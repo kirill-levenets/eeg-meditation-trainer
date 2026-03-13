@@ -4,16 +4,16 @@ Mobile application for training Shamatha meditation using EEG neurofeedback. Bui
 
 ## Features
 
-- **Real-time EEG visualization** — Live scrollable multi-line graph showing meditation metrics at 2 Hz with 5-minute buffer
-- **Raw EEG data tab** — Separate screen plotting all 8 EEG sub-bands and aggregated frequency bands in real-time
+- **Real-time EEG visualization** — Live scrollable graph with Y-axis scale numbers, grid lines, realtime value labels at line endpoints, and X-axis timestamps
+- **Raw EEG data tab** — Composite raw EEG signal waveform + aggregated frequency band plots in real-time
 - **Scrollable graphs** — All graphs support time-scrolling through the full 5-minute data window via slider
 - **Meditation scoring** — Calmness, Shamatha score, Distraction, and Sinking detection
 - **Audio neurofeedback** — White noise generated with stdlib (no numpy), played via Kivy SoundLoader (Android-compatible), volume fades to silence as meditation deepens
 - **State classification** — Stable Focus, Subtle Distraction, Gross Distraction, Sinking
-- **Session diary** — Notes, tags, mood rating, and CSV export for each session
+- **Session diary** — Notes, tags, mood rating, CSV export, and metrics preview graph for each session
 - **Full signal storage** — Raw EEG bands, computed metrics, frequencies, stability, and calmness all stored per-tick in SQLite
 - **CSV export** — Export any session's full signal data (raw + computed) to CSV from the diary screen
-- **User profiles** — Create named user profiles, switch between users; diary and sessions are filtered per-user
+- **User profiles** — Profile chooser/create on app launch; per-user session filtering in diary
 - **Analytics** — Daily/weekly/monthly trends, streak counter, progress tracking
 - **SQLite storage** — Sessions, metrics timeseries, and user profiles with automatic schema migration
 

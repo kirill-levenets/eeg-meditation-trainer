@@ -83,16 +83,17 @@ class EEGMeditationApp(App):
         self._analytics_screen = AnalyticsScreen()
         self._profile_screen = ProfileScreen()
 
+        self._sm.add_widget(self._profile_screen)
         self._sm.add_widget(self._live_screen)
         self._sm.add_widget(self._raw_eeg_screen)
         self._sm.add_widget(self._settings_screen)
         self._sm.add_widget(self._diary_screen)
         self._sm.add_widget(self._analytics_screen)
-        self._sm.add_widget(self._profile_screen)
 
         root.add_widget(self._sm)
 
         self._bind_callbacks()
+        self._refresh_profile()
         return root
 
     def _bind_callbacks(self) -> None:
@@ -240,6 +241,8 @@ class EEGMeditationApp(App):
         session = self._db.get_session(session_id)
         if session:
             self._diary_screen.show_session_detail(session)
+            metrics = self._db.get_session_metrics(session_id)
+            self._diary_screen.load_metrics_preview(metrics)
 
     def _on_save_notes(
         self, session_id: int, notes: str, tags: str, mood: int

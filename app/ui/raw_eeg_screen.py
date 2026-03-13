@@ -1,7 +1,8 @@
 from collections import deque
-from typing import Dict
+from typing import Dict, List
 
-from kivy.graphics import Color, Line
+from kivy.core.text import Label as CoreLabel
+from kivy.graphics import Color, InstructionGroup, Line, Rectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
@@ -15,13 +16,14 @@ from app.config import APP
 class ScrollableGraphWidget(Widget):
     """Scrollable real-time graph with a 5-minute data buffer.
 
-    Displays data within a visible time window that can be scrolled
-    via an external slider. The full buffer holds GRAPH_POINTS_MAX points
-    (5 min at 2 Hz = 600). The viewport shows `viewport_points` at a time.
+    Features: Y-axis scale numbers, horizontal grid lines, realtime value
+    labels at line endpoints, X-axis timestamps. Text rendered via CoreLabel
+    textures on canvas.
     """
 
     def __init__(self, colors: Dict[str, tuple], scales: Dict[str, float],
-                 viewport_seconds: int = 60, **kwargs) -> None:
+                 viewport_seconds: int = 60, show_value_labels: bool = True,
+                 show_timestamps: bool = True, **kwargs) -> None:
         super().__init__(**kwargs)
         self._colors: Dict[str, tuple] = colors
         self._scales: Dict[str, float] = scales
@@ -30,8 +32,12 @@ class ScrollableGraphWidget(Widget):
             key: deque(maxlen=APP.GRAPH_POINTS_MAX) for key in colors
         }
         self._visible: Dict[str, bool] = {key: True for key in colors}
-        self._scroll_offset: int = 0  # 0 = latest data visible (right edge)
+        self._scroll_offset: int = 0
         self._total_points: int = 0
+        self._show_value_labels: bool = show_value_labels
+        self._show_timestamps: bool = show_timestamps
+        self._gfx: InstructionGroup = InstructionGroup()
+        self.canvas.add(self._gfx)
         self.bind(size=self._redraw, pos=self._redraw)
 
     @property
@@ -63,62 +69,145 @@ class ScrollableGraphWidget(Widget):
         self._total_points = len(self._data[first_key])
         self._redraw()
 
+    def load_static_data(self, series: Dict[str, List[float]]) -> None:
+        """Load pre-recorded data for static display (e.g. diary preview)."""
+        for key in self._data:
+            self._data[key].clear()
+            for val in series.get(key, []):
+                self._data[key].append(val)
+        first_key = next(iter(self._data))
+        self._total_points = len(self._data[first_key])
+        self._scroll_offset = 0
+        self._redraw()
+
+    def _make_text_texture(self, text: str, font_size: int = 10,
+                           color: tuple = (1, 1, 1, 1)):
+        """Render text string to a texture for canvas drawing."""
+        cl = CoreLabel(text=text, font_size=dp(font_size), color=color)
+        cl.refresh()
+        return cl.texture
+
     def _redraw(self, *args) -> None:
-        self.canvas.after.clear()
+        self._gfx.clear()
         if self.width < 10 or self.height < 10:
             return
 
-        pad_left = dp(40)
-        pad_bottom = dp(20)
+        pad_left = dp(48) if self._show_value_labels else dp(10)
+        pad_bottom = dp(28) if self._show_timestamps else dp(10)
         pad_top = dp(10)
-        pad_right = dp(10)
+        pad_right = dp(60) if self._show_value_labels else dp(10)
 
         graph_x = self.x + pad_left
         graph_y = self.y + pad_bottom
         graph_w = self.width - pad_left - pad_right
         graph_h = self.height - pad_bottom - pad_top
 
+        if graph_w < 10 or graph_h < 10:
+            return
+
+        # Background
+        self._gfx.add(Color(0.08, 0.08, 0.12, 1.0))
+        self._gfx.add(Rectangle(pos=(self.x, self.y), size=(self.width, self.height)))
+
         # Compute visible slice
         end_idx = self._total_points - self._scroll_offset
         start_idx = max(0, end_idx - self._viewport_points)
+
+        # Y-axis scale (use max scale across visible metrics)
+        max_scale = 100.0
+        for key in self._data:
+            if self._visible.get(key, True):
+                max_scale = max(max_scale, self._scales.get(key, 100.0))
+
+        # Grid lines + Y-axis labels
+        num_grid_lines = 4
+        self._gfx.add(Color(0.25, 0.25, 0.3, 1.0))
+        for i in range(num_grid_lines + 1):
+            frac = i / num_grid_lines
+            y_pos = graph_y + graph_h * frac
+            self._gfx.add(Line(points=[graph_x, y_pos, graph_x + graph_w, y_pos], width=0.5))
+            if self._show_value_labels:
+                val = max_scale * frac
+                tex = self._make_text_texture(f"{val:.0f}", font_size=8,
+                                              color=(0.5, 0.5, 0.5, 1))
+                self._gfx.add(Color(1, 1, 1, 1))
+                self._gfx.add(Rectangle(
+                    texture=tex,
+                    pos=(graph_x - tex.width - dp(4), y_pos - tex.height / 2),
+                    size=tex.size,
+                ))
+
+        # Border
+        self._gfx.add(Color(0.35, 0.35, 0.4, 1.0))
+        self._gfx.add(Line(rectangle=(graph_x, graph_y, graph_w, graph_h), width=1))
+
         if end_idx <= start_idx:
             return
 
-        with self.canvas.after:
-            # Grid
-            Color(0.3, 0.3, 0.3, 1.0)
-            Line(rectangle=(graph_x, graph_y, graph_w, graph_h), width=1)
-            for i in range(5):
-                y_pos = graph_y + graph_h * i / 4
-                Line(points=[graph_x, y_pos, graph_x + graph_w, y_pos], width=0.5)
+        # X-axis timestamps
+        if self._show_timestamps:
+            num_time_labels = min(5, end_idx - start_idx)
+            if num_time_labels > 1:
+                for i in range(num_time_labels):
+                    frac = i / (num_time_labels - 1)
+                    idx = start_idx + int(frac * (end_idx - start_idx - 1))
+                    t_sec = idx * APP.UPDATE_FREQUENCY
+                    mins = int(t_sec) // 60
+                    secs = int(t_sec) % 60
+                    time_str = f"{mins}:{secs:02d}"
+                    tex = self._make_text_texture(time_str, font_size=8,
+                                                  color=(0.5, 0.5, 0.5, 1))
+                    x_pos = graph_x + frac * graph_w
+                    self._gfx.add(Color(1, 1, 1, 1))
+                    self._gfx.add(Rectangle(
+                        texture=tex,
+                        pos=(x_pos - tex.width / 2, graph_y - tex.height - dp(2)),
+                        size=tex.size,
+                    ))
 
-            # Data lines
-            for key, data in self._data.items():
-                if not self._visible.get(key, True):
-                    continue
-                data_list = list(data)
-                slice_data = data_list[start_idx:end_idx]
-                if len(slice_data) < 2:
-                    continue
+        # Data lines + endpoint value labels
+        label_y_positions: List[float] = []
+        for key, data in self._data.items():
+            if not self._visible.get(key, True):
+                continue
+            data_list = list(data)
+            slice_data = data_list[start_idx:end_idx]
+            if len(slice_data) < 2:
+                continue
 
-                color = self._colors[key]
-                scale = self._scales.get(key, 100.0)
-                Color(*color)
+            color = self._colors[key]
+            scale = self._scales.get(key, 100.0)
+            self._gfx.add(Color(*color))
 
-                points = []
-                n = len(slice_data)
-                for i, val in enumerate(slice_data):
-                    x = graph_x + (i / max(n - 1, 1)) * graph_w
-                    y = graph_y + min(max(val, 0.0) / scale, 1.0) * graph_h
-                    points.extend([x, y])
+            points = []
+            n = len(slice_data)
+            for i, val in enumerate(slice_data):
+                x = graph_x + (i / max(n - 1, 1)) * graph_w
+                y = graph_y + min(max(val, 0.0) / scale, 1.0) * graph_h
+                points.extend([x, y])
 
-                if len(points) >= 4:
-                    Line(points=points, width=dp(1.2))
+            if len(points) >= 4:
+                self._gfx.add(Line(points=points, width=dp(1.2)))
 
-            # Time labels
-            Color(0.5, 0.5, 0.5, 1.0)
-            start_sec = start_idx * APP.UPDATE_FREQUENCY
-            end_sec = end_idx * APP.UPDATE_FREQUENCY
+            # Realtime value label at right edge of line
+            if self._show_value_labels and slice_data:
+                last_val = slice_data[-1]
+                last_y = graph_y + min(max(last_val, 0.0) / scale, 1.0) * graph_h
+                # Avoid label overlap by nudging
+                for existing_y in label_y_positions:
+                    if abs(last_y - existing_y) < dp(12):
+                        last_y = existing_y + dp(12)
+                label_y_positions.append(last_y)
+                short_name = key.replace("_score", "").replace("_", " ")
+                tex = self._make_text_texture(
+                    f"{last_val:.0f}", font_size=9, color=color,
+                )
+                self._gfx.add(Color(1, 1, 1, 1))
+                self._gfx.add(Rectangle(
+                    texture=tex,
+                    pos=(graph_x + graph_w + dp(3), last_y - tex.height / 2),
+                    size=tex.size,
+                ))
 
     def clear_data(self) -> None:
         for key in self._data:
@@ -129,28 +218,14 @@ class ScrollableGraphWidget(Widget):
 
 
 class RawEEGScreen(Screen):
-    """Screen displaying raw EEG data and frequency band plots."""
+    """Screen displaying raw EEG signal and frequency band plots."""
 
-    RAW_COLORS = {
-        "delta": (0.4, 0.2, 0.8, 1.0),
-        "theta": (0.2, 0.5, 0.9, 1.0),
-        "alpha1": (0.1, 0.8, 0.4, 1.0),
-        "alpha2": (0.2, 0.9, 0.5, 1.0),
-        "beta1": (0.9, 0.7, 0.1, 1.0),
-        "beta2": (0.9, 0.8, 0.2, 1.0),
-        "gamma1": (1.0, 0.3, 0.3, 1.0),
-        "gamma2": (1.0, 0.4, 0.4, 1.0),
+    EEG_SIGNAL_COLORS = {
+        "eeg": (0.3, 0.8, 1.0, 1.0),
     }
 
-    RAW_SCALES = {
-        "delta": 800.0,
-        "theta": 600.0,
-        "alpha1": 800.0,
-        "alpha2": 800.0,
-        "beta1": 400.0,
-        "beta2": 400.0,
-        "gamma1": 200.0,
-        "gamma2": 200.0,
+    EEG_SIGNAL_SCALES = {
+        "eeg": 3000.0,
     }
 
     BAND_COLORS = {
@@ -186,34 +261,29 @@ class RawEEGScreen(Screen):
         )
         root.add_widget(title)
 
-        # --- Raw sub-bands graph ---
+        # --- Raw EEG signal graph (composite waveform) ---
         raw_label = Label(
-            text="Sub-bands (raw amplitudes)",
+            text="Raw EEG Signal",
             font_size=dp(12),
             size_hint_y=None,
             height=dp(20),
-            color=(0.6, 0.6, 0.6, 1.0),
+            color=(0.3, 0.8, 1.0, 1.0),
         )
         root.add_widget(raw_label)
 
         self._raw_graph = ScrollableGraphWidget(
-            colors=self.RAW_COLORS,
-            scales=self.RAW_SCALES,
+            colors=self.EEG_SIGNAL_COLORS,
+            scales=self.EEG_SIGNAL_SCALES,
             viewport_seconds=60,
+            show_value_labels=False,
+            show_timestamps=True,
             size_hint_y=0.35,
         )
         root.add_widget(self._raw_graph)
 
-        # Raw legend
-        raw_legend = BoxLayout(size_hint_y=None, height=dp(20), spacing=dp(2))
-        for band, color in self.RAW_COLORS.items():
-            lbl = Label(text=band, font_size=dp(9), color=color)
-            raw_legend.add_widget(lbl)
-        root.add_widget(raw_legend)
-
-        # --- Aggregated bands graph ---
+        # --- Frequency bands graph ---
         band_label = Label(
-            text="Frequency Bands (aggregated)",
+            text="Frequency Bands",
             font_size=dp(12),
             size_hint_y=None,
             height=dp(20),
@@ -225,6 +295,8 @@ class RawEEGScreen(Screen):
             colors=self.BAND_COLORS,
             scales=self.BAND_SCALES,
             viewport_seconds=60,
+            show_value_labels=True,
+            show_timestamps=True,
             size_hint_y=0.35,
         )
         root.add_widget(self._band_graph)
@@ -260,9 +332,15 @@ class RawEEGScreen(Screen):
         return self._band_graph
 
     def add_raw_sample(self, sample: Dict[str, float]) -> None:
-        """Add raw EEG sub-band data point."""
-        self._raw_graph.add_point(sample)
-        # Also compute aggregated bands
+        """Add raw EEG sample: composite signal + frequency bands."""
+        # Composite EEG = sum of all sub-bands
+        eeg_sum = sum(
+            sample.get(k, 0.0)
+            for k in ("delta", "theta", "alpha1", "alpha2", "beta1", "beta2", "gamma1", "gamma2")
+        )
+        self._raw_graph.add_point({"eeg": eeg_sum})
+
+        # Aggregated frequency bands
         alpha = sample.get("alpha1", 0.0) + sample.get("alpha2", 0.0)
         beta = sample.get("beta1", 0.0) + sample.get("beta2", 0.0)
         gamma = sample.get("gamma1", 0.0) + sample.get("gamma2", 0.0)

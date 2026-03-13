@@ -10,6 +10,22 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
 
+from app.ui.raw_eeg_screen import ScrollableGraphWidget
+
+METRICS_PREVIEW_COLORS = {
+    "meditation_score": (0.2, 0.6, 1.0, 1.0),
+    "shamatha_score": (0.0, 0.9, 0.4, 1.0),
+    "distraction": (1.0, 0.3, 0.3, 1.0),
+    "sinking": (0.8, 0.5, 0.0, 1.0),
+}
+
+METRICS_PREVIEW_SCALES = {
+    "meditation_score": 200.0,
+    "shamatha_score": 100.0,
+    "distraction": 100.0,
+    "sinking": 100.0,
+}
+
 
 class SessionListItem(BoxLayout):
     """Single row in the session list."""
@@ -198,6 +214,36 @@ class DiaryScreen(Screen):
         )
         self._detail_layout.add_widget(self._export_status)
 
+        # --- Metrics preview graph ---
+        graph_label = Label(
+            text="Session Metrics",
+            font_size=dp(13),
+            bold=True,
+            size_hint_y=None,
+            height=dp(24),
+            color=(0.7, 0.7, 0.7, 1.0),
+        )
+        self._detail_layout.add_widget(graph_label)
+
+        self._metrics_graph = ScrollableGraphWidget(
+            colors=METRICS_PREVIEW_COLORS,
+            scales=METRICS_PREVIEW_SCALES,
+            viewport_seconds=300,
+            show_value_labels=True,
+            show_timestamps=True,
+            size_hint_y=None,
+            height=dp(180),
+        )
+        self._detail_layout.add_widget(self._metrics_graph)
+
+        # Preview legend
+        preview_legend = BoxLayout(size_hint_y=None, height=dp(18), spacing=dp(4))
+        for name, color in METRICS_PREVIEW_COLORS.items():
+            short = name.replace("_score", "").replace("_", " ").title()
+            lbl = Label(text=short, font_size=dp(9), color=color)
+            preview_legend.add_widget(lbl)
+        self._detail_layout.add_widget(preview_legend)
+
         detail_scroll.add_widget(self._detail_layout)
         root.add_widget(detail_scroll)
 
@@ -261,6 +307,17 @@ class DiaryScreen(Screen):
         self._notes_input.text = session.get("notes", "")
         self._tags_input.text = session.get("tags", "")
         self._mood_slider.value = session.get("mood_rating", 3) or 3
+        self._metrics_graph.clear_data()
+
+    def load_metrics_preview(self, metrics_rows: List[Dict]) -> None:
+        """Load session metrics into the preview graph."""
+        if not metrics_rows:
+            return
+        series: Dict[str, List[float]] = {k: [] for k in METRICS_PREVIEW_COLORS}
+        for row in metrics_rows:
+            for key in series:
+                series[key].append(row.get(key, 0.0))
+        self._metrics_graph.load_static_data(series)
 
     def _on_save_pressed(self, *args) -> None:
         if self._selected_session_id and self._on_save_notes:

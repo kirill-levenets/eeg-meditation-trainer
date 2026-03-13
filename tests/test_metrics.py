@@ -437,6 +437,37 @@ class TestScrollableGraphWidget(unittest.TestCase):
         self.graph.set_visible("a", True)
         self.assertTrue(self.graph._visible["a"])
 
+    def test_load_static_data(self):
+        series = {"a": [1.0, 2.0, 3.0, 4.0], "b": [10.0, 20.0, 30.0, 40.0]}
+        self.graph.load_static_data(series)
+        self.assertEqual(self.graph.total_points, 4)
+        self.assertEqual(self.graph._scroll_offset, 0)
+
+    def test_show_flags_default_true(self):
+        self.assertTrue(self.graph._show_value_labels)
+        self.assertTrue(self.graph._show_timestamps)
+
+    def test_show_flags_disabled(self):
+        from app.ui.raw_eeg_screen import ScrollableGraphWidget
+        g = ScrollableGraphWidget(
+            colors={"x": (1, 0, 0, 1)}, scales={"x": 100.0},
+            show_value_labels=False, show_timestamps=False,
+        )
+        self.assertFalse(g._show_value_labels)
+        self.assertFalse(g._show_timestamps)
+
+    def test_diary_preview_loads_metrics(self):
+        """Verify diary load_metrics_preview populates graph."""
+        from app.ui.diary_screen import DiaryScreen
+        screen = DiaryScreen()
+        rows = [
+            {"meditation_score": 50 + i, "shamatha_score": 30 + i,
+             "distraction": 20, "sinking": 10}
+            for i in range(10)
+        ]
+        screen.load_metrics_preview(rows)
+        self.assertEqual(screen._metrics_graph.total_points, 10)
+
 
 class TestSessionManager(unittest.TestCase):
     """Test session lifecycle."""
