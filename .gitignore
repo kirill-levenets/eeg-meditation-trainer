@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+venv/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Database
+*.db
+
+# Buildozer
+.buildozer/
+bin/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp
+*.wav
