@@ -1,3 +1,4 @@
+import os
 from typing import Dict, List, Optional
 
 from kivy.app import App
@@ -18,6 +19,8 @@ from app.storage.database import DatabaseManager
 from app.ui.analytics_screen import AnalyticsScreen
 from app.ui.diary_screen import DiaryScreen
 from app.ui.live_session import LiveSessionScreen
+from app.ui.profile_screen import ProfileScreen
+from app.ui.raw_eeg_screen import RawEEGScreen
 from app.ui.settings_screen import SettingsScreen
 
 
@@ -36,8 +39,10 @@ class EEGMeditationApp(App):
         self._analytics: AnalyticsAggregator = AnalyticsAggregator(self._db)
         self._update_event: Optional[object] = None
         self._metrics_buffer: List[Dict] = []
+        self._raw_buffer: List[Dict] = []
         self._flush_counter: int = 0
         self._current_session_id: Optional[int] = None
+        self._current_user_id: Optional[int] = None
 
     def build(self) -> BoxLayout:
         root = BoxLayout(orientation="vertical")
@@ -49,31 +54,41 @@ class EEGMeditationApp(App):
 
         btn_session = ActionButton(text="Session")
         btn_session.bind(on_release=lambda x: self._switch_screen("live_session"))
+        btn_raw = ActionButton(text="Raw EEG")
+        btn_raw.bind(on_release=lambda x: self._switch_screen("raw_eeg"))
         btn_settings = ActionButton(text="Settings")
         btn_settings.bind(on_release=lambda x: self._switch_screen("settings"))
         btn_diary = ActionButton(text="Diary")
         btn_diary.bind(on_release=lambda x: self._switch_screen("diary"))
         btn_analytics = ActionButton(text="Analytics")
         btn_analytics.bind(on_release=lambda x: self._switch_screen("analytics"))
+        btn_profile = ActionButton(text="Profile")
+        btn_profile.bind(on_release=lambda x: self._switch_screen("profile"))
 
         av.add_widget(btn_session)
+        av.add_widget(btn_raw)
         av.add_widget(btn_settings)
         av.add_widget(btn_diary)
         av.add_widget(btn_analytics)
+        av.add_widget(btn_profile)
         nav_bar.add_widget(av)
         root.add_widget(nav_bar)
 
         self._sm = ScreenManager(transition=SlideTransition())
 
         self._live_screen = LiveSessionScreen()
+        self._raw_eeg_screen = RawEEGScreen()
         self._settings_screen = SettingsScreen()
         self._diary_screen = DiaryScreen()
         self._analytics_screen = AnalyticsScreen()
+        self._profile_screen = ProfileScreen()
 
         self._sm.add_widget(self._live_screen)
+        self._sm.add_widget(self._raw_eeg_screen)
         self._sm.add_widget(self._settings_screen)
         self._sm.add_widget(self._diary_screen)
         self._sm.add_widget(self._analytics_screen)
+        self._sm.add_widget(self._profile_screen)
 
         root.add_widget(self._sm)
 
@@ -90,6 +105,7 @@ class EEGMeditationApp(App):
 
         self._diary_screen.set_session_select_callback(self._on_session_select)
         self._diary_screen.set_save_notes_callback(self._on_save_notes)
+        self._diary_screen.set_export_csv_callback(self._on_export_csv)
 
         self._analytics_screen.btn_daily.bind(
             on_release=lambda x: self._load_analytics("daily")
@@ -101,12 +117,18 @@ class EEGMeditationApp(App):
             on_release=lambda x: self._load_analytics("monthly")
         )
 
+        self._profile_screen.set_user_switch_callback(self._on_user_switch)
+        self._profile_screen.set_user_create_callback(self._on_user_create)
+        self._profile_screen.set_user_delete_callback(self._on_user_delete)
+
     def _switch_screen(self, name: str) -> None:
         self._sm.current = name
         if name == "diary":
             self._refresh_diary()
         elif name == "analytics":
             self._refresh_analytics()
+        elif name == "profile":
+            self._refresh_profile()
 
     def _on_start(self, *args) -> None:
         threshold = self._settings_screen.threshold
@@ -117,6 +139,7 @@ class EEGMeditationApp(App):
         self._eeg_stream.start()
         self._metrics_engine.reset()
         self._metrics_buffer = []
+        self._raw_buffer = []
         self._flush_counter = 0
         self._current_session_id = None
 
@@ -124,6 +147,8 @@ class EEGMeditationApp(App):
         self._live_screen.set_controls_running()
         self._live_screen.update_device_status(True)
         self._live_screen.graph.clear_data()
+        self._raw_eeg_screen.raw_graph.clear_data()
+        self._raw_eeg_screen.band_graph.clear_data()
 
         self._update_event = Clock.schedule_interval(
             self._update_tick, APP.UPDATE_FREQUENCY
@@ -155,7 +180,7 @@ class EEGMeditationApp(App):
         self._audio.stop()
 
         if stats:
-            session_id = self._db.save_session(stats)
+            session_id = self._db.save_session(stats, user_id=self._current_user_id)
             self._current_session_id = session_id
             if self._metrics_buffer:
                 self._db.save_metrics_batch(session_id, self._metrics_buffer)
@@ -176,14 +201,20 @@ class EEGMeditationApp(App):
         metrics = self._metrics_engine.process_sample(raw_sample)
 
         self._session_manager.add_metric(metrics)
-        self._metrics_buffer.append(metrics)
+        # Merge raw + computed for full storage
+        full_record = {**raw_sample, **metrics}
+        self._metrics_buffer.append(full_record)
+        self._raw_buffer.append(raw_sample)
 
         self._audio.update(metrics.get("meditation_score", 0))
 
         self._live_screen.graph.add_point(metrics)
+        self._live_screen.update_scroll_range()
         self._live_screen.update_stats(metrics)
         self._live_screen.update_state(metrics.get("state", "Neutral"))
         self._live_screen.update_timer(self._session_manager.elapsed_formatted)
+
+        self._raw_eeg_screen.add_raw_sample(raw_sample)
 
         # Flush buffer to DB every 60 seconds
         self._flush_counter += 1
@@ -191,7 +222,9 @@ class EEGMeditationApp(App):
         if self._flush_counter >= ticks_per_flush and self._metrics_buffer:
             if self._current_session_id is None:
                 stats_partial = self._session_manager.compute_statistics()
-                self._current_session_id = self._db.save_session(stats_partial)
+                self._current_session_id = self._db.save_session(
+                    stats_partial, user_id=self._current_user_id
+                )
             self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
             self._metrics_buffer = []
             self._flush_counter = 0
@@ -215,8 +248,20 @@ class EEGMeditationApp(App):
         self._refresh_diary()
         logger.info(f"Notes saved for session {session_id}")
 
+    def _on_export_csv(self, session_id: int) -> Optional[str]:
+        """Export session data as CSV file. Returns file path or None."""
+        csv_data = self._db.export_session_csv(session_id)
+        if not csv_data:
+            return None
+        export_dir = os.path.dirname(self._db._db_path)
+        path = os.path.join(export_dir, f"session_{session_id}.csv")
+        with open(path, "w") as f:
+            f.write(csv_data)
+        logger.info(f"Session {session_id} exported to {path}")
+        return path
+
     def _refresh_diary(self) -> None:
-        sessions = self._db.get_all_sessions()
+        sessions = self._db.get_all_sessions(user_id=self._current_user_id)
         self._diary_screen.populate_sessions(sessions)
 
     def _refresh_analytics(self) -> None:
@@ -232,6 +277,36 @@ class EEGMeditationApp(App):
         else:
             data = self._analytics.get_monthly_stats(months=12)
         self._analytics_screen.show_trend(data, "avg_shamatha", f"Shamatha ({period})")
+
+    def _on_user_switch(self, user_id: Optional[int]) -> None:
+        """Switch the active user profile."""
+        self._current_user_id = user_id
+        if user_id:
+            user = self._db.get_user(user_id)
+            name = user["name"] if user else "Unknown"
+            logger.info(f"Switched to user: {name} (id={user_id})")
+        else:
+            logger.info("Switched to: All Users")
+        self._refresh_profile()
+
+    def _on_user_create(self, name: str) -> None:
+        """Create a new user and refresh the profile list."""
+        try:
+            self._db.create_user(name)
+        except Exception as e:
+            logger.warning(f"Could not create user '{name}': {e}")
+        self._refresh_profile()
+
+    def _on_user_delete(self, user_id: int) -> None:
+        """Delete a user profile."""
+        if self._current_user_id == user_id:
+            self._current_user_id = None
+        self._db.delete_user(user_id)
+        self._refresh_profile()
+
+    def _refresh_profile(self) -> None:
+        users = self._db.get_all_users()
+        self._profile_screen.populate_users(users, self._current_user_id)
 
     def on_stop(self) -> None:
         """Cleanup on app exit."""

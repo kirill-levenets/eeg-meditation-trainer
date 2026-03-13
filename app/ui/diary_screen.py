@@ -24,6 +24,7 @@ class DiaryScreen(Screen):
         self.name = "diary"
         self._on_session_select: Optional[Callable] = None
         self._on_save_notes: Optional[Callable] = None
+        self._on_export_csv: Optional[Callable] = None
         self._selected_session_id: Optional[int] = None
         self._sessions_data: List[Dict] = []
         self._build_ui()
@@ -168,17 +169,34 @@ class DiaryScreen(Screen):
         mood_row.add_widget(self._mood_value)
         self._detail_layout.add_widget(mood_row)
 
-        # Save button
+        # Save + Export row
+        btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
         self._save_btn = Button(
             text="Save Notes",
-            size_hint_y=None,
-            height=dp(40),
             background_color=(0.2, 0.6, 0.9, 1.0),
             font_size=dp(14),
             bold=True,
         )
         self._save_btn.bind(on_release=self._on_save_pressed)
-        self._detail_layout.add_widget(self._save_btn)
+        self._export_btn = Button(
+            text="Export CSV",
+            background_color=(0.3, 0.7, 0.3, 1.0),
+            font_size=dp(14),
+            bold=True,
+        )
+        self._export_btn.bind(on_release=self._on_export_pressed)
+        btn_row.add_widget(self._save_btn)
+        btn_row.add_widget(self._export_btn)
+        self._detail_layout.add_widget(btn_row)
+
+        self._export_status = Label(
+            text="",
+            font_size=dp(11),
+            color=(0.5, 0.8, 0.5, 1.0),
+            size_hint_y=None,
+            height=dp(20),
+        )
+        self._detail_layout.add_widget(self._export_status)
 
         detail_scroll.add_widget(self._detail_layout)
         root.add_widget(detail_scroll)
@@ -190,6 +208,9 @@ class DiaryScreen(Screen):
 
     def set_save_notes_callback(self, callback: Callable) -> None:
         self._on_save_notes = callback
+
+    def set_export_csv_callback(self, callback: Callable) -> None:
+        self._on_export_csv = callback
 
     def populate_sessions(self, sessions: List[Dict]) -> None:
         """Fill the session list from DB data."""
@@ -249,3 +270,11 @@ class DiaryScreen(Screen):
                 self._tags_input.text,
                 int(self._mood_slider.value),
             )
+
+    def _on_export_pressed(self, *args) -> None:
+        if self._selected_session_id and self._on_export_csv:
+            path = self._on_export_csv(self._selected_session_id)
+            if path:
+                self._export_status.text = f"Exported: {path}"
+            else:
+                self._export_status.text = "No data to export"

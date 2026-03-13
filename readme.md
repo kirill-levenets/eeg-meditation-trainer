@@ -4,13 +4,18 @@ Mobile application for training Shamatha meditation using EEG neurofeedback. Bui
 
 ## Features
 
-- **Real-time EEG visualization** — Live multi-line graph showing meditation metrics at 2 Hz
+- **Real-time EEG visualization** — Live scrollable multi-line graph showing meditation metrics at 2 Hz with 5-minute buffer
+- **Raw EEG data tab** — Separate screen plotting all 8 EEG sub-bands and aggregated frequency bands in real-time
+- **Scrollable graphs** — All graphs support time-scrolling through the full 5-minute data window via slider
 - **Meditation scoring** — Calmness, Shamatha score, Distraction, and Sinking detection
-- **Audio neurofeedback** — White noise that fades to silence as meditation deepens
+- **Realtime audio neurofeedback** — White noise generated and played in realtime via sounddevice (no WAV files), volume fades to silence as meditation deepens
 - **State classification** — Stable Focus, Subtle Distraction, Gross Distraction, Sinking
-- **Session diary** — Notes, tags, and mood rating for each session
+- **Session diary** — Notes, tags, mood rating, and CSV export for each session
+- **Full signal storage** — Raw EEG bands, computed metrics, frequencies, stability, and calmness all stored per-tick in SQLite
+- **CSV export** — Export any session's full signal data (raw + computed) to CSV from the diary screen
+- **User profiles** — Create named user profiles, switch between users; diary and sessions are filtered per-user
 - **Analytics** — Daily/weekly/monthly trends, streak counter, progress tracking
-- **SQLite storage** — Full session telemetry persistence
+- **SQLite storage** — Sessions, metrics timeseries, and user profiles with automatic schema migration
 
 ## Project Structure
 
@@ -18,9 +23,11 @@ Mobile application for training Shamatha meditation using EEG neurofeedback. Bui
 app/
 ├── ui/                 # Kivy screens, widgets, and ScreenManager
 │   ├── app_manager.py      # Main app with ScreenManager and update loop
-│   ├── live_session.py      # Live session screen with graph and controls
+│   ├── live_session.py      # Live session screen with scrollable graph and controls
+│   ├── raw_eeg_screen.py    # Raw EEG data tab with sub-band and frequency band plots
+│   ├── profile_screen.py    # User profile management and user switcher
 │   ├── settings_screen.py   # Threshold slider, graph toggles
-│   ├── diary_screen.py      # Session list, notes, mood rating
+│   ├── diary_screen.py      # Session list, notes, mood rating, CSV export
 │   └── analytics_screen.py  # Trend graphs and summary stats
 ├── eeg/                # EEG data source
 │   ├── mock_stream.py       # Simulated EEG for development
@@ -28,11 +35,11 @@ app/
 ├── metrics/            # Signal processing and state formulas
 │   └── engine.py            # Full metrics pipeline with sigmoid normalization
 ├── audio_feedback/     # White noise generator
-│   └── noise.py             # WAV generation and dynamic volume control
+│   └── noise.py             # Realtime white noise via sounddevice with dynamic volume
 ├── session/            # Session lifecycle
 │   └── manager.py           # Start/Pause/Resume/Stop state machine
 ├── storage/            # Database
-│   └── database.py          # SQLite schema, CRUD operations
+│   └── database.py          # SQLite schema, CRUD, user profiles, CSV export
 ├── analytics/          # Data aggregation
 │   └── aggregator.py        # Daily/weekly/monthly trend computation
 ├── config.py           # Sigmoid params, thresholds, app constants
@@ -161,5 +168,7 @@ All tunable parameters are in `app/config.py`:
 
 - **Python 3.x** — Core language
 - **Kivy 2.3** — Cross-platform UI framework
-- **SQLite** — Session and metrics storage
+- **SQLite** — Session, metrics, and user profile storage
+- **sounddevice** — Realtime audio output for white noise neurofeedback
+- **numpy** — Audio buffer generation
 - **Buildozer** — Android packaging tool

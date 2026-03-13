@@ -1,103 +1,32 @@
-from collections import deque
 from typing import Dict
 
-from kivy.graphics import Color, Line
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
-from kivy.uix.widget import Widget
+from kivy.uix.slider import Slider
 
 from app.config import APP
+from app.ui.raw_eeg_screen import ScrollableGraphWidget
 
 
-class GraphWidget(Widget):
-    """Real-time multi-line graph showing last 5 minutes of metric data."""
+METRICS_COLORS = {
+    "meditation_score": (0.2, 0.6, 1.0, 1.0),
+    "shamatha_score": (0.0, 0.9, 0.4, 1.0),
+    "distraction": (1.0, 0.3, 0.3, 1.0),
+    "sinking": (0.8, 0.5, 0.0, 1.0),
+    "subtle_distraction": (0.9, 0.9, 0.2, 1.0),
+}
 
-    COLORS = {
-        "meditation_score": (0.2, 0.6, 1.0, 1.0),
-        "shamatha_score": (0.0, 0.9, 0.4, 1.0),
-        "distraction": (1.0, 0.3, 0.3, 1.0),
-        "sinking": (0.8, 0.5, 0.0, 1.0),
-        "subtle_distraction": (0.9, 0.9, 0.2, 1.0),
-    }
-
-    SCALES = {
-        "meditation_score": 200.0,
-        "shamatha_score": 100.0,
-        "distraction": 100.0,
-        "sinking": 100.0,
-        "subtle_distraction": 100.0,
-    }
-
-    def __init__(self, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self._data: Dict[str, deque] = {
-            key: deque(maxlen=APP.GRAPH_POINTS_MAX) for key in self.COLORS
-        }
-        self._visible: Dict[str, bool] = {key: True for key in self.COLORS}
-        self.bind(size=self._redraw, pos=self._redraw)
-
-    def set_visible(self, metric: str, visible: bool) -> None:
-        self._visible[metric] = visible
-        self._redraw()
-
-    def add_point(self, metrics: Dict[str, float]) -> None:
-        for key in self._data:
-            val = metrics.get(key, 0.0)
-            self._data[key].append(val)
-        self._redraw()
-
-    def _redraw(self, *args) -> None:
-        self.canvas.after.clear()
-        if self.width < 10 or self.height < 10:
-            return
-
-        pad_left = dp(40)
-        pad_bottom = dp(20)
-        pad_top = dp(10)
-        pad_right = dp(10)
-
-        graph_x = self.x + pad_left
-        graph_y = self.y + pad_bottom
-        graph_w = self.width - pad_left - pad_right
-        graph_h = self.height - pad_bottom - pad_top
-
-        with self.canvas.after:
-            Color(0.3, 0.3, 0.3, 1.0)
-            Line(
-                rectangle=(graph_x, graph_y, graph_w, graph_h),
-                width=1,
-            )
-
-            for i in range(5):
-                y_pos = graph_y + graph_h * i / 4
-                Line(points=[graph_x, y_pos, graph_x + graph_w, y_pos], width=0.5)
-
-            for key, data in self._data.items():
-                if not self._visible.get(key, True) or len(data) < 2:
-                    continue
-
-                color = self.COLORS[key]
-                scale = self.SCALES.get(key, 100.0)
-                Color(*color)
-
-                points = []
-                n = len(data)
-                for i, val in enumerate(data):
-                    x = graph_x + (i / max(n - 1, 1)) * graph_w
-                    y = graph_y + min(val / scale, 1.0) * graph_h
-                    points.extend([x, y])
-
-                if len(points) >= 4:
-                    Line(points=points, width=dp(1.2))
-
-    def clear_data(self) -> None:
-        for key in self._data:
-            self._data[key].clear()
-        self._redraw()
+METRICS_SCALES = {
+    "meditation_score": 200.0,
+    "shamatha_score": 100.0,
+    "distraction": 100.0,
+    "sinking": 100.0,
+    "subtle_distraction": 100.0,
+}
 
 
 class LiveSessionScreen(Screen):
@@ -135,11 +64,16 @@ class LiveSessionScreen(Screen):
         header.add_widget(self._state_label)
         root.add_widget(header)
 
-        self._graph = GraphWidget(size_hint_y=0.5)
+        self._graph = ScrollableGraphWidget(
+            colors=METRICS_COLORS,
+            scales=METRICS_SCALES,
+            viewport_seconds=60,
+            size_hint_y=0.45,
+        )
         root.add_widget(self._graph)
 
         legend = BoxLayout(size_hint_y=None, height=dp(24), spacing=dp(4))
-        for metric, color in GraphWidget.COLORS.items():
+        for metric, color in METRICS_COLORS.items():
             short = metric.replace("_score", "").replace("_", " ").title()
             lbl = Label(
                 text=short,
@@ -203,11 +137,43 @@ class LiveSessionScreen(Screen):
         controls.add_widget(self._btn_stop)
         root.add_widget(controls)
 
+        # --- Time scroll slider ---
+        scroll_row = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(8))
+        scroll_label = Label(text="Time:", font_size=dp(11), size_hint_x=0.15)
+        self._scroll_slider = Slider(
+            min=0, max=1, value=0, step=1, size_hint_x=0.65,
+        )
+        self._scroll_time_label = Label(
+            text="Live", font_size=dp(11), size_hint_x=0.2,
+        )
+        self._scroll_slider.bind(value=self._on_scroll)
+        scroll_row.add_widget(scroll_label)
+        scroll_row.add_widget(self._scroll_slider)
+        scroll_row.add_widget(self._scroll_time_label)
+        root.add_widget(scroll_row)
+
         self.add_widget(root)
 
     @property
-    def graph(self) -> GraphWidget:
+    def graph(self) -> ScrollableGraphWidget:
         return self._graph
+
+    def update_scroll_range(self) -> None:
+        max_scroll = self._graph.max_scroll
+        self._scroll_slider.max = max(1, max_scroll)
+        if self._scroll_slider.value == 0:
+            self._scroll_time_label.text = "Live"
+
+    def _on_scroll(self, instance, value) -> None:
+        offset = int(self._scroll_slider.max - value)
+        self._graph.set_scroll_offset(offset)
+        if offset == 0:
+            self._scroll_time_label.text = "Live"
+        else:
+            secs_back = offset * APP.UPDATE_FREQUENCY
+            mins = int(secs_back) // 60
+            secs = int(secs_back) % 60
+            self._scroll_time_label.text = f"-{mins}:{secs:02d}"
 
     @property
     def btn_start(self) -> Button:
@@ -270,6 +236,8 @@ class LiveSessionScreen(Screen):
         self._timer_label.text = "00:00"
         self._state_label.text = "IDLE"
         self._state_label.color = (0.7, 0.7, 0.7, 1.0)
+        self._scroll_slider.value = 0
+        self._scroll_time_label.text = "Live"
         for label in self._stat_labels.values():
             label.text = "0"
         self.set_controls_idle()

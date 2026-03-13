@@ -322,6 +322,121 @@ class TestStorageIntegration(unittest.TestCase):
         sessions = self.db.get_all_sessions()
         self.assertEqual(len(sessions), 2)
 
+    def test_create_user(self):
+        uid = self.db.create_user("Alice")
+        user = self.db.get_user(uid)
+        self.assertIsNotNone(user)
+        self.assertEqual(user["name"], "Alice")
+
+    def test_get_all_users(self):
+        self.db.create_user("Alice")
+        self.db.create_user("Bob")
+        users = self.db.get_all_users()
+        self.assertEqual(len(users), 2)
+
+    def test_delete_user(self):
+        uid = self.db.create_user("Alice")
+        self.db.delete_user(uid)
+        self.assertIsNone(self.db.get_user(uid))
+
+    def test_duplicate_user_raises(self):
+        self.db.create_user("Alice")
+        with self.assertRaises(Exception):
+            self.db.create_user("Alice")
+
+    def test_session_with_user_id(self):
+        uid = self.db.create_user("Alice")
+        sid = self.db.save_session({"duration": 60, "threshold_used": 50}, user_id=uid)
+        session = self.db.get_session(sid)
+        self.assertEqual(session["user_id"], uid)
+
+    def test_get_sessions_filtered_by_user(self):
+        uid1 = self.db.create_user("Alice")
+        uid2 = self.db.create_user("Bob")
+        self.db.save_session({"duration": 60, "threshold_used": 50}, user_id=uid1)
+        self.db.save_session({"duration": 120, "threshold_used": 60}, user_id=uid2)
+        self.db.save_session({"duration": 180, "threshold_used": 70}, user_id=uid1)
+        alice_sessions = self.db.get_all_sessions(user_id=uid1)
+        self.assertEqual(len(alice_sessions), 2)
+        bob_sessions = self.db.get_all_sessions(user_id=uid2)
+        self.assertEqual(len(bob_sessions), 1)
+
+    def test_save_and_retrieve_raw_metrics(self):
+        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
+        self.db.save_metrics_batch(sid, [{
+            "timestamp": 0.5,
+            "delta": 300, "theta": 200, "alpha1": 500, "alpha2": 400,
+            "beta1": 100, "beta2": 80, "gamma1": 30, "gamma2": 20,
+            "meditation_score": 55, "shamatha_score": 35,
+            "stability": 5.0, "calmness": 3.2,
+        }])
+        metrics = self.db.get_session_metrics(sid)
+        self.assertEqual(len(metrics), 1)
+        m = metrics[0]
+        self.assertAlmostEqual(m["delta_raw"], 300)
+        self.assertAlmostEqual(m["alpha1_raw"], 500)
+        self.assertAlmostEqual(m["stability"], 5.0)
+        self.assertAlmostEqual(m["calmness"], 3.2)
+
+    def test_export_csv(self):
+        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
+        self.db.save_metrics_batch(sid, [
+            {"timestamp": 0.5, "meditation_score": 55},
+            {"timestamp": 1.0, "meditation_score": 60},
+        ])
+        csv_str = self.db.export_session_csv(sid)
+        self.assertIn("meditation_score", csv_str)
+        lines = csv_str.strip().split("\n")
+        self.assertEqual(len(lines), 3)  # header + 2 data rows
+
+    def test_export_csv_empty_session(self):
+        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
+        csv_str = self.db.export_session_csv(sid)
+        self.assertEqual(csv_str, "")
+
+
+class TestScrollableGraphWidget(unittest.TestCase):
+    """Test ScrollableGraphWidget data management (no rendering)."""
+
+    def setUp(self):
+        from app.ui.raw_eeg_screen import ScrollableGraphWidget
+        self.graph = ScrollableGraphWidget(
+            colors={"a": (1, 0, 0, 1), "b": (0, 1, 0, 1)},
+            scales={"a": 100.0, "b": 200.0},
+            viewport_seconds=10,
+        )
+
+    def test_initial_state(self):
+        self.assertEqual(self.graph.total_points, 0)
+        self.assertEqual(self.graph.max_scroll, 0)
+
+    def test_add_points(self):
+        for i in range(5):
+            self.graph.add_point({"a": float(i), "b": float(i * 2)})
+        self.assertEqual(self.graph.total_points, 5)
+
+    def test_max_scroll_with_enough_data(self):
+        vp = self.graph.viewport_points
+        for i in range(vp + 10):
+            self.graph.add_point({"a": 1.0, "b": 2.0})
+        self.assertEqual(self.graph.max_scroll, 10)
+
+    def test_set_scroll_offset_clamped(self):
+        self.graph.set_scroll_offset(999)
+        self.assertEqual(self.graph._scroll_offset, 0)
+
+    def test_clear_data(self):
+        for i in range(5):
+            self.graph.add_point({"a": 1.0, "b": 2.0})
+        self.graph.clear_data()
+        self.assertEqual(self.graph.total_points, 0)
+
+    def test_set_visible(self):
+        self.graph.set_visible("a", False)
+        self.assertFalse(self.graph._visible["a"])
+        self.graph.set_visible("a", True)
+        self.assertTrue(self.graph._visible["a"])
+
 
 class TestSessionManager(unittest.TestCase):
     """Test session lifecycle."""
@@ -360,36 +475,138 @@ class TestSessionManager(unittest.TestCase):
 
 
 class TestAudioFeedback(unittest.TestCase):
-    """Test white noise volume computation."""
+    """Test realtime white noise volume computation and lifecycle."""
+
+    def setUp(self):
+        from app.audio_feedback.noise import WhiteNoiseGenerator
+        self.gen = WhiteNoiseGenerator()
+
+    def tearDown(self):
+        self.gen.cleanup()
 
     def test_volume_at_threshold(self):
-        from app.audio_feedback.noise import WhiteNoiseGenerator
-        gen = WhiteNoiseGenerator()
-        gen.set_threshold(50)
-        vol = gen.compute_volume(50)
+        self.gen.set_threshold(50)
+        vol = self.gen.compute_volume(50)
         self.assertAlmostEqual(vol, 0.0)
 
     def test_volume_above_threshold(self):
-        from app.audio_feedback.noise import WhiteNoiseGenerator
-        gen = WhiteNoiseGenerator()
-        gen.set_threshold(50)
-        vol = gen.compute_volume(100)
+        self.gen.set_threshold(50)
+        vol = self.gen.compute_volume(100)
         self.assertAlmostEqual(vol, 0.0)
 
     def test_volume_at_zero(self):
-        from app.audio_feedback.noise import WhiteNoiseGenerator
-        gen = WhiteNoiseGenerator()
-        gen.set_threshold(50)
-        vol = gen.compute_volume(0)
+        self.gen.set_threshold(50)
+        vol = self.gen.compute_volume(0)
         self.assertAlmostEqual(vol, 1.0)
 
     def test_volume_proportional(self):
-        from app.audio_feedback.noise import WhiteNoiseGenerator
-        gen = WhiteNoiseGenerator()
-        gen.set_threshold(100)
-        vol = gen.compute_volume(50)
+        self.gen.set_threshold(100)
+        vol = self.gen.compute_volume(50)
         self.assertAlmostEqual(vol, 0.5)
-        gen.cleanup()
+
+    def test_volume_curve_monotonically_decreasing(self):
+        self.gen.set_threshold(100)
+        prev_vol = self.gen.compute_volume(0)
+        for score in range(10, 110, 10):
+            vol = self.gen.compute_volume(score)
+            self.assertLessEqual(vol, prev_vol)
+            prev_vol = vol
+
+    def test_volume_never_negative(self):
+        self.gen.set_threshold(50)
+        for score in range(-10, 200, 5):
+            vol = self.gen.compute_volume(score)
+            self.assertGreaterEqual(vol, 0.0)
+
+    def test_volume_never_exceeds_max(self):
+        from app.config import APP
+        self.gen.set_threshold(50)
+        for score in range(-10, 200, 5):
+            vol = self.gen.compute_volume(score)
+            self.assertLessEqual(vol, APP.MAX_VOLUME)
+
+    def test_set_threshold_minimum_clamp(self):
+        self.gen.set_threshold(0)
+        self.assertEqual(self.gen._threshold, 1)
+
+    def test_set_threshold_updates_value(self):
+        self.gen.set_threshold(75)
+        self.assertEqual(self.gen._threshold, 75)
+
+    def test_update_sets_internal_volume(self):
+        self.gen.set_threshold(100)
+        self.gen.update(50)
+        self.assertAlmostEqual(self.gen.volume, 0.5)
+
+    def test_update_at_threshold_zeroes_volume(self):
+        self.gen.set_threshold(50)
+        self.gen.update(50)
+        self.assertAlmostEqual(self.gen.volume, 0.0)
+
+    def test_initial_state_not_playing(self):
+        self.assertFalse(self.gen.is_playing)
+
+    def test_stop_resets_volume(self):
+        self.gen.set_threshold(100)
+        self.gen.update(25)
+        self.assertGreater(self.gen.volume, 0.0)
+        self.gen.stop()
+        self.assertAlmostEqual(self.gen.volume, 0.0)
+
+    def test_stop_sets_not_playing(self):
+        self.gen.stop()
+        self.assertFalse(self.gen.is_playing)
+
+    def test_cleanup_idempotent(self):
+        self.gen.cleanup()
+        self.gen.cleanup()  # should not raise
+
+    def test_volume_with_different_thresholds(self):
+        for threshold in [30, 50, 80, 100]:
+            self.gen.set_threshold(threshold)
+            vol_zero = self.gen.compute_volume(0)
+            vol_threshold = self.gen.compute_volume(threshold)
+            self.assertAlmostEqual(vol_zero, 1.0)
+            self.assertAlmostEqual(vol_threshold, 0.0)
+
+    def test_no_stream_before_start(self):
+        self.assertIsNone(self.gen._stream)
+
+    def test_no_file_created(self):
+        self.assertFalse(hasattr(self.gen, "_noise_file"))
+
+    def test_audio_callback_zero_volume(self):
+        import numpy as np
+        outdata = np.zeros((1024, 1), dtype=np.float32)
+        self.gen._volume = 0.0
+        self.gen._audio_callback(outdata, 1024, None, None)
+        self.assertTrue(np.all(outdata == 0.0))
+
+    def test_audio_callback_nonzero_volume(self):
+        import numpy as np
+        outdata = np.zeros((1024, 1), dtype=np.float32)
+        self.gen._volume = 0.5
+        self.gen._audio_callback(outdata, 1024, None, None)
+        self.assertFalse(np.all(outdata == 0.0))
+        self.assertTrue(np.all(np.abs(outdata) <= 0.5 + 0.01))
+
+    def test_thread_safe_volume_update(self):
+        import threading
+        results = []
+
+        def update_volume():
+            for i in range(100):
+                self.gen.update(i % 100)
+                results.append(self.gen.volume)
+
+        threads = [threading.Thread(target=update_volume) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        for v in results:
+            self.assertGreaterEqual(v, 0.0)
+            self.assertLessEqual(v, 1.0)
 
 
 if __name__ == "__main__":
