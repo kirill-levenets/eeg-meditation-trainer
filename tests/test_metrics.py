@@ -569,26 +569,33 @@ class TestAudioFeedback(unittest.TestCase):
             self.assertAlmostEqual(vol_zero, 1.0)
             self.assertAlmostEqual(vol_threshold, 0.0)
 
-    def test_no_stream_before_start(self):
-        self.assertIsNone(self.gen._stream)
+    def test_noise_file_created(self):
+        self.assertIsNotNone(self.gen._noise_file)
+        self.assertTrue(os.path.exists(self.gen._noise_file))
 
-    def test_no_file_created(self):
-        self.assertFalse(hasattr(self.gen, "_noise_file"))
+    def test_noise_file_is_valid_wav(self):
+        import wave
+        with wave.open(self.gen._noise_file, "r") as wf:
+            self.assertEqual(wf.getnchannels(), 1)
+            self.assertEqual(wf.getsampwidth(), 2)
+            self.assertEqual(wf.getframerate(), 22050)
+            expected_frames = int(22050 * 2.0)
+            self.assertEqual(wf.getnframes(), expected_frames)
 
-    def test_audio_callback_zero_volume(self):
-        import numpy as np
-        outdata = np.zeros((1024, 1), dtype=np.float32)
-        self.gen._volume = 0.0
-        self.gen._audio_callback(outdata, 1024, None, None)
-        self.assertTrue(np.all(outdata == 0.0))
+    def test_cleanup_removes_file(self):
+        path = self.gen._noise_file
+        self.assertTrue(os.path.exists(path))
+        self.gen.cleanup()
+        self.assertFalse(os.path.exists(path))
 
-    def test_audio_callback_nonzero_volume(self):
-        import numpy as np
-        outdata = np.zeros((1024, 1), dtype=np.float32)
-        self.gen._volume = 0.5
-        self.gen._audio_callback(outdata, 1024, None, None)
-        self.assertFalse(np.all(outdata == 0.0))
-        self.assertTrue(np.all(np.abs(outdata) <= 0.5 + 0.01))
+    def test_update_sets_volume_on_sound_object(self):
+        class FakeSound:
+            def __init__(self):
+                self.volume = 0.0
+        self.gen._sound = FakeSound()
+        self.gen.set_threshold(100)
+        self.gen.update(50)
+        self.assertAlmostEqual(self.gen._sound.volume, 0.5)
 
     def test_thread_safe_volume_update(self):
         import threading
