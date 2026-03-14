@@ -671,33 +671,27 @@ class TestAudioFeedback(unittest.TestCase):
             self.assertAlmostEqual(vol_zero, 1.0)
             self.assertAlmostEqual(vol_threshold, 0.0)
 
-    def test_noise_file_created(self):
-        self.assertIsNotNone(self.gen._noise_file)
-        self.assertTrue(os.path.exists(self.gen._noise_file))
+    def test_no_file_attributes(self):
+        """Audiostream-based generator has no noise file."""
+        self.assertFalse(hasattr(self.gen, "_noise_file"))
 
-    def test_noise_file_is_valid_wav(self):
-        import wave
-        with wave.open(self.gen._noise_file, "r") as wf:
-            self.assertEqual(wf.getnchannels(), 1)
-            self.assertEqual(wf.getsampwidth(), 2)
-            self.assertEqual(wf.getframerate(), 22050)
-            expected_frames = int(22050 * 2.0)
-            self.assertEqual(wf.getnframes(), expected_frames)
-
-    def test_cleanup_removes_file(self):
-        path = self.gen._noise_file
-        self.assertTrue(os.path.exists(path))
+    def test_cleanup_releases_stream(self):
+        self.gen._stream = "fake_stream"
         self.gen.cleanup()
-        self.assertFalse(os.path.exists(path))
+        self.assertIsNone(self.gen._stream)
+        self.assertIsNone(self.gen._source)
 
-    def test_update_sets_volume_on_sound_object(self):
-        class FakeSound:
-            def __init__(self):
-                self.volume = 0.0
-        self.gen._sound = FakeSound()
+    def test_update_only_sets_internal_volume(self):
+        """update() sets _volume without needing a sound object."""
         self.gen.set_threshold(100)
         self.gen.update(50)
-        self.assertAlmostEqual(self.gen._sound.volume, 0.5)
+        self.assertAlmostEqual(self.gen._volume, 0.5)
+
+    def test_default_threshold_is_100(self):
+        from app.audio_feedback.noise import WhiteNoiseGenerator
+        gen = WhiteNoiseGenerator()
+        self.assertEqual(gen._threshold, 100)
+        gen.cleanup()
 
     def test_thread_safe_volume_update(self):
         import threading

@@ -1,50 +1,27 @@
-import os
 import random
 import struct
-import tempfile
-import wave
-from typing import Optional
 
 from app.config import APP
 from app.logger import logger
 
 
 class WhiteNoiseGenerator:
-    """Generates white noise WAV with stdlib, plays via Kivy SoundLoader.
+    """Gapless white noise via audiostream's ThreadSource.
 
-    Uses only stdlib (random, struct, wave) for WAV generation — no numpy
-    or sounddevice. Playback uses Kivy's SoundLoader which works natively
-    on Android via SDL2.
+    Generates random PCM samples on-the-fly in a background thread — no file
+    I/O, no loop boundaries, zero audio spikes. Volume is scaled in real time
+    based on meditation score vs threshold.
+
+    Falls back gracefully if audiostream is not installed.
     """
 
     def __init__(self) -> None:
         self._volume: float = 0.0
         self._max_volume: float = APP.MAX_VOLUME
-        self._threshold: int = 50
-        self._noise_file: Optional[str] = None
-        self._sound: object = None
+        self._threshold: int = 100
         self._is_playing: bool = False
-        self._generate_noise_file()
-
-    def _generate_noise_file(self) -> None:
-        """Generate a white noise WAV file using stdlib only."""
-        sample_rate = APP.WHITE_NOISE_SAMPLE_RATE
-        duration = APP.WHITE_NOISE_DURATION
-        num_samples = int(sample_rate * duration)
-
-        raw_bytes = struct.pack(
-            f"<{num_samples}h",
-            *(int(random.uniform(-1.0, 1.0) * 32767) for _ in range(num_samples))
-        )
-
-        self._noise_file = os.path.join(tempfile.gettempdir(), "eeg_white_noise.wav")
-        with wave.open(self._noise_file, "w") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(sample_rate)
-            wf.writeframes(raw_bytes)
-
-        logger.info(f"White noise file generated: {self._noise_file}")
+        self._stream: object = None
+        self._source: object = None
 
     def set_threshold(self, threshold: int) -> None:
         self._threshold = max(1, threshold)
@@ -59,38 +36,53 @@ class WhiteNoiseGenerator:
     def update(self, meditation_score: float) -> None:
         """Update volume based on current meditation score."""
         self._volume = self.compute_volume(meditation_score)
-        if self._sound is not None:
-            try:
-                self._sound.volume = self._volume
-            except Exception:
-                pass
 
     def start(self) -> None:
-        """Start looped white noise playback via Kivy SoundLoader."""
+        """Start gapless white noise playback via audiostream."""
         if self._is_playing:
             return
         try:
-            from kivy.core.audio import SoundLoader
+            from audiostream import get_output
+            from audiostream.sources.thread import ThreadSource
 
-            if self._noise_file and os.path.exists(self._noise_file):
-                self._sound = SoundLoader.load(self._noise_file)
-                if self._sound:
-                    self._sound.loop = True
-                    self._sound.volume = self._volume
-                    self._sound.play()
-                    self._is_playing = True
-                    logger.info("White noise playback started")
+            rate = APP.WHITE_NOISE_SAMPLE_RATE
+            buffersize = 1024
+            self._stream = get_output(
+                channels=1, rate=rate, buffersize=buffersize, encoding=16,
+            )
+
+            generator = self
+            chunk_samples = buffersize
+
+            class NoiseSource(ThreadSource):
+                def get_bytes(self):
+                    vol = generator._volume
+                    if vol <= 0.001:
+                        return b"\x00" * (chunk_samples * 2)
+                    samples = struct.pack(
+                        f"<{chunk_samples}h",
+                        *(int(random.uniform(-vol, vol) * 32767)
+                          for _ in range(chunk_samples))
+                    )
+                    return samples
+
+            self._source = NoiseSource(self._stream, *[])
+            self._source.start()
+            self._is_playing = True
+            logger.info("White noise streaming started (audiostream)")
         except ImportError:
-            logger.warning("Kivy SoundLoader not available, audio disabled")
+            logger.warning("audiostream not available, audio disabled")
+        except Exception as e:
+            logger.warning(f"Failed to start audiostream: {e}")
 
     def stop(self) -> None:
         """Stop white noise playback."""
-        if self._sound:
+        if self._source:
             try:
-                self._sound.stop()
+                self._source.stop()
             except Exception:
                 pass
-            self._sound = None
+            self._source = None
         self._is_playing = False
         self._volume = 0.0
 
@@ -103,26 +95,19 @@ class WhiteNoiseGenerator:
         return self._is_playing
 
     def cleanup(self) -> None:
-        """Remove temporary noise file and stop playback."""
+        """Stop playback and release resources."""
         self.stop()
-        if self._noise_file and os.path.exists(self._noise_file):
-            try:
-                os.remove(self._noise_file)
-            except OSError:
-                pass
+        self._stream = None
 
 
 if __name__ == "__main__":
     gen = WhiteNoiseGenerator()
-    print(f"Noise file: {gen._noise_file}")
-    print(f"File exists: {os.path.exists(gen._noise_file)}")
     print(f"Volume at score 0: {gen.compute_volume(0):.2f}")
     print(f"Volume at score 25: {gen.compute_volume(25):.2f}")
     print(f"Volume at score 50: {gen.compute_volume(50):.2f}")
     print(f"Volume at score 100: {gen.compute_volume(100):.2f}")
-    gen.set_threshold(50)
+    gen.set_threshold(100)
     gen.update(25)
     print(f"Volume after update(25): {gen.volume:.2f}")
     gen.cleanup()
-    print(f"File after cleanup: {os.path.exists(gen._noise_file) if gen._noise_file else 'None'}")
     print("Done")
