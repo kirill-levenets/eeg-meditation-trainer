@@ -60,8 +60,8 @@ class SettingsScreen(Screen):
 
         slider_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
         self._threshold_slider = Slider(
-            min=40,
-            max=70,
+            min=20,
+            max=200,
             value=METRICS.MEDITATION_THRESHOLD_DEFAULT,
             step=1,
             size_hint_x=0.8,

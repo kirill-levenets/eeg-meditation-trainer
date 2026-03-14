@@ -456,17 +456,88 @@ class TestScrollableGraphWidget(unittest.TestCase):
         self.assertFalse(g._show_value_labels)
         self.assertFalse(g._show_timestamps)
 
-    def test_diary_preview_loads_metrics(self):
-        """Verify diary load_metrics_preview populates graph."""
+    def test_diary_preview_loads_all_graphs(self):
+        """Verify load_metrics_preview populates metrics, raw EEG, and freq graphs."""
         from app.ui.diary_screen import DiaryScreen
         screen = DiaryScreen()
         rows = [
             {"meditation_score": 50 + i, "shamatha_score": 30 + i,
-             "distraction": 20, "sinking": 10}
+             "distraction": 20, "sinking": 10,
+             "delta_raw": 300, "theta_raw": 200,
+             "alpha1_raw": 400, "alpha2_raw": 350,
+             "beta1_raw": 100, "beta2_raw": 80,
+             "gamma1_raw": 30, "gamma2_raw": 20}
             for i in range(10)
         ]
         screen.load_metrics_preview(rows)
         self.assertEqual(screen._metrics_graph.total_points, 10)
+        self.assertEqual(screen._raw_eeg_graph.total_points, 10)
+        self.assertEqual(screen._freq_graph.total_points, 10)
+
+    def test_diary_tab_switching(self):
+        """Verify diary graph tab switching changes active graph."""
+        from app.ui.diary_screen import DiaryScreen
+        screen = DiaryScreen()
+        self.assertEqual(screen._active_graph_tab, "metrics")
+        screen._switch_graph_tab("raw")
+        self.assertEqual(screen._active_graph_tab, "raw")
+        screen._switch_graph_tab("freq")
+        self.assertEqual(screen._active_graph_tab, "freq")
+        screen._switch_graph_tab("metrics")
+        self.assertEqual(screen._active_graph_tab, "metrics")
+
+
+class TestMockEEGStream(unittest.TestCase):
+    """Test realistic mock EEG signal generation."""
+
+    def setUp(self):
+        from app.eeg.mock_stream import MockEEGStream
+        self.stream = MockEEGStream()
+        self.stream.start()
+
+    def tearDown(self):
+        self.stream.stop()
+
+    def test_sample_has_all_bands(self):
+        sample = self.stream.read_sample()
+        expected = {"delta", "theta", "alpha1", "alpha2",
+                    "beta1", "beta2", "gamma1", "gamma2",
+                    "attention", "meditation", "timestamp"}
+        self.assertTrue(expected.issubset(sample.keys()))
+
+    def test_all_values_non_negative(self):
+        for _ in range(50):
+            sample = self.stream.read_sample()
+            for key in ("delta", "theta", "alpha1", "alpha2",
+                        "beta1", "beta2", "gamma1", "gamma2"):
+                self.assertGreaterEqual(sample[key], 0.0, f"{key} was negative")
+
+    def test_attention_meditation_in_range(self):
+        for _ in range(50):
+            sample = self.stream.read_sample()
+            self.assertGreaterEqual(sample["attention"], 0)
+            self.assertLessEqual(sample["attention"], 100)
+            self.assertGreaterEqual(sample["meditation"], 0)
+            self.assertLessEqual(sample["meditation"], 100)
+
+    def test_state_transitions_produce_variation(self):
+        """Collect many samples and verify alpha varies (state changes)."""
+        from app.eeg.mock_stream import MockEEGStream
+        stream = MockEEGStream()
+        stream.start()
+        alphas = []
+        for _ in range(100):
+            s = stream.read_sample()
+            alphas.append(s["alpha1"])
+        stream.stop()
+        # Should have meaningful variation (not constant)
+        self.assertGreater(max(alphas) - min(alphas), 50.0)
+
+    def test_smooth_step(self):
+        from app.eeg.mock_stream import MockEEGStream
+        self.assertAlmostEqual(MockEEGStream._smooth_step(0.0), 0.0)
+        self.assertAlmostEqual(MockEEGStream._smooth_step(1.0), 1.0)
+        self.assertAlmostEqual(MockEEGStream._smooth_step(0.5), 0.5)
 
 
 class TestSessionManager(unittest.TestCase):

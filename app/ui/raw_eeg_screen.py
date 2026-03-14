@@ -275,7 +275,7 @@ class RawEEGScreen(Screen):
             colors=self.EEG_SIGNAL_COLORS,
             scales=self.EEG_SIGNAL_SCALES,
             viewport_seconds=60,
-            show_value_labels=False,
+            show_value_labels=True,
             show_timestamps=True,
             size_hint_y=0.35,
         )

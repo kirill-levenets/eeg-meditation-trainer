@@ -26,6 +26,30 @@ METRICS_PREVIEW_SCALES = {
     "sinking": 100.0,
 }
 
+RAW_EEG_PREVIEW_COLORS = {
+    "eeg": (0.3, 0.8, 1.0, 1.0),
+}
+
+RAW_EEG_PREVIEW_SCALES = {
+    "eeg": 3000.0,
+}
+
+FREQ_PREVIEW_COLORS = {
+    "alpha": (0.1, 0.8, 0.4, 1.0),
+    "beta": (0.9, 0.7, 0.1, 1.0),
+    "gamma": (1.0, 0.3, 0.3, 1.0),
+    "theta": (0.2, 0.5, 0.9, 1.0),
+    "delta": (0.4, 0.2, 0.8, 1.0),
+}
+
+FREQ_PREVIEW_SCALES = {
+    "alpha": 1600.0,
+    "beta": 800.0,
+    "gamma": 400.0,
+    "theta": 600.0,
+    "delta": 800.0,
+}
+
 
 class SessionListItem(BoxLayout):
     """Single row in the session list."""
@@ -214,35 +238,70 @@ class DiaryScreen(Screen):
         )
         self._detail_layout.add_widget(self._export_status)
 
-        # --- Metrics preview graph ---
-        graph_label = Label(
-            text="Session Metrics",
-            font_size=dp(13),
-            bold=True,
-            size_hint_y=None,
-            height=dp(24),
-            color=(0.7, 0.7, 0.7, 1.0),
+        # --- Graph tab buttons ---
+        graph_tabs = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(4))
+        self._tab_metrics_btn = Button(
+            text="Metrics", font_size=dp(12), bold=True,
+            background_color=(0.3, 0.5, 0.8, 1.0),
         )
-        self._detail_layout.add_widget(graph_label)
+        self._tab_raw_btn = Button(
+            text="Raw EEG", font_size=dp(12), bold=True,
+            background_color=(0.2, 0.2, 0.3, 1.0),
+        )
+        self._tab_freq_btn = Button(
+            text="Frequencies", font_size=dp(12), bold=True,
+            background_color=(0.2, 0.2, 0.3, 1.0),
+        )
+        self._tab_metrics_btn.bind(on_release=lambda x: self._switch_graph_tab("metrics"))
+        self._tab_raw_btn.bind(on_release=lambda x: self._switch_graph_tab("raw"))
+        self._tab_freq_btn.bind(on_release=lambda x: self._switch_graph_tab("freq"))
+        graph_tabs.add_widget(self._tab_metrics_btn)
+        graph_tabs.add_widget(self._tab_raw_btn)
+        graph_tabs.add_widget(self._tab_freq_btn)
+        self._detail_layout.add_widget(graph_tabs)
 
+        # --- Graph container (holds one graph at a time) ---
+        self._graph_container = BoxLayout(
+            orientation="vertical", size_hint_y=None, height=dp(200),
+        )
+        self._detail_layout.add_widget(self._graph_container)
+
+        # Create all three graphs
         self._metrics_graph = ScrollableGraphWidget(
             colors=METRICS_PREVIEW_COLORS,
             scales=METRICS_PREVIEW_SCALES,
             viewport_seconds=300,
             show_value_labels=True,
             show_timestamps=True,
-            size_hint_y=None,
-            height=dp(180),
+            size_hint_y=1,
         )
-        self._detail_layout.add_widget(self._metrics_graph)
+        self._raw_eeg_graph = ScrollableGraphWidget(
+            colors=RAW_EEG_PREVIEW_COLORS,
+            scales=RAW_EEG_PREVIEW_SCALES,
+            viewport_seconds=300,
+            show_value_labels=True,
+            show_timestamps=True,
+            size_hint_y=1,
+        )
+        self._freq_graph = ScrollableGraphWidget(
+            colors=FREQ_PREVIEW_COLORS,
+            scales=FREQ_PREVIEW_SCALES,
+            viewport_seconds=300,
+            show_value_labels=True,
+            show_timestamps=True,
+            size_hint_y=1,
+        )
 
-        # Preview legend
-        preview_legend = BoxLayout(size_hint_y=None, height=dp(18), spacing=dp(4))
-        for name, color in METRICS_PREVIEW_COLORS.items():
-            short = name.replace("_score", "").replace("_", " ").title()
-            lbl = Label(text=short, font_size=dp(9), color=color)
-            preview_legend.add_widget(lbl)
-        self._detail_layout.add_widget(preview_legend)
+        # Legend container
+        self._legend_container = BoxLayout(
+            size_hint_y=None, height=dp(18), spacing=dp(4),
+        )
+        self._detail_layout.add_widget(self._legend_container)
+
+        self._active_graph_tab: str = "metrics"
+        self._cached_metrics_rows: List[Dict] = []
+        self._graph_container.add_widget(self._metrics_graph)
+        self._rebuild_legend("metrics")
 
         detail_scroll.add_widget(self._detail_layout)
         root.add_widget(detail_scroll)
@@ -308,16 +367,78 @@ class DiaryScreen(Screen):
         self._tags_input.text = session.get("tags", "")
         self._mood_slider.value = session.get("mood_rating", 3) or 3
         self._metrics_graph.clear_data()
+        self._raw_eeg_graph.clear_data()
+        self._freq_graph.clear_data()
+        self._cached_metrics_rows = []
+        self._switch_graph_tab("metrics")
 
     def load_metrics_preview(self, metrics_rows: List[Dict]) -> None:
-        """Load session metrics into the preview graph."""
+        """Load session metrics into all three preview graphs."""
+        self._cached_metrics_rows = metrics_rows
         if not metrics_rows:
             return
-        series: Dict[str, List[float]] = {k: [] for k in METRICS_PREVIEW_COLORS}
-        for row in metrics_rows:
-            for key in series:
-                series[key].append(row.get(key, 0.0))
-        self._metrics_graph.load_static_data(series)
+        self._load_graph_data(metrics_rows)
+
+    def _load_graph_data(self, rows: List[Dict]) -> None:
+        """Populate all three graphs from metrics rows."""
+        # Metrics graph
+        metrics_series: Dict[str, List[float]] = {k: [] for k in METRICS_PREVIEW_COLORS}
+        for row in rows:
+            for key in metrics_series:
+                metrics_series[key].append(row.get(key, 0.0))
+        self._metrics_graph.load_static_data(metrics_series)
+
+        # Raw EEG composite signal
+        eeg_series: Dict[str, List[float]] = {"eeg": []}
+        raw_keys = ("delta_raw", "theta_raw", "alpha1_raw", "alpha2_raw",
+                     "beta1_raw", "beta2_raw", "gamma1_raw", "gamma2_raw")
+        for row in rows:
+            eeg_sum = sum(row.get(k, 0.0) for k in raw_keys)
+            eeg_series["eeg"].append(eeg_sum)
+        self._raw_eeg_graph.load_static_data(eeg_series)
+
+        # Frequency bands
+        freq_series: Dict[str, List[float]] = {k: [] for k in FREQ_PREVIEW_COLORS}
+        for row in rows:
+            freq_series["alpha"].append(row.get("alpha1_raw", 0.0) + row.get("alpha2_raw", 0.0))
+            freq_series["beta"].append(row.get("beta1_raw", 0.0) + row.get("beta2_raw", 0.0))
+            freq_series["gamma"].append(row.get("gamma1_raw", 0.0) + row.get("gamma2_raw", 0.0))
+            freq_series["theta"].append(row.get("theta_raw", 0.0))
+            freq_series["delta"].append(row.get("delta_raw", 0.0))
+        self._freq_graph.load_static_data(freq_series)
+
+    def _switch_graph_tab(self, tab: str) -> None:
+        """Switch the visible graph in the preview area."""
+        self._active_graph_tab = tab
+        self._graph_container.clear_widgets()
+
+        active_color = (0.3, 0.5, 0.8, 1.0)
+        inactive_color = (0.2, 0.2, 0.3, 1.0)
+        self._tab_metrics_btn.background_color = active_color if tab == "metrics" else inactive_color
+        self._tab_raw_btn.background_color = active_color if tab == "raw" else inactive_color
+        self._tab_freq_btn.background_color = active_color if tab == "freq" else inactive_color
+
+        if tab == "metrics":
+            self._graph_container.add_widget(self._metrics_graph)
+        elif tab == "raw":
+            self._graph_container.add_widget(self._raw_eeg_graph)
+        else:
+            self._graph_container.add_widget(self._freq_graph)
+        self._rebuild_legend(tab)
+
+    def _rebuild_legend(self, tab: str) -> None:
+        """Rebuild legend labels for the active graph tab."""
+        self._legend_container.clear_widgets()
+        if tab == "metrics":
+            colors = METRICS_PREVIEW_COLORS
+        elif tab == "raw":
+            colors = RAW_EEG_PREVIEW_COLORS
+        else:
+            colors = FREQ_PREVIEW_COLORS
+        for name, color in colors.items():
+            short = name.replace("_score", "").replace("_", " ").title()
+            lbl = Label(text=short, font_size=dp(9), color=color)
+            self._legend_container.add_widget(lbl)
 
     def _on_save_pressed(self, *args) -> None:
         if self._selected_session_id and self._on_save_notes:
