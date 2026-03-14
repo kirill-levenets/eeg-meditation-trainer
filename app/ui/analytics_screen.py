@@ -124,9 +124,21 @@ class AnalyticsScreen(Screen):
         self._period_list.bind(
             minimum_height=self._period_list.setter("height")
         )
-        period_scroll = ScrollView(size_hint_y=0.3)
+        period_scroll = ScrollView(size_hint_y=0.25)
         period_scroll.add_widget(self._period_list)
         root.add_widget(period_scroll)
+
+        # Storage info
+        self._storage_label = Label(
+            text="Storage: —",
+            font_size=dp(12),
+            color=(0.5, 0.5, 0.5, 1.0),
+            size_hint_y=None,
+            height=dp(24),
+            halign="left",
+        )
+        self._storage_label.bind(size=self._storage_label.setter("text_size"))
+        root.add_widget(self._storage_label)
 
         self.add_widget(root)
 
@@ -141,6 +153,21 @@ class AnalyticsScreen(Screen):
     @property
     def btn_monthly(self) -> Button:
         return self._btn_monthly
+
+    def update_storage_info(self, size_bytes: int, counts: Dict[str, int]) -> None:
+        """Update the storage info label with DB size and record counts."""
+        if size_bytes < 1024:
+            size_str = f"{size_bytes} B"
+        elif size_bytes < 1024 * 1024:
+            size_str = f"{size_bytes / 1024:.1f} KB"
+        else:
+            size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
+        self._storage_label.text = (
+            f"Storage: {size_str}  |  "
+            f"{counts.get('sessions', 0)} sessions  |  "
+            f"{counts.get('metrics', 0)} data points  |  "
+            f"{counts.get('users', 0)} users"
+        )
 
     def update_summary(self, summary: Dict) -> None:
         for key, label in self._summary_labels.items():

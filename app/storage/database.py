@@ -1,5 +1,6 @@
 import csv
 import io
+import os
 import sqlite3
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -81,6 +82,11 @@ class DatabaseManager:
 
             CREATE INDEX IF NOT EXISTS idx_sessions_user
             ON sessions(user_id);
+
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
             """
         )
         self._conn.commit()
@@ -269,6 +275,48 @@ class DatabaseManager:
         self._conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
         self._conn.commit()
 
+    # ---- Session management ----
+
+    def rename_session(self, session_id: int, new_name: str) -> None:
+        """Rename a session by updating its notes with a title prefix."""
+        self._conn.execute(
+            "UPDATE sessions SET notes = ? WHERE id = ?",
+            (new_name, session_id),
+        )
+        self._conn.commit()
+
+    # ---- Settings persistence ----
+
+    def get_setting(self, key: str) -> Optional[str]:
+        """Get a persisted setting value."""
+        cursor = self._conn.execute(
+            "SELECT value FROM app_settings WHERE key = ?", (key,)
+        )
+        row = cursor.fetchone()
+        return row[0] if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        """Set a persisted setting value (upsert)."""
+        self._conn.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
+            (key, value),
+        )
+        self._conn.commit()
+
+    def get_db_size_bytes(self) -> int:
+        """Return the database file size in bytes."""
+        try:
+            return os.path.getsize(self._db_path)
+        except OSError:
+            return 0
+
+    def get_record_counts(self) -> Dict[str, int]:
+        """Return row counts for sessions and metrics tables."""
+        sessions = self._conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+        metrics = self._conn.execute("SELECT COUNT(*) FROM metrics").fetchone()[0]
+        users = self._conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        return {"sessions": sessions, "metrics": metrics, "users": users}
+
     # ---- CSV export ----
 
     def export_session_csv(self, session_id: int) -> str:
@@ -290,7 +338,6 @@ class DatabaseManager:
 
 if __name__ == "__main__":
     import tempfile
-    import os
 
     db_path = os.path.join(tempfile.gettempdir(), "test_meditation.db")
     db = DatabaseManager(db_path=db_path)
@@ -324,6 +371,19 @@ if __name__ == "__main__":
 
     csv_data = db.export_session_csv(sid)
     print(f"CSV export ({len(csv_data)} chars):\n{csv_data[:200]}")
+
+    db.set_setting("last_user_id", str(uid))
+    print(f"Saved setting last_user_id: {db.get_setting('last_user_id')}")
+
+    db.rename_session(sid, "Morning meditation")
+    s = db.get_session(sid)
+    print(f"Renamed session notes: {s['notes']}")
+
+    print(f"DB size: {db.get_db_size_bytes()} bytes")
+    print(f"Record counts: {db.get_record_counts()}")
+
+    db.delete_session(sid)
+    print(f"Session after delete: {db.get_session(sid)}")
 
     db.close()
     os.remove(db_path)

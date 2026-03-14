@@ -7,6 +7,7 @@ from kivy.uix.checkbox import CheckBox
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
 from kivy.uix.slider import Slider
+from kivy.uix.textinput import TextInput
 
 from app.config import APP
 
@@ -15,8 +16,8 @@ class TimerScreen(Screen):
     """Meditation timer with configurable duration and enable/disable toggle.
 
     When enabled and a session is running, the timer counts down from the
-    selected duration. When it reaches zero, the session auto-stops.
-    By default the timer is disabled.
+    selected duration. When it reaches zero, the session auto-stops and
+    plays the configured end sound (bell by default, or custom WAV).
     """
 
     def __init__(self, **kwargs) -> None:
@@ -26,6 +27,8 @@ class TimerScreen(Screen):
         self._duration_minutes: int = APP.TIMER_DEFAULT_MINUTES
         self._remaining_seconds: float = 0.0
         self._on_timer_finished: Optional[Callable] = None
+        self._on_test_timer_sound: Optional[Callable] = None
+        self._custom_sound_path: str = ""
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -96,6 +99,39 @@ class TimerScreen(Screen):
             btn.bind(on_release=lambda x, m=minutes: self._set_duration(m))
             preset_row.add_widget(btn)
         root.add_widget(preset_row)
+
+        # Timer end sound section
+        sound_label = Label(
+            text="Timer End Sound",
+            font_size=dp(14),
+            size_hint_y=None,
+            height=dp(24),
+            halign="left",
+            bold=True,
+        )
+        sound_label.bind(size=sound_label.setter("text_size"))
+        root.add_widget(sound_label)
+
+        sound_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
+        self._sound_path_input = TextInput(
+            hint_text="Default bell (or enter .wav path)",
+            text="",
+            multiline=False,
+            font_size=dp(12),
+            size_hint_x=0.7,
+        )
+        self._sound_path_input.bind(text=self._on_sound_path_change)
+        self._test_sound_btn = Button(
+            text="Test Sound",
+            font_size=dp(13),
+            bold=True,
+            size_hint_x=0.3,
+            background_color=(0.2, 0.5, 0.7, 1.0),
+        )
+        self._test_sound_btn.bind(on_release=self._on_test_sound_pressed)
+        sound_row.add_widget(self._sound_path_input)
+        sound_row.add_widget(self._test_sound_btn)
+        root.add_widget(sound_row)
 
         # Big countdown display
         self._countdown_label = Label(
@@ -194,5 +230,19 @@ class TimerScreen(Screen):
             self._status_label.color = (0.6, 0.6, 0.6, 1.0)
         self._update_display()
 
+    def _on_sound_path_change(self, instance, value) -> None:
+        self._custom_sound_path = value.strip()
+
+    def _on_test_sound_pressed(self, *args) -> None:
+        if self._on_test_timer_sound:
+            self._on_test_timer_sound()
+
+    @property
+    def custom_sound_path(self) -> str:
+        return self._custom_sound_path
+
     def set_timer_finished_callback(self, callback: Callable) -> None:
         self._on_timer_finished = callback
+
+    def set_test_sound_callback(self, callback: Callable) -> None:
+        self._on_test_timer_sound = callback

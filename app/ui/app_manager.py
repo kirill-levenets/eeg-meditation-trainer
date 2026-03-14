@@ -59,8 +59,8 @@ class EEGMeditationApp(App):
         btn_raw.bind(on_release=lambda x: self._switch_screen("raw_eeg"))
         btn_settings = ActionButton(text="Settings")
         btn_settings.bind(on_release=lambda x: self._switch_screen("settings"))
-        btn_diary = ActionButton(text="Diary")
-        btn_diary.bind(on_release=lambda x: self._switch_screen("diary"))
+        self._btn_diary = ActionButton(text="Diary")
+        self._btn_diary.bind(on_release=lambda x: self._switch_screen("diary"))
         btn_analytics = ActionButton(text="Analytics")
         btn_analytics.bind(on_release=lambda x: self._switch_screen("analytics"))
         btn_timer = ActionButton(text="Timer")
@@ -72,7 +72,7 @@ class EEGMeditationApp(App):
         av.add_widget(btn_raw)
         av.add_widget(btn_settings)
         av.add_widget(btn_timer)
-        av.add_widget(btn_diary)
+        av.add_widget(self._btn_diary)
         av.add_widget(btn_analytics)
         av.add_widget(btn_profile)
         nav_bar.add_widget(av)
@@ -99,7 +99,9 @@ class EEGMeditationApp(App):
         root.add_widget(self._sm)
 
         self._bind_callbacks()
+        self._restore_last_user()
         self._refresh_profile()
+        self._update_diary_visibility()
         return root
 
     def _bind_callbacks(self) -> None:
@@ -117,6 +119,8 @@ class EEGMeditationApp(App):
         self._diary_screen.set_session_select_callback(self._on_session_select)
         self._diary_screen.set_save_notes_callback(self._on_save_notes)
         self._diary_screen.set_export_csv_callback(self._on_export_csv)
+        self._diary_screen.set_delete_session_callback(self._on_delete_session)
+        self._diary_screen.set_rename_session_callback(self._on_rename_session)
 
         self._analytics_screen.btn_daily.bind(
             on_release=lambda x: self._load_analytics("daily")
@@ -128,11 +132,33 @@ class EEGMeditationApp(App):
             on_release=lambda x: self._load_analytics("monthly")
         )
 
+        self._timer_screen.set_test_sound_callback(self._on_test_timer_sound)
+
         self._profile_screen.set_user_switch_callback(self._on_user_switch)
         self._profile_screen.set_user_create_callback(self._on_user_create)
         self._profile_screen.set_user_delete_callback(self._on_user_delete)
 
+    def _restore_last_user(self) -> None:
+        """Restore last selected user from DB settings on startup."""
+        saved = self._db.get_setting("last_user_id")
+        if saved:
+            try:
+                uid = int(saved)
+                user = self._db.get_user(uid)
+                if user:
+                    self._current_user_id = uid
+                    logger.info(f"Restored last user: {user['name']} (id={uid})")
+            except (ValueError, TypeError):
+                pass
+
+    def _update_diary_visibility(self) -> None:
+        """Disable diary nav button when no user is selected."""
+        has_user = self._current_user_id is not None
+        self._btn_diary.disabled = not has_user
+
     def _switch_screen(self, name: str) -> None:
+        if name == "diary" and not self._current_user_id:
+            return
         self._sm.current = name
         if name == "diary":
             self._refresh_diary()
@@ -142,6 +168,14 @@ class EEGMeditationApp(App):
             self._refresh_profile()
 
     def _on_start(self, *args) -> None:
+        if not self._current_user_id:
+            self._live_screen.update_state("Select a user profile first")
+            logger.warning("Session start blocked: no user selected")
+            return
+        if not APP.USE_MOCK_DEVICE:
+            self._live_screen.update_state("No device connected (enable mock in Settings)")
+            logger.warning("Session start blocked: mock disabled, no real device")
+            return
         threshold = self._settings_screen.threshold
         self._metrics_engine.meditation_threshold = threshold
         self._audio.set_threshold(threshold)
@@ -233,6 +267,7 @@ class EEGMeditationApp(App):
         # Timer countdown
         if self._timer_screen.tick(APP.UPDATE_FREQUENCY):
             logger.info("Timer expired, auto-stopping session")
+            self._audio.play_timer_sound(self._timer_screen.custom_sound_path)
             self._on_stop()
             return
 
@@ -267,6 +302,9 @@ class EEGMeditationApp(App):
         self._audio.disconnect_alert_enabled = active
         logger.info(f"Disconnect alert {'enabled' if active else 'disabled'}")
 
+    def _on_test_timer_sound(self) -> None:
+        self._audio.play_timer_sound(self._timer_screen.custom_sound_path)
+
     def _on_device_mode_toggle(self, use_mock: bool) -> None:
         APP.USE_MOCK_DEVICE = use_mock
         if use_mock:
@@ -289,6 +327,18 @@ class EEGMeditationApp(App):
         self._refresh_diary()
         logger.info(f"Notes saved for session {session_id}")
 
+    def _on_delete_session(self, session_id: int) -> None:
+        """Delete a session and refresh the diary list."""
+        self._db.delete_session(session_id)
+        self._refresh_diary()
+        logger.info(f"Session {session_id} deleted")
+
+    def _on_rename_session(self, session_id: int, new_name: str) -> None:
+        """Rename a session (updates notes field) and refresh diary."""
+        self._db.rename_session(session_id, new_name)
+        self._refresh_diary()
+        logger.info(f"Session {session_id} renamed to '{new_name}'")
+
     def _on_export_csv(self, session_id: int) -> Optional[str]:
         """Export session data as CSV file. Returns file path or None."""
         csv_data = self._db.export_session_csv(session_id)
@@ -308,6 +358,10 @@ class EEGMeditationApp(App):
     def _refresh_analytics(self) -> None:
         summary = self._analytics.get_summary()
         self._analytics_screen.update_summary(summary)
+        self._analytics_screen.update_storage_info(
+            self._db.get_db_size_bytes(),
+            self._db.get_record_counts(),
+        )
         self._load_analytics("daily")
 
     def _load_analytics(self, period: str) -> None:
@@ -325,9 +379,11 @@ class EEGMeditationApp(App):
         if user_id:
             user = self._db.get_user(user_id)
             name = user["name"] if user else "Unknown"
+            self._db.set_setting("last_user_id", str(user_id))
             logger.info(f"Switched to user: {name} (id={user_id})")
         else:
             logger.info("Switched to: All Users")
+        self._update_diary_visibility()
         self._refresh_profile()
 
     def _on_user_create(self, name: str) -> None:

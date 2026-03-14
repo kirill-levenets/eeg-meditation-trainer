@@ -8,17 +8,18 @@ Mobile application for training Shamatha meditation using EEG neurofeedback. Bui
 - **Raw EEG data tab** — Composite raw EEG signal waveform with Y-axis numbers and realtime values + aggregated frequency band plots
 - **Scrollable graphs** — All graphs support time-scrolling through the full 5-minute data window via slider
 - **Meditation scoring** — Calmness, Shamatha score, Distraction, and Sinking detection
-- **Dual-channel audio engine** — Ch1: gapless white noise via crossfaded WAV + Kivy SoundLoader (volume scales with meditation); Ch2: synthesized tingsha bell for sinking alerts with cooldown/debounce. No external audio deps
-- **Meditation timer** — Configurable duration (1–120 min) with preset buttons, enable/disable toggle, countdown display, auto-stop on expiry
+- **Dual-channel audio engine** — Ch1: gapless white noise via crossfaded WAV + Kivy SoundLoader (volume scales with meditation); Ch2: synthesized tingsha bell for sinking alerts with cooldown/debounce. Test Audio plays noise→bell→disconnect sequence
+- **Meditation timer** — Configurable duration (1–120 min) with preset buttons, enable/disable toggle, countdown display, auto-stop on expiry, custom end-sound WAV picker with test button
 - **State classification** — Stable Focus, Subtle Distraction, Gross Distraction, Sinking
 - **Settings panel** — Device status/meta display, mock/real device switch, threshold slider, test audio button, sinking alert toggle, disconnect alert toggle, graph metric toggles
-- **Session diary** — Notes, tags, mood rating, CSV export, and tabbed signal preview (Metrics / Raw EEG / Frequencies) for each session
+- **Session diary** — Notes, tags, mood rating, CSV export, delete & rename sessions, tabbed signal preview (Metrics / Raw EEG / Frequencies)
 - **Full signal storage** — Raw EEG bands, computed metrics, frequencies, stability, and calmness all stored per-tick in SQLite
 - **CSV export** — Export any session's full signal data (raw + computed) to CSV from the diary screen
 - **Mock EEG simulation** — Realistic brain state machine (relaxed, focused, drowsy, distracted, deep calm) with per-band oscillation, cross-band interactions, smooth transitions, and burst activity
-- **User profiles** — Profile chooser/create on app launch; per-user session filtering in diary
-- **Analytics** — Daily/weekly/monthly trends, streak counter, progress tracking
-- **SQLite storage** — Sessions, metrics timeseries, and user profiles with automatic schema migration
+- **User profiles** — Profile chooser/create on app launch; per-user session filtering; last user persisted across restarts; diary hidden until user selected
+- **Session guards** — Start blocked if no user selected or if mock disabled without real device connected
+- **Analytics** — Daily/weekly/monthly trends, streak counter, progress tracking, database storage usage display
+- **SQLite storage** — Sessions, metrics timeseries, user profiles, app settings with automatic schema migration
 
 ## Project Structure
 

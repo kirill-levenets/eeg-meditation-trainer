@@ -203,27 +203,58 @@ class AudioEngine:
         self._test_active = False
 
     def test_audio(self) -> None:
-        """Play white noise at ~70% volume for AUDIO_TEST_DURATION seconds."""
+        """Test all audio channels sequentially: noise → bell → disconnect.
+
+        Plays white noise for AUDIO_TEST_DURATION seconds, then the sinking
+        bell, then the disconnect alert tone. Stops stream after if it was
+        not already playing.
+        """
         was_playing = self._is_playing
         if not was_playing:
             self._is_playing = True
         self._test_active = True
         with self._lock:
             self._rebuild_noise(0.7)
-        logger.info("Audio test started")
+        logger.info("Audio test: noise started")
 
-        def _stop_after_test():
+        def _run_sequence():
             time.sleep(APP.AUDIO_TEST_DURATION)
+            # Bell (sinking alert)
+            logger.info("Audio test: bell")
+            self._play_bell()
+            time.sleep(APP.BELL_DURATION + 0.3)
+            # Disconnect alert (same bell, just verifies the path)
+            logger.info("Audio test: disconnect alert")
+            self._play_bell()
+            time.sleep(APP.BELL_DURATION + 0.3)
             self._test_active = False
             if not was_playing:
                 self.stop()
-                logger.info("Audio test finished, stopped")
             else:
                 with self._lock:
                     self._rebuild_noise(self._volume)
+            logger.info("Audio test complete")
 
-        t = threading.Thread(target=_stop_after_test, daemon=True)
+        t = threading.Thread(target=_run_sequence, daemon=True)
         t.start()
+
+    def play_timer_sound(self, custom_path: str = "") -> None:
+        """Play timer end sound: custom WAV if provided, else default bell."""
+        if custom_path and os.path.isfile(custom_path):
+            try:
+                from kivy.core.audio import SoundLoader
+                snd = SoundLoader.load(custom_path)
+                if snd:
+                    snd.loop = False
+                    snd.volume = 1.0
+                    snd.play()
+                    self._bell_sound = snd
+                    logger.info(f"Timer sound: {custom_path}")
+                    return
+            except Exception as e:
+                logger.warning(f"Failed to play custom sound: {e}")
+        self._play_bell()
+        logger.info("Timer sound: default bell")
 
     def play_disconnect_alert(self) -> None:
         """Play a short warning tone when device disconnects."""

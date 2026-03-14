@@ -65,6 +65,8 @@ class DiaryScreen(Screen):
         self._on_session_select: Optional[Callable] = None
         self._on_save_notes: Optional[Callable] = None
         self._on_export_csv: Optional[Callable] = None
+        self._on_delete_session: Optional[Callable] = None
+        self._on_rename_session: Optional[Callable] = None
         self._selected_session_id: Optional[int] = None
         self._sessions_data: List[Dict] = []
         self._build_ui()
@@ -238,6 +240,38 @@ class DiaryScreen(Screen):
         )
         self._detail_layout.add_widget(self._export_status)
 
+        # Rename row
+        rename_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
+        self._rename_input = TextInput(
+            hint_text="New session name...",
+            multiline=False,
+            size_hint_x=0.65,
+            font_size=dp(13),
+        )
+        self._rename_btn = Button(
+            text="Rename",
+            background_color=(0.5, 0.5, 0.2, 1.0),
+            font_size=dp(14),
+            bold=True,
+            size_hint_x=0.35,
+        )
+        self._rename_btn.bind(on_release=self._on_rename_pressed)
+        rename_row.add_widget(self._rename_input)
+        rename_row.add_widget(self._rename_btn)
+        self._detail_layout.add_widget(rename_row)
+
+        # Delete button
+        self._delete_btn = Button(
+            text="Delete Session",
+            background_color=(0.8, 0.2, 0.2, 1.0),
+            font_size=dp(14),
+            bold=True,
+            size_hint_y=None,
+            height=dp(40),
+        )
+        self._delete_btn.bind(on_release=self._on_delete_pressed)
+        self._detail_layout.add_widget(self._delete_btn)
+
         # --- Graph tab buttons ---
         graph_tabs = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(4))
         self._tab_metrics_btn = Button(
@@ -316,6 +350,12 @@ class DiaryScreen(Screen):
 
     def set_export_csv_callback(self, callback: Callable) -> None:
         self._on_export_csv = callback
+
+    def set_delete_session_callback(self, callback: Callable) -> None:
+        self._on_delete_session = callback
+
+    def set_rename_session_callback(self, callback: Callable) -> None:
+        self._on_rename_session = callback
 
     def populate_sessions(self, sessions: List[Dict]) -> None:
         """Fill the session list from DB data."""
@@ -456,3 +496,18 @@ class DiaryScreen(Screen):
                 self._export_status.text = f"Exported: {path}"
             else:
                 self._export_status.text = "No data to export"
+
+    def _on_delete_pressed(self, *args) -> None:
+        if self._selected_session_id and self._on_delete_session:
+            self._on_delete_session(self._selected_session_id)
+            self._selected_session_id = None
+            self._detail_title.text = "Select a session"
+            self._export_status.text = "Session deleted"
+            self._rename_input.text = ""
+
+    def _on_rename_pressed(self, *args) -> None:
+        new_name = self._rename_input.text.strip()
+        if self._selected_session_id and new_name and self._on_rename_session:
+            self._on_rename_session(self._selected_session_id, new_name)
+            self._notes_input.text = new_name
+            self._export_status.text = f"Renamed to: {new_name}"

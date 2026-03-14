@@ -811,5 +811,134 @@ class TestTimerScreen(unittest.TestCase):
         self.assertEqual(self.timer.duration_seconds, 1200.0)
 
 
+    def test_custom_sound_path_default_empty(self):
+        self.assertEqual(self.timer.custom_sound_path, "")
+
+    def test_custom_sound_path_set(self):
+        self.timer._sound_path_input.text = "/tmp/bell.wav"
+        self.assertEqual(self.timer.custom_sound_path, "/tmp/bell.wav")
+
+    def test_test_sound_callback(self):
+        called = []
+        self.timer.set_test_sound_callback(lambda: called.append(True))
+        self.timer._on_test_sound_pressed()
+        self.assertEqual(len(called), 1)
+
+
+class TestDatabaseExtensions(unittest.TestCase):
+    """Test new DB methods: settings, rename, delete, size, counts."""
+
+    def setUp(self):
+        import tempfile
+        import os
+        from app.storage.database import DatabaseManager
+        self._tmp = os.path.join(tempfile.gettempdir(), "test_ext.db")
+        self.db = DatabaseManager(db_path=self._tmp)
+
+    def tearDown(self):
+        import os
+        self.db.close()
+        if os.path.exists(self._tmp):
+            os.remove(self._tmp)
+
+    def test_set_and_get_setting(self):
+        self.db.set_setting("foo", "bar")
+        self.assertEqual(self.db.get_setting("foo"), "bar")
+
+    def test_get_setting_missing(self):
+        self.assertIsNone(self.db.get_setting("nonexistent"))
+
+    def test_setting_upsert(self):
+        self.db.set_setting("key", "v1")
+        self.db.set_setting("key", "v2")
+        self.assertEqual(self.db.get_setting("key"), "v2")
+
+    def test_rename_session(self):
+        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
+        self.db.rename_session(sid, "Morning sit")
+        session = self.db.get_session(sid)
+        self.assertEqual(session["notes"], "Morning sit")
+
+    def test_delete_session_removes(self):
+        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
+        self.db.save_metrics_batch(sid, [{"timestamp": 0.5}])
+        self.db.delete_session(sid)
+        self.assertIsNone(self.db.get_session(sid))
+        self.assertEqual(len(self.db.get_session_metrics(sid)), 0)
+
+    def test_db_size_bytes(self):
+        size = self.db.get_db_size_bytes()
+        self.assertGreater(size, 0)
+
+    def test_record_counts(self):
+        counts = self.db.get_record_counts()
+        self.assertIn("sessions", counts)
+        self.assertIn("metrics", counts)
+        self.assertIn("users", counts)
+        self.assertEqual(counts["sessions"], 0)
+
+    def test_record_counts_after_insert(self):
+        self.db.save_session({"duration": 60, "threshold_used": 50})
+        counts = self.db.get_record_counts()
+        self.assertEqual(counts["sessions"], 1)
+
+
+class TestDiaryDeleteRename(unittest.TestCase):
+    """Test diary screen delete and rename callbacks."""
+
+    def test_delete_callback_wired(self):
+        from app.ui.diary_screen import DiaryScreen
+        screen = DiaryScreen()
+        deleted = []
+        screen.set_delete_session_callback(lambda sid: deleted.append(sid))
+        screen._selected_session_id = 42
+        screen._on_delete_pressed()
+        self.assertEqual(deleted, [42])
+        self.assertIsNone(screen._selected_session_id)
+
+    def test_rename_callback_wired(self):
+        from app.ui.diary_screen import DiaryScreen
+        screen = DiaryScreen()
+        renamed = []
+        screen.set_rename_session_callback(lambda sid, n: renamed.append((sid, n)))
+        screen._selected_session_id = 7
+        screen._rename_input.text = "New Name"
+        screen._on_rename_pressed()
+        self.assertEqual(renamed, [(7, "New Name")])
+
+    def test_rename_empty_ignored(self):
+        from app.ui.diary_screen import DiaryScreen
+        screen = DiaryScreen()
+        renamed = []
+        screen.set_rename_session_callback(lambda sid, n: renamed.append((sid, n)))
+        screen._selected_session_id = 7
+        screen._rename_input.text = "   "
+        screen._on_rename_pressed()
+        self.assertEqual(renamed, [])
+
+
+class TestAnalyticsStorageInfo(unittest.TestCase):
+    """Test analytics screen storage info display."""
+
+    def test_update_storage_info_bytes(self):
+        from app.ui.analytics_screen import AnalyticsScreen
+        screen = AnalyticsScreen()
+        screen.update_storage_info(500, {"sessions": 3, "metrics": 100, "users": 1})
+        self.assertIn("500 B", screen._storage_label.text)
+        self.assertIn("3 sessions", screen._storage_label.text)
+
+    def test_update_storage_info_kb(self):
+        from app.ui.analytics_screen import AnalyticsScreen
+        screen = AnalyticsScreen()
+        screen.update_storage_info(51200, {"sessions": 10, "metrics": 5000, "users": 2})
+        self.assertIn("50.0 KB", screen._storage_label.text)
+
+    def test_update_storage_info_mb(self):
+        from app.ui.analytics_screen import AnalyticsScreen
+        screen = AnalyticsScreen()
+        screen.update_storage_info(5242880, {"sessions": 50, "metrics": 100000, "users": 3})
+        self.assertIn("5.0 MB", screen._storage_label.text)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
