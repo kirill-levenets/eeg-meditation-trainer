@@ -203,6 +203,20 @@ class TestDatabaseExtensions(unittest.TestCase):
         uid = self.db.create_user("Alice")
         self.assertIsNone(self.db.get_user_setting(uid, "nonexistent"))
 
+    def test_update_session_stats(self):
+        sid = self.db.save_session({"duration": 0, "threshold_used": 50})
+        session = self.db.get_session(sid)
+        self.assertEqual(session["duration"], 0)
+        self.db.update_session(sid, {
+            "duration": 300, "threshold_used": 80,
+            "avg_meditation": 120.0, "avg_shamatha": 55.0,
+            "max_meditation": 190.0, "time_above_threshold": 200,
+        })
+        updated = self.db.get_session(sid)
+        self.assertEqual(updated["duration"], 300)
+        self.assertEqual(updated["threshold_used"], 80)
+        self.assertAlmostEqual(updated["avg_meditation"], 120.0)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

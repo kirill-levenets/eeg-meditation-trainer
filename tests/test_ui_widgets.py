@@ -113,6 +113,22 @@ class TestGraphBipolarAndBatch(unittest.TestCase):
         self.assertEqual(g._total_points, 4)
         self.assertEqual(list(g._data["eeg"]), [1.0, 2.0, -3.0, 4.0])
 
+    def test_set_threshold(self):
+        g = ScrollableGraphWidget(
+            colors={"med": (1, 1, 1, 1)}, scales={"med": 200.0},
+        )
+        g.set_threshold(100.0, "med")
+        self.assertEqual(g._threshold_value, 100.0)
+        self.assertEqual(g._threshold_scale_key, "med")
+
+    def test_set_threshold_none_clears(self):
+        g = ScrollableGraphWidget(
+            colors={"med": (1, 1, 1, 1)}, scales={"med": 200.0},
+        )
+        g.set_threshold(100.0, "med")
+        g.set_threshold(None)
+        self.assertIsNone(g._threshold_value)
+
 
 class TestDiaryScreenUI(unittest.TestCase):
     """Test diary screen UI components."""
@@ -190,6 +206,29 @@ class TestDiaryScreenUI(unittest.TestCase):
         }
         screen.show_session_detail(session)
         self.assertEqual(screen._rename_input.text, "Morning sit")
+
+    def test_selected_session_highlight(self):
+        from app.ui.diary_screen import DiaryScreen
+        screen = DiaryScreen()
+        sessions = [
+            {"id": 1, "date_time": "2025-01-01", "duration": 60,
+             "avg_shamatha": 50},
+            {"id": 2, "date_time": "2025-01-02", "duration": 120,
+             "avg_shamatha": 60},
+        ]
+        screen.populate_sessions(sessions)
+        btns = [c for c in screen._session_list_layout.children
+                if hasattr(c, "session_id")]
+        self.assertEqual(len(btns), 2)
+        # All start with default color
+        for b in btns:
+            self.assertEqual(b.background_color, list(screen._DEFAULT_BTN_COLOR))
+
+    def test_set_metrics_threshold(self):
+        from app.ui.diary_screen import DiaryScreen
+        screen = DiaryScreen()
+        screen.set_metrics_threshold(80.0)
+        self.assertEqual(screen._metrics_graph._threshold_value, 80.0)
 
     def test_rename_fallback_when_notes_empty(self):
         from app.ui.diary_screen import DiaryScreen

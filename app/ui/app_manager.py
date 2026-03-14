@@ -199,6 +199,8 @@ class EEGMeditationApp(App):
         self._raw_eeg_screen.raw_graph.clear_data()
         self._raw_eeg_screen.band_graph.clear_data()
 
+        self._live_screen.graph.set_threshold(float(threshold), "meditation_score")
+
         self._update_event = Clock.schedule_interval(
             self._update_tick, APP.UPDATE_FREQUENCY
         )
@@ -232,10 +234,14 @@ class EEGMeditationApp(App):
         self._audio.stop()
 
         if stats:
-            session_id = self._db.save_session(stats, user_id=self._current_user_id)
-            self._current_session_id = session_id
+            if self._current_session_id is not None:
+                self._db.update_session(self._current_session_id, stats)
+            else:
+                self._current_session_id = self._db.save_session(
+                    stats, user_id=self._current_user_id
+                )
             if self._metrics_buffer:
-                self._db.save_metrics_batch(session_id, self._metrics_buffer)
+                self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
                 self._metrics_buffer = []
 
         self._live_screen.set_controls_idle()
@@ -304,6 +310,7 @@ class EEGMeditationApp(App):
     def _on_threshold_change(self, value: int) -> None:
         self._metrics_engine.meditation_threshold = value
         self._audio.set_threshold(value)
+        self._live_screen.graph.set_threshold(float(value), "meditation_score")
         logger.debug(f"Threshold changed to {value}")
 
     def _on_toggle_change(self, metric: str, active: bool) -> None:
@@ -338,6 +345,8 @@ class EEGMeditationApp(App):
         session = self._db.get_session(session_id)
         if session:
             self._diary_screen.show_session_detail(session)
+            threshold_used = session.get("threshold_used", 50)
+            self._diary_screen.set_metrics_threshold(float(threshold_used))
             metrics = self._db.get_session_metrics(session_id)
             self._diary_screen.load_metrics_preview(metrics)
 

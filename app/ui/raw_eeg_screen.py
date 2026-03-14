@@ -1,5 +1,5 @@
 from collections import deque
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from kivy.core.text import Label as CoreLabel
 from kivy.graphics import Color, InstructionGroup, Line, Rectangle
@@ -42,9 +42,17 @@ class ScrollableGraphWidget(Widget):
         self._show_timestamps: bool = show_timestamps
         self._touch_start_x: float = 0.0
         self._touch_start_offset: int = 0
+        self._threshold_value: Optional[float] = None
+        self._threshold_scale_key: Optional[str] = None
         self._gfx: InstructionGroup = InstructionGroup()
         self.canvas.add(self._gfx)
         self.bind(size=self._redraw, pos=self._redraw)
+
+    def set_threshold(self, value: Optional[float], scale_key: Optional[str] = None) -> None:
+        """Set a horizontal threshold line. scale_key picks which series scale to use."""
+        self._threshold_value = value
+        self._threshold_scale_key = scale_key
+        self._redraw()
 
     @property
     def total_points(self) -> int:
@@ -159,6 +167,33 @@ class ScrollableGraphWidget(Widget):
         # Border
         self._gfx.add(Color(0.35, 0.35, 0.4, 1.0))
         self._gfx.add(Line(rectangle=(graph_x, graph_y, graph_w, graph_h), width=1))
+
+        # Threshold line
+        if self._threshold_value is not None and not self._bipolar:
+            t_scale = max_scale
+            if self._threshold_scale_key and self._threshold_scale_key in self._scales:
+                t_scale = self._scales[self._threshold_scale_key]
+            frac_t = min(self._threshold_value / t_scale, 1.0)
+            y_thresh = graph_y + frac_t * graph_h
+            self._gfx.add(Color(1.0, 0.4, 0.2, 0.8))
+            dash_w = dp(6)
+            gap_w = dp(4)
+            x_cur = graph_x
+            while x_cur < graph_x + graph_w:
+                x_end = min(x_cur + dash_w, graph_x + graph_w)
+                self._gfx.add(Line(points=[x_cur, y_thresh, x_end, y_thresh], width=1))
+                x_cur = x_end + gap_w
+            if self._show_value_labels:
+                tex = self._make_text_texture(
+                    f"{self._threshold_value:.0f}", font_size=8,
+                    color=(1.0, 0.4, 0.2, 1),
+                )
+                self._gfx.add(Color(1, 1, 1, 1))
+                self._gfx.add(Rectangle(
+                    texture=tex,
+                    pos=(graph_x + graph_w + dp(3), y_thresh - tex.height / 2),
+                    size=tex.size,
+                ))
 
         if end_idx <= start_idx:
             return

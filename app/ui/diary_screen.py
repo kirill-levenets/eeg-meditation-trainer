@@ -390,9 +390,16 @@ class DiaryScreen(Screen):
             btn.bind(on_release=self._on_session_btn)
             self._session_list_layout.add_widget(btn)
 
+    _SELECTED_BTN_COLOR = (0.3, 0.4, 0.6, 1.0)
+    _DEFAULT_BTN_COLOR = (0.15, 0.15, 0.2, 1.0)
+
     def _on_session_btn(self, btn) -> None:
         sid = getattr(btn, "session_id", None)
         if sid is not None and self._on_session_select:
+            for child in self._session_list_layout.children:
+                if hasattr(child, "session_id"):
+                    child.background_color = self._DEFAULT_BTN_COLOR
+            btn.background_color = self._SELECTED_BTN_COLOR
             self._on_session_select(sid)
 
     def show_session_detail(self, session: Dict) -> None:
@@ -458,6 +465,10 @@ class DiaryScreen(Screen):
         self._metrics_graph.set_scroll_offset(0)
         self._raw_eeg_graph.set_scroll_offset(0)
         self._freq_graph.set_scroll_offset(0)
+
+    def set_metrics_threshold(self, value: float) -> None:
+        """Set threshold line on the metrics preview graph."""
+        self._metrics_graph.set_threshold(value, "meditation_score")
 
     def _switch_graph_tab(self, tab: str) -> None:
         """Switch the visible graph in the preview area."""
