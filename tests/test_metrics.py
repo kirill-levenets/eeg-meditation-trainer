@@ -671,15 +671,18 @@ class TestAudioFeedback(unittest.TestCase):
             self.assertAlmostEqual(vol_zero, 1.0)
             self.assertAlmostEqual(vol_threshold, 0.0)
 
-    def test_no_file_attributes(self):
-        """Audiostream-based generator has no noise file."""
-        self.assertFalse(hasattr(self.gen, "_noise_file"))
+    def test_bell_wav_created(self):
+        """Bell WAV file is pre-generated on init."""
+        import os
+        self.assertTrue(os.path.exists(self.gen._bell_path))
 
-    def test_cleanup_releases_stream(self):
-        self.gen._stream = "fake_stream"
+    def test_cleanup_removes_temp_files(self):
+        import os
+        bell_path = self.gen._bell_path
+        noise_path = self.gen._noise_path
         self.gen.cleanup()
-        self.assertIsNone(self.gen._stream)
-        self.assertIsNone(self.gen._noise_source)
+        self.assertFalse(os.path.exists(bell_path))
+        self.assertIsNone(self.gen._noise_sound)
 
     def test_update_only_sets_internal_volume(self):
         """update() sets _volume without needing a sound object."""
@@ -708,27 +711,31 @@ class TestAudioFeedback(unittest.TestCase):
         self.gen.disconnect_alert_enabled = False
         self.assertFalse(self.gen.disconnect_alert_enabled)
 
-    def test_bell_trigger(self):
-        self.gen._trigger_bell()
-        self.assertTrue(self.gen._bell_active)
-        self.assertGreater(self.gen._bell_samples_remaining, 0)
+    def test_generate_noise_wav_silence(self):
+        from app.audio_feedback.noise import _generate_noise_wav
+        pcm = _generate_noise_wav(0.0, 22050, 1.0)
+        self.assertEqual(pcm, b"\x00" * (22050 * 2))
 
-    def test_bell_generates_bytes(self):
-        self.gen._trigger_bell()
-        data = self.gen._generate_bell_samples(100)
-        self.assertEqual(len(data), 200)  # 100 samples * 2 bytes each
+    def test_generate_noise_wav_nonzero(self):
+        from app.audio_feedback.noise import _generate_noise_wav
+        pcm = _generate_noise_wav(0.5, 22050, 1.0)
+        self.assertEqual(len(pcm), 22050 * 2)
+        self.assertNotEqual(pcm, b"\x00" * (22050 * 2))
+
+    def test_generate_bell_wav(self):
+        from app.audio_feedback.noise import _generate_bell_wav
+        pcm = _generate_bell_wav(22050, 800.0, 0.6)
+        expected_len = int(22050 * 0.6) * 2
+        self.assertEqual(len(pcm), expected_len)
 
     def test_update_sinking_no_trigger_when_disabled(self):
         self.gen.sinking_alert_enabled = False
         self.gen._is_playing = True
         self.gen.update_sinking(99.0)
-        self.assertFalse(self.gen._bell_active)
 
-    def test_stop_resets_bell(self):
-        self.gen._bell_active = True
+    def test_stop_resets_test_active(self):
         self.gen._test_active = True
         self.gen.stop()
-        self.assertFalse(self.gen._bell_active)
         self.assertFalse(self.gen._test_active)
 
     def test_thread_safe_volume_update(self):

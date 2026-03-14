@@ -8,7 +8,7 @@ Mobile application for training Shamatha meditation using EEG neurofeedback. Bui
 - **Raw EEG data tab** — Composite raw EEG signal waveform with Y-axis numbers and realtime values + aggregated frequency band plots
 - **Scrollable graphs** — All graphs support time-scrolling through the full 5-minute data window via slider
 - **Meditation scoring** — Calmness, Shamatha score, Distraction, and Sinking detection
-- **Dual-channel audio engine** — Ch1: gapless white noise (volume scales with meditation); Ch2: synthesized tingsha bell for sinking alerts with cooldown/debounce. Test audio button in settings
+- **Dual-channel audio engine** — Ch1: gapless white noise via crossfaded WAV + Kivy SoundLoader (volume scales with meditation); Ch2: synthesized tingsha bell for sinking alerts with cooldown/debounce. No external audio deps
 - **Meditation timer** — Configurable duration (1–120 min) with preset buttons, enable/disable toggle, countdown display, auto-stop on expiry
 - **State classification** — Stable Focus, Subtle Distraction, Gross Distraction, Sinking
 - **Settings panel** — Device status/meta display, mock/real device switch, threshold slider, test audio button, sinking alert toggle, disconnect alert toggle, graph metric toggles
@@ -171,7 +171,6 @@ All tunable parameters are in `app/config.py`:
 ## Tech Stack
 
 - **Python 3.x** — Core language
-- **Kivy 2.3** — Cross-platform UI framework
-- **audiostream** — Gapless real-time audio output (PCM streaming to speaker)
+- **Kivy 2.3** — Cross-platform UI framework + SoundLoader for audio
 - **SQLite** — Session, metrics, and user profile storage
 - **Buildozer** — Android packaging tool
