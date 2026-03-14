@@ -11,7 +11,7 @@ Mobile application for training Shamatha meditation using EEG neurofeedback. Bui
 - **Dual-channel audio engine** — Ch1: gapless white noise via crossfaded WAV + Kivy SoundLoader (volume scales with meditation); Ch2: synthesized tingsha bell for sinking alerts with cooldown/debounce. Test Audio plays noise→bell→disconnect sequence
 - **Meditation timer** — Configurable duration (1–120 min) with preset buttons, enable/disable toggle (updates display immediately), countdown display, auto-stop on expiry, file chooser dialog for custom end-sound with test button
 - **State classification** — Stable Focus, Subtle Distraction, Gross Distraction, Sinking
-- **Settings panel** — Device status/meta display, mock/real device switch, threshold slider, test audio button, sinking alert toggle, disconnect alert toggle, graph metric toggles
+- **Settings panel** — Device status/meta display, mock/real device switch, threshold slider (20–100), test audio button, sinking alert toggle, disconnect alert toggle, graph metric toggles
 - **Session diary** — Notes, tags, mood rating, CSV export, delete (with confirmation dialog) & rename sessions (name pre-filled with fallback), selected session highlight, tabbed signal preview (Metrics / Raw EEG / Frequencies) with 60s viewport + touch scroll + threshold line
 - **Full signal storage** — Raw EEG bands, computed metrics, frequencies, stability, and calmness all stored per-tick in SQLite
 - **CSV export** — Export any session's full signal data (raw + computed) to CSV from the diary screen

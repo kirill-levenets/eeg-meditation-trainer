@@ -18,6 +18,7 @@ METRICS_PREVIEW_COLORS = {
     "shamatha_score": (0.0, 0.9, 0.4, 1.0),
     "distraction": (1.0, 0.3, 0.3, 1.0),
     "sinking": (0.8, 0.5, 0.0, 1.0),
+    "subtle_distraction": (0.9, 0.9, 0.2, 1.0),
 }
 
 METRICS_PREVIEW_SCALES = {
@@ -25,6 +26,7 @@ METRICS_PREVIEW_SCALES = {
     "shamatha_score": 100.0,
     "distraction": 100.0,
     "sinking": 100.0,
+    "subtle_distraction": 100.0,
 }
 
 RAW_EEG_PREVIEW_COLORS = {
