@@ -15,11 +15,20 @@ source.dir = .
 # (list) Source files to include (let empty to include all the files)
 source.include_exts = py,png,jpg,kv,atlas,wav
 
+# (list) Source files to exclude (let empty to not exclude anything)
+source.exclude_exts =
+
+# (list) List of directory to exclude (let empty to not exclude anything)
+source.exclude_dirs = tests,venv,.git,__pycache__,.buildozer
+
+# (list) List of exclusions using pattern matching
+source.exclude_patterns = *.db,*.db-shm,*.db-wal,*.csv,*.pyc
+
 # (str) Application versioning
 version = 1.0.0
 
 # (list) Application requirements
-requirements = python3,kivy==2.3.0,pillow,sqlite3,android
+requirements = python3,kivy==2.3.0,android
 
 # (str) Supported orientation (landscape, sensorLandscape, portrait, sensorPortrait, all)
 orientation = portrait
