@@ -8,8 +8,10 @@ Mobile application for training Shamatha meditation using EEG neurofeedback. Bui
 - **Raw EEG data tab** — Composite raw EEG signal waveform with Y-axis numbers and realtime values + aggregated frequency band plots
 - **Scrollable graphs** — All graphs support time-scrolling through the full 5-minute data window via slider
 - **Meditation scoring** — Calmness, Shamatha score, Distraction, and Sinking detection
-- **Audio neurofeedback** — Gapless white noise via audiostream (ThreadSource), PCM samples generated on-the-fly with real-time volume scaling — no file loops, no audio spikes
+- **Dual-channel audio engine** — Ch1: gapless white noise (volume scales with meditation); Ch2: synthesized tingsha bell for sinking alerts with cooldown/debounce. Test audio button in settings
+- **Meditation timer** — Configurable duration (1–120 min) with preset buttons, enable/disable toggle, countdown display, auto-stop on expiry
 - **State classification** — Stable Focus, Subtle Distraction, Gross Distraction, Sinking
+- **Settings panel** — Device status/meta display, mock/real device switch, threshold slider, test audio button, sinking alert toggle, disconnect alert toggle, graph metric toggles
 - **Session diary** — Notes, tags, mood rating, CSV export, and tabbed signal preview (Metrics / Raw EEG / Frequencies) for each session
 - **Full signal storage** — Raw EEG bands, computed metrics, frequencies, stability, and calmness all stored per-tick in SQLite
 - **CSV export** — Export any session's full signal data (raw + computed) to CSV from the diary screen
@@ -27,7 +29,8 @@ app/
 │   ├── live_session.py      # Live session screen with scrollable graph and controls
 │   ├── raw_eeg_screen.py    # Raw EEG data tab with sub-band and frequency band plots
 │   ├── profile_screen.py    # User profile management and user switcher
-│   ├── settings_screen.py   # Threshold slider, graph toggles
+│   ├── settings_screen.py   # Threshold, audio controls, device info, toggles
+│   ├── timer_screen.py       # Meditation timer with countdown and presets
 │   ├── diary_screen.py      # Session list, notes, mood rating, CSV export
 │   └── analytics_screen.py  # Trend graphs and summary stats
 ├── eeg/                # EEG data source
@@ -35,8 +38,8 @@ app/
 │   └── buffer.py            # Rolling average and variance buffers
 ├── metrics/            # Signal processing and state formulas
 │   └── engine.py            # Full metrics pipeline with sigmoid normalization
-├── audio_feedback/     # White noise generator
-│   └── noise.py             # Realtime white noise via sounddevice with dynamic volume
+├── audio_feedback/     # Dual-channel audio engine
+│   └── noise.py             # White noise + sinking bell via audiostream ThreadSource
 ├── session/            # Session lifecycle
 │   └── manager.py           # Start/Pause/Resume/Stop state machine
 ├── storage/            # Database

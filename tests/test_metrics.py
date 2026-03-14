@@ -577,11 +577,11 @@ class TestSessionManager(unittest.TestCase):
 
 
 class TestAudioFeedback(unittest.TestCase):
-    """Test realtime white noise volume computation and lifecycle."""
+    """Test dual-channel audio engine volume computation and lifecycle."""
 
     def setUp(self):
-        from app.audio_feedback.noise import WhiteNoiseGenerator
-        self.gen = WhiteNoiseGenerator()
+        from app.audio_feedback.noise import AudioEngine
+        self.gen = AudioEngine()
 
     def tearDown(self):
         self.gen.cleanup()
@@ -679,7 +679,7 @@ class TestAudioFeedback(unittest.TestCase):
         self.gen._stream = "fake_stream"
         self.gen.cleanup()
         self.assertIsNone(self.gen._stream)
-        self.assertIsNone(self.gen._source)
+        self.assertIsNone(self.gen._noise_source)
 
     def test_update_only_sets_internal_volume(self):
         """update() sets _volume without needing a sound object."""
@@ -688,10 +688,48 @@ class TestAudioFeedback(unittest.TestCase):
         self.assertAlmostEqual(self.gen._volume, 0.5)
 
     def test_default_threshold_is_100(self):
-        from app.audio_feedback.noise import WhiteNoiseGenerator
-        gen = WhiteNoiseGenerator()
+        from app.audio_feedback.noise import AudioEngine
+        gen = AudioEngine()
         self.assertEqual(gen._threshold, 100)
         gen.cleanup()
+
+    def test_sinking_alert_enabled_default(self):
+        self.assertTrue(self.gen.sinking_alert_enabled)
+
+    def test_sinking_alert_toggle(self):
+        self.gen.sinking_alert_enabled = False
+        self.assertFalse(self.gen.sinking_alert_enabled)
+        self.gen.sinking_alert_enabled = True
+        self.assertTrue(self.gen.sinking_alert_enabled)
+
+    def test_disconnect_alert_toggle(self):
+        self.gen.disconnect_alert_enabled = True
+        self.assertTrue(self.gen.disconnect_alert_enabled)
+        self.gen.disconnect_alert_enabled = False
+        self.assertFalse(self.gen.disconnect_alert_enabled)
+
+    def test_bell_trigger(self):
+        self.gen._trigger_bell()
+        self.assertTrue(self.gen._bell_active)
+        self.assertGreater(self.gen._bell_samples_remaining, 0)
+
+    def test_bell_generates_bytes(self):
+        self.gen._trigger_bell()
+        data = self.gen._generate_bell_samples(100)
+        self.assertEqual(len(data), 200)  # 100 samples * 2 bytes each
+
+    def test_update_sinking_no_trigger_when_disabled(self):
+        self.gen.sinking_alert_enabled = False
+        self.gen._is_playing = True
+        self.gen.update_sinking(99.0)
+        self.assertFalse(self.gen._bell_active)
+
+    def test_stop_resets_bell(self):
+        self.gen._bell_active = True
+        self.gen._test_active = True
+        self.gen.stop()
+        self.assertFalse(self.gen._bell_active)
+        self.assertFalse(self.gen._test_active)
 
     def test_thread_safe_volume_update(self):
         import threading
@@ -710,6 +748,60 @@ class TestAudioFeedback(unittest.TestCase):
         for v in results:
             self.assertGreaterEqual(v, 0.0)
             self.assertLessEqual(v, 1.0)
+
+
+class TestTimerScreen(unittest.TestCase):
+    """Test meditation timer functionality."""
+
+    def setUp(self):
+        from app.ui.timer_screen import TimerScreen
+        self.timer = TimerScreen()
+
+    def test_default_disabled(self):
+        self.assertFalse(self.timer.enabled)
+
+    def test_enable_toggle(self):
+        self.timer._enable_cb.active = True
+        self.assertTrue(self.timer.enabled)
+
+    def test_duration_default(self):
+        from app.config import APP
+        self.assertEqual(self.timer._duration_minutes, APP.TIMER_DEFAULT_MINUTES)
+
+    def test_set_duration(self):
+        self.timer._set_duration(30)
+        self.assertEqual(self.timer._duration_minutes, 30)
+
+    def test_tick_returns_false_when_disabled(self):
+        self.assertFalse(self.timer.tick(0.5))
+
+    def test_countdown(self):
+        self.timer._enable_cb.active = True
+        self.timer._set_duration(1)  # 1 minute
+        self.timer.start_countdown()
+        self.assertEqual(self.timer._remaining_seconds, 60.0)
+        expired = self.timer.tick(30.0)
+        self.assertFalse(expired)
+        self.assertEqual(self.timer._remaining_seconds, 30.0)
+
+    def test_timer_expires(self):
+        self.timer._enable_cb.active = True
+        self.timer._set_duration(1)
+        self.timer.start_countdown()
+        expired = self.timer.tick(61.0)
+        self.assertTrue(expired)
+
+    def test_reset(self):
+        self.timer._enable_cb.active = True
+        self.timer._set_duration(5)
+        self.timer.start_countdown()
+        self.timer.tick(10.0)
+        self.timer.reset()
+        self.assertEqual(self.timer._remaining_seconds, 0.0)
+
+    def test_duration_seconds_property(self):
+        self.timer._set_duration(20)
+        self.assertEqual(self.timer.duration_seconds, 1200.0)
 
 
 if __name__ == "__main__":

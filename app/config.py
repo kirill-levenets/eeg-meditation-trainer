@@ -50,6 +50,18 @@ class AppConfig:
     MAX_VOLUME: float = 1.0
     WHITE_NOISE_SAMPLE_RATE: int = 22050
     WHITE_NOISE_DURATION: float = 2.0
+    AUDIO_TEST_DURATION: float = 2.0
+
+    SINKING_ALERT_THRESHOLD: float = 60.0
+    SINKING_ALERT_COOLDOWN: float = 15.0
+    BELL_FREQUENCY: float = 800.0
+    BELL_DURATION: float = 0.6
+
+    DISCONNECT_ALERT_ENABLED: bool = False
+    USE_MOCK_DEVICE: bool = True
+
+    TIMER_ENABLED: bool = False
+    TIMER_DEFAULT_MINUTES: int = 20
 
 
 SIGMOID = SigmoidConfig()

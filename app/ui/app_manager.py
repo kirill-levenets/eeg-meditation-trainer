@@ -9,7 +9,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.screenmanager import ScreenManager, SlideTransition
 
 from app.analytics.aggregator import AnalyticsAggregator
-from app.audio_feedback.noise import WhiteNoiseGenerator
+from app.audio_feedback.noise import AudioEngine
 from app.config import APP
 from app.eeg.mock_stream import MockEEGStream
 from app.logger import logger
@@ -22,6 +22,7 @@ from app.ui.live_session import LiveSessionScreen
 from app.ui.profile_screen import ProfileScreen
 from app.ui.raw_eeg_screen import RawEEGScreen
 from app.ui.settings_screen import SettingsScreen
+from app.ui.timer_screen import TimerScreen
 
 
 class EEGMeditationApp(App):
@@ -35,7 +36,7 @@ class EEGMeditationApp(App):
         self._metrics_engine: MetricsEngine = MetricsEngine()
         self._session_manager: SessionManager = SessionManager()
         self._db: DatabaseManager = DatabaseManager()
-        self._audio: WhiteNoiseGenerator = WhiteNoiseGenerator()
+        self._audio: AudioEngine = AudioEngine()
         self._analytics: AnalyticsAggregator = AnalyticsAggregator(self._db)
         self._update_event: Optional[object] = None
         self._metrics_buffer: List[Dict] = []
@@ -62,12 +63,15 @@ class EEGMeditationApp(App):
         btn_diary.bind(on_release=lambda x: self._switch_screen("diary"))
         btn_analytics = ActionButton(text="Analytics")
         btn_analytics.bind(on_release=lambda x: self._switch_screen("analytics"))
+        btn_timer = ActionButton(text="Timer")
+        btn_timer.bind(on_release=lambda x: self._switch_screen("timer"))
         btn_profile = ActionButton(text="Profile")
         btn_profile.bind(on_release=lambda x: self._switch_screen("profile"))
 
         av.add_widget(btn_session)
         av.add_widget(btn_raw)
         av.add_widget(btn_settings)
+        av.add_widget(btn_timer)
         av.add_widget(btn_diary)
         av.add_widget(btn_analytics)
         av.add_widget(btn_profile)
@@ -82,6 +86,7 @@ class EEGMeditationApp(App):
         self._diary_screen = DiaryScreen()
         self._analytics_screen = AnalyticsScreen()
         self._profile_screen = ProfileScreen()
+        self._timer_screen = TimerScreen()
 
         self._sm.add_widget(self._profile_screen)
         self._sm.add_widget(self._live_screen)
@@ -89,6 +94,7 @@ class EEGMeditationApp(App):
         self._sm.add_widget(self._settings_screen)
         self._sm.add_widget(self._diary_screen)
         self._sm.add_widget(self._analytics_screen)
+        self._sm.add_widget(self._timer_screen)
 
         root.add_widget(self._sm)
 
@@ -103,6 +109,10 @@ class EEGMeditationApp(App):
 
         self._settings_screen.set_threshold_callback(self._on_threshold_change)
         self._settings_screen.set_toggle_callback(self._on_toggle_change)
+        self._settings_screen.set_test_audio_callback(self._on_test_audio)
+        self._settings_screen.set_sinking_alert_callback(self._on_sinking_alert_toggle)
+        self._settings_screen.set_disconnect_alert_callback(self._on_disconnect_alert_toggle)
+        self._settings_screen.set_device_mode_callback(self._on_device_mode_toggle)
 
         self._diary_screen.set_session_select_callback(self._on_session_select)
         self._diary_screen.set_save_notes_callback(self._on_save_notes)
@@ -145,6 +155,7 @@ class EEGMeditationApp(App):
         self._current_session_id = None
 
         self._audio.start()
+        self._timer_screen.start_countdown()
         self._live_screen.set_controls_running()
         self._live_screen.update_device_status(True)
         self._live_screen.graph.clear_data()
@@ -190,6 +201,7 @@ class EEGMeditationApp(App):
         self._live_screen.set_controls_idle()
         self._live_screen.update_device_status(False)
         self._live_screen.update_state("FINISHED")
+        self._timer_screen.reset()
         self._session_manager.reset()
         logger.info("Session stopped via UI")
 
@@ -208,6 +220,7 @@ class EEGMeditationApp(App):
         self._raw_buffer.append(raw_sample)
 
         self._audio.update(metrics.get("meditation_score", 0))
+        self._audio.update_sinking(metrics.get("sinking", 0))
 
         self._live_screen.graph.add_point(metrics)
         self._live_screen.update_scroll_range()
@@ -216,6 +229,12 @@ class EEGMeditationApp(App):
         self._live_screen.update_timer(self._session_manager.elapsed_formatted)
 
         self._raw_eeg_screen.add_raw_sample(raw_sample)
+
+        # Timer countdown
+        if self._timer_screen.tick(APP.UPDATE_FREQUENCY):
+            logger.info("Timer expired, auto-stopping session")
+            self._on_stop()
+            return
 
         # Flush buffer to DB every 60 seconds
         self._flush_counter += 1
@@ -236,6 +255,25 @@ class EEGMeditationApp(App):
 
     def _on_toggle_change(self, metric: str, active: bool) -> None:
         self._live_screen.graph.set_visible(metric, active)
+
+    def _on_test_audio(self) -> None:
+        self._audio.test_audio()
+
+    def _on_sinking_alert_toggle(self, active: bool) -> None:
+        self._audio.sinking_alert_enabled = active
+        logger.info(f"Sinking alert {'enabled' if active else 'disabled'}")
+
+    def _on_disconnect_alert_toggle(self, active: bool) -> None:
+        self._audio.disconnect_alert_enabled = active
+        logger.info(f"Disconnect alert {'enabled' if active else 'disabled'}")
+
+    def _on_device_mode_toggle(self, use_mock: bool) -> None:
+        APP.USE_MOCK_DEVICE = use_mock
+        if use_mock:
+            self._settings_screen.update_device_status(False, meta="Mode: Mock Data")
+        else:
+            self._settings_screen.update_device_status(False, meta="Mode: Real Device")
+        logger.info(f"Device mode: {'Mock' if use_mock else 'Real'}")
 
     def _on_session_select(self, session_id: int) -> None:
         session = self._db.get_session(session_id)
