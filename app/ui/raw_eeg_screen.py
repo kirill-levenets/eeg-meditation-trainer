@@ -23,13 +23,17 @@ class ScrollableGraphWidget(Widget):
 
     def __init__(self, colors: Dict[str, tuple], scales: Dict[str, float],
                  viewport_seconds: int = 60, show_value_labels: bool = True,
-                 show_timestamps: bool = True, **kwargs) -> None:
+                 show_timestamps: bool = True, sample_rate: float = 0.0,
+                 max_points: int = 0, bipolar: bool = False, **kwargs) -> None:
         super().__init__(**kwargs)
         self._colors: Dict[str, tuple] = colors
         self._scales: Dict[str, float] = scales
-        self._viewport_points: int = int(viewport_seconds / APP.UPDATE_FREQUENCY)
+        self._bipolar: bool = bipolar
+        self._sample_rate: float = sample_rate if sample_rate > 0 else (1.0 / APP.UPDATE_FREQUENCY)
+        effective_max = max_points if max_points > 0 else APP.GRAPH_POINTS_MAX
+        self._viewport_points: int = int(viewport_seconds * self._sample_rate)
         self._data: Dict[str, deque] = {
-            key: deque(maxlen=APP.GRAPH_POINTS_MAX) for key in colors
+            key: deque(maxlen=effective_max) for key in colors
         }
         self._visible: Dict[str, bool] = {key: True for key in colors}
         self._scroll_offset: int = 0
@@ -66,6 +70,16 @@ class ScrollableGraphWidget(Widget):
     def add_point(self, values: Dict[str, float]) -> None:
         for key in self._data:
             val = values.get(key, 0.0)
+            self._data[key].append(val)
+        first_key = next(iter(self._data))
+        self._total_points = len(self._data[first_key])
+        self._redraw()
+
+    def add_points_batch(self, key: str, values: List[float]) -> None:
+        """Add multiple points for a single series without per-point redraw."""
+        if key not in self._data:
+            return
+        for val in values:
             self._data[key].append(val)
         first_key = next(iter(self._data))
         self._total_points = len(self._data[first_key])
@@ -129,7 +143,10 @@ class ScrollableGraphWidget(Widget):
             y_pos = graph_y + graph_h * frac
             self._gfx.add(Line(points=[graph_x, y_pos, graph_x + graph_w, y_pos], width=0.5))
             if self._show_value_labels:
-                val = max_scale * frac
+                if self._bipolar:
+                    val = max_scale * (frac * 2.0 - 1.0)
+                else:
+                    val = max_scale * frac
                 tex = self._make_text_texture(f"{val:.0f}", font_size=8,
                                               color=(0.5, 0.5, 0.5, 1))
                 self._gfx.add(Color(1, 1, 1, 1))
@@ -153,7 +170,7 @@ class ScrollableGraphWidget(Widget):
                 for i in range(num_time_labels):
                     frac = i / (num_time_labels - 1)
                     idx = start_idx + int(frac * (end_idx - start_idx - 1))
-                    t_sec = idx * APP.UPDATE_FREQUENCY
+                    t_sec = idx / self._sample_rate
                     mins = int(t_sec) // 60
                     secs = int(t_sec) % 60
                     time_str = f"{mins}:{secs:02d}"
@@ -185,7 +202,11 @@ class ScrollableGraphWidget(Widget):
             n = len(slice_data)
             for i, val in enumerate(slice_data):
                 x = graph_x + (i / max(n - 1, 1)) * graph_w
-                y = graph_y + min(max(val, 0.0) / scale, 1.0) * graph_h
+                if self._bipolar:
+                    norm = (val / scale + 1.0) * 0.5
+                    y = graph_y + max(0.0, min(norm, 1.0)) * graph_h
+                else:
+                    y = graph_y + min(max(val, 0.0) / scale, 1.0) * graph_h
                 points.extend([x, y])
 
             if len(points) >= 4:
@@ -194,7 +215,11 @@ class ScrollableGraphWidget(Widget):
             # Realtime value label at right edge of line
             if self._show_value_labels and slice_data:
                 last_val = slice_data[-1]
-                last_y = graph_y + min(max(last_val, 0.0) / scale, 1.0) * graph_h
+                if self._bipolar:
+                    norm = (last_val / scale + 1.0) * 0.5
+                    last_y = graph_y + max(0.0, min(norm, 1.0)) * graph_h
+                else:
+                    last_y = graph_y + min(max(last_val, 0.0) / scale, 1.0) * graph_h
                 # Avoid label overlap by nudging
                 for existing_y in label_y_positions:
                     if abs(last_y - existing_y) < dp(12):
@@ -253,8 +278,11 @@ class RawEEGScreen(Screen):
     }
 
     EEG_SIGNAL_SCALES = {
-        "eeg": 3000.0,
+        "eeg": 120.0,
     }
+
+    EEG_WAVEFORM_RATE: float = 128.0
+    EEG_WAVEFORM_MAX: int = 128 * 60  # 60s at 128Hz
 
     BAND_COLORS = {
         "alpha": (0.1, 0.8, 0.4, 1.0),
@@ -302,9 +330,12 @@ class RawEEGScreen(Screen):
         self._raw_graph = ScrollableGraphWidget(
             colors=self.EEG_SIGNAL_COLORS,
             scales=self.EEG_SIGNAL_SCALES,
-            viewport_seconds=60,
+            viewport_seconds=10,
             show_value_labels=True,
             show_timestamps=True,
+            sample_rate=self.EEG_WAVEFORM_RATE,
+            max_points=self.EEG_WAVEFORM_MAX,
+            bipolar=True,
             size_hint_y=0.35,
         )
         root.add_widget(self._raw_graph)
@@ -360,13 +391,19 @@ class RawEEGScreen(Screen):
         return self._band_graph
 
     def add_raw_sample(self, sample: Dict[str, float]) -> None:
-        """Add raw EEG sample: composite signal + frequency bands."""
-        # Composite EEG = sum of all sub-bands
-        eeg_sum = sum(
-            sample.get(k, 0.0)
-            for k in ("delta", "theta", "alpha1", "alpha2", "beta1", "beta2", "gamma1", "gamma2")
-        )
-        self._raw_graph.add_point({"eeg": eeg_sum})
+        """Add raw EEG sample: waveform signal + frequency bands."""
+        # Oscillating EEG waveform from sub-sampled burst
+        waveform = sample.get("raw_eeg_waveform", [])
+        if waveform:
+            self._raw_graph.add_points_batch("eeg", waveform)
+        else:
+            # Fallback: sum of band powers (for v1 mock or real device)
+            eeg_sum = sum(
+                sample.get(k, 0.0)
+                for k in ("delta", "theta", "alpha1", "alpha2",
+                          "beta1", "beta2", "gamma1", "gamma2")
+            )
+            self._raw_graph.add_point({"eeg": eeg_sum})
 
         # Aggregated frequency bands
         alpha = sample.get("alpha1", 0.0) + sample.get("alpha2", 0.0)
@@ -391,11 +428,13 @@ class RawEEGScreen(Screen):
     def _on_scroll(self, instance, value) -> None:
         offset = int(self._scroll_slider.max - value)
         self._raw_graph.set_scroll_offset(offset)
-        self._band_graph.set_scroll_offset(offset)
+        # Scale offset for band graph (different sample rate)
+        band_offset = int(offset / self.EEG_WAVEFORM_RATE * (1.0 / APP.UPDATE_FREQUENCY))
+        self._band_graph.set_scroll_offset(band_offset)
         if offset == 0:
             self._scroll_time_label.text = "Live"
         else:
-            secs_back = offset * APP.UPDATE_FREQUENCY
+            secs_back = offset / self.EEG_WAVEFORM_RATE
             mins = int(secs_back) // 60
             secs = int(secs_back) % 60
             self._scroll_time_label.text = f"-{mins}:{secs:02d}"

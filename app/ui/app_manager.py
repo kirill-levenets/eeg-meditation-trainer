@@ -439,6 +439,10 @@ class EEGMeditationApp(App):
         self._db.set_user_setting(uid, "timer_sound", self._timer_screen.custom_sound_path)
         self._db.set_user_setting(uid, "sinking_alert", str(self._audio.sinking_alert_enabled))
         self._db.set_user_setting(uid, "disconnect_alert", str(self._audio.disconnect_alert_enabled))
+        self._db.set_user_setting(uid, "threshold", str(self._settings_screen.threshold))
+        toggles = self._settings_screen.graph_toggles
+        for key, active in toggles.items():
+            self._db.set_user_setting(uid, f"toggle_{key}", str(active))
         logger.debug(f"Saved settings for user {uid}")
 
     def _load_user_settings(self, user_id: int) -> None:
@@ -472,6 +476,23 @@ class EEGMeditationApp(App):
             val = disc == "True"
             self._audio.disconnect_alert_enabled = val
             self._settings_screen._disconnect_alert_cb.active = val
+
+        threshold = g(user_id, "threshold")
+        if threshold is not None:
+            try:
+                tval = int(threshold)
+                self._settings_screen._threshold_slider.value = tval
+                self._metrics_engine.meditation_threshold = tval
+                self._audio.set_threshold(tval)
+            except (ValueError, TypeError):
+                pass
+
+        for key, cb in self._settings_screen._checkboxes.items():
+            saved = g(user_id, f"toggle_{key}")
+            if saved is not None:
+                active = saved == "True"
+                cb.active = active
+                self._live_screen.graph.set_visible(key, active)
 
         logger.debug(f"Loaded settings for user {user_id}")
 

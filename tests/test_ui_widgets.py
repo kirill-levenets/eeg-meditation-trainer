@@ -85,6 +85,35 @@ class TestGraphTouchScroll(unittest.TestCase):
         self.assertFalse(result)
 
 
+class TestGraphBipolarAndBatch(unittest.TestCase):
+    """Test bipolar mode and batch point adding."""
+
+    def test_bipolar_flag_stored(self):
+        g = ScrollableGraphWidget(
+            colors={"eeg": (1, 1, 1, 1)}, scales={"eeg": 100.0},
+            bipolar=True,
+        )
+        self.assertTrue(g._bipolar)
+
+    def test_custom_sample_rate_and_max_points(self):
+        g = ScrollableGraphWidget(
+            colors={"eeg": (1, 1, 1, 1)}, scales={"eeg": 100.0},
+            sample_rate=128.0, max_points=7680, viewport_seconds=10,
+        )
+        self.assertEqual(g._sample_rate, 128.0)
+        self.assertEqual(g._viewport_points, 1280)
+        self.assertEqual(g._data["eeg"].maxlen, 7680)
+
+    def test_add_points_batch(self):
+        g = ScrollableGraphWidget(
+            colors={"eeg": (1, 1, 1, 1)}, scales={"eeg": 100.0},
+            max_points=1000,
+        )
+        g.add_points_batch("eeg", [1.0, 2.0, -3.0, 4.0])
+        self.assertEqual(g._total_points, 4)
+        self.assertEqual(list(g._data["eeg"]), [1.0, 2.0, -3.0, 4.0])
+
+
 class TestDiaryScreenUI(unittest.TestCase):
     """Test diary screen UI components."""
 
@@ -161,6 +190,20 @@ class TestDiaryScreenUI(unittest.TestCase):
         }
         screen.show_session_detail(session)
         self.assertEqual(screen._rename_input.text, "Morning sit")
+
+    def test_rename_fallback_when_notes_empty(self):
+        from app.ui.diary_screen import DiaryScreen
+        screen = DiaryScreen()
+        session = {
+            "id": 5, "date_time": "2025-03-14 09:30:00",
+            "duration": 600, "threshold_used": 50,
+            "avg_meditation": 60.0, "avg_shamatha": 40.0,
+            "max_meditation": 120.0, "time_above_threshold": 100,
+            "notes": "", "tags": "", "mood_rating": 3,
+        }
+        screen.show_session_detail(session)
+        self.assertIn("Session", screen._rename_input.text)
+        self.assertIn("10min", screen._rename_input.text)
 
 
 class TestTimerEnableDisplay(unittest.TestCase):

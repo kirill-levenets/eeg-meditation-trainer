@@ -250,6 +250,23 @@ class MockEEGStream:
 
             sample[band] = max(0.0, value)
 
+        # Synthesize raw oscillating EEG waveform from band frequencies
+        # Generate 64 sub-samples over the 0.5s tick at 128Hz effective rate
+        waveform_len = 64
+        dt_sub = 0.5 / waveform_len
+        waveform: List[float] = []
+        for si in range(waveform_len):
+            t_sub = t - 0.5 + si * dt_sub
+            val = 0.0
+            for band in BASE_POWER:
+                amp = math.sqrt(max(sample.get(band, 0.0), 0.0))
+                freq = self._band_frequencies.get(band, 5.0)
+                phase = self._band_phases.get(band, 0.0)
+                val += amp * math.sin(2 * math.pi * freq * t_sub + phase)
+            val += random.gauss(0, 2.0)
+            waveform.append(val)
+        sample["raw_eeg_waveform"] = waveform
+
         # Derived attention/meditation from band ratios
         alpha_power = sample.get("alpha1", 0) + sample.get("alpha2", 0)
         beta_power = sample.get("beta1", 0) + sample.get("beta2", 0)

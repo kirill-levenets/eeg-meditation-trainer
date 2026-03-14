@@ -305,7 +305,7 @@ class DiaryScreen(Screen):
         self._metrics_graph = ScrollableGraphWidget(
             colors=METRICS_PREVIEW_COLORS,
             scales=METRICS_PREVIEW_SCALES,
-            viewport_seconds=300,
+            viewport_seconds=60,
             show_value_labels=True,
             show_timestamps=True,
             size_hint_y=1,
@@ -313,7 +313,7 @@ class DiaryScreen(Screen):
         self._raw_eeg_graph = ScrollableGraphWidget(
             colors=RAW_EEG_PREVIEW_COLORS,
             scales=RAW_EEG_PREVIEW_SCALES,
-            viewport_seconds=300,
+            viewport_seconds=60,
             show_value_labels=True,
             show_timestamps=True,
             size_hint_y=1,
@@ -321,7 +321,7 @@ class DiaryScreen(Screen):
         self._freq_graph = ScrollableGraphWidget(
             colors=FREQ_PREVIEW_COLORS,
             scales=FREQ_PREVIEW_SCALES,
-            viewport_seconds=300,
+            viewport_seconds=60,
             show_value_labels=True,
             show_timestamps=True,
             size_hint_y=1,
@@ -407,7 +407,12 @@ class DiaryScreen(Screen):
         self._notes_input.text = session.get("notes", "")
         self._tags_input.text = session.get("tags", "")
         self._mood_slider.value = session.get("mood_rating", 3) or 3
-        self._rename_input.text = session.get("notes", "")
+        session_name = session.get("notes", "").strip()
+        if not session_name:
+            dt = session.get("date_time", "")[:16]
+            dur = session.get("duration", 0) or 0
+            session_name = f"Session {dt} ({dur // 60}min)"
+        self._rename_input.text = session_name
         self._metrics_graph.clear_data()
         self._raw_eeg_graph.clear_data()
         self._freq_graph.clear_data()
@@ -448,6 +453,11 @@ class DiaryScreen(Screen):
             freq_series["theta"].append(row.get("theta_raw", 0.0))
             freq_series["delta"].append(row.get("delta_raw", 0.0))
         self._freq_graph.load_static_data(freq_series)
+
+        # Scroll to end so user sees latest data and can drag back
+        self._metrics_graph.set_scroll_offset(0)
+        self._raw_eeg_graph.set_scroll_offset(0)
+        self._freq_graph.set_scroll_offset(0)
 
     def _switch_graph_tab(self, tab: str) -> None:
         """Switch the visible graph in the preview area."""

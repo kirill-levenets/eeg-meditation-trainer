@@ -108,6 +108,22 @@ class TestMockEEGStreamV2(unittest.TestCase):
             self.assertGreaterEqual(freq, lo)
             self.assertLessEqual(freq, hi)
 
+    def test_raw_eeg_waveform_present(self):
+        """Verify sample contains oscillating waveform burst."""
+        sample = self.stream.read_sample()
+        self.assertIn("raw_eeg_waveform", sample)
+        waveform = sample["raw_eeg_waveform"]
+        self.assertEqual(len(waveform), 64)
+
+    def test_raw_eeg_waveform_oscillates(self):
+        """Waveform should have both positive and negative values."""
+        sample = self.stream.read_sample()
+        waveform = sample["raw_eeg_waveform"]
+        has_pos = any(v > 0 for v in waveform)
+        has_neg = any(v < 0 for v in waveform)
+        self.assertTrue(has_pos, "Waveform has no positive values")
+        self.assertTrue(has_neg, "Waveform has no negative values")
+
     def test_is_connected_property(self):
         self.assertTrue(self.stream.is_connected)
         self.stream.stop()

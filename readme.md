@@ -5,18 +5,18 @@ Mobile application for training Shamatha meditation using EEG neurofeedback. Bui
 ## Features
 
 - **Real-time EEG visualization** — Live scrollable graph with Y-axis scale numbers, grid lines, realtime value labels at line endpoints, and X-axis timestamps
-- **Raw EEG data tab** — Composite raw EEG signal waveform with Y-axis numbers and realtime values + aggregated frequency band plots
+- **Raw EEG data tab** — Oscillating EEG waveform (128Hz sub-sampled, bipolar ±μV display) + aggregated frequency band plots
 - **Scrollable graphs** — All graphs support time-scrolling through the full 5-minute data window via slider or touch drag/slide on the graph
 - **Meditation scoring** — Calmness, Shamatha score, Distraction, and Sinking detection
 - **Dual-channel audio engine** — Ch1: gapless white noise via crossfaded WAV + Kivy SoundLoader (volume scales with meditation); Ch2: synthesized tingsha bell for sinking alerts with cooldown/debounce. Test Audio plays noise→bell→disconnect sequence
 - **Meditation timer** — Configurable duration (1–120 min) with preset buttons, enable/disable toggle (updates display immediately), countdown display, auto-stop on expiry, file chooser dialog for custom end-sound with test button
 - **State classification** — Stable Focus, Subtle Distraction, Gross Distraction, Sinking
 - **Settings panel** — Device status/meta display, mock/real device switch, threshold slider, test audio button, sinking alert toggle, disconnect alert toggle, graph metric toggles
-- **Session diary** — Notes, tags, mood rating, CSV export, delete (with confirmation dialog) & rename sessions (name pre-filled), tabbed signal preview (Metrics / Raw EEG / Frequencies)
+- **Session diary** — Notes, tags, mood rating, CSV export, delete (with confirmation dialog) & rename sessions (name pre-filled with fallback), tabbed signal preview (Metrics / Raw EEG / Frequencies) with 60s viewport + touch scroll
 - **Full signal storage** — Raw EEG bands, computed metrics, frequencies, stability, and calmness all stored per-tick in SQLite
 - **CSV export** — Export any session's full signal data (raw + computed) to CSV from the diary screen
-- **Mock EEG simulation** — Frequency-based synthesis: picks dominant Hz per band from physiological ranges for 5-10s epochs, builds composite signal with harmonics, cross-band coupling, smooth state transitions, and Gaussian noise
-- **User profiles** — Profile chooser/create on app launch; per-user session filtering; last user persisted across restarts; diary hidden until user selected; per-user settings persistence (timer, alerts, sounds)
+- **Mock EEG simulation** — Frequency-based synthesis: picks dominant Hz per band from physiological ranges for 5-10s epochs, builds composite signal with harmonics, cross-band coupling, smooth state transitions, Gaussian noise, and 64-sample oscillating waveform burst per tick
+- **User profiles** — Profile chooser/create on app launch; per-user session filtering; last user persisted across restarts; diary hidden until user selected; per-user settings persistence (timer, alerts, sounds, threshold, graph metric toggles)
 - **Session guards** — Start blocked if no user selected or if mock disabled without real device connected
 - **Analytics** — Daily/weekly/monthly trends, streak counter, progress tracking, database storage usage display
 - **Debug logging** — Every action/event logged; raw EEG samples logged periodically during session
