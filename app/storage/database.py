@@ -303,6 +303,14 @@ class DatabaseManager:
         )
         self._conn.commit()
 
+    def get_user_setting(self, user_id: int, key: str) -> Optional[str]:
+        """Get a per-user setting value."""
+        return self.get_setting(f"user_{user_id}_{key}")
+
+    def set_user_setting(self, user_id: int, key: str, value: str) -> None:
+        """Set a per-user setting value."""
+        self.set_setting(f"user_{user_id}_{key}", value)
+
     def get_db_size_bytes(self) -> int:
         """Return the database file size in bytes."""
         try:

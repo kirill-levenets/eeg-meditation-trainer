@@ -2,7 +2,7 @@ import logging
 import sys
 
 logger = logging.getLogger("eeg_meditation")
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 
 handler = logging.StreamHandler(sys.stdout)
 formatter = logging.Formatter(

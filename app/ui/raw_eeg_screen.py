@@ -36,6 +36,8 @@ class ScrollableGraphWidget(Widget):
         self._total_points: int = 0
         self._show_value_labels: bool = show_value_labels
         self._show_timestamps: bool = show_timestamps
+        self._touch_start_x: float = 0.0
+        self._touch_start_offset: int = 0
         self._gfx: InstructionGroup = InstructionGroup()
         self.canvas.add(self._gfx)
         self.bind(size=self._redraw, pos=self._redraw)
@@ -208,6 +210,32 @@ class ScrollableGraphWidget(Widget):
                     pos=(graph_x + graph_w + dp(3), last_y - tex.height / 2),
                     size=tex.size,
                 ))
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            touch.grab(self)
+            self._touch_start_x = touch.x
+            self._touch_start_offset = self._scroll_offset
+            return True
+        return super().on_touch_down(touch)
+
+    def on_touch_move(self, touch):
+        if touch.grab_current is self:
+            graph_w = self.width - dp(58) - dp(60)
+            if graph_w > 0 and self._total_points > self._viewport_points:
+                dx = touch.x - self._touch_start_x
+                points_per_pixel = self._viewport_points / graph_w
+                delta_points = int(-dx * points_per_pixel)
+                new_offset = self._touch_start_offset + delta_points
+                self.set_scroll_offset(new_offset)
+            return True
+        return super().on_touch_move(touch)
+
+    def on_touch_up(self, touch):
+        if touch.grab_current is self:
+            touch.ungrab(self)
+            return True
+        return super().on_touch_up(touch)
 
     def clear_data(self) -> None:
         for key in self._data:

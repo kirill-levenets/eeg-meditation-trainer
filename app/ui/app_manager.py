@@ -11,7 +11,7 @@ from kivy.uix.screenmanager import ScreenManager, SlideTransition
 from app.analytics.aggregator import AnalyticsAggregator
 from app.audio_feedback.noise import AudioEngine
 from app.config import APP
-from app.eeg.mock_stream import MockEEGStream
+from app.eeg.mock_stream_v2 import MockEEGStream
 from app.logger import logger
 from app.metrics.engine import MetricsEngine
 from app.session.manager import SessionManager, SessionState
@@ -147,6 +147,7 @@ class EEGMeditationApp(App):
                 user = self._db.get_user(uid)
                 if user:
                     self._current_user_id = uid
+                    self._load_user_settings(uid)
                     logger.info(f"Restored last user: {user['name']} (id={uid})")
             except (ValueError, TypeError):
                 pass
@@ -158,7 +159,9 @@ class EEGMeditationApp(App):
 
     def _switch_screen(self, name: str) -> None:
         if name == "diary" and not self._current_user_id:
+            logger.debug("Diary switch blocked: no user selected")
             return
+        logger.debug(f"Screen switch: {name}")
         self._sm.current = name
         if name == "diary":
             self._refresh_diary()
@@ -199,6 +202,7 @@ class EEGMeditationApp(App):
         self._update_event = Clock.schedule_interval(
             self._update_tick, APP.UPDATE_FREQUENCY
         )
+        self._tick_count: int = 0
         logger.info("Session started via UI")
 
     def _on_pause(self, *args) -> None:
@@ -208,6 +212,7 @@ class EEGMeditationApp(App):
             self._audio.stop()
             if self._update_event:
                 self._update_event.cancel()
+            logger.info("Session paused")
         elif self._session_manager.state == SessionState.PAUSED:
             self._session_manager.resume()
             self._live_screen.set_controls_running()
@@ -215,6 +220,7 @@ class EEGMeditationApp(App):
             self._update_event = Clock.schedule_interval(
                 self._update_tick, APP.UPDATE_FREQUENCY
             )
+            logger.info("Session resumed")
 
     def _on_stop(self, *args) -> None:
         if self._update_event:
@@ -246,6 +252,17 @@ class EEGMeditationApp(App):
 
         raw_sample = self._eeg_stream.read_sample()
         metrics = self._metrics_engine.process_sample(raw_sample)
+
+        # Log raw sample every 10 ticks (~5s at 2Hz)
+        self._tick_count = getattr(self, '_tick_count', 0) + 1
+        if self._tick_count % 10 == 0:
+            bands = {k: f"{raw_sample.get(k, 0):.0f}" for k in
+                     ("delta", "theta", "alpha1", "alpha2", "beta1", "beta2", "gamma1", "gamma2")}
+            logger.debug(f"Raw sample #{self._tick_count}: {bands}")
+            logger.debug(f"Metrics: med={metrics.get('meditation_score', 0):.0f} "
+                         f"sham={metrics.get('shamatha_score', 0):.0f} "
+                         f"sink={metrics.get('sinking', 0):.0f} "
+                         f"dist={metrics.get('distraction', 0):.0f}")
 
         self._session_manager.add_metric(metrics)
         # Merge raw + computed for full storage
@@ -287,11 +304,14 @@ class EEGMeditationApp(App):
     def _on_threshold_change(self, value: int) -> None:
         self._metrics_engine.meditation_threshold = value
         self._audio.set_threshold(value)
+        logger.debug(f"Threshold changed to {value}")
 
     def _on_toggle_change(self, metric: str, active: bool) -> None:
         self._live_screen.graph.set_visible(metric, active)
+        logger.debug(f"Graph toggle: {metric}={'on' if active else 'off'}")
 
     def _on_test_audio(self) -> None:
+        logger.debug("Test audio triggered")
         self._audio.test_audio()
 
     def _on_sinking_alert_toggle(self, active: bool) -> None:
@@ -303,6 +323,7 @@ class EEGMeditationApp(App):
         logger.info(f"Disconnect alert {'enabled' if active else 'disabled'}")
 
     def _on_test_timer_sound(self) -> None:
+        logger.debug(f"Test timer sound, path='{self._timer_screen.custom_sound_path}'")
         self._audio.play_timer_sound(self._timer_screen.custom_sound_path)
 
     def _on_device_mode_toggle(self, use_mock: bool) -> None:
@@ -375,11 +396,14 @@ class EEGMeditationApp(App):
 
     def _on_user_switch(self, user_id: Optional[int]) -> None:
         """Switch the active user profile."""
+        # Save current user's settings before switching
+        self._save_user_settings()
         self._current_user_id = user_id
         if user_id:
             user = self._db.get_user(user_id)
             name = user["name"] if user else "Unknown"
             self._db.set_setting("last_user_id", str(user_id))
+            self._load_user_settings(user_id)
             logger.info(f"Switched to user: {name} (id={user_id})")
         else:
             logger.info("Switched to: All Users")
@@ -405,8 +429,55 @@ class EEGMeditationApp(App):
         users = self._db.get_all_users()
         self._profile_screen.populate_users(users, self._current_user_id)
 
+    def _save_user_settings(self) -> None:
+        """Persist current UI settings for the active user."""
+        uid = self._current_user_id
+        if not uid:
+            return
+        self._db.set_user_setting(uid, "timer_enabled", str(self._timer_screen.enabled))
+        self._db.set_user_setting(uid, "timer_minutes", str(self._timer_screen._duration_minutes))
+        self._db.set_user_setting(uid, "timer_sound", self._timer_screen.custom_sound_path)
+        self._db.set_user_setting(uid, "sinking_alert", str(self._audio.sinking_alert_enabled))
+        self._db.set_user_setting(uid, "disconnect_alert", str(self._audio.disconnect_alert_enabled))
+        logger.debug(f"Saved settings for user {uid}")
+
+    def _load_user_settings(self, user_id: int) -> None:
+        """Restore persisted settings for a user."""
+        g = self._db.get_user_setting
+
+        timer_on = g(user_id, "timer_enabled")
+        if timer_on is not None:
+            active = timer_on == "True"
+            self._timer_screen._enable_cb.active = active
+
+        timer_min = g(user_id, "timer_minutes")
+        if timer_min is not None:
+            try:
+                self._timer_screen._set_duration(int(timer_min))
+            except (ValueError, TypeError):
+                pass
+
+        timer_sound = g(user_id, "timer_sound")
+        if timer_sound is not None:
+            self._timer_screen._sound_path_input.text = timer_sound
+
+        sink = g(user_id, "sinking_alert")
+        if sink is not None:
+            val = sink == "True"
+            self._audio.sinking_alert_enabled = val
+            self._settings_screen._sinking_alert_cb.active = val
+
+        disc = g(user_id, "disconnect_alert")
+        if disc is not None:
+            val = disc == "True"
+            self._audio.disconnect_alert_enabled = val
+            self._settings_screen._disconnect_alert_cb.active = val
+
+        logger.debug(f"Loaded settings for user {user_id}")
+
     def on_stop(self) -> None:
         """Cleanup on app exit."""
+        self._save_user_settings()
         if self._session_manager.state == SessionState.RUNNING:
             self._on_stop()
         self._audio.cleanup()

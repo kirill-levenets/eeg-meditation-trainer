@@ -6,20 +6,21 @@ Mobile application for training Shamatha meditation using EEG neurofeedback. Bui
 
 - **Real-time EEG visualization** — Live scrollable graph with Y-axis scale numbers, grid lines, realtime value labels at line endpoints, and X-axis timestamps
 - **Raw EEG data tab** — Composite raw EEG signal waveform with Y-axis numbers and realtime values + aggregated frequency band plots
-- **Scrollable graphs** — All graphs support time-scrolling through the full 5-minute data window via slider
+- **Scrollable graphs** — All graphs support time-scrolling through the full 5-minute data window via slider or touch drag/slide on the graph
 - **Meditation scoring** — Calmness, Shamatha score, Distraction, and Sinking detection
 - **Dual-channel audio engine** — Ch1: gapless white noise via crossfaded WAV + Kivy SoundLoader (volume scales with meditation); Ch2: synthesized tingsha bell for sinking alerts with cooldown/debounce. Test Audio plays noise→bell→disconnect sequence
-- **Meditation timer** — Configurable duration (1–120 min) with preset buttons, enable/disable toggle, countdown display, auto-stop on expiry, custom end-sound WAV picker with test button
+- **Meditation timer** — Configurable duration (1–120 min) with preset buttons, enable/disable toggle (updates display immediately), countdown display, auto-stop on expiry, file chooser dialog for custom end-sound with test button
 - **State classification** — Stable Focus, Subtle Distraction, Gross Distraction, Sinking
 - **Settings panel** — Device status/meta display, mock/real device switch, threshold slider, test audio button, sinking alert toggle, disconnect alert toggle, graph metric toggles
-- **Session diary** — Notes, tags, mood rating, CSV export, delete & rename sessions, tabbed signal preview (Metrics / Raw EEG / Frequencies)
+- **Session diary** — Notes, tags, mood rating, CSV export, delete (with confirmation dialog) & rename sessions (name pre-filled), tabbed signal preview (Metrics / Raw EEG / Frequencies)
 - **Full signal storage** — Raw EEG bands, computed metrics, frequencies, stability, and calmness all stored per-tick in SQLite
 - **CSV export** — Export any session's full signal data (raw + computed) to CSV from the diary screen
-- **Mock EEG simulation** — Realistic brain state machine (relaxed, focused, drowsy, distracted, deep calm) with per-band oscillation, cross-band interactions, smooth transitions, and burst activity
-- **User profiles** — Profile chooser/create on app launch; per-user session filtering; last user persisted across restarts; diary hidden until user selected
+- **Mock EEG simulation** — Frequency-based synthesis: picks dominant Hz per band from physiological ranges for 5-10s epochs, builds composite signal with harmonics, cross-band coupling, smooth state transitions, and Gaussian noise
+- **User profiles** — Profile chooser/create on app launch; per-user session filtering; last user persisted across restarts; diary hidden until user selected; per-user settings persistence (timer, alerts, sounds)
 - **Session guards** — Start blocked if no user selected or if mock disabled without real device connected
 - **Analytics** — Daily/weekly/monthly trends, streak counter, progress tracking, database storage usage display
-- **SQLite storage** — Sessions, metrics timeseries, user profiles, app settings with automatic schema migration
+- **Debug logging** — Every action/event logged; raw EEG samples logged periodically during session
+- **SQLite storage** — Sessions, metrics timeseries, user profiles, per-user settings with automatic schema migration
 
 ## Project Structure
 
@@ -35,7 +36,8 @@ app/
 │   ├── diary_screen.py      # Session list, notes, mood rating, CSV export
 │   └── analytics_screen.py  # Trend graphs and summary stats
 ├── eeg/                # EEG data source
-│   ├── mock_stream.py       # Simulated EEG for development
+│   ├── mock_stream.py       # Original simulated EEG (v1)
+│   ├── mock_stream_v2.py    # Frequency-based synthesis (v2, active)
 │   └── buffer.py            # Rolling average and variance buffers
 ├── metrics/            # Signal processing and state formulas
 │   └── engine.py            # Full metrics pipeline with sigmoid normalization
@@ -71,7 +73,8 @@ source venv/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Run tests
+# Run tests (split across test_buffers, test_engine, test_database,
+# test_mock_stream, test_session, test_audio, test_timer, test_ui_widgets)
 python -m pytest tests/ -v
 
 # Run application

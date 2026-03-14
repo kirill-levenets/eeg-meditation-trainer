@@ -6,6 +6,7 @@ from kivy.uix.button import Button
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
+from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
@@ -406,6 +407,7 @@ class DiaryScreen(Screen):
         self._notes_input.text = session.get("notes", "")
         self._tags_input.text = session.get("tags", "")
         self._mood_slider.value = session.get("mood_rating", 3) or 3
+        self._rename_input.text = session.get("notes", "")
         self._metrics_graph.clear_data()
         self._raw_eeg_graph.clear_data()
         self._freq_graph.clear_data()
@@ -498,6 +500,35 @@ class DiaryScreen(Screen):
                 self._export_status.text = "No data to export"
 
     def _on_delete_pressed(self, *args) -> None:
+        if not self._selected_session_id or not self._on_delete_session:
+            return
+        content = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(12))
+        content.add_widget(Label(
+            text="Delete this session?\nThis cannot be undone.",
+            font_size=dp(14),
+            halign="center",
+        ))
+        btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+        btn_cancel = Button(text="Cancel", font_size=dp(14))
+        btn_confirm = Button(
+            text="Delete", font_size=dp(14),
+            background_color=(0.8, 0.2, 0.2, 1.0),
+        )
+        btn_row.add_widget(btn_cancel)
+        btn_row.add_widget(btn_confirm)
+        content.add_widget(btn_row)
+        popup = Popup(
+            title="Confirm Delete",
+            content=content,
+            size_hint=(0.6, 0.3),
+            auto_dismiss=False,
+        )
+        btn_cancel.bind(on_release=popup.dismiss)
+        btn_confirm.bind(on_release=lambda x: self._confirm_delete(popup))
+        popup.open()
+
+    def _confirm_delete(self, popup) -> None:
+        popup.dismiss()
         if self._selected_session_id and self._on_delete_session:
             self._on_delete_session(self._selected_session_id)
             self._selected_session_id = None

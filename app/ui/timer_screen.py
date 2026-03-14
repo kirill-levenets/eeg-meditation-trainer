@@ -4,7 +4,9 @@ from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.checkbox import CheckBox
+from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.label import Label
+from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
 from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
@@ -114,13 +116,20 @@ class TimerScreen(Screen):
 
         sound_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
         self._sound_path_input = TextInput(
-            hint_text="Default bell (or enter .wav path)",
+            hint_text="Default bell (or enter path)",
             text="",
             multiline=False,
             font_size=dp(12),
-            size_hint_x=0.7,
+            size_hint_x=0.5,
         )
         self._sound_path_input.bind(text=self._on_sound_path_change)
+        browse_btn = Button(
+            text="Browse",
+            font_size=dp(13),
+            size_hint_x=0.2,
+            background_color=(0.35, 0.35, 0.5, 1.0),
+        )
+        browse_btn.bind(on_release=self._on_browse_sound)
         self._test_sound_btn = Button(
             text="Test Sound",
             font_size=dp(13),
@@ -130,6 +139,7 @@ class TimerScreen(Screen):
         )
         self._test_sound_btn.bind(on_release=self._on_test_sound_pressed)
         sound_row.add_widget(self._sound_path_input)
+        sound_row.add_widget(browse_btn)
         sound_row.add_widget(self._test_sound_btn)
         root.add_widget(sound_row)
 
@@ -164,7 +174,7 @@ class TimerScreen(Screen):
         else:
             self._status_label.text = "Timer disabled"
             self._status_label.color = (0.6, 0.6, 0.6, 1.0)
-            self._countdown_label.text = "--:--"
+        self._update_display()
 
     def _on_duration_change(self, instance, value) -> None:
         self._duration_minutes = int(value)
@@ -229,6 +239,40 @@ class TimerScreen(Screen):
             self._status_label.text = "Timer disabled"
             self._status_label.color = (0.6, 0.6, 0.6, 1.0)
         self._update_display()
+
+    def _on_browse_sound(self, *args) -> None:
+        """Open a file chooser popup for media files."""
+        import os
+        content = BoxLayout(orientation="vertical", spacing=dp(8))
+        start_path = os.path.expanduser("~")
+        chooser = FileChooserListView(
+            path=start_path,
+            filters=["*.wav", "*.mp3", "*.ogg", "*.flac", "*.m4a"],
+        )
+        content.add_widget(chooser)
+        btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+        btn_cancel = Button(text="Cancel", font_size=dp(14))
+        btn_select = Button(
+            text="Select", font_size=dp(14),
+            background_color=(0.2, 0.6, 0.3, 1.0),
+        )
+        btn_row.add_widget(btn_cancel)
+        btn_row.add_widget(btn_select)
+        content.add_widget(btn_row)
+        popup = Popup(
+            title="Choose audio file",
+            content=content,
+            size_hint=(0.9, 0.8),
+        )
+        btn_cancel.bind(on_release=popup.dismiss)
+        btn_select.bind(on_release=lambda x: self._on_file_selected(chooser, popup))
+        popup.open()
+
+    def _on_file_selected(self, chooser, popup) -> None:
+        selection = chooser.selection
+        if selection:
+            self._sound_path_input.text = selection[0]
+        popup.dismiss()
 
     def _on_sound_path_change(self, instance, value) -> None:
         self._custom_sound_path = value.strip()
