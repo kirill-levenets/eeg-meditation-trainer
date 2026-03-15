@@ -34,7 +34,7 @@ RAW_EEG_PREVIEW_COLORS = {
 }
 
 RAW_EEG_PREVIEW_SCALES = {
-    "eeg": 3000.0,
+    "eeg": 500000.0,
 }
 
 FREQ_PREVIEW_COLORS = {
@@ -46,11 +46,11 @@ FREQ_PREVIEW_COLORS = {
 }
 
 FREQ_PREVIEW_SCALES = {
-    "alpha": 1600.0,
-    "beta": 800.0,
-    "gamma": 400.0,
-    "theta": 600.0,
-    "delta": 800.0,
+    "alpha": 200000.0,
+    "beta": 100000.0,
+    "gamma": 50000.0,
+    "theta": 200000.0,
+    "delta": 1500000.0,
 }
 
 

@@ -74,10 +74,8 @@ class TestMetricsEngine(unittest.TestCase):
         self.assertGreater(calmness, 0.0)
 
     def test_meditation_score_in_range(self):
-        bands = MetricsEngine.derive_bands(self.sample)
-        norms = MetricsEngine.normalize_bands(bands)
-        calmness = self.engine.compute_calmness(norms)
-        score = self.engine.compute_meditation_score(calmness)
+        bands_sqrt = MetricsEngine.compute_sqrt_relative_bands(self.sample)
+        score = self.engine.compute_meditation_score(bands_sqrt)
         self.assertGreaterEqual(score, 0.0)
         self.assertLessEqual(score, 200.0)
 
@@ -134,7 +132,7 @@ class TestMetricsEngine(unittest.TestCase):
 
     def test_state_classification_subtle(self):
         state = self.engine.classify_state(
-            meditation_score=100, stability=50, sinking=20, distraction=20
+            meditation_score=100, stability=500, sinking=20, distraction=20
         )
         self.assertEqual(state, "Subtle Distraction")
 
@@ -177,6 +175,35 @@ class TestMetricsEngine(unittest.TestCase):
         norms = MetricsEngine.normalize_bands(bands)
         calmness = self.engine.compute_calmness(norms)
         self.assertGreater(calmness, 3.0)
+
+    def test_sqrt_relative_bands_sum(self):
+        bands_sqrt = MetricsEngine.compute_sqrt_relative_bands(self.sample)
+        for key in ("delta", "theta", "alpha1", "alpha2", "beta1", "beta2"):
+            self.assertIn(key, bands_sqrt)
+            self.assertGreaterEqual(bands_sqrt[key], 0.0)
+            self.assertLessEqual(bands_sqrt[key], 1.0)
+
+    def test_high_alpha_gives_high_meditation(self):
+        high_alpha = {
+            "timestamp": 1.0,
+            "delta": 5000.0, "theta": 5000.0,
+            "alpha1": 200000.0, "alpha2": 200000.0,
+            "beta1": 2000.0, "beta2": 2000.0,
+            "gamma1": 500.0, "gamma2": 500.0,
+        }
+        result = self.engine.process_sample(high_alpha)
+        self.assertGreater(result["meditation_score"], 150.0)
+
+    def test_high_beta_gives_low_meditation(self):
+        high_beta = {
+            "timestamp": 1.0,
+            "delta": 10000.0, "theta": 10000.0,
+            "alpha1": 3000.0, "alpha2": 2000.0,
+            "beta1": 50000.0, "beta2": 40000.0,
+            "gamma1": 10000.0, "gamma2": 5000.0,
+        }
+        result = self.engine.process_sample(high_beta)
+        self.assertLess(result["meditation_score"], 50.0)
 
 
 if __name__ == "__main__":

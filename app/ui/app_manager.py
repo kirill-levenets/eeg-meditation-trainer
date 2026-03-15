@@ -198,6 +198,7 @@ class EEGMeditationApp(App):
         self._metrics_buffer = []
         self._raw_buffer = []
         self._flush_counter = 0
+        self._tick_count = 0
         self._current_session_id = None
 
         self._audio.start()
@@ -289,10 +290,12 @@ class EEGMeditationApp(App):
             bands = {k: f"{raw_sample.get(k, 0):.0f}" for k in
                      ("delta", "theta", "alpha1", "alpha2", "beta1", "beta2", "gamma1", "gamma2")}
             logger.debug(f"Raw sample #{self._tick_count}: {bands}")
+            native_med = raw_sample.get("meditation", -1)
             logger.debug(f"Metrics: med={metrics.get('meditation_score', 0):.0f} "
                          f"sham={metrics.get('shamatha_score', 0):.0f} "
                          f"sink={metrics.get('sinking', 0):.0f} "
-                         f"dist={metrics.get('distraction', 0):.0f}")
+                         f"dist={metrics.get('distraction', 0):.0f} "
+                         f"native_med={native_med:.0f}")
 
         self._session_manager.add_metric(metrics)
         # Merge raw + computed for full storage
@@ -301,7 +304,8 @@ class EEGMeditationApp(App):
         self._raw_buffer.append(raw_sample)
 
         self._audio.update(metrics.get("meditation_score", 0))
-        self._audio.update_sinking(metrics.get("sinking", 0))
+        if self._tick_count > 10:
+            self._audio.update_sinking(metrics.get("sinking", 0))
 
         self._live_screen.graph.add_point(metrics)
         self._live_screen.update_scroll_range()

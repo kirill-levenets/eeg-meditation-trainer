@@ -28,10 +28,10 @@ class MetricsConfig:
     STABILITY_BUFFER_SIZE: int = 40  # 20s * 2Hz
 
     MEDITATION_THRESHOLD_DEFAULT: int = 100
-    STABILITY_LIMIT: float = 30.0
+    STABILITY_LIMIT: float = 200.0
     SINKING_LIMIT: float = 50.0
     DISTRACTION_LIMIT: float = 50.0
-    STABILITY_MAX: float = 100.0
+    STABILITY_MAX: float = 2000.0
 
 
 class AppConfig:

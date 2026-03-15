@@ -1,4 +1,5 @@
 import math
+from collections import deque
 from typing import Dict
 
 from app.config import METRICS, SIGMOID
@@ -8,6 +9,14 @@ from app.eeg.buffer import RollingBuffer, VarianceBuffer
 class MetricsEngine:
     """Computes all EEG meditation metrics from smoothed band data."""
 
+    # Classic EEG-meditation formula coefficients
+    _MED_A2_WEIGHT: float = 0.8
+    _MED_THETA_WEIGHT: float = 0.4
+    _MED_DELTA_WEIGHT: float = 0.08
+    _MED_SCALE: float = 0.75
+    _MED_OFFSET: float = 0.1
+    _MED_AVG_WINDOW: int = 4
+
     def __init__(self) -> None:
         self._rolling_buffer: RollingBuffer = RollingBuffer(
             window_size=METRICS.ROLLING_WINDOW_SIZE
@@ -16,6 +25,7 @@ class MetricsEngine:
             max_size=METRICS.STABILITY_BUFFER_SIZE
         )
         self._meditation_threshold: int = METRICS.MEDITATION_THRESHOLD_DEFAULT
+        self._med_ratio_buffer: deque = deque(maxlen=self._MED_AVG_WINDOW)
 
     @property
     def meditation_threshold(self) -> int:
@@ -68,10 +78,49 @@ class MetricsEngine:
         """calmness = alpha_norm / (beta_norm + gamma_norm + eps)"""
         return norms["alpha_norm"] / (norms["beta_norm"] + norms["gamma_norm"] + 0.001)
 
-    def compute_meditation_score(self, calmness: float) -> float:
-        """Meditation score: clamp(200 * calmness / Cmax) in [0, 200]."""
-        raw = METRICS.MEDITATION_SCORE_MAX * calmness / METRICS.CMAX
-        return max(0.0, min(METRICS.MEDITATION_SCORE_MAX, raw))
+    @staticmethod
+    def compute_sqrt_relative_bands(
+        sample: Dict[str, float],
+    ) -> Dict[str, float]:
+        """Compute sqrt-normalized relative band units.
+
+        For each of the 6 bands (delta, theta, alpha1, alpha2, beta1, beta2):
+        result = sqrt(abs_value / sum_all_6)
+        """
+        keys = ("delta", "theta", "alpha1", "alpha2", "beta1", "beta2")
+        values = {k: max(sample.get(k, 0.0), 0.0) for k in keys}
+        total = sum(values.values())
+        if total < 1.0:
+            return {k: 0.0 for k in keys}
+        return {k: math.sqrt(v / total) for k, v in values.items()}
+
+    def compute_meditation_score(self, bands_sqrt: Dict[str, float]) -> float:
+        """Classic EEG-meditation formula (scaled to 0-200).
+
+        Formula: 100 * min(avg(ratio, 4) * 0.75 - 0.1, 1)
+        ratio = (a1 + 0.8*a2) / (b2 + b1 + 0.4*t + 0.08*d)
+        Band values are sqrt-normalized relative units.
+        Output scaled to [0, MEDITATION_SCORE_MAX] (0-200).
+        """
+        a1 = bands_sqrt.get("alpha1", 0.0)
+        a2 = bands_sqrt.get("alpha2", 0.0)
+        b1 = bands_sqrt.get("beta1", 0.0)
+        b2 = bands_sqrt.get("beta2", 0.0)
+        t = bands_sqrt.get("theta", 0.0)
+        d = bands_sqrt.get("delta", 0.0)
+
+        denom = b2 + b1 + self._MED_THETA_WEIGHT * t + self._MED_DELTA_WEIGHT * d
+        if denom < 1e-6:
+            ratio = 0.0
+        else:
+            ratio = (a1 + self._MED_A2_WEIGHT * a2) / denom
+
+        self._med_ratio_buffer.append(ratio)
+        avg_ratio = sum(self._med_ratio_buffer) / len(self._med_ratio_buffer)
+
+        score_01 = min(avg_ratio * self._MED_SCALE - self._MED_OFFSET, 1.0)
+        score_100 = max(0.0, score_01) * 100.0
+        return score_100 * METRICS.MEDITATION_SCORE_MAX / 100.0
 
     def compute_sinking(self, norms: Dict[str, float]) -> float:
         """Sinking (dullness): sigmoid of (theta_norm + delta_norm) / (alpha_norm + beta_norm + eps)."""
@@ -95,7 +144,8 @@ class MetricsEngine:
             meditation_score > self._meditation_threshold
             and stability > METRICS.STABILITY_LIMIT
         ):
-            raw = stability / METRICS.STABILITY_MAX
+            capped = min(stability, METRICS.STABILITY_MAX)
+            raw = capped / METRICS.STABILITY_MAX
             return self.sigmoid(raw, SIGMOID.SUBTLE_K, SIGMOID.SUBTLE_MIDPOINT)
         return 0.0
 
@@ -159,7 +209,8 @@ class MetricsEngine:
             }
 
         calmness = self.compute_calmness(norms)
-        meditation_score = self.compute_meditation_score(calmness)
+        bands_sqrt = self.compute_sqrt_relative_bands(smoothed)
+        meditation_score = self.compute_meditation_score(bands_sqrt)
         self._stability_buffer.push(meditation_score)
         stability = self.compute_stability()
 
@@ -189,6 +240,7 @@ class MetricsEngine:
     def reset(self) -> None:
         self._rolling_buffer.reset()
         self._stability_buffer.reset()
+        self._med_ratio_buffer.clear()
 
 
 if __name__ == "__main__":
@@ -205,6 +257,9 @@ if __name__ == "__main__":
         {"label": "Balanced", "timestamp": 3.0,
          "delta": 32271, "theta": 17149, "alpha1": 29861, "alpha2": 24108,
          "beta1": 12103, "beta2": 6182, "gamma1": 6435, "gamma2": 3383},
+        {"label": "Distracted (high beta)", "timestamp": 4.0,
+         "delta": 30000, "theta": 20000, "alpha1": 5000, "alpha2": 3000,
+         "beta1": 50000, "beta2": 40000, "gamma1": 20000, "gamma2": 15000},
         {"label": "Startup (near-zero)", "timestamp": 0.5,
          "delta": 33, "theta": 1, "alpha1": 1, "alpha2": 3,
          "beta1": 1, "beta2": 0, "gamma1": 0, "gamma2": 1},
@@ -212,12 +267,13 @@ if __name__ == "__main__":
 
     for s in samples:
         label = s.pop("label")
+        engine.reset()
         result = engine.process_sample(s)
         print(f"\n  {label}:")
         print(f"    med={result['meditation_score']:.0f} sham={result['shamatha_score']:.0f} "
               f"sink={result['sinking']:.0f} dist={result['distraction']:.0f} "
+              f"subtle={result['subtle_distraction']:.0f} stab={result['stability']:.0f} "
               f"state={result['state']}")
-    engine.reset()
 
     print("\nSigmoid tests:")
     print(f"  sigmoid(0, 4, 1.0) = {MetricsEngine.sigmoid(0, 4, 1.0):.2f}")

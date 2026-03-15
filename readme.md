@@ -7,7 +7,7 @@ Mobile application for training Shamatha meditation using EEG neurofeedback. Bui
 - **Real-time EEG visualization** — Live scrollable graph with Y-axis scale numbers, grid lines, realtime value labels at line endpoints, X-axis timestamps, and dashed meditation threshold line
 - **Raw EEG data tab** — Oscillating EEG waveform (128Hz sub-sampled, bipolar ±μV display) + aggregated frequency band plots
 - **Scrollable graphs** — All graphs support time-scrolling through the full 5-minute data window via slider or touch drag/slide on the graph
-- **Meditation scoring** — Calmness, Shamatha score, Distraction, and Sinking detection
+- **Meditation scoring** — Classic EEG-meditation formula `100*min(avg((a1+0.8*a2)/(b2+b1+0.4*t+0.08*d),4)*0.75-0.1,1)` with sqrt-normalized relative band units; Calmness, Shamatha score, Distraction, and Sinking detection
 - **Dual-channel audio engine** — Ch1: gapless white noise via crossfaded WAV + Kivy SoundLoader (volume scales with meditation); Ch2: synthesized tingsha bell for sinking alerts with cooldown/debounce. Test Audio plays noise→bell→disconnect sequence
 - **Meditation timer** — Configurable duration (1–120 min) with preset buttons, enable/disable toggle (updates display immediately), countdown display, auto-stop on expiry, file chooser dialog for custom end-sound with test button
 - **State classification** — Stable Focus, Subtle Distraction, Gross Distraction, Sinking
