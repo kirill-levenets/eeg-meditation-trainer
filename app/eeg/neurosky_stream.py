@@ -280,6 +280,47 @@ class NeuroSkyStream:
                 if len(self._raw_wave_buffer) > 1024:
                     self._raw_wave_buffer = self._raw_wave_buffer[-1024:]
 
+    @staticmethod
+    def _request_bt_permissions() -> None:
+        """Request Bluetooth runtime permissions on Android 6+."""
+        try:
+            from jnius import autoclass
+        except ImportError:
+            return
+
+        try:
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+            activity = PythonActivity.mActivity
+            PackageManager = autoclass("android.content.pm.PackageManager")
+            Build_VERSION = autoclass("android.os.Build$VERSION")
+
+            permissions_needed = [
+                "android.permission.BLUETOOTH",
+                "android.permission.BLUETOOTH_ADMIN",
+                "android.permission.ACCESS_FINE_LOCATION",
+            ]
+            # Android 12+ (API 31+) requires new BT permissions
+            if Build_VERSION.SDK_INT >= 31:
+                permissions_needed.extend([
+                    "android.permission.BLUETOOTH_CONNECT",
+                    "android.permission.BLUETOOTH_SCAN",
+                ])
+
+            missing = []
+            for perm in permissions_needed:
+                if activity.checkSelfPermission(perm) != PackageManager.PERMISSION_GRANTED:
+                    missing.append(perm)
+
+            if missing:
+                logger.info(f"Requesting BT permissions: {missing}")
+                activity.requestPermissions(missing, 1)
+                # Brief wait for user to respond to dialog
+                time.sleep(2.0)
+            else:
+                logger.debug("All BT permissions already granted")
+        except Exception as e:
+            logger.warning(f"Permission request failed: {e}")
+
     def _connect_bluetooth(self) -> None:
         """Open RFCOMM socket to the MindWave via Android Bluetooth API."""
         try:
@@ -288,6 +329,8 @@ class NeuroSkyStream:
             raise RuntimeError(
                 "pyjnius not available — real device connection requires Android"
             )
+
+        self._request_bt_permissions()
 
         BluetoothAdapter = autoclass("android.bluetooth.BluetoothAdapter")
         UUID = autoclass("java.util.UUID")
@@ -302,7 +345,10 @@ class NeuroSkyStream:
         uuid = UUID.fromString(NEUROSKY_SPP_UUID)
 
         logger.info(f"Connecting to {self._device_name} ({self._device_address})...")
-        adapter.cancelDiscovery()
+        try:
+            adapter.cancelDiscovery()
+        except Exception as e:
+            logger.warning(f"cancelDiscovery failed (non-fatal): {e}")
 
         socket = device.createRfcommSocketToServiceRecord(uuid)
         socket.connect()
@@ -352,6 +398,8 @@ class NeuroSkyStream:
             return []
 
         try:
+            NeuroSkyStream._request_bt_permissions()
+
             BluetoothAdapter = autoclass("android.bluetooth.BluetoothAdapter")
             adapter = BluetoothAdapter.getDefaultAdapter()
             if adapter is None or not adapter.isEnabled():
