@@ -35,25 +35,25 @@ class TestMetricsEngine(unittest.TestCase):
         self.engine = MetricsEngine()
         self.sample = {
             "timestamp": 1.0,
-            "delta": 300.0,
-            "theta": 200.0,
-            "alpha1": 500.0,
-            "alpha2": 400.0,
-            "beta1": 100.0,
-            "beta2": 80.0,
-            "gamma1": 30.0,
-            "gamma2": 20.0,
+            "delta": 32000.0,
+            "theta": 17000.0,
+            "alpha1": 30000.0,
+            "alpha2": 24000.0,
+            "beta1": 12000.0,
+            "beta2": 6000.0,
+            "gamma1": 6400.0,
+            "gamma2": 3400.0,
             "attention": 50,
             "meditation": 60,
         }
 
     def test_derive_bands(self):
         bands = MetricsEngine.derive_bands(self.sample)
-        self.assertAlmostEqual(bands["alpha"], 900.0)
-        self.assertAlmostEqual(bands["beta"], 180.0)
-        self.assertAlmostEqual(bands["gamma"], 50.0)
-        self.assertAlmostEqual(bands["theta"], 200.0)
-        self.assertAlmostEqual(bands["delta"], 300.0)
+        self.assertAlmostEqual(bands["alpha"], 54000.0)
+        self.assertAlmostEqual(bands["beta"], 18000.0)
+        self.assertAlmostEqual(bands["gamma"], 9800.0)
+        self.assertAlmostEqual(bands["theta"], 17000.0)
+        self.assertAlmostEqual(bands["delta"], 32000.0)
 
     def test_normalize_bands_sum_near_one(self):
         bands = MetricsEngine.derive_bands(self.sample)
@@ -69,32 +69,37 @@ class TestMetricsEngine(unittest.TestCase):
 
     def test_calmness_positive(self):
         bands = MetricsEngine.derive_bands(self.sample)
-        calmness = self.engine.compute_calmness(bands)
+        norms = MetricsEngine.normalize_bands(bands)
+        calmness = self.engine.compute_calmness(norms)
         self.assertGreater(calmness, 0.0)
 
     def test_meditation_score_in_range(self):
         bands = MetricsEngine.derive_bands(self.sample)
-        calmness = self.engine.compute_calmness(bands)
+        norms = MetricsEngine.normalize_bands(bands)
+        calmness = self.engine.compute_calmness(norms)
         score = self.engine.compute_meditation_score(calmness)
         self.assertGreaterEqual(score, 0.0)
         self.assertLessEqual(score, 200.0)
 
     def test_sinking_in_range(self):
         bands = MetricsEngine.derive_bands(self.sample)
-        sinking = self.engine.compute_sinking(bands)
+        norms = MetricsEngine.normalize_bands(bands)
+        sinking = self.engine.compute_sinking(norms)
         self.assertGreater(sinking, 0.0)
         self.assertLess(sinking, 100.0)
 
     def test_distraction_in_range(self):
         bands = MetricsEngine.derive_bands(self.sample)
-        distraction = self.engine.compute_distraction(bands)
+        norms = MetricsEngine.normalize_bands(bands)
+        distraction = self.engine.compute_distraction(norms)
         self.assertGreater(distraction, 0.0)
         self.assertLess(distraction, 100.0)
 
     def test_shamatha_in_range(self):
         bands = MetricsEngine.derive_bands(self.sample)
-        calmness = self.engine.compute_calmness(bands)
-        shamatha = self.engine.compute_shamatha(calmness, bands, 10.0)
+        norms = MetricsEngine.normalize_bands(bands)
+        calmness = self.engine.compute_calmness(norms)
+        shamatha = self.engine.compute_shamatha(calmness, norms, 10.0)
         self.assertGreater(shamatha, 0.0)
         self.assertLess(shamatha, 100.0)
 
@@ -157,19 +162,20 @@ class TestMetricsEngine(unittest.TestCase):
     def test_high_alpha_gives_high_calmness(self):
         high_alpha_sample = {
             "timestamp": 1.0,
-            "delta": 50.0,
-            "theta": 50.0,
-            "alpha1": 2000.0,
-            "alpha2": 2000.0,
-            "beta1": 20.0,
-            "beta2": 20.0,
-            "gamma1": 5.0,
-            "gamma2": 5.0,
+            "delta": 5000.0,
+            "theta": 5000.0,
+            "alpha1": 200000.0,
+            "alpha2": 200000.0,
+            "beta1": 2000.0,
+            "beta2": 2000.0,
+            "gamma1": 500.0,
+            "gamma2": 500.0,
             "attention": 50,
             "meditation": 80,
         }
         bands = MetricsEngine.derive_bands(high_alpha_sample)
-        calmness = self.engine.compute_calmness(bands)
+        norms = MetricsEngine.normalize_bands(bands)
+        calmness = self.engine.compute_calmness(norms)
         self.assertGreater(calmness, 3.0)
 
 

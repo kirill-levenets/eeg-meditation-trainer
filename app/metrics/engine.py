@@ -64,23 +64,23 @@ class MetricsEngine:
             "total_power": total_power,
         }
 
-    def compute_calmness(self, bands: Dict[str, float]) -> float:
-        """calmness = alpha / (beta + gamma + 1)"""
-        return bands["alpha"] / (bands["beta"] + bands["gamma"] + 1.0)
+    def compute_calmness(self, norms: Dict[str, float]) -> float:
+        """calmness = alpha_norm / (beta_norm + gamma_norm + eps)"""
+        return norms["alpha_norm"] / (norms["beta_norm"] + norms["gamma_norm"] + 0.001)
 
     def compute_meditation_score(self, calmness: float) -> float:
         """Meditation score: clamp(200 * calmness / Cmax) in [0, 200]."""
         raw = METRICS.MEDITATION_SCORE_MAX * calmness / METRICS.CMAX
         return max(0.0, min(METRICS.MEDITATION_SCORE_MAX, raw))
 
-    def compute_sinking(self, bands: Dict[str, float]) -> float:
-        """Sinking (dullness): sigmoid of (theta + delta) / (alpha + beta + 1)."""
-        raw = (bands["theta"] + bands["delta"]) / (bands["alpha"] + bands["beta"] + 1.0)
+    def compute_sinking(self, norms: Dict[str, float]) -> float:
+        """Sinking (dullness): sigmoid of (theta_norm + delta_norm) / (alpha_norm + beta_norm + eps)."""
+        raw = (norms["theta_norm"] + norms["delta_norm"]) / (norms["alpha_norm"] + norms["beta_norm"] + 0.001)
         return self.sigmoid(raw, SIGMOID.SINKING_K, SIGMOID.SINKING_MIDPOINT)
 
-    def compute_distraction(self, bands: Dict[str, float]) -> float:
-        """Gross distraction: sigmoid of (beta + gamma) / (alpha + 1)."""
-        raw = (bands["beta"] + bands["gamma"]) / (bands["alpha"] + 1.0)
+    def compute_distraction(self, norms: Dict[str, float]) -> float:
+        """Gross distraction: sigmoid of (beta_norm + gamma_norm) / (alpha_norm + eps)."""
+        raw = (norms["beta_norm"] + norms["gamma_norm"]) / (norms["alpha_norm"] + 0.001)
         return self.sigmoid(raw, SIGMOID.DISTRACTION_K, SIGMOID.DISTRACTION_MIDPOINT)
 
     def compute_stability(self) -> float:
@@ -100,10 +100,10 @@ class MetricsEngine:
         return 0.0
 
     def compute_shamatha(
-        self, calmness: float, bands: Dict[str, float], stability: float
+        self, calmness: float, norms: Dict[str, float], stability: float
     ) -> float:
         """Composite shamatha score combining calmness, clarity, stability."""
-        clarity = bands["alpha"] / (bands["theta"] + bands["delta"] + 1.0)
+        clarity = norms["alpha_norm"] / (norms["theta_norm"] + norms["delta_norm"] + 0.001)
         stability_factor = 1.0 / (1.0 + stability)
         shamatha_raw = (calmness * 0.4) + (clarity * 0.3) + (stability_factor * 0.3)
         return self.sigmoid(
@@ -136,21 +136,37 @@ class MetricsEngine:
             return "Sinking"
         return "Neutral"
 
+    # Minimum total power to consider data valid (suppresses startup noise)
+    MIN_TOTAL_POWER: float = 100.0
+
     def process_sample(self, raw_sample: Dict[str, float]) -> Dict[str, float]:
         """Full pipeline: smooth → derive → normalize → compute all metrics."""
         smoothed = self._rolling_buffer.push_sample(raw_sample)
         bands = self.derive_bands(smoothed)
         norms = self.normalize_bands(bands)
 
-        calmness = self.compute_calmness(bands)
+        # Suppress metrics when total power is too low (startup / no signal)
+        if norms["total_power"] < self.MIN_TOTAL_POWER:
+            self._stability_buffer.push(0.0)
+            return {
+                "timestamp": raw_sample.get("timestamp", 0.0),
+                "alpha_norm": 0.0, "beta_norm": 0.0, "gamma_norm": 0.0,
+                "theta_norm": 0.0, "delta_norm": 0.0,
+                "meditation_score": 0.0, "distraction": 0.0,
+                "subtle_distraction": 0.0, "sinking": 0.0,
+                "shamatha_score": 0.0, "stability": 0.0,
+                "state": "Neutral", "calmness": 0.0,
+            }
+
+        calmness = self.compute_calmness(norms)
         meditation_score = self.compute_meditation_score(calmness)
         self._stability_buffer.push(meditation_score)
         stability = self.compute_stability()
 
-        sinking = self.compute_sinking(bands)
-        distraction = self.compute_distraction(bands)
+        sinking = self.compute_sinking(norms)
+        distraction = self.compute_distraction(norms)
         subtle_distraction = self.compute_subtle_distraction(meditation_score, stability)
-        shamatha = self.compute_shamatha(calmness, bands, stability)
+        shamatha = self.compute_shamatha(calmness, norms, stability)
         state = self.classify_state(meditation_score, stability, sinking, distraction)
 
         return {
@@ -178,28 +194,32 @@ class MetricsEngine:
 if __name__ == "__main__":
     engine = MetricsEngine()
 
-    test_sample = {
-        "timestamp": 1.0,
-        "delta": 300.0,
-        "theta": 200.0,
-        "alpha1": 500.0,
-        "alpha2": 400.0,
-        "beta1": 100.0,
-        "beta2": 80.0,
-        "gamma1": 30.0,
-        "gamma2": 20.0,
-        "attention": 50,
-        "meditation": 60,
-    }
+    # NeuroSky-range test data
+    samples = [
+        {"label": "Relaxed (high alpha)", "timestamp": 1.0,
+         "delta": 11158, "theta": 7860, "alpha1": 70533, "alpha2": 31842,
+         "beta1": 9686, "beta2": 12795, "gamma1": 3367, "gamma2": 2396},
+        {"label": "Drowsy (high delta)", "timestamp": 2.0,
+         "delta": 457157, "theta": 26947, "alpha1": 115888, "alpha2": 26465,
+         "beta1": 9854, "beta2": 12525, "gamma1": 2678, "gamma2": 4579},
+        {"label": "Balanced", "timestamp": 3.0,
+         "delta": 32271, "theta": 17149, "alpha1": 29861, "alpha2": 24108,
+         "beta1": 12103, "beta2": 6182, "gamma1": 6435, "gamma2": 3383},
+        {"label": "Startup (near-zero)", "timestamp": 0.5,
+         "delta": 33, "theta": 1, "alpha1": 1, "alpha2": 3,
+         "beta1": 1, "beta2": 0, "gamma1": 0, "gamma2": 1},
+    ]
 
-    result = engine.process_sample(test_sample)
-    for key, val in sorted(result.items()):
-        if isinstance(val, float):
-            print(f"  {key}: {val:.4f}")
-        else:
-            print(f"  {key}: {val}")
+    for s in samples:
+        label = s.pop("label")
+        result = engine.process_sample(s)
+        print(f"\n  {label}:")
+        print(f"    med={result['meditation_score']:.0f} sham={result['shamatha_score']:.0f} "
+              f"sink={result['sinking']:.0f} dist={result['distraction']:.0f} "
+              f"state={result['state']}")
+    engine.reset()
 
     print("\nSigmoid tests:")
-    print(f"  sigmoid(0, 2, 1.5) = {MetricsEngine.sigmoid(0, 2, 1.5):.2f}")
-    print(f"  sigmoid(1.5, 2, 1.5) = {MetricsEngine.sigmoid(1.5, 2, 1.5):.2f}")
-    print(f"  sigmoid(5, 2, 1.5) = {MetricsEngine.sigmoid(5, 2, 1.5):.2f}")
+    print(f"  sigmoid(0, 4, 1.0) = {MetricsEngine.sigmoid(0, 4, 1.0):.2f}")
+    print(f"  sigmoid(1.0, 4, 1.0) = {MetricsEngine.sigmoid(1.0, 4, 1.0):.2f}")
+    print(f"  sigmoid(3.0, 4, 1.0) = {MetricsEngine.sigmoid(3.0, 4, 1.0):.2f}")

@@ -4,23 +4,23 @@ import os
 class SigmoidConfig:
     """Sigmoid normalization parameters for easy calibration."""
 
-    SINKING_K: float = 2.0
-    SINKING_MIDPOINT: float = 1.5
+    SINKING_K: float = 4.0
+    SINKING_MIDPOINT: float = 1.0
 
-    DISTRACTION_K: float = 2.0
-    DISTRACTION_MIDPOINT: float = 2.5
+    DISTRACTION_K: float = 4.0
+    DISTRACTION_MIDPOINT: float = 1.0
 
     SUBTLE_K: float = 2.0
     SUBTLE_MIDPOINT: float = 0.5
 
-    SHAMATHA_K: float = 2.0
-    SHAMATHA_MIDPOINT: float = 1.5
+    SHAMATHA_K: float = 3.0
+    SHAMATHA_MIDPOINT: float = 1.0
 
 
 class MetricsConfig:
     """Tunable thresholds and limits for metrics engine."""
 
-    CMAX: float = 4.0
+    CMAX: float = 3.0
     MEDITATION_SCORE_MAX: float = 200.0
 
     ROLLING_WINDOW_SIZE: int = 5
