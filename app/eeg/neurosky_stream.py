@@ -350,10 +350,29 @@ class NeuroSkyStream:
         except Exception as e:
             logger.warning(f"cancelDiscovery failed (non-fatal): {e}")
 
-        socket = device.createRfcommSocketToServiceRecord(uuid)
-        socket.connect()
-        self._bt_socket = socket
-        logger.info("RFCOMM socket connected")
+        # Try standard RFCOMM first, fall back to reflection method
+        # (many Android devices fail with IOException on the standard call)
+        try:
+            socket = device.createRfcommSocketToServiceRecord(uuid)
+            socket.connect()
+            self._bt_socket = socket
+            logger.info("RFCOMM socket connected (standard)")
+            return
+        except Exception as e:
+            logger.warning(f"Standard RFCOMM failed: {e}, trying reflection fallback")
+
+        try:
+            Integer = autoclass("java.lang.Integer")
+            clazz = device.getClass()
+            method = clazz.getMethod(
+                "createRfcommSocket", Integer.TYPE,
+            )
+            socket = method.invoke(device, 1)
+            socket.connect()
+            self._bt_socket = socket
+            logger.info("RFCOMM socket connected (reflection fallback)")
+        except Exception as e2:
+            raise RuntimeError(f"Both RFCOMM methods failed: {e2}") from e2
 
     def _read_bytes(self, max_bytes: int) -> bytes:
         """Read up to max_bytes from the BT socket."""
