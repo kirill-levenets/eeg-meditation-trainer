@@ -251,12 +251,10 @@ class NeuroSkyStream:
                     time.sleep(0.01)
                     continue
                 self._read_count += 1
-                if self._read_count <= 5 or self._read_count % 100 == 0:
-                    logger.debug(f"BT read #{self._read_count}: {len(data)} bytes, first=[{' '.join(f'{b:02x}' for b in data[:16])}]")
+                if self._read_count == 1 or self._read_count % 1000 == 0:
+                    logger.debug(f"BT read #{self._read_count}: {len(data)} bytes")
                 packets = self._parser.feed(data)
                 for pkt in packets:
-                    if self._read_count <= 10 or self._read_count % 100 == 0:
-                        logger.debug(f"Parsed packet: {pkt}")
                     self._apply_packet(pkt)
             except Exception as e:
                 logger.error(f"NeuroSky read error: {e}")
