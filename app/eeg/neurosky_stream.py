@@ -362,12 +362,13 @@ class NeuroSkyStream:
             logger.warning(f"Standard RFCOMM failed: {e}, trying reflection fallback")
 
         try:
+            from jnius import cast
             Integer = autoclass("java.lang.Integer")
+            BluetoothSocket = autoclass("android.bluetooth.BluetoothSocket")
             clazz = device.getClass()
-            method = clazz.getMethod(
-                "createRfcommSocket", Integer.TYPE,
-            )
-            socket = method.invoke(device, 1)
+            param_types = [Integer.TYPE]
+            method = clazz.getMethod("createRfcommSocket", param_types)
+            socket = cast("android.bluetooth.BluetoothSocket", method.invoke(device, Integer(1)))
             socket.connect()
             self._bt_socket = socket
             logger.info("RFCOMM socket connected (reflection fallback)")
