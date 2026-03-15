@@ -174,6 +174,8 @@ class NeuroSkyStream:
 
         # Android Bluetooth objects (set during connect)
         self._bt_socket = None
+        self._bt_input_stream = None
+        self._read_count: int = 0
 
     def set_device(self, address: str, name: str = "") -> None:
         """Set the target Bluetooth device address."""
@@ -240,15 +242,21 @@ class NeuroSkyStream:
 
         logger.info("NeuroSky BT connected, reading packets...")
         self._connected = True
+        self._read_count = 0
 
         while self._running:
             try:
-                data = self._read_bytes(256)
+                data = self._read_bytes(512)
                 if not data:
                     time.sleep(0.01)
                     continue
+                self._read_count += 1
+                if self._read_count <= 5 or self._read_count % 100 == 0:
+                    logger.debug(f"BT read #{self._read_count}: {len(data)} bytes, first=[{' '.join(f'{b:02x}' for b in data[:16])}]")
                 packets = self._parser.feed(data)
                 for pkt in packets:
+                    if self._read_count <= 10 or self._read_count % 100 == 0:
+                        logger.debug(f"Parsed packet: {pkt}")
                     self._apply_packet(pkt)
             except Exception as e:
                 logger.error(f"NeuroSky read error: {e}")
@@ -358,6 +366,7 @@ class NeuroSkyStream:
             socket = device.createRfcommSocketToServiceRecord(uuid)
             socket.connect()
             self._bt_socket = socket
+            self._bt_input_stream = socket.getInputStream()
             logger.info("RFCOMM socket connected (secure)")
             return
         except Exception as e:
@@ -369,6 +378,7 @@ class NeuroSkyStream:
             socket = device.createInsecureRfcommSocketToServiceRecord(uuid)
             socket.connect()
             self._bt_socket = socket
+            self._bt_input_stream = socket.getInputStream()
             logger.info("RFCOMM socket connected (insecure)")
             return
         except Exception as e:
@@ -386,6 +396,7 @@ class NeuroSkyStream:
             socket = cast("android.bluetooth.BluetoothSocket", raw_socket)
             socket.connect()
             self._bt_socket = socket
+            self._bt_input_stream = socket.getInputStream()
             logger.info("RFCOMM socket connected (reflection ch=1)")
             return
         except Exception as e:
@@ -395,27 +406,45 @@ class NeuroSkyStream:
         raise RuntimeError(f"All RFCOMM methods failed: {'; '.join(errors)}")
 
     def _read_bytes(self, max_bytes: int) -> bytes:
-        """Read up to max_bytes from the BT socket."""
-        if self._bt_socket is None:
+        """Read bytes from the BT socket using blocking Java read."""
+        if self._bt_input_stream is None:
             return b""
         try:
-            input_stream = self._bt_socket.getInputStream()
-            available = input_stream.available()
+            # First check if anything available; if not, do a single
+            # blocking read() to wait for at least 1 byte
+            available = self._bt_input_stream.available()
             if available <= 0:
-                return b""
-            to_read = min(available, max_bytes)
-            buf = bytearray(to_read)
-            for i in range(to_read):
-                b = input_stream.read()
-                if b < 0:
-                    break
-                buf[i] = b
-            return bytes(buf)
-        except Exception:
-            return b""
+                # Blocking read of one byte
+                first = self._bt_input_stream.read()
+                if first < 0:
+                    return b""
+                # Now check if more available
+                result = bytearray([first])
+                available = self._bt_input_stream.available()
+                if available > 0:
+                    to_read = min(available, max_bytes - 1)
+                    for _ in range(to_read):
+                        b = self._bt_input_stream.read()
+                        if b < 0:
+                            break
+                        result.append(b)
+                return bytes(result)
+            else:
+                to_read = min(available, max_bytes)
+                result = bytearray()
+                for _ in range(to_read):
+                    b = self._bt_input_stream.read()
+                    if b < 0:
+                        break
+                    result.append(b)
+                return bytes(result)
+        except Exception as e:
+            logger.debug(f"_read_bytes error: {e}")
+            raise
 
     def _close_socket(self) -> None:
         """Close the Bluetooth socket if open."""
+        self._bt_input_stream = None
         if self._bt_socket:
             try:
                 self._bt_socket.close()
