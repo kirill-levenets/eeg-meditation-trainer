@@ -181,10 +181,12 @@ class TestNeuroSkyStreamInterface(unittest.TestCase):
         self.assertLessEqual(len(stream._raw_wave_buffer), 1024)
 
     def test_scan_paired_devices_returns_list_on_desktop(self):
-        # On desktop (no pyjnius), should return empty list
+        # On desktop, should return list of paired devices via bluetoothctl
         devices = NeuroSkyStream.scan_paired_devices()
         self.assertIsInstance(devices, list)
-        self.assertEqual(len(devices), 0)
+        for dev in devices:
+            self.assertIn("name", dev)
+            self.assertIn("address", dev)
 
 
 if __name__ == "__main__":

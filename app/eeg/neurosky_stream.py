@@ -1,20 +1,26 @@
 """NeuroSky MindWave Mobile 2 stream driver.
 
-Connects via Bluetooth Classic RFCOMM on Android using pyjnius.
+Connects via Bluetooth Classic RFCOMM:
+- Android: pyjnius wrapping Java BluetoothSocket API
+- Desktop Linux: Python socket module with BTPROTO_RFCOMM
+
 Parses ThinkGear serial protocol packets to extract:
 - 8 EEG band powers (ASIC_EEG_POWER_INT, code 0x83)
 - Attention (code 0x04) and Meditation (code 0x05) eSense values
 - Signal quality (code 0x02)
 - Raw wave (code 0x80, 512Hz signed 16-bit)
-
-Falls back gracefully on non-Android platforms.
 """
+import socket as _socket
 import struct
+import subprocess
+import sys
 import threading
 import time
 from typing import Dict, List, Optional
 
 from app.logger import logger
+
+_IS_ANDROID: bool = hasattr(sys, "getandroidapilevel")
 
 THINKGEAR_SYNC = 0xAA
 THINKGEAR_EXCODE = 0x55
@@ -151,7 +157,7 @@ class NeuroSkyStream:
     """Bluetooth RFCOMM stream to NeuroSky MindWave Mobile 2.
 
     Interface matches MockEEGStream: start(), stop(), is_connected, read_sample().
-    Uses pyjnius on Android for Bluetooth access.
+    Uses pyjnius on Android, Python socket on desktop Linux.
     """
 
     def __init__(self) -> None:
@@ -172,9 +178,10 @@ class NeuroSkyStream:
         self._latest_signal_quality: int = 200
         self._raw_wave_buffer: List[int] = []
 
-        # Android Bluetooth objects (set during connect)
+        # Bluetooth objects (set during connect)
         self._bt_socket = None
-        self._bt_input_stream = None
+        self._bt_input_stream = None  # Android only (Java InputStream)
+        self._desktop_socket: Optional[_socket.socket] = None  # Desktop only
         self._read_count: int = 0
 
     def set_device(self, address: str, name: str = "") -> None:
@@ -332,7 +339,16 @@ class NeuroSkyStream:
             logger.warning(f"Permission request failed: {e}")
 
     def _connect_bluetooth(self) -> None:
-        """Open RFCOMM socket to the MindWave via Android Bluetooth API."""
+        """Open RFCOMM socket to the MindWave."""
+        if _IS_ANDROID:
+            self._connect_android()
+        else:
+            self._connect_desktop()
+
+    # ---- Android backend ----
+
+    def _connect_android(self) -> None:
+        """Open RFCOMM socket via Android Bluetooth API (pyjnius)."""
         try:
             from jnius import autoclass
         except ImportError:
@@ -360,7 +376,6 @@ class NeuroSkyStream:
         except Exception as e:
             logger.warning(f"cancelDiscovery failed (non-fatal): {e}")
 
-        # Try multiple RFCOMM connection methods
         errors: List[str] = []
 
         # Method 1: Standard secure RFCOMM
@@ -375,7 +390,7 @@ class NeuroSkyStream:
             errors.append(f"secure: {e}")
             logger.warning(f"Secure RFCOMM failed: {e}")
 
-        # Method 2: Insecure RFCOMM (no encryption, works on more devices)
+        # Method 2: Insecure RFCOMM
         try:
             socket = device.createInsecureRfcommSocketToServiceRecord(uuid)
             socket.connect()
@@ -407,20 +422,39 @@ class NeuroSkyStream:
 
         raise RuntimeError(f"All RFCOMM methods failed: {'; '.join(errors)}")
 
+    # ---- Desktop Linux backend ----
+
+    def _connect_desktop(self) -> None:
+        """Open RFCOMM socket via Python socket module (Linux desktop)."""
+        logger.info(f"Connecting to {self._device_name} ({self._device_address}) via desktop RFCOMM...")
+        try:
+            BTPROTO_RFCOMM = 3
+            sock = _socket.socket(
+                _socket.AF_BLUETOOTH, _socket.SOCK_STREAM, BTPROTO_RFCOMM
+            )
+            sock.connect((self._device_address, 1))  # channel 1 for SPP
+            sock.settimeout(5.0)
+            self._desktop_socket = sock
+            logger.info("Desktop RFCOMM socket connected")
+        except Exception as e:
+            raise RuntimeError(f"Desktop RFCOMM connect failed: {e}")
+
     def _read_bytes(self, max_bytes: int) -> bytes:
-        """Read bytes from the BT socket using blocking Java read."""
+        """Read bytes from the BT socket (platform-aware)."""
+        if _IS_ANDROID:
+            return self._read_bytes_android(max_bytes)
+        return self._read_bytes_desktop(max_bytes)
+
+    def _read_bytes_android(self, max_bytes: int) -> bytes:
+        """Read bytes using Java InputStream (Android)."""
         if self._bt_input_stream is None:
             return b""
         try:
-            # First check if anything available; if not, do a single
-            # blocking read() to wait for at least 1 byte
             available = self._bt_input_stream.available()
             if available <= 0:
-                # Blocking read of one byte
                 first = self._bt_input_stream.read()
                 if first < 0:
                     return b""
-                # Now check if more available
                 result = bytearray([first])
                 available = self._bt_input_stream.available()
                 if available > 0:
@@ -441,7 +475,19 @@ class NeuroSkyStream:
                     result.append(b)
                 return bytes(result)
         except Exception as e:
-            logger.debug(f"_read_bytes error: {e}")
+            logger.debug(f"_read_bytes_android error: {e}")
+            raise
+
+    def _read_bytes_desktop(self, max_bytes: int) -> bytes:
+        """Read bytes using Python socket (desktop Linux)."""
+        if self._desktop_socket is None:
+            return b""
+        try:
+            return self._desktop_socket.recv(max_bytes)
+        except _socket.timeout:
+            return b""
+        except Exception as e:
+            logger.debug(f"_read_bytes_desktop error: {e}")
             raise
 
     def _close_socket(self) -> None:
@@ -453,18 +499,31 @@ class NeuroSkyStream:
             except Exception:
                 pass
             self._bt_socket = None
+        if self._desktop_socket:
+            try:
+                self._desktop_socket.close()
+            except Exception:
+                pass
+            self._desktop_socket = None
 
     @staticmethod
     def scan_paired_devices() -> List[Dict[str, str]]:
         """Return list of paired Bluetooth devices.
 
         Returns [{'name': ..., 'address': ...}].
-        Only works on Android. Returns empty list on other platforms.
+        Works on Android (pyjnius) and desktop Linux (bluetoothctl).
         """
+        if _IS_ANDROID:
+            return NeuroSkyStream._scan_paired_android()
+        return NeuroSkyStream._scan_paired_desktop()
+
+    @staticmethod
+    def _scan_paired_android() -> List[Dict[str, str]]:
+        """Scan paired devices via Android Bluetooth API."""
         try:
             from jnius import autoclass
         except ImportError:
-            logger.debug("pyjnius not available, scan_paired_devices returning empty")
+            logger.debug("pyjnius not available, scan returning empty")
             return []
 
         try:
@@ -486,8 +545,42 @@ class NeuroSkyStream:
             logger.info(f"Found {len(devices)} paired BT devices")
             return devices
         except Exception as e:
-            logger.error(f"BT scan error: {e}")
+            logger.error(f"BT scan error (Android): {e}")
             return []
+
+    @staticmethod
+    def _scan_paired_desktop() -> List[Dict[str, str]]:
+        """Scan paired devices via bluetoothctl on Linux desktop."""
+        commands = [
+            ["bluetoothctl", "paired-devices"],
+            ["bluetoothctl", "devices", "Paired"],
+        ]
+        for cmd in commands:
+            try:
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=5
+                )
+                if result.returncode != 0:
+                    continue
+                devices: List[Dict[str, str]] = []
+                for line in result.stdout.strip().splitlines():
+                    # Format: "Device XX:XX:XX:XX:XX:XX DeviceName"
+                    parts = line.strip().split(" ", 2)
+                    if len(parts) >= 3 and parts[0] == "Device":
+                        devices.append({
+                            "address": parts[1],
+                            "name": parts[2],
+                        })
+                logger.info(f"Found {len(devices)} paired BT devices (desktop)")
+                return devices
+            except FileNotFoundError:
+                logger.warning("bluetoothctl not found")
+                return []
+            except Exception as e:
+                logger.debug(f"BT scan cmd {cmd} failed: {e}")
+                continue
+        logger.error("All bluetoothctl scan methods failed")
+        return []
 
 
 if __name__ == "__main__":
