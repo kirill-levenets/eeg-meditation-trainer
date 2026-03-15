@@ -203,7 +203,12 @@ class EEGMeditationApp(App):
         self._audio.start()
         self._timer_screen.start_countdown()
         self._live_screen.set_controls_running()
-        self._live_screen.update_device_status(True)
+        if APP.USE_MOCK_DEVICE:
+            self._live_screen.update_device_status(True)
+        else:
+            self._live_screen.update_device_status(
+                True, device_name=self._real_stream._device_name or "Real EEG"
+            )
         self._live_screen.graph.clear_data()
         self._raw_eeg_screen.raw_graph.clear_data()
         self._raw_eeg_screen.band_graph.clear_data()
@@ -360,8 +365,11 @@ class EEGMeditationApp(App):
     def _on_device_select(self, address: str, name: str) -> None:
         """User selected a BT device from the list."""
         self._real_stream.set_device(address, name)
+        # Auto-switch to real device mode
+        APP.USE_MOCK_DEVICE = False
+        self._settings_screen._device_mode_cb.active = False
         self._settings_screen.update_device_status(False, meta=f"Selected: {name}")
-        logger.info(f"BT device selected: {name} ({address})")
+        logger.info(f"BT device selected: {name} ({address}), switched to real mode")
         if self._current_user_id:
             self._db.set_user_setting(self._current_user_id, "bt_device_address", address)
             self._db.set_user_setting(self._current_user_id, "bt_device_name", name)

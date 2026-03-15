@@ -206,9 +206,10 @@ class LiveSessionScreen(Screen):
             val = metrics.get(key, 0.0)
             label.text = f"{val:.0f}"
 
-    def update_device_status(self, connected: bool) -> None:
+    def update_device_status(self, connected: bool, device_name: str = "") -> None:
         if connected:
-            self._device_label.text = "[Mock EEG] ●"
+            label = f"[{device_name}] ●" if device_name else "[Mock EEG] ●"
+            self._device_label.text = label
             self._device_label.color = (0.2, 0.9, 0.4, 1.0)
         else:
             self._device_label.text = "[Disconnected]"
