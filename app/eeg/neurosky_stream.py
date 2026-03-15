@@ -350,30 +350,49 @@ class NeuroSkyStream:
         except Exception as e:
             logger.warning(f"cancelDiscovery failed (non-fatal): {e}")
 
-        # Try standard RFCOMM first, fall back to reflection method
-        # (many Android devices fail with IOException on the standard call)
+        # Try multiple RFCOMM connection methods
+        errors: List[str] = []
+
+        # Method 1: Standard secure RFCOMM
         try:
             socket = device.createRfcommSocketToServiceRecord(uuid)
             socket.connect()
             self._bt_socket = socket
-            logger.info("RFCOMM socket connected (standard)")
+            logger.info("RFCOMM socket connected (secure)")
             return
         except Exception as e:
-            logger.warning(f"Standard RFCOMM failed: {e}, trying reflection fallback")
+            errors.append(f"secure: {e}")
+            logger.warning(f"Secure RFCOMM failed: {e}")
 
+        # Method 2: Insecure RFCOMM (no encryption, works on more devices)
+        try:
+            socket = device.createInsecureRfcommSocketToServiceRecord(uuid)
+            socket.connect()
+            self._bt_socket = socket
+            logger.info("RFCOMM socket connected (insecure)")
+            return
+        except Exception as e:
+            errors.append(f"insecure: {e}")
+            logger.warning(f"Insecure RFCOMM failed: {e}")
+
+        # Method 3: Reflection-based createRfcommSocket(channel=1)
         try:
             from jnius import cast
             Integer = autoclass("java.lang.Integer")
-            BluetoothSocket = autoclass("android.bluetooth.BluetoothSocket")
             clazz = device.getClass()
-            param_types = [Integer.TYPE]
-            method = clazz.getMethod("createRfcommSocket", param_types)
-            socket = cast("android.bluetooth.BluetoothSocket", method.invoke(device, Integer(1)))
+            intclass = Integer.TYPE
+            method = clazz.getMethod("createRfcommSocket", [intclass])
+            raw_socket = method.invoke(device, [Integer.valueOf(1)])
+            socket = cast("android.bluetooth.BluetoothSocket", raw_socket)
             socket.connect()
             self._bt_socket = socket
-            logger.info("RFCOMM socket connected (reflection fallback)")
-        except Exception as e2:
-            raise RuntimeError(f"Both RFCOMM methods failed: {e2}") from e2
+            logger.info("RFCOMM socket connected (reflection ch=1)")
+            return
+        except Exception as e:
+            errors.append(f"reflection: {e}")
+            logger.warning(f"Reflection RFCOMM failed: {e}")
+
+        raise RuntimeError(f"All RFCOMM methods failed: {'; '.join(errors)}")
 
     def _read_bytes(self, max_bytes: int) -> bytes:
         """Read up to max_bytes from the BT socket."""
