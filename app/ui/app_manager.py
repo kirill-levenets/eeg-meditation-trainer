@@ -368,6 +368,8 @@ class EEGMeditationApp(App):
         else:
             addr = self._real_stream._device_address or "none"
             self._settings_screen.update_device_status(False, meta=f"Mode: Real Device ({addr})")
+        if self._current_user_id:
+            self._db.set_user_setting(self._current_user_id, "use_mock", str(use_mock))
         logger.info(f"Device mode: {'Mock' if use_mock else 'Real'}")
 
     def _on_scan_devices(self) -> None:
@@ -496,6 +498,7 @@ class EEGMeditationApp(App):
         self._db.set_user_setting(uid, "sinking_alert", str(self._audio.sinking_alert_enabled))
         self._db.set_user_setting(uid, "disconnect_alert", str(self._audio.disconnect_alert_enabled))
         self._db.set_user_setting(uid, "threshold", str(self._settings_screen.threshold))
+        self._db.set_user_setting(uid, "use_mock", str(APP.USE_MOCK_DEVICE))
         toggles = self._settings_screen.graph_toggles
         for key, active in toggles.items():
             self._db.set_user_setting(uid, f"toggle_{key}", str(active))
@@ -557,6 +560,15 @@ class EEGMeditationApp(App):
             self._settings_screen.update_device_status(
                 False, meta=f"Saved device: {bt_name or bt_addr}"
             )
+
+        use_mock = g(user_id, "use_mock")
+        if use_mock is not None:
+            val = use_mock == "True"
+            APP.USE_MOCK_DEVICE = val
+            self._settings_screen._device_mode_cb.active = val
+        elif bt_addr:
+            APP.USE_MOCK_DEVICE = False
+            self._settings_screen._device_mode_cb.active = False
 
         logger.debug(f"Loaded settings for user {user_id}")
 

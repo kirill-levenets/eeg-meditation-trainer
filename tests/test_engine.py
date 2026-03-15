@@ -107,7 +107,7 @@ class TestMetricsEngine(unittest.TestCase):
             "timestamp", "alpha_norm", "beta_norm", "gamma_norm",
             "theta_norm", "delta_norm", "meditation_score", "distraction",
             "subtle_distraction", "sinking", "shamatha_score", "stability",
-            "state", "calmness",
+            "state", "calmness", "native_attention", "native_meditation",
         ]
         for key in expected_keys:
             self.assertIn(key, result, f"Missing key: {key}")
@@ -153,7 +153,7 @@ class TestMetricsEngine(unittest.TestCase):
     def test_subtle_distraction_zero_when_below_threshold(self):
         self.engine.meditation_threshold = 200
         result = self.engine.compute_subtle_distraction(
-            meditation_score=50, stability=100
+            meditation_score=50
         )
         self.assertAlmostEqual(result, 0.0)
 

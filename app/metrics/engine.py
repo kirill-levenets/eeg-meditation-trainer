@@ -26,6 +26,8 @@ class MetricsEngine:
         )
         self._meditation_threshold: int = METRICS.MEDITATION_THRESHOLD_DEFAULT
         self._med_ratio_buffer: deque = deque(maxlen=self._MED_AVG_WINDOW)
+        self._ticks_above_threshold: int = 0
+        self._recent_med_buffer: deque = deque(maxlen=10)
 
     @property
     def meditation_threshold(self) -> int:
@@ -137,17 +139,37 @@ class MetricsEngine:
         return self._stability_buffer.variance()
 
     def compute_subtle_distraction(
-        self, meditation_score: float, stability: float
+        self, meditation_score: float
     ) -> float:
-        """Subtle distraction: high meditation but unstable."""
-        if (
-            meditation_score > self._meditation_threshold
-            and stability > METRICS.STABILITY_LIMIT
-        ):
-            capped = min(stability, METRICS.STABILITY_MAX)
-            raw = capped / METRICS.STABILITY_MAX
-            return self.sigmoid(raw, SIGMOID.SUBTLE_K, SIGMOID.SUBTLE_MIDPOINT)
-        return 0.0
+        """Subtle distraction: meditation above threshold but oscillating.
+
+        Only triggers after meditation has been above threshold for at
+        least 10 consecutive ticks (5s), preventing false positives during
+        ramp-up.  Uses short-window variance (last 10 ticks / 5s) to
+        detect recent oscillations rather than the full 20s buffer.
+        """
+        self._recent_med_buffer.append(meditation_score)
+        if meditation_score > self._meditation_threshold:
+            self._ticks_above_threshold += 1
+        else:
+            self._ticks_above_threshold = 0
+            return 0.0
+
+        if self._ticks_above_threshold < 10:
+            return 0.0
+
+        if len(self._recent_med_buffer) < 2:
+            return 0.0
+        n = len(self._recent_med_buffer)
+        mean = sum(self._recent_med_buffer) / n
+        recent_var = sum((x - mean) ** 2 for x in self._recent_med_buffer) / n
+
+        if recent_var < METRICS.STABILITY_LIMIT:
+            return 0.0
+
+        capped = min(recent_var, METRICS.STABILITY_MAX)
+        raw = capped / METRICS.STABILITY_MAX
+        return self.sigmoid(raw, SIGMOID.SUBTLE_K, SIGMOID.SUBTLE_MIDPOINT)
 
     def compute_shamatha(
         self, calmness: float, norms: Dict[str, float], stability: float
@@ -196,6 +218,9 @@ class MetricsEngine:
         norms = self.normalize_bands(bands)
 
         # Suppress metrics when total power is too low (startup / no signal)
+        native_attention = raw_sample.get("attention", 0.0)
+        native_meditation = raw_sample.get("meditation", 0.0)
+
         if norms["total_power"] < self.MIN_TOTAL_POWER:
             self._stability_buffer.push(0.0)
             return {
@@ -206,6 +231,8 @@ class MetricsEngine:
                 "subtle_distraction": 0.0, "sinking": 0.0,
                 "shamatha_score": 0.0, "stability": 0.0,
                 "state": "Neutral", "calmness": 0.0,
+                "native_attention": native_attention,
+                "native_meditation": native_meditation,
             }
 
         calmness = self.compute_calmness(norms)
@@ -216,7 +243,7 @@ class MetricsEngine:
 
         sinking = self.compute_sinking(norms)
         distraction = self.compute_distraction(norms)
-        subtle_distraction = self.compute_subtle_distraction(meditation_score, stability)
+        subtle_distraction = self.compute_subtle_distraction(meditation_score)
         shamatha = self.compute_shamatha(calmness, norms, stability)
         state = self.classify_state(meditation_score, stability, sinking, distraction)
 
@@ -235,12 +262,16 @@ class MetricsEngine:
             "stability": stability,
             "state": state,
             "calmness": calmness,
+            "native_attention": native_attention,
+            "native_meditation": native_meditation,
         }
 
     def reset(self) -> None:
         self._rolling_buffer.reset()
         self._stability_buffer.reset()
         self._med_ratio_buffer.clear()
+        self._ticks_above_threshold = 0
+        self._recent_med_buffer.clear()
 
 
 if __name__ == "__main__":

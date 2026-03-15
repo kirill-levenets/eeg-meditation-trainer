@@ -19,6 +19,8 @@ METRICS_PREVIEW_COLORS = {
     "distraction": (1.0, 0.3, 0.3, 1.0),
     "sinking": (0.8, 0.5, 0.0, 1.0),
     "subtle_distraction": (0.9, 0.9, 0.2, 1.0),
+    "native_attention": (0.6, 0.3, 0.9, 1.0),
+    "native_meditation": (0.3, 0.9, 0.9, 1.0),
 }
 
 METRICS_PREVIEW_SCALES = {
@@ -27,6 +29,8 @@ METRICS_PREVIEW_SCALES = {
     "distraction": 100.0,
     "sinking": 100.0,
     "subtle_distraction": 100.0,
+    "native_attention": 100.0,
+    "native_meditation": 100.0,
 }
 
 RAW_EEG_PREVIEW_COLORS = {

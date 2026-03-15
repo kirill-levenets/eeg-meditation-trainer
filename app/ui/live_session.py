@@ -18,6 +18,8 @@ METRICS_COLORS = {
     "distraction": (1.0, 0.3, 0.3, 1.0),
     "sinking": (0.8, 0.5, 0.0, 1.0),
     "subtle_distraction": (0.9, 0.9, 0.2, 1.0),
+    "native_attention": (0.6, 0.3, 0.9, 1.0),
+    "native_meditation": (0.3, 0.9, 0.9, 1.0),
 }
 
 METRICS_SCALES = {
@@ -26,6 +28,8 @@ METRICS_SCALES = {
     "distraction": 100.0,
     "sinking": 100.0,
     "subtle_distraction": 100.0,
+    "native_attention": 100.0,
+    "native_meditation": 100.0,
 }
 
 
@@ -84,7 +88,7 @@ class LiveSessionScreen(Screen):
         root.add_widget(legend)
 
         stats_grid = GridLayout(
-            cols=4, size_hint_y=None, height=dp(60), spacing=dp(4), padding=dp(4)
+            cols=6, size_hint_y=None, height=dp(60), spacing=dp(4), padding=dp(4)
         )
         self._stat_labels: Dict[str, Label] = {}
         stat_items = [
@@ -92,6 +96,8 @@ class LiveSessionScreen(Screen):
             ("shamatha_score", "Shamatha"),
             ("distraction", "Distraction"),
             ("sinking", "Sinking"),
+            ("native_attention", "NS Attn"),
+            ("native_meditation", "NS Med"),
         ]
         for key, title in stat_items:
             box = BoxLayout(orientation="vertical")

@@ -213,6 +213,8 @@ class SettingsScreen(Screen):
             "distraction": "Distraction",
             "sinking": "Sinking",
             "subtle_distraction": "Subtle Distraction",
+            "native_attention": "NS Attention",
+            "native_meditation": "NS Meditation",
         }
         self._checkboxes: Dict[str, CheckBox] = {}
         for key, display_name in toggle_names.items():

@@ -7,17 +7,17 @@ Mobile application for training Shamatha meditation using EEG neurofeedback. Bui
 - **Real-time EEG visualization** — Live scrollable graph with Y-axis scale numbers, grid lines, realtime value labels at line endpoints, X-axis timestamps, and dashed meditation threshold line
 - **Raw EEG data tab** — Oscillating EEG waveform (128Hz sub-sampled, bipolar ±μV display) + aggregated frequency band plots
 - **Scrollable graphs** — All graphs support time-scrolling through the full 5-minute data window via slider or touch drag/slide on the graph
-- **Meditation scoring** — Classic EEG-meditation formula `100*min(avg((a1+0.8*a2)/(b2+b1+0.4*t+0.08*d),4)*0.75-0.1,1)` with sqrt-normalized relative band units; Calmness, Shamatha score, Distraction, and Sinking detection
+- **Meditation scoring** — Classic EEG-meditation formula `100*min(avg((a1+0.8*a2)/(b2+b1+0.4*t+0.08*d),4)*0.75-0.1,1)` with sqrt-normalized relative band units; Calmness, Shamatha score, Distraction, Sinking, and Subtle Distraction (short-window variance with warmup guard); native NeuroSky eSense Attention & Meditation displayed on live graph and stored in DB/CSV
 - **Dual-channel audio engine** — Ch1: gapless white noise via crossfaded WAV + Kivy SoundLoader (volume scales with meditation); Ch2: synthesized tingsha bell for sinking alerts with cooldown/debounce. Test Audio plays noise→bell→disconnect sequence
 - **Meditation timer** — Configurable duration (1–120 min) with preset buttons, enable/disable toggle (updates display immediately), countdown display, auto-stop on expiry, file chooser dialog for custom end-sound with test button
 - **State classification** — Stable Focus, Subtle Distraction, Gross Distraction, Sinking
 - **NeuroSky MindWave Mobile 2** — Real EEG device support via Bluetooth Classic RFCOMM on Android (pyjnius) and desktop Linux (Python socket BTPROTO_RFCOMM); ThinkGear protocol parser extracts 8 band powers, attention, meditation, signal quality, raw wave (512Hz); background reader thread with auto-reconnect; desktop paired device scanning via bluetoothctl
 - **Settings panel** — Device status/meta display, mock/real device switch, BT device scan + select from paired devices list, threshold slider (20–100), test audio button, sinking alert toggle, disconnect alert toggle, graph metric toggles
 - **Session diary** — Notes, tags, mood rating, CSV export, delete (with confirmation dialog) & rename sessions (name pre-filled with fallback), selected session highlight, tabbed signal preview (Metrics / Raw EEG / Frequencies) with 60s viewport + touch scroll + threshold line
-- **Full signal storage** — Raw EEG bands, computed metrics, frequencies, stability, and calmness all stored per-tick in SQLite
+- **Full signal storage** — Raw EEG bands, computed metrics, frequencies, stability, calmness, native NeuroSky attention & meditation all stored per-tick in SQLite
 - **CSV export** — Export any session's full signal data (raw + computed) to CSV from the diary screen
 - **Mock EEG simulation** — NeuroSky-compatible format: band powers in ASIC_EEG_POWER range (3-byte unsigned ints), 512Hz raw waveform, eSense attention/meditation (0-100), signal quality; state machine with smooth transitions, cross-band coupling, Gaussian noise, burst activity
-- **User profiles** — Profile chooser/create on app launch; per-user session filtering; last user persisted across restarts; diary hidden until user selected; per-user settings persistence (timer, alerts, sounds, threshold, graph metric toggles)
+- **User profiles** — Profile chooser/create on app launch; per-user session filtering; last user persisted across restarts; diary hidden until user selected; per-user settings persistence (timer, alerts, sounds, threshold, graph metric toggles, device mode mock/real)
 - **Session guards** — Start blocked if no user selected or if mock disabled without real BT device selected
 - **Analytics** — Daily/weekly/monthly trends, streak counter, progress tracking, database storage usage display
 - **Debug logging** — Every action/event logged; raw EEG samples logged periodically during session

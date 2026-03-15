@@ -74,6 +74,8 @@ class DatabaseManager:
                 shamatha_score REAL DEFAULT 0,
                 stability REAL DEFAULT 0,
                 calmness REAL DEFAULT 0,
+                native_attention REAL DEFAULT 0,
+                native_meditation REAL DEFAULT 0,
                 FOREIGN KEY (session_id) REFERENCES sessions(id)
             );
 
@@ -109,6 +111,8 @@ class DatabaseManager:
             "gamma2_raw": "REAL DEFAULT 0",
             "stability": "REAL DEFAULT 0",
             "calmness": "REAL DEFAULT 0",
+            "native_attention": "REAL DEFAULT 0",
+            "native_meditation": "REAL DEFAULT 0",
         }
         for col, col_type in new_columns.items():
             if col not in existing:
@@ -176,6 +180,8 @@ class DatabaseManager:
                 m.get("shamatha_score", 0),
                 m.get("stability", 0),
                 m.get("calmness", 0),
+                m.get("native_attention", 0),
+                m.get("native_meditation", 0),
             )
             for m in metrics_list
         ]
@@ -186,8 +192,9 @@ class DatabaseManager:
              beta1_raw, beta2_raw, gamma1_raw, gamma2_raw,
              alpha_norm, beta_norm, theta_norm, delta_norm, gamma_norm,
              meditation_score, distraction, subtle_distraction, sinking,
-             shamatha_score, stability, calmness)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             shamatha_score, stability, calmness,
+             native_attention, native_meditation)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
