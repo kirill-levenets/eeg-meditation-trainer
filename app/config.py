@@ -57,6 +57,16 @@ class AppConfig:
     BELL_FREQUENCY: float = 800.0
     BELL_DURATION: float = 0.6
 
+    SUBTLE_ALERT_THRESHOLD: float = 30.0
+    SUBTLE_ALERT_COOLDOWN: float = 20.0
+    CHIME_FREQUENCY: float = 1200.0
+    CHIME_DURATION: float = 0.8
+
+    DISCONNECT_FREQ_LOW: float = 600.0
+    DISCONNECT_FREQ_HIGH: float = 900.0
+    DISCONNECT_DURATION: float = 0.8
+    DISCONNECT_CYCLES: int = 4
+
     DISCONNECT_ALERT_ENABLED: bool = False
     USE_MOCK_DEVICE: bool = True
 

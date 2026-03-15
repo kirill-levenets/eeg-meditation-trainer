@@ -306,6 +306,7 @@ class EEGMeditationApp(App):
         self._audio.update(metrics.get("meditation_score", 0))
         if self._tick_count > 10:
             self._audio.update_sinking(metrics.get("sinking", 0))
+            self._audio.update_subtle_distraction(metrics.get("subtle_distraction", 0))
 
         self._live_screen.graph.add_point(metrics)
         self._live_screen.update_scroll_range()

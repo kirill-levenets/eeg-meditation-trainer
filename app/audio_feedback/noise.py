@@ -62,6 +62,48 @@ def _generate_bell_wav(rate: int, freq: float, duration: float) -> bytes:
     return struct.pack(f"<{n_samples}h", *samples)
 
 
+def _generate_chime_wav(rate: int, freq: float, duration: float) -> bytes:
+    """Synthesize a gentle chime for subtle distraction.
+
+    Higher pitch than the sinking bell, softer harmonics, longer
+    exponential decay with a shimmer effect.
+    """
+    n_samples = int(rate * duration)
+    samples = []
+    for i in range(n_samples):
+        progress = i / n_samples
+        envelope = math.exp(-2.0 * progress)
+        shimmer = 1.0 + 0.15 * math.sin(2 * math.pi * 6.0 * i / rate)
+        value = envelope * shimmer * math.sin(2 * math.pi * freq * i / rate)
+        value += 0.2 * envelope * math.sin(2 * math.pi * freq * 2.0 * i / rate)
+        value += 0.08 * envelope * math.sin(2 * math.pi * freq * 3.0 * i / rate)
+        samples.append(int(value * 20000))
+    return struct.pack(f"<{n_samples}h", *samples)
+
+
+def _generate_disconnect_wav(
+    rate: int, freq_low: float, freq_high: float, duration: float, cycles: int
+) -> bytes:
+    """Synthesize an urgent alternating dual-frequency warble alert.
+
+    Rapidly alternates between freq_low and freq_high for `cycles` times
+    within the given duration. Sounds harsh and attention-grabbing.
+    """
+    n_samples = int(rate * duration)
+    cycle_len = n_samples // cycles
+    half_cycle = cycle_len // 2
+    samples = []
+    for i in range(n_samples):
+        progress = i / n_samples
+        envelope = 1.0 - 0.3 * progress
+        pos_in_cycle = i % cycle_len
+        freq = freq_low if pos_in_cycle < half_cycle else freq_high
+        value = envelope * math.sin(2 * math.pi * freq * i / rate)
+        value += 0.5 * envelope * math.sin(2 * math.pi * freq * 1.5 * i / rate)
+        samples.append(max(-32767, min(32767, int(value * 22000))))
+    return struct.pack(f"<{n_samples}h", *samples)
+
+
 class AudioEngine:
     """Dual-channel audio engine for meditation neurofeedback.
 
@@ -92,15 +134,34 @@ class AudioEngine:
         self._tmpdir: str = tempfile.mkdtemp(prefix="eeg_audio_")
         self._noise_path = os.path.join(self._tmpdir, "noise.wav")
         self._bell_path = os.path.join(self._tmpdir, "bell.wav")
+        self._chime_path = os.path.join(self._tmpdir, "chime.wav")
+        self._disconnect_path = os.path.join(self._tmpdir, "disconnect.wav")
+        self._chime_sound: object = None
+        self._disconnect_sound: object = None
+        self._subtle_cooldown_until: float = 0.0
         self._lock = threading.Lock()
-        self._prepare_bell()
+        self._prepare_sounds()
 
-    def _prepare_bell(self) -> None:
-        """Pre-generate the bell WAV file."""
+    def _prepare_sounds(self) -> None:
+        """Pre-generate all alert WAV files."""
         pcm = _generate_bell_wav(
             self._rate, APP.BELL_FREQUENCY, APP.BELL_DURATION,
         )
         _write_wav(self._bell_path, pcm, self._rate)
+
+        pcm = _generate_chime_wav(
+            self._rate, APP.CHIME_FREQUENCY, APP.CHIME_DURATION,
+        )
+        _write_wav(self._chime_path, pcm, self._rate)
+
+        pcm = _generate_disconnect_wav(
+            self._rate,
+            APP.DISCONNECT_FREQ_LOW,
+            APP.DISCONNECT_FREQ_HIGH,
+            APP.DISCONNECT_DURATION,
+            APP.DISCONNECT_CYCLES,
+        )
+        _write_wav(self._disconnect_path, pcm, self._rate)
 
     def _rebuild_noise(self, volume: float) -> None:
         """Regenerate noise WAV at given volume and reload SoundLoader."""
@@ -155,21 +216,59 @@ class AudioEngine:
             self._sinking_cooldown_until = now + APP.SINKING_ALERT_COOLDOWN
             logger.info(f"Sinking alert triggered (score={sinking_score:.0f})")
 
-    def _play_bell(self) -> None:
-        """Play the bell WAV once via SoundLoader."""
+    def update_subtle_distraction(self, subtle_score: float) -> None:
+        """Check subtle distraction score and play gentle chime if needed."""
+        if not self._is_playing:
+            return
+        now = time.time()
+        if subtle_score > APP.SUBTLE_ALERT_THRESHOLD and now >= self._subtle_cooldown_until:
+            self._play_chime()
+            self._subtle_cooldown_until = now + APP.SUBTLE_ALERT_COOLDOWN
+            logger.info(f"Subtle distraction chime (score={subtle_score:.0f})")
+
+    def _play_sound(self, path: str, volume: float = 0.8) -> object:
+        """Play a WAV file once via SoundLoader. Returns the Sound object."""
         try:
             from kivy.core.audio import SoundLoader
-            if self._bell_sound:
-                self._bell_sound.stop()
-                self._bell_sound.unload()
-            snd = SoundLoader.load(self._bell_path)
+            snd = SoundLoader.load(path)
             if snd:
                 snd.loop = False
-                snd.volume = 0.8
+                snd.volume = volume
                 snd.play()
-                self._bell_sound = snd
+                return snd
         except Exception as e:
-            logger.warning(f"Failed to play bell: {e}")
+            logger.warning(f"Failed to play sound {path}: {e}")
+        return None
+
+    def _play_bell(self) -> None:
+        """Play the sinking bell WAV."""
+        if self._bell_sound:
+            try:
+                self._bell_sound.stop()
+                self._bell_sound.unload()
+            except Exception:
+                pass
+        self._bell_sound = self._play_sound(self._bell_path, 0.8)
+
+    def _play_chime(self) -> None:
+        """Play the gentle chime WAV for subtle distraction."""
+        if self._chime_sound:
+            try:
+                self._chime_sound.stop()
+                self._chime_sound.unload()
+            except Exception:
+                pass
+        self._chime_sound = self._play_sound(self._chime_path, 0.6)
+
+    def _play_disconnect(self) -> None:
+        """Play the harsh disconnect alert WAV."""
+        if self._disconnect_sound:
+            try:
+                self._disconnect_sound.stop()
+                self._disconnect_sound.unload()
+            except Exception:
+                pass
+        self._disconnect_sound = self._play_sound(self._disconnect_path, 0.9)
 
     def start(self) -> None:
         """Start white noise playback."""
@@ -183,20 +282,15 @@ class AudioEngine:
 
     def stop(self) -> None:
         """Stop all audio playback."""
-        if self._noise_sound:
-            try:
-                self._noise_sound.stop()
-                self._noise_sound.unload()
-            except Exception:
-                pass
-            self._noise_sound = None
-        if self._bell_sound:
-            try:
-                self._bell_sound.stop()
-                self._bell_sound.unload()
-            except Exception:
-                pass
-            self._bell_sound = None
+        for snd_attr in ("_noise_sound", "_bell_sound", "_chime_sound", "_disconnect_sound"):
+            snd = getattr(self, snd_attr, None)
+            if snd:
+                try:
+                    snd.stop()
+                    snd.unload()
+                except Exception:
+                    pass
+                setattr(self, snd_attr, None)
         self._is_playing = False
         self._volume = 0.0
         self._applied_volume = -1.0
@@ -220,13 +314,17 @@ class AudioEngine:
         def _run_sequence():
             time.sleep(APP.AUDIO_TEST_DURATION)
             # Bell (sinking alert)
-            logger.info("Audio test: bell")
+            logger.info("Audio test: sinking bell")
             self._play_bell()
             time.sleep(APP.BELL_DURATION + 0.3)
-            # Disconnect alert (same bell, just verifies the path)
+            # Chime (subtle distraction)
+            logger.info("Audio test: subtle distraction chime")
+            self._play_chime()
+            time.sleep(APP.CHIME_DURATION + 0.3)
+            # Disconnect alert (harsh warble)
             logger.info("Audio test: disconnect alert")
-            self._play_bell()
-            time.sleep(APP.BELL_DURATION + 0.3)
+            self._play_disconnect()
+            time.sleep(APP.DISCONNECT_DURATION + 0.3)
             self._test_active = False
             if not was_playing:
                 self.stop()
@@ -257,10 +355,10 @@ class AudioEngine:
         logger.info("Timer sound: default bell")
 
     def play_disconnect_alert(self) -> None:
-        """Play a short warning tone when device disconnects."""
+        """Play a harsh warble when device disconnects."""
         if not self._disconnect_alert_enabled:
             return
-        self._play_bell()
+        self._play_disconnect()
         logger.info("Disconnect alert played")
 
     @property
@@ -290,7 +388,7 @@ class AudioEngine:
     def cleanup(self) -> None:
         """Stop playback, unload sounds, remove temp files."""
         self.stop()
-        for path in (self._noise_path, self._bell_path):
+        for path in (self._noise_path, self._bell_path, self._chime_path, self._disconnect_path):
             try:
                 if path and os.path.exists(path):
                     os.remove(path)
@@ -315,6 +413,8 @@ if __name__ == "__main__":
     print(f"Sinking alert enabled: {engine.sinking_alert_enabled}")
     print(f"Disconnect alert enabled: {engine.disconnect_alert_enabled}")
     print(f"Bell WAV exists: {os.path.exists(engine._bell_path)}")
+    print(f"Chime WAV exists: {os.path.exists(engine._chime_path)}")
+    print(f"Disconnect WAV exists: {os.path.exists(engine._disconnect_path)}")
     engine.cleanup()
     print(f"Temp cleaned: {not os.path.exists(engine._noise_path)}")
     print("Done")
