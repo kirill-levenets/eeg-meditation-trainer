@@ -16,7 +16,7 @@ Mobile application for training Shamatha meditation using EEG neurofeedback. Bui
 - **Session diary** — Notes, tags, mood rating, CSV export, delete (with confirmation dialog) & rename sessions (name pre-filled with fallback), selected session highlight, tabbed signal preview (Metrics / Raw EEG / Frequencies) with 60s viewport + touch scroll + threshold line
 - **Full signal storage** — Raw EEG bands, computed metrics, frequencies, stability, and calmness all stored per-tick in SQLite
 - **CSV export** — Export any session's full signal data (raw + computed) to CSV from the diary screen
-- **Mock EEG simulation** — Frequency-based synthesis: picks dominant Hz per band from physiological ranges for 5-10s epochs, builds composite signal with harmonics, cross-band coupling, smooth state transitions, Gaussian noise, and 64-sample oscillating waveform burst per tick
+- **Mock EEG simulation** — NeuroSky-compatible format: band powers in ASIC_EEG_POWER range (3-byte unsigned ints), 512Hz raw waveform, eSense attention/meditation (0-100), signal quality; state machine with smooth transitions, cross-band coupling, Gaussian noise, burst activity
 - **User profiles** — Profile chooser/create on app launch; per-user session filtering; last user persisted across restarts; diary hidden until user selected; per-user settings persistence (timer, alerts, sounds, threshold, graph metric toggles)
 - **Session guards** — Start blocked if no user selected or if mock disabled without real BT device selected
 - **Analytics** — Daily/weekly/monthly trends, streak counter, progress tracking, database storage usage display

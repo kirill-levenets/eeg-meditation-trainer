@@ -47,16 +47,17 @@ class MockEEGStream:
     oscillation frequency, amplitude envelope, and noise profile.
     """
 
-    # Base amplitudes (µV-like) per band — typical resting EEG
+    # Base amplitudes matching NeuroSky ASIC_EEG_POWER (3-byte unsigned int)
+    # Typical values from real MindWave Mobile 2 recordings
     BASE_AMPLITUDES: Dict[str, float] = {
-        "delta": 280.0,   # 0.5-4 Hz, high during sleep/drowsiness
-        "theta": 180.0,   # 4-8 Hz, meditation/drowsiness
-        "alpha1": 350.0,  # 8-10 Hz, relaxation, eyes closed
-        "alpha2": 300.0,  # 10-12 Hz, calm alertness
-        "beta1": 120.0,   # 12-20 Hz, active thinking
-        "beta2": 90.0,    # 20-30 Hz, intense focus
-        "gamma1": 40.0,   # 30-50 Hz, cognitive processing
-        "gamma2": 30.0,   # 50-70 Hz, high-level cognition
+        "delta": 500000.0,   # 0.5-4 Hz, dominant during drowsiness
+        "theta": 150000.0,   # 4-8 Hz, meditation/drowsiness
+        "alpha1": 80000.0,   # 8-10 Hz, relaxation, eyes closed
+        "alpha2": 60000.0,   # 10-12 Hz, calm alertness
+        "beta1": 40000.0,    # 12-20 Hz, active thinking
+        "beta2": 30000.0,    # 20-30 Hz, intense focus
+        "gamma1": 15000.0,   # 30-50 Hz, cognitive processing
+        "gamma2": 10000.0,   # 50-70 Hz, high-level cognition
     }
 
     # Characteristic oscillation rates (Hz) for amplitude modulation
@@ -83,6 +84,10 @@ class MockEEGStream:
         "gamma2": 0.28,
     }
 
+    # Raw EEG waveform parameters (512 Hz, signed 16-bit range)
+    RAW_WAVE_SAMPLE_RATE: float = 512.0
+    RAW_WAVE_AMPLITUDE: float = 200.0  # typical peak amplitude
+
     def __init__(self) -> None:
         self._running: bool = False
         self._start_time: float = 0.0
@@ -96,6 +101,8 @@ class MockEEGStream:
         self._phase_offsets: Dict[str, float] = {
             k: random.uniform(0, 2 * math.pi) for k in self.BASE_AMPLITUDES
         }
+        self._last_sample_time: float = 0.0
+        self._signal_quality: int = 0  # 0 = good contact
         self._init_state()
 
     def _init_state(self) -> None:
@@ -111,6 +118,7 @@ class MockEEGStream:
     def start(self) -> None:
         self._running = True
         self._start_time = time.time()
+        self._last_sample_time = self._start_time
         self._state_timer = 0.0
         self._init_state()
 
@@ -175,15 +183,21 @@ class MockEEGStream:
         t = max(0.0, min(1.0, t))
         return t * t * (3.0 - 2.0 * t)
 
-    def read_sample(self) -> Dict[str, float]:
-        """Generate a single mock EEG sample with realistic band activity."""
-        t = time.time() - self._start_time if self._running else 0.0
+    def read_sample(self) -> Dict:
+        """Generate a single mock EEG sample matching NeuroSky ThinkGear format.
+
+        Returns dict with: delta, theta, alpha1, alpha2, beta1, beta2,
+        gamma1, gamma2, attention, meditation, signal_quality, timestamp,
+        raw_eeg_waveform (list of 512Hz samples since last call).
+        """
+        now = time.time()
+        t = now - self._start_time if self._running else 0.0
 
         self._advance_state(0.5)
 
         multipliers = self._get_effective_multipliers()
 
-        sample: Dict[str, float] = {"timestamp": t}
+        sample: Dict = {"timestamp": t}
 
         for band in self.BASE_AMPLITUDES:
             base = self.BASE_AMPLITUDES[band]
@@ -221,7 +235,7 @@ class MockEEGStream:
 
             sample[band] = max(0.0, value)
 
-        # Derived attention/meditation from band ratios
+        # Derived attention/meditation (0-100, matching NeuroSky eSense)
         alpha_power = sample.get("alpha1", 0) + sample.get("alpha2", 0)
         beta_power = sample.get("beta1", 0) + sample.get("beta2", 0)
         theta_power = sample.get("theta", 0)
@@ -232,21 +246,45 @@ class MockEEGStream:
 
         sample["attention"] = float(attention)
         sample["meditation"] = float(meditation)
+        sample["signal_quality"] = self._signal_quality
+
+        # Generate raw EEG waveform at 512Hz since last call
+        dt = now - self._last_sample_time if self._last_sample_time > 0 else 0.5
+        self._last_sample_time = now
+        n_raw = int(dt * self.RAW_WAVE_SAMPLE_RATE)
+        n_raw = max(1, min(n_raw, 1024))  # clamp
+        waveform: List[int] = []
+        amp = self.RAW_WAVE_AMPLITUDE * multipliers.get("alpha1", 1.0)
+        for i in range(n_raw):
+            t_raw = t + i / self.RAW_WAVE_SAMPLE_RATE
+            # Composite signal: alpha ~10Hz + theta ~6Hz + noise
+            val = (
+                amp * 0.5 * math.sin(2 * math.pi * 10.0 * t_raw)
+                + amp * 0.3 * math.sin(2 * math.pi * 6.0 * t_raw + 0.7)
+                + amp * 0.1 * math.sin(2 * math.pi * 20.0 * t_raw + 1.3)
+                + random.gauss(0, amp * 0.15)
+            )
+            waveform.append(int(max(-32768, min(32767, val))))
+        sample["raw_eeg_waveform"] = waveform
+
         return sample
 
 
 if __name__ == "__main__":
     stream = MockEEGStream()
     stream.start()
-    print("Band amplitudes over 20 samples (0.1s intervals):")
-    print(f"{'t':>5} {'delta':>7} {'theta':>7} {'alpha1':>7} {'alpha2':>7} "
-          f"{'beta1':>7} {'beta2':>7} {'gamma1':>7} {'gamma2':>7} {'att':>4} {'med':>4}")
-    for i in range(20):
+    print("Band powers (NeuroSky range) over 10 samples (0.5s intervals):")
+    print(f"{'t':>5} {'delta':>10} {'theta':>10} {'alpha1':>10} {'alpha2':>10} "
+          f"{'beta1':>10} {'beta2':>10} {'gamma1':>10} {'gamma2':>10} "
+          f"{'att':>4} {'med':>4} {'sq':>3} {'raw#':>5}")
+    for i in range(10):
         s = stream.read_sample()
-        print(f"{s['timestamp']:5.1f} {s['delta']:7.0f} {s['theta']:7.0f} "
-              f"{s['alpha1']:7.0f} {s['alpha2']:7.0f} {s['beta1']:7.0f} "
-              f"{s['beta2']:7.0f} {s['gamma1']:7.0f} {s['gamma2']:7.0f} "
-              f"{s['attention']:4.0f} {s['meditation']:4.0f}")
-        time.sleep(0.1)
+        wf = s.get("raw_eeg_waveform", [])
+        print(f"{s['timestamp']:5.1f} {s['delta']:10.0f} {s['theta']:10.0f} "
+              f"{s['alpha1']:10.0f} {s['alpha2']:10.0f} {s['beta1']:10.0f} "
+              f"{s['beta2']:10.0f} {s['gamma1']:10.0f} {s['gamma2']:10.0f} "
+              f"{s['attention']:4.0f} {s['meditation']:4.0f} "
+              f"{s['signal_quality']:3d} {len(wf):5d}")
+        time.sleep(0.5)
     stream.stop()
     print(f"\nConnected after stop: {stream.is_connected}")
