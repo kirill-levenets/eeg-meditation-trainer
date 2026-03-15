@@ -203,6 +203,7 @@ class EEGMeditationApp(App):
         self._audio.start()
         self._timer_screen.start_countdown()
         self._live_screen.set_controls_running()
+        self._bt_connected_notified = False
         if APP.USE_MOCK_DEVICE:
             self._live_screen.update_device_status(True)
         else:
@@ -269,6 +270,15 @@ class EEGMeditationApp(App):
         """Main 2 Hz processing loop."""
         if self._session_manager.state != SessionState.RUNNING:
             return
+
+        # Update settings status when real BT device connects
+        if (not self._bt_connected_notified
+                and not APP.USE_MOCK_DEVICE
+                and self._real_stream.is_connected):
+            self._bt_connected_notified = True
+            name = self._real_stream._device_name or "Real EEG"
+            self._settings_screen.update_device_status(True, name=name)
+            logger.info(f"Settings updated: {name} connected")
 
         raw_sample = self._eeg_stream.read_sample()
         metrics = self._metrics_engine.process_sample(raw_sample)

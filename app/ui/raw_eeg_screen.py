@@ -313,11 +313,11 @@ class RawEEGScreen(Screen):
     }
 
     EEG_SIGNAL_SCALES = {
-        "eeg": 120.0,
+        "eeg": 500.0,
     }
 
-    EEG_WAVEFORM_RATE: float = 128.0
-    EEG_WAVEFORM_MAX: int = 128 * 60  # 60s at 128Hz
+    EEG_WAVEFORM_RATE: float = 512.0
+    EEG_WAVEFORM_MAX: int = 512 * 60  # 60s at 512Hz
 
     BAND_COLORS = {
         "alpha": (0.1, 0.8, 0.4, 1.0),
@@ -328,11 +328,11 @@ class RawEEGScreen(Screen):
     }
 
     BAND_SCALES = {
-        "alpha": 1600.0,
-        "beta": 800.0,
-        "gamma": 400.0,
-        "theta": 600.0,
-        "delta": 800.0,
+        "alpha": 200000.0,
+        "beta": 100000.0,
+        "gamma": 50000.0,
+        "theta": 200000.0,
+        "delta": 1500000.0,
     }
 
     def __init__(self, **kwargs) -> None:

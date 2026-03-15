@@ -227,6 +227,10 @@ class NeuroSkyStream:
             sample["attention"] = self._latest_attention
             sample["meditation"] = self._latest_meditation
             sample["signal_quality"] = self._latest_signal_quality
+            # Drain raw wave buffer for waveform graph
+            if self._raw_wave_buffer:
+                sample["raw_eeg_waveform"] = list(self._raw_wave_buffer)
+                self._raw_wave_buffer.clear()
             self._sample_count += 1
             return sample
 
