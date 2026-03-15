@@ -12,6 +12,7 @@ from app.analytics.aggregator import AnalyticsAggregator
 from app.audio_feedback.noise import AudioEngine
 from app.config import APP
 from app.eeg.mock_stream_v2 import MockEEGStream
+from app.eeg.neurosky_stream import NeuroSkyStream
 from app.logger import logger
 from app.metrics.engine import MetricsEngine
 from app.session.manager import SessionManager, SessionState
@@ -32,7 +33,9 @@ class EEGMeditationApp(App):
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        self._eeg_stream: MockEEGStream = MockEEGStream()
+        self._mock_stream: MockEEGStream = MockEEGStream()
+        self._real_stream: NeuroSkyStream = NeuroSkyStream()
+        self._eeg_stream = self._mock_stream
         self._metrics_engine: MetricsEngine = MetricsEngine()
         self._session_manager: SessionManager = SessionManager()
         self._db: DatabaseManager = DatabaseManager()
@@ -115,6 +118,8 @@ class EEGMeditationApp(App):
         self._settings_screen.set_sinking_alert_callback(self._on_sinking_alert_toggle)
         self._settings_screen.set_disconnect_alert_callback(self._on_disconnect_alert_toggle)
         self._settings_screen.set_device_mode_callback(self._on_device_mode_toggle)
+        self._settings_screen.set_scan_devices_callback(self._on_scan_devices)
+        self._settings_screen.set_device_select_callback(self._on_device_select)
 
         self._diary_screen.set_session_select_callback(self._on_session_select)
         self._diary_screen.set_save_notes_callback(self._on_save_notes)
@@ -175,10 +180,14 @@ class EEGMeditationApp(App):
             self._live_screen.update_state("Select a user profile first")
             logger.warning("Session start blocked: no user selected")
             return
-        if not APP.USE_MOCK_DEVICE:
-            self._live_screen.update_state("No device connected (enable mock in Settings)")
-            logger.warning("Session start blocked: mock disabled, no real device")
-            return
+        if APP.USE_MOCK_DEVICE:
+            self._eeg_stream = self._mock_stream
+        else:
+            if not self._real_stream._device_address:
+                self._live_screen.update_state("No device selected (scan in Settings)")
+                logger.warning("Session start blocked: no BT device selected")
+                return
+            self._eeg_stream = self._real_stream
         threshold = self._settings_screen.threshold
         self._metrics_engine.meditation_threshold = threshold
         self._audio.set_threshold(threshold)
@@ -338,8 +347,24 @@ class EEGMeditationApp(App):
         if use_mock:
             self._settings_screen.update_device_status(False, meta="Mode: Mock Data")
         else:
-            self._settings_screen.update_device_status(False, meta="Mode: Real Device")
+            addr = self._real_stream._device_address or "none"
+            self._settings_screen.update_device_status(False, meta=f"Mode: Real Device ({addr})")
         logger.info(f"Device mode: {'Mock' if use_mock else 'Real'}")
+
+    def _on_scan_devices(self) -> None:
+        """Scan for paired Bluetooth devices and send to settings screen."""
+        devices = NeuroSkyStream.scan_paired_devices()
+        self._settings_screen.populate_bt_devices(devices)
+        logger.info(f"BT scan found {len(devices)} paired devices")
+
+    def _on_device_select(self, address: str, name: str) -> None:
+        """User selected a BT device from the list."""
+        self._real_stream.set_device(address, name)
+        self._settings_screen.update_device_status(False, meta=f"Selected: {name}")
+        logger.info(f"BT device selected: {name} ({address})")
+        if self._current_user_id:
+            self._db.set_user_setting(self._current_user_id, "bt_device_address", address)
+            self._db.set_user_setting(self._current_user_id, "bt_device_name", name)
 
     def _on_session_select(self, session_id: int) -> None:
         session = self._db.get_session(session_id)
@@ -502,6 +527,14 @@ class EEGMeditationApp(App):
                 active = saved == "True"
                 cb.active = active
                 self._live_screen.graph.set_visible(key, active)
+
+        bt_addr = g(user_id, "bt_device_address")
+        bt_name = g(user_id, "bt_device_name")
+        if bt_addr:
+            self._real_stream.set_device(bt_addr, bt_name or bt_addr)
+            self._settings_screen.update_device_status(
+                False, meta=f"Saved device: {bt_name or bt_addr}"
+            )
 
         logger.debug(f"Loaded settings for user {user_id}")
 

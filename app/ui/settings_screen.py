@@ -24,6 +24,8 @@ class SettingsScreen(Screen):
         self._on_sinking_alert_toggle: Optional[Callable] = None
         self._on_disconnect_alert_toggle: Optional[Callable] = None
         self._on_device_mode_toggle: Optional[Callable] = None
+        self._on_scan_devices: Optional[Callable] = None
+        self._on_device_select: Optional[Callable] = None
         self._graph_toggles: Dict[str, bool] = {
             "meditation_score": True,
             "shamatha_score": True,
@@ -93,6 +95,31 @@ class SettingsScreen(Screen):
         device_mode_row.add_widget(self._device_mode_cb)
         device_mode_row.add_widget(device_mode_lbl)
         layout.add_widget(device_mode_row)
+
+        # Scan + device list (visible when mock is off)
+        self._bt_section = BoxLayout(
+            orientation="vertical", size_hint_y=None, spacing=dp(4),
+        )
+        self._bt_section.bind(minimum_height=self._bt_section.setter("height"))
+
+        self._scan_btn = Button(
+            text="Scan Paired Devices",
+            font_size=dp(13),
+            size_hint_y=None,
+            height=dp(36),
+            background_color=(0.25, 0.4, 0.55, 1.0),
+        )
+        self._scan_btn.bind(on_release=self._on_scan_pressed)
+        self._bt_section.add_widget(self._scan_btn)
+
+        self._bt_device_list = BoxLayout(
+            orientation="vertical", size_hint_y=None, spacing=dp(2),
+        )
+        self._bt_device_list.bind(
+            minimum_height=self._bt_device_list.setter("height")
+        )
+        self._bt_section.add_widget(self._bt_device_list)
+        layout.add_widget(self._bt_section)
 
         # --- Threshold section ---
         layout.add_widget(self._section_label("Meditation Threshold"))
@@ -268,6 +295,16 @@ class SettingsScreen(Screen):
         if self._on_device_mode_toggle:
             self._on_device_mode_toggle(active)
 
+    def _on_scan_pressed(self, *args) -> None:
+        if self._on_scan_devices:
+            self._on_scan_devices()
+
+    def _on_bt_device_pressed(self, btn) -> None:
+        address = getattr(btn, "bt_address", "")
+        name = getattr(btn, "bt_name", "")
+        if address and self._on_device_select:
+            self._on_device_select(address, name)
+
     @property
     def threshold(self) -> int:
         return int(self._threshold_slider.value)
@@ -293,6 +330,38 @@ class SettingsScreen(Screen):
 
     def set_device_mode_callback(self, callback: Callable) -> None:
         self._on_device_mode_toggle = callback
+
+    def set_scan_devices_callback(self, callback: Callable) -> None:
+        self._on_scan_devices = callback
+
+    def set_device_select_callback(self, callback: Callable) -> None:
+        self._on_device_select = callback
+
+    def populate_bt_devices(self, devices: list) -> None:
+        """Populate the BT device list with scan results."""
+        self._bt_device_list.clear_widgets()
+        if not devices:
+            lbl = Label(
+                text="No paired devices found",
+                font_size=dp(11),
+                size_hint_y=None,
+                height=dp(28),
+                color=(0.6, 0.6, 0.6, 1.0),
+            )
+            self._bt_device_list.add_widget(lbl)
+            return
+        for dev in devices:
+            btn = Button(
+                text=f"{dev['name']}  ({dev['address']})",
+                font_size=dp(11),
+                size_hint_y=None,
+                height=dp(32),
+                background_color=(0.18, 0.18, 0.25, 1.0),
+            )
+            btn.bt_address = dev["address"]
+            btn.bt_name = dev["name"]
+            btn.bind(on_release=self._on_bt_device_pressed)
+            self._bt_device_list.add_widget(btn)
 
     def update_device_status(
         self, connected: bool, name: str = "", meta: str = ""

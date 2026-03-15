@@ -28,7 +28,7 @@ source.exclude_patterns = *.db,*.db-shm,*.db-wal,*.csv,*.pyc
 version = 1.0.0
 
 # (list) Application requirements
-requirements = python3,kivy==2.3.0,android
+requirements = python3,kivy==2.3.0,pyjnius,android
 
 # (str) Supported orientation (landscape, sensorLandscape, portrait, sensorPortrait, all)
 orientation = portrait
