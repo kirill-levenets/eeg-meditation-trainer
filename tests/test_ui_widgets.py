@@ -147,7 +147,7 @@ class TestDiaryScreenUI(unittest.TestCase):
         ]
         screen.load_metrics_preview(rows)
         self.assertEqual(screen._metrics_graph.total_points, 10)
-        self.assertEqual(screen._raw_eeg_graph.total_points, 10)
+        self.assertEqual(screen._raw_eeg_graph.total_points, 10 * 256)
         self.assertEqual(screen._freq_graph.total_points, 10)
 
     def test_diary_tab_switching(self):

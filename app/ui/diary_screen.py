@@ -1,3 +1,4 @@
+import math
 from typing import Callable, Dict, List, Optional
 
 from kivy.metrics import dp
@@ -38,8 +39,56 @@ RAW_EEG_PREVIEW_COLORS = {
 }
 
 RAW_EEG_PREVIEW_SCALES = {
-    "eeg": 500000.0,
+    "eeg": 500.0,
 }
+
+_SYNTH_RATE: float = 512.0
+_TICK_DURATION: float = 0.5
+_SAMPLES_PER_TICK: int = int(_SYNTH_RATE * _TICK_DURATION)
+
+_BAND_FREQS = {
+    "delta": 2.5,
+    "theta": 6.0,
+    "alpha1": 9.0,
+    "alpha2": 11.0,
+    "beta1": 15.0,
+    "beta2": 24.0,
+    "gamma1": 35.0,
+    "gamma2": 45.0,
+}
+
+_AMPLITUDE_SCALE: float = 0.0004
+
+
+def _synthesize_waveform(rows: List[Dict]) -> List[float]:
+    """Synthesize an approximate EEG waveform from stored band powers.
+
+    For each 2Hz tick, generates ~256 samples (0.5s at 512Hz) by
+    combining sine waves at characteristic band frequencies with
+    amplitudes proportional to sqrt of the stored band power.
+    """
+    waveform: List[float] = []
+    sample_idx = 0
+    for row in rows:
+        raw_keys = {
+            "delta": "delta_raw", "theta": "theta_raw",
+            "alpha1": "alpha1_raw", "alpha2": "alpha2_raw",
+            "beta1": "beta1_raw", "beta2": "beta2_raw",
+            "gamma1": "gamma1_raw", "gamma2": "gamma2_raw",
+        }
+        amps = {}
+        for band, db_key in raw_keys.items():
+            power = max(row.get(db_key, 0.0), 0.0)
+            amps[band] = math.sqrt(power) * _AMPLITUDE_SCALE
+
+        for i in range(_SAMPLES_PER_TICK):
+            t = sample_idx / _SYNTH_RATE
+            val = 0.0
+            for band, freq in _BAND_FREQS.items():
+                val += amps.get(band, 0.0) * math.sin(2.0 * math.pi * freq * t)
+            waveform.append(val)
+            sample_idx += 1
+    return waveform
 
 FREQ_PREVIEW_COLORS = {
     "alpha": (0.1, 0.8, 0.4, 1.0),
@@ -319,9 +368,12 @@ class DiaryScreen(Screen):
         self._raw_eeg_graph = ScrollableGraphWidget(
             colors=RAW_EEG_PREVIEW_COLORS,
             scales=RAW_EEG_PREVIEW_SCALES,
-            viewport_seconds=60,
+            viewport_seconds=10,
             show_value_labels=True,
             show_timestamps=True,
+            sample_rate=_SYNTH_RATE,
+            max_points=int(_SYNTH_RATE * 60),
+            bipolar=True,
             size_hint_y=1,
         )
         self._freq_graph = ScrollableGraphWidget(
@@ -448,13 +500,9 @@ class DiaryScreen(Screen):
                 metrics_series[key].append(row.get(key, 0.0))
         self._metrics_graph.load_static_data(metrics_series)
 
-        # Raw EEG composite signal
-        eeg_series: Dict[str, List[float]] = {"eeg": []}
-        raw_keys = ("delta_raw", "theta_raw", "alpha1_raw", "alpha2_raw",
-                     "beta1_raw", "beta2_raw", "gamma1_raw", "gamma2_raw")
-        for row in rows:
-            eeg_sum = sum(row.get(k, 0.0) for k in raw_keys)
-            eeg_series["eeg"].append(eeg_sum)
+        # Raw EEG synthesized waveform from band powers
+        synth = _synthesize_waveform(rows)
+        eeg_series: Dict[str, List[float]] = {"eeg": synth}
         self._raw_eeg_graph.load_static_data(eeg_series)
 
         # Frequency bands
