@@ -1,0 +1,77 @@
+# -*- mode: python ; coding: utf-8 -*-
+"""PyInstaller spec for EEG Meditation Trainer (Windows build).
+
+Run on Windows:
+    python -m PyInstaller eeg_meditation.spec
+"""
+
+import os
+import sys
+from pathlib import Path
+
+from kivy_deps import sdl2, glew
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+
+block_cipher = None
+
+PROJECT_ROOT = os.path.abspath(os.path.dirname(SPECPATH))
+
+# Collect all app submodules
+app_hiddenimports = collect_submodules('app')
+
+# Kivy hidden imports needed at runtime
+kivy_hiddenimports = [
+    'kivy.core.window.window_sdl2',
+    'kivy.core.text.text_sdl2',
+    'kivy.core.image.img_sdl2',
+    'kivy.core.audio.audio_sdl2',
+    'kivy.core.clipboard.clipboard_sdl2',
+    'kivy.graphics.opengl',
+    'kivy.graphics.opengl_utils',
+]
+
+all_hiddenimports = app_hiddenimports + kivy_hiddenimports
+
+a = Analysis(
+    [os.path.join(PROJECT_ROOT, 'main.py')],
+    pathex=[PROJECT_ROOT],
+    binaries=[],
+    datas=[],
+    hiddenimports=all_hiddenimports,
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=['tkinter', '_tkinter', 'unittest', 'pytest'],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name='EEG_Meditation_Trainer',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=False,
+    icon=None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    *[Tree(p) for p in (sdl2.dep_bins + glew.dep_bins)],
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='EEG_Meditation_Trainer',
+)

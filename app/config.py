@@ -1,4 +1,5 @@
 import os
+import sys
 
 
 class SigmoidConfig:
@@ -45,7 +46,12 @@ class AppConfig:
     SIGNAL_BUFFER_SECONDS: int = 120
 
     DB_NAME: str = "meditation.db"
-    DB_PATH: str = os.path.join(os.path.dirname(os.path.dirname(__file__)), DB_NAME)
+    _BASE_DIR: str = (
+        os.path.dirname(os.path.abspath(sys.executable))
+        if getattr(sys, 'frozen', False)
+        else os.path.dirname(os.path.dirname(__file__))
+    )
+    DB_PATH: str = os.path.join(_BASE_DIR, DB_NAME)
 
     MAX_VOLUME: float = 1.0
     WHITE_NOISE_SAMPLE_RATE: int = 22050

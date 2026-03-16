@@ -165,6 +165,46 @@ buildozer android deploy run logcat
 - **Build errors**: Run `buildozer android clean` then rebuild
 - **Logs**: Check `buildozer android deploy run logcat` for runtime errors
 
+## Building Windows Executable
+
+### Prerequisites
+
+- **Windows 10/11** with Python 3.10–3.12 installed from [python.org](https://www.python.org/downloads/)
+- Ensure `python` is on your PATH (`python --version` should work)
+
+### Quick Build (automated)
+
+```bat
+REM Double-click or run from Command Prompt:
+build_windows.bat
+```
+
+This creates a venv, installs deps, and builds the exe. Output: `dist\EEG_Meditation_Trainer\`
+
+### Manual Build
+
+```bat
+REM Create venv and install deps
+python -m venv build_venv
+build_venv\Scripts\activate.bat
+pip install -r requirements_windows.txt
+
+REM Build
+python -m PyInstaller eeg_meditation.spec --noconfirm
+
+REM Output: dist\EEG_Meditation_Trainer\EEG_Meditation_Trainer.exe
+```
+
+### Distribution
+
+Zip the entire `dist\EEG_Meditation_Trainer\` folder. The user runs `EEG_Meditation_Trainer.exe` directly — no Python install needed.
+
+### Troubleshooting
+
+- **Missing DLLs**: Ensure `kivy_deps.sdl2` and `kivy_deps.glew` are installed — the spec file bundles their binaries
+- **Black screen on launch**: Try `console=True` in the spec file to see error output
+- **Database location**: `meditation.db` is created next to the exe at runtime
+
 ## Configuration
 
 All tunable parameters are in `app/config.py`:
@@ -179,3 +219,4 @@ All tunable parameters are in `app/config.py`:
 - **Kivy 2.3** — Cross-platform UI framework + SoundLoader for audio
 - **SQLite** — Session, metrics, and user profile storage
 - **Buildozer** — Android packaging tool
+- **PyInstaller** — Windows executable packaging
