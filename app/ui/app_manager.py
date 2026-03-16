@@ -423,6 +423,9 @@ class EEGMeditationApp(App):
         self._live_screen.graph.set_line_width(width)
         self._raw_eeg_screen.raw_graph.set_line_width(width)
         self._raw_eeg_screen.band_graph.set_line_width(width)
+        self._diary_screen._metrics_graph.set_line_width(width)
+        self._diary_screen._raw_eeg_graph.set_line_width(width)
+        self._diary_screen._freq_graph.set_line_width(width)
         logger.debug(f"Line width changed to {width}")
 
     def _on_rotate_screen(self, rotation: int) -> None:
