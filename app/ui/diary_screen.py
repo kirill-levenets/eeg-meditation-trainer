@@ -88,7 +88,13 @@ def _synthesize_waveform(rows: List[Dict]) -> List[float]:
                 val += amps.get(band, 0.0) * math.sin(2.0 * math.pi * freq * t)
             waveform.append(val)
             sample_idx += 1
-    return waveform
+
+    if not waveform:
+        return waveform
+    peak = max(abs(v) for v in waveform) or 1.0
+    target = 500.0 * 0.8
+    scale_factor = target / peak
+    return [v * scale_factor for v in waveform]
 
 FREQ_PREVIEW_COLORS = {
     "alpha": (0.1, 0.8, 0.4, 1.0),

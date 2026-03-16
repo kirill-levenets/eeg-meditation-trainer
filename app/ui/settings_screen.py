@@ -26,6 +26,8 @@ class SettingsScreen(Screen):
         self._on_device_mode_toggle: Optional[Callable] = None
         self._on_scan_devices: Optional[Callable] = None
         self._on_device_select: Optional[Callable] = None
+        self._on_line_width_change: Optional[Callable] = None
+        self._on_rotate_screen: Optional[Callable] = None
         self._graph_toggles: Dict[str, bool] = {
             "meditation_score": True,
             "shamatha_score": True,
@@ -204,6 +206,40 @@ class SettingsScreen(Screen):
         disconnect_row.add_widget(disconnect_lbl)
         layout.add_widget(disconnect_row)
 
+        # --- Display section ---
+        layout.add_widget(self._section_label("Display"))
+
+        # Line width slider
+        lw_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(8))
+        lw_label = Label(
+            text="Line Width:", font_size=dp(13),
+            size_hint_x=0.3, halign="left",
+        )
+        lw_label.bind(size=lw_label.setter("text_size"))
+        self._line_width_slider = Slider(
+            min=0.5, max=4.0, value=1.2, step=0.1, size_hint_x=0.5,
+        )
+        self._line_width_value = Label(
+            text="1.2", font_size=dp(13), bold=True, size_hint_x=0.2,
+        )
+        self._line_width_slider.bind(value=self._on_line_width_slider)
+        lw_row.add_widget(lw_label)
+        lw_row.add_widget(self._line_width_slider)
+        lw_row.add_widget(self._line_width_value)
+        layout.add_widget(lw_row)
+
+        # Screen rotation button
+        self._rotate_btn = Button(
+            text="Rotate Screen (0\u00b0)",
+            font_size=dp(13),
+            size_hint_y=None,
+            height=dp(36),
+            background_color=(0.25, 0.35, 0.5, 1.0),
+        )
+        self._rotate_btn.bind(on_release=self._on_rotate_pressed)
+        self._current_rotation: int = 0
+        layout.add_widget(self._rotate_btn)
+
         # --- Graph toggles ---
         layout.add_widget(self._section_label("Graph Metrics"))
 
@@ -293,6 +329,18 @@ class SettingsScreen(Screen):
         if self._on_disconnect_alert_toggle:
             self._on_disconnect_alert_toggle(active)
 
+    def _on_line_width_slider(self, instance, value) -> None:
+        val = round(value, 1)
+        self._line_width_value.text = f"{val:.1f}"
+        if self._on_line_width_change:
+            self._on_line_width_change(val)
+
+    def _on_rotate_pressed(self, *args) -> None:
+        self._current_rotation = (self._current_rotation + 90) % 360
+        self._rotate_btn.text = f"Rotate Screen ({self._current_rotation}\u00b0)"
+        if self._on_rotate_screen:
+            self._on_rotate_screen(self._current_rotation)
+
     def _on_device_mode_change(self, checkbox, active) -> None:
         if self._on_device_mode_toggle:
             self._on_device_mode_toggle(active)
@@ -329,6 +377,12 @@ class SettingsScreen(Screen):
 
     def set_disconnect_alert_callback(self, callback: Callable) -> None:
         self._on_disconnect_alert_toggle = callback
+
+    def set_line_width_callback(self, callback: Callable) -> None:
+        self._on_line_width_change = callback
+
+    def set_rotate_screen_callback(self, callback: Callable) -> None:
+        self._on_rotate_screen = callback
 
     def set_device_mode_callback(self, callback: Callable) -> None:
         self._on_device_mode_toggle = callback

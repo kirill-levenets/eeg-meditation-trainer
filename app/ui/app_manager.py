@@ -120,6 +120,8 @@ class EEGMeditationApp(App):
         self._settings_screen.set_device_mode_callback(self._on_device_mode_toggle)
         self._settings_screen.set_scan_devices_callback(self._on_scan_devices)
         self._settings_screen.set_device_select_callback(self._on_device_select)
+        self._settings_screen.set_line_width_callback(self._on_line_width_change)
+        self._settings_screen.set_rotate_screen_callback(self._on_rotate_screen)
 
         self._diary_screen.set_session_select_callback(self._on_session_select)
         self._diary_screen.set_save_notes_callback(self._on_save_notes)
@@ -408,11 +410,25 @@ class EEGMeditationApp(App):
 
     def _on_toggle_change(self, metric: str, active: bool) -> None:
         self._live_screen.graph.set_visible(metric, active)
+        if metric == "sinking":
+            self._audio.sinking_alert_enabled = active
+            self._settings_screen._sinking_alert_cb.active = active
         logger.debug(f"Graph toggle: {metric}={'on' if active else 'off'}")
 
     def _on_test_audio(self) -> None:
         logger.debug("Test audio triggered")
         self._audio.test_audio()
+
+    def _on_line_width_change(self, width: float) -> None:
+        self._live_screen.graph.set_line_width(width)
+        self._raw_eeg_screen.raw_graph.set_line_width(width)
+        self._raw_eeg_screen.band_graph.set_line_width(width)
+        logger.debug(f"Line width changed to {width}")
+
+    def _on_rotate_screen(self, rotation: int) -> None:
+        from kivy.core.window import Window
+        Window.rotation = rotation
+        logger.info(f"Screen rotation set to {rotation}")
 
     def _on_sinking_alert_toggle(self, active: bool) -> None:
         self._audio.sinking_alert_enabled = active
@@ -564,6 +580,12 @@ class EEGMeditationApp(App):
         self._db.set_user_setting(uid, "disconnect_alert", str(self._audio.disconnect_alert_enabled))
         self._db.set_user_setting(uid, "threshold", str(self._settings_screen.threshold))
         self._db.set_user_setting(uid, "use_mock", str(APP.USE_MOCK_DEVICE))
+        self._db.set_user_setting(
+            uid, "line_width", str(self._settings_screen._line_width_slider.value)
+        )
+        self._db.set_user_setting(
+            uid, "rotation", str(self._settings_screen._current_rotation)
+        )
         toggles = self._settings_screen.graph_toggles
         for key, active in toggles.items():
             self._db.set_user_setting(uid, f"toggle_{key}", str(active))
@@ -634,6 +656,25 @@ class EEGMeditationApp(App):
         elif bt_addr:
             APP.USE_MOCK_DEVICE = False
             self._settings_screen._device_mode_cb.active = False
+
+        lw = g(user_id, "line_width")
+        if lw is not None:
+            try:
+                lw_val = float(lw)
+                self._settings_screen._line_width_slider.value = lw_val
+                self._on_line_width_change(lw_val)
+            except (ValueError, TypeError):
+                pass
+
+        rot = g(user_id, "rotation")
+        if rot is not None:
+            try:
+                rot_val = int(rot)
+                self._settings_screen._current_rotation = rot_val
+                self._settings_screen._rotate_btn.text = f"Rotate Screen ({rot_val}\u00b0)"
+                self._on_rotate_screen(rot_val)
+            except (ValueError, TypeError):
+                pass
 
         logger.debug(f"Loaded settings for user {user_id}")
 

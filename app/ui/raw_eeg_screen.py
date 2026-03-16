@@ -29,6 +29,7 @@ class ScrollableGraphWidget(Widget):
         self._colors: Dict[str, tuple] = colors
         self._scales: Dict[str, float] = scales
         self._bipolar: bool = bipolar
+        self._line_width: float = 1.2
         self._sample_rate: float = sample_rate if sample_rate > 0 else (1.0 / APP.UPDATE_FREQUENCY)
         effective_max = max_points if max_points > 0 else APP.GRAPH_POINTS_MAX
         self._viewport_points: int = int(viewport_seconds * self._sample_rate)
@@ -65,6 +66,10 @@ class ScrollableGraphWidget(Widget):
     @property
     def max_scroll(self) -> int:
         return max(0, self._total_points - self._viewport_points)
+
+    def set_line_width(self, width: float) -> None:
+        self._line_width = max(0.5, min(width, 5.0))
+        self._redraw()
 
     def set_visible(self, metric: str, visible: bool) -> None:
         if metric in self._visible:
@@ -248,7 +253,7 @@ class ScrollableGraphWidget(Widget):
                 points.extend([x, y])
 
             if len(points) >= 4:
-                self._gfx.add(Line(points=points, width=dp(1.2)))
+                self._gfx.add(Line(points=points, width=dp(self._line_width)))
 
             # Realtime value label at right edge of line
             if self._show_value_labels and slice_data:
