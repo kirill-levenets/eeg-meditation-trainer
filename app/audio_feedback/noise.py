@@ -354,6 +354,11 @@ class AudioEngine:
         self._play_bell()
         logger.info("Timer sound: default bell")
 
+    def play_connect_sound(self) -> None:
+        """Play a chime to confirm device connected."""
+        self._play_chime()
+        logger.info("Connect sound played")
+
     def play_disconnect_alert(self) -> None:
         """Play a harsh warble when device disconnects."""
         if not self._disconnect_alert_enabled:

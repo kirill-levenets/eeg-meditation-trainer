@@ -188,34 +188,42 @@ class EEGMeditationApp(App):
                 logger.warning("Session start blocked: no BT device selected")
                 return
             self._eeg_stream = self._real_stream
+
         threshold = self._settings_screen.threshold
         self._metrics_engine.meditation_threshold = threshold
         self._audio.set_threshold(threshold)
-
-        self._session_manager.start(threshold=threshold)
-        self._eeg_stream.start()
         self._metrics_engine.reset()
         self._metrics_buffer = []
         self._raw_buffer = []
         self._flush_counter = 0
         self._tick_count = 0
         self._current_session_id = None
-
-        self._audio.start()
-        self._timer_screen.start_countdown()
-        self._live_screen.set_controls_running()
         self._bt_connected_notified = False
-        if APP.USE_MOCK_DEVICE:
-            self._live_screen.update_device_status(True)
-        else:
-            self._live_screen.update_device_status(
-                True, device_name=self._real_stream._device_name or "Real EEG"
-            )
+
         self._live_screen.graph.clear_data()
         self._raw_eeg_screen.raw_graph.clear_data()
         self._raw_eeg_screen.band_graph.clear_data()
-
         self._live_screen.graph.set_threshold(float(threshold), "meditation_score")
+        self._live_screen.set_controls_running()
+
+        self._eeg_stream.start()
+
+        if APP.USE_MOCK_DEVICE:
+            self._waiting_for_bt = False
+            self._session_manager.start(threshold=threshold)
+            self._audio.start()
+            self._timer_screen.start_countdown()
+            self._live_screen.update_device_status(True)
+            self._live_screen.update_state("Running")
+        else:
+            self._waiting_for_bt = True
+            self._pending_threshold = threshold
+            name = self._real_stream._device_name or "Real EEG"
+            self._live_screen.update_device_status(
+                False, device_name=name, connecting=True
+            )
+            self._live_screen.update_state("Connecting to device...")
+            logger.info(f"Waiting for BT connection to {name}")
 
         self._update_event = Clock.schedule_interval(
             self._update_tick, APP.UPDATE_FREQUENCY
@@ -245,6 +253,17 @@ class EEGMeditationApp(App):
             self._update_event.cancel()
             self._update_event = None
 
+        # If still waiting for BT, session never started — just clean up
+        if getattr(self, '_waiting_for_bt', False):
+            self._waiting_for_bt = False
+            self._eeg_stream.stop()
+            self._live_screen.set_controls_idle()
+            self._live_screen.update_device_status(False)
+            self._live_screen.update_state("Cancelled")
+            self._timer_screen.reset()
+            logger.info("Session cancelled during BT connection wait")
+            return
+
         stats = self._session_manager.stop()
         self._eeg_stream.stop()
         self._audio.stop()
@@ -269,6 +288,39 @@ class EEGMeditationApp(App):
 
     def _update_tick(self, dt: float) -> None:
         """Main 2 Hz processing loop."""
+        # Handle BT connection wait phase
+        if getattr(self, '_waiting_for_bt', False):
+            if self._real_stream.is_connected:
+                raw_sample = self._eeg_stream.read_sample()
+                total = sum(raw_sample.get(k, 0.0) for k in
+                            ("delta", "theta", "alpha1", "alpha2",
+                             "beta1", "beta2", "gamma1", "gamma2"))
+                if total > 0:
+                    self._waiting_for_bt = False
+                    name = self._real_stream._device_name or "Real EEG"
+                    self._session_manager.start(
+                        threshold=self._pending_threshold
+                    )
+                    self._audio.start()
+                    self._audio.play_connect_sound()
+                    self._timer_screen.start_countdown()
+                    self._live_screen.update_device_status(
+                        True, device_name=name
+                    )
+                    self._live_screen.update_state("Running")
+                    self._settings_screen.update_device_status(True, name=name)
+                    logger.info(f"BT device {name} connected, session started")
+            elif not self._real_stream._running:
+                self._waiting_for_bt = False
+                if self._update_event:
+                    self._update_event.cancel()
+                    self._update_event = None
+                self._live_screen.set_controls_idle()
+                self._live_screen.update_device_status(False)
+                self._live_screen.update_state("Connection failed")
+                logger.error("BT connection failed, session aborted")
+            return
+
         if self._session_manager.state != SessionState.RUNNING:
             return
 
@@ -280,6 +332,18 @@ class EEGMeditationApp(App):
             name = self._real_stream._device_name or "Real EEG"
             self._settings_screen.update_device_status(True, name=name)
             logger.info(f"Settings updated: {name} connected")
+
+        # Detect BT disconnect during session
+        if (not APP.USE_MOCK_DEVICE
+                and self._bt_connected_notified
+                and not self._real_stream.is_connected):
+            self._bt_connected_notified = False
+            name = self._real_stream._device_name or "Real EEG"
+            self._live_screen.update_device_status(
+                False, device_name=name, connecting=True
+            )
+            self._audio.play_disconnect_alert()
+            logger.warning(f"BT device {name} disconnected during session")
 
         raw_sample = self._eeg_stream.read_sample()
         metrics = self._metrics_engine.process_sample(raw_sample)

@@ -231,17 +231,20 @@ class ScrollableGraphWidget(Widget):
 
             color = self._colors[key]
             scale = self._scales.get(key, 100.0)
+            draw_scale = max_scale if not self._bipolar else scale
             self._gfx.add(Color(*color))
 
             points = []
             n = len(slice_data)
+            vp = max(self._viewport_points, n)
+            x_offset = vp - n
             for i, val in enumerate(slice_data):
-                x = graph_x + (i / max(n - 1, 1)) * graph_w
+                x = graph_x + ((x_offset + i) / max(vp - 1, 1)) * graph_w
                 if self._bipolar:
-                    norm = (val / scale + 1.0) * 0.5
+                    norm = (val / draw_scale + 1.0) * 0.5
                     y = graph_y + max(0.0, min(norm, 1.0)) * graph_h
                 else:
-                    y = graph_y + min(max(val, 0.0) / scale, 1.0) * graph_h
+                    y = graph_y + min(max(val, 0.0) / draw_scale, 1.0) * graph_h
                 points.extend([x, y])
 
             if len(points) >= 4:
@@ -251,10 +254,10 @@ class ScrollableGraphWidget(Widget):
             if self._show_value_labels and slice_data:
                 last_val = slice_data[-1]
                 if self._bipolar:
-                    norm = (last_val / scale + 1.0) * 0.5
+                    norm = (last_val / draw_scale + 1.0) * 0.5
                     last_y = graph_y + max(0.0, min(norm, 1.0)) * graph_h
                 else:
-                    last_y = graph_y + min(max(last_val, 0.0) / scale, 1.0) * graph_h
+                    last_y = graph_y + min(max(last_val, 0.0) / draw_scale, 1.0) * graph_h
                 # Avoid label overlap by nudging
                 for existing_y in label_y_positions:
                     if abs(last_y - existing_y) < dp(12):

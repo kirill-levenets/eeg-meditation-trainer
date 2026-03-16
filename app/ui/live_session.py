@@ -212,8 +212,14 @@ class LiveSessionScreen(Screen):
             val = metrics.get(key, 0.0)
             label.text = f"{val:.0f}"
 
-    def update_device_status(self, connected: bool, device_name: str = "") -> None:
-        if connected:
+    def update_device_status(
+        self, connected: bool, device_name: str = "", connecting: bool = False
+    ) -> None:
+        if connecting:
+            name = device_name or "Device"
+            self._device_label.text = f"[{name}] Connecting..."
+            self._device_label.color = (0.9, 0.8, 0.2, 1.0)
+        elif connected:
             label = f"[{device_name}] ●" if device_name else "[Mock EEG] ●"
             self._device_label.text = label
             self._device_label.color = (0.2, 0.9, 0.4, 1.0)
@@ -223,6 +229,7 @@ class LiveSessionScreen(Screen):
 
     def set_controls_running(self) -> None:
         self._btn_start.disabled = True
+        self._btn_pause.text = "Pause"
         self._btn_pause.disabled = False
         self._btn_stop.disabled = False
 
