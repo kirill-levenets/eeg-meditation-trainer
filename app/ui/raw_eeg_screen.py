@@ -24,11 +24,13 @@ class ScrollableGraphWidget(Widget):
     def __init__(self, colors: Dict[str, tuple], scales: Dict[str, float],
                  viewport_seconds: int = 60, show_value_labels: bool = True,
                  show_timestamps: bool = True, sample_rate: float = 0.0,
-                 max_points: int = 0, bipolar: bool = False, **kwargs) -> None:
+                 max_points: int = 0, bipolar: bool = False,
+                 auto_scale: bool = False, **kwargs) -> None:
         super().__init__(**kwargs)
         self._colors: Dict[str, tuple] = colors
         self._scales: Dict[str, float] = scales
         self._bipolar: bool = bipolar
+        self._auto_scale: bool = auto_scale
         self._line_width: float = 1.2
         self._sample_rate: float = sample_rate if sample_rate > 0 else (1.0 / APP.UPDATE_FREQUENCY)
         effective_max = max_points if max_points > 0 else APP.GRAPH_POINTS_MAX
@@ -142,11 +144,28 @@ class ScrollableGraphWidget(Widget):
         end_idx = self._total_points - self._scroll_offset
         start_idx = max(0, end_idx - self._viewport_points)
 
-        # Y-axis scale (use max scale across visible metrics)
-        max_scale = 100.0
-        for key in self._data:
-            if self._visible.get(key, True):
-                max_scale = max(max_scale, self._scales.get(key, 100.0))
+        # Y-axis scale
+        if self._auto_scale:
+            max_scale = 0.0
+            for key in self._data:
+                if not self._visible.get(key, True):
+                    continue
+                data_list = list(self._data[key])
+                slice_vals = data_list[start_idx:end_idx]
+                if slice_vals:
+                    if self._bipolar:
+                        peak = max(abs(v) for v in slice_vals)
+                    else:
+                        peak = max(slice_vals)
+                    max_scale = max(max_scale, peak)
+            if max_scale < 1.0:
+                max_scale = 100.0
+            max_scale *= 1.1
+        else:
+            max_scale = 100.0
+            for key in self._data:
+                if self._visible.get(key, True):
+                    max_scale = max(max_scale, self._scales.get(key, 100.0))
 
         # Grid lines + Y-axis labels
         num_grid_lines = 4
@@ -203,20 +222,30 @@ class ScrollableGraphWidget(Widget):
         if end_idx <= start_idx:
             return
 
-        # X-axis timestamps
+        # X-axis timestamps + vertical grid lines (aligned with right-aligned data)
         if self._show_timestamps:
-            num_time_labels = min(5, end_idx - start_idx)
-            if num_time_labels > 1:
+            n_visible = end_idx - start_idx
+            vp = max(self._viewport_points, n_visible)
+            x_off = vp - n_visible
+            data_x_start = graph_x + (x_off / max(vp - 1, 1)) * graph_w
+            data_x_end = graph_x + graph_w
+            data_x_width = data_x_end - data_x_start
+            num_time_labels = min(5, n_visible)
+            if num_time_labels > 1 and data_x_width > dp(40):
                 for i in range(num_time_labels):
                     frac = i / (num_time_labels - 1)
-                    idx = start_idx + int(frac * (end_idx - start_idx - 1))
+                    idx = start_idx + int(frac * (n_visible - 1))
                     t_sec = idx / self._sample_rate
                     mins = int(t_sec) // 60
                     secs = int(t_sec) % 60
                     time_str = f"{mins}:{secs:02d}"
                     tex = self._make_text_texture(time_str, font_size=8,
                                                   color=(0.5, 0.5, 0.5, 1))
-                    x_pos = graph_x + frac * graph_w
+                    x_pos = data_x_start + frac * data_x_width
+                    # Vertical grid line
+                    self._gfx.add(Color(0.25, 0.25, 0.3, 1.0))
+                    self._gfx.add(Line(points=[x_pos, graph_y, x_pos, graph_y + graph_h], width=0.5))
+                    # Timestamp label
                     self._gfx.add(Color(1, 1, 1, 1))
                     self._gfx.add(Rectangle(
                         texture=tex,
@@ -253,7 +282,14 @@ class ScrollableGraphWidget(Widget):
                 points.extend([x, y])
 
             if len(points) >= 4:
-                self._gfx.add(Line(points=points, width=dp(self._line_width)))
+                max_coords = 1024  # 512 points × 2 coords each
+                if len(points) <= max_coords:
+                    self._gfx.add(Line(points=points, width=dp(self._line_width)))
+                else:
+                    for chunk_start in range(0, len(points) - 2, max_coords - 2):
+                        chunk = points[chunk_start:chunk_start + max_coords]
+                        if len(chunk) >= 4:
+                            self._gfx.add(Line(points=chunk, width=dp(self._line_width)))
 
             # Realtime value label at right edge of line
             if self._show_value_labels and slice_data:
@@ -399,6 +435,7 @@ class RawEEGScreen(Screen):
             viewport_seconds=60,
             show_value_labels=True,
             show_timestamps=True,
+            auto_scale=True,
             size_hint_y=0.35,
         )
         root.add_widget(self._band_graph)

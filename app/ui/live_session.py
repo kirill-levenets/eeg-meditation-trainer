@@ -20,6 +20,7 @@ METRICS_COLORS = {
     "subtle_distraction": (0.9, 0.9, 0.2, 1.0),
     "native_attention": (0.6, 0.3, 0.9, 1.0),
     "native_meditation": (0.3, 0.9, 0.9, 1.0),
+    "custom_formula": (1.0, 0.4, 0.8, 1.0),
 }
 
 METRICS_SCALES = {
@@ -30,6 +31,7 @@ METRICS_SCALES = {
     "subtle_distraction": 100.0,
     "native_attention": 100.0,
     "native_meditation": 100.0,
+    "custom_formula": 200.0,
 }
 
 

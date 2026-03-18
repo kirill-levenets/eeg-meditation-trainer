@@ -8,6 +8,7 @@ from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.slider import Slider
+from kivy.uix.textinput import TextInput
 
 from app.config import APP, METRICS
 
@@ -28,6 +29,7 @@ class SettingsScreen(Screen):
         self._on_device_select: Optional[Callable] = None
         self._on_line_width_change: Optional[Callable] = None
         self._on_rotate_screen: Optional[Callable] = None
+        self._on_custom_formula_change: Optional[Callable] = None
         self._graph_toggles: Dict[str, bool] = {
             "meditation_score": True,
             "shamatha_score": True,
@@ -270,6 +272,103 @@ class SettingsScreen(Screen):
             layout.add_widget(row)
             self._checkboxes[key] = cb
 
+        # --- Custom Formula section ---
+        layout.add_widget(self._section_label("Custom Formula"))
+
+        formula_desc = Label(
+            text=(
+                "Enter a Python-style formula to track as an extra metric.\n"
+                "Leave empty to disable."
+            ),
+            font_size=dp(11),
+            size_hint_y=None,
+            height=dp(32),
+            color=(0.6, 0.6, 0.6, 1.0),
+            halign="left",
+        )
+        formula_desc.bind(size=formula_desc.setter("text_size"))
+        layout.add_widget(formula_desc)
+
+        self._formula_input = TextInput(
+            text="",
+            hint_text="e.g. (alpha1 + alpha2) / (beta1 + beta2 + 1)",
+            font_size=dp(13),
+            size_hint_y=None,
+            height=dp(40),
+            multiline=False,
+            background_color=(0.12, 0.12, 0.18, 1.0),
+            foreground_color=(0.9, 0.9, 0.9, 1.0),
+        )
+        self._formula_input.bind(on_text_validate=self._on_formula_submit)
+        layout.add_widget(self._formula_input)
+
+        formula_btn = Button(
+            text="Apply Formula",
+            font_size=dp(13),
+            size_hint_y=None,
+            height=dp(34),
+            background_color=(0.25, 0.4, 0.55, 1.0),
+        )
+        formula_btn.bind(on_release=self._on_formula_submit)
+        layout.add_widget(formula_btn)
+
+        self._formula_status = Label(
+            text="",
+            font_size=dp(11),
+            size_hint_y=None,
+            height=dp(20),
+            color=(0.5, 0.8, 0.5, 1.0),
+            halign="left",
+        )
+        self._formula_status.bind(size=self._formula_status.setter("text_size"))
+        layout.add_widget(self._formula_status)
+
+        examples = Label(
+            text=(
+                "Examples:\n"
+                "  (alpha1 + alpha2) / (beta1 + beta2 + 1)\n"
+                "  sqrt(alpha_norm) * 100\n"
+                "  meditation_score * 0.7 + shamatha_score * 0.3\n"
+                "  avg(alpha1 + beta1, 10)\n"
+                "  avg(sqrt(alpha_norm) * 100, 30)\n"
+                "  avg(meditation_score, 20) - avg(distraction, 20)"
+            ),
+            font_size=dp(13),
+            size_hint_y=None,
+            height=dp(130),
+            color=(0.5, 0.5, 0.5, 1.0),
+            halign="left",
+            valign="top",
+        )
+        examples.bind(size=examples.setter("text_size"))
+        layout.add_widget(examples)
+
+        ref = Label(
+            text=(
+                "Bands: alpha1 alpha2 beta1 beta2\n"
+                "  gamma1 gamma2 theta delta\n"
+                "Combined: alpha beta gamma\n"
+                "Normalized: alpha_norm beta_norm gamma_norm\n"
+                "  theta_norm delta_norm total_power\n"
+                "Metrics: meditation_score shamatha_score\n"
+                "  distraction sinking subtle_distraction\n"
+                "  stability calmness\n"
+                "  native_attention native_meditation\n"
+                "Functions: sqrt abs log log10 log2 exp pow\n"
+                "  min max sin cos tanh\n"
+                "Windowed: avg(expr, N) \u2014 mean of last N ticks\n"
+                "  N = 1..600 (at 2Hz: 10=5s, 60=30s, 120=1min)"
+            ),
+            font_size=dp(12),
+            size_hint_y=None,
+            height=dp(195),
+            color=(0.45, 0.45, 0.55, 1.0),
+            halign="left",
+            valign="top",
+        )
+        ref.bind(size=ref.setter("text_size"))
+        layout.add_widget(ref)
+
         # --- Info section ---
         spacer = Label(size_hint_y=None, height=dp(20))
         layout.add_widget(spacer)
@@ -335,6 +434,18 @@ class SettingsScreen(Screen):
         if self._on_line_width_change:
             self._on_line_width_change(val)
 
+    def _on_formula_submit(self, *args) -> None:
+        formula = self._formula_input.text.strip()
+        if self._on_custom_formula_change:
+            self._on_custom_formula_change(formula)
+
+    def set_formula_status(self, text: str, is_error: bool = False) -> None:
+        self._formula_status.text = text
+        if is_error:
+            self._formula_status.color = (0.9, 0.3, 0.3, 1.0)
+        else:
+            self._formula_status.color = (0.5, 0.8, 0.5, 1.0)
+
     def _on_rotate_pressed(self, *args) -> None:
         self._current_rotation = (self._current_rotation + 90) % 360
         self._rotate_btn.text = f"Rotate Screen ({self._current_rotation}\u00b0)"
@@ -383,6 +494,9 @@ class SettingsScreen(Screen):
 
     def set_rotate_screen_callback(self, callback: Callable) -> None:
         self._on_rotate_screen = callback
+
+    def set_custom_formula_callback(self, callback: Callable) -> None:
+        self._on_custom_formula_change = callback
 
     def set_device_mode_callback(self, callback: Callable) -> None:
         self._on_device_mode_toggle = callback

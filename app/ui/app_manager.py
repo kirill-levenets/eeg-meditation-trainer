@@ -14,6 +14,7 @@ from app.config import APP
 from app.eeg.mock_stream_v2 import MockEEGStream
 from app.eeg.neurosky_stream import NeuroSkyStream
 from app.logger import logger
+from app.metrics.custom_formula import CustomFormulaEvaluator
 from app.metrics.engine import MetricsEngine
 from app.session.manager import SessionManager, SessionState
 from app.storage.database import DatabaseManager
@@ -47,6 +48,7 @@ class EEGMeditationApp(App):
         self._flush_counter: int = 0
         self._current_session_id: Optional[int] = None
         self._current_user_id: Optional[int] = None
+        self._custom_formula: CustomFormulaEvaluator = CustomFormulaEvaluator()
 
     def build(self) -> BoxLayout:
         root = BoxLayout(orientation="vertical")
@@ -122,6 +124,10 @@ class EEGMeditationApp(App):
         self._settings_screen.set_device_select_callback(self._on_device_select)
         self._settings_screen.set_line_width_callback(self._on_line_width_change)
         self._settings_screen.set_rotate_screen_callback(self._on_rotate_screen)
+        self._settings_screen.set_custom_formula_callback(self._on_custom_formula_change)
+
+        # Hide custom formula on graph until a formula is set
+        self._live_screen.graph.set_visible("custom_formula", False)
 
         self._diary_screen.set_session_select_callback(self._on_session_select)
         self._diary_screen.set_save_notes_callback(self._on_save_notes)
@@ -363,6 +369,14 @@ class EEGMeditationApp(App):
                          f"dist={metrics.get('distraction', 0):.0f} "
                          f"native_med={native_med:.0f}")
 
+        # Evaluate custom formula if active
+        if self._custom_formula.is_valid:
+            formula_vars = {**raw_sample, **metrics}
+            bands = self._metrics_engine.derive_bands(raw_sample)
+            formula_vars.update(bands)
+            self._custom_formula.push_variables(formula_vars)
+            metrics["custom_formula"] = self._custom_formula.evaluate(formula_vars)
+
         self._session_manager.add_metric(metrics)
         # Merge raw + computed for full storage
         full_record = {**raw_sample, **metrics}
@@ -432,6 +446,23 @@ class EEGMeditationApp(App):
         from kivy.core.window import Window
         Window.rotation = rotation
         logger.info(f"Screen rotation set to {rotation}")
+
+    def _on_custom_formula_change(self, formula: str) -> None:
+        """Handle custom formula change from settings."""
+        if not formula:
+            self._custom_formula.set_formula("")
+            self._live_screen.graph.set_visible("custom_formula", False)
+            self._settings_screen.set_formula_status("Formula cleared")
+            logger.info("Custom formula cleared")
+            return
+        ok, err = self._custom_formula.set_formula(formula)
+        if ok:
+            self._live_screen.graph.set_visible("custom_formula", True)
+            self._settings_screen.set_formula_status("Formula active")
+            logger.info(f"Custom formula applied: {formula}")
+        else:
+            self._live_screen.graph.set_visible("custom_formula", False)
+            self._settings_screen.set_formula_status(f"Error: {err}", is_error=True)
 
     def _on_sinking_alert_toggle(self, active: bool) -> None:
         self._audio.sinking_alert_enabled = active
@@ -589,6 +620,9 @@ class EEGMeditationApp(App):
         self._db.set_user_setting(
             uid, "rotation", str(self._settings_screen._current_rotation)
         )
+        self._db.set_user_setting(
+            uid, "custom_formula", self._custom_formula.formula
+        )
         toggles = self._settings_screen.graph_toggles
         for key, active in toggles.items():
             self._db.set_user_setting(uid, f"toggle_{key}", str(active))
@@ -678,6 +712,14 @@ class EEGMeditationApp(App):
                 self._on_rotate_screen(rot_val)
             except (ValueError, TypeError):
                 pass
+
+        saved_formula = g(user_id, "custom_formula")
+        if saved_formula:
+            self._settings_screen._formula_input.text = saved_formula
+            self._on_custom_formula_change(saved_formula)
+        else:
+            self._settings_screen._formula_input.text = ""
+            self._on_custom_formula_change("")
 
         logger.debug(f"Loaded settings for user {user_id}")
 
