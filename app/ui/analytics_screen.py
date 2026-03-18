@@ -1,5 +1,6 @@
 from typing import Dict, List
 
+from kivy.core.text import Label as CoreLabel
 from kivy.graphics import Color, Line, Rectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
@@ -26,18 +27,33 @@ class TrendGraphWidget(Widget):
         self._title = title
         self._redraw()
 
+    @staticmethod
+    def _make_text_texture(text: str, font_size: int = 10,
+                           color: tuple = (0.5, 0.5, 0.5, 1)):
+        kw = {"font_size": font_size, "color": color}
+        lbl = CoreLabel(text=text, **kw)
+        lbl.refresh()
+        return lbl.texture
+
     def _redraw(self, *args) -> None:
         self.canvas.after.clear()
         if self.width < 10 or self.height < 10 or not self._data:
             return
 
-        pad = dp(30)
-        graph_x = self.x + pad
-        graph_y = self.y + pad
-        graph_w = self.width - pad * 2
-        graph_h = self.height - pad * 2
+        pad_left = dp(40)
+        pad_bottom = dp(36)
+        pad_top = dp(10)
+        pad_right = dp(10)
+        graph_x = self.x + pad_left
+        graph_y = self.y + pad_bottom
+        graph_w = self.width - pad_left - pad_right
+        graph_h = self.height - pad_bottom - pad_top
+
+        if graph_w < 10 or graph_h < 10:
+            return
 
         values = [d.get(self._metric_key, 0) for d in self._data]
+        periods = [d.get("period", "") for d in self._data]
         max_val = max(values) if values else 1
         if max_val == 0:
             max_val = 1
@@ -47,14 +63,52 @@ class TrendGraphWidget(Widget):
         gap = graph_w / max(n, 1)
 
         with self.canvas.after:
+            # Border
             Color(0.3, 0.3, 0.3, 1.0)
             Line(rectangle=(graph_x, graph_y, graph_w, graph_h), width=1)
 
+            # Y-axis labels (counts/values)
+            num_y_labels = 4
+            for i in range(num_y_labels + 1):
+                frac = i / num_y_labels
+                y_pos = graph_y + graph_h * frac
+                Color(0.25, 0.25, 0.3, 1.0)
+                Line(points=[graph_x, y_pos, graph_x + graph_w, y_pos], width=0.5)
+                val = max_val * frac
+                tex = self._make_text_texture(
+                    f"{val:.0f}", font_size=9, color=(0.5, 0.5, 0.5, 1),
+                )
+                Color(1, 1, 1, 1)
+                Rectangle(
+                    texture=tex,
+                    pos=(graph_x - tex.width - dp(4), y_pos - tex.height / 2),
+                    size=tex.size,
+                )
+
+            # Bars
             Color(0.2, 0.6, 1.0, 0.8)
             for i, val in enumerate(values):
                 bx = graph_x + i * gap + (gap - bar_w) / 2
                 bh = (val / max_val) * graph_h
                 Rectangle(pos=(bx, graph_y), size=(bar_w, bh))
+
+            # X-axis labels (time periods)
+            max_x_labels = max(1, int(graph_w / dp(50)))
+            step = max(1, n // max_x_labels)
+            for i in range(0, n, step):
+                bx = graph_x + i * gap + gap / 2
+                period_text = periods[i]
+                if len(period_text) > 10:
+                    period_text = period_text[-8:]
+                tex = self._make_text_texture(
+                    period_text, font_size=8, color=(0.5, 0.5, 0.5, 1),
+                )
+                Color(1, 1, 1, 1)
+                Rectangle(
+                    texture=tex,
+                    pos=(bx - tex.width / 2, graph_y - tex.height - dp(3)),
+                    size=tex.size,
+                )
 
 
 class AnalyticsScreen(Screen):

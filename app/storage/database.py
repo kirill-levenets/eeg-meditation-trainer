@@ -44,6 +44,7 @@ class DatabaseManager:
                 avg_shamatha REAL DEFAULT 0,
                 max_meditation REAL DEFAULT 0,
                 time_above_threshold INTEGER DEFAULT 0,
+                longest_streak INTEGER DEFAULT 0,
                 notes TEXT DEFAULT '',
                 tags TEXT DEFAULT '',
                 mood_rating INTEGER DEFAULT 0,
@@ -124,6 +125,9 @@ class DatabaseManager:
         if "user_id" not in sess_cols:
             self._conn.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER DEFAULT NULL")
             logger.info("Migrated: added column sessions.user_id")
+        if "longest_streak" not in sess_cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN longest_streak INTEGER DEFAULT 0")
+            logger.info("Migrated: added column sessions.longest_streak")
 
         self._conn.commit()
 
@@ -133,8 +137,8 @@ class DatabaseManager:
             """
             INSERT INTO sessions
             (user_id, date_time, duration, threshold_used, avg_meditation, avg_shamatha,
-             max_meditation, time_above_threshold)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             max_meditation, time_above_threshold, longest_streak)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -145,6 +149,7 @@ class DatabaseManager:
                 stats.get("avg_shamatha", 0),
                 stats.get("max_meditation", 0),
                 stats.get("time_above_threshold", 0),
+                stats.get("longest_streak", 0),
             ),
         )
         self._conn.commit()
@@ -290,7 +295,8 @@ class DatabaseManager:
             """
             UPDATE sessions
             SET duration = ?, threshold_used = ?, avg_meditation = ?,
-                avg_shamatha = ?, max_meditation = ?, time_above_threshold = ?
+                avg_shamatha = ?, max_meditation = ?, time_above_threshold = ?,
+                longest_streak = ?
             WHERE id = ?
             """,
             (
@@ -300,6 +306,7 @@ class DatabaseManager:
                 stats.get("avg_shamatha", 0),
                 stats.get("max_meditation", 0),
                 stats.get("time_above_threshold", 0),
+                stats.get("longest_streak", 0),
                 session_id,
             ),
         )
@@ -389,6 +396,7 @@ if __name__ == "__main__":
         "avg_shamatha": 42.3,
         "max_meditation": 180.0,
         "time_above_threshold": 300,
+        "longest_streak": 45,
     }, user_id=uid)
     print(f"Created session ID: {sid}")
 
