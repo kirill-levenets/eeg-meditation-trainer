@@ -1,0 +1,3 @@
+
+create com port cloner to share data flow between two applications
+run original app and this syncroniously and adjust metrics
