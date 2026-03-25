@@ -9,13 +9,14 @@ from app.eeg.buffer import RollingBuffer, VarianceBuffer
 class MetricsEngine:
     """Computes all EEG meditation metrics from smoothed band data."""
 
-    # Classic EEG-meditation formula coefficients
+    # Vernihor shamatha formula coefficients
+    # Source: scriptures.ru/yoga/eeg_voprosy_i_otvety.htm#formula2
+    # min(avg((a1 + 0.8*a2) / (b2 + b1 + 0.4*t + 0.08*d), 4s) / 1.48, 1)
     _MED_A2_WEIGHT: float = 0.8
     _MED_THETA_WEIGHT: float = 0.4
     _MED_DELTA_WEIGHT: float = 0.08
-    _MED_SCALE: float = 0.75
-    _MED_OFFSET: float = 0.1
-    _MED_AVG_WINDOW: int = 4
+    _MED_DIVISOR: float = 1.48
+    _MED_AVG_WINDOW: int = 8  # 4 seconds at 2Hz
 
     def __init__(self) -> None:
         self._rolling_buffer: RollingBuffer = RollingBuffer(
@@ -35,7 +36,7 @@ class MetricsEngine:
 
     @meditation_threshold.setter
     def meditation_threshold(self, value: int) -> None:
-        self._meditation_threshold = max(0, min(200, value))
+        self._meditation_threshold = max(0, min(100, value))
 
     @staticmethod
     def sigmoid(raw: float, k: float, midpoint: float, max_scale: float = 100.0) -> float:
@@ -97,12 +98,11 @@ class MetricsEngine:
         return {k: math.sqrt(v / total) for k, v in values.items()}
 
     def compute_meditation_score(self, bands_sqrt: Dict[str, float]) -> float:
-        """Classic EEG-meditation formula (scaled to 0-200).
+        """Vernihor shamatha formula.
 
-        Formula: 100 * min(avg(ratio, 4) * 0.75 - 0.1, 1)
-        ratio = (a1 + 0.8*a2) / (b2 + b1 + 0.4*t + 0.08*d)
+        Formula: max(0, avg((a1 + 0.8*a2) / (b2 + b1 + 0.4*t + 0.08*d), 4s) / 1.48) * 100
         Band values are sqrt-normalized relative units.
-        Output scaled to [0, MEDITATION_SCORE_MAX] (0-200).
+        Returns unclamped value — can exceed 100 for very deep meditation.
         """
         a1 = bands_sqrt.get("alpha1", 0.0)
         a2 = bands_sqrt.get("alpha2", 0.0)
@@ -120,9 +120,7 @@ class MetricsEngine:
         self._med_ratio_buffer.append(ratio)
         avg_ratio = sum(self._med_ratio_buffer) / len(self._med_ratio_buffer)
 
-        score_01 = min(avg_ratio * self._MED_SCALE - self._MED_OFFSET, 1.0)
-        score_100 = max(0.0, score_01) * 100.0
-        return score_100 * METRICS.MEDITATION_SCORE_MAX / 100.0
+        return max(0.0, avg_ratio / self._MED_DIVISOR) * 100.0
 
     def compute_sinking(self, norms: Dict[str, float]) -> float:
         """Sinking (dullness): sigmoid of (theta_norm + delta_norm) / (alpha_norm + beta_norm + eps)."""
@@ -171,16 +169,9 @@ class MetricsEngine:
         raw = capped / METRICS.STABILITY_MAX
         return self.sigmoid(raw, SIGMOID.SUBTLE_K, SIGMOID.SUBTLE_MIDPOINT)
 
-    def compute_shamatha(
-        self, calmness: float, norms: Dict[str, float], stability: float
-    ) -> float:
-        """Composite shamatha score combining calmness, clarity, stability."""
-        clarity = norms["alpha_norm"] / (norms["theta_norm"] + norms["delta_norm"] + 0.001)
-        stability_factor = 1.0 / (1.0 + stability)
-        shamatha_raw = (calmness * 0.4) + (clarity * 0.3) + (stability_factor * 0.3)
-        return self.sigmoid(
-            shamatha_raw, SIGMOID.SHAMATHA_K, SIGMOID.SHAMATHA_MIDPOINT
-        )
+    def compute_shamatha(self, meditation_score: float) -> float:
+        """Shamatha score = meditation score (Vernihor no-levelling formula)."""
+        return meditation_score
 
     def classify_state(
         self,
@@ -244,7 +235,7 @@ class MetricsEngine:
         sinking = self.compute_sinking(norms)
         distraction = self.compute_distraction(norms)
         subtle_distraction = self.compute_subtle_distraction(meditation_score)
-        shamatha = self.compute_shamatha(calmness, norms, stability)
+        shamatha = self.compute_shamatha(meditation_score)
         state = self.classify_state(meditation_score, stability, sinking, distraction)
 
         return {

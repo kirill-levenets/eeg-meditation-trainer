@@ -20,18 +20,70 @@ import time
 IS_WINDOWS = platform.system() == "Windows"
 
 
-def run_linux(bt_addr: str, channel: int = 1) -> None:
-    """Read from BT RFCOMM, write to two PTYs."""
+def run_linux(bt_addr: str, channel: int = 1, use_socat: bool = False,
+              record_file: str = None) -> None:
+    """Read from BT RFCOMM, write to two virtual serial ports.
+
+    With --socat: creates proper virtual serial devices via socat (needed for
+    Wine/thinkgear.dll which requires full serial ioctl support).
+    Without: uses simple PTYs (fine for apps that just read raw bytes).
+    """
     import select
+    import signal
     import socket
+    import subprocess
 
     BTPROTO_RFCOMM = 3
+    socat_procs = []
 
-    # Create two pseudo-terminal pairs
-    master1, slave1 = os.openpty()
-    master2, slave2 = os.openpty()
-    name1 = os.ttyname(slave1)
-    name2 = os.ttyname(slave2)
+    if use_socat:
+        # Create two socat virtual serial pairs:
+        #   /tmp/mindwave_a_master <-> /tmp/mindwave_a  (app A reads from _a)
+        #   /tmp/mindwave_b_master <-> /tmp/mindwave_b  (app B reads from _b)
+        pairs = [
+            ("/tmp/mindwave_a_master", "/tmp/mindwave_a"),
+            ("/tmp/mindwave_b_master", "/tmp/mindwave_b"),
+        ]
+        for master_link, slave_link in pairs:
+            # Clean up stale symlinks
+            for p in (master_link, slave_link):
+                if os.path.exists(p) or os.path.islink(p):
+                    os.unlink(p)
+            proc = subprocess.Popen(
+                [
+                    "socat", "-d",
+                    f"pty,raw,echo=0,link={master_link}",
+                    f"pty,raw,echo=0,link={slave_link}",
+                ],
+                stderr=subprocess.PIPE,
+            )
+            socat_procs.append(proc)
+
+        # Wait for socat to create the links
+        for _ in range(20):
+            if all(os.path.exists(p[1]) for p in pairs):
+                break
+            time.sleep(0.1)
+        else:
+            print("ERROR: socat failed to create virtual serial ports")
+            for p in socat_procs:
+                p.terminate()
+            sys.exit(1)
+
+        # Open the master side for writing (non-blocking to avoid stalling)
+        import fcntl
+        master1_fd = os.open(pairs[0][0], os.O_WRONLY | os.O_NOCTTY | os.O_NONBLOCK)
+        master2_fd = os.open(pairs[1][0], os.O_WRONLY | os.O_NOCTTY | os.O_NONBLOCK)
+        name1 = pairs[0][1]
+        name2 = pairs[1][1]
+        slave1_fd = None
+        slave2_fd = None
+    else:
+        # Simple PTY mode
+        master1_fd, slave1_fd = os.openpty()
+        master2_fd, slave2_fd = os.openpty()
+        name1 = os.ttyname(slave1_fd)
+        name2 = os.ttyname(slave2_fd)
 
     print(f"Connecting to {bt_addr} channel {channel}...")
     sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, BTPROTO_RFCOMM)
@@ -41,12 +93,22 @@ def run_linux(bt_addr: str, channel: int = 1) -> None:
     print()
     print(f"  Port A (original app): {name1}")
     print(f"  Port B (your app):     {name2}")
+    if use_socat:
+        print()
+        print("  These are proper serial devices (socat). For Wine:")
+        print(f"    ln -sf {name1} ~/.wine/dosdevices/com1")
     print()
-    print("Point each application at the corresponding /dev/pts/N path.")
+    rec_fh = None
+    if record_file:
+        rec_fh = open(record_file, "wb")
+        print(f"  Recording raw stream to: {record_file}")
+
+    print()
     print("Press Ctrl+C to stop.")
     print()
 
     bytes_total = 0
+    t_start = time.time()
     try:
         while True:
             ready, _, _ = select.select([sock], [], [], 1.0)
@@ -55,11 +117,26 @@ def run_linux(bt_addr: str, channel: int = 1) -> None:
                     data = sock.recv(1024)
                 except BlockingIOError:
                     continue
+                except (TimeoutError, ConnectionError, OSError) as e:
+                    print(f"\nDevice disconnected: {e}")
+                    break
                 if not data:
                     print("Device disconnected.")
                     break
-                os.write(master1, data)
-                os.write(master2, data)
+                try:
+                    os.write(master1_fd, data)
+                except (OSError, BlockingIOError):
+                    pass  # reader not connected or buffer full
+                try:
+                    os.write(master2_fd, data)
+                except (OSError, BlockingIOError):
+                    pass
+                if rec_fh:
+                    # Write timestamp + length + data for accurate replay
+                    elapsed = time.time() - t_start
+                    import struct as _struct
+                    rec_fh.write(_struct.pack("<dH", elapsed, len(data)))
+                    rec_fh.write(data)
                 bytes_total += len(data)
                 if bytes_total % 10240 < len(data):
                     print(f"  [{bytes_total} bytes forwarded]", end="\r")
@@ -67,10 +144,18 @@ def run_linux(bt_addr: str, channel: int = 1) -> None:
         print(f"\nStopped. Total bytes forwarded: {bytes_total}")
     finally:
         sock.close()
-        os.close(master1)
-        os.close(master2)
-        os.close(slave1)
-        os.close(slave2)
+        os.close(master1_fd)
+        os.close(master2_fd)
+        if slave1_fd is not None:
+            os.close(slave1_fd)
+        if slave2_fd is not None:
+            os.close(slave2_fd)
+        if rec_fh:
+            rec_fh.close()
+            print(f"Recording saved: {record_file}")
+        for p in socat_procs:
+            p.terminate()
+            p.wait()
 
 
 def run_windows(source_port: str, out1: str, out2: str, baudrate: int = 57600) -> None:
@@ -149,6 +234,15 @@ def main() -> None:
         "--baudrate", type=int, default=57600,
         help="(Windows) Serial baud rate (default: 57600)"
     )
+    parser.add_argument(
+        "--socat", action="store_true",
+        help="(Linux) Use socat virtual serial devices instead of PTYs. "
+             "Required for Wine/thinkgear.dll which needs full serial ioctl support."
+    )
+    parser.add_argument(
+        "--record", metavar="FILE",
+        help="Record raw BT stream to file for later replay"
+    )
     args = parser.parse_args()
 
     if args.bt:
@@ -156,7 +250,8 @@ def main() -> None:
             print("ERROR: --bt (Bluetooth RFCOMM) is only supported on Linux.")
             print("On Windows, use --serial COMx instead.")
             sys.exit(1)
-        run_linux(args.bt, args.channel)
+        run_linux(args.bt, args.channel, use_socat=args.socat,
+                  record_file=args.record)
     elif args.serial:
         if not IS_WINDOWS:
             print("NOTE: --serial mode is intended for Windows with com0com.")

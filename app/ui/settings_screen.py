@@ -30,6 +30,10 @@ class SettingsScreen(Screen):
         self._on_line_width_change: Optional[Callable] = None
         self._on_rotate_screen: Optional[Callable] = None
         self._on_custom_formula_change: Optional[Callable] = None
+        self._on_save_formula: Optional[Callable] = None
+        self._on_load_formula: Optional[Callable] = None
+        self._on_delete_formula: Optional[Callable] = None
+        self._on_export_formulas: Optional[Callable] = None
         self._graph_toggles: Dict[str, bool] = {
             "meditation_score": True,
             "shamatha_score": True,
@@ -302,15 +306,25 @@ class SettingsScreen(Screen):
         self._formula_input.bind(on_text_validate=self._on_formula_submit)
         layout.add_widget(self._formula_input)
 
+        formula_btns = BoxLayout(
+            size_hint_y=None, height=dp(34), spacing=dp(6)
+        )
         formula_btn = Button(
-            text="Apply Formula",
+            text="Apply",
             font_size=dp(13),
-            size_hint_y=None,
-            height=dp(34),
             background_color=(0.25, 0.4, 0.55, 1.0),
         )
         formula_btn.bind(on_release=self._on_formula_submit)
-        layout.add_widget(formula_btn)
+        formula_btns.add_widget(formula_btn)
+
+        save_btn = Button(
+            text="Save",
+            font_size=dp(13),
+            background_color=(0.3, 0.45, 0.3, 1.0),
+        )
+        save_btn.bind(on_release=self._on_save_formula_pressed)
+        formula_btns.add_widget(save_btn)
+        layout.add_widget(formula_btns)
 
         self._formula_status = Label(
             text="",
@@ -322,6 +336,36 @@ class SettingsScreen(Screen):
         )
         self._formula_status.bind(size=self._formula_status.setter("text_size"))
         layout.add_widget(self._formula_status)
+
+        # Saved formulas header with export button
+        saved_header = BoxLayout(size_hint_y=None, height=dp(26), spacing=dp(6))
+        saved_label = Label(
+            text="Saved Formulas:",
+            font_size=dp(12),
+            size_hint_x=0.6,
+            color=(0.6, 0.6, 0.6, 1.0),
+            halign="left",
+        )
+        saved_label.bind(size=saved_label.setter("text_size"))
+        saved_header.add_widget(saved_label)
+
+        export_formulas_btn = Button(
+            text="Export to .txt",
+            font_size=dp(11),
+            size_hint_x=0.4,
+            background_color=(0.3, 0.3, 0.45, 1.0),
+        )
+        export_formulas_btn.bind(on_release=self._on_export_formulas_pressed)
+        saved_header.add_widget(export_formulas_btn)
+        layout.add_widget(saved_header)
+
+        self._saved_formulas_box = BoxLayout(
+            orientation="vertical",
+            size_hint_y=None,
+            height=dp(0),
+            spacing=dp(2),
+        )
+        layout.add_widget(self._saved_formulas_box)
 
         examples = Label(
             text=(
@@ -348,6 +392,8 @@ class SettingsScreen(Screen):
                 "Bands: alpha1 alpha2 beta1 beta2\n"
                 "  gamma1 gamma2 theta delta\n"
                 "Combined: alpha beta gamma\n"
+                "Sqrt-relative: s_alpha1 s_alpha2 s_beta1\n"
+                "  s_beta2 s_theta s_delta\n"
                 "Normalized: alpha_norm beta_norm gamma_norm\n"
                 "  theta_norm delta_norm total_power\n"
                 "Metrics: meditation_score shamatha_score\n"
@@ -361,7 +407,7 @@ class SettingsScreen(Screen):
             ),
             font_size=dp(12),
             size_hint_y=None,
-            height=dp(195),
+            height=dp(225),
             color=(0.45, 0.45, 0.55, 1.0),
             halign="left",
             valign="top",
@@ -497,6 +543,73 @@ class SettingsScreen(Screen):
 
     def set_custom_formula_callback(self, callback: Callable) -> None:
         self._on_custom_formula_change = callback
+
+    def set_save_formula_callback(self, callback: Callable) -> None:
+        self._on_save_formula = callback
+
+    def set_load_formula_callback(self, callback: Callable) -> None:
+        self._on_load_formula = callback
+
+    def set_delete_formula_callback(self, callback: Callable) -> None:
+        self._on_delete_formula = callback
+
+    def set_export_formulas_callback(self, callback: Callable) -> None:
+        self._on_export_formulas = callback
+
+    def _on_export_formulas_pressed(self, *args) -> None:
+        if self._on_export_formulas:
+            self._on_export_formulas()
+
+    def _on_save_formula_pressed(self, *args) -> None:
+        formula = self._formula_input.text.strip()
+        if not formula:
+            self.set_formula_status("Nothing to save", is_error=True)
+            return
+        if self._on_save_formula:
+            self._on_save_formula(formula)
+
+    def _on_load_formula_pressed(self, btn) -> None:
+        idx = getattr(btn, "formula_index", -1)
+        if idx >= 0 and self._on_load_formula:
+            self._on_load_formula(idx)
+
+    def _on_delete_formula_pressed(self, btn) -> None:
+        idx = getattr(btn, "formula_index", -1)
+        if idx >= 0 and self._on_delete_formula:
+            self._on_delete_formula(idx)
+
+    def populate_saved_formulas(self, formulas) -> None:
+        """Update the saved formulas list. formulas: [{name, formula}, ...]"""
+        box = self._saved_formulas_box
+        box.clear_widgets()
+        row_height = dp(30)
+        box.height = row_height * len(formulas) if formulas else dp(0)
+
+        for i, entry in enumerate(formulas):
+            row = BoxLayout(size_hint_y=None, height=row_height, spacing=dp(4))
+
+            load_btn = Button(
+                text=entry.get("name", entry.get("formula", "")[:30]),
+                font_size=dp(11),
+                size_hint_x=0.65,
+                background_color=(0.2, 0.2, 0.3, 1.0),
+                halign="left",
+            )
+            load_btn.formula_index = i
+            load_btn.bind(on_release=self._on_load_formula_pressed)
+            row.add_widget(load_btn)
+
+            del_btn = Button(
+                text="X",
+                font_size=dp(12),
+                size_hint_x=0.12,
+                background_color=(0.5, 0.2, 0.2, 1.0),
+            )
+            del_btn.formula_index = i
+            del_btn.bind(on_release=self._on_delete_formula_pressed)
+            row.add_widget(del_btn)
+
+            box.add_widget(row)
 
     def set_device_mode_callback(self, callback: Callable) -> None:
         self._on_device_mode_toggle = callback

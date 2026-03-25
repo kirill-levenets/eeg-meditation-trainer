@@ -24,7 +24,7 @@ METRICS_COLORS = {
 }
 
 METRICS_SCALES = {
-    "meditation_score": 200.0,
+    "meditation_score": 100.0,
     "shamatha_score": 100.0,
     "distraction": 100.0,
     "sinking": 100.0,
@@ -69,6 +69,17 @@ class LiveSessionScreen(Screen):
         header.add_widget(self._timer_label)
         header.add_widget(self._state_label)
         root.add_widget(header)
+
+        self._alert_label = Label(
+            text="",
+            size_hint_y=None,
+            height=dp(0),
+            font_size=dp(12),
+            color=(1.0, 0.4, 0.2, 1.0),
+            halign="center",
+        )
+        self._alert_label.bind(size=self._alert_label.setter("text_size"))
+        root.add_widget(self._alert_label)
 
         self._graph = ScrollableGraphWidget(
             colors=METRICS_COLORS,
@@ -247,6 +258,15 @@ class LiveSessionScreen(Screen):
         self._btn_pause.text = "Pause"
         self._btn_stop.disabled = True
 
+    def show_alert(self, text: str) -> None:
+        """Show a warning banner below the header."""
+        self._alert_label.text = text
+        self._alert_label.height = dp(28)
+
+    def hide_alert(self) -> None:
+        self._alert_label.text = ""
+        self._alert_label.height = dp(0)
+
     def reset_display(self) -> None:
         self._graph.clear_data()
         self._timer_label.text = "00:00"
@@ -254,6 +274,7 @@ class LiveSessionScreen(Screen):
         self._state_label.color = (0.7, 0.7, 0.7, 1.0)
         self._scroll_slider.value = 0
         self._scroll_time_label.text = "Live"
+        self.hide_alert()
         for label in self._stat_labels.values():
             label.text = "0"
         self.set_controls_idle()

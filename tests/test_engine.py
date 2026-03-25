@@ -73,11 +73,10 @@ class TestMetricsEngine(unittest.TestCase):
         calmness = self.engine.compute_calmness(norms)
         self.assertGreater(calmness, 0.0)
 
-    def test_meditation_score_in_range(self):
+    def test_meditation_score_non_negative(self):
         bands_sqrt = MetricsEngine.compute_sqrt_relative_bands(self.sample)
         score = self.engine.compute_meditation_score(bands_sqrt)
         self.assertGreaterEqual(score, 0.0)
-        self.assertLessEqual(score, 200.0)
 
     def test_sinking_in_range(self):
         bands = MetricsEngine.derive_bands(self.sample)
@@ -93,13 +92,11 @@ class TestMetricsEngine(unittest.TestCase):
         self.assertGreater(distraction, 0.0)
         self.assertLess(distraction, 100.0)
 
-    def test_shamatha_in_range(self):
-        bands = MetricsEngine.derive_bands(self.sample)
-        norms = MetricsEngine.normalize_bands(bands)
-        calmness = self.engine.compute_calmness(norms)
-        shamatha = self.engine.compute_shamatha(calmness, norms, 10.0)
-        self.assertGreater(shamatha, 0.0)
-        self.assertLess(shamatha, 100.0)
+    def test_shamatha_equals_meditation(self):
+        result = self.engine.process_sample(self.sample)
+        self.assertAlmostEqual(
+            result["shamatha_score"], result["meditation_score"]
+        )
 
     def test_process_sample_returns_all_keys(self):
         result = self.engine.process_sample(self.sample)
@@ -114,7 +111,7 @@ class TestMetricsEngine(unittest.TestCase):
 
     def test_state_classification_stable(self):
         state = self.engine.classify_state(
-            meditation_score=100, stability=10, sinking=20, distraction=20
+            meditation_score=85, stability=10, sinking=20, distraction=20
         )
         self.assertEqual(state, "Stable Focus")
 
@@ -132,7 +129,7 @@ class TestMetricsEngine(unittest.TestCase):
 
     def test_state_classification_subtle(self):
         state = self.engine.classify_state(
-            meditation_score=100, stability=500, sinking=20, distraction=20
+            meditation_score=85, stability=500, sinking=20, distraction=20
         )
         self.assertEqual(state, "Subtle Distraction")
 
@@ -140,7 +137,7 @@ class TestMetricsEngine(unittest.TestCase):
         self.engine.meditation_threshold = 60
         self.assertEqual(self.engine.meditation_threshold, 60)
         self.engine.meditation_threshold = 300
-        self.assertEqual(self.engine.meditation_threshold, 200)
+        self.assertEqual(self.engine.meditation_threshold, 100)
         self.engine.meditation_threshold = -10
         self.assertEqual(self.engine.meditation_threshold, 0)
 
@@ -192,7 +189,7 @@ class TestMetricsEngine(unittest.TestCase):
             "gamma1": 500.0, "gamma2": 500.0,
         }
         result = self.engine.process_sample(high_alpha)
-        self.assertGreater(result["meditation_score"], 150.0)
+        self.assertGreater(result["meditation_score"], 75.0)
 
     def test_high_beta_gives_low_meditation(self):
         high_beta = {

@@ -182,6 +182,7 @@ class NeuroSkyStream:
         self._bt_socket = None
         self._bt_input_stream = None  # Android only (Java InputStream)
         self._desktop_socket: Optional[_socket.socket] = None  # Desktop only
+        self._serial_fd: Optional[int] = None  # Serial device mode (splitter)
         self._read_count: int = 0
 
     def set_device(self, address: str, name: str = "") -> None:
@@ -338,9 +339,16 @@ class NeuroSkyStream:
         except Exception as e:
             logger.warning(f"Permission request failed: {e}")
 
+    @property
+    def _is_serial_device(self) -> bool:
+        """True if address is a serial device path (e.g. /tmp/mindwave_b from splitter)."""
+        return bool(self._device_address and self._device_address.startswith("/"))
+
     def _connect_bluetooth(self) -> None:
-        """Open RFCOMM socket to the MindWave."""
-        if _IS_ANDROID:
+        """Open RFCOMM socket to the MindWave (or serial device from splitter)."""
+        if self._is_serial_device:
+            self._connect_serial()
+        elif _IS_ANDROID:
             self._connect_android()
         else:
             self._connect_desktop()
@@ -422,6 +430,20 @@ class NeuroSkyStream:
 
         raise RuntimeError(f"All RFCOMM methods failed: {'; '.join(errors)}")
 
+    # ---- Serial device backend (splitter) ----
+
+    def _connect_serial(self) -> None:
+        """Open a serial device path (e.g. /tmp/mindwave_b from splitter)."""
+        import os as _os
+        path = self._device_address
+        logger.info(f"Connecting to serial device {path}...")
+        try:
+            fd = _os.open(path, _os.O_RDONLY | _os.O_NOCTTY)
+            self._serial_fd = fd
+            logger.info(f"Serial device connected: {path}")
+        except Exception as e:
+            raise RuntimeError(f"Serial device connect failed: {e}")
+
     # ---- Desktop Linux backend ----
 
     def _connect_desktop(self) -> None:
@@ -440,10 +462,25 @@ class NeuroSkyStream:
             raise RuntimeError(f"Desktop RFCOMM connect failed: {e}")
 
     def _read_bytes(self, max_bytes: int) -> bytes:
-        """Read bytes from the BT socket (platform-aware)."""
+        """Read bytes from the BT socket or serial device (platform-aware)."""
+        if self._serial_fd is not None:
+            return self._read_bytes_serial(max_bytes)
         if _IS_ANDROID:
             return self._read_bytes_android(max_bytes)
         return self._read_bytes_desktop(max_bytes)
+
+    def _read_bytes_serial(self, max_bytes: int) -> bytes:
+        """Read bytes from a serial device file descriptor (splitter)."""
+        import os as _os
+        if self._serial_fd is None:
+            return b""
+        try:
+            return _os.read(self._serial_fd, max_bytes)
+        except BlockingIOError:
+            return b""
+        except Exception as e:
+            logger.debug(f"_read_bytes_serial error: {e}")
+            raise
 
     def _read_bytes_android(self, max_bytes: int) -> bytes:
         """Read bytes using Java InputStream (Android)."""
@@ -491,8 +528,15 @@ class NeuroSkyStream:
             raise
 
     def _close_socket(self) -> None:
-        """Close the Bluetooth socket if open."""
+        """Close the Bluetooth socket or serial device if open."""
+        import os as _os
         self._bt_input_stream = None
+        if self._serial_fd is not None:
+            try:
+                _os.close(self._serial_fd)
+            except Exception:
+                pass
+            self._serial_fd = None
         if self._bt_socket:
             try:
                 self._bt_socket.close()

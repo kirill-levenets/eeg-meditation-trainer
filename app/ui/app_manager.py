@@ -1,4 +1,5 @@
 import os
+import sys
 from typing import Dict, List, Optional
 
 from kivy.app import App
@@ -16,13 +17,14 @@ from app.eeg.neurosky_stream import NeuroSkyStream
 from app.logger import logger
 from app.metrics.custom_formula import CustomFormulaEvaluator
 from app.metrics.engine import MetricsEngine
+from app.metrics.noise_detector import PowerLineDetector
 from app.session.manager import SessionManager, SessionState
 from app.storage.database import DatabaseManager
 from app.ui.analytics_screen import AnalyticsScreen
 from app.ui.diary_screen import DiaryScreen
 from app.ui.live_session import LiveSessionScreen
 from app.ui.profile_screen import ProfileScreen
-from app.ui.raw_eeg_screen import RawEEGScreen
+from app.ui.raw_eeg_screen import RawEEGScreen, ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
 from app.ui.timer_screen import TimerScreen
 
@@ -49,8 +51,46 @@ class EEGMeditationApp(App):
         self._current_session_id: Optional[int] = None
         self._current_user_id: Optional[int] = None
         self._custom_formula: CustomFormulaEvaluator = CustomFormulaEvaluator()
+        self.serial_device_override: Optional[str] = None
+        self._wake_lock = None
+
+    def _acquire_wake_lock(self) -> None:
+        """Keep screen on during session (Android only)."""
+        if not hasattr(sys, "getandroidapilevel"):
+            return
+        try:
+            from jnius import autoclass
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+            activity = PythonActivity.mActivity
+            window = activity.getWindow()
+            WindowManager = autoclass("android.view.WindowManager$LayoutParams")
+            window.addFlags(WindowManager.FLAG_KEEP_SCREEN_ON)
+            logger.info("Wake lock acquired (screen will stay on)")
+        except Exception as e:
+            logger.warning(f"Failed to acquire wake lock: {e}")
+
+    def _release_wake_lock(self) -> None:
+        """Allow screen to turn off again (Android only)."""
+        if not hasattr(sys, "getandroidapilevel"):
+            return
+        try:
+            from jnius import autoclass
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+            activity = PythonActivity.mActivity
+            window = activity.getWindow()
+            WindowManager = autoclass("android.view.WindowManager$LayoutParams")
+            window.clearFlags(WindowManager.FLAG_KEEP_SCREEN_ON)
+            logger.info("Wake lock released")
+        except Exception as e:
+            logger.warning(f"Failed to release wake lock: {e}")
 
     def build(self) -> BoxLayout:
+        # Apply --serial override if provided
+        if self.serial_device_override:
+            path = self.serial_device_override
+            self._real_stream.set_device(path, f"Splitter ({path})")
+            APP.USE_MOCK_DEVICE = False
+            logger.info(f"Serial device override: {path}")
         root = BoxLayout(orientation="vertical")
 
         nav_bar = ActionBar(size_hint_y=None, height=dp(48))
@@ -104,10 +144,23 @@ class EEGMeditationApp(App):
         root.add_widget(self._sm)
 
         self._bind_callbacks()
+        self._link_graph_zoom()
         self._restore_last_user()
         self._refresh_profile()
         self._update_diary_visibility()
+        self._acquire_wake_lock()
         return root
+
+    def _link_graph_zoom(self) -> None:
+        """Link zoom across all graph widgets so they share the same time scale."""
+        ScrollableGraphWidget.link_zoom(
+            self._live_screen.graph,
+            self._raw_eeg_screen._raw_graph,
+            self._raw_eeg_screen._band_graph,
+            self._diary_screen._metrics_graph,
+            self._diary_screen._raw_eeg_graph,
+            self._diary_screen._freq_graph,
+        )
 
     def _bind_callbacks(self) -> None:
         self._live_screen.btn_start.bind(on_release=self._on_start)
@@ -125,6 +178,10 @@ class EEGMeditationApp(App):
         self._settings_screen.set_line_width_callback(self._on_line_width_change)
         self._settings_screen.set_rotate_screen_callback(self._on_rotate_screen)
         self._settings_screen.set_custom_formula_callback(self._on_custom_formula_change)
+        self._settings_screen.set_save_formula_callback(self._on_save_formula)
+        self._settings_screen.set_load_formula_callback(self._on_load_formula)
+        self._settings_screen.set_delete_formula_callback(self._on_delete_formula)
+        self._settings_screen.set_export_formulas_callback(self._on_export_formulas)
 
         # Hide custom formula on graph until a formula is set
         self._live_screen.graph.set_visible("custom_formula", False)
@@ -201,6 +258,7 @@ class EEGMeditationApp(App):
         self._metrics_engine.meditation_threshold = threshold
         self._audio.set_threshold(threshold)
         self._metrics_engine.reset()
+        self._noise_detector = PowerLineDetector() if not APP.USE_MOCK_DEVICE else None
         self._metrics_buffer = []
         self._raw_buffer = []
         self._flush_counter = 0
@@ -212,6 +270,7 @@ class EEGMeditationApp(App):
         self._raw_eeg_screen.raw_graph.clear_data()
         self._raw_eeg_screen.band_graph.clear_data()
         self._live_screen.graph.set_threshold(float(threshold), "meditation_score")
+        self._live_screen.hide_alert()
         self._live_screen.set_controls_running()
 
         self._eeg_stream.start()
@@ -356,6 +415,21 @@ class EEGMeditationApp(App):
         raw_sample = self._eeg_stream.read_sample()
         metrics = self._metrics_engine.process_sample(raw_sample)
 
+        # Feed raw waveform to power line noise detector
+        detector = getattr(self, '_noise_detector', None)
+        if detector and not detector.ready():
+            waveform = raw_sample.get("raw_eeg_waveform", [])
+            if waveform:
+                detector.feed(waveform)
+            if detector.ready():
+                detected, freq = detector.result()
+                if detected:
+                    self._live_screen.show_alert(
+                        f"Warning: {freq} Hz power line noise detected. "
+                        f"Check notch filter setting or move away from electrical equipment."
+                    )
+                    logger.warning(f"Power line noise detected: {freq} Hz")
+
         # Log raw sample every 10 ticks (~5s at 2Hz)
         self._tick_count = getattr(self, '_tick_count', 0) + 1
         if self._tick_count % 10 == 0:
@@ -374,6 +448,9 @@ class EEGMeditationApp(App):
             formula_vars = {**raw_sample, **metrics}
             bands = self._metrics_engine.derive_bands(raw_sample)
             formula_vars.update(bands)
+            # Add sqrt-normalized relative bands (s_ prefix)
+            sqrt_bands = self._metrics_engine.compute_sqrt_relative_bands(raw_sample)
+            formula_vars.update({f"s_{k}": v for k, v in sqrt_bands.items()})
             self._custom_formula.push_variables(formula_vars)
             metrics["custom_formula"] = self._custom_formula.evaluate(formula_vars)
 
@@ -464,6 +541,65 @@ class EEGMeditationApp(App):
             self._live_screen.graph.set_visible("custom_formula", False)
             self._settings_screen.set_formula_status(f"Error: {err}", is_error=True)
 
+    def _on_save_formula(self, formula: str) -> None:
+        """Save the current formula to the user's saved list."""
+        if not self._current_user_id:
+            self._settings_screen.set_formula_status("No user selected", is_error=True)
+            return
+        # Use a truncated version as the name
+        name = formula[:40] + ("..." if len(formula) > 40 else "")
+        ok = self._db.add_saved_formula(self._current_user_id, name, formula)
+        if ok:
+            self._settings_screen.set_formula_status("Formula saved")
+            self._refresh_saved_formulas()
+            logger.info(f"Formula saved: {formula}")
+        else:
+            self._settings_screen.set_formula_status("Limit reached (50 max)", is_error=True)
+
+    def _on_load_formula(self, index: int) -> None:
+        """Load a saved formula into the input and apply it."""
+        if not self._current_user_id:
+            return
+        formulas = self._db.get_saved_formulas(self._current_user_id)
+        if 0 <= index < len(formulas):
+            formula = formulas[index]["formula"]
+            self._settings_screen._formula_input.text = formula
+            self._on_custom_formula_change(formula)
+
+    def _on_delete_formula(self, index: int) -> None:
+        """Delete a saved formula."""
+        if not self._current_user_id:
+            return
+        self._db.remove_saved_formula(self._current_user_id, index)
+        self._refresh_saved_formulas()
+        self._settings_screen.set_formula_status("Formula deleted")
+        logger.info(f"Saved formula #{index} deleted")
+
+    def _on_export_formulas(self) -> None:
+        """Export saved formulas to a text file."""
+        if not self._current_user_id:
+            self._settings_screen.set_formula_status("No user selected", is_error=True)
+            return
+        formulas = self._db.get_saved_formulas(self._current_user_id)
+        if not formulas:
+            self._settings_screen.set_formula_status("No formulas to export", is_error=True)
+            return
+        export_dir = os.path.dirname(self._db._db_path)
+        path = os.path.join(export_dir, f"formulas_user_{self._current_user_id}.txt")
+        with open(path, "w") as f:
+            for entry in formulas:
+                f.write(f"{entry['formula']}\n")
+        self._settings_screen.set_formula_status(f"Exported to {os.path.basename(path)}")
+        logger.info(f"Exported {len(formulas)} formulas to {path}")
+
+    def _refresh_saved_formulas(self) -> None:
+        """Refresh the saved formulas list in settings UI."""
+        if not self._current_user_id:
+            self._settings_screen.populate_saved_formulas([])
+            return
+        formulas = self._db.get_saved_formulas(self._current_user_id)
+        self._settings_screen.populate_saved_formulas(formulas)
+
     def _on_sinking_alert_toggle(self, active: bool) -> None:
         self._audio.sinking_alert_enabled = active
         logger.info(f"Sinking alert {'enabled' if active else 'disabled'}")
@@ -535,7 +671,9 @@ class EEGMeditationApp(App):
 
     def _on_export_csv(self, session_id: int) -> Optional[str]:
         """Export session data as CSV file. Returns file path or None."""
-        csv_data = self._db.export_session_csv(session_id)
+        csv_data = self._db.export_session_csv(
+            session_id, custom_formula=self._custom_formula
+        )
         if not csv_data:
             return None
         export_dir = os.path.dirname(self._db._db_path)
@@ -623,6 +761,10 @@ class EEGMeditationApp(App):
         self._db.set_user_setting(
             uid, "custom_formula", self._custom_formula.formula
         )
+        # Save zoom level as viewport duration in seconds
+        graph = self._live_screen.graph
+        zoom_seconds = graph.viewport_points / graph._sample_rate
+        self._db.set_user_setting(uid, "graph_zoom_seconds", str(zoom_seconds))
         toggles = self._settings_screen.graph_toggles
         for key, active in toggles.items():
             self._db.set_user_setting(uid, f"toggle_{key}", str(active))
@@ -677,22 +819,24 @@ class EEGMeditationApp(App):
                 cb.active = active
                 self._live_screen.graph.set_visible(key, active)
 
-        bt_addr = g(user_id, "bt_device_address")
-        bt_name = g(user_id, "bt_device_name")
-        if bt_addr:
-            self._real_stream.set_device(bt_addr, bt_name or bt_addr)
-            self._settings_screen.update_device_status(
-                False, meta=f"Saved device: {bt_name or bt_addr}"
-            )
+        # Skip BT/mock restore if --serial override is active
+        if not self.serial_device_override:
+            bt_addr = g(user_id, "bt_device_address")
+            bt_name = g(user_id, "bt_device_name")
+            if bt_addr:
+                self._real_stream.set_device(bt_addr, bt_name or bt_addr)
+                self._settings_screen.update_device_status(
+                    False, meta=f"Saved device: {bt_name or bt_addr}"
+                )
 
-        use_mock = g(user_id, "use_mock")
-        if use_mock is not None:
-            val = use_mock == "True"
-            APP.USE_MOCK_DEVICE = val
-            self._settings_screen._device_mode_cb.active = val
-        elif bt_addr:
-            APP.USE_MOCK_DEVICE = False
-            self._settings_screen._device_mode_cb.active = False
+            use_mock = g(user_id, "use_mock")
+            if use_mock is not None:
+                val = use_mock == "True"
+                APP.USE_MOCK_DEVICE = val
+                self._settings_screen._device_mode_cb.active = val
+            elif bt_addr:
+                APP.USE_MOCK_DEVICE = False
+                self._settings_screen._device_mode_cb.active = False
 
         lw = g(user_id, "line_width")
         if lw is not None:
@@ -713,6 +857,15 @@ class EEGMeditationApp(App):
             except (ValueError, TypeError):
                 pass
 
+        zoom_s = g(user_id, "graph_zoom_seconds")
+        if zoom_s is not None:
+            try:
+                sec = float(zoom_s)
+                graph = self._live_screen.graph
+                graph._set_viewport(int(sec * graph._sample_rate))
+            except (ValueError, TypeError):
+                pass
+
         saved_formula = g(user_id, "custom_formula")
         if saved_formula:
             self._settings_screen._formula_input.text = saved_formula
@@ -721,6 +874,7 @@ class EEGMeditationApp(App):
             self._settings_screen._formula_input.text = ""
             self._on_custom_formula_change("")
 
+        self._refresh_saved_formulas()
         logger.debug(f"Loaded settings for user {user_id}")
 
     def on_stop(self) -> None:

@@ -2,6 +2,7 @@ from collections import deque
 from typing import Dict, List, Optional
 
 from kivy.core.text import Label as CoreLabel
+from kivy.core.window import Window
 from kivy.graphics import Color, InstructionGroup, Line, Rectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
@@ -45,11 +46,23 @@ class ScrollableGraphWidget(Widget):
         self._show_timestamps: bool = show_timestamps
         self._touch_start_x: float = 0.0
         self._touch_start_offset: int = 0
+        self._default_viewport: int = self._viewport_points
+        self._min_viewport: int = max(4, int(self._sample_rate * 2))  # min 2 seconds
+        self._max_viewport: int = effective_max  # max = full buffer
+        self._zoom_factor: float = 1.3  # each step zooms by 30%
+        # Pinch zoom state
+        self._pinch_active: bool = False
+        self._pinch_start_dist: float = 0.0
+        self._pinch_start_viewport: int = 0
+        # Sync group: linked graphs zoom together
+        self._sync_group: List["ScrollableGraphWidget"] = []
         self._threshold_value: Optional[float] = None
         self._threshold_scale_key: Optional[str] = None
         self._gfx: InstructionGroup = InstructionGroup()
         self.canvas.add(self._gfx)
         self.bind(size=self._redraw, pos=self._redraw)
+        # Bind Window scroll for zoom (bypasses ScrollView interception)
+        Window.bind(on_mouse_down=self._on_window_mouse_down)
 
     def set_threshold(self, value: Optional[float], scale_key: Optional[str] = None) -> None:
         """Set a horizontal threshold line. scale_key picks which series scale to use."""
@@ -194,10 +207,7 @@ class ScrollableGraphWidget(Widget):
 
         # Threshold line
         if self._threshold_value is not None and not self._bipolar:
-            t_scale = max_scale
-            if self._threshold_scale_key and self._threshold_scale_key in self._scales:
-                t_scale = self._scales[self._threshold_scale_key]
-            frac_t = min(self._threshold_value / t_scale, 1.0)
+            frac_t = min(self._threshold_value / max_scale, 1.0) if max_scale > 0 else 0.0
             y_thresh = graph_y + frac_t * graph_h
             self._gfx.add(Color(1.0, 0.4, 0.2, 0.8))
             dash_w = dp(6)
@@ -222,36 +232,39 @@ class ScrollableGraphWidget(Widget):
         if end_idx <= start_idx:
             return
 
-        # X-axis timestamps + vertical grid lines (aligned with right-aligned data)
+        # X-axis timestamps + vertical grid lines at 10-second intervals
         if self._show_timestamps:
             n_visible = end_idx - start_idx
             vp = max(self._viewport_points, n_visible)
             x_off = vp - n_visible
-            data_x_start = graph_x + (x_off / max(vp - 1, 1)) * graph_w
-            data_x_end = graph_x + graph_w
-            data_x_width = data_x_end - data_x_start
-            num_time_labels = min(5, n_visible)
-            if num_time_labels > 1 and data_x_width > dp(40):
-                for i in range(num_time_labels):
-                    frac = i / (num_time_labels - 1)
-                    idx = start_idx + int(frac * (n_visible - 1))
-                    t_sec = idx / self._sample_rate
-                    mins = int(t_sec) // 60
-                    secs = int(t_sec) % 60
-                    time_str = f"{mins}:{secs:02d}"
-                    tex = self._make_text_texture(time_str, font_size=8,
-                                                  color=(0.5, 0.5, 0.5, 1))
-                    x_pos = data_x_start + frac * data_x_width
+
+            t_start = start_idx / self._sample_rate
+            t_end = end_idx / self._sample_rate
+            grid_sec = 10.0
+            # First grid line at next 10s boundary after t_start
+            first_mark = (int(t_start / grid_sec) + 1) * grid_sec
+            t_mark = first_mark
+            while t_mark <= t_end:
+                idx_in_data = t_mark * self._sample_rate - start_idx
+                frac = (x_off + idx_in_data) / max(vp - 1, 1)
+                if 0.0 <= frac <= 1.0:
+                    x_pos = graph_x + frac * graph_w
                     # Vertical grid line
                     self._gfx.add(Color(0.25, 0.25, 0.3, 1.0))
                     self._gfx.add(Line(points=[x_pos, graph_y, x_pos, graph_y + graph_h], width=0.5))
                     # Timestamp label
+                    mins = int(t_mark) // 60
+                    secs = int(t_mark) % 60
+                    time_str = f"{mins}:{secs:02d}"
+                    tex = self._make_text_texture(time_str, font_size=8,
+                                                  color=(0.5, 0.5, 0.5, 1))
                     self._gfx.add(Color(1, 1, 1, 1))
                     self._gfx.add(Rectangle(
                         texture=tex,
                         pos=(x_pos - tex.width / 2, graph_y - tex.height - dp(2)),
                         size=tex.size,
                     ))
+                t_mark += grid_sec
 
         # Data lines + endpoint value labels
         label_y_positions: List[float] = []
@@ -315,31 +328,113 @@ class ScrollableGraphWidget(Widget):
                     size=tex.size,
                 ))
 
+    @staticmethod
+    def link_zoom(*graphs: "ScrollableGraphWidget") -> None:
+        """Link graphs so zooming one zooms all. Each graph keeps its own
+        sample rate but they share the same time-window duration."""
+        group = list(graphs)
+        for g in group:
+            g._sync_group = [other for other in group if other is not g]
+
+    def _set_viewport(self, points: int, _from_sync: bool = False) -> None:
+        """Set viewport size (horizontal zoom), clamped to min/max."""
+        self._viewport_points = max(self._min_viewport, min(points, self._max_viewport))
+        # Clamp scroll offset to new max
+        self._scroll_offset = max(0, min(self._scroll_offset, self.max_scroll))
+        self._redraw()
+        # Propagate to linked graphs (convert via time duration)
+        if not _from_sync and self._sync_group:
+            duration = self._viewport_points / self._sample_rate
+            for other in self._sync_group:
+                other_points = int(duration * other._sample_rate)
+                other._set_viewport(other_points, _from_sync=True)
+
+    def zoom_in(self) -> None:
+        """Zoom in (show fewer points = more detail)."""
+        self._set_viewport(int(self._viewport_points / self._zoom_factor))
+
+    def zoom_out(self) -> None:
+        """Zoom out (show more points = wider view)."""
+        self._set_viewport(int(self._viewport_points * self._zoom_factor))
+
+    def zoom_reset(self) -> None:
+        """Reset to default viewport."""
+        self._set_viewport(self._default_viewport)
+
+    def _on_window_mouse_down(self, window, x, y, button, modifiers):
+        """Handle mouse scroll at Window level (bypasses ScrollView)."""
+        if button not in ("scrollup", "scrolldown"):
+            return
+        # Convert window coords to widget coords and check collision
+        wx, wy = self.to_widget(x, y, relative=False)
+        if not self.collide_point(wx, wy):
+            return
+        if button == "scrollup":
+            self.zoom_in()
+        elif button == "scrolldown":
+            self.zoom_out()
+
     def on_touch_down(self, touch):
-        if self.collide_point(*touch.pos):
-            touch.grab(self)
-            self._touch_start_x = touch.x
-            self._touch_start_offset = self._scroll_offset
+        if not self.collide_point(*touch.pos):
+            return super().on_touch_down(touch)
+
+        # Skip scroll events — handled by _on_window_mouse_down
+        if hasattr(touch, "button") and touch.button in ("scrollup", "scrolldown"):
             return True
-        return super().on_touch_down(touch)
+
+        touch.grab(self)
+        self._touch_start_x = touch.x
+        self._touch_start_offset = self._scroll_offset
+        return True
 
     def on_touch_move(self, touch):
-        if touch.grab_current is self:
-            graph_w = self.width - dp(58) - dp(60)
-            if graph_w > 0 and self._total_points > self._viewport_points:
-                dx = touch.x - self._touch_start_x
-                points_per_pixel = self._viewport_points / graph_w
-                delta_points = int(-dx * points_per_pixel)
-                new_offset = self._touch_start_offset + delta_points
-                self.set_scroll_offset(new_offset)
+        if touch.grab_current is not self:
+            return super().on_touch_move(touch)
+
+        # Pinch zoom detection (Android / multi-touch)
+        # Kivy delivers each touch separately; detect two active grabs
+        active_touches = [t for t in self._get_grabbed_touches(touch)
+                          if self.collide_point(*t.pos)]
+        if len(active_touches) >= 2:
+            t1, t2 = active_touches[0], active_touches[1]
+            dist = ((t1.x - t2.x) ** 2 + (t1.y - t2.y) ** 2) ** 0.5
+            if not self._pinch_active:
+                self._pinch_active = True
+                self._pinch_start_dist = max(dist, 1.0)
+                self._pinch_start_viewport = self._viewport_points
+            else:
+                scale = self._pinch_start_dist / max(dist, 1.0)
+                new_vp = int(self._pinch_start_viewport * scale)
+                self._set_viewport(new_vp)
             return True
-        return super().on_touch_move(touch)
+
+        # Single touch — scroll
+        graph_w = self.width - dp(58) - dp(60)
+        if graph_w > 0 and self._total_points > self._viewport_points:
+            dx = touch.x - self._touch_start_x
+            points_per_pixel = self._viewport_points / graph_w
+            delta_points = int(-dx * points_per_pixel)
+            new_offset = self._touch_start_offset + delta_points
+            self.set_scroll_offset(new_offset)
+        return True
 
     def on_touch_up(self, touch):
         if touch.grab_current is self:
             touch.ungrab(self)
+            self._pinch_active = False
             return True
         return super().on_touch_up(touch)
+
+    @staticmethod
+    def _get_grabbed_touches(current_touch):
+        """Get all touches currently grabbed by this widget's event loop."""
+        from kivy.base import EventLoop
+        result = []
+        if EventLoop.touches:
+            for t in EventLoop.touches:
+                if t.grab_current is current_touch.grab_current:
+                    result.append(t)
+        return result
 
     def clear_data(self) -> None:
         for key in self._data:

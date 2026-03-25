@@ -13,6 +13,8 @@ ALLOWED_VARIABLES = {
     "alpha", "beta", "gamma",
     "alpha_norm", "beta_norm", "gamma_norm", "theta_norm", "delta_norm",
     "total_power",
+    # sqrt-normalized relative bands: sqrt(band / sum_of_6_bands)
+    "s_alpha1", "s_alpha2", "s_beta1", "s_beta2", "s_theta", "s_delta",
     "meditation_score", "shamatha_score", "distraction", "sinking",
     "subtle_distraction", "stability", "calmness",
     "native_attention", "native_meditation",

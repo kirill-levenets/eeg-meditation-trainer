@@ -347,6 +347,49 @@ class DatabaseManager:
         """Set a per-user setting value."""
         self.set_setting(f"user_{user_id}_{key}", value)
 
+    # ---- Saved formulas (per-user, max 50) ----
+
+    _MAX_SAVED_FORMULAS = 50
+
+    def get_saved_formulas(self, user_id: int) -> List[Dict[str, str]]:
+        """Return saved formulas for a user as [{name, formula}, ...]."""
+        import json
+        raw = self.get_user_setting(user_id, "saved_formulas")
+        if not raw:
+            return []
+        try:
+            data = json.loads(raw)
+            return data if isinstance(data, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    def _save_formulas_list(self, user_id: int, formulas: List[Dict[str, str]]) -> None:
+        import json
+        self.set_user_setting(user_id, "saved_formulas", json.dumps(formulas))
+
+    def add_saved_formula(self, user_id: int, name: str, formula: str) -> bool:
+        """Save a formula. Returns False if limit reached."""
+        formulas = self.get_saved_formulas(user_id)
+        if len(formulas) >= self._MAX_SAVED_FORMULAS:
+            return False
+        formulas.append({"name": name, "formula": formula})
+        self._save_formulas_list(user_id, formulas)
+        return True
+
+    def update_saved_formula(self, user_id: int, index: int, name: str, formula: str) -> None:
+        """Update a saved formula by index."""
+        formulas = self.get_saved_formulas(user_id)
+        if 0 <= index < len(formulas):
+            formulas[index] = {"name": name, "formula": formula}
+            self._save_formulas_list(user_id, formulas)
+
+    def remove_saved_formula(self, user_id: int, index: int) -> None:
+        """Remove a saved formula by index."""
+        formulas = self.get_saved_formulas(user_id)
+        if 0 <= index < len(formulas):
+            formulas.pop(index)
+            self._save_formulas_list(user_id, formulas)
+
     def get_db_size_bytes(self) -> int:
         """Return the database file size in bytes."""
         try:
@@ -363,11 +406,54 @@ class DatabaseManager:
 
     # ---- CSV export ----
 
-    def export_session_csv(self, session_id: int) -> str:
-        """Export all metrics for a session as a CSV string."""
+    def export_session_csv(self, session_id: int, custom_formula=None) -> str:
+        """Export all metrics for a session as a CSV string.
+
+        If custom_formula (CustomFormulaEvaluator) is provided and has a valid
+        formula, recomputes custom_formula values from stored band powers and
+        appends the column.
+        """
         metrics = self.get_session_metrics(session_id)
         if not metrics:
             return ""
+
+        if custom_formula and custom_formula.is_valid:
+            import math
+            for row in metrics:
+                # Build variable dict matching what the formula expects
+                raw_bands = {
+                    "delta": row.get("delta_raw", 0),
+                    "theta": row.get("theta_raw", 0),
+                    "alpha1": row.get("alpha1_raw", 0),
+                    "alpha2": row.get("alpha2_raw", 0),
+                    "beta1": row.get("beta1_raw", 0),
+                    "beta2": row.get("beta2_raw", 0),
+                    "gamma1": row.get("gamma1_raw", 0),
+                    "gamma2": row.get("gamma2_raw", 0),
+                }
+                fvars = {
+                    **raw_bands,
+                    "alpha": raw_bands["alpha1"] + raw_bands["alpha2"],
+                    "beta": raw_bands["beta1"] + raw_bands["beta2"],
+                    "gamma": raw_bands["gamma1"] + raw_bands["gamma2"],
+                    "meditation_score": row.get("meditation_score", 0),
+                    "shamatha_score": row.get("shamatha_score", 0),
+                    "native_attention": row.get("native_attention", 0),
+                    "native_meditation": row.get("native_meditation", 0),
+                }
+                # Compute sqrt-normalized relative bands (s_ prefix)
+                sqrt_keys = ("delta", "theta", "alpha1", "alpha2", "beta1", "beta2")
+                sqrt_vals = {k: max(raw_bands.get(k, 0.0), 0.0) for k in sqrt_keys}
+                total = sum(sqrt_vals.values())
+                if total >= 1.0:
+                    for k, v in sqrt_vals.items():
+                        fvars[f"s_{k}"] = math.sqrt(v / total)
+                else:
+                    for k in sqrt_keys:
+                        fvars[f"s_{k}"] = 0.0
+                custom_formula.push_variables(fvars)
+                row["custom_formula"] = custom_formula.evaluate(fvars)
+
         output = io.StringIO()
         writer = csv.DictWriter(output, fieldnames=metrics[0].keys())
         writer.writeheader()

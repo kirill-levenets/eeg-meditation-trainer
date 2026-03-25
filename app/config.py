@@ -14,21 +14,19 @@ class SigmoidConfig:
     SUBTLE_K: float = 2.0
     SUBTLE_MIDPOINT: float = 0.5
 
-    SHAMATHA_K: float = 3.0
-    SHAMATHA_MIDPOINT: float = 1.0
 
 
 class MetricsConfig:
     """Tunable thresholds and limits for metrics engine."""
 
     CMAX: float = 3.0
-    MEDITATION_SCORE_MAX: float = 200.0
+    MEDITATION_SCORE_MAX: float = 100.0
 
-    ROLLING_WINDOW_SIZE: int = 5
+    ROLLING_WINDOW_SIZE: int = 1  # no pre-smoothing (Vernihor formula averages ratio only)
     STABILITY_BUFFER_SECONDS: int = 20
     STABILITY_BUFFER_SIZE: int = 40  # 20s * 2Hz
 
-    MEDITATION_THRESHOLD_DEFAULT: int = 100
+    MEDITATION_THRESHOLD_DEFAULT: int = 80
     STABILITY_LIMIT: float = 200.0
     SINKING_LIMIT: float = 50.0
     DISTRACTION_LIMIT: float = 50.0
