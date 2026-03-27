@@ -31,13 +31,13 @@ version = 1.0.0
 requirements = python3,kivy==2.3.0,pyjnius,android
 
 # (str) Supported orientation (landscape, sensorLandscape, portrait, sensorPortrait, all)
-orientation = portrait
+orientation = portrait, landscape
 
 # (bool) Indicate if the application should be fullscreen or not
 fullscreen = 0
 
 # (list) Permissions
-android.permissions = BLUETOOTH,BLUETOOTH_ADMIN,BLUETOOTH_CONNECT,BLUETOOTH_SCAN,ACCESS_FINE_LOCATION
+android.permissions = BLUETOOTH,BLUETOOTH_ADMIN,BLUETOOTH_CONNECT,BLUETOOTH_SCAN,ACCESS_FINE_LOCATION,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,MANAGE_EXTERNAL_STORAGE
 
 # (int) Target Android API
 android.api = 33

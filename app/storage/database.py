@@ -18,6 +18,7 @@ class DatabaseManager:
         self._init_db()
 
     def _init_db(self) -> None:
+        os.makedirs(os.path.dirname(self._db_path) or ".", exist_ok=True)
         self._conn = sqlite3.connect(self._db_path)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
@@ -77,6 +78,7 @@ class DatabaseManager:
                 calmness REAL DEFAULT 0,
                 native_attention REAL DEFAULT 0,
                 native_meditation REAL DEFAULT 0,
+                marker INTEGER DEFAULT 0,
                 FOREIGN KEY (session_id) REFERENCES sessions(id)
             );
 
@@ -114,6 +116,7 @@ class DatabaseManager:
             "calmness": "REAL DEFAULT 0",
             "native_attention": "REAL DEFAULT 0",
             "native_meditation": "REAL DEFAULT 0",
+            "marker": "INTEGER DEFAULT 0",
         }
         for col, col_type in new_columns.items():
             if col not in existing:
@@ -187,6 +190,7 @@ class DatabaseManager:
                 m.get("calmness", 0),
                 m.get("native_attention", 0),
                 m.get("native_meditation", 0),
+                m.get("marker", 0),
             )
             for m in metrics_list
         ]
@@ -198,8 +202,8 @@ class DatabaseManager:
              alpha_norm, beta_norm, theta_norm, delta_norm, gamma_norm,
              meditation_score, distraction, subtle_distraction, sinking,
              shamatha_score, stability, calmness,
-             native_attention, native_meditation)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             native_attention, native_meditation, marker)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )

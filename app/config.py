@@ -2,6 +2,28 @@ import os
 import sys
 
 
+def _resolve_android_base_dir() -> str:
+    """Try /sdcard/EEGMeditation, fall back to app-private storage."""
+    ext = os.path.join("/sdcard", "EEGMeditation")
+    try:
+        os.makedirs(ext, exist_ok=True)
+        # Verify we can actually write
+        test = os.path.join(ext, ".writetest")
+        with open(test, "w") as f:
+            f.write("ok")
+        os.remove(test)
+        return ext
+    except (PermissionError, OSError):
+        pass
+    try:
+        from android.storage import app_storage_path  # type: ignore
+        p = os.path.join(app_storage_path(), "EEGMeditation")
+    except ImportError:
+        p = os.path.join(os.path.expanduser("~"), "EEGMeditation")
+    os.makedirs(p, exist_ok=True)
+    return p
+
+
 class SigmoidConfig:
     """Sigmoid normalization parameters for easy calibration."""
 
@@ -44,8 +66,10 @@ class AppConfig:
     SIGNAL_BUFFER_SECONDS: int = 120
 
     DB_NAME: str = "meditation.db"
+    _ANDROID: bool = hasattr(sys, "getandroidapilevel")
     _BASE_DIR: str = (
-        os.path.dirname(os.path.abspath(sys.executable))
+        _resolve_android_base_dir() if _ANDROID
+        else os.path.dirname(os.path.abspath(sys.executable))
         if getattr(sys, 'frozen', False)
         else os.path.dirname(os.path.dirname(__file__))
     )

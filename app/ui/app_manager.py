@@ -7,6 +7,7 @@ from kivy.clock import Clock
 from kivy.metrics import dp
 from kivy.uix.actionbar import ActionBar, ActionButton, ActionPrevious, ActionView
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.button import Button
 from kivy.uix.screenmanager import ScreenManager, SlideTransition
 
 from app.analytics.aggregator import AnalyticsAggregator
@@ -93,11 +94,26 @@ class EEGMeditationApp(App):
             logger.info(f"Serial device override: {path}")
         root = BoxLayout(orientation="vertical")
 
-        nav_bar = ActionBar(size_hint_y=None, height=dp(48))
+        # --- Sandwich toggle + ActionBar ---
+        self._nav_tabs_visible = True
+
+        top_bar = BoxLayout(size_hint_y=None, height=dp(48))
+        self._sandwich_btn = Button(
+            text="\u2630",
+            size_hint_x=None,
+            width=dp(48),
+            font_size=dp(22),
+            background_color=(0.15, 0.15, 0.2, 1.0),
+        )
+        self._sandwich_btn.bind(on_release=self._toggle_nav_tabs)
+
+        self._nav_bar = ActionBar(size_hint_x=1)
         av = ActionView()
         ap = ActionPrevious(title="EEG Meditation", with_previous=False)
         av.add_widget(ap)
 
+        btn_profile = ActionButton(text="Profile")
+        btn_profile.bind(on_release=lambda x: self._switch_screen("profile"))
         btn_session = ActionButton(text="Session")
         btn_session.bind(on_release=lambda x: self._switch_screen("live_session"))
         btn_raw = ActionButton(text="Raw EEG")
@@ -110,27 +126,29 @@ class EEGMeditationApp(App):
         btn_analytics.bind(on_release=lambda x: self._switch_screen("analytics"))
         btn_timer = ActionButton(text="Timer")
         btn_timer.bind(on_release=lambda x: self._switch_screen("timer"))
-        btn_profile = ActionButton(text="Profile")
-        btn_profile.bind(on_release=lambda x: self._switch_screen("profile"))
 
+        av.add_widget(btn_profile)
         av.add_widget(btn_session)
         av.add_widget(btn_raw)
         av.add_widget(btn_settings)
         av.add_widget(btn_timer)
         av.add_widget(self._btn_diary)
         av.add_widget(btn_analytics)
-        av.add_widget(btn_profile)
-        nav_bar.add_widget(av)
-        root.add_widget(nav_bar)
+        self._nav_bar.add_widget(av)
+
+        top_bar.add_widget(self._sandwich_btn)
+        top_bar.add_widget(self._nav_bar)
+        root.add_widget(top_bar)
+        self._top_bar = top_bar
 
         self._sm = ScreenManager(transition=SlideTransition())
 
+        self._profile_screen = ProfileScreen()
         self._live_screen = LiveSessionScreen()
         self._raw_eeg_screen = RawEEGScreen()
         self._settings_screen = SettingsScreen()
         self._diary_screen = DiaryScreen()
         self._analytics_screen = AnalyticsScreen()
-        self._profile_screen = ProfileScreen()
         self._timer_screen = TimerScreen()
 
         self._sm.add_widget(self._profile_screen)
@@ -151,6 +169,18 @@ class EEGMeditationApp(App):
         self._acquire_wake_lock()
         return root
 
+    def _toggle_nav_tabs(self, *args) -> None:
+        """Toggle visibility of the navigation tab bar."""
+        self._nav_tabs_visible = not self._nav_tabs_visible
+        if self._nav_tabs_visible:
+            self._top_bar.height = dp(48)
+            self._nav_bar.opacity = 1
+            self._nav_bar.disabled = False
+        else:
+            self._top_bar.height = dp(48)
+            self._nav_bar.opacity = 0
+            self._nav_bar.disabled = True
+
     def _link_graph_zoom(self) -> None:
         """Link zoom across all graph widgets so they share the same time scale."""
         ScrollableGraphWidget.link_zoom(
@@ -166,6 +196,7 @@ class EEGMeditationApp(App):
         self._live_screen.btn_start.bind(on_release=self._on_start)
         self._live_screen.btn_pause.bind(on_release=self._on_pause)
         self._live_screen.btn_stop.bind(on_release=self._on_stop)
+        self._live_screen.btn_marker.bind(on_release=self._on_marker)
 
         self._settings_screen.set_threshold_callback(self._on_threshold_change)
         self._settings_screen.set_toggle_callback(self._on_toggle_change)
@@ -182,9 +213,14 @@ class EEGMeditationApp(App):
         self._settings_screen.set_load_formula_callback(self._on_load_formula)
         self._settings_screen.set_delete_formula_callback(self._on_delete_formula)
         self._settings_screen.set_export_formulas_callback(self._on_export_formulas)
+        self._settings_screen.set_custom_formula_visible_callback(
+            self._on_custom_formula_visible_toggle
+        )
+        self._settings_screen.set_audio_metric_callback(self._on_audio_metric_change)
 
-        # Hide custom formula on graph until a formula is set
+        # Hide custom formula on graph until enabled via checkbox
         self._live_screen.graph.set_visible("custom_formula", False)
+        self._audio_metric_key: str = "meditation_score"
 
         self._diary_screen.set_session_select_callback(self._on_session_select)
         self._diary_screen.set_save_notes_callback(self._on_save_notes)
@@ -265,6 +301,7 @@ class EEGMeditationApp(App):
         self._tick_count = 0
         self._current_session_id = None
         self._bt_connected_notified = False
+        self._pending_marker = False
 
         self._live_screen.graph.clear_data()
         self._raw_eeg_screen.raw_graph.clear_data()
@@ -282,6 +319,8 @@ class EEGMeditationApp(App):
             self._timer_screen.start_countdown()
             self._live_screen.update_device_status(True)
             self._live_screen.update_state("Running")
+            import time
+            self._live_screen.set_start_time(time.time())
         else:
             self._waiting_for_bt = True
             self._pending_threshold = threshold
@@ -375,6 +414,8 @@ class EEGMeditationApp(App):
                         True, device_name=name
                     )
                     self._live_screen.update_state("Running")
+                    import time
+                    self._live_screen.set_start_time(time.time())
                     self._settings_screen.update_device_status(True, name=name)
                     logger.info(f"BT device {name} connected, session started")
             elif not self._real_stream._running:
@@ -460,18 +501,25 @@ class EEGMeditationApp(App):
         self._metrics_buffer.append(full_record)
         self._raw_buffer.append(raw_sample)
 
-        self._audio.update(metrics.get("meditation_score", 0))
+        self._audio.update(metrics.get(self._audio_metric_key, 0))
         if self._tick_count > 10:
             self._audio.update_sinking(metrics.get("sinking", 0))
             self._audio.update_subtle_distraction(metrics.get("subtle_distraction", 0))
 
         self._live_screen.graph.add_point(metrics)
-        self._live_screen.update_scroll_range()
         self._live_screen.update_stats(metrics)
         self._live_screen.update_state(metrics.get("state", "Neutral"))
         self._live_screen.update_timer(self._session_manager.elapsed_formatted)
 
         self._raw_eeg_screen.add_raw_sample(raw_sample)
+
+        # Handle pending marker (after points added so indices are current)
+        if self._pending_marker:
+            self._pending_marker = False
+            full_record["marker"] = 1
+            self._live_screen.graph.add_marker()
+            self._raw_eeg_screen.raw_graph.add_marker()
+            self._raw_eeg_screen.band_graph.add_marker()
 
         # Timer countdown
         if self._timer_screen.tick(APP.UPDATE_FREQUENCY):
@@ -492,6 +540,12 @@ class EEGMeditationApp(App):
             self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
             self._metrics_buffer = []
             self._flush_counter = 0
+
+    def _on_marker(self, *args) -> None:
+        """Place a marker at the current position in the session."""
+        if self._session_manager.state == SessionState.RUNNING:
+            self._pending_marker = True
+            logger.info("Marker placed")
 
     def _on_threshold_change(self, value: int) -> None:
         self._metrics_engine.meditation_threshold = value
@@ -524,6 +578,17 @@ class EEGMeditationApp(App):
         Window.rotation = rotation
         logger.info(f"Screen rotation set to {rotation}")
 
+    def _on_custom_formula_visible_toggle(self, active: bool) -> None:
+        """Toggle custom formula line visibility on graph."""
+        show = active and self._custom_formula.is_valid
+        self._live_screen.graph.set_visible("custom_formula", show)
+        logger.debug(f"Custom formula visibility: {show}")
+
+    def _on_audio_metric_change(self, key: str) -> None:
+        """Switch which metric drives the audio threshold feedback."""
+        self._audio_metric_key = key
+        logger.info(f"Audio threshold metric changed to: {key}")
+
     def _on_custom_formula_change(self, formula: str) -> None:
         """Handle custom formula change from settings."""
         if not formula:
@@ -534,7 +599,8 @@ class EEGMeditationApp(App):
             return
         ok, err = self._custom_formula.set_formula(formula)
         if ok:
-            self._live_screen.graph.set_visible("custom_formula", True)
+            show = self._settings_screen.custom_formula_visible
+            self._live_screen.graph.set_visible("custom_formula", show)
             self._settings_screen.set_formula_status("Formula active")
             logger.info(f"Custom formula applied: {formula}")
         else:
@@ -768,6 +834,11 @@ class EEGMeditationApp(App):
         toggles = self._settings_screen.graph_toggles
         for key, active in toggles.items():
             self._db.set_user_setting(uid, f"toggle_{key}", str(active))
+        self._db.set_user_setting(
+            uid, "custom_formula_visible",
+            str(self._settings_screen.custom_formula_visible),
+        )
+        self._db.set_user_setting(uid, "audio_metric", self._audio_metric_key)
         logger.debug(f"Saved settings for user {uid}")
 
     def _load_user_settings(self, user_id: int) -> None:
@@ -873,6 +944,16 @@ class EEGMeditationApp(App):
         else:
             self._settings_screen._formula_input.text = ""
             self._on_custom_formula_change("")
+
+        cf_vis = g(user_id, "custom_formula_visible")
+        if cf_vis is not None:
+            self._settings_screen.custom_formula_visible = cf_vis == "True"
+            self._on_custom_formula_visible_toggle(cf_vis == "True")
+
+        audio_met = g(user_id, "audio_metric")
+        if audio_met is not None:
+            self._settings_screen.audio_metric = audio_met
+            self._audio_metric_key = audio_met
 
         self._refresh_saved_formulas()
         logger.debug(f"Loaded settings for user {user_id}")

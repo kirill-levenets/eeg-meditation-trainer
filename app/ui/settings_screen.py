@@ -151,6 +151,49 @@ class SettingsScreen(Screen):
         slider_row.add_widget(self._threshold_value_label)
         layout.add_widget(slider_row)
 
+        # Audio threshold metric picker
+        audio_metric_label = Label(
+            text="Audio control metric:",
+            font_size=dp(13),
+            size_hint_y=None,
+            height=dp(24),
+            color=(0.6, 0.6, 0.6, 1.0),
+            halign="left",
+        )
+        audio_metric_label.bind(size=audio_metric_label.setter("text_size"))
+        layout.add_widget(audio_metric_label)
+
+        self._audio_metric_radios: Dict[str, CheckBox] = {}
+        self._audio_metric_selected: str = "meditation_score"
+        self._on_audio_metric_change: Optional[Callable] = None
+        audio_metric_options = {
+            "meditation_score": "Meditation Score",
+            "shamatha_score": "Shamatha Score",
+            "native_meditation": "NS Meditation",
+            "native_attention": "NS Attention",
+            "custom_formula": "Custom Formula",
+        }
+        for key, display_name in audio_metric_options.items():
+            row = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(8))
+            rb = CheckBox(
+                group="audio_metric",
+                active=(key == "meditation_score"),
+                size_hint_x=0.15,
+            )
+            rb.audio_metric_key = key
+            rb.bind(active=self._on_audio_metric_radio)
+            lbl = Label(
+                text=display_name,
+                font_size=dp(13),
+                size_hint_x=0.85,
+                halign="left",
+            )
+            lbl.bind(size=lbl.setter("text_size"))
+            row.add_widget(rb)
+            row.add_widget(lbl)
+            layout.add_widget(row)
+            self._audio_metric_radios[key] = rb
+
         # --- Audio section ---
         layout.add_widget(self._section_label("Audio Feedback"))
 
@@ -275,6 +318,22 @@ class SettingsScreen(Screen):
             row.add_widget(lbl)
             layout.add_widget(row)
             self._checkboxes[key] = cb
+
+        # Custom formula visibility toggle
+        cf_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(8))
+        self._custom_formula_cb = CheckBox(active=False, size_hint_x=0.15)
+        self._custom_formula_cb.bind(active=self._on_custom_formula_toggle)
+        self._on_custom_formula_visible_change: Optional[Callable] = None
+        cf_lbl = Label(
+            text="Show Custom Formula",
+            font_size=dp(14),
+            size_hint_x=0.85,
+            halign="left",
+        )
+        cf_lbl.bind(size=cf_lbl.setter("text_size"))
+        cf_row.add_widget(self._custom_formula_cb)
+        cf_row.add_widget(cf_lbl)
+        layout.add_widget(cf_row)
 
         # --- Custom Formula section ---
         layout.add_widget(self._section_label("Custom Formula"))
@@ -666,3 +725,44 @@ class SettingsScreen(Screen):
     @property
     def graph_toggles(self) -> Dict[str, bool]:
         return dict(self._graph_toggles)
+
+    # --- Custom formula visibility ---
+
+    def _on_custom_formula_toggle(self, checkbox, active) -> None:
+        if self._on_custom_formula_visible_change:
+            self._on_custom_formula_visible_change(active)
+
+    def set_custom_formula_visible_callback(self, callback: Callable) -> None:
+        self._on_custom_formula_visible_change = callback
+
+    @property
+    def custom_formula_visible(self) -> bool:
+        return self._custom_formula_cb.active
+
+    @custom_formula_visible.setter
+    def custom_formula_visible(self, value: bool) -> None:
+        self._custom_formula_cb.active = value
+
+    # --- Audio threshold metric picker ---
+
+    def _on_audio_metric_radio(self, checkbox, active) -> None:
+        if not active:
+            return
+        key = getattr(checkbox, "audio_metric_key", None)
+        if key:
+            self._audio_metric_selected = key
+            if self._on_audio_metric_change:
+                self._on_audio_metric_change(key)
+
+    def set_audio_metric_callback(self, callback: Callable) -> None:
+        self._on_audio_metric_change = callback
+
+    @property
+    def audio_metric(self) -> str:
+        return self._audio_metric_selected
+
+    @audio_metric.setter
+    def audio_metric(self, key: str) -> None:
+        self._audio_metric_selected = key
+        for k, rb in self._audio_metric_radios.items():
+            rb.active = (k == key)

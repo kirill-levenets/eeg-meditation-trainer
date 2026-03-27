@@ -1,3 +1,5 @@
+import math
+import time as _time
 from collections import deque
 from typing import Dict, List, Optional
 
@@ -8,7 +10,6 @@ from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
-from kivy.uix.slider import Slider
 from kivy.uix.widget import Widget
 
 from app.config import APP
@@ -26,12 +27,15 @@ class ScrollableGraphWidget(Widget):
                  viewport_seconds: int = 60, show_value_labels: bool = True,
                  show_timestamps: bool = True, sample_rate: float = 0.0,
                  max_points: int = 0, bipolar: bool = False,
-                 auto_scale: bool = False, **kwargs) -> None:
+                 auto_scale: bool = False, grid_step: float = 20.0,
+                 **kwargs) -> None:
         super().__init__(**kwargs)
         self._colors: Dict[str, tuple] = colors
         self._scales: Dict[str, float] = scales
         self._bipolar: bool = bipolar
         self._auto_scale: bool = auto_scale
+        self._grid_step: float = grid_step
+        self._markers: List[int] = []
         self._line_width: float = 1.2
         self._sample_rate: float = sample_rate if sample_rate > 0 else (1.0 / APP.UPDATE_FREQUENCY)
         effective_max = max_points if max_points > 0 else APP.GRAPH_POINTS_MAX
@@ -58,6 +62,8 @@ class ScrollableGraphWidget(Widget):
         self._sync_group: List["ScrollableGraphWidget"] = []
         self._threshold_value: Optional[float] = None
         self._threshold_scale_key: Optional[str] = None
+        self._start_wall_time: Optional[float] = None
+        self._scroll_change_callback = None
         self._gfx: InstructionGroup = InstructionGroup()
         self.canvas.add(self._gfx)
         self.bind(size=self._redraw, pos=self._redraw)
@@ -94,6 +100,16 @@ class ScrollableGraphWidget(Widget):
     def set_scroll_offset(self, offset: int) -> None:
         self._scroll_offset = max(0, min(offset, self.max_scroll))
         self._redraw()
+        if self._scroll_change_callback:
+            self._scroll_change_callback(self._scroll_offset)
+
+    def set_scroll_change_callback(self, callback) -> None:
+        self._scroll_change_callback = callback
+
+    def set_start_wall_time(self, epoch: Optional[float]) -> None:
+        """Set the session start wall-clock time (epoch seconds) for real-time labels."""
+        self._start_wall_time = epoch
+        self._redraw()
 
     def add_point(self, values: Dict[str, float]) -> None:
         for key in self._data:
@@ -122,6 +138,7 @@ class ScrollableGraphWidget(Widget):
         first_key = next(iter(self._data))
         self._total_points = len(self._data[first_key])
         self._scroll_offset = 0
+        self._markers = []
         self._redraw()
 
     def _make_text_texture(self, text: str, font_size: int = 10,
@@ -137,7 +154,8 @@ class ScrollableGraphWidget(Widget):
             return
 
         pad_left = dp(48) if self._show_value_labels else dp(10)
-        pad_bottom = dp(28) if self._show_timestamps else dp(10)
+        has_wall_time = self._show_timestamps and self._start_wall_time is not None
+        pad_bottom = dp(40) if has_wall_time else (dp(28) if self._show_timestamps else dp(10))
         pad_top = dp(10)
         pad_right = dp(60) if self._show_value_labels else dp(10)
 
@@ -181,25 +199,41 @@ class ScrollableGraphWidget(Widget):
                     max_scale = max(max_scale, self._scales.get(key, 100.0))
 
         # Grid lines + Y-axis labels
-        num_grid_lines = 4
-        self._gfx.add(Color(0.25, 0.25, 0.3, 1.0))
-        for i in range(num_grid_lines + 1):
-            frac = i / num_grid_lines
-            y_pos = graph_y + graph_h * frac
-            self._gfx.add(Line(points=[graph_x, y_pos, graph_x + graph_w, y_pos], width=0.5))
-            if self._show_value_labels:
-                if self._bipolar:
+        if self._bipolar:
+            num_grid_lines = 4
+            for i in range(num_grid_lines + 1):
+                frac = i / num_grid_lines
+                y_pos = graph_y + graph_h * frac
+                self._gfx.add(Color(0.25, 0.25, 0.3, 1.0))
+                self._gfx.add(Line(points=[graph_x, y_pos, graph_x + graph_w, y_pos], width=0.5))
+                if self._show_value_labels:
                     val = max_scale * (frac * 2.0 - 1.0)
-                else:
-                    val = max_scale * frac
-                tex = self._make_text_texture(f"{val:.0f}", font_size=8,
-                                              color=(0.5, 0.5, 0.5, 1))
-                self._gfx.add(Color(1, 1, 1, 1))
-                self._gfx.add(Rectangle(
-                    texture=tex,
-                    pos=(graph_x - tex.width - dp(4), y_pos - tex.height / 2),
-                    size=tex.size,
-                ))
+                    tex = self._make_text_texture(f"{val:.0f}", font_size=8,
+                                                  color=(0.5, 0.5, 0.5, 1))
+                    self._gfx.add(Color(1, 1, 1, 1))
+                    self._gfx.add(Rectangle(
+                        texture=tex,
+                        pos=(graph_x - tex.width - dp(4), y_pos - tex.height / 2),
+                        size=tex.size,
+                    ))
+        else:
+            step = self._compute_nice_step(max_scale) if self._auto_scale else self._grid_step
+            val = 0.0
+            while val <= max_scale:
+                frac = val / max_scale if max_scale > 0 else 0
+                y_pos = graph_y + graph_h * frac
+                self._gfx.add(Color(0.25, 0.25, 0.3, 1.0))
+                self._gfx.add(Line(points=[graph_x, y_pos, graph_x + graph_w, y_pos], width=0.5))
+                if self._show_value_labels:
+                    tex = self._make_text_texture(f"{val:.0f}", font_size=8,
+                                                  color=(0.5, 0.5, 0.5, 1))
+                    self._gfx.add(Color(1, 1, 1, 1))
+                    self._gfx.add(Rectangle(
+                        texture=tex,
+                        pos=(graph_x - tex.width - dp(4), y_pos - tex.height / 2),
+                        size=tex.size,
+                    ))
+                val += step
 
         # Border
         self._gfx.add(Color(0.35, 0.35, 0.4, 1.0))
@@ -241,8 +275,10 @@ class ScrollableGraphWidget(Widget):
             t_start = start_idx / self._sample_rate
             t_end = end_idx / self._sample_rate
             grid_sec = 10.0
-            # First grid line at next 10s boundary after t_start
-            first_mark = (int(t_start / grid_sec) + 1) * grid_sec
+            # First grid line at nearest 10s boundary >= t_start
+            first_mark = math.ceil(t_start / grid_sec) * grid_sec
+            if first_mark == 0.0:
+                first_mark = grid_sec
             t_mark = first_mark
             while t_mark <= t_end:
                 idx_in_data = t_mark * self._sample_rate - start_idx
@@ -252,7 +288,7 @@ class ScrollableGraphWidget(Widget):
                     # Vertical grid line
                     self._gfx.add(Color(0.25, 0.25, 0.3, 1.0))
                     self._gfx.add(Line(points=[x_pos, graph_y, x_pos, graph_y + graph_h], width=0.5))
-                    # Timestamp label
+                    # Relative timestamp label
                     mins = int(t_mark) // 60
                     secs = int(t_mark) % 60
                     time_str = f"{mins}:{secs:02d}"
@@ -264,6 +300,20 @@ class ScrollableGraphWidget(Widget):
                         pos=(x_pos - tex.width / 2, graph_y - tex.height - dp(2)),
                         size=tex.size,
                     ))
+                    # Real wall-clock time label
+                    if self._start_wall_time is not None:
+                        wall = self._start_wall_time + t_mark
+                        lt = _time.localtime(wall)
+                        wall_str = f"{lt.tm_hour:02d}:{lt.tm_min:02d}:{lt.tm_sec:02d}"
+                        tex2 = self._make_text_texture(wall_str, font_size=7,
+                                                       color=(0.4, 0.6, 0.4, 1))
+                        self._gfx.add(Color(1, 1, 1, 1))
+                        self._gfx.add(Rectangle(
+                            texture=tex2,
+                            pos=(x_pos - tex2.width / 2,
+                                 graph_y - tex.height - tex2.height - dp(3)),
+                            size=tex2.size,
+                        ))
                 t_mark += grid_sec
 
         # Data lines + endpoint value labels
@@ -327,6 +377,38 @@ class ScrollableGraphWidget(Widget):
                     pos=(graph_x + graph_w + dp(3), last_y - tex.height / 2),
                     size=tex.size,
                 ))
+
+        # Marker vertical lines
+        if self._markers:
+            n_visible = end_idx - start_idx
+            vp = max(self._viewport_points, n_visible)
+            x_off = vp - n_visible
+            for marker_idx in self._markers:
+                if start_idx <= marker_idx < end_idx:
+                    idx_in_slice = marker_idx - start_idx
+                    frac_m = (x_off + idx_in_slice) / max(vp - 1, 1)
+                    if 0.0 <= frac_m <= 1.0:
+                        x_pos = graph_x + frac_m * graph_w
+                        self._gfx.add(Color(1.0, 0.2, 1.0, 0.8))
+                        self._gfx.add(Line(points=[x_pos, graph_y, x_pos, graph_y + graph_h], width=1.5))
+
+    @staticmethod
+    def _compute_nice_step(max_val: float) -> float:
+        """Compute a visually pleasing grid step for auto-scaled graphs."""
+        if max_val <= 0:
+            return 20.0
+        raw_step = max_val / 5
+        magnitude = 10 ** int(math.log10(max(raw_step, 1e-10)))
+        normalized = raw_step / magnitude
+        if normalized <= 1.5:
+            nice = 1
+        elif normalized <= 3.5:
+            nice = 2
+        elif normalized <= 7.5:
+            nice = 5
+        else:
+            nice = 10
+        return nice * magnitude
 
     @staticmethod
     def link_zoom(*graphs: "ScrollableGraphWidget") -> None:
@@ -436,11 +518,23 @@ class ScrollableGraphWidget(Widget):
                     result.append(t)
         return result
 
+    def add_marker(self, index: Optional[int] = None) -> None:
+        """Add a marker at the given data point index (default: current end)."""
+        idx = index if index is not None else max(0, self._total_points - 1)
+        self._markers.append(idx)
+        self._redraw()
+
+    def set_markers(self, markers: List[int]) -> None:
+        """Set all markers (for loading from DB)."""
+        self._markers = list(markers)
+        self._redraw()
+
     def clear_data(self) -> None:
         for key in self._data:
             self._data[key].clear()
         self._total_points = 0
         self._scroll_offset = 0
+        self._markers = []
         self._redraw()
 
 
@@ -512,6 +606,8 @@ class RawEEGScreen(Screen):
             bipolar=True,
             size_hint_y=0.35,
         )
+        self._raw_graph.set_scroll_change_callback(self._on_raw_graph_touch_scroll)
+        self._syncing_scroll = False
         root.add_widget(self._raw_graph)
 
         # --- Frequency bands graph ---
@@ -533,6 +629,7 @@ class RawEEGScreen(Screen):
             auto_scale=True,
             size_hint_y=0.35,
         )
+        self._band_graph.set_scroll_change_callback(self._on_band_graph_touch_scroll)
         root.add_widget(self._band_graph)
 
         # Band legend
@@ -541,19 +638,6 @@ class RawEEGScreen(Screen):
             lbl = Label(text=band, font_size=dp(9), color=color)
             band_legend.add_widget(lbl)
         root.add_widget(band_legend)
-
-        # --- Time scroll slider ---
-        scroll_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(8))
-        scroll_label = Label(text="Time Scroll:", font_size=dp(12), size_hint_x=0.2)
-        self._scroll_slider = Slider(
-            min=0, max=1, value=0, step=1, size_hint_x=0.6,
-        )
-        self._scroll_time_label = Label(text="Live", font_size=dp(12), size_hint_x=0.2)
-        self._scroll_slider.bind(value=self._on_scroll)
-        scroll_row.add_widget(scroll_label)
-        scroll_row.add_widget(self._scroll_slider)
-        scroll_row.add_widget(self._scroll_time_label)
-        root.add_widget(scroll_row)
 
         self.add_widget(root)
 
@@ -592,27 +676,24 @@ class RawEEGScreen(Screen):
             "delta": sample.get("delta", 0.0),
         }
         self._band_graph.add_point(bands)
-        self._update_scroll_range()
 
-    def _update_scroll_range(self) -> None:
-        max_scroll = self._raw_graph.max_scroll
-        self._scroll_slider.max = max(1, max_scroll)
-        if self._scroll_slider.value == 0:
-            self._scroll_time_label.text = "Live"
-
-    def _on_scroll(self, instance, value) -> None:
-        offset = int(self._scroll_slider.max - value)
-        self._raw_graph.set_scroll_offset(offset)
-        # Scale offset for band graph (different sample rate)
+    def _on_raw_graph_touch_scroll(self, offset: int) -> None:
+        """Sync band graph when raw graph is touch-scrolled."""
+        if self._syncing_scroll:
+            return
+        self._syncing_scroll = True
         band_offset = int(offset / self.EEG_WAVEFORM_RATE * (1.0 / APP.UPDATE_FREQUENCY))
         self._band_graph.set_scroll_offset(band_offset)
-        if offset == 0:
-            self._scroll_time_label.text = "Live"
-        else:
-            secs_back = offset / self.EEG_WAVEFORM_RATE
-            mins = int(secs_back) // 60
-            secs = int(secs_back) % 60
-            self._scroll_time_label.text = f"-{mins}:{secs:02d}"
+        self._syncing_scroll = False
+
+    def _on_band_graph_touch_scroll(self, band_offset: int) -> None:
+        """Sync raw graph when band graph is touch-scrolled."""
+        if self._syncing_scroll:
+            return
+        self._syncing_scroll = True
+        raw_offset = int(band_offset * self.EEG_WAVEFORM_RATE * APP.UPDATE_FREQUENCY)
+        self._raw_graph.set_scroll_offset(raw_offset)
+        self._syncing_scroll = False
 
 
 if __name__ == "__main__":

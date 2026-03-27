@@ -6,9 +6,7 @@ from kivy.uix.button import Button
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
-from kivy.uix.slider import Slider
 
-from app.config import APP
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 
 
@@ -49,16 +47,25 @@ class LiveSessionScreen(Screen):
         header = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
         self._device_label = Label(
             text="[Mock EEG]",
-            size_hint_x=0.3,
+            size_hint_x=0.25,
             color=(0.5, 0.8, 1.0, 1.0),
             font_size=dp(13),
         )
+        timer_box = BoxLayout(orientation="vertical", size_hint_x=0.25)
+        self._start_time_label = Label(
+            text="",
+            font_size=dp(10),
+            color=(0.5, 0.7, 0.5, 1.0),
+            size_hint_y=0.4,
+        )
         self._timer_label = Label(
             text="00:00",
-            size_hint_x=0.2,
             font_size=dp(18),
             bold=True,
+            size_hint_y=0.6,
         )
+        timer_box.add_widget(self._start_time_label)
+        timer_box.add_widget(self._timer_label)
         self._state_label = Label(
             text="IDLE",
             size_hint_x=0.5,
@@ -66,7 +73,7 @@ class LiveSessionScreen(Screen):
             color=(0.8, 0.8, 0.8, 1.0),
         )
         header.add_widget(self._device_label)
-        header.add_widget(self._timer_label)
+        header.add_widget(timer_box)
         header.add_widget(self._state_label)
         root.add_widget(header)
 
@@ -151,48 +158,24 @@ class LiveSessionScreen(Screen):
             bold=True,
             disabled=True,
         )
+        self._btn_marker = Button(
+            text="Mark",
+            background_color=(0.8, 0.2, 0.8, 1.0),
+            font_size=dp(15),
+            bold=True,
+            disabled=True,
+        )
         controls.add_widget(self._btn_start)
         controls.add_widget(self._btn_pause)
         controls.add_widget(self._btn_stop)
+        controls.add_widget(self._btn_marker)
         root.add_widget(controls)
-
-        # --- Time scroll slider ---
-        scroll_row = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(8))
-        scroll_label = Label(text="Time:", font_size=dp(11), size_hint_x=0.15)
-        self._scroll_slider = Slider(
-            min=0, max=1, value=0, step=1, size_hint_x=0.65,
-        )
-        self._scroll_time_label = Label(
-            text="Live", font_size=dp(11), size_hint_x=0.2,
-        )
-        self._scroll_slider.bind(value=self._on_scroll)
-        scroll_row.add_widget(scroll_label)
-        scroll_row.add_widget(self._scroll_slider)
-        scroll_row.add_widget(self._scroll_time_label)
-        root.add_widget(scroll_row)
 
         self.add_widget(root)
 
     @property
     def graph(self) -> ScrollableGraphWidget:
         return self._graph
-
-    def update_scroll_range(self) -> None:
-        max_scroll = self._graph.max_scroll
-        self._scroll_slider.max = max(1, max_scroll)
-        if self._scroll_slider.value == 0:
-            self._scroll_time_label.text = "Live"
-
-    def _on_scroll(self, instance, value) -> None:
-        offset = int(self._scroll_slider.max - value)
-        self._graph.set_scroll_offset(offset)
-        if offset == 0:
-            self._scroll_time_label.text = "Live"
-        else:
-            secs_back = offset * APP.UPDATE_FREQUENCY
-            mins = int(secs_back) // 60
-            secs = int(secs_back) % 60
-            self._scroll_time_label.text = f"-{mins}:{secs:02d}"
 
     @property
     def btn_start(self) -> Button:
@@ -206,8 +189,19 @@ class LiveSessionScreen(Screen):
     def btn_stop(self) -> Button:
         return self._btn_stop
 
+    @property
+    def btn_marker(self) -> Button:
+        return self._btn_marker
+
     def update_timer(self, text: str) -> None:
         self._timer_label.text = text
+
+    def set_start_time(self, epoch: float) -> None:
+        """Display session start wall-clock time and pass it to the graph."""
+        import time
+        lt = time.localtime(epoch)
+        self._start_time_label.text = f"started {lt.tm_hour:02d}:{lt.tm_min:02d}:{lt.tm_sec:02d}"
+        self._graph.set_start_wall_time(epoch)
 
     def update_state(self, state: str) -> None:
         self._state_label.text = state
@@ -245,18 +239,21 @@ class LiveSessionScreen(Screen):
         self._btn_pause.text = "Pause"
         self._btn_pause.disabled = False
         self._btn_stop.disabled = False
+        self._btn_marker.disabled = False
 
     def set_controls_paused(self) -> None:
         self._btn_start.disabled = True
         self._btn_pause.text = "Resume"
         self._btn_pause.disabled = False
         self._btn_stop.disabled = False
+        self._btn_marker.disabled = True
 
     def set_controls_idle(self) -> None:
         self._btn_start.disabled = False
         self._btn_pause.disabled = True
         self._btn_pause.text = "Pause"
         self._btn_stop.disabled = True
+        self._btn_marker.disabled = True
 
     def show_alert(self, text: str) -> None:
         """Show a warning banner below the header."""
@@ -269,11 +266,11 @@ class LiveSessionScreen(Screen):
 
     def reset_display(self) -> None:
         self._graph.clear_data()
+        self._graph.set_start_wall_time(None)
         self._timer_label.text = "00:00"
+        self._start_time_label.text = ""
         self._state_label.text = "IDLE"
         self._state_label.color = (0.7, 0.7, 0.7, 1.0)
-        self._scroll_slider.value = 0
-        self._scroll_time_label.text = "Live"
         self.hide_alert()
         for label in self._stat_labels.values():
             label.text = "0"

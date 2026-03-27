@@ -546,6 +546,13 @@ class DiaryScreen(Screen):
             freq_series["delta"].append(row.get("delta_raw", 0.0))
         self._freq_graph.load_static_data(freq_series)
 
+        # Load marker positions
+        marker_indices = [i for i, row in enumerate(rows) if row.get("marker", 0)]
+        self._metrics_graph.set_markers(marker_indices)
+        raw_marker_indices = [i * _SAMPLES_PER_TICK for i in marker_indices]
+        self._raw_eeg_graph.set_markers(raw_marker_indices)
+        self._freq_graph.set_markers(marker_indices)
+
         # Scroll to end so user sees latest data and can drag back
         self._metrics_graph.set_scroll_offset(0)
         self._raw_eeg_graph.set_scroll_offset(0)
@@ -568,10 +575,13 @@ class DiaryScreen(Screen):
 
         if tab == "metrics":
             self._graph_container.add_widget(self._metrics_graph)
+            self._metrics_graph._redraw()
         elif tab == "raw":
             self._graph_container.add_widget(self._raw_eeg_graph)
+            self._raw_eeg_graph._redraw()
         else:
             self._graph_container.add_widget(self._freq_graph)
+            self._freq_graph._redraw()
         self._rebuild_legend(tab)
 
     def _rebuild_legend(self, tab: str) -> None:
