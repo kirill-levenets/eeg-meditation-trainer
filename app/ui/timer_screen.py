@@ -47,13 +47,16 @@ class TimerScreen(Screen):
 
         # Enable/disable toggle
         toggle_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
-        self._enable_cb = CheckBox(active=self._enabled, size_hint_x=0.15)
+        self._enable_cb = CheckBox(
+            active=self._enabled, size_hint_x=0.15,
+            size_hint_y=None, height=dp(40),
+        )
         self._enable_cb.bind(active=self._on_enable_toggle)
         enable_lbl = Label(
             text="Enable Timer",
             font_size=dp(16),
             size_hint_x=0.85,
-            halign="left",
+            halign="left", valign="middle",
         )
         enable_lbl.bind(size=enable_lbl.setter("text_size"))
         toggle_row.add_widget(self._enable_cb)

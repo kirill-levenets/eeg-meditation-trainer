@@ -9,6 +9,8 @@ build/
 # Virtual environment
 venv/
 .venv/
+build_venv/
+build_venv_android/
 
 # IDE
 .idea/
@@ -18,14 +20,25 @@ venv/
 
 # Database
 *.db
+*.db-shm
+*.db-wal
+
+# Session data (EEG biometric data — never commit)
+*.csv
+*.eeg
+*.ods
+formulas_user_*.txt
 
 # Buildozer
 .buildozer/
 bin/
 
+# Bluetooth diagnostic logs (contain MAC addresses)
+tools/bt_logs/
+
 # OS
 .DS_Store
 Thumbs.db
 
-# Temp
+# Temp audio
 *.wav

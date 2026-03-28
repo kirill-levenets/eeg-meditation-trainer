@@ -1,5 +1,6 @@
 from typing import Callable, Dict, Optional
 
+from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
@@ -23,6 +24,7 @@ class SettingsScreen(Screen):
         self._on_toggle_change: Optional[Callable] = None
         self._on_test_audio: Optional[Callable] = None
         self._on_sinking_alert_toggle: Optional[Callable] = None
+        self._on_subtle_alert_toggle: Optional[Callable] = None
         self._on_disconnect_alert_toggle: Optional[Callable] = None
         self._on_device_mode_toggle: Optional[Callable] = None
         self._on_scan_devices: Optional[Callable] = None
@@ -91,13 +93,14 @@ class SettingsScreen(Screen):
         device_mode_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(8))
         self._device_mode_cb = CheckBox(
             active=APP.USE_MOCK_DEVICE, size_hint_x=0.15,
+            size_hint_y=None, height=dp(36),
         )
         self._device_mode_cb.bind(active=self._on_device_mode_change)
         device_mode_lbl = Label(
             text="Use Mock Data (uncheck for real device)",
             font_size=dp(13),
             size_hint_x=0.85,
-            halign="left",
+            halign="left", valign="middle",
         )
         device_mode_lbl.bind(size=device_mode_lbl.setter("text_size"))
         device_mode_row.add_widget(self._device_mode_cb)
@@ -178,6 +181,7 @@ class SettingsScreen(Screen):
                 group="audio_metric",
                 active=(key == "shamatha_score"),
                 size_hint_x=0.15,
+                size_hint_y=None, height=dp(32),
             )
             rb.audio_metric_key = key
             rb.bind(active=self._on_audio_metric_radio)
@@ -185,7 +189,7 @@ class SettingsScreen(Screen):
                 text=display_name,
                 font_size=dp(13),
                 size_hint_x=0.85,
-                halign="left",
+                halign="left", valign="middle",
             )
             lbl.bind(size=lbl.setter("text_size"))
             row.add_widget(rb)
@@ -198,12 +202,13 @@ class SettingsScreen(Screen):
 
         audio_desc = Label(
             text=(
-                "Ch1: White noise — volume decreases as meditation deepens\n"
-                "Ch2: Sinking bell — alert when sinking exceeds threshold"
+                "Rain noise — volume decreases as meditation deepens\n"
+                "Test: noise sweep (0-max-0), sinking bell (dullness > 60, every 15s),\n"
+                "distraction chime (subtle > 30, every 20s), disconnect warble (device lost)"
             ),
             font_size=dp(11),
             size_hint_y=None,
-            height=dp(40),
+            height=dp(50),
             color=(0.6, 0.6, 0.6, 1.0),
             halign="left",
         )
@@ -224,30 +229,52 @@ class SettingsScreen(Screen):
 
         # Sinking alert toggle
         sinking_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(8))
-        self._sinking_alert_cb = CheckBox(active=True, size_hint_x=0.15)
+        self._sinking_alert_cb = CheckBox(
+            active=True, size_hint_x=0.15,
+            size_hint_y=None, height=dp(36),
+        )
         self._sinking_alert_cb.bind(active=self._on_sinking_alert_change)
         sinking_lbl = Label(
             text="Enable Sinking Alert Bell",
             font_size=dp(13),
             size_hint_x=0.85,
-            halign="left",
+            halign="left", valign="middle",
         )
         sinking_lbl.bind(size=sinking_lbl.setter("text_size"))
         sinking_row.add_widget(self._sinking_alert_cb)
         sinking_row.add_widget(sinking_lbl)
         layout.add_widget(sinking_row)
 
+        # Subtle distraction alert toggle
+        subtle_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(8))
+        self._subtle_alert_cb = CheckBox(
+            active=True, size_hint_x=0.15,
+            size_hint_y=None, height=dp(36),
+        )
+        self._subtle_alert_cb.bind(active=self._on_subtle_alert_change)
+        subtle_lbl = Label(
+            text="Enable Distraction Chime",
+            font_size=dp(13),
+            size_hint_x=0.85,
+            halign="left", valign="middle",
+        )
+        subtle_lbl.bind(size=subtle_lbl.setter("text_size"))
+        subtle_row.add_widget(self._subtle_alert_cb)
+        subtle_row.add_widget(subtle_lbl)
+        layout.add_widget(subtle_row)
+
         # Disconnect alert toggle
         disconnect_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(8))
         self._disconnect_alert_cb = CheckBox(
             active=APP.DISCONNECT_ALERT_ENABLED, size_hint_x=0.15,
+            size_hint_y=None, height=dp(36),
         )
         self._disconnect_alert_cb.bind(active=self._on_disconnect_alert_change)
         disconnect_lbl = Label(
             text="Audio alert on disconnect / signal loss",
             font_size=dp(13),
             size_hint_x=0.85,
-            halign="left",
+            halign="left", valign="middle",
         )
         disconnect_lbl.bind(size=disconnect_lbl.setter("text_size"))
         disconnect_row.add_widget(self._disconnect_alert_cb)
@@ -288,6 +315,35 @@ class SettingsScreen(Screen):
         self._current_rotation: int = 0
         layout.add_widget(self._rotate_btn)
 
+        # Marker hotkey picker
+        marker_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(8))
+        marker_lbl = Label(
+            text="Marker Hotkey:", font_size=dp(13),
+            size_hint_x=0.35, halign="left",
+        )
+        marker_lbl.bind(size=marker_lbl.setter("text_size"))
+        self._marker_hotkey_btn = Button(
+            text="m",
+            font_size=dp(13),
+            bold=True,
+            size_hint_x=0.35,
+            background_color=(0.3, 0.3, 0.5, 1.0),
+        )
+        self._marker_hotkey_btn.bind(on_release=self._on_marker_hotkey_pressed)
+        self._marker_hotkey_clear = Button(
+            text="Clear",
+            font_size=dp(12),
+            size_hint_x=0.3,
+            background_color=(0.4, 0.2, 0.2, 1.0),
+        )
+        self._marker_hotkey_clear.bind(on_release=self._on_marker_hotkey_clear)
+        marker_row.add_widget(marker_lbl)
+        marker_row.add_widget(self._marker_hotkey_btn)
+        marker_row.add_widget(self._marker_hotkey_clear)
+        layout.add_widget(marker_row)
+        self._marker_hotkey: str = "m"
+        self._waiting_for_hotkey: bool = False
+
         # --- Graph toggles ---
         layout.add_widget(self._section_label("Graph Metrics"))
 
@@ -302,14 +358,17 @@ class SettingsScreen(Screen):
         self._checkboxes: Dict[str, CheckBox] = {}
         for key, display_name in toggle_names.items():
             row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(8))
-            cb = CheckBox(active=True, size_hint_x=0.15)
+            cb = CheckBox(
+                active=True, size_hint_x=0.15,
+                size_hint_y=None, height=dp(36),
+            )
             cb.metric_key = key
             cb.bind(active=self._on_toggle)
             lbl = Label(
                 text=display_name,
                 font_size=dp(14),
                 size_hint_x=0.85,
-                halign="left",
+                halign="left", valign="middle",
             )
             lbl.bind(size=lbl.setter("text_size"))
             row.add_widget(cb)
@@ -319,14 +378,17 @@ class SettingsScreen(Screen):
 
         # Custom formula visibility toggle
         cf_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(8))
-        self._custom_formula_cb = CheckBox(active=False, size_hint_x=0.15)
+        self._custom_formula_cb = CheckBox(
+            active=False, size_hint_x=0.15,
+            size_hint_y=None, height=dp(36),
+        )
         self._custom_formula_cb.bind(active=self._on_custom_formula_toggle)
         self._on_custom_formula_visible_change: Optional[Callable] = None
         cf_lbl = Label(
             text="Show Custom Formula",
             font_size=dp(14),
             size_hint_x=0.85,
-            halign="left",
+            halign="left", valign="middle",
         )
         cf_lbl.bind(size=cf_lbl.setter("text_size"))
         cf_row.add_widget(self._custom_formula_cb)
@@ -527,6 +589,10 @@ class SettingsScreen(Screen):
         if self._on_sinking_alert_toggle:
             self._on_sinking_alert_toggle(active)
 
+    def _on_subtle_alert_change(self, checkbox, active) -> None:
+        if self._on_subtle_alert_toggle:
+            self._on_subtle_alert_toggle(active)
+
     def _on_disconnect_alert_change(self, checkbox, active) -> None:
         if self._on_disconnect_alert_toggle:
             self._on_disconnect_alert_toggle(active)
@@ -554,6 +620,49 @@ class SettingsScreen(Screen):
         self._rotate_btn.text = f"Rotate Screen ({self._current_rotation}\u00b0)"
         if self._on_rotate_screen:
             self._on_rotate_screen(self._current_rotation)
+
+    def _on_marker_hotkey_pressed(self, *args) -> None:
+        """Enter hotkey capture mode — next key press sets the marker hotkey."""
+        self._waiting_for_hotkey = True
+        self._marker_hotkey_btn.text = "Press a key..."
+        self._marker_hotkey_btn.background_color = (0.6, 0.4, 0.1, 1.0)
+        Window.bind(on_key_down=self._on_hotkey_capture)
+
+    def _on_hotkey_capture(self, window, key, scancode, codepoint, modifiers) -> bool:
+        """Capture a single key press for the marker hotkey."""
+        if not self._waiting_for_hotkey:
+            return False
+        Window.unbind(on_key_down=self._on_hotkey_capture)
+        self._waiting_for_hotkey = False
+        # Use codepoint (printable char) or Kivy key name
+        from kivy.core.window import Keyboard
+        key_name = codepoint if codepoint else Keyboard.keycode_to_string(Keyboard(), key)
+        if key_name:
+            self._marker_hotkey = key_name
+            self._marker_hotkey_btn.text = key_name
+        else:
+            self._marker_hotkey_btn.text = f"key {key}"
+            self._marker_hotkey = str(key)
+        self._marker_hotkey_btn.background_color = (0.3, 0.3, 0.5, 1.0)
+        return True
+
+    def _on_marker_hotkey_clear(self, *args) -> None:
+        """Clear the marker hotkey (disable keyboard marker)."""
+        if self._waiting_for_hotkey:
+            Window.unbind(on_key_down=self._on_hotkey_capture)
+            self._waiting_for_hotkey = False
+        self._marker_hotkey = ""
+        self._marker_hotkey_btn.text = "(none)"
+        self._marker_hotkey_btn.background_color = (0.3, 0.3, 0.5, 1.0)
+
+    @property
+    def marker_hotkey(self) -> str:
+        return self._marker_hotkey
+
+    @marker_hotkey.setter
+    def marker_hotkey(self, value: str) -> None:
+        self._marker_hotkey = value
+        self._marker_hotkey_btn.text = value if value else "(none)"
 
     def _on_device_mode_change(self, checkbox, active) -> None:
         if self._on_device_mode_toggle:
@@ -588,6 +697,9 @@ class SettingsScreen(Screen):
 
     def set_sinking_alert_callback(self, callback: Callable) -> None:
         self._on_sinking_alert_toggle = callback
+
+    def set_subtle_alert_callback(self, callback: Callable) -> None:
+        self._on_subtle_alert_toggle = callback
 
     def set_disconnect_alert_callback(self, callback: Callable) -> None:
         self._on_disconnect_alert_toggle = callback

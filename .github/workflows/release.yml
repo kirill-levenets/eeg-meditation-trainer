@@ -1,0 +1,155 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config \
+            libgl1-mesa-dev libgles2-mesa-dev libsdl2-dev \
+            libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
+            libgstreamer1.0-dev gstreamer1.0-plugins-base
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install kivy==2.3.0 pillow==10.4.0 pyinstaller==6.11.1
+
+      - name: Build Linux executable
+        run: |
+          pyinstaller \
+            --name "EEG_Meditation_Trainer" \
+            --noconfirm \
+            --clean \
+            --onedir \
+            --noconsole \
+            --strip \
+            --exclude-module tkinter \
+            --exclude-module _tkinter \
+            --exclude-module unittest \
+            --exclude-module pytest \
+            --hidden-import app \
+            --hidden-import app.ui \
+            --hidden-import app.ui.app_manager \
+            --hidden-import app.ui.live_session \
+            --hidden-import app.ui.raw_eeg_screen \
+            --hidden-import app.ui.settings_screen \
+            --hidden-import app.ui.timer_screen \
+            --hidden-import app.ui.diary_screen \
+            --hidden-import app.ui.analytics_screen \
+            --hidden-import app.ui.profile_screen \
+            --hidden-import app.eeg \
+            --hidden-import app.eeg.mock_stream \
+            --hidden-import app.eeg.mock_stream_v2 \
+            --hidden-import app.eeg.buffer \
+            --hidden-import app.metrics \
+            --hidden-import app.metrics.engine \
+            --hidden-import app.metrics.custom_formula \
+            --hidden-import app.metrics.noise_detector \
+            --hidden-import app.audio_feedback \
+            --hidden-import app.audio_feedback.noise \
+            --hidden-import app.session \
+            --hidden-import app.session.manager \
+            --hidden-import app.storage \
+            --hidden-import app.storage.database \
+            --hidden-import app.analytics \
+            --hidden-import app.analytics.aggregator \
+            --hidden-import app.config \
+            --hidden-import app.logger \
+            --hidden-import kivy.core.window.window_sdl2 \
+            --hidden-import kivy.core.text.text_sdl2 \
+            --hidden-import kivy.core.image.img_sdl2 \
+            --hidden-import kivy.core.audio.audio_sdl2 \
+            --hidden-import kivy.core.clipboard.clipboard_sdl2 \
+            --hidden-import kivy.graphics.opengl \
+            --hidden-import kivy.graphics.opengl_utils \
+            main.py
+
+      - name: Package Linux build
+        run: |
+          tar czf EEG_Meditation_Trainer_linux_x64.tar.gz -C dist EEG_Meditation_Trainer
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: EEG_Meditation_Trainer_linux_x64.tar.gz
+
+  build-android:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git zip unzip autoconf libtool \
+            pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev cmake \
+            libffi-dev libssl-dev automake openjdk-17-jdk \
+            lld
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install buildozer
+        run: |
+          pip install --upgrade pip
+          pip install buildozer==1.5.0 cython==3.0.10
+
+      - name: Build Android APK
+        run: |
+          yes | buildozer android debug 2>&1 | tail -100
+        env:
+          ANDROIDSDK: ${{ github.workspace }}/.buildozer/android/platform/android-sdk
+          ANDROIDNDK: ${{ github.workspace }}/.buildozer/android/platform/android-ndk-r25b
+
+      - name: Find APK
+        id: apk
+        run: |
+          APK=$(find bin -name "*.apk" -type f | head -1)
+          echo "path=$APK" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename $APK)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-build
+          path: ${{ steps.apk.outputs.path }}
+
+  release:
+    needs: [build-linux, build-android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-build
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-build
+
+      - name: List artifacts
+        run: ls -lah
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            EEG_Meditation_Trainer_linux_x64.tar.gz
+            *.apk

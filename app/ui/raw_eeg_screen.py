@@ -65,6 +65,8 @@ class ScrollableGraphWidget(Widget):
         self._threshold_scale_key: Optional[str] = None
         self._start_wall_time: Optional[float] = None
         self._scroll_change_callback = None
+        self._tap_callback = None
+        self._touch_moved: bool = False
         self._gfx: InstructionGroup = InstructionGroup()
         self.canvas.add(self._gfx)
         self.bind(size=self._redraw, pos=self._redraw)
@@ -468,11 +470,16 @@ class ScrollableGraphWidget(Widget):
         self._grabbed_touches[touch.uid] = touch
         self._touch_start_x = touch.x
         self._touch_start_offset = self._scroll_offset
+        self._touch_moved = False
         return True
 
     def on_touch_move(self, touch):
         if touch.grab_current is not self:
             return super().on_touch_move(touch)
+
+        dx = abs(touch.x - self._touch_start_x)
+        if dx > dp(10):
+            self._touch_moved = True
 
         # Pinch zoom detection (Android / multi-touch)
         active = [t for t in self._grabbed_touches.values()
@@ -502,11 +509,18 @@ class ScrollableGraphWidget(Widget):
 
     def on_touch_up(self, touch):
         if touch.grab_current is self:
+            was_tap = not self._touch_moved and not self._pinch_active
             self._grabbed_touches.pop(touch.uid, None)
             touch.ungrab(self)
             self._pinch_active = False
+            if was_tap and self._tap_callback and len(self._grabbed_touches) == 0:
+                self._tap_callback()
             return True
         return super().on_touch_up(touch)
+
+    def set_tap_callback(self, callback) -> None:
+        """Set callback for single tap on the graph (used for marker on Android)."""
+        self._tap_callback = callback
 
     def add_marker(self, index: Optional[int] = None) -> None:
         """Add a marker at the given data point index (default: current end)."""

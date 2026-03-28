@@ -6,6 +6,7 @@ import tempfile
 import time
 import threading
 import wave
+from typing import Optional
 
 from app.config import APP
 from app.logger import logger
@@ -13,7 +14,6 @@ from app.logger import logger
 METRICS_THRESHOLD_FALLBACK = 100
 _FADE_SAMPLES = 512
 _NOISE_BUFFER_SECONDS = 10
-_VOLUME_CHANGE_THRESHOLD = 0.05
 
 
 def _write_wav(path: str, samples: bytes, rate: int) -> None:
@@ -26,16 +26,40 @@ def _write_wav(path: str, samples: bytes, rate: int) -> None:
 
 
 def _generate_noise_wav(volume: float, rate: int, duration: float) -> bytes:
-    """Generate white noise PCM with crossfade at boundaries for gapless loop.
+    """Generate rain-like noise PCM with crossfade at boundaries for gapless loop.
 
-    The first and last _FADE_SAMPLES are blended so the waveform wraps
-    smoothly when Kivy loops the file — eliminating the click/spike.
+    Blends brown noise (warm low rumble) with a touch of white noise
+    (high-frequency patter), then applies a one-pole low-pass filter
+    to soften harsh edges. Sounds like steady rain.
     """
     n_samples = int(rate * duration)
     if volume <= 0.001:
         return b"\x00" * (n_samples * 2)
 
-    raw = [int(random.uniform(-volume, volume) * 32767) for _ in range(n_samples)]
+    # Brown noise via leaky integration of white noise
+    brown = 0.0
+    leak = 0.98  # higher = deeper rumble
+    # Low-pass filter state (smooths the final mix)
+    lp = 0.0
+    cutoff = 2500.0  # Hz — tame harsh highs
+    rc = 1.0 / (2.0 * math.pi * cutoff)
+    dt = 1.0 / rate
+    alpha = dt / (rc + dt)
+
+    raw = []
+    for _ in range(n_samples):
+        white = random.uniform(-1.0, 1.0)
+        # Brown noise: integrated white with leak to prevent drift
+        brown = leak * brown + white * (1.0 - leak)
+        # Mix: 80% brown (rumble) + 20% white (patter texture)
+        sample = 0.8 * brown + 0.2 * white
+        # One-pole low-pass
+        lp += alpha * (sample - lp)
+        raw.append(lp)
+
+    # Normalize to [-1, 1]
+    peak = max(abs(s) for s in raw) or 1.0
+    raw = [int((s / peak) * volume * 32767) for s in raw]
 
     # Crossfade: blend tail into head so loop boundary is seamless
     for i in range(_FADE_SAMPLES):
@@ -44,6 +68,9 @@ def _generate_noise_wav(volume: float, rate: int, duration: float) -> bytes:
         tail = raw[n_samples - _FADE_SAMPLES + i]
         raw[i] = int(head * t + tail * (1 - t))
         raw[n_samples - _FADE_SAMPLES + i] = int(tail * t + head * (1 - t))
+
+    # Clamp to 16-bit range
+    raw = [max(-32767, min(32767, s)) for s in raw]
 
     return struct.pack(f"<{n_samples}h", *raw)
 
@@ -107,18 +134,22 @@ def _generate_disconnect_wav(
 class AudioEngine:
     """Dual-channel audio engine for meditation neurofeedback.
 
-    Channel 1 (White Noise): Looping WAV generated with stdlib, played
-        via Kivy SoundLoader. Crossfaded boundaries for gapless looping.
-        Volume changes trigger WAV regeneration.
+    Channel 1 (Pink Noise): Looping WAV generated once at full amplitude,
+        played via Kivy SoundLoader. Volume controlled smoothly via
+        sound.volume property — no WAV regeneration needed.
     Channel 2 (Sinking Alert): Synthesized bell/tingsha WAV played once
         when sinking exceeds threshold, with cooldown to prevent spam.
 
     Uses only stdlib + Kivy. No external audio libraries.
     """
 
+    # Volume interpolation: ramp toward target in small steps
+    _RAMP_INTERVAL: float = 0.025  # 25ms between steps (40 updates/sec)
+    _RAMP_SPEED: float = 0.6  # max volume change per second
+
     def __init__(self) -> None:
         self._volume: float = 0.0
-        self._applied_volume: float = -1.0
+        self._target_volume: float = 0.0
         self._max_volume: float = APP.MAX_VOLUME
         self._threshold: int = METRICS_THRESHOLD_FALLBACK
         self._is_playing: bool = False
@@ -128,6 +159,7 @@ class AudioEngine:
         self._bell_path: str = ""
         self._sinking_cooldown_until: float = 0.0
         self._sinking_alert_enabled: bool = True
+        self._subtle_alert_enabled: bool = True
         self._disconnect_alert_enabled: bool = APP.DISCONNECT_ALERT_ENABLED
         self._test_active: bool = False
         self._rate: int = APP.WHITE_NOISE_SAMPLE_RATE
@@ -140,10 +172,15 @@ class AudioEngine:
         self._disconnect_sound: object = None
         self._subtle_cooldown_until: float = 0.0
         self._lock = threading.Lock()
+        self._ramp_thread: Optional[threading.Thread] = None
+        self._ramp_running: bool = False
         self._prepare_sounds()
 
     def _prepare_sounds(self) -> None:
-        """Pre-generate all alert WAV files."""
+        """Pre-generate all WAV files (noise at full amplitude, alerts)."""
+        pcm = _generate_noise_wav(1.0, self._rate, _NOISE_BUFFER_SECONDS)
+        _write_wav(self._noise_path, pcm, self._rate)
+
         pcm = _generate_bell_wav(
             self._rate, APP.BELL_FREQUENCY, APP.BELL_DURATION,
         )
@@ -163,11 +200,8 @@ class AudioEngine:
         )
         _write_wav(self._disconnect_path, pcm, self._rate)
 
-    def _rebuild_noise(self, volume: float) -> None:
-        """Regenerate noise WAV at given volume and reload SoundLoader."""
-        pcm = _generate_noise_wav(volume, self._rate, _NOISE_BUFFER_SECONDS)
-        _write_wav(self._noise_path, pcm, self._rate)
-        self._applied_volume = volume
+    def _start_noise_loop(self) -> None:
+        """Load and start the pre-generated noise WAV in a loop."""
         try:
             from kivy.core.audio import SoundLoader
             if self._noise_sound:
@@ -176,11 +210,44 @@ class AudioEngine:
             snd = SoundLoader.load(self._noise_path)
             if snd:
                 snd.loop = True
-                snd.volume = 1.0
+                snd.volume = self._volume
                 snd.play()
                 self._noise_sound = snd
         except Exception as e:
             logger.warning(f"Failed to load noise WAV: {e}")
+
+    def _set_noise_volume(self, volume: float) -> None:
+        """Set target volume — the ramp thread interpolates smoothly toward it."""
+        self._target_volume = volume
+        self._volume = volume
+        self._ensure_ramp_thread()
+
+    def _ensure_ramp_thread(self) -> None:
+        """Start the volume ramp thread if not already running."""
+        if self._ramp_running:
+            return
+        self._ramp_running = True
+        self._ramp_thread = threading.Thread(target=self._ramp_loop, daemon=True)
+        self._ramp_thread.start()
+
+    def _ramp_loop(self) -> None:
+        """Background loop: smoothly interpolate sound.volume toward target."""
+        max_step = self._RAMP_SPEED * self._RAMP_INTERVAL
+        while self._ramp_running and self._is_playing:
+            target = self._target_volume
+            if self._noise_sound:
+                try:
+                    current = self._noise_sound.volume
+                    diff = target - current
+                    if abs(diff) < 0.001:
+                        self._noise_sound.volume = target
+                    else:
+                        step = max(-max_step, min(max_step, diff))
+                        self._noise_sound.volume = current + step
+                except Exception:
+                    pass
+            time.sleep(self._RAMP_INTERVAL)
+        self._ramp_running = False
 
     def set_threshold(self, threshold: int) -> None:
         self._threshold = max(1, threshold)
@@ -193,16 +260,12 @@ class AudioEngine:
         return min(raw, self._max_volume)
 
     def update(self, meditation_score: float) -> None:
-        """Update noise volume. Regenerates WAV if volume changed enough."""
-        self._volume = self.compute_volume(meditation_score)
+        """Update noise volume smoothly via sound.volume property."""
+        new_vol = self.compute_volume(meditation_score)
         if not self._is_playing or self._test_active:
+            self._volume = new_vol
             return
-        delta = abs(self._volume - self._applied_volume)
-        if delta >= _VOLUME_CHANGE_THRESHOLD or (
-            self._volume <= 0.001 and self._applied_volume > 0.001
-        ):
-            with self._lock:
-                self._rebuild_noise(self._volume)
+        self._set_noise_volume(new_vol)
 
     def update_sinking(self, sinking_score: float) -> None:
         """Check sinking score and trigger bell alert if needed."""
@@ -218,6 +281,8 @@ class AudioEngine:
 
     def update_subtle_distraction(self, subtle_score: float) -> None:
         """Check subtle distraction score and play gentle chime if needed."""
+        if not self._subtle_alert_enabled:
+            return
         if not self._is_playing:
             return
         now = time.time()
@@ -271,17 +336,24 @@ class AudioEngine:
         self._disconnect_sound = self._play_sound(self._disconnect_path, 0.9)
 
     def start(self) -> None:
-        """Start white noise playback."""
+        """Start noise playback."""
         if self._is_playing:
             return
         self._is_playing = True
-        initial_vol = self._volume if self._volume > 0.001 else self._max_volume * 0.5
+        initial = self._volume if self._volume > 0.001 else self._max_volume * 0.5
+        self._volume = initial
+        self._target_volume = initial
         with self._lock:
-            self._rebuild_noise(initial_vol)
+            self._start_noise_loop()
+        self._ensure_ramp_thread()
         logger.info("Audio engine started (SoundLoader)")
 
     def stop(self) -> None:
         """Stop all audio playback."""
+        self._ramp_running = False
+        if self._ramp_thread:
+            self._ramp_thread.join(timeout=0.5)
+            self._ramp_thread = None
         for snd_attr in ("_noise_sound", "_bell_sound", "_chime_sound", "_disconnect_sound"):
             snd = getattr(self, snd_attr, None)
             if snd:
@@ -293,27 +365,42 @@ class AudioEngine:
                 setattr(self, snd_attr, None)
         self._is_playing = False
         self._volume = 0.0
-        self._applied_volume = -1.0
+        self._target_volume = 0.0
         self._test_active = False
 
     def test_audio(self) -> None:
-        """Test all audio channels sequentially: noise → bell → disconnect.
+        """Test all audio channels: noise volume sweep → bell → chime → disconnect.
 
-        Plays white noise for AUDIO_TEST_DURATION seconds, then the sinking
-        bell, then the disconnect alert tone. Stops stream after if it was
-        not already playing.
+        Demonstrates smooth volume gradient by ramping noise from silence
+        to max and back down, then plays alert sounds.
         """
         was_playing = self._is_playing
+        saved_volume = self._volume
         if not was_playing:
             self._is_playing = True
         self._test_active = True
+        self._set_noise_volume(0.0)
         with self._lock:
-            self._rebuild_noise(0.7)
-        logger.info("Audio test: noise started")
+            self._start_noise_loop()
+        logger.info("Audio test: noise volume sweep started")
 
         def _run_sequence():
-            time.sleep(APP.AUDIO_TEST_DURATION)
+            # Sweep noise volume: 0 → max over half duration, max → 0 over other half
+            sweep_duration = APP.AUDIO_TEST_DURATION
+            step_interval = 0.05  # 50ms steps = 20 updates/sec
+            n_steps = int(sweep_duration / step_interval)
+            half = n_steps // 2
+            for i in range(n_steps):
+                if not self._test_active:
+                    break
+                if i <= half:
+                    vol = self._max_volume * (i / half)
+                else:
+                    vol = self._max_volume * (1.0 - (i - half) / (n_steps - half))
+                self._set_noise_volume(vol)
+                time.sleep(step_interval)
             # Bell (sinking alert)
+            self._set_noise_volume(0.0)
             logger.info("Audio test: sinking bell")
             self._play_bell()
             time.sleep(APP.BELL_DURATION + 0.3)
@@ -329,8 +416,7 @@ class AudioEngine:
             if not was_playing:
                 self.stop()
             else:
-                with self._lock:
-                    self._rebuild_noise(self._volume)
+                self._set_noise_volume(saved_volume)
             logger.info("Audio test complete")
 
         t = threading.Thread(target=_run_sequence, daemon=True)
@@ -381,6 +467,14 @@ class AudioEngine:
     @sinking_alert_enabled.setter
     def sinking_alert_enabled(self, value: bool) -> None:
         self._sinking_alert_enabled = value
+
+    @property
+    def subtle_alert_enabled(self) -> bool:
+        return self._subtle_alert_enabled
+
+    @subtle_alert_enabled.setter
+    def subtle_alert_enabled(self, value: bool) -> None:
+        self._subtle_alert_enabled = value
 
     @property
     def disconnect_alert_enabled(self) -> bool:

@@ -3,6 +3,7 @@
 Connects via Bluetooth Classic RFCOMM:
 - Android: pyjnius wrapping Java BluetoothSocket API
 - Desktop Linux: Python socket module with BTPROTO_RFCOMM
+- Windows: pyserial over virtual COM port (NeuroSky SPP profile)
 
 Parses ThinkGear serial protocol packets to extract:
 - 8 EEG band powers (ASIC_EEG_POWER_INT, code 0x83)
@@ -21,6 +22,7 @@ from typing import Dict, List, Optional
 from app.logger import logger
 
 _IS_ANDROID: bool = hasattr(sys, "getandroidapilevel")
+_IS_WINDOWS: bool = sys.platform == "win32"
 
 THINKGEAR_SYNC = 0xAA
 THINKGEAR_EXCODE = 0x55
@@ -182,6 +184,7 @@ class NeuroSkyStream:
         self._bt_socket = None
         self._bt_input_stream = None  # Android only (Java InputStream)
         self._desktop_socket: Optional[_socket.socket] = None  # Desktop only
+        self._windows_serial = None  # Windows only (pyserial Serial object)
         self._serial_fd: Optional[int] = None  # Serial device mode (splitter)
         self._read_count: int = 0
 
@@ -350,6 +353,8 @@ class NeuroSkyStream:
             self._connect_serial()
         elif _IS_ANDROID:
             self._connect_android()
+        elif _IS_WINDOWS:
+            self._connect_windows()
         else:
             self._connect_desktop()
 
@@ -461,12 +466,80 @@ class NeuroSkyStream:
         except Exception as e:
             raise RuntimeError(f"Desktop RFCOMM connect failed: {e}")
 
+    # ---- Windows backend ----
+
+    def _connect_windows(self) -> None:
+        """Open serial COM port via pyserial (Windows).
+
+        On Windows, NeuroSky MindWave pairs as a virtual COM port via SPP.
+        The device address can be either:
+        - A COM port name (e.g. "COM5") — used directly
+        - A Bluetooth MAC address — we search for the matching COM port
+        """
+        try:
+            import serial
+        except ImportError:
+            raise RuntimeError(
+                "pyserial is required for Windows Bluetooth. Install it: pip install pyserial"
+            )
+
+        port = self._device_address
+        # If address looks like a MAC, resolve it to a COM port
+        if port and ":" in port:
+            resolved = self._find_com_port_for_mac(port)
+            if resolved:
+                port = resolved
+                logger.info(f"Resolved MAC {self._device_address} to {port}")
+            else:
+                raise RuntimeError(
+                    f"Could not find COM port for device {self._device_address}. "
+                    "Pair the device in Windows Bluetooth settings and check Device Manager for the COM port."
+                )
+
+        logger.info(f"Connecting to {self._device_name} via {port}...")
+        try:
+            ser = serial.Serial(
+                port=port,
+                baudrate=57600,
+                timeout=5.0,
+            )
+            self._windows_serial = ser
+            logger.info(f"Windows serial port connected: {port}")
+        except Exception as e:
+            raise RuntimeError(f"Windows serial connect failed ({port}): {e}")
+
+    @staticmethod
+    def _find_com_port_for_mac(mac_address: str) -> Optional[str]:
+        """Search Windows registry for COM port associated with a BT MAC address."""
+        try:
+            import winreg
+            # Normalize MAC: remove colons for registry lookup
+            mac_clean = mac_address.replace(":", "").replace("-", "").upper()
+            # BT COM ports are under HKLM\SYSTEM\CurrentControlSet\Enum\BTHENUM
+            key_path = r"SYSTEM\CurrentControlSet\Enum\BTHENUM"
+            try:
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path)
+            except FileNotFoundError:
+                return None
+            # Walk subkeys looking for our MAC and an associated COM port
+            import serial.tools.list_ports as list_ports
+            for port_info in list_ports.comports():
+                if port_info.hwid and mac_clean in port_info.hwid.upper():
+                    winreg.CloseKey(key)
+                    return port_info.device
+            winreg.CloseKey(key)
+        except Exception as e:
+            logger.debug(f"COM port registry lookup failed: {e}")
+        return None
+
     def _read_bytes(self, max_bytes: int) -> bytes:
         """Read bytes from the BT socket or serial device (platform-aware)."""
         if self._serial_fd is not None:
             return self._read_bytes_serial(max_bytes)
         if _IS_ANDROID:
             return self._read_bytes_android(max_bytes)
+        if _IS_WINDOWS and self._windows_serial is not None:
+            return self._read_bytes_windows(max_bytes)
         return self._read_bytes_desktop(max_bytes)
 
     def _read_bytes_serial(self, max_bytes: int) -> bytes:
@@ -527,10 +600,29 @@ class NeuroSkyStream:
             logger.debug(f"_read_bytes_desktop error: {e}")
             raise
 
+    def _read_bytes_windows(self, max_bytes: int) -> bytes:
+        """Read bytes using pyserial (Windows)."""
+        if self._windows_serial is None:
+            return b""
+        try:
+            waiting = self._windows_serial.in_waiting
+            if waiting > 0:
+                return self._windows_serial.read(min(waiting, max_bytes))
+            return self._windows_serial.read(1)
+        except Exception as e:
+            logger.debug(f"_read_bytes_windows error: {e}")
+            raise
+
     def _close_socket(self) -> None:
         """Close the Bluetooth socket or serial device if open."""
         import os as _os
         self._bt_input_stream = None
+        if self._windows_serial is not None:
+            try:
+                self._windows_serial.close()
+            except Exception:
+                pass
+            self._windows_serial = None
         if self._serial_fd is not None:
             try:
                 _os.close(self._serial_fd)
@@ -559,6 +651,8 @@ class NeuroSkyStream:
         """
         if _IS_ANDROID:
             return NeuroSkyStream._scan_paired_android()
+        if _IS_WINDOWS:
+            return NeuroSkyStream._scan_paired_windows()
         return NeuroSkyStream._scan_paired_desktop()
 
     @staticmethod
@@ -625,6 +719,45 @@ class NeuroSkyStream:
                 continue
         logger.error("All bluetoothctl scan methods failed")
         return []
+
+    @staticmethod
+    def _scan_paired_windows() -> List[Dict[str, str]]:
+        """Scan for Bluetooth serial (COM) ports on Windows.
+
+        Lists COM ports that are associated with Bluetooth devices.
+        Falls back to listing all available COM ports if BT filtering fails.
+        """
+        try:
+            import serial.tools.list_ports as list_ports
+        except ImportError:
+            logger.warning("pyserial not installed — cannot scan COM ports")
+            return []
+
+        try:
+            devices: List[Dict[str, str]] = []
+            for port_info in list_ports.comports():
+                # Filter for Bluetooth COM ports (BTHENUM in hardware ID)
+                hwid = (port_info.hwid or "").upper()
+                is_bt = "BTHENUM" in hwid or "BLUETOOTH" in hwid
+                if is_bt:
+                    name = port_info.description or port_info.device
+                    devices.append({
+                        "address": port_info.device,  # e.g. "COM5"
+                        "name": f"{name} ({port_info.device})",
+                    })
+            if not devices:
+                # Fallback: show all COM ports so user can pick manually
+                for port_info in list_ports.comports():
+                    name = port_info.description or port_info.device
+                    devices.append({
+                        "address": port_info.device,
+                        "name": f"{name} ({port_info.device})",
+                    })
+            logger.info(f"Found {len(devices)} COM ports (Windows)")
+            return devices
+        except Exception as e:
+            logger.error(f"COM port scan error (Windows): {e}")
+            return []
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ from typing import Dict, List, Optional
 
 from kivy.app import App
 from kivy.clock import Clock
+from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.uix.actionbar import ActionBar, ActionButton, ActionPrevious, ActionView
 from kivy.uix.boxlayout import BoxLayout
@@ -200,10 +201,16 @@ class EEGMeditationApp(App):
         self._live_screen.btn_stop.bind(on_release=self._on_stop)
         self._live_screen.btn_marker.bind(on_release=self._on_marker)
 
+        # Tap on graph to set marker (Android — no keyboard available)
+        from kivy.utils import platform as kivy_platform
+        if kivy_platform == "android":
+            self._live_screen.graph.set_tap_callback(self._on_marker)
+
         self._settings_screen.set_threshold_callback(self._on_threshold_change)
         self._settings_screen.set_toggle_callback(self._on_toggle_change)
         self._settings_screen.set_test_audio_callback(self._on_test_audio)
         self._settings_screen.set_sinking_alert_callback(self._on_sinking_alert_toggle)
+        self._settings_screen.set_subtle_alert_callback(self._on_subtle_alert_toggle)
         self._settings_screen.set_disconnect_alert_callback(self._on_disconnect_alert_toggle)
         self._settings_screen.set_device_mode_callback(self._on_device_mode_toggle)
         self._settings_screen.set_scan_devices_callback(self._on_scan_devices)
@@ -219,6 +226,9 @@ class EEGMeditationApp(App):
             self._on_custom_formula_visible_toggle
         )
         self._settings_screen.set_audio_metric_callback(self._on_audio_metric_change)
+
+        # Keyboard hotkey for marker
+        Window.bind(on_key_down=self._on_key_down)
 
         # Hide custom formula on graph until enabled via checkbox
         self._live_screen.graph.set_visible("custom_formula", False)
@@ -633,6 +643,20 @@ class EEGMeditationApp(App):
             self._metrics_buffer = []
             self._flush_counter = 0
 
+    def _on_key_down(self, window, key, scancode, codepoint, modifiers) -> bool:
+        """Handle keyboard hotkey for marker."""
+        # Don't capture keys while settings hotkey picker is active
+        if self._settings_screen._waiting_for_hotkey:
+            return False
+        hotkey = self._settings_screen.marker_hotkey
+        if not hotkey:
+            return False
+        pressed = codepoint if codepoint else str(key)
+        if pressed == hotkey:
+            self._on_marker()
+            return True
+        return False
+
     def _on_marker(self, *args) -> None:
         """Place a marker at the current position in the session."""
         if self._session_manager.state == SessionState.RUNNING:
@@ -761,6 +785,10 @@ class EEGMeditationApp(App):
     def _on_sinking_alert_toggle(self, active: bool) -> None:
         self._audio.sinking_alert_enabled = active
         logger.info(f"Sinking alert {'enabled' if active else 'disabled'}")
+
+    def _on_subtle_alert_toggle(self, active: bool) -> None:
+        self._audio.subtle_alert_enabled = active
+        logger.info(f"Distraction chime {'enabled' if active else 'disabled'}")
 
     def _on_disconnect_alert_toggle(self, active: bool) -> None:
         self._audio.disconnect_alert_enabled = active
@@ -909,6 +937,7 @@ class EEGMeditationApp(App):
         self._db.set_user_setting(uid, "timer_minutes", str(self._timer_screen._duration_minutes))
         self._db.set_user_setting(uid, "timer_sound", self._timer_screen.custom_sound_path)
         self._db.set_user_setting(uid, "sinking_alert", str(self._audio.sinking_alert_enabled))
+        self._db.set_user_setting(uid, "subtle_alert", str(self._audio.subtle_alert_enabled))
         self._db.set_user_setting(uid, "disconnect_alert", str(self._audio.disconnect_alert_enabled))
         self._db.set_user_setting(uid, "threshold", str(self._settings_screen.threshold))
         self._db.set_user_setting(uid, "use_mock", str(APP.USE_MOCK_DEVICE))
@@ -933,6 +962,7 @@ class EEGMeditationApp(App):
             str(self._settings_screen.custom_formula_visible),
         )
         self._db.set_user_setting(uid, "audio_metric", self._audio_metric_key)
+        self._db.set_user_setting(uid, "marker_hotkey", self._settings_screen.marker_hotkey)
         logger.debug(f"Saved settings for user {uid}")
 
     def _load_user_settings(self, user_id: int) -> None:
@@ -960,6 +990,12 @@ class EEGMeditationApp(App):
             val = sink == "True"
             self._audio.sinking_alert_enabled = val
             self._settings_screen._sinking_alert_cb.active = val
+
+        subtle = g(user_id, "subtle_alert")
+        if subtle is not None:
+            val = subtle == "True"
+            self._audio.subtle_alert_enabled = val
+            self._settings_screen._subtle_alert_cb.active = val
 
         disc = g(user_id, "disconnect_alert")
         if disc is not None:
@@ -1048,6 +1084,10 @@ class EEGMeditationApp(App):
         if audio_met is not None:
             self._settings_screen.audio_metric = audio_met
             self._audio_metric_key = audio_met
+
+        marker_hk = g(user_id, "marker_hotkey")
+        if marker_hk is not None:
+            self._settings_screen.marker_hotkey = marker_hk
 
         self._refresh_saved_formulas()
         logger.debug(f"Loaded settings for user {user_id}")
