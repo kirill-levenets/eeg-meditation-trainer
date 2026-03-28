@@ -19,7 +19,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config \
             libgl1-mesa-dev libgles2-mesa-dev libsdl2-dev \
-            libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev
+            libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
+            libmtdev-dev libxkbcommon-dev
 
       - uses: actions/setup-python@v5
         with:
@@ -91,6 +92,7 @@ jobs:
 
   build-android:
     runs-on: ubuntu-22.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -99,8 +101,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential git zip unzip autoconf libtool \
             pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev cmake \
-            libffi-dev libssl-dev automake openjdk-17-jdk \
-            lld
+            libffi-dev libssl-dev automake openjdk-17-jdk lld
 
       - uses: actions/setup-python@v5
         with:
@@ -113,17 +114,20 @@ jobs:
 
       - name: Build Android APK
         run: |
-          yes | buildozer android debug 2>&1 | tail -100
-        env:
-          ANDROIDSDK: ${{ github.workspace }}/.buildozer/android/platform/android-sdk
-          ANDROIDNDK: ${{ github.workspace }}/.buildozer/android/platform/android-ndk-r25b
+          yes | buildozer android debug
+        timeout-minutes: 45
 
       - name: Find APK
         id: apk
         run: |
-          APK=$(find bin -name "*.apk" -type f | head -1)
+          APK=$(find bin -name "*.apk" -type f 2>/dev/null | head -1)
+          if [ -z "$APK" ]; then
+            echo "ERROR: No APK found in bin/"
+            ls -la bin/ 2>/dev/null || echo "bin/ directory does not exist"
+            exit 1
+          fi
           echo "path=$APK" >> "$GITHUB_OUTPUT"
-          echo "name=$(basename $APK)" >> "$GITHUB_OUTPUT"
+          echo "Found APK: $APK ($(du -h "$APK" | cut -f1))"
 
       - uses: actions/upload-artifact@v4
         with:
