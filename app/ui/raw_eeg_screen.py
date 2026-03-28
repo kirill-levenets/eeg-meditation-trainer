@@ -58,6 +58,7 @@ class ScrollableGraphWidget(Widget):
         self._pinch_active: bool = False
         self._pinch_start_dist: float = 0.0
         self._pinch_start_viewport: int = 0
+        self._grabbed_touches: Dict[int, object] = {}
         # Sync group: linked graphs zoom together
         self._sync_group: List["ScrollableGraphWidget"] = []
         self._threshold_value: Optional[float] = None
@@ -195,8 +196,7 @@ class ScrollableGraphWidget(Widget):
         else:
             max_scale = 100.0
             for key in self._data:
-                if self._visible.get(key, True):
-                    max_scale = max(max_scale, self._scales.get(key, 100.0))
+                max_scale = max(max_scale, self._scales.get(key, 100.0))
 
         # Grid lines + Y-axis labels
         if self._bipolar:
@@ -465,6 +465,7 @@ class ScrollableGraphWidget(Widget):
             return True
 
         touch.grab(self)
+        self._grabbed_touches[touch.uid] = touch
         self._touch_start_x = touch.x
         self._touch_start_offset = self._scroll_offset
         return True
@@ -474,11 +475,10 @@ class ScrollableGraphWidget(Widget):
             return super().on_touch_move(touch)
 
         # Pinch zoom detection (Android / multi-touch)
-        # Kivy delivers each touch separately; detect two active grabs
-        active_touches = [t for t in self._get_grabbed_touches(touch)
-                          if self.collide_point(*t.pos)]
-        if len(active_touches) >= 2:
-            t1, t2 = active_touches[0], active_touches[1]
+        active = [t for t in self._grabbed_touches.values()
+                  if self.collide_point(*t.pos)]
+        if len(active) >= 2:
+            t1, t2 = active[0], active[1]
             dist = ((t1.x - t2.x) ** 2 + (t1.y - t2.y) ** 2) ** 0.5
             if not self._pinch_active:
                 self._pinch_active = True
@@ -502,21 +502,11 @@ class ScrollableGraphWidget(Widget):
 
     def on_touch_up(self, touch):
         if touch.grab_current is self:
+            self._grabbed_touches.pop(touch.uid, None)
             touch.ungrab(self)
             self._pinch_active = False
             return True
         return super().on_touch_up(touch)
-
-    @staticmethod
-    def _get_grabbed_touches(current_touch):
-        """Get all touches currently grabbed by this widget's event loop."""
-        from kivy.base import EventLoop
-        result = []
-        if EventLoop.touches:
-            for t in EventLoop.touches:
-                if t.grab_current is current_touch.grab_current:
-                    result.append(t)
-        return result
 
     def add_marker(self, index: Optional[int] = None) -> None:
         """Add a marker at the given data point index (default: current end)."""

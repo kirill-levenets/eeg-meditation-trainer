@@ -8,6 +8,8 @@ from kivy.metrics import dp
 from kivy.uix.actionbar import ActionBar, ActionButton, ActionPrevious, ActionView
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
+from kivy.uix.label import Label
+from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import ScreenManager, SlideTransition
 
 from app.analytics.aggregator import AnalyticsAggregator
@@ -99,10 +101,11 @@ class EEGMeditationApp(App):
 
         top_bar = BoxLayout(size_hint_y=None, height=dp(48))
         self._sandwich_btn = Button(
-            text="\u2630",
+            text="=",
             size_hint_x=None,
             width=dp(48),
-            font_size=dp(22),
+            font_size=dp(24),
+            bold=True,
             background_color=(0.15, 0.15, 0.2, 1.0),
         )
         self._sandwich_btn.bind(on_release=self._toggle_nav_tabs)
@@ -166,7 +169,6 @@ class EEGMeditationApp(App):
         self._restore_last_user()
         self._refresh_profile()
         self._update_diary_visibility()
-        self._acquire_wake_lock()
         return root
 
     def _toggle_nav_tabs(self, *args) -> None:
@@ -220,7 +222,7 @@ class EEGMeditationApp(App):
 
         # Hide custom formula on graph until enabled via checkbox
         self._live_screen.graph.set_visible("custom_formula", False)
-        self._audio_metric_key: str = "meditation_score"
+        self._audio_metric_key: str = "shamatha_score"
 
         self._diary_screen.set_session_select_callback(self._on_session_select)
         self._diary_screen.set_save_notes_callback(self._on_save_notes)
@@ -306,11 +308,12 @@ class EEGMeditationApp(App):
         self._live_screen.graph.clear_data()
         self._raw_eeg_screen.raw_graph.clear_data()
         self._raw_eeg_screen.band_graph.clear_data()
-        self._live_screen.graph.set_threshold(float(threshold), "meditation_score")
+        self._live_screen.graph.set_threshold(float(threshold), "shamatha_score")
         self._live_screen.hide_alert()
         self._live_screen.set_controls_running()
 
         self._eeg_stream.start()
+        self._acquire_wake_lock()
 
         if APP.USE_MOCK_DEVICE:
             self._waiting_for_bt = False
@@ -355,20 +358,66 @@ class EEGMeditationApp(App):
             logger.info("Session resumed")
 
     def _on_stop(self, *args) -> None:
-        if self._update_event:
-            self._update_event.cancel()
-            self._update_event = None
-
         # If still waiting for BT, session never started — just clean up
         if getattr(self, '_waiting_for_bt', False):
+            if self._update_event:
+                self._update_event.cancel()
+                self._update_event = None
             self._waiting_for_bt = False
             self._eeg_stream.stop()
             self._live_screen.set_controls_idle()
             self._live_screen.update_device_status(False)
             self._live_screen.update_state("Cancelled")
             self._timer_screen.reset()
+            self._release_wake_lock()
             logger.info("Session cancelled during BT connection wait")
             return
+
+        # Pause the update loop while the dialog is open
+        if self._update_event:
+            self._update_event.cancel()
+            self._update_event = None
+
+        content = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(12))
+        content.add_widget(Label(
+            text="Save session data?",
+            font_size=dp(16),
+            halign="center",
+        ))
+        btn_row = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
+        btn_save = Button(
+            text="Save", font_size=dp(15), bold=True,
+            background_color=(0.2, 0.7, 0.3, 1.0),
+        )
+        btn_discard = Button(
+            text="Discard", font_size=dp(15), bold=True,
+            background_color=(0.8, 0.2, 0.2, 1.0),
+        )
+        btn_cancel = Button(
+            text="Cancel", font_size=dp(15),
+            background_color=(0.3, 0.3, 0.4, 1.0),
+        )
+        btn_row.add_widget(btn_save)
+        btn_row.add_widget(btn_discard)
+        btn_row.add_widget(btn_cancel)
+        content.add_widget(btn_row)
+
+        popup = Popup(
+            title="Stop Session",
+            content=content,
+            size_hint=(0.7, 0.3),
+            auto_dismiss=False,
+        )
+        btn_save.bind(on_release=lambda x: self._finish_stop(popup, save=True))
+        btn_discard.bind(on_release=lambda x: self._finish_stop(popup, save=False))
+        btn_cancel.bind(on_release=lambda x: self._cancel_stop(popup))
+        popup.open()
+
+    def _stop_and_save(self) -> None:
+        """Stop session and save data immediately (no dialog)."""
+        if self._update_event:
+            self._update_event.cancel()
+            self._update_event = None
 
         stats = self._session_manager.stop()
         self._eeg_stream.stop()
@@ -390,7 +439,50 @@ class EEGMeditationApp(App):
         self._live_screen.update_state("FINISHED")
         self._timer_screen.reset()
         self._session_manager.reset()
-        logger.info("Session stopped via UI")
+        self._release_wake_lock()
+        logger.info("Session stopped and saved")
+
+    def _cancel_stop(self, popup) -> None:
+        """Resume the session after cancelling stop."""
+        popup.dismiss()
+        self._update_event = Clock.schedule_interval(
+            self._update_tick, APP.UPDATE_FREQUENCY
+        )
+        logger.info("Stop cancelled, session resumed")
+
+    def _finish_stop(self, popup, save: bool) -> None:
+        """Finish stopping the session, optionally saving data."""
+        popup.dismiss()
+
+        stats = self._session_manager.stop()
+        self._eeg_stream.stop()
+        self._audio.stop()
+
+        if save and stats:
+            if self._current_session_id is not None:
+                self._db.update_session(self._current_session_id, stats)
+            else:
+                self._current_session_id = self._db.save_session(
+                    stats, user_id=self._current_user_id
+                )
+            if self._metrics_buffer:
+                self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
+                self._metrics_buffer = []
+            logger.info("Session stopped and saved")
+        else:
+            # Discard: delete partially flushed data if any
+            if self._current_session_id is not None:
+                self._db.delete_session(self._current_session_id)
+                logger.info(f"Session {self._current_session_id} discarded")
+            self._metrics_buffer = []
+            logger.info("Session stopped, data discarded")
+
+        self._live_screen.set_controls_idle()
+        self._live_screen.update_device_status(False)
+        self._live_screen.update_state("FINISHED")
+        self._timer_screen.reset()
+        self._session_manager.reset()
+        self._release_wake_lock()
 
     def _update_tick(self, dt: float) -> None:
         """Main 2 Hz processing loop."""
@@ -525,7 +617,7 @@ class EEGMeditationApp(App):
         if self._timer_screen.tick(APP.UPDATE_FREQUENCY):
             logger.info("Timer expired, auto-stopping session")
             self._audio.play_timer_sound(self._timer_screen.custom_sound_path)
-            self._on_stop()
+            self._stop_and_save()
             return
 
         # Flush buffer to DB every 60 seconds
@@ -550,7 +642,7 @@ class EEGMeditationApp(App):
     def _on_threshold_change(self, value: int) -> None:
         self._metrics_engine.meditation_threshold = value
         self._audio.set_threshold(value)
-        self._live_screen.graph.set_threshold(float(value), "meditation_score")
+        self._live_screen.graph.set_threshold(float(value), "shamatha_score")
         logger.debug(f"Threshold changed to {value}")
 
     def _on_toggle_change(self, metric: str, active: bool) -> None:
@@ -735,15 +827,17 @@ class EEGMeditationApp(App):
         self._refresh_diary()
         logger.info(f"Session {session_id} renamed to '{new_name}'")
 
-    def _on_export_csv(self, session_id: int) -> Optional[str]:
+    def _on_export_csv(self, session_id: int, path: Optional[str] = None) -> Optional[str]:
         """Export session data as CSV file. Returns file path or None."""
         csv_data = self._db.export_session_csv(
             session_id, custom_formula=self._custom_formula
         )
         if not csv_data:
             return None
-        export_dir = os.path.dirname(self._db._db_path)
-        path = os.path.join(export_dir, f"session_{session_id}.csv")
+        if not path:
+            export_dir = os.path.dirname(self._db._db_path)
+            path = os.path.join(export_dir, f"session_{session_id}.csv")
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "w") as f:
             f.write(csv_data)
         logger.info(f"Session {session_id} exported to {path}")
@@ -961,8 +1055,8 @@ class EEGMeditationApp(App):
     def on_stop(self) -> None:
         """Cleanup on app exit."""
         self._save_user_settings()
-        if self._session_manager.state == SessionState.RUNNING:
-            self._on_stop()
+        if self._session_manager.state in (SessionState.RUNNING, SessionState.PAUSED):
+            self._stop_and_save()
         self._audio.cleanup()
         self._db.close()
         logger.info("Application closed")

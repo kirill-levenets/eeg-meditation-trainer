@@ -19,10 +19,10 @@ source.include_exts = py,png,jpg,kv,atlas,wav
 source.exclude_exts =
 
 # (list) List of directory to exclude (let empty to not exclude anything)
-source.exclude_dirs = tests,venv,.git,__pycache__,.buildozer
+source.exclude_dirs = tests,venv,.git,__pycache__,.buildozer,docs,tools,.claude,bin
 
 # (list) List of exclusions using pattern matching
-source.exclude_patterns = *.db,*.db-shm,*.db-wal,*.csv,*.pyc
+source.exclude_patterns = *.db,*.db-shm,*.db-wal,*.csv,*.pyc,*.eeg,*.ods,*.md,*.sh,*.bat,*.spec,*.txt
 
 # (str) Application versioning
 version = 1.0.0
@@ -37,7 +37,11 @@ orientation = portrait, landscape
 fullscreen = 0
 
 # (list) Permissions
-android.permissions = BLUETOOTH,BLUETOOTH_ADMIN,BLUETOOTH_CONNECT,BLUETOOTH_SCAN,ACCESS_FINE_LOCATION,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,MANAGE_EXTERNAL_STORAGE
+# BLUETOOTH/BLUETOOTH_ADMIN: BT Classic on Android <12
+# BLUETOOTH_CONNECT/BLUETOOTH_SCAN: BT on Android 12+
+# ACCESS_FINE_LOCATION: required by Android 6-11 for BT scanning (not used for actual location)
+# WRITE/READ_EXTERNAL_STORAGE: CSV export to /sdcard on Android <11
+android.permissions = BLUETOOTH,BLUETOOTH_ADMIN,BLUETOOTH_CONNECT,BLUETOOTH_SCAN,ACCESS_FINE_LOCATION,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
 
 # (int) Target Android API
 android.api = 33
@@ -52,7 +56,9 @@ android.ndk = 25b
 android.ndk_api = 21
 
 # (str) The Android arch to build for
-android.archs = arm64-v8a,armeabi-v7a
+# arm64-v8a only: cuts APK nearly in half (~18MB vs ~36MB)
+# armeabi-v7a is for old 32-bit devices (pre-2017); remove if not needed
+android.archs = arm64-v8a
 
 # (bool) Enable AndroidX support
 android.enable_androidx = True
@@ -62,6 +68,7 @@ p4a.branch = master
 
 # (str) Bootstrap to use for android builds
 p4a.bootstrap = sdl2
+
 
 [buildozer]
 

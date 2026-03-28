@@ -1,9 +1,11 @@
 import math
+import os
 from typing import Callable, Dict, List, Optional
 
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
+from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
@@ -608,10 +610,73 @@ class DiaryScreen(Screen):
             )
 
     def _on_export_pressed(self, *args) -> None:
+        if not self._selected_session_id or not self._on_export_csv:
+            return
+
+        content = BoxLayout(orientation="vertical", spacing=dp(8))
+
+        start_path = os.path.expanduser("~")
+        self._file_chooser = FileChooserListView(
+            path=start_path,
+            dirselect=True,
+            filters=["!.*"],
+        )
+        content.add_widget(self._file_chooser)
+
+        name_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
+        name_label = Label(text="File name:", font_size=dp(13), size_hint_x=0.25)
+        self._export_filename = TextInput(
+            text=f"session_{self._selected_session_id}.csv",
+            multiline=False,
+            font_size=dp(13),
+            size_hint_x=0.75,
+        )
+        name_row.add_widget(name_label)
+        name_row.add_widget(self._export_filename)
+        content.add_widget(name_row)
+
+        btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+        btn_cancel = Button(text="Cancel", font_size=dp(14))
+        btn_save = Button(
+            text="Save", font_size=dp(14),
+            background_color=(0.2, 0.6, 0.3, 1.0), bold=True,
+        )
+        btn_row.add_widget(btn_cancel)
+        btn_row.add_widget(btn_save)
+        content.add_widget(btn_row)
+
+        popup = Popup(
+            title="Export CSV — choose folder",
+            content=content,
+            size_hint=(0.95, 0.85),
+        )
+        btn_cancel.bind(on_release=popup.dismiss)
+        btn_save.bind(on_release=lambda x: self._do_export(popup))
+        popup.open()
+
+    def _do_export(self, popup) -> None:
+        """Perform export to the selected directory."""
+        selection = self._file_chooser.selection
+        if selection:
+            folder = selection[0]
+            if not os.path.isdir(folder):
+                folder = os.path.dirname(folder)
+        else:
+            folder = self._file_chooser.path
+
+        filename = self._export_filename.text.strip()
+        if not filename:
+            filename = f"session_{self._selected_session_id}.csv"
+        if not filename.endswith(".csv"):
+            filename += ".csv"
+
+        full_path = os.path.join(folder, filename)
+        popup.dismiss()
+
         if self._selected_session_id and self._on_export_csv:
-            path = self._on_export_csv(self._selected_session_id)
-            if path:
-                self._export_status.text = f"Exported: {path}"
+            result = self._on_export_csv(self._selected_session_id, full_path)
+            if result:
+                self._export_status.text = f"Exported: {result}"
             else:
                 self._export_status.text = "No data to export"
 

@@ -1,69 +1,89 @@
 # EEG Meditation Trainer
 
-Mobile application for training Shamatha meditation using EEG neurofeedback. Built with Python/Kivy for Android.
+Cross-platform application for training Shamatha meditation using EEG neurofeedback from NeuroSky MindWave Mobile 2. Built with Python/Kivy for Android, Linux, and Windows.
 
 ## Features
 
-- **Real-time EEG visualization** — Live scrollable graph with unified Y-axis scaling across all metrics, grid lines, realtime value labels at line endpoints, X-axis timestamps, dashed meditation threshold line, right-aligned data during fill-up
-- **Raw EEG data tab** — Oscillating EEG waveform (128Hz sub-sampled, bipolar ±μV display) + aggregated frequency band plots with adaptive Y-axis scaling to visible data range
-- **Scrollable graphs** — All graphs support time-scrolling through the full 5-minute data window via slider or touch drag/slide on the graph; chunked line rendering to prevent GPU artifacts on large point counts; vertical + horizontal grid lines aligned with timestamps
-- **Meditation scoring** — Classic EEG-meditation formula `100*min(avg((a1+0.8*a2)/(b2+b1+0.4*t+0.08*d),4)*0.75-0.1,1)` with sqrt-normalized relative band units; Calmness, Shamatha score, Distraction, Sinking, and Subtle Distraction (short-window variance with warmup guard); native NeuroSky eSense Attention & Meditation displayed on live graph and stored in DB/CSV
-- **Multi-channel audio engine** — Ch1: gapless white noise via crossfaded WAV + Kivy SoundLoader (volume scales with meditation); Ch2: synthesized tingsha bell for sinking alerts (800Hz, decaying harmonics); Ch3: gentle chime for subtle distraction (1200Hz, shimmer effect); Ch4: harsh dual-frequency warble for device disconnect alert (600/900Hz alternating). All with cooldown/debounce. Test Audio plays noise→bell→chime→disconnect sequence
-- **Meditation timer** — Configurable duration (1–120 min) with preset buttons, enable/disable toggle (updates display immediately), countdown display, auto-stop on expiry, file chooser dialog for custom end-sound with test button
+- **Real-time EEG visualization** — Live scrollable graph with Y-axis up to 200, horizontal grid lines every 20 units, real-time value labels, X-axis with relative and wall-clock timestamps, dashed threshold line, session start time display
+- **Raw EEG data tab** — Oscillating EEG waveform (512Hz) + aggregated frequency band plots with adaptive Y-axis scaling; both graphs synchronized for linked scrolling and zooming
+- **Scrollable graphs** — All graphs support touch drag/slide scrolling and pinch-to-zoom (Android) / mouse wheel zoom (desktop); chunked line rendering; vertical + horizontal grid lines
+- **Meditation scoring** — Vernihor shamatha formula `(avg(ratio, 4) * 0.75 - 0.3) * 100` with sqrt-normalized relative band units and duplicate-sample deduplication; verified against original Windows app (MSE ~28); Distraction, Sinking, Subtle Distraction (short-window variance with warmup guard); native NeuroSky eSense Attention & Meditation
+- **Session markers** — Place vertical markers on all graphs during a session to tag significant moments; markers stored in DB, displayed in diary previews, exported in CSV as a separate column
+- **Multi-channel audio engine** — Ch1: gapless white noise (volume scales with configurable metric); Ch2: tingsha bell for sinking alerts; Ch3: chime for subtle distraction; Ch4: warble for disconnect alert. Configurable audio control metric (Meditation, Shamatha, NS Meditation, NS Attention, Custom Formula)
+- **Meditation timer** — Configurable duration (1-120 min) with presets, countdown display, auto-stop, custom end sound with file chooser and test button
 - **State classification** — Stable Focus, Subtle Distraction, Gross Distraction, Sinking
-- **NeuroSky MindWave Mobile 2** — Real EEG device support via Bluetooth Classic RFCOMM on Android (pyjnius) and desktop Linux (Python socket BTPROTO_RFCOMM); ThinkGear protocol parser extracts 8 band powers, attention, meditation, signal quality, raw wave (512Hz); background reader thread with auto-reconnect; desktop paired device scanning via bluetoothctl; BT connection wait on Start (shows Connecting... status, waits for first data, plays connect chime, detects disconnect during session)
-- **Settings panel** — Device status/meta display, mock/real device switch, BT device scan + select from paired devices list, threshold slider (20–100), test audio button, sinking alert toggle (linked to graph toggle), disconnect alert toggle, graph metric toggles, line width slider (0.5–4.0), screen rotation button (0°/90°/180°/270°), custom formula field (Python-style math expression tracked as extra metric on live graph); all persisted per user
-- **Custom formula** — User-defined metric via Python-style expression using band powers (alpha1, alpha2, beta1, beta2, gamma1, gamma2, theta, delta), combined bands (alpha, beta, gamma), normalized bands (alpha_norm, etc.), computed metrics (meditation_score, shamatha_score, distraction, sinking, etc.), math functions (sqrt, abs, log, exp, pow, min, max, sin, cos, tanh), and windowed average `avg(expr, N)` for smoothed N-point rolling mean over any expression (max 600 points, e.g. `avg(alpha1 + beta1, 10)`, `avg(sqrt(alpha_norm) * 100, 30)`); AST-parsed with whitelist validation, division-by-zero and overflow protection; displayed as magenta line on live graph; saved per user
-- **Session diary** — Notes, tags, mood rating, CSV export, delete (with confirmation dialog) & rename sessions (name pre-filled with fallback), selected session highlight, tabbed signal preview (Metrics / Raw EEG / Frequencies) with touch scroll + threshold line; session stats include duration, avg meditation/shamatha, time above threshold, longest meditation streak, threshold used, mood rating; Raw EEG tab synthesizes approximate bipolar waveform from stored band powers using sine waves at characteristic frequencies
-- **Full signal storage** — Raw EEG bands, computed metrics, frequencies, stability, calmness, native NeuroSky attention & meditation all stored per-tick in SQLite
-- **CSV export** — Export any session's full signal data (raw + computed) to CSV from the diary screen
-- **Mock EEG simulation** — NeuroSky-compatible format: band powers in ASIC_EEG_POWER range (3-byte unsigned ints), 512Hz raw waveform, eSense attention/meditation (0-100), signal quality; state machine with smooth transitions, cross-band coupling, Gaussian noise, burst activity
-- **User profiles** — Profile chooser/create on app launch; per-user session filtering; last user persisted across restarts; diary hidden until user selected; per-user settings persistence (timer, alerts, sounds, threshold, graph metric toggles, device mode mock/real)
-- **Session guards** — Start blocked if no user selected or if mock disabled without real BT device selected
-- **Analytics** — Daily/weekly/monthly trends with Y-axis value labels and X-axis time period labels on trend graphs, streak counter, progress tracking, database storage usage display
-- **Debug logging** — Every action/event logged; raw EEG samples logged periodically during session
-- **SQLite storage** — Sessions, metrics timeseries, user profiles, per-user settings with automatic schema migration; mid-session flush with final stats update on stop
+- **NeuroSky MindWave Mobile 2** — Bluetooth RFCOMM on Android (pyjnius) and Linux (Python socket); ThinkGear protocol parser; background reader thread; BT connection wait with status display; paired device scanning
+- **Settings panel** — Device status, mock/real switch, BT scan + select, threshold slider, audio metric picker (radio buttons), test audio, sinking/disconnect alert toggles, line width slider, screen rotation, graph metric toggles, custom formula show/hide checkbox; all persisted per user
+- **Custom formula engine** — Python-style expressions with band powers, combined/normalized bands, sqrt-relative bands, computed metrics, math functions, and windowed `avg(expr, N)`; AST-parsed with whitelist validation; save/load/export formula library per user
+- **Session diary** — Notes, tags, mood rating, CSV export with file save dialog, delete/rename sessions, tabbed signal preview (Metrics / Raw EEG / Frequencies) with markers and threshold line
+- **Full signal storage** — Raw bands, computed metrics, native NeuroSky values, markers — all per-tick in SQLite with automatic schema migration
+- **CSV export** — Full session data with file chooser dialog; includes marker column
+- **Mock EEG simulation** — NeuroSky-compatible: band powers, 512Hz raw waveform, eSense values; state machine with smooth transitions
+- **User profiles** — Multiple profiles with per-user sessions, settings, and formulas; last user persisted; diary disabled until user selected
+- **Session guards** — Start blocked without user or device; stop dialog with Save/Discard/Cancel; timer auto-stop saves automatically
+- **Analytics** — Daily/weekly/monthly trends with step-20 grid lines, streak counter, storage usage display
+- **Navigation** — Tab bar with hamburger toggle button; Profile tab first
+- **Android storage** — Tries /sdcard/EEGMeditation, falls back to app-private storage if permission denied
+
+## Documentation
+
+- [User Manual (English)](docs/USER_MANUAL.md)
+- [User Manual (Ukrainian)](docs/USER_MANUAL_UA.md)
+- [Formula Comparison Tools](tools/COMPARISON.md)
 
 ## Project Structure
 
 ```
 app/
-├── ui/                 # Kivy screens, widgets, and ScreenManager
-│   ├── app_manager.py      # Main app with ScreenManager and update loop
-│   ├── live_session.py      # Live session screen with scrollable graph and controls
-│   ├── raw_eeg_screen.py    # Raw EEG data tab with sub-band and frequency band plots
-│   ├── profile_screen.py    # User profile management and user switcher
-│   ├── settings_screen.py   # Threshold, audio controls, device info, toggles
-│   ├── timer_screen.py       # Meditation timer with countdown and presets
-│   ├── diary_screen.py      # Session list, notes, mood rating, CSV export
-│   └── analytics_screen.py  # Trend graphs and summary stats
-├── eeg/                # EEG data source
-│   ├── mock_stream.py       # Original simulated EEG (v1)
-│   ├── mock_stream_v2.py    # Frequency-based synthesis (v2, active)
-│   └── buffer.py            # Rolling average and variance buffers
-├── metrics/            # Signal processing and state formulas
-│   └── engine.py            # Full metrics pipeline with sigmoid normalization
-├── audio_feedback/     # Dual-channel audio engine
-│   └── noise.py             # White noise + sinking bell via audiostream ThreadSource
-├── session/            # Session lifecycle
-│   └── manager.py           # Start/Pause/Resume/Stop state machine
-├── storage/            # Database
-│   └── database.py          # SQLite schema, CRUD, user profiles, CSV export
-├── analytics/          # Data aggregation
-│   └── aggregator.py        # Daily/weekly/monthly trend computation
-├── config.py           # Sigmoid params, thresholds, app constants
-└── logger.py           # Centralized logging
+├── ui/                     # Kivy screens and widgets
+│   ├── app_manager.py          # Main app, ScreenManager, update loop, navigation
+│   ├── live_session.py         # Session screen with graph, stats, markers, controls
+│   ├── raw_eeg_screen.py       # ScrollableGraphWidget + Raw EEG screen
+│   ├── profile_screen.py       # User profile management
+│   ├── settings_screen.py      # All settings: device, audio, display, formula
+│   ├── timer_screen.py         # Meditation timer with countdown
+│   ├── diary_screen.py         # Session diary with preview graphs and CSV export
+│   ├── analytics_screen.py     # Trend graphs and summary statistics
+│   └── home_screen.py          # Home screen (alternative navigation, unused)
+├── eeg/                    # EEG data sources
+│   ├── mock_stream_v2.py       # Frequency-based EEG synthesis (active mock)
+│   ├── neurosky_stream.py      # Real Bluetooth RFCOMM + ThinkGear parser
+│   └── buffer.py               # Rolling average and variance buffers
+├── metrics/                # Signal processing
+│   ├── engine.py               # Shamatha formula, sinking, distraction, state classification
+│   ├── custom_formula.py       # AST-parsed user formula engine with avg() support
+│   └── noise_detector.py       # Power line noise (50/60Hz) detection
+├── audio_feedback/
+│   └── noise.py                # 4-channel audio: white noise, bell, chime, warble
+├── session/
+│   └── manager.py              # Start/Pause/Resume/Stop state machine
+├── storage/
+│   └── database.py             # SQLite: sessions, metrics, users, settings, CSV export
+├── analytics/
+│   └── aggregator.py           # Daily/weekly/monthly trend computation
+├── config.py               # Sigmoid params, thresholds, app constants, Android storage
+└── logger.py               # Centralized logging
+
+tools/
+├── splitter.py             # BT stream splitter for simultaneous app comparison
+├── replay.py               # Replay recorded .eeg sessions
+├── run_comparison.sh       # One-script simultaneous comparison with Wine app
+└── COMPARISON.md           # Comparison setup documentation
 ```
 
-## Metrics Computed
+## Shamatha Formula
 
-| Metric | Formula | Range |
-|--------|---------|-------|
-| Meditation Score | `clamp(200 * calmness / Cmax)` | 0–200 |
-| Sinking | `sigmoid((theta+delta) / (alpha+beta+1))` | 0–100 |
-| Distraction | `sigmoid((beta+gamma) / (alpha+1))` | 0–100 |
-| Subtle Distraction | `sigmoid(stability / stability_max)` when score > threshold | 0–100 |
-| Shamatha Score | `sigmoid(calmness*0.4 + clarity*0.3 + stability_factor*0.3)` | 0–100 |
+Vernihor formula (Windows variant, confirmed by data fitting):
+
+```
+score = max(0, avg(ratio, 4) * 0.75 - 0.3) * 100
+```
+
+Where:
+- `ratio = (s_alpha1 + 0.8 * s_alpha2) / (s_beta2 + s_beta1 + 0.4 * s_theta + 0.08 * s_delta)`
+- `s_X = sqrt(X / (delta + theta + alpha1 + alpha2 + beta1 + beta2))` — sqrt-normalized relative bands
+- `avg(ratio, 4)` — rolling average over 4 unique NeuroSky samples (1Hz)
+- Duplicate samples from 2Hz polling are skipped
 
 ## Setup (Desktop Development)
 
@@ -75,111 +95,67 @@ source venv/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Run tests (split across test_buffers, test_engine, test_database,
-# test_mock_stream, test_session, test_audio, test_timer, test_ui_widgets)
+# Run tests (241 tests)
 python -m pytest tests/ -v
 
 # Run application
 python main.py
+
+# Run with serial device (e.g. from splitter)
+python main.py --serial /tmp/mindwave_b
 ```
 
-## Building Linux Executable
+## Building
+
+### Linux
 
 ```bash
-# One-command build (creates venv, installs deps, builds with PyInstaller)
 ./build_linux.sh
-
 # Output: dist/EEG_Meditation_Trainer/EEG_Meditation_Trainer
-# Distribute: tar czf EEG_Meditation_Trainer_linux.tar.gz -C dist EEG_Meditation_Trainer
 ```
 
 Requires Python 3.10+, `build-essential`, `pkg-config`.
 
-## Building Android APK
+### Android
 
 ```bash
-# Debug build (one command — creates venv, installs buildozer, builds APK)
-./build_android.sh
+./build_android.sh            # debug build
+./build_android.sh release    # release build
 
-# Release build
-./build_android.sh release
-
-# Install on device
-adb install bin/eegmeditation-*-debug.apk
-# Or: buildozer android deploy run logcat
+# Deploy and run
+buildozer android debug deploy run logcat
 ```
 
-Requires Python 3.10+, JDK 17, `git`, `zip`, `unzip`, `autoconf`, `libtool`, `cmake`.
-First build downloads Android SDK/NDK (~1.5 GB) and takes 15-30 min.
+Requires Python 3.10+, JDK 17. First build downloads Android SDK/NDK (~1.5 GB).
 
-### System deps (Ubuntu/Debian)
-
+System deps (Ubuntu/Debian):
 ```bash
 sudo apt-get install -y build-essential git zip unzip autoconf libtool \
     pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev cmake \
     libffi-dev libssl-dev automake openjdk-17-jdk
 ```
 
-### Troubleshooting
-
-- **Java version**: Requires JDK 17. Check with `java -version`
-- **SDK/NDK**: Buildozer auto-downloads. Set `ANDROIDSDK` and `ANDROIDNDK` env vars if using existing install
-- **First build slow**: SDK/NDK download + compilation takes 15-30 minutes
-- **Build errors**: Run `buildozer android clean` then rebuild
-- **Logs**: Check `buildozer android deploy run logcat` for runtime errors
-
-## Building Windows Executable
-
-### Prerequisites
-
-- **Windows 10/11** with Python 3.10–3.12 installed from [python.org](https://www.python.org/downloads/)
-- Ensure `python` is on your PATH (`python --version` should work)
-
-### Quick Build (automated)
+### Windows
 
 ```bat
-REM Double-click or run from Command Prompt:
 build_windows.bat
-```
-
-This creates a venv, installs deps, and builds the exe. Output: `dist\EEG_Meditation_Trainer\`
-
-### Manual Build
-
-```bat
-REM Create venv and install deps
-python -m venv build_venv
-build_venv\Scripts\activate.bat
-pip install -r requirements_windows.txt
-
-REM Build
-python -m PyInstaller eeg_meditation.spec --noconfirm
-
 REM Output: dist\EEG_Meditation_Trainer\EEG_Meditation_Trainer.exe
 ```
 
-### Distribution
-
-Zip the entire `dist\EEG_Meditation_Trainer\` folder. The user runs `EEG_Meditation_Trainer.exe` directly — no Python install needed.
-
-### Troubleshooting
-
-- **Missing DLLs**: Ensure `kivy_deps.sdl2` and `kivy_deps.glew` are installed — the spec file bundles their binaries
-- **Black screen on launch**: Try `console=True` in the spec file to see error output
-- **Database location**: `meditation.db` is created next to the exe at runtime
+Requires Python 3.10-3.12 from python.org.
 
 ## Configuration
 
-All tunable parameters are in `app/config.py`:
+All tunable parameters in `app/config.py`:
 
-- **SigmoidConfig** — `k` and `midpoint` for each sigmoid normalization
+- **SigmoidConfig** — k and midpoint for each sigmoid normalization
 - **MetricsConfig** — Cmax, rolling window size, threshold defaults, limits
-- **AppConfig** — Update frequency, graph window, flush interval, audio settings
+- **AppConfig** — Update frequency (2Hz), graph window (5min), flush interval, audio settings
 
 ## Tech Stack
 
-- **Python 3.x** — Core language
-- **Kivy 2.3** — Cross-platform UI framework + SoundLoader for audio
-- **SQLite** — Session, metrics, and user profile storage
-- **Buildozer** — Android packaging tool
-- **PyInstaller** — Windows executable packaging
+- **Python 3.11** — Core language
+- **Kivy 2.3** — Cross-platform UI + SoundLoader audio
+- **SQLite** — Session, metrics, user profile storage
+- **Buildozer** — Android packaging
+- **PyInstaller** — Desktop executable packaging

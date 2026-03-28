@@ -11,7 +11,6 @@ from app.ui.raw_eeg_screen import ScrollableGraphWidget
 
 
 METRICS_COLORS = {
-    "meditation_score": (0.2, 0.6, 1.0, 1.0),
     "shamatha_score": (0.0, 0.9, 0.4, 1.0),
     "distraction": (1.0, 0.3, 0.3, 1.0),
     "sinking": (0.8, 0.5, 0.0, 1.0),
@@ -22,7 +21,6 @@ METRICS_COLORS = {
 }
 
 METRICS_SCALES = {
-    "meditation_score": 100.0,
     "shamatha_score": 100.0,
     "distraction": 100.0,
     "sinking": 100.0,
@@ -108,11 +106,10 @@ class LiveSessionScreen(Screen):
         root.add_widget(legend)
 
         stats_grid = GridLayout(
-            cols=6, size_hint_y=None, height=dp(60), spacing=dp(4), padding=dp(4)
+            cols=5, size_hint_y=None, height=dp(60), spacing=dp(4), padding=dp(4)
         )
         self._stat_labels: Dict[str, Label] = {}
         stat_items = [
-            ("meditation_score", "Meditation"),
             ("shamatha_score", "Shamatha"),
             ("distraction", "Distraction"),
             ("sinking", "Sinking"),

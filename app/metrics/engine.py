@@ -9,14 +9,16 @@ from app.eeg.buffer import RollingBuffer, VarianceBuffer
 class MetricsEngine:
     """Computes all EEG meditation metrics from smoothed band data."""
 
-    # Vernihor shamatha formula coefficients
+    # Vernihor shamatha formula coefficients (Windows variant)
     # Source: scriptures.ru/yoga/eeg_voprosy_i_otvety.htm#formula2
-    # min(avg((a1 + 0.8*a2) / (b2 + b1 + 0.4*t + 0.08*d), 4s) / 1.48, 1)
+    # 100 * (avg((a1 + 0.8*a2) / (b2 + b1 + 0.4*t + 0.08*d), 4) * 0.75 - 0.3)
+    # Windows version uses offset 0.3 (confirmed by data fitting, MSE=28 vs MSE=487 for 0.1)
     _MED_A2_WEIGHT: float = 0.8
     _MED_THETA_WEIGHT: float = 0.4
     _MED_DELTA_WEIGHT: float = 0.08
-    _MED_DIVISOR: float = 1.48
-    _MED_AVG_WINDOW: int = 8  # 4 seconds at 2Hz
+    _MED_SCALE: float = 0.75
+    _MED_OFFSET: float = 0.3
+    _MED_AVG_WINDOW: int = 4  # 4 unique samples (NeuroSky sends at 1Hz)
 
     def __init__(self) -> None:
         self._rolling_buffer: RollingBuffer = RollingBuffer(
@@ -98,11 +100,12 @@ class MetricsEngine:
         return {k: math.sqrt(v / total) for k, v in values.items()}
 
     def compute_meditation_score(self, bands_sqrt: Dict[str, float]) -> float:
-        """Vernihor shamatha formula.
+        """Vernihor shamatha formula (exact match).
 
-        Formula: max(0, avg((a1 + 0.8*a2) / (b2 + b1 + 0.4*t + 0.08*d), 4s) / 1.48) * 100
+        Formula: 100 * min(max(0, avg(ratio, 4) * 0.75 - 0.1), 1)
         Band values are sqrt-normalized relative units.
-        Returns unclamped value — can exceed 100 for very deep meditation.
+        The avg window is 4 unique NeuroSky samples (1Hz).
+        Duplicate samples (from our 2Hz polling) are skipped.
         """
         a1 = bands_sqrt.get("alpha1", 0.0)
         a2 = bands_sqrt.get("alpha2", 0.0)
@@ -117,10 +120,13 @@ class MetricsEngine:
         else:
             ratio = (a1 + self._MED_A2_WEIGHT * a2) / denom
 
-        self._med_ratio_buffer.append(ratio)
+        # Skip duplicate samples: only push if ratio changed (NeuroSky 1Hz vs our 2Hz)
+        if not self._med_ratio_buffer or abs(ratio - self._med_ratio_buffer[-1]) > 1e-9:
+            self._med_ratio_buffer.append(ratio)
+
         avg_ratio = sum(self._med_ratio_buffer) / len(self._med_ratio_buffer)
 
-        return max(0.0, avg_ratio / self._MED_DIVISOR) * 100.0
+        return max(0.0, avg_ratio * self._MED_SCALE - self._MED_OFFSET) * 100.0
 
     def compute_sinking(self, norms: Dict[str, float]) -> float:
         """Sinking (dullness): sigmoid of (theta_norm + delta_norm) / (alpha_norm + beta_norm + eps)."""

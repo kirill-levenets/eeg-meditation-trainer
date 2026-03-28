@@ -164,10 +164,9 @@ class SettingsScreen(Screen):
         layout.add_widget(audio_metric_label)
 
         self._audio_metric_radios: Dict[str, CheckBox] = {}
-        self._audio_metric_selected: str = "meditation_score"
+        self._audio_metric_selected: str = "shamatha_score"
         self._on_audio_metric_change: Optional[Callable] = None
         audio_metric_options = {
-            "meditation_score": "Meditation Score",
             "shamatha_score": "Shamatha Score",
             "native_meditation": "NS Meditation",
             "native_attention": "NS Attention",
@@ -177,7 +176,7 @@ class SettingsScreen(Screen):
             row = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(8))
             rb = CheckBox(
                 group="audio_metric",
-                active=(key == "meditation_score"),
+                active=(key == "shamatha_score"),
                 size_hint_x=0.15,
             )
             rb.audio_metric_key = key
@@ -293,7 +292,6 @@ class SettingsScreen(Screen):
         layout.add_widget(self._section_label("Graph Metrics"))
 
         toggle_names = {
-            "meditation_score": "Meditation Score",
             "shamatha_score": "Shamatha Score",
             "distraction": "Distraction",
             "sinking": "Sinking",
