@@ -63,12 +63,15 @@ class EEGMeditationApp(App):
         if not hasattr(sys, "getandroidapilevel"):
             return
         try:
-            from jnius import autoclass
-            PythonActivity = autoclass("org.kivy.android.PythonActivity")
-            activity = PythonActivity.mActivity
-            window = activity.getWindow()
-            WindowManager = autoclass("android.view.WindowManager$LayoutParams")
-            window.addFlags(WindowManager.FLAG_KEEP_SCREEN_ON)
+            from android.runnable import run_on_ui_thread
+            @run_on_ui_thread
+            def _set_flag():
+                from jnius import autoclass
+                PythonActivity = autoclass("org.kivy.android.PythonActivity")
+                activity = PythonActivity.mActivity
+                WindowManager = autoclass("android.view.WindowManager$LayoutParams")
+                activity.getWindow().addFlags(WindowManager.FLAG_KEEP_SCREEN_ON)
+            _set_flag()
             logger.info("Wake lock acquired (screen will stay on)")
         except Exception as e:
             logger.warning(f"Failed to acquire wake lock: {e}")
@@ -78,12 +81,15 @@ class EEGMeditationApp(App):
         if not hasattr(sys, "getandroidapilevel"):
             return
         try:
-            from jnius import autoclass
-            PythonActivity = autoclass("org.kivy.android.PythonActivity")
-            activity = PythonActivity.mActivity
-            window = activity.getWindow()
-            WindowManager = autoclass("android.view.WindowManager$LayoutParams")
-            window.clearFlags(WindowManager.FLAG_KEEP_SCREEN_ON)
+            from android.runnable import run_on_ui_thread
+            @run_on_ui_thread
+            def _clear_flag():
+                from jnius import autoclass
+                PythonActivity = autoclass("org.kivy.android.PythonActivity")
+                activity = PythonActivity.mActivity
+                WindowManager = autoclass("android.view.WindowManager$LayoutParams")
+                activity.getWindow().clearFlags(WindowManager.FLAG_KEEP_SCREEN_ON)
+            _clear_flag()
             logger.info("Wake lock released")
         except Exception as e:
             logger.warning(f"Failed to release wake lock: {e}")

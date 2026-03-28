@@ -103,6 +103,11 @@ jobs:
             pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev cmake \
             libffi-dev libssl-dev automake openjdk-17-jdk lld
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -116,6 +121,8 @@ jobs:
         run: |
           yes | buildozer android debug
         timeout-minutes: 45
+        env:
+          JAVA_HOME: ${{ env.JAVA_HOME_17_X64 }}
 
       - name: Find APK
         id: apk
