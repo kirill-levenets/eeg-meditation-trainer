@@ -15,6 +15,11 @@ if errorlevel 1 (
     exit /b 1
 )
 
+REM Clean previous builds
+echo Cleaning previous builds...
+if exist "build" rd /s /q "build"
+if exist "dist" rd /s /q "dist"
+
 REM Create virtual environment if needed
 if not exist "build_venv" (
     echo Creating virtual environment...
@@ -25,11 +30,12 @@ echo Activating virtual environment...
 call build_venv\Scripts\activate.bat
 
 echo Installing dependencies...
-pip install --upgrade pip
+python -m pip install --upgrade pip
 pip install kivy[base]==2.3.0 kivy_deps.sdl2 kivy_deps.glew
 pip install pillow==10.4.0
 pip install pyserial==3.5
 pip install pyinstaller==6.11.1
+pip install pywin32
 
 echo.
 echo === Building executable ===
@@ -47,5 +53,6 @@ echo.
 echo === Build complete! ===
 echo Output: dist\EEG_Meditation_Trainer\EEG_Meditation_Trainer.exe
 echo.
-echo To distribute: zip the entire dist\EEG_Meditation_Trainer folder
+echo IMPORTANT: Run the EXE from the 'dist\EEG_Meditation_Trainer' folder.
+echo To distribute: zip the entire dist\EEG_Meditation_Trainer folder.
 pause

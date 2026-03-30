@@ -14,7 +14,7 @@ from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 block_cipher = None
 
-PROJECT_ROOT = os.path.abspath(os.path.dirname(SPECPATH))
+PROJECT_ROOT = SPECPATH
 
 # Collect all app submodules
 app_hiddenimports = collect_submodules('app')
@@ -28,6 +28,7 @@ kivy_hiddenimports = [
     'kivy.core.clipboard.clipboard_sdl2',
     'kivy.graphics.opengl',
     'kivy.graphics.opengl_utils',
+    'win32timezone',  # Added for Kivy FileChooser on Windows
 ]
 
 all_hiddenimports = app_hiddenimports + kivy_hiddenimports
@@ -36,7 +37,9 @@ a = Analysis(
     [os.path.join(PROJECT_ROOT, 'main.py')],
     pathex=[PROJECT_ROOT],
     binaries=[],
-    datas=[],
+    datas=[
+        (os.path.join(PROJECT_ROOT, 'app'), 'app'),
+    ],
     hiddenimports=all_hiddenimports,
     hookspath=[],
     hooksconfig={},
@@ -59,7 +62,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     console=False,
     icon=None,
 )
@@ -71,7 +74,8 @@ coll = COLLECT(
     a.datas,
     *[Tree(p) for p in (sdl2.dep_bins + glew.dep_bins)],
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     name='EEG_Meditation_Trainer',
+    contents_directory='.',
 )
