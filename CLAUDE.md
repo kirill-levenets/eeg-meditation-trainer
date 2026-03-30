@@ -38,8 +38,8 @@ build_windows.bat
 
 **Data flow:** EEG stream → MetricsEngine → SessionManager → UI screens + Database
 
-- **EEG sources** (`app/eeg/`): `mock_stream_v2.py` (active mock with frequency-based synthesis, NeuroSky-compatible format) and `neurosky_stream.py` (real Bluetooth RFCOMM, ThinkGear protocol). Both produce 8 band powers + raw 512Hz waveform + eSense attention/meditation.
-- **Metrics pipeline** (`app/metrics/engine.py`): Consumes raw band powers, computes meditation score, shamatha score, distraction, sinking, subtle distraction via sigmoid normalization. Uses rolling buffers from `app/eeg/buffer.py`.
+- **EEG sources** (`app/eeg/`): `mock_stream_v2.py` (active mock with frequency-based synthesis, NeuroSky-compatible format), `mock_stream.py` (legacy mock), and `neurosky_stream.py` (real Bluetooth RFCOMM / pyserial, ThinkGear protocol). Both active sources produce 8 band powers + raw 512Hz waveform + eSense attention/meditation.
+- **Metrics pipeline** (`app/metrics/engine.py`): Consumes raw band powers, computes meditation score, shamatha score, distraction, sinking, subtle distraction via sigmoid normalization. Uses rolling buffers from `app/eeg/buffer.py`. Power-line noise detection in `app/metrics/noise_detector.py`.
 - **Custom formula engine** (`app/metrics/custom_formula.py`): AST-parsed user-defined expressions with whitelisted functions and `avg(expr, N)` windowed averages.
 - **Session lifecycle** (`app/session/manager.py`): Start/Pause/Resume/Stop state machine. Coordinates EEG stream, metrics engine, audio feedback, and database flush.
 - **Audio feedback** (`app/audio_feedback/noise.py`): 4-channel engine — white noise (meditation-scaled volume), tingsha bell (sinking), chime (subtle distraction), warble (disconnect alert). Uses Kivy SoundLoader with crossfaded WAV generation.
@@ -52,6 +52,6 @@ build_windows.bat
 
 - Update loop runs at 2Hz (`AppConfig.UPDATE_FREQUENCY = 0.5s`), graph holds 600 points (5 min).
 - Band powers are sqrt-normalized to relative units before metric formulas.
-- NeuroSky Bluetooth uses pyjnius on Android, Python socket BTPROTO_RFCOMM on Linux desktop.
+- NeuroSky Bluetooth uses pyjnius on Android, Python socket BTPROTO_RFCOMM on Linux, pyserial over virtual COM port on Windows.
 - Database path resolves relative to executable (frozen) or project root (development).
 - `conftest.py` only sets `sys.path` — no shared fixtures.

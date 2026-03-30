@@ -132,13 +132,15 @@ def _generate_disconnect_wav(
 
 
 class AudioEngine:
-    """Dual-channel audio engine for meditation neurofeedback.
+    """4-channel audio engine for meditation neurofeedback.
 
-    Channel 1 (Pink Noise): Looping WAV generated once at full amplitude,
-        played via Kivy SoundLoader. Volume controlled smoothly via
-        sound.volume property — no WAV regeneration needed.
-    Channel 2 (Sinking Alert): Synthesized bell/tingsha WAV played once
-        when sinking exceeds threshold, with cooldown to prevent spam.
+    Channel 1 (Noise): Looping brown/white noise WAV, volume scaled by
+        meditation score via smooth ramping.
+    Channel 2 (Bell): Synthesized tingsha bell, one-shot on sinking alert
+        with cooldown.
+    Channel 3 (Chime): Synthesized chime, one-shot on subtle distraction
+        alert with cooldown.
+    Channel 4 (Disconnect): Warble alert on Bluetooth disconnection.
 
     Uses only stdlib + Kivy. No external audio libraries.
     """

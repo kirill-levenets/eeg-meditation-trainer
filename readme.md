@@ -11,9 +11,9 @@ Cross-platform application for training Shamatha meditation using EEG neurofeedb
 - **Session markers** — Place vertical markers on all graphs during a session to tag significant moments; markers stored in DB, displayed in diary previews, exported in CSV as a separate column
 - **Multi-channel audio engine** — Ch1: gapless white noise (volume scales with configurable metric); Ch2: tingsha bell for sinking alerts; Ch3: chime for subtle distraction; Ch4: warble for disconnect alert. Configurable audio control metric (Meditation, Shamatha, NS Meditation, NS Attention, Custom Formula)
 - **Meditation timer** — Configurable duration (1-120 min) with presets, countdown display, auto-stop, custom end sound with file chooser and test button
-- **State classification** — Stable Focus, Subtle Distraction, Gross Distraction, Sinking
+- **State classification** — Stable Focus, Subtle Distraction, Gross Distraction, Sinking, Neutral
 - **NeuroSky MindWave Mobile 2** — Bluetooth RFCOMM on Android (pyjnius) and Linux (Python socket); ThinkGear protocol parser; background reader thread; BT connection wait with status display; paired device scanning
-- **Settings panel** — Device status, mock/real switch, BT scan + select, threshold slider, audio metric picker (radio buttons), test audio, sinking/disconnect alert toggles, line width slider, screen rotation, graph metric toggles, custom formula show/hide checkbox; all persisted per user
+- **Settings panel** — Device status, mock/real switch, BT scan + select, threshold slider, audio metric picker (radio buttons), test audio, sinking/subtle distraction/disconnect alert toggles, line width slider, screen rotation, graph metric toggles, custom formula show/hide checkbox; all persisted per user
 - **Custom formula engine** — Python-style expressions with band powers, combined/normalized bands, sqrt-relative bands, computed metrics, math functions, and windowed `avg(expr, N)`; AST-parsed with whitelist validation; save/load/export formula library per user
 - **Session diary** — Notes, tags, mood rating, CSV export with file save dialog, delete/rename sessions, tabbed signal preview (Metrics / Raw EEG / Frequencies) with markers and threshold line
 - **Full signal storage** — Raw bands, computed metrics, native NeuroSky values, markers — all per-tick in SQLite with automatic schema migration

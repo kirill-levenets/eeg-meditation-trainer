@@ -2,10 +2,10 @@
 # Run both EEG apps simultaneously on the same live MindWave stream.
 # Usage: ./tools/run_comparison.sh [MAC_ADDRESS]
 
-BT_ADDR="${1:-C4:64:E3:E8:CC:CA}"
+BT_ADDR="${1:-AA:BB:CC:DD:EE:FF}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-WINE_APP_DIR="/home/kirl/Documents/eegmeditation"
+WINE_APP_DIR="${WINE_APP_DIR:-$HOME/eegmeditation}"
 LOG_FILE="$PROJECT_DIR/tools/bt_logs/comparison_$(date +%Y%m%d_%H%M%S).log"
 SESSION_FILE="$PROJECT_DIR/session_$(date +%Y%m%d_%H%M%S).eeg"
 

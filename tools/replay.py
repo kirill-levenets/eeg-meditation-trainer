@@ -6,7 +6,7 @@ so that the receiving app sees the same data as during the live session.
 
 Usage:
     # Replay to /dev/rfcomm0 (for Wine app via COM1):
-    sudo rfcomm bind 0 C4:64:E3:E8:CC:CA 1   # create the device first
+    sudo rfcomm bind 0 AA:BB:CC:DD:EE:FF 1   # create the device first
     # (disconnect rfcomm since we just need the device node)
     python tools/replay.py session.eeg --device /dev/rfcomm0
 

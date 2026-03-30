@@ -100,9 +100,9 @@ class MetricsEngine:
         return {k: math.sqrt(v / total) for k, v in values.items()}
 
     def compute_meditation_score(self, bands_sqrt: Dict[str, float]) -> float:
-        """Vernihor shamatha formula (exact match).
+        """Vernihor shamatha formula (Windows variant).
 
-        Formula: 100 * min(max(0, avg(ratio, 4) * 0.75 - 0.1), 1)
+        Formula: max(0, avg(ratio, 4) * 0.75 - 0.3) * 100
         Band values are sqrt-normalized relative units.
         The avg window is 4 unique NeuroSky samples (1Hz).
         Duplicate samples (from our 2Hz polling) are skipped.

@@ -66,6 +66,7 @@ The app provides real-time audio feedback during sessions:
 
 - **White noise** - volume decreases as your selected metric increases (quieter = deeper meditation). At threshold level, noise goes silent.
 - **Sinking alert bell** - a tingsha bell sound when drowsiness (theta+delta) gets too high. Enable/disable with the checkbox.
+- **Subtle distraction chime** - a gentle chime when short-term meditation score variance is high (mind wavering). Enable/disable with the checkbox.
 - **Disconnect alert** - warble sound when the headset loses connection. Enable/disable with the checkbox.
 
 Tap **Test Audio** to hear a sample.
