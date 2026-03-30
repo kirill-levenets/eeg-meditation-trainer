@@ -107,6 +107,8 @@ jobs:
 
       - name: Build Windows executable
         run: python -m PyInstaller eeg_meditation.spec --noconfirm
+        env:
+          KIVY_DOC: '1'
 
       - name: Package Windows build
         run: Compress-Archive -Path dist\EEG_Meditation_Trainer -DestinationPath EEG_Meditation_Trainer_windows_x64.zip
