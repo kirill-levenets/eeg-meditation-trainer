@@ -90,6 +90,32 @@ jobs:
           name: linux-build
           path: EEG_Meditation_Trainer_linux_x64.tar.gz
 
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install kivy[base]==2.3.0 kivy_deps.sdl2 kivy_deps.glew
+          pip install pillow==10.4.0 pyserial==3.5 pyinstaller==6.11.1 pywin32
+
+      - name: Build Windows executable
+        run: python -m PyInstaller eeg_meditation.spec --noconfirm
+
+      - name: Package Windows build
+        run: Compress-Archive -Path dist\EEG_Meditation_Trainer -DestinationPath EEG_Meditation_Trainer_windows_x64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: EEG_Meditation_Trainer_windows_x64.zip
+
   build-android:
     runs-on: ubuntu-22.04
     timeout-minutes: 60
@@ -142,12 +168,16 @@ jobs:
           path: ${{ steps.apk.outputs.path }}
 
   release:
-    needs: [build-linux, build-android]
+    needs: [build-linux, build-windows, build-android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: linux-build
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-build
 
       - uses: actions/download-artifact@v4
         with:
@@ -162,4 +192,5 @@ jobs:
           generate_release_notes: true
           files: |
             EEG_Meditation_Trainer_linux_x64.tar.gz
+            EEG_Meditation_Trainer_windows_x64.zip
             *.apk
