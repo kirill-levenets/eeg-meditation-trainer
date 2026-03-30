@@ -1,5 +1,7 @@
 # EEG Meditation Trainer - User Manual
 
+> **Disclaimer:** This software is for educational and personal exploration purposes only. It is not a medical device and must not be used for medical diagnosis or treatment. EEG data from consumer-grade headsets is inherently noisy. Use at your own risk.
+
 ## Getting Started
 
 ### First Launch

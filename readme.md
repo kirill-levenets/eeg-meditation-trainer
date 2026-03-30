@@ -2,6 +2,8 @@
 
 Cross-platform application for training Shamatha meditation using EEG neurofeedback from NeuroSky MindWave Mobile 2. Built with Python/Kivy for Android, Linux, and Windows.
 
+Inspired by the [EEG meditation research and Vernihor formula](https://scriptures.ru/yoga/eeg_voprosy_i_otvety.htm) from scriptures.ru.
+
 ## Features
 
 - **Real-time EEG visualization** — Live scrollable graph with Y-axis up to 200, horizontal grid lines every 20 units, real-time value labels, X-axis with relative and wall-clock timestamps, dashed threshold line, session start time display
@@ -151,6 +153,10 @@ All tunable parameters in `app/config.py`:
 - **SigmoidConfig** — k and midpoint for each sigmoid normalization
 - **MetricsConfig** — Cmax, rolling window size, threshold defaults, limits
 - **AppConfig** — Update frequency (2Hz), graph window (5min), flush interval, audio settings
+
+## Disclaimer
+
+This software is provided for educational and personal exploration purposes only. It is **not a medical device** and must not be used for medical diagnosis, treatment, or any clinical purpose. EEG data from consumer-grade headsets (NeuroSky MindWave) is inherently noisy and should not be relied upon for health decisions. Use at your own risk.
 
 ## Tech Stack
 
