@@ -105,6 +105,9 @@ jobs:
           pip install kivy[base]==2.3.0 kivy_deps.sdl2 kivy_deps.glew
           pip install pillow==10.4.0 pyserial==3.5 pyinstaller==6.11.1 pywin32
 
+      - name: Remove incompatible PyInstaller kivy hook
+        run: python -c "import os, PyInstaller; p=os.path.join(os.path.dirname(PyInstaller.__file__), 'hooks', 'hook-kivy.py'); os.remove(p); print(f'Removed {p}')"
+
       - name: Build Windows executable
         run: python -m PyInstaller eeg_meditation.spec --noconfirm
         env:
