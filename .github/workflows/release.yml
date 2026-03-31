@@ -20,7 +20,7 @@ jobs:
           sudo apt-get install -y build-essential pkg-config \
             libgl1-mesa-dev libgles2-mesa-dev libsdl2-dev \
             libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
-            libmtdev-dev libxkbcommon-dev
+            libmtdev-dev libxkbcommon-dev libbluetooth-dev
 
       - uses: actions/setup-python@v5
         with:
@@ -29,7 +29,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip
-          pip install kivy==2.3.0 pillow==10.4.0 pyinstaller==6.11.1
+          pip install kivy==2.3.0 pillow==10.4.0 pyinstaller==6.11.1 pybluez==0.23
 
       - name: Build Linux executable
         run: |
@@ -79,6 +79,7 @@ jobs:
             --hidden-import kivy.core.clipboard.clipboard_sdl2 \
             --hidden-import kivy.graphics.opengl \
             --hidden-import kivy.graphics.opengl_utils \
+            --hidden-import bluetooth \
             main.py
 
       - name: Package Linux build

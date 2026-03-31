@@ -42,13 +42,16 @@ kivy_hiddenimports += [
 
 all_hiddenimports = app_hiddenimports + kivy_hiddenimports
 
+# Kivy data files (style.kv, fonts, images, shaders etc.)
+kivy_data = collect_data_files('kivy')
+
 a = Analysis(
     [os.path.join(PROJECT_ROOT, 'main.py')],
     pathex=[PROJECT_ROOT],
     binaries=[],
     datas=[
         (os.path.join(PROJECT_ROOT, 'app'), 'app'),
-    ],
+    ] + kivy_data,
     hiddenimports=all_hiddenimports,
     hookspath=[],
     hooksconfig={},

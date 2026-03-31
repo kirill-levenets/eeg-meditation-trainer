@@ -452,19 +452,48 @@ class NeuroSkyStream:
     # ---- Desktop Linux backend ----
 
     def _connect_desktop(self) -> None:
-        """Open RFCOMM socket via Python socket module (Linux desktop)."""
+        """Open RFCOMM socket via Python socket module (Linux desktop).
+
+        Falls back to PyBluez if the Python build lacks socket.AF_BLUETOOTH
+        (common in PyInstaller bundles built without libbluetooth-dev headers).
+        """
         logger.info(f"Connecting to {self._device_name} ({self._device_address}) via desktop RFCOMM...")
+
+        # Try native socket.AF_BLUETOOTH first (available when Python was
+        # compiled with libbluetooth-dev headers)
+        if hasattr(_socket, "AF_BLUETOOTH"):
+            try:
+                BTPROTO_RFCOMM = 3
+                sock = _socket.socket(
+                    _socket.AF_BLUETOOTH, _socket.SOCK_STREAM, BTPROTO_RFCOMM
+                )
+                sock.connect((self._device_address, 1))  # channel 1 for SPP
+                sock.settimeout(5.0)
+                self._desktop_socket = sock
+                logger.info("Desktop RFCOMM socket connected (native)")
+                return
+            except Exception as e:
+                raise RuntimeError(f"Desktop RFCOMM connect failed: {e}")
+
+        # Fallback: PyBluez BluetoothSocket (works independently of
+        # CPython's socket module BT support)
         try:
-            BTPROTO_RFCOMM = 3
-            sock = _socket.socket(
-                _socket.AF_BLUETOOTH, _socket.SOCK_STREAM, BTPROTO_RFCOMM
+            import bluetooth
+        except ImportError:
+            raise RuntimeError(
+                "Desktop RFCOMM connect failed: module 'socket' has no attribute "
+                "'AF_BLUETOOTH' and PyBluez is not installed. "
+                "Install PyBluez: pip install pybluez"
             )
-            sock.connect((self._device_address, 1))  # channel 1 for SPP
+
+        try:
+            sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
+            sock.connect((self._device_address, 1))
             sock.settimeout(5.0)
             self._desktop_socket = sock
-            logger.info("Desktop RFCOMM socket connected")
+            logger.info("Desktop RFCOMM socket connected (PyBluez)")
         except Exception as e:
-            raise RuntimeError(f"Desktop RFCOMM connect failed: {e}")
+            raise RuntimeError(f"Desktop RFCOMM connect failed (PyBluez): {e}")
 
     # ---- Windows backend ----
 
