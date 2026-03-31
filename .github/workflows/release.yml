@@ -4,12 +4,27 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform to build'
+        required: true
+        type: choice
+        options:
+          - all
+          - linux
+          - windows
+          - android
 
 permissions:
   contents: write
 
 jobs:
   build-linux:
+    if: >-
+      github.event_name == 'push' ||
+      github.event.inputs.platform == 'all' ||
+      github.event.inputs.platform == 'linux'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -95,6 +110,10 @@ jobs:
           path: EEG_Meditation_Trainer_linux_x64.tar.gz
 
   build-windows:
+    if: >-
+      github.event_name == 'push' ||
+      github.event.inputs.platform == 'all' ||
+      github.event.inputs.platform == 'windows'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -124,6 +143,10 @@ jobs:
           path: EEG_Meditation_Trainer_windows_x64.zip
 
   build-android:
+    if: >-
+      github.event_name == 'push' ||
+      github.event.inputs.platform == 'all' ||
+      github.event.inputs.platform == 'android'
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
@@ -175,6 +198,7 @@ jobs:
           path: ${{ steps.apk.outputs.path }}
 
   release:
+    if: github.event_name == 'push'
     needs: [build-linux, build-windows, build-android]
     runs-on: ubuntu-latest
     steps:
