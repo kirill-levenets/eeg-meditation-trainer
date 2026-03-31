@@ -10,7 +10,11 @@ import sys
 from pathlib import Path
 
 from kivy_deps import sdl2, glew
-from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+from kivy.tools.packaging.pyinstaller_hooks import (
+    runtime_hooks as kivy_runtime_hooks,
+)
+from kivy.tools.packaging.pyinstaller_hooks import datas as kivy_datas
+from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
 
@@ -42,20 +46,17 @@ kivy_hiddenimports += [
 
 all_hiddenimports = app_hiddenimports + kivy_hiddenimports
 
-# Kivy data files (style.kv, fonts, images, shaders etc.)
-kivy_data = collect_data_files('kivy')
-
 a = Analysis(
     [os.path.join(PROJECT_ROOT, 'main.py')],
     pathex=[PROJECT_ROOT],
     binaries=[],
     datas=[
         (os.path.join(PROJECT_ROOT, 'app'), 'app'),
-    ] + kivy_data,
+    ] + kivy_datas,
     hiddenimports=all_hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=kivy_runtime_hooks(),
     excludes=['tkinter', '_tkinter', 'unittest', 'pytest'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
