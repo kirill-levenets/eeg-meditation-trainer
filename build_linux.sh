@@ -57,7 +57,7 @@ source "${VENV_DIR}/bin/activate"
 
 echo "Installing dependencies..."
 pip install --upgrade pip
-pip install kivy==2.3.0 pillow==10.4.0 pybluez==0.23
+pip install kivy==2.3.0 pillow==10.4.0
 pip install pyinstaller==6.11.1
 
 echo
@@ -108,7 +108,6 @@ pyinstaller \
     --hidden-import kivy.core.clipboard.clipboard_sdl2 \
     --hidden-import kivy.graphics.opengl \
     --hidden-import kivy.graphics.opengl_utils \
-    --hidden-import bluetooth \
     "${SCRIPT_DIR}/main.py"
 
 if [ $? -ne 0 ]; then

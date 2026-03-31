@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build-linux:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -20,19 +20,22 @@ jobs:
           sudo apt-get install -y build-essential pkg-config \
             libgl1-mesa-dev libgles2-mesa-dev libsdl2-dev \
             libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
-            libmtdev-dev libxkbcommon-dev libbluetooth-dev
+            libmtdev-dev libxkbcommon-dev libbluetooth-dev \
+            python3-venv python3-dev
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      - name: Verify Bluetooth socket support
+        run: python3 -c "import socket; assert hasattr(socket, 'AF_BLUETOOTH'), 'AF_BLUETOOTH missing'; print('OK: AF_BLUETOOTH available')"
 
       - name: Install Python dependencies
         run: |
+          python3 -m venv .venv
+          . .venv/bin/activate
           pip install --upgrade pip
-          pip install kivy==2.3.0 pillow==10.4.0 pyinstaller==6.11.1 pybluez==0.23
+          pip install kivy==2.3.0 pillow==10.4.0 pyinstaller==6.11.1
 
       - name: Build Linux executable
         run: |
+          . .venv/bin/activate
           pyinstaller \
             --name "EEG_Meditation_Trainer" \
             --noconfirm \
@@ -79,7 +82,6 @@ jobs:
             --hidden-import kivy.core.clipboard.clipboard_sdl2 \
             --hidden-import kivy.graphics.opengl \
             --hidden-import kivy.graphics.opengl_utils \
-            --hidden-import bluetooth \
             main.py
 
       - name: Package Linux build
