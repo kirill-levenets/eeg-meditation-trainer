@@ -20,14 +20,7 @@ PROJECT_ROOT = SPECPATH
 app_hiddenimports = collect_submodules('app')
 
 # Kivy hidden imports needed at runtime
-kivy_hiddenimports = [
-    'kivy.core.window.window_sdl2',
-    'kivy.core.text.text_sdl2',
-    'kivy.core.image.img_sdl2',
-    'kivy.core.audio.audio_sdl2',
-    'kivy.core.clipboard.clipboard_sdl2',
-    'kivy.graphics.opengl',
-    'kivy.graphics.opengl_utils',
+kivy_hiddenimports = collect_submodules('kivy') + [
     'win32timezone',  # Added for Kivy FileChooser on Windows
 ]
 
