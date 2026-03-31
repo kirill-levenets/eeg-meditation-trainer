@@ -19,9 +19,25 @@ PROJECT_ROOT = SPECPATH
 # Collect all app submodules
 app_hiddenimports = collect_submodules('app')
 
-# Kivy hidden imports needed at runtime
-kivy_hiddenimports = collect_submodules('kivy') + [
-    'win32timezone',  # Added for Kivy FileChooser on Windows
+# Kivy hidden imports — collect safe subpackages individually
+# (collect_submodules('kivy') fails because kivy.garden has non-standard path)
+kivy_hiddenimports = []
+for pkg in ['kivy.core', 'kivy.graphics', 'kivy.uix', 'kivy.input',
+            'kivy.lang', 'kivy.lib', 'kivy.modules', 'kivy.network',
+            'kivy.storage']:
+    kivy_hiddenimports += collect_submodules(pkg)
+kivy_hiddenimports += [
+    'kivy.weakmethod',
+    'kivy._clock',
+    'kivy.cache',
+    'kivy.context',
+    'kivy.properties',
+    'kivy.event',
+    'kivy.factory',
+    'kivy.clock',
+    'kivy.base',
+    'kivy.app',
+    'win32timezone',
 ]
 
 all_hiddenimports = app_hiddenimports + kivy_hiddenimports
