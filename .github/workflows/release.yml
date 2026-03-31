@@ -24,7 +24,8 @@ jobs:
             python3-venv python3-dev
 
       - name: Verify Bluetooth socket support
-        run: python3 -c "import socket; assert hasattr(socket, 'AF_BLUETOOTH'), 'AF_BLUETOOTH missing'; print('OK: AF_BLUETOOTH available')"
+        run: |
+          python3 -c "import socket; assert hasattr(socket, 'AF_BLUETOOTH'); print('OK: AF_BLUETOOTH available')"
 
       - name: Install Python dependencies
         run: |
