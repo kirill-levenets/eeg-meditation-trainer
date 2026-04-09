@@ -281,10 +281,12 @@ class DiaryScreen(Screen):
             font_size=F.BODY,
             color=C.TEXT_SECONDARY,
             size_hint_y=None,
-            height=dp(22),
+            height=dp(26),
             halign="left",
+            valign="bottom",
+            padding=[0, dp(4)],
         )
-        notes_label.bind(size=notes_label.setter("text_size"))
+        notes_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
         self._detail_layout.add_widget(notes_label)
 
         self._notes_input = TextInput(
@@ -305,10 +307,12 @@ class DiaryScreen(Screen):
             font_size=F.BODY,
             color=C.TEXT_SECONDARY,
             size_hint_y=None,
-            height=dp(22),
+            height=dp(26),
             halign="left",
+            valign="bottom",
+            padding=[0, dp(4)],
         )
-        tags_label.bind(size=tags_label.setter("text_size"))
+        tags_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
         self._detail_layout.add_widget(tags_label)
 
         self._tags_input = TextInput(
