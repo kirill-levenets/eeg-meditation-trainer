@@ -236,7 +236,7 @@ class DiaryScreen(Screen):
         self._stats_grid = GridLayout(
             cols=2,
             size_hint_y=None,
-            height=dp(140),
+            height=dp(180),
             spacing=dp(4),
             padding=dp(4),
         )
