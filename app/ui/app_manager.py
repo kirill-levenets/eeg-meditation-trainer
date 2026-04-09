@@ -7,7 +7,7 @@ from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.metrics import dp
-from kivy.uix.actionbar import ActionBar, ActionButton, ActionPrevious, ActionView
+from kivy.graphics import Color, Rectangle
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
@@ -29,8 +29,10 @@ from app.ui.analytics_screen import AnalyticsScreen
 from app.ui.diary_screen import DiaryScreen
 from app.ui.live_session import LiveSessionScreen
 from app.ui.profile_screen import ProfileScreen
-from app.ui.raw_eeg_screen import RawEEGScreen, ScrollableGraphWidget
+from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
+from app.ui.history_screen import HistoryScreen
+from app.ui.theme import BottomNav, C
 from app.ui.timer_screen import TimerScreen
 
 
@@ -95,6 +97,13 @@ class EEGMeditationApp(App):
         except Exception as e:
             logger.warning(f"Failed to release wake lock: {e}")
 
+    # Map bottom-nav tab keys to screen groups
+    _TAB_SCREENS = {
+        "session": "live_session",
+        "history": "history",
+        "settings": "settings",
+    }
+
     def build(self) -> BoxLayout:
         # Apply --serial override if provided
         if self.serial_device_override:
@@ -102,102 +111,61 @@ class EEGMeditationApp(App):
             self._real_stream.set_device(path, f"Splitter ({path})")
             APP.USE_MOCK_DEVICE = False
             logger.info(f"Serial device override: {path}")
+
         root = BoxLayout(orientation="vertical")
-
-        # --- Sandwich toggle + ActionBar ---
-        self._nav_tabs_visible = True
-
-        top_bar = BoxLayout(size_hint_y=None, height=dp(48))
-        self._sandwich_btn = Button(
-            text="=",
-            size_hint_x=None,
-            width=dp(48),
-            font_size=dp(24),
-            bold=True,
-            background_color=(0.15, 0.15, 0.2, 1.0),
+        with root.canvas.before:
+            Color(*C.BG_DARK)
+            self._root_bg = Rectangle(size=root.size, pos=root.pos)
+        root.bind(
+            size=lambda w, v: setattr(self._root_bg, "size", v),
+            pos=lambda w, v: setattr(self._root_bg, "pos", v),
         )
-        self._sandwich_btn.bind(on_release=self._toggle_nav_tabs)
 
-        self._nav_bar = ActionBar(size_hint_x=1)
-        av = ActionView()
-        ap = ActionPrevious(title="EEG Meditation", with_previous=False)
-        av.add_widget(ap)
-
-        btn_profile = ActionButton(text="Profile")
-        btn_profile.bind(on_release=lambda x: self._switch_screen("profile"))
-        btn_session = ActionButton(text="Session")
-        btn_session.bind(on_release=lambda x: self._switch_screen("live_session"))
-        btn_raw = ActionButton(text="Raw EEG")
-        btn_raw.bind(on_release=lambda x: self._switch_screen("raw_eeg"))
-        btn_settings = ActionButton(text="Settings")
-        btn_settings.bind(on_release=lambda x: self._switch_screen("settings"))
-        self._btn_diary = ActionButton(text="Diary")
-        self._btn_diary.bind(on_release=lambda x: self._switch_screen("diary"))
-        btn_analytics = ActionButton(text="Analytics")
-        btn_analytics.bind(on_release=lambda x: self._switch_screen("analytics"))
-        btn_timer = ActionButton(text="Timer")
-        btn_timer.bind(on_release=lambda x: self._switch_screen("timer"))
-
-        av.add_widget(btn_profile)
-        av.add_widget(btn_session)
-        av.add_widget(btn_raw)
-        av.add_widget(btn_settings)
-        av.add_widget(btn_timer)
-        av.add_widget(self._btn_diary)
-        av.add_widget(btn_analytics)
-        self._nav_bar.add_widget(av)
-
-        top_bar.add_widget(self._sandwich_btn)
-        top_bar.add_widget(self._nav_bar)
-        root.add_widget(top_bar)
-        self._top_bar = top_bar
-
+        # --- Screen manager (all screens still exist, routed via nav) ---
         self._sm = ScreenManager(transition=SlideTransition())
 
         self._profile_screen = ProfileScreen()
         self._live_screen = LiveSessionScreen()
-        self._raw_eeg_screen = RawEEGScreen()
         self._settings_screen = SettingsScreen()
+        self._history_screen = HistoryScreen()
         self._diary_screen = DiaryScreen()
         self._analytics_screen = AnalyticsScreen()
         self._timer_screen = TimerScreen()
 
-        self._sm.add_widget(self._profile_screen)
         self._sm.add_widget(self._live_screen)
-        self._sm.add_widget(self._raw_eeg_screen)
+        self._sm.add_widget(self._history_screen)
         self._sm.add_widget(self._settings_screen)
+        self._sm.add_widget(self._profile_screen)
         self._sm.add_widget(self._diary_screen)
         self._sm.add_widget(self._analytics_screen)
         self._sm.add_widget(self._timer_screen)
 
         root.add_widget(self._sm)
 
+        # --- Bottom navigation ---
+        self._bottom_nav = BottomNav(
+            tabs=[
+                ("Session", "session"),
+                ("History", "history"),
+                ("Settings", "settings"),
+            ],
+            callback=self._on_nav_tab,
+        )
+        root.add_widget(self._bottom_nav)
+
         self._bind_callbacks()
         self._link_graph_zoom()
         self._restore_last_user()
         self._refresh_profile()
-        self._update_diary_visibility()
         self._auto_scan_bt()
         return root
-
-    def _toggle_nav_tabs(self, *args) -> None:
-        """Toggle visibility of the navigation tab bar."""
-        self._nav_tabs_visible = not self._nav_tabs_visible
-        if self._nav_tabs_visible:
-            self._top_bar.height = dp(48)
-            self._nav_bar.opacity = 1
-            self._nav_bar.disabled = False
-        else:
-            self._top_bar.height = dp(48)
-            self._nav_bar.opacity = 0
-            self._nav_bar.disabled = True
 
     def _link_graph_zoom(self) -> None:
         """Link zoom across all graph widgets so they share the same time scale."""
         ScrollableGraphWidget.link_zoom(
             self._live_screen.graph,
-            self._raw_eeg_screen._raw_graph,
-            self._raw_eeg_screen._band_graph,
+            self._live_screen.raw_graph,
+            self._live_screen.band_graph,
             self._diary_screen._metrics_graph,
             self._diary_screen._raw_eeg_graph,
             self._diary_screen._freq_graph,
@@ -249,6 +217,14 @@ class EEGMeditationApp(App):
         self._diary_screen.set_export_csv_callback(self._on_export_csv)
         self._diary_screen.set_delete_session_callback(self._on_delete_session)
         self._diary_screen.set_rename_session_callback(self._on_rename_session)
+
+        self._history_screen.set_callbacks(
+            on_session_select=self._on_session_select,
+            on_save_notes=self._on_save_notes,
+            on_delete_session=self._on_delete_session,
+            on_export_csv=self._on_export_csv,
+            on_rename_session=self._on_rename_session,
+        )
 
         self._analytics_screen.btn_daily.bind(
             on_release=lambda x: self._load_analytics("daily")
@@ -315,10 +291,10 @@ class EEGMeditationApp(App):
 
         threading.Thread(target=_run, daemon=True).start()
 
-    def _update_diary_visibility(self) -> None:
-        """Disable diary nav button when no user is selected."""
-        has_user = self._current_user_id is not None
-        self._btn_diary.disabled = not has_user
+    def _on_nav_tab(self, tab_key: str) -> None:
+        """Handle bottom nav tab press."""
+        screen_name = self._TAB_SCREENS.get(tab_key, tab_key)
+        self._switch_screen(screen_name)
 
     def _switch_screen(self, name: str) -> None:
         if name == "diary" and not self._current_user_id:
@@ -326,12 +302,19 @@ class EEGMeditationApp(App):
             return
         logger.debug(f"Screen switch: {name}")
         self._sm.current = name
-        if name == "diary":
+        if name == "history":
+            self._refresh_history()
+        elif name == "diary":
             self._refresh_diary()
         elif name == "analytics":
             self._refresh_analytics()
         elif name == "profile":
             self._refresh_profile()
+        # Sync bottom nav highlight
+        for tab_key, screen in self._TAB_SCREENS.items():
+            if screen == name:
+                self._bottom_nav.active_tab = tab_key
+                break
 
     def _on_start(self, *args) -> None:
         if not self._current_user_id:
@@ -413,8 +396,8 @@ class EEGMeditationApp(App):
         self._bt_connect_start = time.time()
 
         self._live_screen.graph.clear_data()
-        self._raw_eeg_screen.raw_graph.clear_data()
-        self._raw_eeg_screen.band_graph.clear_data()
+        self._live_screen.raw_graph.clear_data()
+        self._live_screen.band_graph.clear_data()
         self._live_screen.graph.set_threshold(float(threshold), "shamatha_score")
         self._live_screen.hide_alert()
         self._live_screen.set_controls_running()
@@ -804,15 +787,15 @@ class EEGMeditationApp(App):
         self._live_screen.update_state(metrics.get("state", "Neutral"))
         self._live_screen.update_timer(self._session_manager.elapsed_formatted)
 
-        self._raw_eeg_screen.add_raw_sample(raw_sample)
+        self._live_screen.add_raw_sample(raw_sample)
 
         # Handle pending marker (after points added so indices are current)
         if self._pending_marker:
             self._pending_marker = False
             full_record["marker"] = 1
             self._live_screen.graph.add_marker()
-            self._raw_eeg_screen.raw_graph.add_marker()
-            self._raw_eeg_screen.band_graph.add_marker()
+            self._live_screen.raw_graph.add_marker()
+            self._live_screen.band_graph.add_marker()
 
         # Timer countdown
         if self._timer_screen.tick(APP.UPDATE_FREQUENCY):
@@ -873,8 +856,8 @@ class EEGMeditationApp(App):
 
     def _on_line_width_change(self, width: float) -> None:
         self._live_screen.graph.set_line_width(width)
-        self._raw_eeg_screen.raw_graph.set_line_width(width)
-        self._raw_eeg_screen.band_graph.set_line_width(width)
+        self._live_screen.raw_graph.set_line_width(width)
+        self._live_screen.band_graph.set_line_width(width)
         self._diary_screen._metrics_graph.set_line_width(width)
         self._diary_screen._raw_eeg_graph.set_line_width(width)
         self._diary_screen._freq_graph.set_line_width(width)
@@ -1065,6 +1048,10 @@ class EEGMeditationApp(App):
         logger.info(f"Session {session_id} exported to {path}")
         return path
 
+    def _refresh_history(self) -> None:
+        sessions = self._db.get_all_sessions(user_id=self._current_user_id)
+        self._history_screen.load_sessions(sessions)
+
     def _refresh_diary(self) -> None:
         sessions = self._db.get_all_sessions(user_id=self._current_user_id)
         self._diary_screen.populate_sessions(sessions)
@@ -1100,7 +1087,6 @@ class EEGMeditationApp(App):
             logger.info(f"Switched to user: {name} (id={user_id})")
         else:
             logger.info("Switched to: All Users")
-        self._update_diary_visibility()
         self._refresh_profile()
 
     def _on_user_create(self, name: str) -> None:
