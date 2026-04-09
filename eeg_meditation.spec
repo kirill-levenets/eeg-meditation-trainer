@@ -7,18 +7,31 @@ Run on Windows:
 
 import os
 import sys
+from os.path import dirname, join, basename
 from pathlib import Path
 
+# Prevent Kivy from initializing GL (fails on headless CI)
+os.environ['KIVY_DOC'] = '1'
+
 from kivy_deps import sdl2, glew
-from kivy.tools.packaging.pyinstaller_hooks import (
-    runtime_hooks as kivy_runtime_hooks,
-)
-from kivy.tools.packaging.pyinstaller_hooks import datas as kivy_datas
+import kivy
 from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
 
 PROJECT_ROOT = SPECPATH
+
+# --- Kivy data: style.kv, fonts, shaders, modules ---
+# Replicate what kivy.tools.packaging.pyinstaller_hooks.datas provides,
+# without importing that module (it requires KIVY_DOC unset → GL init → crash on CI).
+kivy_datas = [
+    (kivy.kivy_data_dir, join('kivy_install', basename(kivy.kivy_data_dir))),
+    (kivy.kivy_modules_dir, join('kivy_install', basename(kivy.kivy_modules_dir))),
+]
+
+# Runtime hook that sets KIVY_DATA_DIR / KIVY_MODULES_DIR in the frozen app
+kivy_hooks_dir = join(dirname(kivy.__file__), 'tools', 'packaging', 'pyinstaller_hooks')
+kivy_runtime_hooks = [join(kivy_hooks_dir, 'pyi_rth_kivy.py')]
 
 # Collect all app submodules
 app_hiddenimports = collect_submodules('app')
@@ -56,7 +69,7 @@ a = Analysis(
     hiddenimports=all_hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=kivy_runtime_hooks(),
+    runtime_hooks=kivy_runtime_hooks,
     excludes=['tkinter', '_tkinter', 'unittest', 'pytest'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
