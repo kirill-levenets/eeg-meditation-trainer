@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 from typing import Dict, List, Optional
 
 from kivy.app import App
@@ -176,6 +177,7 @@ class EEGMeditationApp(App):
         self._restore_last_user()
         self._refresh_profile()
         self._update_diary_visibility()
+        self._auto_scan_bt()
         return root
 
     def _toggle_nav_tabs(self, *args) -> None:
@@ -206,6 +208,8 @@ class EEGMeditationApp(App):
         self._live_screen.btn_pause.bind(on_release=self._on_pause)
         self._live_screen.btn_stop.bind(on_release=self._on_stop)
         self._live_screen.btn_marker.bind(on_release=self._on_marker)
+        self._live_screen.overlay_cancel_btn.bind(on_release=self._on_connect_cancel)
+        self._live_screen.overlay_retry_btn.bind(on_release=self._on_connect_retry)
 
         # Tap on graph to set marker (Android — no keyboard available)
         from kivy.utils import platform as kivy_platform
@@ -276,6 +280,41 @@ class EEGMeditationApp(App):
             except (ValueError, TypeError):
                 pass
 
+    def _auto_scan_bt(self) -> None:
+        """Background-scan paired BT devices at startup and auto-select MindWave."""
+        if self.serial_device_override:
+            return
+        if self._real_stream._device_address:
+            # Already have a saved device from user settings
+            return
+
+        def _scan_thread():
+            return NeuroSkyStream.scan_paired_devices()
+
+        def _on_scan_done(devices):
+            if not devices:
+                return
+            # Auto-select first MindWave device
+            for dev in devices:
+                name = (dev.get("name") or "").lower()
+                if "mindwave" in name or "neurosky" in name:
+                    self._on_device_select(dev["address"], dev["name"])
+                    logger.info(f"Auto-selected BT device: {dev['name']}")
+                    return
+            # No MindWave found — populate settings list for manual pick
+            self._settings_screen.populate_bt_devices(devices)
+
+        import threading
+
+        def _run():
+            try:
+                devices = _scan_thread()
+                Clock.schedule_once(lambda dt: _on_scan_done(devices))
+            except Exception as e:
+                logger.warning(f"Auto-scan failed: {e}")
+
+        threading.Thread(target=_run, daemon=True).start()
+
     def _update_diary_visibility(self) -> None:
         """Disable diary nav button when no user is selected."""
         has_user = self._current_user_id is not None
@@ -299,15 +338,66 @@ class EEGMeditationApp(App):
             self._live_screen.update_state("Select a user profile first")
             logger.warning("Session start blocked: no user selected")
             return
+
         if APP.USE_MOCK_DEVICE:
             self._eeg_stream = self._mock_stream
-        else:
-            if not self._real_stream._device_address:
-                self._live_screen.update_state("No device selected (scan in Settings)")
-                logger.warning("Session start blocked: no BT device selected")
-                return
-            self._eeg_stream = self._real_stream
+            self._start_session_common()
+            return
 
+        # Real device — need BT connection
+        if self._real_stream._device_address:
+            # Device already selected (from settings or auto-scan)
+            self._eeg_stream = self._real_stream
+            self._start_session_common()
+            return
+
+        # No device selected — auto-scan and connect
+        self._live_screen.show_overlay("Scanning for MindWave...")
+        self._live_screen.set_controls_running()
+        logger.info("Auto-scanning for BT device before session start")
+
+        import threading
+
+        def _scan_and_connect():
+            devices = NeuroSkyStream.scan_paired_devices()
+            mindwave = None
+            for dev in devices:
+                name = (dev.get("name") or "").lower()
+                if "mindwave" in name or "neurosky" in name:
+                    mindwave = dev
+                    break
+
+            def _on_main_thread(dt):
+                if mindwave:
+                    self._on_device_select(mindwave["address"], mindwave["name"])
+                    self._eeg_stream = self._real_stream
+                    self._live_screen.update_overlay(
+                        f"Found {mindwave['name']}\nConnecting..."
+                    )
+                    self._start_session_common()
+                elif devices:
+                    # Found BT devices but no MindWave
+                    self._settings_screen.populate_bt_devices(devices)
+                    self._live_screen.set_controls_idle()
+                    self._live_screen.show_overlay_retry(
+                        "No MindWave found among paired devices.\n"
+                        "Pair it in system Bluetooth settings,\n"
+                        "or select manually in Settings tab."
+                    )
+                else:
+                    self._live_screen.set_controls_idle()
+                    self._live_screen.show_overlay_retry(
+                        "No paired Bluetooth devices found.\n"
+                        "Pair your MindWave in system\n"
+                        "Bluetooth settings first."
+                    )
+
+            Clock.schedule_once(_on_main_thread)
+
+        threading.Thread(target=_scan_and_connect, daemon=True).start()
+
+    def _start_session_common(self) -> None:
+        """Shared session startup logic after device is resolved."""
         threshold = self._settings_screen.threshold
         self._metrics_engine.meditation_threshold = threshold
         self._audio.set_threshold(threshold)
@@ -320,6 +410,7 @@ class EEGMeditationApp(App):
         self._current_session_id = None
         self._bt_connected_notified = False
         self._pending_marker = False
+        self._bt_connect_start = time.time()
 
         self._live_screen.graph.clear_data()
         self._raw_eeg_screen.raw_graph.clear_data()
@@ -338,8 +429,8 @@ class EEGMeditationApp(App):
             self._timer_screen.start_countdown()
             self._live_screen.update_device_status(True)
             self._live_screen.update_state("Running")
-            import time
             self._live_screen.set_start_time(time.time())
+            self._live_screen.hide_overlay()
         else:
             self._waiting_for_bt = True
             self._pending_threshold = threshold
@@ -347,14 +438,36 @@ class EEGMeditationApp(App):
             self._live_screen.update_device_status(
                 False, device_name=name, connecting=True
             )
-            self._live_screen.update_state("Connecting to device...")
+            self._live_screen.show_overlay(
+                f"Connecting to {name}..."
+            )
             logger.info(f"Waiting for BT connection to {name}")
 
         self._update_event = Clock.schedule_interval(
             self._update_tick, APP.UPDATE_FREQUENCY
         )
-        self._tick_count: int = 0
+        self._tick_count = 0
         logger.info("Session started via UI")
+
+    def _on_connect_cancel(self, *args) -> None:
+        """Cancel button on connection overlay."""
+        self._live_screen.hide_overlay()
+        if self._waiting_for_bt or getattr(self, '_update_event', None):
+            self._real_stream.stop()
+            self._waiting_for_bt = False
+            if self._update_event:
+                self._update_event.cancel()
+                self._update_event = None
+            self._release_wake_lock()
+        self._live_screen.set_controls_idle()
+        self._live_screen.update_device_status(False)
+        self._live_screen.update_state("IDLE")
+
+    def _on_connect_retry(self, *args) -> None:
+        """Retry button on connection overlay."""
+        self._live_screen.hide_overlay()
+        self._live_screen.set_controls_idle()
+        self._on_start()
 
     def _on_pause(self, *args) -> None:
         if self._session_manager.state == SessionState.RUNNING:
@@ -500,18 +613,32 @@ class EEGMeditationApp(App):
         self._session_manager.reset()
         self._release_wake_lock()
 
+    _BT_CONNECT_TIMEOUT = 20.0  # seconds before BT socket gives up
+    _BT_SIGNAL_TIMEOUT = 15.0  # seconds to wait for EEG data after connected
+
     def _update_tick(self, dt: float) -> None:
         """Main 2 Hz processing loop."""
         # Handle BT connection wait phase
         if getattr(self, '_waiting_for_bt', False):
+            elapsed = time.time() - self._bt_connect_start
+            name = self._real_stream._device_name or "Real EEG"
+
             if self._real_stream.is_connected:
+                # BT socket connected — waiting for actual EEG data
+                if not getattr(self, '_bt_signal_start', None):
+                    self._bt_signal_start = time.time()
+                signal_elapsed = time.time() - self._bt_signal_start
+                signal_remaining = int(self._BT_SIGNAL_TIMEOUT - signal_elapsed)
+
                 raw_sample = self._eeg_stream.read_sample()
+                sq = raw_sample.get("signal_quality", 200)
                 total = sum(raw_sample.get(k, 0.0) for k in
                             ("delta", "theta", "alpha1", "alpha2",
                              "beta1", "beta2", "gamma1", "gamma2"))
+
                 if total > 0:
                     self._waiting_for_bt = False
-                    name = self._real_stream._device_name or "Real EEG"
+                    self._bt_signal_start = None
                     self._session_manager.start(
                         threshold=self._pending_threshold
                     )
@@ -522,19 +649,77 @@ class EEGMeditationApp(App):
                         True, device_name=name
                     )
                     self._live_screen.update_state("Running")
-                    import time
                     self._live_screen.set_start_time(time.time())
+                    self._live_screen.hide_overlay()
                     self._settings_screen.update_device_status(True, name=name)
                     logger.info(f"BT device {name} connected, session started")
+                elif signal_elapsed > self._BT_SIGNAL_TIMEOUT:
+                    # Connected but no EEG data
+                    self._waiting_for_bt = False
+                    self._bt_signal_start = None
+                    self._real_stream.stop()
+                    if self._update_event:
+                        self._update_event.cancel()
+                        self._update_event = None
+                    self._live_screen.set_controls_idle()
+                    self._live_screen.update_device_status(False, device_name=name)
+                    self._live_screen.show_overlay_retry(
+                        f"Connected to {name} but\n"
+                        "no EEG signal received.\n"
+                        "Check headset sensor contact."
+                    )
+                    self._release_wake_lock()
+                    logger.error("BT connected but no EEG signal, timed out")
+                else:
+                    # Show signal quality feedback
+                    if sq == 200:
+                        sensor_info = "Sensor: no contact"
+                    elif sq > 50:
+                        sensor_info = f"Sensor: poor (quality {sq})"
+                    elif sq > 0:
+                        sensor_info = f"Sensor: fair (quality {sq})"
+                    else:
+                        sensor_info = "Sensor: good"
+                    self._live_screen.update_overlay(
+                        f"Connected to {name}\n"
+                        f"Waiting for EEG data... {signal_remaining}s\n"
+                        f"{sensor_info}"
+                    )
             elif not self._real_stream._running:
+                # Connection thread ended with error
                 self._waiting_for_bt = False
+                self._bt_signal_start = None
                 if self._update_event:
                     self._update_event.cancel()
                     self._update_event = None
                 self._live_screen.set_controls_idle()
                 self._live_screen.update_device_status(False)
-                self._live_screen.update_state("Connection failed")
+                self._live_screen.show_overlay_retry(
+                    f"Connection to {name} failed.\nCheck device is on and paired."
+                )
                 logger.error("BT connection failed, session aborted")
+            elif elapsed > self._BT_CONNECT_TIMEOUT:
+                # Timeout waiting for BT socket
+                self._waiting_for_bt = False
+                self._bt_signal_start = None
+                self._real_stream.stop()
+                if self._update_event:
+                    self._update_event.cancel()
+                    self._update_event = None
+                self._live_screen.set_controls_idle()
+                self._live_screen.update_device_status(False)
+                self._live_screen.show_overlay_retry(
+                    f"Connection to {name} timed out.\n"
+                    "Make sure the device is turned on\nand in range."
+                )
+                self._release_wake_lock()
+                logger.error("BT connection timed out")
+            else:
+                # Still waiting for BT socket — show countdown
+                remaining = int(self._BT_CONNECT_TIMEOUT - elapsed)
+                self._live_screen.update_overlay(
+                    f"Connecting to {name}...\nTimeout in {remaining}s"
+                )
             return
 
         if self._session_manager.state != SessionState.RUNNING:
@@ -808,9 +993,12 @@ class EEGMeditationApp(App):
         APP.USE_MOCK_DEVICE = use_mock
         if use_mock:
             self._settings_screen.update_device_status(False, meta="Mode: Mock Data")
+            self._live_screen.update_device_status(False, device_name="Mock EEG")
         else:
+            name = self._real_stream._device_name or ""
             addr = self._real_stream._device_address or "none"
             self._settings_screen.update_device_status(False, meta=f"Mode: Real Device ({addr})")
+            self._live_screen.update_device_status(False, device_name=name or "Real EEG")
         if self._current_user_id:
             self._db.set_user_setting(self._current_user_id, "use_mock", str(use_mock))
         logger.info(f"Device mode: {'Mock' if use_mock else 'Real'}")
@@ -1045,6 +1233,13 @@ class EEGMeditationApp(App):
                 APP.USE_MOCK_DEVICE = False
                 self._settings_screen._device_mode_cb.active = False
 
+        # Update live screen device label to match current mode
+        if APP.USE_MOCK_DEVICE:
+            self._live_screen.update_device_status(False, device_name="Mock EEG")
+        elif self._real_stream._device_address:
+            name = self._real_stream._device_name or "Real EEG"
+            self._live_screen.update_device_status(False, device_name=name)
+
         lw = g(user_id, "line_width")
         if lw is not None:
             try:
@@ -1097,6 +1292,12 @@ class EEGMeditationApp(App):
 
         self._refresh_saved_formulas()
         logger.debug(f"Loaded settings for user {user_id}")
+
+    def on_pause(self) -> bool:
+        """Called when app is paused (Android home/switch). Save settings
+        because the OS may kill the process without calling on_stop."""
+        self._save_user_settings()
+        return True
 
     def on_stop(self) -> None:
         """Cleanup on app exit."""

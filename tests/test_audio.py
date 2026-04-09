@@ -28,12 +28,14 @@ class TestAudioFeedback(unittest.TestCase):
     def test_volume_at_zero(self):
         self.gen.set_threshold(50)
         vol = self.gen.compute_volume(0)
-        self.assertAlmostEqual(vol, 1.0)
+        self.assertAlmostEqual(vol, self.gen._max_volume)
 
     def test_volume_proportional(self):
         self.gen.set_threshold(100)
         vol = self.gen.compute_volume(50)
-        self.assertAlmostEqual(vol, 0.5)
+        # Log curve: volume at half-threshold is above half of max
+        self.assertGreater(vol, self.gen._max_volume * 0.5)
+        self.assertLess(vol, self.gen._max_volume)
 
     def test_volume_curve_monotonically_decreasing(self):
         self.gen.set_threshold(100)
@@ -66,7 +68,8 @@ class TestAudioFeedback(unittest.TestCase):
     def test_update_sets_internal_volume(self):
         self.gen.set_threshold(100)
         self.gen.update(50)
-        self.assertAlmostEqual(self.gen.volume, 0.5)
+        self.assertGreater(self.gen.volume, self.gen._max_volume * 0.5)
+        self.assertLess(self.gen.volume, self.gen._max_volume)
 
     def test_update_at_threshold_zeroes_volume(self):
         self.gen.set_threshold(50)
@@ -96,7 +99,7 @@ class TestAudioFeedback(unittest.TestCase):
             self.gen.set_threshold(threshold)
             vol_zero = self.gen.compute_volume(0)
             vol_threshold = self.gen.compute_volume(threshold)
-            self.assertAlmostEqual(vol_zero, 1.0)
+            self.assertAlmostEqual(vol_zero, self.gen._max_volume)
             self.assertAlmostEqual(vol_threshold, 0.0)
 
     def test_bell_wav_created(self):
@@ -111,7 +114,8 @@ class TestAudioFeedback(unittest.TestCase):
     def test_update_only_sets_internal_volume(self):
         self.gen.set_threshold(100)
         self.gen.update(50)
-        self.assertAlmostEqual(self.gen._volume, 0.5)
+        self.assertGreater(self.gen._volume, self.gen._max_volume * 0.5)
+        self.assertLess(self.gen._volume, self.gen._max_volume)
 
     def test_default_threshold_is_100(self):
         gen = AudioEngine()

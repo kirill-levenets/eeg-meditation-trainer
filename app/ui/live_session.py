@@ -1,8 +1,11 @@
 from typing import Dict
 
+from kivy.clock import Clock
+from kivy.graphics import Color, Rectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
+from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
@@ -40,7 +43,9 @@ class LiveSessionScreen(Screen):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        root = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(4))
+        float_root = FloatLayout()
+        root = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(4),
+                         size_hint=(1, 1), pos_hint={"x": 0, "y": 0})
 
         header = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
         self._device_label = Label(
@@ -168,7 +173,81 @@ class LiveSessionScreen(Screen):
         controls.add_widget(self._btn_marker)
         root.add_widget(controls)
 
-        self.add_widget(root)
+        float_root.add_widget(root)
+
+        # --- Connection overlay ---
+        self._overlay = BoxLayout(
+            orientation="vertical",
+            size_hint=(1, 1),
+            pos_hint={"x": 0, "y": 0},
+            padding=dp(40),
+            spacing=dp(16),
+        )
+        with self._overlay.canvas.before:
+            Color(0, 0, 0, 0.75)
+            self._overlay_bg = Rectangle(size=self._overlay.size, pos=self._overlay.pos)
+        self._overlay.bind(
+            size=lambda w, v: setattr(self._overlay_bg, "size", v),
+            pos=lambda w, v: setattr(self._overlay_bg, "pos", v),
+        )
+
+        # Spacer to push content to center
+        self._overlay.add_widget(BoxLayout(size_hint_y=1))
+
+        self._overlay_status = Label(
+            text="",
+            font_size=dp(18),
+            color=(0.9, 0.9, 0.9, 1.0),
+            halign="center",
+            valign="middle",
+            size_hint_y=None,
+            height=dp(60),
+        )
+        self._overlay_status.bind(size=self._overlay_status.setter("text_size"))
+        self._overlay.add_widget(self._overlay_status)
+
+        self._overlay_dots = Label(
+            text="",
+            font_size=dp(24),
+            color=(0.5, 0.8, 1.0, 1.0),
+            size_hint_y=None,
+            height=dp(30),
+        )
+        self._overlay.add_widget(self._overlay_dots)
+
+        self._overlay_cancel_btn = Button(
+            text="Cancel",
+            size_hint=(0.4, None),
+            height=dp(44),
+            pos_hint={"center_x": 0.5},
+            background_color=(0.6, 0.2, 0.2, 1.0),
+            font_size=dp(14),
+        )
+        self._overlay.add_widget(self._overlay_cancel_btn)
+
+        self._overlay_retry_btn = Button(
+            text="Retry",
+            size_hint=(0.4, None),
+            height=dp(44),
+            pos_hint={"center_x": 0.5},
+            background_color=(0.2, 0.5, 0.7, 1.0),
+            font_size=dp(14),
+            opacity=0,
+            disabled=True,
+        )
+        self._overlay.add_widget(self._overlay_retry_btn)
+
+        # Bottom spacer
+        self._overlay.add_widget(BoxLayout(size_hint_y=1))
+
+        self._overlay.opacity = 0
+        self._overlay.size_hint = (0, 0)
+        self._overlay.size = (0, 0)
+        self._dot_event = None
+        self._dot_count = 0
+        float_root.add_widget(self._overlay)
+
+        self.add_widget(float_root)
 
     @property
     def graph(self) -> ScrollableGraphWidget:
@@ -224,9 +303,13 @@ class LiveSessionScreen(Screen):
             self._device_label.text = f"[{name}] Connecting..."
             self._device_label.color = (0.9, 0.8, 0.2, 1.0)
         elif connected:
-            label = f"[{device_name}] ●" if device_name else "[Mock EEG] ●"
+            label = f"[{device_name}] *" if device_name else "[Mock EEG] *"
             self._device_label.text = label
             self._device_label.color = (0.2, 0.9, 0.4, 1.0)
+        elif device_name:
+            # Idle state with known device
+            self._device_label.text = f"[{device_name}]"
+            self._device_label.color = (0.5, 0.8, 1.0, 1.0)
         else:
             self._device_label.text = "[Disconnected]"
             self._device_label.color = (0.8, 0.3, 0.3, 1.0)
@@ -261,6 +344,57 @@ class LiveSessionScreen(Screen):
         self._alert_label.text = ""
         self._alert_label.height = dp(0)
 
+    def show_overlay(self, text: str = "Connecting...") -> None:
+        """Show semi-transparent connection overlay with animated dots."""
+        self._overlay_status.text = text
+        self._overlay.opacity = 1
+        self._overlay.size_hint = (1, 1)
+        self._overlay_retry_btn.opacity = 0
+        self._overlay_retry_btn.disabled = True
+        self._overlay_cancel_btn.text = "Cancel"
+        self._dot_count = 0
+        if self._dot_event:
+            self._dot_event.cancel()
+        self._dot_event = Clock.schedule_interval(self._animate_dots, 0.5)
+
+    def update_overlay(self, text: str) -> None:
+        """Update the overlay status text."""
+        if self._overlay.opacity > 0:
+            self._overlay_status.text = text
+
+    def hide_overlay(self) -> None:
+        """Hide the connection overlay and remove from touch chain."""
+        self._overlay.opacity = 0
+        self._overlay.size_hint = (0, 0)
+        self._overlay.size = (0, 0)
+        if self._dot_event:
+            self._dot_event.cancel()
+            self._dot_event = None
+        self._overlay_dots.text = ""
+
+    def show_overlay_retry(self, text: str) -> None:
+        """Show failure state with Retry button."""
+        self._overlay_status.text = text
+        self._overlay_retry_btn.opacity = 1
+        self._overlay_retry_btn.disabled = False
+        self._overlay_cancel_btn.text = "Close"
+        if self._dot_event:
+            self._dot_event.cancel()
+            self._dot_event = None
+        self._overlay_dots.text = ""
+
+    def _animate_dots(self, dt: float) -> None:
+        self._dot_count = (self._dot_count + 1) % 4
+        self._overlay_dots.text = ".  " * self._dot_count
+
+    @property
+    def overlay_cancel_btn(self) -> Button:
+        return self._overlay_cancel_btn
+
+    @property
+    def overlay_retry_btn(self) -> Button:
+        return self._overlay_retry_btn
+
     def reset_display(self) -> None:
         self._graph.clear_data()
         self._graph.set_start_wall_time(None)
@@ -269,6 +403,7 @@ class LiveSessionScreen(Screen):
         self._state_label.text = "IDLE"
         self._state_label.color = (0.7, 0.7, 0.7, 1.0)
         self.hide_alert()
+        self.hide_overlay()
         for label in self._stat_labels.values():
             label.text = "0"
         self.set_controls_idle()

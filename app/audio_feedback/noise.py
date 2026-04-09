@@ -255,11 +255,18 @@ class AudioEngine:
         self._threshold = max(1, threshold)
 
     def compute_volume(self, meditation_score: float) -> float:
-        """Compute noise volume based on meditation score and threshold."""
+        """Compute noise volume based on meditation score and threshold.
+
+        Uses log scaling so volume rises quickly at first but the rate of
+        increase slows as score approaches zero (concave curve).
+        Curve: log(1 + t*k) / log(1 + k), k=9.
+        """
         if meditation_score >= self._threshold:
             return 0.0
-        raw = self._max_volume * (self._threshold - meditation_score) / self._threshold
-        return min(raw, self._max_volume)
+        t = (self._threshold - meditation_score) / self._threshold  # 0..1 linear
+        k = 9.0
+        scaled = math.log(1.0 + t * k) / math.log(1.0 + k)  # 0..1 log-curved
+        return min(scaled * self._max_volume, self._max_volume)
 
     def update(self, meditation_score: float) -> None:
         """Update noise volume smoothly via sound.volume property."""
