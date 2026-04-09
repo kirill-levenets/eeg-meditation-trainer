@@ -163,6 +163,7 @@ class TestDiaryScreenUI(unittest.TestCase):
 
     def test_selected_session_highlight(self):
         from app.ui.diary_screen import DiaryScreen
+        from app.ui.theme import C
         screen = DiaryScreen()
         sessions = [
             {"id": 1, "date_time": "2025-01-01", "duration": 60,
@@ -174,9 +175,9 @@ class TestDiaryScreenUI(unittest.TestCase):
         btns = [c for c in screen._session_list_layout.children
                 if hasattr(c, "session_id")]
         self.assertEqual(len(btns), 2)
-        # All start with default color
+        # All start with card background color
         for b in btns:
-            self.assertEqual(b.background_color, list(screen._DEFAULT_BTN_COLOR))
+            self.assertEqual(list(b.bg_color), list(C.BG_CARD))
 
     def test_set_metrics_threshold(self):
         from app.ui.diary_screen import DiaryScreen

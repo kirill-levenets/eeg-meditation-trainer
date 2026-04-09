@@ -2,6 +2,7 @@ import math
 import os
 from typing import Callable, Dict, List, Optional
 
+from kivy.graphics import Color, Rectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
@@ -15,6 +16,7 @@ from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
 
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
+from app.ui.theme import C, F, S, StyledButton
 
 
 class _GraphAwareScrollView(ScrollView):
@@ -160,12 +162,10 @@ class DiaryScreen(Screen):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        from app.ui.theme import C, F, S, StyledButton
         self._theme_C = C
 
         root = BoxLayout(orientation="vertical", padding=S.PAGE_PAD, spacing=S.GAP)
         with root.canvas.before:
-            from kivy.graphics import Color, Rectangle
             Color(*C.BG)
             self._root_bg = Rectangle(size=root.size, pos=root.pos)
         root.bind(
@@ -278,9 +278,10 @@ class DiaryScreen(Screen):
         # Notes
         notes_label = Label(
             text="Notes:",
-            font_size=dp(14),
+            font_size=F.BODY,
+            color=C.TEXT_SECONDARY,
             size_hint_y=None,
-            height=dp(24),
+            height=dp(22),
             halign="left",
         )
         notes_label.bind(size=notes_label.setter("text_size"))
@@ -291,16 +292,20 @@ class DiaryScreen(Screen):
             multiline=True,
             size_hint_y=None,
             height=dp(80),
-            font_size=dp(13),
+            font_size=F.BODY,
+            foreground_color=C.TEXT,
+            background_color=list(C.BG_INPUT),
+            cursor_color=C.PRIMARY,
         )
         self._detail_layout.add_widget(self._notes_input)
 
         # Tags
         tags_label = Label(
             text="Tags (comma-separated):",
-            font_size=dp(14),
+            font_size=F.BODY,
+            color=C.TEXT_SECONDARY,
             size_hint_y=None,
-            height=dp(24),
+            height=dp(22),
             halign="left",
         )
         tags_label.bind(size=tags_label.setter("text_size"))
@@ -310,16 +315,23 @@ class DiaryScreen(Screen):
             hint_text="morning, calm, focused...",
             multiline=False,
             size_hint_y=None,
-            height=dp(36),
-            font_size=dp(13),
+            height=dp(34),
+            font_size=F.BODY,
+            foreground_color=C.TEXT,
+            background_color=list(C.BG_INPUT),
+            cursor_color=C.PRIMARY,
         )
         self._detail_layout.add_widget(self._tags_input)
 
         # Mood slider
-        mood_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(8))
-        mood_label = Label(text="Mood:", font_size=dp(14), size_hint_x=0.2)
+        mood_row = BoxLayout(size_hint_y=None, height=dp(34), spacing=S.GAP)
+        mood_label = Label(
+            text="Mood:", font_size=F.BODY, color=C.TEXT_SECONDARY, size_hint_x=0.2,
+        )
         self._mood_slider = Slider(min=1, max=5, value=3, step=1, size_hint_x=0.6)
-        self._mood_value = Label(text="3", font_size=dp(14), bold=True, size_hint_x=0.2)
+        self._mood_value = Label(
+            text="3", font_size=F.H3, bold=True, color=C.TEXT, size_hint_x=0.2,
+        )
         self._mood_slider.bind(
             value=lambda inst, val: setattr(self._mood_value, "text", str(int(val)))
         )
@@ -329,19 +341,19 @@ class DiaryScreen(Screen):
         self._detail_layout.add_widget(mood_row)
 
         # Save + Export row
-        btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
-        self._save_btn = Button(
+        btn_row = BoxLayout(size_hint_y=None, height=dp(38), spacing=S.GAP)
+        self._save_btn = StyledButton(
             text="Save Notes",
-            background_color=(0.2, 0.6, 0.9, 1.0),
-            font_size=dp(14),
-            bold=True,
+            bg_color=C.PRIMARY,
+            bg_pressed=C.PRIMARY_DIM,
+            height=dp(38),
         )
         self._save_btn.bind(on_release=self._on_save_pressed)
-        self._export_btn = Button(
+        self._export_btn = StyledButton(
             text="Export CSV",
-            background_color=(0.3, 0.7, 0.3, 1.0),
-            font_size=dp(14),
-            bold=True,
+            bg_color=C.ACCENT,
+            bg_pressed=C.ACCENT_DIM,
+            height=dp(38),
         )
         self._export_btn.bind(on_release=self._on_export_pressed)
         btn_row.add_widget(self._save_btn)
@@ -350,26 +362,26 @@ class DiaryScreen(Screen):
 
         self._export_status = Label(
             text="",
-            font_size=dp(11),
-            color=(0.5, 0.8, 0.5, 1.0),
+            font_size=F.TINY,
+            color=C.ACCENT,
             size_hint_y=None,
-            height=dp(20),
+            height=dp(18),
         )
         self._detail_layout.add_widget(self._export_status)
 
         # --- Graph tab buttons ---
-        graph_tabs = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(4))
-        self._tab_metrics_btn = Button(
-            text="Metrics", font_size=dp(12), bold=True,
-            background_color=(0.3, 0.5, 0.8, 1.0),
+        graph_tabs = BoxLayout(size_hint_y=None, height=dp(30), spacing=S.GAP_SM)
+        self._tab_metrics_btn = StyledButton(
+            text="Metrics", font_size=F.SMALL, height=dp(30),
+            bg_color=C.PRIMARY, text_color=C.TEXT,
         )
-        self._tab_raw_btn = Button(
-            text="Raw EEG", font_size=dp(12), bold=True,
-            background_color=(0.2, 0.2, 0.3, 1.0),
+        self._tab_raw_btn = StyledButton(
+            text="Raw EEG", font_size=F.SMALL, height=dp(30),
+            bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY,
         )
-        self._tab_freq_btn = Button(
-            text="Frequencies", font_size=dp(12), bold=True,
-            background_color=(0.2, 0.2, 0.3, 1.0),
+        self._tab_freq_btn = StyledButton(
+            text="Frequencies", font_size=F.SMALL, height=dp(30),
+            bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY,
         )
         self._tab_metrics_btn.bind(on_release=lambda x: self._switch_graph_tab("metrics"))
         self._tab_raw_btn.bind(on_release=lambda x: self._switch_graph_tab("raw"))
@@ -484,32 +496,34 @@ class DiaryScreen(Screen):
             self._session_list_layout.add_widget(lbl)
             return
 
+        C = self._theme_C
         for s in sessions:
-            btn = Button(
+            btn = StyledButton(
                 text=(
                     f"#{s['id']}  {s.get('date_time', '')[:16]}  "
                     f"{s.get('duration', 0) // 60}min  "
                     f"Shamatha: {s.get('avg_shamatha', 0):.0f}"
                 ),
-                size_hint_y=None,
                 height=dp(36),
-                font_size=dp(12),
-                background_color=(0.15, 0.15, 0.2, 1.0),
+                font_size=F.SMALL,
+                bg_color=C.BG_CARD,
+                text_color=C.TEXT_SECONDARY,
+                bold=False,
             )
             btn.session_id = s["id"]
             btn.bind(on_release=self._on_session_btn)
             self._session_list_layout.add_widget(btn)
 
-    _SELECTED_BTN_COLOR = (0.3, 0.4, 0.6, 1.0)
-    _DEFAULT_BTN_COLOR = (0.15, 0.15, 0.2, 1.0)
-
     def _on_session_btn(self, btn) -> None:
+        C = self._theme_C
         sid = getattr(btn, "session_id", None)
         if sid is not None and self._on_session_select:
             for child in self._session_list_layout.children:
-                if hasattr(child, "session_id"):
-                    child.background_color = self._DEFAULT_BTN_COLOR
-            btn.background_color = self._SELECTED_BTN_COLOR
+                if hasattr(child, "session_id") and isinstance(child, StyledButton):
+                    child.bg_color = C.BG_CARD
+                    child.text_color = C.TEXT_SECONDARY
+            btn.bg_color = C.PRIMARY_DIM
+            btn.text_color = C.TEXT
             self._on_session_select(sid)
 
     def show_session_detail(self, session: Dict, from_history: bool = True) -> None:
@@ -590,11 +604,18 @@ class DiaryScreen(Screen):
         self._active_graph_tab = tab
         self._graph_container.clear_widgets()
 
-        active_color = (0.3, 0.5, 0.8, 1.0)
-        inactive_color = (0.2, 0.2, 0.3, 1.0)
-        self._tab_metrics_btn.background_color = active_color if tab == "metrics" else inactive_color
-        self._tab_raw_btn.background_color = active_color if tab == "raw" else inactive_color
-        self._tab_freq_btn.background_color = active_color if tab == "freq" else inactive_color
+        C = self._theme_C
+        for btn, key in [
+            (self._tab_metrics_btn, "metrics"),
+            (self._tab_raw_btn, "raw"),
+            (self._tab_freq_btn, "freq"),
+        ]:
+            if key == tab:
+                btn.bg_color = C.PRIMARY
+                btn.text_color = C.TEXT
+            else:
+                btn.bg_color = C.BG_CARD
+                btn.text_color = C.TEXT_SECONDARY
 
         if tab == "metrics":
             self._graph_container.add_widget(self._metrics_graph)
@@ -656,11 +677,13 @@ class DiaryScreen(Screen):
         name_row.add_widget(self._export_filename)
         content.add_widget(name_row)
 
-        btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
-        btn_cancel = Button(text="Cancel", font_size=dp(14))
-        btn_save = Button(
-            text="Save", font_size=dp(14),
-            background_color=(0.2, 0.6, 0.3, 1.0), bold=True,
+        C = self._theme_C
+        btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=S.GAP)
+        btn_cancel = StyledButton(
+            text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY, height=dp(40),
+        )
+        btn_save = StyledButton(
+            text="Save", bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM, height=dp(40),
         )
         btn_row.add_widget(btn_cancel)
         btn_row.add_widget(btn_save)
