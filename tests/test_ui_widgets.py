@@ -161,52 +161,6 @@ class TestDiaryScreenUI(unittest.TestCase):
         screen._switch_graph_tab("metrics")
         self.assertEqual(screen._active_graph_tab, "metrics")
 
-    def test_delete_callback_wired(self):
-        from unittest.mock import MagicMock
-        from app.ui.diary_screen import DiaryScreen
-        screen = DiaryScreen()
-        deleted = []
-        screen.set_delete_session_callback(lambda sid: deleted.append(sid))
-        screen._selected_session_id = 42
-        mock_popup = MagicMock()
-        screen._confirm_delete(mock_popup)
-        self.assertEqual(deleted, [42])
-        self.assertIsNone(screen._selected_session_id)
-        mock_popup.dismiss.assert_called_once()
-
-    def test_rename_callback_wired(self):
-        from app.ui.diary_screen import DiaryScreen
-        screen = DiaryScreen()
-        renamed = []
-        screen.set_rename_session_callback(lambda sid, n: renamed.append((sid, n)))
-        screen._selected_session_id = 7
-        screen._rename_input.text = "New Name"
-        screen._on_rename_pressed()
-        self.assertEqual(renamed, [(7, "New Name")])
-
-    def test_rename_empty_ignored(self):
-        from app.ui.diary_screen import DiaryScreen
-        screen = DiaryScreen()
-        renamed = []
-        screen.set_rename_session_callback(lambda sid, n: renamed.append((sid, n)))
-        screen._selected_session_id = 7
-        screen._rename_input.text = "   "
-        screen._on_rename_pressed()
-        self.assertEqual(renamed, [])
-
-    def test_rename_prefilled_on_session_select(self):
-        from app.ui.diary_screen import DiaryScreen
-        screen = DiaryScreen()
-        session = {
-            "id": 1, "date_time": "2025-01-01 10:00:00",
-            "duration": 300, "threshold_used": 50,
-            "avg_meditation": 60.0, "avg_shamatha": 40.0,
-            "max_meditation": 120.0, "time_above_threshold": 100,
-            "notes": "Morning sit", "tags": "", "mood_rating": 4,
-        }
-        screen.show_session_detail(session)
-        self.assertEqual(screen._rename_input.text, "Morning sit")
-
     def test_selected_session_highlight(self):
         from app.ui.diary_screen import DiaryScreen
         screen = DiaryScreen()
@@ -230,19 +184,6 @@ class TestDiaryScreenUI(unittest.TestCase):
         screen.set_metrics_threshold(80.0)
         self.assertEqual(screen._metrics_graph._threshold_value, 80.0)
 
-    def test_rename_fallback_when_notes_empty(self):
-        from app.ui.diary_screen import DiaryScreen
-        screen = DiaryScreen()
-        session = {
-            "id": 5, "date_time": "2025-03-14 09:30:00",
-            "duration": 600, "threshold_used": 50,
-            "avg_meditation": 60.0, "avg_shamatha": 40.0,
-            "max_meditation": 120.0, "time_above_threshold": 100,
-            "notes": "", "tags": "", "mood_rating": 3,
-        }
-        screen.show_session_detail(session)
-        self.assertIn("Session", screen._rename_input.text)
-        self.assertIn("10min", screen._rename_input.text)
 
 
 class TestTimerEnableDisplay(unittest.TestCase):

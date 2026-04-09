@@ -131,17 +131,21 @@ class DatabaseManager:
         if "longest_streak" not in sess_cols:
             self._conn.execute("ALTER TABLE sessions ADD COLUMN longest_streak INTEGER DEFAULT 0")
             logger.info("Migrated: added column sessions.longest_streak")
+        if "session_name" not in sess_cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN session_name TEXT DEFAULT ''")
+            logger.info("Migrated: added column sessions.session_name")
 
         self._conn.commit()
 
-    def save_session(self, stats: Dict, user_id: Optional[int] = None) -> int:
+    def save_session(self, stats: Dict, user_id: Optional[int] = None,
+                     session_name: str = "") -> int:
         """Insert a session record and return its ID."""
         cursor = self._conn.execute(
             """
             INSERT INTO sessions
             (user_id, date_time, duration, threshold_used, avg_meditation, avg_shamatha,
-             max_meditation, time_above_threshold, longest_streak)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             max_meditation, time_above_threshold, longest_streak, session_name)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -153,6 +157,7 @@ class DatabaseManager:
                 stats.get("max_meditation", 0),
                 stats.get("time_above_threshold", 0),
                 stats.get("longest_streak", 0),
+                session_name,
             ),
         )
         self._conn.commit()
@@ -318,9 +323,9 @@ class DatabaseManager:
         logger.info(f"Session {session_id} updated with final stats")
 
     def rename_session(self, session_id: int, new_name: str) -> None:
-        """Rename a session by updating its notes with a title prefix."""
+        """Rename a session."""
         self._conn.execute(
-            "UPDATE sessions SET notes = ? WHERE id = ?",
+            "UPDATE sessions SET session_name = ? WHERE id = ?",
             (new_name, session_id),
         )
         self._conn.commit()

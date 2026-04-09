@@ -154,23 +154,36 @@ class DiaryScreen(Screen):
         self._on_export_csv: Optional[Callable] = None
         self._on_delete_session: Optional[Callable] = None
         self._on_rename_session: Optional[Callable] = None
+        self._on_back: Optional[Callable] = None
         self._selected_session_id: Optional[int] = None
         self._sessions_data: List[Dict] = []
         self._build_ui()
 
     def _build_ui(self) -> None:
-        root = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(8))
+        from app.ui.theme import C, F, S, StyledButton
+        self._theme_C = C
 
-        title = Label(
+        root = BoxLayout(orientation="vertical", padding=S.PAGE_PAD, spacing=S.GAP)
+        with root.canvas.before:
+            from kivy.graphics import Color, Rectangle
+            Color(*C.BG)
+            self._root_bg = Rectangle(size=root.size, pos=root.pos)
+        root.bind(
+            size=lambda w, v: setattr(self._root_bg, "size", v),
+            pos=lambda w, v: setattr(self._root_bg, "pos", v),
+        )
+
+        self._title_label = Label(
             text="Session Diary",
-            font_size=dp(20),
+            font_size=F.H1,
             bold=True,
+            color=C.TEXT,
             size_hint_y=None,
             height=dp(36),
         )
-        root.add_widget(title)
+        root.add_widget(self._title_label)
 
-        # --- Session list ---
+        # --- Session list (hidden when coming from History) ---
         self._session_list_layout = BoxLayout(
             orientation="vertical",
             size_hint_y=None,
@@ -179,9 +192,9 @@ class DiaryScreen(Screen):
         self._session_list_layout.bind(
             minimum_height=self._session_list_layout.setter("height")
         )
-        session_scroll = ScrollView(size_hint_y=0.4)
-        session_scroll.add_widget(self._session_list_layout)
-        root.add_widget(session_scroll)
+        self._session_scroll = ScrollView(size_hint_y=0.4)
+        self._session_scroll.add_widget(self._session_list_layout)
+        root.add_widget(self._session_scroll)
 
         # --- Detail panel ---
         detail_scroll = _GraphAwareScrollView(size_hint_y=0.6)
@@ -195,10 +208,25 @@ class DiaryScreen(Screen):
             minimum_height=self._detail_layout.setter("height")
         )
 
+        # Back button (shown when navigated from History)
+        self._back_btn = StyledButton(
+            text="< Back",
+            font_size=F.BODY,
+            size_hint=(None, None),
+            width=dp(90),
+            height=dp(32),
+            bg_color=C.BG_CARD,
+            text_color=C.PRIMARY,
+            bold=False,
+        )
+        self._back_btn.bind(on_release=self._on_back_pressed)
+        self._detail_layout.add_widget(self._back_btn)
+
         self._detail_title = Label(
             text="Select a session",
-            font_size=dp(16),
+            font_size=F.H2,
             bold=True,
+            color=C.TEXT,
             size_hint_y=None,
             height=dp(30),
         )
@@ -225,8 +253,8 @@ class DiaryScreen(Screen):
         for key, display in stat_keys:
             lbl_title = Label(
                 text=display,
-                font_size=dp(12),
-                color=(0.6, 0.6, 0.6, 1.0),
+                font_size=F.SMALL,
+                color=C.TEXT_SECONDARY,
                 halign="left",
                 size_hint_y=None,
                 height=dp(20),
@@ -234,8 +262,9 @@ class DiaryScreen(Screen):
             lbl_title.bind(size=lbl_title.setter("text_size"))
             lbl_value = Label(
                 text="-",
-                font_size=dp(14),
+                font_size=F.H3,
                 bold=True,
+                color=C.TEXT,
                 halign="left",
                 size_hint_y=None,
                 height=dp(20),
@@ -328,38 +357,6 @@ class DiaryScreen(Screen):
         )
         self._detail_layout.add_widget(self._export_status)
 
-        # Rename row
-        rename_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
-        self._rename_input = TextInput(
-            hint_text="New session name...",
-            multiline=False,
-            size_hint_x=0.65,
-            font_size=dp(13),
-        )
-        self._rename_btn = Button(
-            text="Rename",
-            background_color=(0.5, 0.5, 0.2, 1.0),
-            font_size=dp(14),
-            bold=True,
-            size_hint_x=0.35,
-        )
-        self._rename_btn.bind(on_release=self._on_rename_pressed)
-        rename_row.add_widget(self._rename_input)
-        rename_row.add_widget(self._rename_btn)
-        self._detail_layout.add_widget(rename_row)
-
-        # Delete button
-        self._delete_btn = Button(
-            text="Delete Session",
-            background_color=(0.8, 0.2, 0.2, 1.0),
-            font_size=dp(14),
-            bold=True,
-            size_hint_y=None,
-            height=dp(40),
-        )
-        self._delete_btn.bind(on_release=self._on_delete_pressed)
-        self._detail_layout.add_widget(self._delete_btn)
-
         # --- Graph tab buttons ---
         graph_tabs = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(4))
         self._tab_metrics_btn = Button(
@@ -449,6 +446,28 @@ class DiaryScreen(Screen):
     def set_rename_session_callback(self, callback: Callable) -> None:
         self._on_rename_session = callback
 
+    def set_back_callback(self, callback: Callable) -> None:
+        self._on_back = callback
+
+    def _on_back_pressed(self, *args) -> None:
+        # Restore session list when going back
+        self._show_list_section(True)
+        if self._on_back:
+            self._on_back()
+
+    def _show_list_section(self, show: bool) -> None:
+        """Show or hide the session list + title, expanding detail to full height."""
+        if show:
+            self._title_label.height = dp(36)
+            self._title_label.opacity = 1
+            self._session_scroll.size_hint_y = 0.4
+            self._session_scroll.opacity = 1
+        else:
+            self._title_label.height = 0
+            self._title_label.opacity = 0
+            self._session_scroll.size_hint_y = 0
+            self._session_scroll.opacity = 0
+
     def populate_sessions(self, sessions: List[Dict]) -> None:
         """Fill the session list from DB data."""
         self._sessions_data = sessions
@@ -493,8 +512,10 @@ class DiaryScreen(Screen):
             btn.background_color = self._SELECTED_BTN_COLOR
             self._on_session_select(sid)
 
-    def show_session_detail(self, session: Dict) -> None:
+    def show_session_detail(self, session: Dict, from_history: bool = True) -> None:
         """Display detail for a selected session."""
+        if from_history:
+            self._show_list_section(False)
         self._selected_session_id = session.get("id")
         self._detail_title.text = f"Session #{session.get('id', '?')} — {session.get('date_time', '')[:16]}"
 
@@ -510,7 +531,7 @@ class DiaryScreen(Screen):
             dt = session.get("date_time", "")[:16]
             dur = session.get("duration", 0) or 0
             session_name = f"Session {dt} ({dur // 60}min)"
-        self._rename_input.text = session_name
+        # session_name used for title display only (rename moved to History)
         self._metrics_graph.clear_data()
         self._raw_eeg_graph.clear_data()
         self._freq_graph.clear_data()
@@ -680,46 +701,3 @@ class DiaryScreen(Screen):
             else:
                 self._export_status.text = "No data to export"
 
-    def _on_delete_pressed(self, *args) -> None:
-        if not self._selected_session_id or not self._on_delete_session:
-            return
-        content = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(12))
-        content.add_widget(Label(
-            text="Delete this session?\nThis cannot be undone.",
-            font_size=dp(14),
-            halign="center",
-        ))
-        btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
-        btn_cancel = Button(text="Cancel", font_size=dp(14))
-        btn_confirm = Button(
-            text="Delete", font_size=dp(14),
-            background_color=(0.8, 0.2, 0.2, 1.0),
-        )
-        btn_row.add_widget(btn_cancel)
-        btn_row.add_widget(btn_confirm)
-        content.add_widget(btn_row)
-        popup = Popup(
-            title="Confirm Delete",
-            content=content,
-            size_hint=(0.6, 0.3),
-            auto_dismiss=False,
-        )
-        btn_cancel.bind(on_release=popup.dismiss)
-        btn_confirm.bind(on_release=lambda x: self._confirm_delete(popup))
-        popup.open()
-
-    def _confirm_delete(self, popup) -> None:
-        popup.dismiss()
-        if self._selected_session_id and self._on_delete_session:
-            self._on_delete_session(self._selected_session_id)
-            self._selected_session_id = None
-            self._detail_title.text = "Select a session"
-            self._export_status.text = "Session deleted"
-            self._rename_input.text = ""
-
-    def _on_rename_pressed(self, *args) -> None:
-        new_name = self._rename_input.text.strip()
-        if self._selected_session_id and new_name and self._on_rename_session:
-            self._on_rename_session(self._selected_session_id, new_name)
-            self._notes_input.text = new_name
-            self._export_status.text = f"Renamed to: {new_name}"

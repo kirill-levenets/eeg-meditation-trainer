@@ -217,6 +217,7 @@ class EEGMeditationApp(App):
         self._diary_screen.set_export_csv_callback(self._on_export_csv)
         self._diary_screen.set_delete_session_callback(self._on_delete_session)
         self._diary_screen.set_rename_session_callback(self._on_rename_session)
+        self._diary_screen.set_back_callback(self._on_diary_back)
 
         self._history_screen.set_callbacks(
             on_session_select=self._on_session_select,
@@ -525,6 +526,14 @@ class EEGMeditationApp(App):
         btn_cancel.bind(on_release=lambda x: self._cancel_stop(popup))
         popup.open()
 
+    def _make_session_name(self) -> str:
+        """Generate default session name including device type."""
+        device = "Mock" if APP.USE_MOCK_DEVICE else (
+            self._real_stream._device_name or "Real EEG"
+        )
+        ts = time.strftime("%H:%M")
+        return f"{ts} - {device}"
+
     def _stop_and_save(self) -> None:
         """Stop session and save data immediately (no dialog)."""
         if self._update_event:
@@ -540,7 +549,8 @@ class EEGMeditationApp(App):
                 self._db.update_session(self._current_session_id, stats)
             else:
                 self._current_session_id = self._db.save_session(
-                    stats, user_id=self._current_user_id
+                    stats, user_id=self._current_user_id,
+                    session_name=self._make_session_name(),
                 )
             if self._metrics_buffer:
                 self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
@@ -575,7 +585,8 @@ class EEGMeditationApp(App):
                 self._db.update_session(self._current_session_id, stats)
             else:
                 self._current_session_id = self._db.save_session(
-                    stats, user_id=self._current_user_id
+                    stats, user_id=self._current_user_id,
+                    session_name=self._make_session_name(),
                 )
             if self._metrics_buffer:
                 self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
@@ -811,7 +822,8 @@ class EEGMeditationApp(App):
             if self._current_session_id is None:
                 stats_partial = self._session_manager.compute_statistics()
                 self._current_session_id = self._db.save_session(
-                    stats_partial, user_id=self._current_user_id
+                    stats_partial, user_id=self._current_user_id,
+                    session_name=self._make_session_name(),
                 )
             self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
             self._metrics_buffer = []
@@ -1012,6 +1024,14 @@ class EEGMeditationApp(App):
             self._diary_screen.set_metrics_threshold(float(threshold_used))
             metrics = self._db.get_session_metrics(session_id)
             self._diary_screen.load_metrics_preview(metrics)
+            # Navigate to diary detail view; remember where we came from
+            self._session_detail_back = self._sm.current
+            self._sm.current = "diary"
+
+    def _on_diary_back(self) -> None:
+        """Return from diary detail to previous screen (usually history)."""
+        back = getattr(self, "_session_detail_back", "history")
+        self._switch_screen(back)
 
     def _on_save_notes(
         self, session_id: int, notes: str, tags: str, mood: int
@@ -1021,15 +1041,17 @@ class EEGMeditationApp(App):
         logger.info(f"Notes saved for session {session_id}")
 
     def _on_delete_session(self, session_id: int) -> None:
-        """Delete a session and refresh the diary list."""
+        """Delete a session and refresh lists."""
         self._db.delete_session(session_id)
         self._refresh_diary()
+        self._refresh_history()
         logger.info(f"Session {session_id} deleted")
 
     def _on_rename_session(self, session_id: int, new_name: str) -> None:
-        """Rename a session (updates notes field) and refresh diary."""
+        """Rename a session and refresh lists."""
         self._db.rename_session(session_id, new_name)
         self._refresh_diary()
+        self._refresh_history()
         logger.info(f"Session {session_id} renamed to '{new_name}'")
 
     def _on_export_csv(self, session_id: int, path: Optional[str] = None) -> Optional[str]:

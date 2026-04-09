@@ -14,6 +14,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.screenmanager import Screen
+from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
 from app.ui.theme import C, F, S, Card, StyledButton, Divider
@@ -193,6 +194,7 @@ class HistoryScreen(Screen):
         self._on_export_csv: Optional[Callable] = None
         self._on_rename_session: Optional[Callable] = None
         self._sessions: List[Dict] = []
+        self._filtered_date: Optional[str] = None
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -224,18 +226,32 @@ class HistoryScreen(Screen):
         self._heatmap.set_day_tap_callback(self._on_day_tap)
         root.add_widget(self._heatmap)
 
-        # Selected date label
+        # Date label + Show All button
+        date_row = BoxLayout(size_hint_y=None, height=dp(28), spacing=S.GAP)
         self._date_label = Label(
             text="Tap a day to see sessions",
             font_size=F.BODY,
             color=C.TEXT_SECONDARY,
-            size_hint_y=None,
-            height=dp(24),
             halign="left",
             valign="middle",
         )
         self._date_label.bind(size=self._date_label.setter("text_size"))
-        root.add_widget(self._date_label)
+        date_row.add_widget(self._date_label)
+        self._btn_show_all = StyledButton(
+            text="Show All",
+            bg_color=C.BG_CARD,
+            text_color=C.TEXT_SECONDARY,
+            font_size=F.SMALL,
+            size_hint_x=None,
+            width=dp(80),
+            height=dp(28),
+            bold=False,
+        )
+        self._btn_show_all.bind(on_release=lambda *a: self._reset_filter())
+        self._btn_show_all.opacity = 0
+        self._btn_show_all.disabled = True
+        date_row.add_widget(self._btn_show_all)
+        root.add_widget(date_row)
 
         root.add_widget(Divider())
 
@@ -288,18 +304,32 @@ class HistoryScreen(Screen):
         self._show_sessions(sessions, "All sessions")
 
     def _on_day_tap(self, date_str: str) -> None:
-        """Filter sessions to the tapped day."""
+        """Filter sessions to the tapped day. Tap again to reset."""
+        if date_str == self._filtered_date:
+            self._reset_filter()
+            return
+        self._filtered_date = date_str
         day_sessions = [
             s for s in self._sessions
             if s.get("date_time", "")[:10] == date_str
         ]
-        # Format date nicely
         try:
             dt = datetime.date.fromisoformat(date_str)
             nice_date = dt.strftime("%B %d, %Y")
         except (ValueError, TypeError):
             nice_date = date_str
         self._show_sessions(day_sessions, nice_date)
+        self._btn_show_all.opacity = 1
+        self._btn_show_all.disabled = False
+
+    def _reset_filter(self) -> None:
+        """Clear day filter and show all sessions."""
+        self._filtered_date = None
+        self._heatmap._selected_date = None
+        self._heatmap._redraw()
+        self._show_sessions(self._sessions, "All sessions")
+        self._btn_show_all.opacity = 0
+        self._btn_show_all.disabled = True
 
     def _show_sessions(self, sessions: List[Dict], header: str) -> None:
         """Populate the session list."""
@@ -321,22 +351,33 @@ class HistoryScreen(Screen):
             self._session_list.add_widget(self._make_session_row(s))
 
     def _make_session_row(self, session: Dict) -> BoxLayout:
-        """Create a tappable session summary row."""
+        """Create a session row: tap to view, rename/delete buttons on right."""
         sid = session.get("id", 0)
         dt_str = session.get("date_time", "")
         duration = session.get("duration", 0)
         avg_sh = session.get("avg_shamatha", 0) or 0
+        name = session.get("session_name", "") or ""
 
-        # Format time
         time_str = dt_str[11:16] if len(dt_str) > 16 else dt_str
         dur_min = duration // 60
         dur_sec = duration % 60
+        if not name:
+            name = f"{time_str} ({dur_min}m {dur_sec:02d}s)"
+
+        # Outer wrapper holds the normal row + hidden rename input
+        wrapper = BoxLayout(
+            orientation="vertical",
+            size_hint_y=None,
+            height=dp(56),
+            spacing=0,
+        )
 
         row = Card(
             orientation="horizontal",
             size_hint_y=None,
-            height=dp(52),
+            height=dp(56),
             bg_color=C.BG_CARD,
+            spacing=S.GAP_SM,
         )
 
         # Score indicator (colored bar)
@@ -353,39 +394,175 @@ class HistoryScreen(Screen):
         )
         row.add_widget(score_bar)
 
-        # Info
-        info = BoxLayout(orientation="vertical", padding=[dp(8), 0])
-        top_line = Label(
-            text=f"{time_str}  |  {dur_min}m {dur_sec:02d}s",
+        # Info column (tappable → session detail)
+        info = BoxLayout(orientation="vertical", padding=[dp(6), 0])
+        name_label = Label(
+            text=name,
             font_size=F.BODY,
             color=C.TEXT,
             halign="left",
             valign="middle",
-            size_hint_y=0.5,
+            size_hint_y=0.55,
         )
-        top_line.bind(size=top_line.setter("text_size"))
-        bottom_line = Label(
-            text=f"Shamatha: {avg_sh:.0f}",
-            font_size=F.SMALL,
-            color=C.TEXT_SECONDARY,
+        name_label.bind(size=name_label.setter("text_size"))
+        stats_line = Label(
+            text=f"Shamatha: {avg_sh:.0f}  |  {dur_min}m {dur_sec:02d}s",
+            font_size=F.TINY,
+            color=C.TEXT_MUTED,
             halign="left",
             valign="middle",
-            size_hint_y=0.5,
+            size_hint_y=0.45,
         )
-        bottom_line.bind(size=bottom_line.setter("text_size"))
-        info.add_widget(top_line)
-        info.add_widget(bottom_line)
+        stats_line.bind(size=stats_line.setter("text_size"))
+        info.add_widget(name_label)
+        info.add_widget(stats_line)
         row.add_widget(info)
 
-        # Tap handler
+        # Tap on row → view session detail
         row._session_id = sid
         row.bind(on_touch_down=lambda w, t: self._row_tapped(w, t))
 
-        return row
+        # Right side: rename + delete buttons
+        actions = BoxLayout(
+            orientation="horizontal",
+            size_hint_x=None,
+            width=dp(80),
+            spacing=dp(2),
+            padding=[0, dp(6)],
+        )
+        btn_rename = StyledButton(
+            text="Ab",
+            bg_color=C.BG_CARD,
+            text_color=C.PRIMARY,
+            font_size=F.SMALL,
+            height=dp(32),
+            bold=False,
+        )
+        btn_del = StyledButton(
+            text="x",
+            bg_color=C.BG_CARD,
+            text_color=C.DANGER,
+            font_size=F.SMALL,
+            height=dp(32),
+            bold=False,
+        )
+        actions.add_widget(btn_rename)
+        actions.add_widget(btn_del)
+        row.add_widget(actions)
+
+        wrapper.add_widget(row)
+
+        # Hidden rename input row (shown when rename button pressed)
+        rename_row = BoxLayout(
+            size_hint_y=None,
+            height=0,
+            spacing=S.GAP_SM,
+            padding=[dp(10), 0],
+            opacity=0,
+        )
+        rename_input = TextInput(
+            text=name,
+            font_size=F.BODY,
+            foreground_color=C.TEXT,
+            background_color=list(C.BG_INPUT),
+            cursor_color=C.PRIMARY,
+            multiline=False,
+            write_tab=False,
+            size_hint_x=1,
+        )
+        rename_save = StyledButton(
+            text="Save",
+            bg_color=C.ACCENT,
+            font_size=F.SMALL,
+            height=dp(34),
+            size_hint_x=None,
+            width=dp(60),
+        )
+        rename_row.add_widget(rename_input)
+        rename_row.add_widget(rename_save)
+        wrapper.add_widget(rename_row)
+
+        # Wire rename toggle
+        def _toggle_rename(*args):
+            if rename_row.opacity == 0:
+                rename_row.opacity = 1
+                rename_row.height = dp(38)
+                wrapper.height = dp(56) + dp(38) + dp(2)
+                rename_input.focus = True
+            else:
+                rename_row.opacity = 0
+                rename_row.height = 0
+                wrapper.height = dp(56)
+
+        def _do_rename(*args):
+            txt = rename_input.text.strip()
+            if txt:
+                name_label.text = txt
+                if self._on_rename_session:
+                    self._on_rename_session(sid, txt)
+            _toggle_rename()
+
+        btn_rename.bind(on_release=_toggle_rename)
+        rename_save.bind(on_release=_do_rename)
+        rename_input.bind(on_text_validate=_do_rename)
+
+        # Wire delete with confirmation
+        btn_del.bind(on_release=lambda *a: self._confirm_delete(sid, name))
+
+        return wrapper
+
+    def _confirm_delete(self, session_id: int, name: str) -> None:
+        """Show a delete confirmation popup."""
+        from kivy.uix.popup import Popup
+
+        content = BoxLayout(orientation="vertical", spacing=S.GAP, padding=S.GAP)
+        content.add_widget(Label(
+            text=f"Delete session\n\"{name}\"?",
+            font_size=F.BODY,
+            color=C.TEXT,
+            halign="center",
+            valign="middle",
+            size_hint_y=0.6,
+        ))
+        btn_row = BoxLayout(spacing=S.GAP, size_hint_y=0.4)
+        btn_cancel = StyledButton(
+            text="Cancel",
+            bg_color=C.BG_CARD,
+            text_color=C.TEXT_SECONDARY,
+            height=dp(38),
+        )
+        btn_confirm = StyledButton(
+            text="Delete",
+            bg_color=C.DANGER,
+            height=dp(38),
+        )
+        btn_row.add_widget(btn_cancel)
+        btn_row.add_widget(btn_confirm)
+        content.add_widget(btn_row)
+
+        popup = Popup(
+            title="Confirm Delete",
+            content=content,
+            size_hint=(0.7, 0.3),
+            auto_dismiss=True,
+        )
+        btn_cancel.bind(on_release=popup.dismiss)
+
+        def _do_delete(*args):
+            popup.dismiss()
+            if self._on_delete_session:
+                self._on_delete_session(session_id)
+
+        btn_confirm.bind(on_release=_do_delete)
+        popup.open()
 
     def _row_tapped(self, widget, touch) -> bool:
         if not widget.collide_point(*touch.pos):
             return False
+        # Don't trigger if touch landed on a button inside the row
+        for child in widget.walk():
+            if isinstance(child, StyledButton) and child.collide_point(*touch.pos):
+                return False
         sid = getattr(widget, "_session_id", None)
         if sid and self._on_session_select:
             self._on_session_select(sid)
