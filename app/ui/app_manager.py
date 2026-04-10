@@ -105,6 +105,11 @@ class EEGMeditationApp(App):
     }
 
     def build(self) -> BoxLayout:
+        # Restore saved theme before building UI
+        saved_theme = self._db.get_setting("theme")
+        if saved_theme:
+            C.set_theme(saved_theme)
+
         # Apply --serial override if provided
         if self.serial_device_override:
             path = self.serial_device_override
@@ -204,6 +209,7 @@ class EEGMeditationApp(App):
             self._on_custom_formula_visible_toggle
         )
         self._settings_screen.set_audio_metric_callback(self._on_audio_metric_change)
+        self._settings_screen.set_theme_callback(self._on_theme_change)
 
         # Keyboard hotkey for marker
         Window.bind(on_key_down=self._on_key_down)
@@ -897,6 +903,11 @@ class EEGMeditationApp(App):
         """Switch which metric drives the audio threshold feedback."""
         self._audio_metric_key = key
         logger.info(f"Audio threshold metric changed to: {key}")
+
+    def _on_theme_change(self, theme_name: str) -> None:
+        """Save selected theme."""
+        self._db.set_setting("theme", theme_name)
+        logger.info(f"Theme changed to: {theme_name}")
 
     def _on_custom_formula_change(self, formula: str) -> None:
         """Handle custom formula change from settings."""

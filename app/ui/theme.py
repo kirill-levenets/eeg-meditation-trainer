@@ -19,66 +19,159 @@ from kivy.uix.label import Label
 
 # ── Color palette ────────────────────────────────────────────────────
 
-class C:
-    """Color constants (RGBA tuples). Semantic names."""
+# ── Theme palettes ───────────────────────────────────────────────────
 
-    # Backgrounds
-    BG_DARK = (0.06, 0.06, 0.10, 1.0)       # deepest background
-    BG = (0.09, 0.09, 0.14, 1.0)             # main screen background
-    BG_CARD = (0.12, 0.12, 0.18, 1.0)        # card / panel surface
-    BG_INPUT = (0.10, 0.10, 0.16, 1.0)       # text input background
-    BG_OVERLAY = (0.0, 0.0, 0.0, 0.75)       # modal overlay
+# Metric colors are shared across all themes
+_METRICS = {
+    "SHAMATHA": (0.30, 0.85, 0.55, 1.0),
+    "DISTRACTION": (0.90, 0.35, 0.35, 1.0),
+    "SINKING": (0.80, 0.55, 0.15, 1.0),
+    "SUBTLE": (0.85, 0.85, 0.30, 1.0),
+    "ATTENTION": (0.55, 0.35, 0.85, 1.0),
+    "MEDITATION": (0.35, 0.80, 0.85, 1.0),
+    "CUSTOM": (0.90, 0.45, 0.75, 1.0),
+    "MED_SCORE": (0.30, 0.60, 0.95, 1.0),
+    "THRESHOLD_LINE": (0.90, 0.30, 0.90, 0.7),
+    "STATE_FOCUS": (0.30, 0.85, 0.50, 1.0),
+    "STATE_SUBTLE": (0.85, 0.85, 0.30, 1.0),
+    "STATE_DISTRACTED": (0.90, 0.35, 0.35, 1.0),
+    "STATE_SINKING": (0.80, 0.55, 0.15, 1.0),
+    "CONNECTED": (0.35, 0.80, 0.50, 1.0),
+    "CONNECTING": (0.85, 0.75, 0.30, 1.0),
+    "DISCONNECTED": (0.70, 0.30, 0.30, 1.0),
+}
 
-    # Accents
-    PRIMARY = (0.30, 0.65, 0.90, 1.0)        # calm blue — main accent
-    PRIMARY_DIM = (0.20, 0.45, 0.70, 1.0)    # pressed / muted blue
-    ACCENT = (0.45, 0.80, 0.65, 1.0)         # sage green — success / go
-    ACCENT_DIM = (0.30, 0.60, 0.45, 1.0)     # pressed green
-    WARM = (0.85, 0.65, 0.30, 1.0)           # warm amber — pause / caution
-    WARM_DIM = (0.65, 0.50, 0.20, 1.0)       # pressed amber
-    DANGER = (0.75, 0.30, 0.30, 1.0)         # muted red — stop / delete
-    DANGER_DIM = (0.55, 0.20, 0.20, 1.0)     # pressed red
-    PURPLE = (0.55, 0.35, 0.70, 1.0)         # soft purple — marker / special
-    PURPLE_DIM = (0.40, 0.25, 0.55, 1.0)     # pressed purple
+_DARK_BLUE = {
+    **_METRICS,
+    "BG_DARK": (0.06, 0.06, 0.10, 1.0),
+    "BG": (0.09, 0.09, 0.14, 1.0),
+    "BG_CARD": (0.12, 0.12, 0.18, 1.0),
+    "BG_INPUT": (0.10, 0.10, 0.16, 1.0),
+    "BG_OVERLAY": (0.0, 0.0, 0.0, 0.75),
+    "PRIMARY": (0.30, 0.65, 0.90, 1.0),
+    "PRIMARY_DIM": (0.20, 0.45, 0.70, 1.0),
+    "ACCENT": (0.45, 0.80, 0.65, 1.0),
+    "ACCENT_DIM": (0.30, 0.60, 0.45, 1.0),
+    "WARM": (0.85, 0.65, 0.30, 1.0),
+    "WARM_DIM": (0.65, 0.50, 0.20, 1.0),
+    "DANGER": (0.75, 0.30, 0.30, 1.0),
+    "DANGER_DIM": (0.55, 0.20, 0.20, 1.0),
+    "PURPLE": (0.55, 0.35, 0.70, 1.0),
+    "PURPLE_DIM": (0.40, 0.25, 0.55, 1.0),
+    "TEXT": (0.88, 0.88, 0.92, 1.0),
+    "TEXT_SECONDARY": (0.55, 0.55, 0.62, 1.0),
+    "TEXT_MUTED": (0.40, 0.40, 0.46, 1.0),
+    "TEXT_ON_ACCENT": (0.06, 0.06, 0.10, 1.0),
+    "BORDER": (0.22, 0.22, 0.28, 1.0),
+    "BORDER_FOCUS": (0.30, 0.65, 0.90, 0.6),
+    "GRAPH_BG": (0.07, 0.07, 0.11, 1.0),
+    "GRAPH_GRID": (0.18, 0.18, 0.24, 1.0),
+    "GRAPH_BORDER": (0.25, 0.25, 0.32, 1.0),
+    "DEVICE_IDLE": (0.40, 0.65, 0.90, 1.0),
+    "STATE_NEUTRAL": (0.55, 0.55, 0.62, 1.0),
+}
 
-    # Text
-    TEXT = (0.88, 0.88, 0.92, 1.0)           # primary text
-    TEXT_SECONDARY = (0.55, 0.55, 0.62, 1.0) # secondary / hint
-    TEXT_MUTED = (0.40, 0.40, 0.46, 1.0)     # disabled / placeholder
-    TEXT_ON_ACCENT = (0.06, 0.06, 0.10, 1.0) # dark text on bright bg
+_DARK_GREEN = {
+    **_DARK_BLUE,
+    "BG_DARK": (0.05, 0.08, 0.06, 1.0),
+    "BG": (0.08, 0.12, 0.09, 1.0),
+    "BG_CARD": (0.10, 0.15, 0.11, 1.0),
+    "BG_INPUT": (0.09, 0.13, 0.10, 1.0),
+    "PRIMARY": (0.40, 0.75, 0.55, 1.0),
+    "PRIMARY_DIM": (0.28, 0.55, 0.40, 1.0),
+    "BORDER": (0.18, 0.25, 0.20, 1.0),
+    "BORDER_FOCUS": (0.40, 0.75, 0.55, 0.6),
+    "GRAPH_BG": (0.06, 0.09, 0.07, 1.0),
+    "GRAPH_GRID": (0.14, 0.20, 0.16, 1.0),
+    "GRAPH_BORDER": (0.20, 0.28, 0.22, 1.0),
+    "DEVICE_IDLE": (0.40, 0.70, 0.55, 1.0),
+}
 
-    # Borders / dividers
-    BORDER = (0.22, 0.22, 0.28, 1.0)         # subtle separator
-    BORDER_FOCUS = (0.30, 0.65, 0.90, 0.6)   # focused input border
+_LIGHT_CREAM = {
+    **_METRICS,
+    "BG_DARK": (0.90, 0.87, 0.82, 1.0),
+    "BG": (0.95, 0.93, 0.88, 1.0),
+    "BG_CARD": (1.00, 0.98, 0.94, 1.0),
+    "BG_INPUT": (0.98, 0.96, 0.92, 1.0),
+    "BG_OVERLAY": (0.0, 0.0, 0.0, 0.50),
+    "PRIMARY": (0.20, 0.50, 0.75, 1.0),
+    "PRIMARY_DIM": (0.15, 0.40, 0.60, 1.0),
+    "ACCENT": (0.30, 0.65, 0.45, 1.0),
+    "ACCENT_DIM": (0.22, 0.50, 0.35, 1.0),
+    "WARM": (0.80, 0.55, 0.20, 1.0),
+    "WARM_DIM": (0.60, 0.42, 0.15, 1.0),
+    "DANGER": (0.75, 0.25, 0.25, 1.0),
+    "DANGER_DIM": (0.60, 0.18, 0.18, 1.0),
+    "PURPLE": (0.50, 0.30, 0.65, 1.0),
+    "PURPLE_DIM": (0.38, 0.22, 0.50, 1.0),
+    "TEXT": (0.15, 0.15, 0.18, 1.0),
+    "TEXT_SECONDARY": (0.40, 0.40, 0.45, 1.0),
+    "TEXT_MUTED": (0.60, 0.58, 0.55, 1.0),
+    "TEXT_ON_ACCENT": (0.98, 0.98, 0.96, 1.0),
+    "BORDER": (0.82, 0.80, 0.76, 1.0),
+    "BORDER_FOCUS": (0.20, 0.50, 0.75, 0.6),
+    "GRAPH_BG": (0.97, 0.95, 0.91, 1.0),
+    "GRAPH_GRID": (0.85, 0.83, 0.80, 1.0),
+    "GRAPH_BORDER": (0.78, 0.76, 0.72, 1.0),
+    "DEVICE_IDLE": (0.30, 0.55, 0.80, 1.0),
+    "STATE_NEUTRAL": (0.45, 0.45, 0.50, 1.0),
+}
 
-    # Metric colors (shared across graphs)
-    SHAMATHA = (0.30, 0.85, 0.55, 1.0)       # green
-    DISTRACTION = (0.90, 0.35, 0.35, 1.0)    # red
-    SINKING = (0.80, 0.55, 0.15, 1.0)        # orange
-    SUBTLE = (0.85, 0.85, 0.30, 1.0)         # yellow
-    ATTENTION = (0.55, 0.35, 0.85, 1.0)      # purple
-    MEDITATION = (0.35, 0.80, 0.85, 1.0)     # cyan
-    CUSTOM = (0.90, 0.45, 0.75, 1.0)         # magenta
-    MED_SCORE = (0.30, 0.60, 0.95, 1.0)      # blue
+_LIGHT_GREEN = {
+    **_LIGHT_CREAM,
+    "BG_DARK": (0.85, 0.90, 0.85, 1.0),
+    "BG": (0.91, 0.95, 0.91, 1.0),
+    "BG_CARD": (0.96, 0.99, 0.96, 1.0),
+    "BG_INPUT": (0.93, 0.97, 0.93, 1.0),
+    "PRIMARY": (0.25, 0.60, 0.40, 1.0),
+    "PRIMARY_DIM": (0.18, 0.45, 0.30, 1.0),
+    "BORDER": (0.78, 0.84, 0.78, 1.0),
+    "BORDER_FOCUS": (0.25, 0.60, 0.40, 0.6),
+    "GRAPH_BG": (0.93, 0.97, 0.93, 1.0),
+    "GRAPH_GRID": (0.82, 0.87, 0.82, 1.0),
+    "GRAPH_BORDER": (0.74, 0.80, 0.74, 1.0),
+    "DEVICE_IDLE": (0.30, 0.60, 0.45, 1.0),
+}
 
-    # Graph
-    GRAPH_BG = (0.07, 0.07, 0.11, 1.0)
-    GRAPH_GRID = (0.18, 0.18, 0.24, 1.0)
-    GRAPH_BORDER = (0.25, 0.25, 0.32, 1.0)
-    THRESHOLD_LINE = (0.90, 0.30, 0.90, 0.7)
+THEMES = {
+    "Dark Blue": _DARK_BLUE,
+    "Dark Green": _DARK_GREEN,
+    "Light Cream": _LIGHT_CREAM,
+    "Light Green": _LIGHT_GREEN,
+}
 
-    # Status
-    CONNECTED = (0.35, 0.80, 0.50, 1.0)
-    CONNECTING = (0.85, 0.75, 0.30, 1.0)
-    DISCONNECTED = (0.70, 0.30, 0.30, 1.0)
-    DEVICE_IDLE = (0.40, 0.65, 0.90, 1.0)
 
-    # State colors (live session)
-    STATE_FOCUS = (0.30, 0.85, 0.50, 1.0)
-    STATE_SUBTLE = (0.85, 0.85, 0.30, 1.0)
-    STATE_DISTRACTED = (0.90, 0.35, 0.35, 1.0)
-    STATE_SINKING = (0.80, 0.55, 0.15, 1.0)
-    STATE_NEUTRAL = (0.55, 0.55, 0.62, 1.0)
+class _ColorAccessor:
+    """Provides attribute access to the active theme palette.
+
+    All existing code uses C.PRIMARY, C.BG etc. — this class makes
+    that work while allowing the underlying palette to be swapped at runtime.
+    """
+
+    def __init__(self):
+        self._palette = dict(_DARK_BLUE)
+        self._name = "Dark Blue"
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            return super().__getattribute__(name)
+        try:
+            return self._palette[name]
+        except KeyError:
+            raise AttributeError(f"No color '{name}' in theme")
+
+    def set_theme(self, name: str) -> None:
+        """Switch the active palette."""
+        if name in THEMES:
+            self._palette = dict(THEMES[name])
+            self._name = name
+
+    @property
+    def theme_name(self) -> str:
+        return self._name
+
+
+C = _ColorAccessor()
 
 
 # ── Typography ───────────────────────────────────────────────────────

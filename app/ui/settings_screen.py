@@ -37,6 +37,7 @@ class SettingsScreen(Screen):
         self._on_load_formula: Optional[Callable] = None
         self._on_delete_formula: Optional[Callable] = None
         self._on_export_formulas: Optional[Callable] = None
+        self._on_theme_change: Optional[Callable] = None
         self._graph_toggles: Dict[str, bool] = {
             "meditation_score": True,
             "shamatha_score": True,
@@ -692,6 +693,42 @@ class SettingsScreen(Screen):
 
         layout.add_widget(formula_section)
 
+        # --- Theme section ---
+        theme_section = CollapsibleSection(title="Theme", collapsed=True)
+
+        self._theme_buttons = {}
+        theme_row = BoxLayout(
+            size_hint_y=None, height=dp(36), spacing=S.GAP_SM,
+        )
+        from app.ui.theme import THEMES
+        for theme_name in THEMES:
+            is_active = theme_name == C.theme_name
+            btn = StyledButton(
+                text=theme_name,
+                bg_color=C.PRIMARY if is_active else C.BG_CARD,
+                text_color=C.TEXT if is_active else C.TEXT_SECONDARY,
+                font_size=F.TINY,
+                height=dp(34),
+                bold=is_active,
+            )
+            btn._theme_name = theme_name
+            btn.bind(on_release=self._on_theme_select)
+            theme_row.add_widget(btn)
+            self._theme_buttons[theme_name] = btn
+        theme_section.add_content(theme_row)
+
+        theme_note = Label(
+            text="Theme change takes effect on next app restart",
+            font_size=F.TINY,
+            color=C.TEXT_MUTED,
+            size_hint_y=None,
+            height=dp(18),
+            halign="left",
+        )
+        theme_note.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
+        theme_section.add_content(theme_note)
+        layout.add_widget(theme_section)
+
         # --- Info section ---
         spacer = Label(size_hint_y=None, height=dp(20))
         layout.add_widget(spacer)
@@ -1020,6 +1057,31 @@ class SettingsScreen(Screen):
             self._audio_metric_selected = key
             if self._on_audio_metric_change:
                 self._on_audio_metric_change(key)
+
+    def _on_theme_select(self, btn) -> None:
+        """Handle theme button press."""
+        name = btn._theme_name
+        C.set_theme(name)
+        # Update button visuals
+        for tname, tbtn in self._theme_buttons.items():
+            if tname == name:
+                tbtn.bg_color = C.PRIMARY
+                tbtn.text_color = C.TEXT
+                tbtn.bold = True
+            else:
+                tbtn.bg_color = C.BG_CARD
+                tbtn.text_color = C.TEXT_SECONDARY
+                tbtn.bold = False
+        # Save via callback
+        if self._on_theme_change:
+            self._on_theme_change(name)
+
+    def set_theme_callback(self, callback: Callable) -> None:
+        self._on_theme_change = callback
+
+    @property
+    def selected_theme(self) -> str:
+        return C.theme_name
 
     def set_audio_metric_callback(self, callback: Callable) -> None:
         self._on_audio_metric_change = callback
