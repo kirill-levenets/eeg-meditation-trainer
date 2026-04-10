@@ -548,7 +548,8 @@ class _AccordionSection(BoxLayout):
             self._scroll.height = 0
             self._scroll.opacity = 0
 
-        self.bind(minimum_height=self.setter("height"))
+        self._scroll.bind(height=self._recalc_height)
+        self._recalc_height()
         C.add_listener(self._refresh_theme)
 
     def add_widget(self, widget, *args, **kwargs):
@@ -579,11 +580,14 @@ class _AccordionSection(BoxLayout):
             if not self._header_icon_text:
                 self._header._icon_label.text = Icons.CHEVRON_DOWN
 
+    def _recalc_height(self, *args):
+        """Set section height = header + scroll content height."""
+        self.height = dp(38) + self._scroll.height
+
     def _update_height(self):
         if self._collapsed:
             self._scroll.height = 0
         else:
-            # Cap content scroll height to avoid giant sections
             content_h = self._content.minimum_height
             self._scroll.height = min(content_h, dp(500))
 
