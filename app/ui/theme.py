@@ -23,12 +23,25 @@ from kivy.uix.scrollview import ScrollView
 
 # ── Icon font ────────────────────────────────────────────────────────
 
-_ICON_FONT = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)),
-    "assets", "fonts", "materialdesignicons-webfont.ttf",
-)
-if os.path.exists(_ICON_FONT):
+_FONT_NAME = "materialdesignicons-webfont.ttf"
+_ICON_FONT_CANDIDATES = [
+    # Standard: app/assets/fonts/ relative to app/ui/theme.py
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "fonts", _FONT_NAME),
+    # Android: Buildozer puts files relative to the app root
+    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                 "app", "assets", "fonts", _FONT_NAME),
+    # Fallback: same directory as this file
+    os.path.join(os.path.dirname(__file__), _FONT_NAME),
+]
+_ICON_FONT = ""
+for _candidate in _ICON_FONT_CANDIDATES:
+    if os.path.exists(_candidate):
+        _ICON_FONT = _candidate
+        break
+ICONS_AVAILABLE = False
+if _ICON_FONT:
     LabelBase.register("Icons", _ICON_FONT)
+    ICONS_AVAILABLE = True
 
 
 class Icons:
@@ -341,28 +354,27 @@ class StyledButton(ButtonBehavior, BoxLayout):
         self._label.bind(size=self._label.setter("text_size"))
 
         self._icon_label = None
-        if self.icon:
-            # Icon-only: center the icon, no text label
+        if self.icon and ICONS_AVAILABLE:
+            icon_kwargs = {"font_name": "Icons"}
             if not self.text:
                 self._icon_label = Label(
                     text=self.icon,
-                    font_name="Icons",
                     font_size=self.font_size + dp(6),
                     color=self.text_color,
                     halign="center",
                     valign="middle",
+                    **icon_kwargs,
                 )
                 self._icon_label.bind(size=self._icon_label.setter("text_size"))
                 self.add_widget(self._icon_label)
             else:
-                # Icon + text
                 self._icon_label = Label(
                     text=self.icon,
-                    font_name="Icons",
                     font_size=self.font_size + dp(4),
                     color=self.text_color,
                     size_hint_x=None,
                     width=dp(26),
+                    **icon_kwargs,
                 )
                 self.add_widget(self._icon_label)
                 self.add_widget(self._label)
@@ -721,7 +733,7 @@ class _NavTab(ButtonBehavior, BoxLayout):
         self.spacing = 0
 
         self._icon = None
-        if icon:
+        if icon and ICONS_AVAILABLE:
             self._icon = Label(
                 text=icon,
                 font_name="Icons",
