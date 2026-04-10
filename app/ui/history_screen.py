@@ -17,7 +17,7 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
-from app.ui.theme import C, F, S, Card, StyledButton, Divider
+from app.ui.theme import C, F, S, Card, Icons, StyledButton, Divider
 
 
 def _lerp_color(t: float):
@@ -431,19 +431,19 @@ class HistoryScreen(Screen):
             padding=[0, dp(6)],
         )
         btn_rename = StyledButton(
-            text="\u270E",
+            text="", icon=Icons.PENCIL,
             bg_color=C.PRIMARY,
             text_color=C.PRIMARY,
-            font_size=F.H3,
+            font_size=F.SMALL,
             height=dp(32),
             bold=False,
             outline=True,
         )
         btn_del = StyledButton(
-            text="\u2715",
+            text="", icon=Icons.DELETE,
             bg_color=C.DANGER,
             text_color=C.DANGER,
-            font_size=F.H3,
+            font_size=F.SMALL,
             height=dp(32),
             bold=False,
             outline=True,
@@ -473,7 +473,7 @@ class HistoryScreen(Screen):
             size_hint_x=1,
         )
         rename_save = StyledButton(
-            text="\u2713 Save",
+            text="Save", icon=Icons.CHECK,
             bg_color=C.ACCENT,
             font_size=F.SMALL,
             height=dp(34),

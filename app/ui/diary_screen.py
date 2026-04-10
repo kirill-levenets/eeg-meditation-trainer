@@ -16,7 +16,7 @@ from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
 
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
-from app.ui.theme import C, F, S, StyledButton
+from app.ui.theme import C, F, S, Icons, StyledButton
 
 
 class _GraphAwareScrollView(ScrollView):
@@ -210,7 +210,7 @@ class DiaryScreen(Screen):
 
         # Back button (shown when navigated from History)
         self._back_btn = StyledButton(
-            text="\u25C0 Back",
+            text="Back", icon=Icons.CHEVRON_LEFT,
             font_size=F.BODY,
             size_hint=(None, None),
             width=dp(90),

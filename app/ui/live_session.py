@@ -11,7 +11,7 @@ from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
 
 from app.ui.raw_eeg_screen import RawEEGScreen, ScrollableGraphWidget
-from app.ui.theme import C, F, S, Card, StyledButton
+from app.ui.theme import C, F, S, Card, Icons, StyledButton
 
 
 # Band colors/scales for inline raw EEG view
@@ -228,19 +228,19 @@ class LiveSessionScreen(Screen):
             spacing=S.GAP, padding=[S.GAP, 0],
         )
         self._btn_start = StyledButton(
-            text="\u25B6 Start", bg_color=C.ACCENT,
+            text="Start", icon=Icons.PLAY, bg_color=C.ACCENT,
             bg_pressed=C.ACCENT_DIM,
         )
         self._btn_pause = StyledButton(
-            text="Pause", bg_color=C.WARM,
+            text="Pause", icon=Icons.PAUSE, bg_color=C.WARM,
             bg_pressed=C.WARM_DIM, disabled=True,
         )
         self._btn_stop = StyledButton(
-            text="\u25A0 Stop", bg_color=C.DANGER,
+            text="Stop", icon=Icons.STOP, bg_color=C.DANGER,
             bg_pressed=C.DANGER_DIM, disabled=True,
         )
         self._btn_marker = StyledButton(
-            text="Mark", bg_color=C.PURPLE,
+            text="Mark", icon=Icons.MARKER, bg_color=C.PURPLE,
             bg_pressed=C.PURPLE_DIM, disabled=True,
         )
         controls.add_widget(self._btn_start)

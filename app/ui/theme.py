@@ -4,6 +4,9 @@ Centralized palette, typography, spacing, and custom styled widgets.
 Design direction: calm, focused, minimal — dark theme with soft accents.
 """
 
+import os
+
+from kivy.core.text import LabelBase
 from kivy.graphics import Color, Line, Rectangle, RoundedRectangle
 from kivy.metrics import dp
 from kivy.properties import (
@@ -15,6 +18,43 @@ from kivy.properties import (
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
+
+
+# ── Icon font ────────────────────────────────────────────────────────
+
+_ICON_FONT = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)),
+    "assets", "fonts", "materialdesignicons-webfont.ttf",
+)
+if os.path.exists(_ICON_FONT):
+    LabelBase.register("Icons", _ICON_FONT)
+
+
+class Icons:
+    """Material Design Icon codepoints (used with font_name='Icons')."""
+    PLAY = "\U000F040A"
+    PAUSE = "\U000F03E4"
+    STOP = "\U000F04DB"
+    PENCIL = "\U000F03EB"
+    DELETE = "\U000F01B4"
+    CHECK = "\U000F012C"
+    CLOSE = "\U000F0156"
+    CHEVRON_LEFT = "\U000F0141"
+    CHEVRON_DOWN = "\U000F0140"
+    CHEVRON_RIGHT = "\U000F0142"
+    COG = "\U000F0493"
+    HISTORY = "\U000F02DA"
+    TIMER = "\U000F013B"
+    ACCOUNT = "\U000F0004"
+    BLUETOOTH = "\U000F00AF"
+    VOLUME = "\U000F057E"
+    CHART = "\U000F0128"
+    TUNE = "\U000F062E"
+    PALETTE = "\U000F0400"
+    MARKER = "\U000F034E"
+    BRAIN = "\U000F09D8"
+    PLUS = "\U000F0415"
+    REFRESH = "\U000F0450"
 
 
 # ── Color palette ────────────────────────────────────────────────────
@@ -243,10 +283,11 @@ class StyledButton(ButtonBehavior, BoxLayout):
         if self.icon:
             self._icon_label = Label(
                 text=self.icon,
-                font_size=self.font_size + dp(2),
+                font_name="Icons",
+                font_size=self.font_size + dp(4),
                 color=self.text_color,
                 size_hint_x=None,
-                width=dp(24),
+                width=dp(26),
             )
             self.add_widget(self._icon_label)
 
@@ -359,106 +400,13 @@ class SectionLabel(Label):
         self.bind(size=self.setter("text_size"))
 
 
-class CollapsibleSection(BoxLayout):
-    """Tappable section header that expands/collapses its content.
+class CollapsibleSection:
+    """Placeholder — settings screen uses Kivy Accordion directly.
 
-    Usage:
-        section = CollapsibleSection(title="Audio", collapsed=True)
-        section.add_content(widget1)
-        parent.add_widget(section)
+    This class is kept for backward compat but settings_screen.py should
+    use kivy.uix.accordion.Accordion + AccordionItem.
     """
-
-    def __init__(self, title="", collapsed=False, **kwargs):
-        self._init_done = False
-        self._is_collapsed = collapsed
-        kwargs.setdefault("orientation", "vertical")
-        kwargs.setdefault("size_hint_y", None)
-
-        self._content = BoxLayout(
-            orientation="vertical",
-            size_hint_y=None,
-            spacing=S.GAP,
-            padding=[dp(4), S.GAP_SM],
-        )
-        self._content.bind(minimum_height=self._on_content_height)
-
-        super().__init__(**kwargs)
-
-        self._header = BoxLayout(
-            size_hint_y=None, height=S.ROW_SM + dp(4),
-            padding=[0, dp(2)],
-        )
-        self._arrow = Label(
-            text=">" if collapsed else "v",
-            font_size=F.BODY,
-            color=C.TEXT_MUTED,
-            size_hint_x=None,
-            width=dp(20),
-        )
-        self._label = Label(
-            text=title,
-            font_size=F.H2,
-            bold=True,
-            color=C.TEXT_SECONDARY,
-            halign="left",
-            valign="middle",
-        )
-        self._label.bind(size=self._label.setter("text_size"))
-        self._header.add_widget(self._arrow)
-        self._header.add_widget(self._label)
-        super().add_widget(self._header)
-        super().add_widget(Divider())
-        super().add_widget(self._content)
-
-        if collapsed:
-            self._content.opacity = 0
-            self._content.disabled = True
-
-        self._init_done = True
-        self._update_height()
-
-    def _on_content_height(self, widget, value):
-        """When content's minimum_height changes, update our total height."""
-        self._update_height()
-
-    def _update_height(self):
-        header_h = S.ROW_SM + dp(4) + dp(1)  # header + divider
-        if self._is_collapsed:
-            self.height = header_h
-        else:
-            self.height = header_h + self._content.minimum_height
-
-    def add_content(self, widget):
-        self._content.add_widget(widget)
-
-    def on_touch_down(self, touch):
-        # Check if touch is on the header area
-        if self._header.collide_point(*touch.pos):
-            self.toggle()
-            return True
-        # If collapsed, don't let touches reach hidden content
-        if self._is_collapsed:
-            return False
-        return super().on_touch_down(touch)
-
-    def toggle(self):
-        self._is_collapsed = not self._is_collapsed
-        if self._is_collapsed:
-            self._content.opacity = 0
-            self._content.disabled = True
-            self._arrow.text = ">"
-        else:
-            self._content.opacity = 1
-            self._content.disabled = False
-            self._arrow.text = "v"
-        self._update_height()
-
-    def add_widget(self, widget, *args, **kwargs):
-        if self._init_done:
-            self._content.add_widget(widget, *args, **kwargs)
-            self._update_height()
-        else:
-            super().add_widget(widget, *args, **kwargs)
+    pass
 
 
 class PresetRow(BoxLayout):
@@ -534,8 +482,13 @@ class BottomNav(BoxLayout):
             )
         self.bind(size=self._update_bg, pos=self._update_bg)
 
+        _TAB_ICONS = {
+            "session": Icons.BRAIN,
+            "history": Icons.HISTORY,
+            "settings": Icons.COG,
+        }
         for label, key in tabs:
-            tab = _NavTab(label=label, key=key)
+            tab = _NavTab(label=label, key=key, icon=_TAB_ICONS.get(key, ""))
             tab.bind(on_release=self._on_tab_press)
             self._tab_widgets[key] = tab
             self.add_widget(tab)
@@ -564,18 +517,33 @@ class _NavTab(ButtonBehavior, BoxLayout):
 
     active = BooleanProperty(False)
 
-    def __init__(self, label="", key="", **kwargs):
+    def __init__(self, label="", key="", icon="", **kwargs):
         super().__init__(orientation="vertical", **kwargs)
         self.key = key
-        self.padding = [0, dp(4)]
+        self.padding = [0, dp(2)]
+        self.spacing = 0
+
+        self._icon = None
+        if icon:
+            self._icon = Label(
+                text=icon,
+                font_name="Icons",
+                font_size=dp(20),
+                color=C.TEXT_MUTED,
+                size_hint_y=None,
+                height=dp(22),
+            )
+            self.add_widget(self._icon)
 
         self._label = Label(
             text=label,
-            font_size=F.SMALL,
+            font_size=F.TINY,
             bold=True,
             halign="center",
             valign="middle",
             color=C.TEXT_MUTED,
+            size_hint_y=None,
+            height=dp(14),
         )
         self._label.bind(size=self._label.setter("text_size"))
         self._indicator = BoxLayout(size_hint_y=None, height=dp(3))
@@ -589,6 +557,8 @@ class _NavTab(ButtonBehavior, BoxLayout):
         self._indicator.canvas.before.clear()
         if self.active:
             self._label.color = C.PRIMARY
+            if self._icon:
+                self._icon.color = C.PRIMARY
             with self._indicator.canvas.before:
                 Color(*C.PRIMARY)
                 RoundedRectangle(
@@ -599,6 +569,8 @@ class _NavTab(ButtonBehavior, BoxLayout):
             self._indicator.bind(pos=self._redraw_indicator, size=self._redraw_indicator)
         else:
             self._label.color = C.TEXT_MUTED
+            if self._icon:
+                self._icon.color = C.TEXT_MUTED
 
     def _redraw_indicator(self, *args):
         if self.active:

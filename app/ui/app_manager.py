@@ -150,9 +150,9 @@ class EEGMeditationApp(App):
         # --- Bottom navigation ---
         self._bottom_nav = BottomNav(
             tabs=[
-                ("\u25B6 Session", "session"),
-                ("\u2630 History", "history"),
-                ("\u2699 Settings", "settings"),
+                ("Session", "session"),
+                ("History", "history"),
+                ("Settings", "settings"),
             ],
             callback=self._on_nav_tab,
         )
