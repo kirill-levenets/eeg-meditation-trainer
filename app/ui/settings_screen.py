@@ -232,7 +232,7 @@ class SettingsScreen(Screen):
         slider_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=S.GAP)
         self._threshold_slider = Slider(
             min=20,
-            max=100,
+            max=180,
             value=METRICS.MEDITATION_THRESHOLD_DEFAULT,
             step=1,
             size_hint_x=0.8,
@@ -250,7 +250,7 @@ class SettingsScreen(Screen):
         threshold_section.add_widget(slider_row)
 
         threshold_presets = PresetRow(
-            values=[30, 50, 70, 85, 100],
+            values=[50, 80, 100, 130, 160],
             callback=lambda v: setattr(self._threshold_slider, 'value', v),
         )
         threshold_section.add_widget(threshold_presets)
