@@ -13,7 +13,7 @@ from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
 
 from app.config import APP, METRICS
-from app.ui.theme import C, F, S, Icons, StyledButton, SectionLabel, Divider, PresetRow
+from app.ui.theme import C, F, S, Icons, StyledButton, SectionLabel, Divider, PresetRow, style_accordion
 
 
 def _make_section_content() -> BoxLayout:
@@ -753,6 +753,8 @@ class SettingsScreen(Screen):
         accordion.add_widget(theme_item)
 
         root.add_widget(accordion)
+        style_accordion(accordion)
+        self._accordion = accordion
         self.add_widget(root)
 
     def _update_bg(self, *args) -> None:

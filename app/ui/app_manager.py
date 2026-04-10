@@ -584,6 +584,7 @@ class EEGMeditationApp(App):
         self._timer_screen.reset()
         self._session_manager.reset()
         self._release_wake_lock()
+        self._mark_history_dirty()
         logger.info("Session stopped and saved")
 
     def _cancel_stop(self, popup) -> None:
@@ -628,6 +629,7 @@ class EEGMeditationApp(App):
         self._timer_screen.reset()
         self._session_manager.reset()
         self._release_wake_lock()
+        self._mark_history_dirty()
 
     _BT_CONNECT_TIMEOUT = 20.0  # seconds before BT socket gives up
     _BT_SIGNAL_TIMEOUT = 15.0  # seconds to wait for EEG data after connected
@@ -1071,14 +1073,14 @@ class EEGMeditationApp(App):
         """Delete a session and refresh lists."""
         self._db.delete_session(session_id)
         self._refresh_diary()
-        self._refresh_history()
+        self._refresh_history(force=True)
         logger.info(f"Session {session_id} deleted")
 
     def _on_rename_session(self, session_id: int, new_name: str) -> None:
         """Rename a session and refresh lists."""
         self._db.rename_session(session_id, new_name)
         self._refresh_diary()
-        self._refresh_history()
+        self._refresh_history(force=True)
         logger.info(f"Session {session_id} renamed to '{new_name}'")
 
     def _on_export_csv(self, session_id: int, path: Optional[str] = None) -> Optional[str]:
@@ -1097,9 +1099,17 @@ class EEGMeditationApp(App):
         logger.info(f"Session {session_id} exported to {path}")
         return path
 
-    def _refresh_history(self) -> None:
+    _history_dirty: bool = True
+
+    def _refresh_history(self, force: bool = False) -> None:
+        if not force and not self._history_dirty:
+            return
         sessions = self._db.get_all_sessions(user_id=self._current_user_id)
         self._history_screen.load_sessions(sessions)
+        self._history_dirty = False
+
+    def _mark_history_dirty(self) -> None:
+        self._history_dirty = True
 
     def _refresh_diary(self) -> None:
         sessions = self._db.get_all_sessions(user_id=self._current_user_id)
@@ -1136,6 +1146,7 @@ class EEGMeditationApp(App):
             logger.info(f"Switched to user: {name} (id={user_id})")
         else:
             logger.info("Switched to: All Users")
+        self._mark_history_dirty()
         self._refresh_profile()
 
     def _on_user_create(self, name: str) -> None:

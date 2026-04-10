@@ -61,25 +61,50 @@ class Icons:
 
 # ── Accordion styling via kv ──────────────────────────────────────────
 
-from kivy.lang import Builder
-Builder.load_string("""
-<AccordionItem>:
-    background_normal: ''
-    background_selected: ''
-    title_template: 'AccordionItemTitle'
-    min_space: dp(38)
-    canvas.before:
-        Color:
-            rgba: app.theme_bg_card if hasattr(app, 'theme_bg_card') else (0.12, 0.12, 0.18, 1)
-        Rectangle:
-            pos: self.pos
-            size: self.size
+def _create_solid_png(rgba, path):
+    """Write a 1x1 solid-color PNG file for use as accordion background."""
+    import struct, zlib
+    r = int(rgba[0] * 255)
+    g = int(rgba[1] * 255)
+    b = int(rgba[2] * 255)
+    a = int(rgba[3] * 255) if len(rgba) > 3 else 255
 
-<AccordionItemTitle>:
-    color: app.theme_text_secondary if hasattr(app, 'theme_text_secondary') else (0.55, 0.55, 0.62, 1)
-    font_size: sp(15)
-    bold: True
-""")
+    def _chunk(ctype, data):
+        c = ctype + data
+        return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xFFFFFFFF)
+
+    raw = zlib.compress(bytes([0, r, g, b, a]))
+    png = b'\x89PNG\r\n\x1a\n'
+    png += _chunk(b'IHDR', struct.pack('>IIBBBBB', 1, 1, 8, 6, 0, 0, 0))
+    png += _chunk(b'IDAT', raw)
+    png += _chunk(b'IEND', b'')
+    with open(path, 'wb') as f:
+        f.write(png)
+
+
+# Generate solid-color PNGs for accordion backgrounds
+import tempfile as _tempfile
+_ACCORDION_DIR = _tempfile.mkdtemp(prefix="eeg_theme_")
+
+
+def get_accordion_bg(color_key="BG_CARD"):
+    """Return path to a solid-color PNG for accordion backgrounds."""
+    color = getattr(C, color_key)
+    name = f"acc_{color_key}.png"
+    path = os.path.join(_ACCORDION_DIR, name)
+    if not os.path.exists(path):
+        _create_solid_png(color, path)
+    return path
+
+
+def style_accordion(accordion):
+    """Apply theme colors to all AccordionItems."""
+    bg_normal = get_accordion_bg("BG_CARD")
+    bg_selected = get_accordion_bg("PRIMARY_DIM")
+    for item in accordion.children:
+        if hasattr(item, 'background_normal'):
+            item.background_normal = bg_normal
+            item.background_selected = bg_selected
 
 
 # ── Theme palettes ───────────────────────────────────────────────────
