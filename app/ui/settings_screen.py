@@ -1,9 +1,9 @@
 from typing import Callable, Dict, Optional
 
 from kivy.core.window import Window
+from kivy.graphics import Color, Rectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.button import Button
 from kivy.uix.checkbox import CheckBox
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
@@ -12,6 +12,7 @@ from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
 
 from app.config import APP, METRICS
+from app.ui.theme import C, F, S, Card, StyledButton, SectionLabel, Divider
 
 
 class SettingsScreen(Screen):
@@ -49,30 +50,40 @@ class SettingsScreen(Screen):
         scroll = ScrollView()
         layout = BoxLayout(
             orientation="vertical",
-            padding=dp(16),
-            spacing=dp(12),
+            padding=S.PAGE_PAD,
+            spacing=S.GAP_LG,
             size_hint_y=None,
         )
         layout.bind(minimum_height=layout.setter("height"))
 
+        # Screen background
+        with scroll.canvas.before:
+            Color(*C.BG)
+            self._bg_rect = Rectangle(size=scroll.size, pos=scroll.pos)
+        scroll.bind(
+            size=self._update_bg,
+            pos=self._update_bg,
+        )
+
         title = Label(
             text="Settings",
-            font_size=dp(22),
+            font_size=F.H1,
             bold=True,
+            color=C.TEXT,
             size_hint_y=None,
             height=dp(40),
         )
         layout.add_widget(title)
 
         # --- Device Status section ---
-        layout.add_widget(self._section_label("Device"))
+        layout.add_widget(SectionLabel(text="Device"))
 
         self._device_status_label = Label(
             text="Not connected",
-            font_size=dp(13),
+            font_size=F.BODY,
             size_hint_y=None,
             height=dp(24),
-            color=(0.8, 0.3, 0.3, 1.0),
+            color=C.DISCONNECTED,
             halign="left",
         )
         self._device_status_label.bind(size=self._device_status_label.setter("text_size"))
@@ -80,17 +91,17 @@ class SettingsScreen(Screen):
 
         self._device_meta_label = Label(
             text="Mode: Mock Data",
-            font_size=dp(11),
+            font_size=F.SMALL,
             size_hint_y=None,
             height=dp(20),
-            color=(0.5, 0.5, 0.5, 1.0),
+            color=C.TEXT_MUTED,
             halign="left",
         )
         self._device_meta_label.bind(size=self._device_meta_label.setter("text_size"))
         layout.add_widget(self._device_meta_label)
 
         # Mock / Real device switch
-        device_mode_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(8))
+        device_mode_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
         self._device_mode_cb = CheckBox(
             active=APP.USE_MOCK_DEVICE, size_hint_x=0.15,
             size_hint_y=None, height=dp(36),
@@ -98,7 +109,8 @@ class SettingsScreen(Screen):
         self._device_mode_cb.bind(active=self._on_device_mode_change)
         device_mode_lbl = Label(
             text="Use Mock Data (uncheck for real device)",
-            font_size=dp(13),
+            font_size=F.BODY,
+            color=C.TEXT,
             size_hint_x=0.85,
             halign="left", valign="middle",
         )
@@ -109,16 +121,16 @@ class SettingsScreen(Screen):
 
         # Scan + device list (visible when mock is off)
         self._bt_section = BoxLayout(
-            orientation="vertical", size_hint_y=None, spacing=dp(4),
+            orientation="vertical", size_hint_y=None, spacing=S.GAP_SM,
         )
         self._bt_section.bind(minimum_height=self._bt_section.setter("height"))
 
-        self._scan_btn = Button(
+        self._scan_btn = StyledButton(
             text="Scan Paired Devices",
-            font_size=dp(13),
+            font_size=F.BODY,
+            bg_color=C.PRIMARY_DIM,
             size_hint_y=None,
             height=dp(36),
-            background_color=(0.25, 0.4, 0.55, 1.0),
         )
         self._scan_btn.bind(on_release=self._on_scan_pressed)
         self._bt_section.add_widget(self._scan_btn)
@@ -133,9 +145,9 @@ class SettingsScreen(Screen):
         layout.add_widget(self._bt_section)
 
         # --- Threshold section ---
-        layout.add_widget(self._section_label("Meditation Threshold"))
+        layout.add_widget(SectionLabel(text="Meditation Threshold"))
 
-        slider_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
+        slider_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=S.GAP)
         self._threshold_slider = Slider(
             min=20,
             max=100,
@@ -145,8 +157,9 @@ class SettingsScreen(Screen):
         )
         self._threshold_value_label = Label(
             text=str(METRICS.MEDITATION_THRESHOLD_DEFAULT),
-            font_size=dp(16),
+            font_size=F.H2,
             bold=True,
+            color=C.TEXT,
             size_hint_x=0.2,
         )
         self._threshold_slider.bind(value=self._on_slider_value)
@@ -157,10 +170,10 @@ class SettingsScreen(Screen):
         # Audio threshold metric picker
         audio_metric_label = Label(
             text="Audio control metric:",
-            font_size=dp(13),
+            font_size=F.BODY,
             size_hint_y=None,
             height=dp(24),
-            color=(0.6, 0.6, 0.6, 1.0),
+            color=C.TEXT_SECONDARY,
             halign="left",
         )
         audio_metric_label.bind(size=audio_metric_label.setter("text_size"))
@@ -176,7 +189,7 @@ class SettingsScreen(Screen):
             "custom_formula": "Custom Formula",
         }
         for key, display_name in audio_metric_options.items():
-            row = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(8))
+            row = BoxLayout(size_hint_y=None, height=dp(32), spacing=S.GAP)
             rb = CheckBox(
                 group="audio_metric",
                 active=(key == "shamatha_score"),
@@ -187,7 +200,8 @@ class SettingsScreen(Screen):
             rb.bind(active=self._on_audio_metric_radio)
             lbl = Label(
                 text=display_name,
-                font_size=dp(13),
+                font_size=F.BODY,
+                color=C.TEXT,
                 size_hint_x=0.85,
                 halign="left", valign="middle",
             )
@@ -198,7 +212,7 @@ class SettingsScreen(Screen):
             self._audio_metric_radios[key] = rb
 
         # --- Audio section ---
-        layout.add_widget(self._section_label("Audio Feedback"))
+        layout.add_widget(SectionLabel(text="Audio Feedback"))
 
         audio_desc = Label(
             text=(
@@ -206,29 +220,29 @@ class SettingsScreen(Screen):
                 "Test: noise sweep (0-max-0), sinking bell (dullness > 60, every 15s),\n"
                 "distraction chime (subtle > 30, every 20s), disconnect warble (device lost)"
             ),
-            font_size=dp(11),
+            font_size=F.SMALL,
             size_hint_y=None,
             height=dp(50),
-            color=(0.6, 0.6, 0.6, 1.0),
+            color=C.TEXT_SECONDARY,
             halign="left",
         )
         audio_desc.bind(size=audio_desc.setter("text_size"))
         layout.add_widget(audio_desc)
 
         # Test Audio button
-        self._test_audio_btn = Button(
-            text="▶ Test Audio",
-            font_size=dp(14),
+        self._test_audio_btn = StyledButton(
+            text="Test Audio",
+            font_size=F.H3,
             bold=True,
+            bg_color=C.PRIMARY,
             size_hint_y=None,
             height=dp(40),
-            background_color=(0.2, 0.5, 0.7, 1.0),
         )
         self._test_audio_btn.bind(on_release=self._on_test_audio_pressed)
         layout.add_widget(self._test_audio_btn)
 
         # Sinking alert toggle
-        sinking_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(8))
+        sinking_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
         self._sinking_alert_cb = CheckBox(
             active=True, size_hint_x=0.15,
             size_hint_y=None, height=dp(36),
@@ -236,7 +250,8 @@ class SettingsScreen(Screen):
         self._sinking_alert_cb.bind(active=self._on_sinking_alert_change)
         sinking_lbl = Label(
             text="Enable Sinking Alert Bell",
-            font_size=dp(13),
+            font_size=F.BODY,
+            color=C.TEXT,
             size_hint_x=0.85,
             halign="left", valign="middle",
         )
@@ -246,7 +261,7 @@ class SettingsScreen(Screen):
         layout.add_widget(sinking_row)
 
         # Subtle distraction alert toggle
-        subtle_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(8))
+        subtle_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
         self._subtle_alert_cb = CheckBox(
             active=True, size_hint_x=0.15,
             size_hint_y=None, height=dp(36),
@@ -254,7 +269,8 @@ class SettingsScreen(Screen):
         self._subtle_alert_cb.bind(active=self._on_subtle_alert_change)
         subtle_lbl = Label(
             text="Enable Distraction Chime",
-            font_size=dp(13),
+            font_size=F.BODY,
+            color=C.TEXT,
             size_hint_x=0.85,
             halign="left", valign="middle",
         )
@@ -264,7 +280,7 @@ class SettingsScreen(Screen):
         layout.add_widget(subtle_row)
 
         # Disconnect alert toggle
-        disconnect_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(8))
+        disconnect_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
         self._disconnect_alert_cb = CheckBox(
             active=APP.DISCONNECT_ALERT_ENABLED, size_hint_x=0.15,
             size_hint_y=None, height=dp(36),
@@ -272,7 +288,8 @@ class SettingsScreen(Screen):
         self._disconnect_alert_cb.bind(active=self._on_disconnect_alert_change)
         disconnect_lbl = Label(
             text="Audio alert on disconnect / signal loss",
-            font_size=dp(13),
+            font_size=F.BODY,
+            color=C.TEXT,
             size_hint_x=0.85,
             halign="left", valign="middle",
         )
@@ -282,12 +299,13 @@ class SettingsScreen(Screen):
         layout.add_widget(disconnect_row)
 
         # --- Display section ---
-        layout.add_widget(self._section_label("Display"))
+        layout.add_widget(SectionLabel(text="Display"))
 
         # Line width slider
-        lw_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(8))
+        lw_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
         lw_label = Label(
-            text="Line Width:", font_size=dp(13),
+            text="Line Width:", font_size=F.BODY,
+            color=C.TEXT,
             size_hint_x=0.3, halign="left",
         )
         lw_label.bind(size=lw_label.setter("text_size"))
@@ -295,7 +313,7 @@ class SettingsScreen(Screen):
             min=0.5, max=4.0, value=1.2, step=0.1, size_hint_x=0.5,
         )
         self._line_width_value = Label(
-            text="1.2", font_size=dp(13), bold=True, size_hint_x=0.2,
+            text="1.2", font_size=F.BODY, bold=True, color=C.TEXT, size_hint_x=0.2,
         )
         self._line_width_slider.bind(value=self._on_line_width_slider)
         lw_row.add_widget(lw_label)
@@ -304,37 +322,44 @@ class SettingsScreen(Screen):
         layout.add_widget(lw_row)
 
         # Screen rotation button
-        self._rotate_btn = Button(
+        self._rotate_btn = StyledButton(
             text="Rotate Screen (0\u00b0)",
-            font_size=dp(13),
+            font_size=F.BODY,
+            bg_color=C.PRIMARY_DIM,
             size_hint_y=None,
             height=dp(36),
-            background_color=(0.25, 0.35, 0.5, 1.0),
         )
         self._rotate_btn.bind(on_release=self._on_rotate_pressed)
         self._current_rotation: int = 0
         layout.add_widget(self._rotate_btn)
 
         # Marker hotkey picker
-        marker_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(8))
+        marker_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
         marker_lbl = Label(
-            text="Marker Hotkey:", font_size=dp(13),
+            text="Marker Hotkey:", font_size=F.BODY,
+            color=C.TEXT,
             size_hint_x=0.35, halign="left",
         )
         marker_lbl.bind(size=marker_lbl.setter("text_size"))
-        self._marker_hotkey_btn = Button(
+        self._marker_hotkey_btn = StyledButton(
             text="m",
-            font_size=dp(13),
+            font_size=F.BODY,
             bold=True,
+            bg_color=C.BG_CARD,
+            text_color=C.PRIMARY,
             size_hint_x=0.35,
-            background_color=(0.3, 0.3, 0.5, 1.0),
+            size_hint_y=None,
+            height=dp(36),
         )
         self._marker_hotkey_btn.bind(on_release=self._on_marker_hotkey_pressed)
-        self._marker_hotkey_clear = Button(
+        self._marker_hotkey_clear = StyledButton(
             text="Clear",
-            font_size=dp(12),
+            font_size=F.SMALL,
+            bg_color=C.BG_CARD,
+            text_color=C.DANGER,
             size_hint_x=0.3,
-            background_color=(0.4, 0.2, 0.2, 1.0),
+            size_hint_y=None,
+            height=dp(36),
         )
         self._marker_hotkey_clear.bind(on_release=self._on_marker_hotkey_clear)
         marker_row.add_widget(marker_lbl)
@@ -345,7 +370,7 @@ class SettingsScreen(Screen):
         self._waiting_for_hotkey: bool = False
 
         # --- Graph toggles ---
-        layout.add_widget(self._section_label("Graph Metrics"))
+        layout.add_widget(SectionLabel(text="Graph Metrics"))
 
         toggle_names = {
             "shamatha_score": "Shamatha Score",
@@ -357,7 +382,7 @@ class SettingsScreen(Screen):
         }
         self._checkboxes: Dict[str, CheckBox] = {}
         for key, display_name in toggle_names.items():
-            row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(8))
+            row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
             cb = CheckBox(
                 active=True, size_hint_x=0.15,
                 size_hint_y=None, height=dp(36),
@@ -366,7 +391,8 @@ class SettingsScreen(Screen):
             cb.bind(active=self._on_toggle)
             lbl = Label(
                 text=display_name,
-                font_size=dp(14),
+                font_size=F.H3,
+                color=C.TEXT,
                 size_hint_x=0.85,
                 halign="left", valign="middle",
             )
@@ -377,7 +403,7 @@ class SettingsScreen(Screen):
             self._checkboxes[key] = cb
 
         # Custom formula visibility toggle
-        cf_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(8))
+        cf_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
         self._custom_formula_cb = CheckBox(
             active=False, size_hint_x=0.15,
             size_hint_y=None, height=dp(36),
@@ -386,7 +412,8 @@ class SettingsScreen(Screen):
         self._on_custom_formula_visible_change: Optional[Callable] = None
         cf_lbl = Label(
             text="Show Custom Formula",
-            font_size=dp(14),
+            font_size=F.H3,
+            color=C.TEXT,
             size_hint_x=0.85,
             halign="left", valign="middle",
         )
@@ -396,17 +423,17 @@ class SettingsScreen(Screen):
         layout.add_widget(cf_row)
 
         # --- Custom Formula section ---
-        layout.add_widget(self._section_label("Custom Formula"))
+        layout.add_widget(SectionLabel(text="Custom Formula"))
 
         formula_desc = Label(
             text=(
                 "Enter a Python-style formula to track as an extra metric.\n"
                 "Leave empty to disable."
             ),
-            font_size=dp(11),
+            font_size=F.SMALL,
             size_hint_y=None,
             height=dp(32),
-            color=(0.6, 0.6, 0.6, 1.0),
+            color=C.TEXT_SECONDARY,
             halign="left",
         )
         formula_desc.bind(size=formula_desc.setter("text_size"))
@@ -415,31 +442,35 @@ class SettingsScreen(Screen):
         self._formula_input = TextInput(
             text="",
             hint_text="e.g. (alpha1 + alpha2) / (beta1 + beta2 + 1)",
-            font_size=dp(13),
+            font_size=F.BODY,
             size_hint_y=None,
             height=dp(40),
             multiline=False,
-            background_color=(0.12, 0.12, 0.18, 1.0),
-            foreground_color=(0.9, 0.9, 0.9, 1.0),
+            background_color=list(C.BG_INPUT),
+            foreground_color=C.TEXT,
         )
         self._formula_input.bind(on_text_validate=self._on_formula_submit)
         layout.add_widget(self._formula_input)
 
         formula_btns = BoxLayout(
-            size_hint_y=None, height=dp(34), spacing=dp(6)
+            size_hint_y=None, height=dp(34), spacing=S.GAP_SM
         )
-        formula_btn = Button(
+        formula_btn = StyledButton(
             text="Apply",
-            font_size=dp(13),
-            background_color=(0.25, 0.4, 0.55, 1.0),
+            font_size=F.BODY,
+            bg_color=C.PRIMARY,
+            size_hint_y=None,
+            height=dp(34),
         )
         formula_btn.bind(on_release=self._on_formula_submit)
         formula_btns.add_widget(formula_btn)
 
-        save_btn = Button(
+        save_btn = StyledButton(
             text="Save",
-            font_size=dp(13),
-            background_color=(0.3, 0.45, 0.3, 1.0),
+            font_size=F.BODY,
+            bg_color=C.ACCENT,
+            size_hint_y=None,
+            height=dp(34),
         )
         save_btn.bind(on_release=self._on_save_formula_pressed)
         formula_btns.add_widget(save_btn)
@@ -447,32 +478,35 @@ class SettingsScreen(Screen):
 
         self._formula_status = Label(
             text="",
-            font_size=dp(11),
+            font_size=F.SMALL,
             size_hint_y=None,
             height=dp(20),
-            color=(0.5, 0.8, 0.5, 1.0),
+            color=C.ACCENT,
             halign="left",
         )
         self._formula_status.bind(size=self._formula_status.setter("text_size"))
         layout.add_widget(self._formula_status)
 
         # Saved formulas header with export button
-        saved_header = BoxLayout(size_hint_y=None, height=dp(26), spacing=dp(6))
+        saved_header = BoxLayout(size_hint_y=None, height=dp(26), spacing=S.GAP_SM)
         saved_label = Label(
             text="Saved Formulas:",
-            font_size=dp(12),
+            font_size=F.SMALL,
             size_hint_x=0.6,
-            color=(0.6, 0.6, 0.6, 1.0),
+            color=C.TEXT_SECONDARY,
             halign="left",
         )
         saved_label.bind(size=saved_label.setter("text_size"))
         saved_header.add_widget(saved_label)
 
-        export_formulas_btn = Button(
+        export_formulas_btn = StyledButton(
             text="Export to .txt",
-            font_size=dp(11),
+            font_size=F.SMALL,
+            bg_color=C.BG_CARD,
+            text_color=C.TEXT_SECONDARY,
             size_hint_x=0.4,
-            background_color=(0.3, 0.3, 0.45, 1.0),
+            size_hint_y=None,
+            height=dp(26),
         )
         export_formulas_btn.bind(on_release=self._on_export_formulas_pressed)
         saved_header.add_widget(export_formulas_btn)
@@ -496,10 +530,10 @@ class SettingsScreen(Screen):
                 "  avg(sqrt(alpha_norm) * 100, 30)\n"
                 "  avg(meditation_score, 20) - avg(distraction, 20)"
             ),
-            font_size=dp(13),
+            font_size=F.BODY,
             size_hint_y=None,
             height=dp(130),
-            color=(0.5, 0.5, 0.5, 1.0),
+            color=C.TEXT_MUTED,
             halign="left",
             valign="top",
         )
@@ -524,10 +558,10 @@ class SettingsScreen(Screen):
                 "Windowed: avg(expr, N) \u2014 mean of last N ticks\n"
                 "  N = 1..600 (at 2Hz: 10=5s, 60=30s, 120=1min)"
             ),
-            font_size=dp(12),
+            font_size=F.SMALL,
             size_hint_y=None,
             height=dp(225),
-            color=(0.45, 0.45, 0.55, 1.0),
+            color=C.TEXT_MUTED,
             halign="left",
             valign="top",
         )
@@ -543,8 +577,8 @@ class SettingsScreen(Screen):
                 "EEG Meditation Trainer v1.0\n"
                 "Shamatha meditation with neurofeedback"
             ),
-            font_size=dp(11),
-            color=(0.5, 0.5, 0.5, 1.0),
+            font_size=F.SMALL,
+            color=C.TEXT_MUTED,
             size_hint_y=None,
             height=dp(40),
             halign="center",
@@ -554,19 +588,11 @@ class SettingsScreen(Screen):
         scroll.add_widget(layout)
         self.add_widget(scroll)
 
-    @staticmethod
-    def _section_label(text: str) -> Label:
-        """Create a styled section header label."""
-        lbl = Label(
-            text=text,
-            font_size=dp(16),
-            size_hint_y=None,
-            height=dp(30),
-            halign="left",
-            bold=True,
-        )
-        lbl.bind(size=lbl.setter("text_size"))
-        return lbl
+    def _update_bg(self, *args) -> None:
+        scroll = self.children[0] if self.children else None
+        if scroll and hasattr(self, '_bg_rect'):
+            self._bg_rect.size = scroll.size
+            self._bg_rect.pos = scroll.pos
 
     def _on_slider_value(self, instance, value) -> None:
         val = int(value)
@@ -611,9 +637,9 @@ class SettingsScreen(Screen):
     def set_formula_status(self, text: str, is_error: bool = False) -> None:
         self._formula_status.text = text
         if is_error:
-            self._formula_status.color = (0.9, 0.3, 0.3, 1.0)
+            self._formula_status.color = C.DANGER
         else:
-            self._formula_status.color = (0.5, 0.8, 0.5, 1.0)
+            self._formula_status.color = C.ACCENT
 
     def _on_rotate_pressed(self, *args) -> None:
         self._current_rotation = (self._current_rotation + 90) % 360
@@ -625,7 +651,7 @@ class SettingsScreen(Screen):
         """Enter hotkey capture mode — next key press sets the marker hotkey."""
         self._waiting_for_hotkey = True
         self._marker_hotkey_btn.text = "Press a key..."
-        self._marker_hotkey_btn.background_color = (0.6, 0.4, 0.1, 1.0)
+        self._marker_hotkey_btn.bg_color = list(C.WARM)
         Window.bind(on_key_down=self._on_hotkey_capture)
 
     def _on_hotkey_capture(self, window, key, scancode, codepoint, modifiers) -> bool:
@@ -643,7 +669,7 @@ class SettingsScreen(Screen):
         else:
             self._marker_hotkey_btn.text = f"key {key}"
             self._marker_hotkey = str(key)
-        self._marker_hotkey_btn.background_color = (0.3, 0.3, 0.5, 1.0)
+        self._marker_hotkey_btn.bg_color = list(C.BG_CARD)
         return True
 
     def _on_marker_hotkey_clear(self, *args) -> None:
@@ -653,7 +679,7 @@ class SettingsScreen(Screen):
             self._waiting_for_hotkey = False
         self._marker_hotkey = ""
         self._marker_hotkey_btn.text = "(none)"
-        self._marker_hotkey_btn.background_color = (0.3, 0.3, 0.5, 1.0)
+        self._marker_hotkey_btn.bg_color = list(C.BG_CARD)
 
     @property
     def marker_hotkey(self) -> str:
@@ -755,24 +781,30 @@ class SettingsScreen(Screen):
         box.height = row_height * len(formulas) if formulas else dp(0)
 
         for i, entry in enumerate(formulas):
-            row = BoxLayout(size_hint_y=None, height=row_height, spacing=dp(4))
+            row = BoxLayout(size_hint_y=None, height=row_height, spacing=S.GAP_SM)
 
-            load_btn = Button(
+            load_btn = StyledButton(
                 text=entry.get("name", entry.get("formula", "")[:30]),
-                font_size=dp(11),
+                font_size=F.SMALL,
+                bg_color=C.BG_CARD,
+                text_color=C.TEXT,
                 size_hint_x=0.65,
-                background_color=(0.2, 0.2, 0.3, 1.0),
+                size_hint_y=None,
+                height=row_height,
                 halign="left",
             )
             load_btn.formula_index = i
             load_btn.bind(on_release=self._on_load_formula_pressed)
             row.add_widget(load_btn)
 
-            del_btn = Button(
+            del_btn = StyledButton(
                 text="X",
-                font_size=dp(12),
+                font_size=F.SMALL,
+                bg_color=C.BG_CARD,
+                text_color=C.DANGER,
                 size_hint_x=0.12,
-                background_color=(0.5, 0.2, 0.2, 1.0),
+                size_hint_y=None,
+                height=row_height,
             )
             del_btn.formula_index = i
             del_btn.bind(on_release=self._on_delete_formula_pressed)
@@ -795,20 +827,21 @@ class SettingsScreen(Screen):
         if not devices:
             lbl = Label(
                 text="No paired devices found",
-                font_size=dp(11),
+                font_size=F.SMALL,
                 size_hint_y=None,
                 height=dp(28),
-                color=(0.6, 0.6, 0.6, 1.0),
+                color=C.TEXT_SECONDARY,
             )
             self._bt_device_list.add_widget(lbl)
             return
         for dev in devices:
-            btn = Button(
+            btn = StyledButton(
                 text=f"{dev['name']}  ({dev['address']})",
-                font_size=dp(11),
+                font_size=F.SMALL,
+                bg_color=C.BG_CARD,
+                text_color=C.TEXT,
                 size_hint_y=None,
                 height=dp(32),
-                background_color=(0.18, 0.18, 0.25, 1.0),
             )
             btn.bt_address = dev["address"]
             btn.bt_name = dev["name"]
@@ -821,10 +854,10 @@ class SettingsScreen(Screen):
         """Update device status display in settings."""
         if connected:
             self._device_status_label.text = f"Connected: {name}" if name else "Connected"
-            self._device_status_label.color = (0.2, 0.9, 0.4, 1.0)
+            self._device_status_label.color = C.CONNECTED
         else:
             self._device_status_label.text = "Not connected"
-            self._device_status_label.color = (0.8, 0.3, 0.3, 1.0)
+            self._device_status_label.color = C.DISCONNECTED
         if meta:
             self._device_meta_label.text = meta
         elif self._device_mode_cb.active:
