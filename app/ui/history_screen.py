@@ -196,9 +196,11 @@ class HistoryScreen(Screen):
         self._sessions: List[Dict] = []
         self._filtered_date: Optional[str] = None
         self._build_ui()
+        C.add_listener(self._refresh_theme)
 
     def _build_ui(self) -> None:
-        root = BoxLayout(orientation="vertical", padding=S.PAGE_PAD, spacing=S.GAP)
+        self._root = BoxLayout(orientation="vertical", padding=S.PAGE_PAD, spacing=S.GAP)
+        root = self._root
         with root.canvas.before:
             Color(*C.BG)
             self._bg = Rectangle(size=root.size, pos=root.pos)
@@ -569,3 +571,12 @@ class HistoryScreen(Screen):
         if sid and self._on_session_select:
             self._on_session_select(sid)
         return True
+
+    def _refresh_theme(self):
+        """Update background when theme changes."""
+        self._root.canvas.before.clear()
+        with self._root.canvas.before:
+            Color(*C.BG)
+            self._bg = Rectangle(size=self._root.size, pos=self._root.pos)
+        self._date_label.color = C.TEXT_SECONDARY
+        self._heatmap._redraw()

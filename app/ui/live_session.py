@@ -56,13 +56,15 @@ class LiveSessionScreen(Screen):
         super().__init__(**kwargs)
         self.name = "live_session"
         self._build_ui()
+        C.add_listener(self._refresh_theme)
 
     def _build_ui(self) -> None:
         float_root = FloatLayout()
 
         # Screen background
-        root = BoxLayout(orientation="vertical", padding=S.PAGE_PAD, spacing=S.GAP_SM,
-                         size_hint=(1, 1), pos_hint={"x": 0, "y": 0})
+        self._root = BoxLayout(orientation="vertical", padding=S.PAGE_PAD, spacing=S.GAP_SM,
+                               size_hint=(1, 1), pos_hint={"x": 0, "y": 0})
+        root = self._root
         with root.canvas.before:
             Color(*C.BG)
             self._root_bg = Rectangle(size=root.size, pos=root.pos)
@@ -531,3 +533,24 @@ class LiveSessionScreen(Screen):
         for label in self._stat_labels.values():
             label.text = "0"
         self.set_controls_idle()
+
+    def _refresh_theme(self):
+        """Update background and label colors when theme changes."""
+        self._root.canvas.before.clear()
+        with self._root.canvas.before:
+            Color(*C.BG)
+            self._root_bg = Rectangle(size=self._root.size, pos=self._root.pos)
+        self._overlay.canvas.before.clear()
+        with self._overlay.canvas.before:
+            Color(*C.BG_OVERLAY)
+            self._overlay_bg = Rectangle(size=self._overlay.size, pos=self._overlay.pos)
+        # Update label colors
+        self._device_label.color = C.DEVICE_IDLE
+        self._start_time_label.color = C.TEXT_MUTED
+        self._timer_label.color = C.TEXT
+        self._state_label.color = C.STATE_NEUTRAL
+        self._alert_label.color = C.WARM
+        self._overlay_status.color = C.TEXT
+        self._overlay_dots.color = C.PRIMARY
+        for lbl in self._stat_labels.values():
+            lbl.color = C.TEXT

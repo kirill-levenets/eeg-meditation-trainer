@@ -41,6 +41,15 @@ class EEGMeditationApp(App):
 
     title = APP.APP_NAME
 
+    # Expose theme colors as app properties for kv language access
+    @property
+    def theme_bg_card(self):
+        return C.BG_CARD
+
+    @property
+    def theme_text_secondary(self):
+        return C.TEXT_SECONDARY
+
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self._mock_stream: MockEEGStream = MockEEGStream()

@@ -59,6 +59,29 @@ class Icons:
 
 # ── Color palette ────────────────────────────────────────────────────
 
+# ── Accordion styling via kv ──────────────────────────────────────────
+
+from kivy.lang import Builder
+Builder.load_string("""
+<AccordionItem>:
+    background_normal: ''
+    background_selected: ''
+    title_template: 'AccordionItemTitle'
+    min_space: dp(38)
+    canvas.before:
+        Color:
+            rgba: app.theme_bg_card if hasattr(app, 'theme_bg_card') else (0.12, 0.12, 0.18, 1)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
+<AccordionItemTitle>:
+    color: app.theme_text_secondary if hasattr(app, 'theme_text_secondary') else (0.55, 0.55, 0.62, 1)
+    font_size: sp(15)
+    bold: True
+""")
+
+
 # ── Theme palettes ───────────────────────────────────────────────────
 
 # Metric colors are shared across all themes
@@ -186,11 +209,13 @@ class _ColorAccessor:
 
     All existing code uses C.PRIMARY, C.BG etc. — this class makes
     that work while allowing the underlying palette to be swapped at runtime.
+    Supports listeners that get called on theme change for live refresh.
     """
 
     def __init__(self):
         self._palette = dict(_DARK_BLUE)
         self._name = "Dark Blue"
+        self._listeners = []
 
     def __getattr__(self, name):
         if name.startswith("_"):
@@ -201,10 +226,20 @@ class _ColorAccessor:
             raise AttributeError(f"No color '{name}' in theme")
 
     def set_theme(self, name: str) -> None:
-        """Switch the active palette."""
+        """Switch the active palette and notify listeners."""
         if name in THEMES:
             self._palette = dict(THEMES[name])
             self._name = name
+            for cb in self._listeners:
+                try:
+                    cb()
+                except Exception:
+                    pass
+
+    def add_listener(self, callback) -> None:
+        """Register a callback to be called when theme changes."""
+        if callback not in self._listeners:
+            self._listeners.append(callback)
 
     @property
     def theme_name(self) -> str:
@@ -281,17 +316,32 @@ class StyledButton(ButtonBehavior, BoxLayout):
 
         self._icon_label = None
         if self.icon:
-            self._icon_label = Label(
-                text=self.icon,
-                font_name="Icons",
-                font_size=self.font_size + dp(4),
-                color=self.text_color,
-                size_hint_x=None,
-                width=dp(26),
-            )
-            self.add_widget(self._icon_label)
-
-        self.add_widget(self._label)
+            # Icon-only: center the icon, no text label
+            if not self.text:
+                self._icon_label = Label(
+                    text=self.icon,
+                    font_name="Icons",
+                    font_size=self.font_size + dp(6),
+                    color=self.text_color,
+                    halign="center",
+                    valign="middle",
+                )
+                self._icon_label.bind(size=self._icon_label.setter("text_size"))
+                self.add_widget(self._icon_label)
+            else:
+                # Icon + text
+                self._icon_label = Label(
+                    text=self.icon,
+                    font_name="Icons",
+                    font_size=self.font_size + dp(4),
+                    color=self.text_color,
+                    size_hint_x=None,
+                    width=dp(26),
+                )
+                self.add_widget(self._icon_label)
+                self.add_widget(self._label)
+        else:
+            self.add_widget(self._label)
 
         self.bind(
             text=self._update_label,
@@ -302,6 +352,7 @@ class StyledButton(ButtonBehavior, BoxLayout):
             disabled=self._redraw,
         )
         self._redraw()
+        C.add_listener(self._redraw)
 
     def _update_label(self, *args):
         self._label.text = self.text
@@ -495,12 +546,22 @@ class BottomNav(BoxLayout):
 
         if tabs:
             self.active_tab = tabs[0][1]
+        C.add_listener(self._refresh_theme)
+
+    def _refresh_theme(self):
+        self._update_bg()
+        self.on_active_tab()
 
     def _update_bg(self, *args):
-        self._bg.size = self.size
-        self._bg.pos = self.pos
-        self._border.size = (self.size[0], dp(1))
-        self._border.pos = (self.pos[0], self.pos[1] + self.size[1] - dp(1))
+        self.canvas.before.clear()
+        with self.canvas.before:
+            Color(*C.BG_DARK)
+            self._bg = Rectangle(size=self.size, pos=self.pos)
+            Color(*C.BORDER)
+            self._border = Rectangle(
+                size=(self.size[0], dp(1)),
+                pos=(self.pos[0], self.pos[1] + self.size[1] - dp(1)),
+            )
 
     def _on_tab_press(self, tab):
         self.active_tab = tab.key

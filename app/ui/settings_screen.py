@@ -13,7 +13,7 @@ from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
 
 from app.config import APP, METRICS
-from app.ui.theme import C, F, S, StyledButton, SectionLabel, Divider, PresetRow
+from app.ui.theme import C, F, S, Icons, StyledButton, SectionLabel, Divider, PresetRow
 
 
 def _make_section_content() -> BoxLayout:
@@ -1100,6 +1100,32 @@ class SettingsScreen(Screen):
         self._on_profile_delete = on_delete
         self._profile_create_btn.bind(on_release=self._on_profile_create_pressed)
 
+    def _confirm_user_delete(self, user_id, user_name):
+        """Show confirmation before deleting a user."""
+        from kivy.uix.popup import Popup
+        content = BoxLayout(orientation="vertical", spacing=S.GAP, padding=S.GAP)
+        content.add_widget(Label(
+            text=f'Delete user "{user_name}"?\nAll their settings will be lost.',
+            font_size=F.BODY, color=C.TEXT,
+            halign="center", valign="middle", size_hint_y=0.6,
+        ))
+        btn_row = BoxLayout(spacing=S.GAP, size_hint_y=0.4)
+        btn_cancel = StyledButton(text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY, height=dp(38))
+        btn_confirm = StyledButton(text="Delete", icon=Icons.DELETE, bg_color=C.DANGER, height=dp(38))
+        btn_row.add_widget(btn_cancel)
+        btn_row.add_widget(btn_confirm)
+        content.add_widget(btn_row)
+        popup = Popup(title="Confirm Delete", content=content, size_hint=(0.7, 0.3), auto_dismiss=True)
+        btn_cancel.bind(on_release=popup.dismiss)
+
+        def _do_delete(*args):
+            popup.dismiss()
+            if self._on_profile_delete:
+                self._on_profile_delete(user_id)
+
+        btn_confirm.bind(on_release=_do_delete)
+        popup.open()
+
     def _on_profile_create_pressed(self, *args):
         name = self._profile_name_input.text.strip()
         if name and self._on_profile_create:
@@ -1135,20 +1161,19 @@ class SettingsScreen(Screen):
             row.add_widget(btn)
 
             del_btn = StyledButton(
-                text="x",
-                bg_color=C.BG_CARD,
+                text="", icon=Icons.DELETE,
+                bg_color=C.DANGER,
                 text_color=C.DANGER,
                 font_size=F.SMALL,
                 height=dp(36),
                 size_hint_x=None,
-                width=dp(36),
+                width=dp(40),
                 bold=False,
+                outline=True,
             )
             del_btn._user_id = u["id"]
             del_btn._user_name = u["name"]
-            del_btn.bind(on_release=lambda b: (
-                self._on_profile_delete(b._user_id) if self._on_profile_delete else None
-            ))
+            del_btn.bind(on_release=lambda b: self._confirm_user_delete(b._user_id, b._user_name))
             row.add_widget(del_btn)
             self._profile_user_list.add_widget(row)
 
