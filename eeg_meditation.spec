@@ -90,7 +90,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
-    icon=None,
+    icon=os.path.join(PROJECT_ROOT, 'app', 'assets', 'icons', 'icon.ico'),
 )
 
 coll = COLLECT(

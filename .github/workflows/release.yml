@@ -140,6 +140,7 @@ jobs:
             --clean \
             --onedir \
             --windowed \
+            --icon app/assets/icons/icon.icns \
             --exclude-module tkinter \
             --exclude-module _tkinter \
             --exclude-module unittest \

@@ -40,6 +40,10 @@ class EEGMeditationApp(App):
     """Main Kivy application for EEG Meditation Trainer."""
 
     title = APP.APP_NAME
+    icon = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)),
+        "assets", "icons", "icon_128.png",
+    )
 
     # Expose theme colors as app properties for kv language access
     @property

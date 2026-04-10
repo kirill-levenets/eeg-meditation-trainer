@@ -27,6 +27,12 @@ source.exclude_patterns = *.db,*.db-shm,*.db-wal,*.csv,*.pyc,*.eeg,*.ods,*.md,*.
 # (str) Application versioning
 version = 1.0.0
 
+# (str) Presplash of the application
+presplash.filename = app/assets/icons/presplash.png
+
+# (str) Icon of the application
+icon.filename = app/assets/icons/icon_512.png
+
 # (list) Application requirements
 requirements = python3,kivy==2.3.0,pyjnius,android
 
