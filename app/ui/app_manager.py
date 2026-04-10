@@ -7,7 +7,7 @@ from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.metrics import dp
-from kivy.uix.actionbar import ActionBar, ActionButton, ActionPrevious, ActionView
+from kivy.graphics import Color, Rectangle
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
@@ -29,15 +29,31 @@ from app.ui.analytics_screen import AnalyticsScreen
 from app.ui.diary_screen import DiaryScreen
 from app.ui.live_session import LiveSessionScreen
 from app.ui.profile_screen import ProfileScreen
-from app.ui.raw_eeg_screen import RawEEGScreen, ScrollableGraphWidget
+from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
+from app.ui.history_screen import HistoryScreen
+from app.ui.theme import BottomNav, C
 from app.ui.timer_screen import TimerScreen
+from app.ui.wizard_screen import WizardScreen
 
 
 class EEGMeditationApp(App):
     """Main Kivy application for EEG Meditation Trainer."""
 
     title = APP.APP_NAME
+    icon = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)),
+        "assets", "icons", "icon_128.png",
+    )
+
+    # Expose theme colors as app properties for kv language access
+    @property
+    def theme_bg_card(self):
+        return C.BG_CARD
+
+    @property
+    def theme_text_secondary(self):
+        return C.TEXT_SECONDARY
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -95,121 +111,109 @@ class EEGMeditationApp(App):
         except Exception as e:
             logger.warning(f"Failed to release wake lock: {e}")
 
+    # Map bottom-nav tab keys to screen groups
+    _TAB_SCREENS = {
+        "session": "live_session",
+        "history": "history",
+        "settings": "settings",
+    }
+
     def build(self) -> BoxLayout:
+        # Restore saved theme before building UI
+        saved_theme = self._db.get_setting("theme")
+        if saved_theme:
+            C.set_theme(saved_theme)
+
         # Apply --serial override if provided
         if self.serial_device_override:
             path = self.serial_device_override
             self._real_stream.set_device(path, f"Splitter ({path})")
             APP.USE_MOCK_DEVICE = False
             logger.info(f"Serial device override: {path}")
+
         root = BoxLayout(orientation="vertical")
-
-        # --- Sandwich toggle + ActionBar ---
-        self._nav_tabs_visible = True
-
-        top_bar = BoxLayout(size_hint_y=None, height=dp(48))
-        self._sandwich_btn = Button(
-            text="=",
-            size_hint_x=None,
-            width=dp(48),
-            font_size=dp(24),
-            bold=True,
-            background_color=(0.15, 0.15, 0.2, 1.0),
+        with root.canvas.before:
+            Color(*C.BG_DARK)
+            self._root_bg = Rectangle(size=root.size, pos=root.pos)
+        root.bind(
+            size=lambda w, v: setattr(self._root_bg, "size", v),
+            pos=lambda w, v: setattr(self._root_bg, "pos", v),
         )
-        self._sandwich_btn.bind(on_release=self._toggle_nav_tabs)
 
-        self._nav_bar = ActionBar(size_hint_x=1)
-        av = ActionView()
-        ap = ActionPrevious(title="EEG Meditation", with_previous=False)
-        av.add_widget(ap)
-
-        btn_profile = ActionButton(text="Profile")
-        btn_profile.bind(on_release=lambda x: self._switch_screen("profile"))
-        btn_session = ActionButton(text="Session")
-        btn_session.bind(on_release=lambda x: self._switch_screen("live_session"))
-        btn_raw = ActionButton(text="Raw EEG")
-        btn_raw.bind(on_release=lambda x: self._switch_screen("raw_eeg"))
-        btn_settings = ActionButton(text="Settings")
-        btn_settings.bind(on_release=lambda x: self._switch_screen("settings"))
-        self._btn_diary = ActionButton(text="Diary")
-        self._btn_diary.bind(on_release=lambda x: self._switch_screen("diary"))
-        btn_analytics = ActionButton(text="Analytics")
-        btn_analytics.bind(on_release=lambda x: self._switch_screen("analytics"))
-        btn_timer = ActionButton(text="Timer")
-        btn_timer.bind(on_release=lambda x: self._switch_screen("timer"))
-
-        av.add_widget(btn_profile)
-        av.add_widget(btn_session)
-        av.add_widget(btn_raw)
-        av.add_widget(btn_settings)
-        av.add_widget(btn_timer)
-        av.add_widget(self._btn_diary)
-        av.add_widget(btn_analytics)
-        self._nav_bar.add_widget(av)
-
-        top_bar.add_widget(self._sandwich_btn)
-        top_bar.add_widget(self._nav_bar)
-        root.add_widget(top_bar)
-        self._top_bar = top_bar
-
+        # --- Screen manager (all screens still exist, routed via nav) ---
         self._sm = ScreenManager(transition=SlideTransition())
 
         self._profile_screen = ProfileScreen()
         self._live_screen = LiveSessionScreen()
-        self._raw_eeg_screen = RawEEGScreen()
         self._settings_screen = SettingsScreen()
+        self._history_screen = HistoryScreen()
         self._diary_screen = DiaryScreen()
         self._analytics_screen = AnalyticsScreen()
         self._timer_screen = TimerScreen()
 
-        self._sm.add_widget(self._profile_screen)
+        self._wizard_screen = WizardScreen()
+        self._sm.add_widget(self._wizard_screen)
         self._sm.add_widget(self._live_screen)
-        self._sm.add_widget(self._raw_eeg_screen)
+        self._sm.add_widget(self._history_screen)
         self._sm.add_widget(self._settings_screen)
+        self._sm.add_widget(self._profile_screen)
         self._sm.add_widget(self._diary_screen)
         self._sm.add_widget(self._analytics_screen)
         self._sm.add_widget(self._timer_screen)
 
         root.add_widget(self._sm)
 
+        # --- Bottom navigation ---
+        self._bottom_nav = BottomNav(
+            tabs=[
+                ("Session", "session"),
+                ("History", "history"),
+                ("Settings", "settings"),
+            ],
+            callback=self._on_nav_tab,
+        )
+        root.add_widget(self._bottom_nav)
+
         self._bind_callbacks()
         self._link_graph_zoom()
         self._restore_last_user()
         self._refresh_profile()
-        self._update_diary_visibility()
-        self._auto_scan_bt()
-        return root
 
-    def _toggle_nav_tabs(self, *args) -> None:
-        """Toggle visibility of the navigation tab bar."""
-        self._nav_tabs_visible = not self._nav_tabs_visible
-        if self._nav_tabs_visible:
-            self._top_bar.height = dp(48)
-            self._nav_bar.opacity = 1
-            self._nav_bar.disabled = False
+        # First-run: show wizard if no users exist
+        if not self._db.get_all_users():
+            self._sm.current = "wizard"
+            self._bottom_nav.opacity = 0
+            self._bottom_nav.disabled = True
         else:
-            self._top_bar.height = dp(48)
-            self._nav_bar.opacity = 0
-            self._nav_bar.disabled = True
+            self._auto_scan_bt()
+
+        return root
 
     def _link_graph_zoom(self) -> None:
         """Link zoom across all graph widgets so they share the same time scale."""
         ScrollableGraphWidget.link_zoom(
             self._live_screen.graph,
-            self._raw_eeg_screen._raw_graph,
-            self._raw_eeg_screen._band_graph,
+            self._live_screen.raw_graph,
+            self._live_screen.band_graph,
             self._diary_screen._metrics_graph,
             self._diary_screen._raw_eeg_graph,
             self._diary_screen._freq_graph,
         )
 
     def _bind_callbacks(self) -> None:
+        # Wizard
+        self._wizard_screen.set_complete_callback(self._on_wizard_complete)
+        self._wizard_screen.set_scan_callback(self._on_wizard_scan)
+
         self._live_screen.btn_start.bind(on_release=self._on_start)
         self._live_screen.btn_pause.bind(on_release=self._on_pause)
         self._live_screen.btn_stop.bind(on_release=self._on_stop)
         self._live_screen.btn_marker.bind(on_release=self._on_marker)
         self._live_screen.overlay_cancel_btn.bind(on_release=self._on_connect_cancel)
         self._live_screen.overlay_retry_btn.bind(on_release=self._on_connect_retry)
+        self._live_screen.summary_save_btn.bind(on_release=self._on_summary_save)
+        self._live_screen.summary_history_btn.bind(on_release=self._on_summary_history)
+        self._live_screen.summary_close_btn.bind(on_release=self._on_summary_close)
 
         # Tap on graph to set marker (Android — no keyboard available)
         from kivy.utils import platform as kivy_platform
@@ -236,6 +240,7 @@ class EEGMeditationApp(App):
             self._on_custom_formula_visible_toggle
         )
         self._settings_screen.set_audio_metric_callback(self._on_audio_metric_change)
+        self._settings_screen.set_theme_callback(self._on_theme_change)
 
         # Keyboard hotkey for marker
         Window.bind(on_key_down=self._on_key_down)
@@ -249,6 +254,15 @@ class EEGMeditationApp(App):
         self._diary_screen.set_export_csv_callback(self._on_export_csv)
         self._diary_screen.set_delete_session_callback(self._on_delete_session)
         self._diary_screen.set_rename_session_callback(self._on_rename_session)
+        self._diary_screen.set_back_callback(self._on_diary_back)
+
+        self._history_screen.set_callbacks(
+            on_session_select=self._on_session_select,
+            on_save_notes=self._on_save_notes,
+            on_delete_session=self._on_delete_session,
+            on_export_csv=self._on_export_csv,
+            on_rename_session=self._on_rename_session,
+        )
 
         self._analytics_screen.btn_daily.bind(
             on_release=lambda x: self._load_analytics("daily")
@@ -266,6 +280,13 @@ class EEGMeditationApp(App):
         self._profile_screen.set_user_create_callback(self._on_user_create)
         self._profile_screen.set_user_delete_callback(self._on_user_delete)
 
+        # Profile section in settings
+        self._settings_screen.set_profile_callbacks(
+            on_switch=self._on_user_switch,
+            on_create=self._on_user_create,
+            on_delete=self._on_user_delete,
+        )
+
     def _restore_last_user(self) -> None:
         """Restore last selected user from DB settings on startup."""
         saved = self._db.get_setting("last_user_id")
@@ -279,6 +300,59 @@ class EEGMeditationApp(App):
                     logger.info(f"Restored last user: {user['name']} (id={uid})")
             except (ValueError, TypeError):
                 pass
+
+    def _on_wizard_complete(self, user_name: str, device_addr, device_name) -> None:
+        """Wizard finished: create user, optionally set device, go to session."""
+        # Create user
+        try:
+            self._db.create_user(user_name)
+        except Exception as e:
+            logger.warning(f"Wizard user create failed: {e}")
+        users = self._db.get_all_users()
+        for u in users:
+            if u["name"] == user_name:
+                self._current_user_id = u["id"]
+                self._db.set_setting("last_user_id", str(u["id"]))
+                break
+
+        # Set device
+        if device_addr:
+            self._real_stream.set_device(device_addr, device_name or device_addr)
+            APP.USE_MOCK_DEVICE = False
+            if self._current_user_id:
+                self._db.set_user_setting(self._current_user_id, "bt_device_address", device_addr)
+                self._db.set_user_setting(self._current_user_id, "bt_device_name", device_name or "")
+                self._db.set_user_setting(self._current_user_id, "use_mock", "False")
+            self._settings_screen._device_mode_cb.active = False
+            self._live_screen.update_device_status(False, device_name=device_name or device_addr)
+            logger.info(f"Wizard: device set to {device_name} ({device_addr})")
+        else:
+            APP.USE_MOCK_DEVICE = True
+            if self._current_user_id:
+                self._db.set_user_setting(self._current_user_id, "use_mock", "True")
+            self._settings_screen._device_mode_cb.active = True
+            self._live_screen.update_device_status(False, device_name="Mock EEG")
+            logger.info("Wizard: using mock device")
+
+        # Show nav and go to session
+        self._bottom_nav.opacity = 1
+        self._bottom_nav.disabled = False
+        self._refresh_profile()
+        self._sm.current = "live_session"
+        self._bottom_nav.active_tab = "session"
+        self._auto_scan_bt()
+        logger.info(f"Wizard complete: user '{user_name}' created")
+
+    def _on_wizard_scan(self) -> None:
+        """Scan for BT devices from wizard."""
+        import threading
+
+        def _run():
+            from kivy.clock import Clock as _Clock
+            devices = NeuroSkyStream.scan_paired_devices()
+            _Clock.schedule_once(lambda dt: self._wizard_screen.populate_devices(devices))
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def _auto_scan_bt(self) -> None:
         """Background-scan paired BT devices at startup and auto-select MindWave."""
@@ -315,10 +389,10 @@ class EEGMeditationApp(App):
 
         threading.Thread(target=_run, daemon=True).start()
 
-    def _update_diary_visibility(self) -> None:
-        """Disable diary nav button when no user is selected."""
-        has_user = self._current_user_id is not None
-        self._btn_diary.disabled = not has_user
+    def _on_nav_tab(self, tab_key: str) -> None:
+        """Handle bottom nav tab press."""
+        screen_name = self._TAB_SCREENS.get(tab_key, tab_key)
+        self._switch_screen(screen_name)
 
     def _switch_screen(self, name: str) -> None:
         if name == "diary" and not self._current_user_id:
@@ -326,12 +400,19 @@ class EEGMeditationApp(App):
             return
         logger.debug(f"Screen switch: {name}")
         self._sm.current = name
-        if name == "diary":
+        if name == "history":
+            self._refresh_history()
+        elif name == "diary":
             self._refresh_diary()
         elif name == "analytics":
             self._refresh_analytics()
         elif name == "profile":
             self._refresh_profile()
+        # Sync bottom nav highlight
+        for tab_key, screen in self._TAB_SCREENS.items():
+            if screen == name:
+                self._bottom_nav.active_tab = tab_key
+                break
 
     def _on_start(self, *args) -> None:
         if not self._current_user_id:
@@ -413,8 +494,8 @@ class EEGMeditationApp(App):
         self._bt_connect_start = time.time()
 
         self._live_screen.graph.clear_data()
-        self._raw_eeg_screen.raw_graph.clear_data()
-        self._raw_eeg_screen.band_graph.clear_data()
+        self._live_screen.raw_graph.clear_data()
+        self._live_screen.band_graph.clear_data()
         self._live_screen.graph.set_threshold(float(threshold), "shamatha_score")
         self._live_screen.hide_alert()
         self._live_screen.set_controls_running()
@@ -468,6 +549,25 @@ class EEGMeditationApp(App):
         self._live_screen.hide_overlay()
         self._live_screen.set_controls_idle()
         self._on_start()
+
+    def _on_summary_save(self, *args) -> None:
+        """Save notes from summary overlay."""
+        sid = self._live_screen.summary_session_id
+        notes = self._live_screen.summary_notes
+        if sid and notes:
+            self._db.update_session_notes(sid, notes)
+            self._mark_history_dirty()
+            logger.info(f"Quick notes saved for session {sid}")
+        self._live_screen.hide_summary()
+
+    def _on_summary_history(self, *args) -> None:
+        """Navigate to history from summary."""
+        self._live_screen.hide_summary()
+        self._switch_screen("history")
+
+    def _on_summary_close(self, *args) -> None:
+        """Close summary without saving notes."""
+        self._live_screen.hide_summary()
 
     def _on_pause(self, *args) -> None:
         if self._session_manager.state == SessionState.RUNNING:
@@ -542,6 +642,14 @@ class EEGMeditationApp(App):
         btn_cancel.bind(on_release=lambda x: self._cancel_stop(popup))
         popup.open()
 
+    def _make_session_name(self) -> str:
+        """Generate default session name including device type."""
+        device = "Mock" if APP.USE_MOCK_DEVICE else (
+            self._real_stream._device_name or "Real EEG"
+        )
+        ts = time.strftime("%H:%M")
+        return f"{ts} - {device}"
+
     def _stop_and_save(self) -> None:
         """Stop session and save data immediately (no dialog)."""
         if self._update_event:
@@ -557,7 +665,8 @@ class EEGMeditationApp(App):
                 self._db.update_session(self._current_session_id, stats)
             else:
                 self._current_session_id = self._db.save_session(
-                    stats, user_id=self._current_user_id
+                    stats, user_id=self._current_user_id,
+                    session_name=self._make_session_name(),
                 )
             if self._metrics_buffer:
                 self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
@@ -569,6 +678,10 @@ class EEGMeditationApp(App):
         self._timer_screen.reset()
         self._session_manager.reset()
         self._release_wake_lock()
+        self._mark_history_dirty()
+
+        if stats and self._current_session_id:
+            self._live_screen.show_summary(self._current_session_id, stats)
         logger.info("Session stopped and saved")
 
     def _cancel_stop(self, popup) -> None:
@@ -592,7 +705,8 @@ class EEGMeditationApp(App):
                 self._db.update_session(self._current_session_id, stats)
             else:
                 self._current_session_id = self._db.save_session(
-                    stats, user_id=self._current_user_id
+                    stats, user_id=self._current_user_id,
+                    session_name=self._make_session_name(),
                 )
             if self._metrics_buffer:
                 self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
@@ -612,6 +726,10 @@ class EEGMeditationApp(App):
         self._timer_screen.reset()
         self._session_manager.reset()
         self._release_wake_lock()
+        self._mark_history_dirty()
+
+        if save and stats and self._current_session_id:
+            self._live_screen.show_summary(self._current_session_id, stats)
 
     _BT_CONNECT_TIMEOUT = 20.0  # seconds before BT socket gives up
     _BT_SIGNAL_TIMEOUT = 15.0  # seconds to wait for EEG data after connected
@@ -804,15 +922,15 @@ class EEGMeditationApp(App):
         self._live_screen.update_state(metrics.get("state", "Neutral"))
         self._live_screen.update_timer(self._session_manager.elapsed_formatted)
 
-        self._raw_eeg_screen.add_raw_sample(raw_sample)
+        self._live_screen.add_raw_sample(raw_sample)
 
         # Handle pending marker (after points added so indices are current)
         if self._pending_marker:
             self._pending_marker = False
             full_record["marker"] = 1
             self._live_screen.graph.add_marker()
-            self._raw_eeg_screen.raw_graph.add_marker()
-            self._raw_eeg_screen.band_graph.add_marker()
+            self._live_screen.raw_graph.add_marker()
+            self._live_screen.band_graph.add_marker()
 
         # Timer countdown
         if self._timer_screen.tick(APP.UPDATE_FREQUENCY):
@@ -828,7 +946,8 @@ class EEGMeditationApp(App):
             if self._current_session_id is None:
                 stats_partial = self._session_manager.compute_statistics()
                 self._current_session_id = self._db.save_session(
-                    stats_partial, user_id=self._current_user_id
+                    stats_partial, user_id=self._current_user_id,
+                    session_name=self._make_session_name(),
                 )
             self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
             self._metrics_buffer = []
@@ -873,8 +992,8 @@ class EEGMeditationApp(App):
 
     def _on_line_width_change(self, width: float) -> None:
         self._live_screen.graph.set_line_width(width)
-        self._raw_eeg_screen.raw_graph.set_line_width(width)
-        self._raw_eeg_screen.band_graph.set_line_width(width)
+        self._live_screen.raw_graph.set_line_width(width)
+        self._live_screen.band_graph.set_line_width(width)
         self._diary_screen._metrics_graph.set_line_width(width)
         self._diary_screen._raw_eeg_graph.set_line_width(width)
         self._diary_screen._freq_graph.set_line_width(width)
@@ -895,6 +1014,11 @@ class EEGMeditationApp(App):
         """Switch which metric drives the audio threshold feedback."""
         self._audio_metric_key = key
         logger.info(f"Audio threshold metric changed to: {key}")
+
+    def _on_theme_change(self, theme_name: str) -> None:
+        """Save selected theme."""
+        self._db.set_setting("theme", theme_name)
+        logger.info(f"Theme changed to: {theme_name}")
 
     def _on_custom_formula_change(self, formula: str) -> None:
         """Handle custom formula change from settings."""
@@ -1029,6 +1153,14 @@ class EEGMeditationApp(App):
             self._diary_screen.set_metrics_threshold(float(threshold_used))
             metrics = self._db.get_session_metrics(session_id)
             self._diary_screen.load_metrics_preview(metrics)
+            # Navigate to diary detail view; remember where we came from
+            self._session_detail_back = self._sm.current
+            self._sm.current = "diary"
+
+    def _on_diary_back(self) -> None:
+        """Return from diary detail to previous screen (usually history)."""
+        back = getattr(self, "_session_detail_back", "history")
+        self._switch_screen(back)
 
     def _on_save_notes(
         self, session_id: int, notes: str, tags: str, mood: int
@@ -1038,15 +1170,17 @@ class EEGMeditationApp(App):
         logger.info(f"Notes saved for session {session_id}")
 
     def _on_delete_session(self, session_id: int) -> None:
-        """Delete a session and refresh the diary list."""
+        """Delete a session and refresh lists."""
         self._db.delete_session(session_id)
         self._refresh_diary()
+        self._refresh_history(force=True)
         logger.info(f"Session {session_id} deleted")
 
     def _on_rename_session(self, session_id: int, new_name: str) -> None:
-        """Rename a session (updates notes field) and refresh diary."""
+        """Rename a session and refresh lists."""
         self._db.rename_session(session_id, new_name)
         self._refresh_diary()
+        self._refresh_history(force=True)
         logger.info(f"Session {session_id} renamed to '{new_name}'")
 
     def _on_export_csv(self, session_id: int, path: Optional[str] = None) -> Optional[str]:
@@ -1064,6 +1198,18 @@ class EEGMeditationApp(App):
             f.write(csv_data)
         logger.info(f"Session {session_id} exported to {path}")
         return path
+
+    _history_dirty: bool = True
+
+    def _refresh_history(self, force: bool = False) -> None:
+        if not force and not self._history_dirty:
+            return
+        sessions = self._db.get_all_sessions(user_id=self._current_user_id)
+        self._history_screen.load_sessions(sessions)
+        self._history_dirty = False
+
+    def _mark_history_dirty(self) -> None:
+        self._history_dirty = True
 
     def _refresh_diary(self) -> None:
         sessions = self._db.get_all_sessions(user_id=self._current_user_id)
@@ -1100,7 +1246,7 @@ class EEGMeditationApp(App):
             logger.info(f"Switched to user: {name} (id={user_id})")
         else:
             logger.info("Switched to: All Users")
-        self._update_diary_visibility()
+        self._mark_history_dirty()
         self._refresh_profile()
 
     def _on_user_create(self, name: str) -> None:
@@ -1121,14 +1267,18 @@ class EEGMeditationApp(App):
     def _refresh_profile(self) -> None:
         users = self._db.get_all_users()
         self._profile_screen.populate_users(users, self._current_user_id)
+        self._settings_screen.populate_users(users, self._current_user_id)
 
     def _save_user_settings(self) -> None:
         """Persist current UI settings for the active user."""
         uid = self._current_user_id
         if not uid:
             return
-        self._db.set_user_setting(uid, "timer_enabled", str(self._timer_screen.enabled))
-        self._db.set_user_setting(uid, "timer_minutes", str(self._timer_screen._duration_minutes))
+        # Sync timer from settings screen to timer screen
+        self._timer_screen._enable_cb.active = self._settings_screen.timer_enabled
+        self._timer_screen._set_duration(self._settings_screen.timer_minutes)
+        self._db.set_user_setting(uid, "timer_enabled", str(self._settings_screen.timer_enabled))
+        self._db.set_user_setting(uid, "timer_minutes", str(self._settings_screen.timer_minutes))
         self._db.set_user_setting(uid, "timer_sound", self._timer_screen.custom_sound_path)
         self._db.set_user_setting(uid, "sinking_alert", str(self._audio.sinking_alert_enabled))
         self._db.set_user_setting(uid, "subtle_alert", str(self._audio.subtle_alert_enabled))
@@ -1167,11 +1317,14 @@ class EEGMeditationApp(App):
         if timer_on is not None:
             active = timer_on == "True"
             self._timer_screen._enable_cb.active = active
+            self._settings_screen.timer_enabled = active
 
         timer_min = g(user_id, "timer_minutes")
         if timer_min is not None:
             try:
-                self._timer_screen._set_duration(int(timer_min))
+                val = int(timer_min)
+                self._timer_screen._set_duration(val)
+                self._settings_screen.timer_minutes = val
             except (ValueError, TypeError):
                 pass
 

@@ -1,0 +1,261 @@
+"""First-run wizard: create profile + select device in 2 steps."""
+
+from typing import Callable, Dict, List, Optional
+
+from kivy.graphics import Color, Rectangle
+from kivy.metrics import dp
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.label import Label
+from kivy.uix.screenmanager import Screen
+from kivy.uix.textinput import TextInput
+
+from app.ui.theme import C, F, S, Icons, StyledButton, Card, ICONS_AVAILABLE
+
+
+class WizardScreen(Screen):
+    """Two-step first-run wizard: profile name → device selection."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.name = "wizard"
+        self._on_complete: Optional[Callable] = None
+        self._on_scan: Optional[Callable] = None
+        self._step = 1
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        root = BoxLayout(orientation="vertical", padding=dp(24), spacing=S.GAP_LG)
+        with root.canvas.before:
+            Color(*C.BG)
+            self._bg = Rectangle(size=root.size, pos=root.pos)
+        root.bind(
+            size=lambda w, v: setattr(self._bg, "size", v),
+            pos=lambda w, v: setattr(self._bg, "pos", v),
+        )
+
+        root.add_widget(BoxLayout(size_hint_y=0.15))  # top spacer
+
+        # Welcome header
+        self._title = Label(
+            text="Welcome",
+            font_size=dp(28),
+            bold=True,
+            color=C.PRIMARY,
+            size_hint_y=None,
+            height=dp(40),
+        )
+        root.add_widget(self._title)
+
+        self._subtitle = Label(
+            text="Let's set up your meditation trainer",
+            font_size=F.BODY,
+            color=C.TEXT_SECONDARY,
+            size_hint_y=None,
+            height=dp(24),
+        )
+        root.add_widget(self._subtitle)
+
+        root.add_widget(BoxLayout(size_hint_y=0.05))
+
+        # Step indicator
+        self._step_label = Label(
+            text="Step 1 of 2",
+            font_size=F.SMALL,
+            color=C.TEXT_MUTED,
+            size_hint_y=None,
+            height=dp(20),
+        )
+        root.add_widget(self._step_label)
+
+        # --- Step 1: Name input ---
+        self._step1 = BoxLayout(orientation="vertical", spacing=S.GAP)
+
+        name_label = Label(
+            text="What's your name?",
+            font_size=F.H2,
+            color=C.TEXT,
+            size_hint_y=None,
+            height=dp(30),
+            halign="left",
+        )
+        name_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
+        self._step1.add_widget(name_label)
+
+        self._name_input = TextInput(
+            hint_text="Enter your name...",
+            multiline=False,
+            font_size=F.H2,
+            size_hint_y=None,
+            height=dp(48),
+            foreground_color=C.TEXT,
+            background_color=list(C.BG_INPUT),
+            cursor_color=C.PRIMARY,
+        )
+        self._step1.add_widget(self._name_input)
+
+        name_hint = Label(
+            text="This creates your profile to track sessions and settings",
+            font_size=F.SMALL,
+            color=C.TEXT_MUTED,
+            size_hint_y=None,
+            height=dp(20),
+            halign="left",
+        )
+        name_hint.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
+        self._step1.add_widget(name_hint)
+
+        self._name_next_btn = StyledButton(
+            text="Next", icon=Icons.CHEVRON_RIGHT if ICONS_AVAILABLE else "",
+            bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM,
+        )
+        self._name_next_btn.bind(on_release=self._on_name_next)
+        self._step1.add_widget(self._name_next_btn)
+
+        self._name_error = Label(
+            text="",
+            font_size=F.SMALL,
+            color=C.DANGER,
+            size_hint_y=None,
+            height=dp(20),
+        )
+        self._step1.add_widget(self._name_error)
+        root.add_widget(self._step1)
+
+        # --- Step 2: Device selection ---
+        self._step2 = BoxLayout(orientation="vertical", spacing=S.GAP)
+
+        device_label = Label(
+            text="Connect your EEG device",
+            font_size=F.H2,
+            color=C.TEXT,
+            size_hint_y=None,
+            height=dp(30),
+            halign="left",
+        )
+        device_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
+        self._step2.add_widget(device_label)
+
+        device_hint = Label(
+            text="Make sure your MindWave is paired in\nsystem Bluetooth settings first",
+            font_size=F.SMALL,
+            color=C.TEXT_MUTED,
+            size_hint_y=None,
+            height=dp(34),
+            halign="left",
+        )
+        device_hint.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
+        self._step2.add_widget(device_hint)
+
+        self._scan_btn = StyledButton(
+            text="Scan for Devices",
+            icon=Icons.BLUETOOTH if ICONS_AVAILABLE else "",
+            bg_color=C.PRIMARY, bg_pressed=C.PRIMARY_DIM,
+        )
+        self._scan_btn.bind(on_release=self._on_scan_pressed)
+        self._step2.add_widget(self._scan_btn)
+
+        self._device_list = BoxLayout(
+            orientation="vertical",
+            size_hint_y=None,
+            spacing=S.GAP_SM,
+        )
+        self._device_list.bind(minimum_height=self._device_list.setter("height"))
+        self._step2.add_widget(self._device_list)
+
+        self._scan_status = Label(
+            text="",
+            font_size=F.SMALL,
+            color=C.TEXT_SECONDARY,
+            size_hint_y=None,
+            height=dp(20),
+        )
+        self._step2.add_widget(self._scan_status)
+
+        skip_btn = StyledButton(
+            text="Skip (use demo mode)",
+            bg_color=C.BG_CARD, text_color=C.TEXT_MUTED,
+            font_size=F.BODY,
+            bold=False,
+        )
+        skip_btn.bind(on_release=self._on_skip)
+        self._step2.add_widget(skip_btn)
+
+        # Hidden initially
+        self._step2.opacity = 0
+        self._step2.size_hint_y = 0
+        self._step2.height = 0
+        root.add_widget(self._step2)
+
+        root.add_widget(BoxLayout(size_hint_y=0.2))  # bottom spacer
+
+        self.add_widget(root)
+
+    def set_complete_callback(self, cb: Callable) -> None:
+        """Called with (user_name, device_address, device_name) or (user_name, None, None)."""
+        self._on_complete = cb
+
+    def set_scan_callback(self, cb: Callable) -> None:
+        """Called to trigger BT scan. Should call populate_devices() with results."""
+        self._on_scan = cb
+
+    def _on_name_next(self, *args) -> None:
+        name = self._name_input.text.strip()
+        if not name:
+            self._name_error.text = "Please enter a name"
+            return
+        if len(name) < 2:
+            self._name_error.text = "Name too short"
+            return
+        self._name_error.text = ""
+        self._user_name = name
+
+        # Transition to step 2
+        self._step = 2
+        self._step_label.text = "Step 2 of 2"
+        self._title.text = f"Hi, {name}!"
+        self._subtitle.text = "Now let's connect your device"
+
+        self._step1.opacity = 0
+        self._step1.size_hint_y = 0
+        self._step1.height = 0
+
+        self._step2.opacity = 1
+        self._step2.size_hint_y = 1
+
+    def _on_scan_pressed(self, *args) -> None:
+        self._scan_status.text = "Scanning..."
+        self._device_list.clear_widgets()
+        if self._on_scan:
+            self._on_scan()
+
+    def populate_devices(self, devices: List[Dict[str, str]]) -> None:
+        """Show scan results."""
+        self._device_list.clear_widgets()
+        if not devices:
+            self._scan_status.text = "No paired devices found"
+            return
+
+        self._scan_status.text = f"Found {len(devices)} device(s)"
+        for dev in devices:
+            name = dev.get("name", "Unknown")
+            addr = dev.get("address", "")
+            btn = StyledButton(
+                text=name,
+                bg_color=C.BG_CARD,
+                text_color=C.TEXT,
+                font_size=F.BODY,
+                height=dp(40),
+                bold=False,
+            )
+            btn._dev_addr = addr
+            btn._dev_name = name
+            btn.bind(on_release=self._on_device_pick)
+            self._device_list.add_widget(btn)
+
+    def _on_device_pick(self, btn) -> None:
+        if self._on_complete:
+            self._on_complete(self._user_name, btn._dev_addr, btn._dev_name)
+
+    def _on_skip(self, *args) -> None:
+        if self._on_complete:
+            self._on_complete(self._user_name, None, None)

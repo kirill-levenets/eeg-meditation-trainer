@@ -13,6 +13,7 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.widget import Widget
 
 from app.config import APP
+from app.ui.theme import C as TC
 
 
 class ScrollableGraphWidget(Widget):
@@ -171,7 +172,7 @@ class ScrollableGraphWidget(Widget):
             return
 
         # Background
-        self._gfx.add(Color(0.08, 0.08, 0.12, 1.0))
+        self._gfx.add(Color(*TC.GRAPH_BG))
         self._gfx.add(Rectangle(pos=(self.x, self.y), size=(self.width, self.height)))
 
         # Compute visible slice
@@ -206,13 +207,13 @@ class ScrollableGraphWidget(Widget):
             for i in range(num_grid_lines + 1):
                 frac = i / num_grid_lines
                 y_pos = graph_y + graph_h * frac
-                self._gfx.add(Color(0.25, 0.25, 0.3, 1.0))
+                self._gfx.add(Color(*TC.GRAPH_GRID))
                 self._gfx.add(Line(points=[graph_x, y_pos, graph_x + graph_w, y_pos], width=0.5))
                 if self._show_value_labels:
                     val = max_scale * (frac * 2.0 - 1.0)
                     tex = self._make_text_texture(f"{val:.0f}", font_size=8,
                                                   color=(0.5, 0.5, 0.5, 1))
-                    self._gfx.add(Color(1, 1, 1, 1))
+                    self._gfx.add(Color(*TC.TEXT))
                     self._gfx.add(Rectangle(
                         texture=tex,
                         pos=(graph_x - tex.width - dp(4), y_pos - tex.height / 2),
@@ -224,12 +225,12 @@ class ScrollableGraphWidget(Widget):
             while val <= max_scale:
                 frac = val / max_scale if max_scale > 0 else 0
                 y_pos = graph_y + graph_h * frac
-                self._gfx.add(Color(0.25, 0.25, 0.3, 1.0))
+                self._gfx.add(Color(*TC.GRAPH_GRID))
                 self._gfx.add(Line(points=[graph_x, y_pos, graph_x + graph_w, y_pos], width=0.5))
                 if self._show_value_labels:
                     tex = self._make_text_texture(f"{val:.0f}", font_size=8,
                                                   color=(0.5, 0.5, 0.5, 1))
-                    self._gfx.add(Color(1, 1, 1, 1))
+                    self._gfx.add(Color(*TC.TEXT))
                     self._gfx.add(Rectangle(
                         texture=tex,
                         pos=(graph_x - tex.width - dp(4), y_pos - tex.height / 2),
@@ -238,14 +239,14 @@ class ScrollableGraphWidget(Widget):
                 val += step
 
         # Border
-        self._gfx.add(Color(0.35, 0.35, 0.4, 1.0))
+        self._gfx.add(Color(*TC.GRAPH_BORDER))
         self._gfx.add(Line(rectangle=(graph_x, graph_y, graph_w, graph_h), width=1))
 
         # Threshold line
         if self._threshold_value is not None and not self._bipolar:
             frac_t = min(self._threshold_value / max_scale, 1.0) if max_scale > 0 else 0.0
             y_thresh = graph_y + frac_t * graph_h
-            self._gfx.add(Color(1.0, 0.4, 0.2, 0.8))
+            self._gfx.add(Color(*TC.THRESHOLD_LINE))
             dash_w = dp(6)
             gap_w = dp(4)
             x_cur = graph_x
@@ -258,7 +259,7 @@ class ScrollableGraphWidget(Widget):
                     f"{self._threshold_value:.0f}", font_size=8,
                     color=(1.0, 0.4, 0.2, 1),
                 )
-                self._gfx.add(Color(1, 1, 1, 1))
+                self._gfx.add(Color(*TC.TEXT))
                 self._gfx.add(Rectangle(
                     texture=tex,
                     pos=(graph_x + graph_w + dp(3), y_thresh - tex.height / 2),
@@ -288,7 +289,7 @@ class ScrollableGraphWidget(Widget):
                 if 0.0 <= frac <= 1.0:
                     x_pos = graph_x + frac * graph_w
                     # Vertical grid line
-                    self._gfx.add(Color(0.25, 0.25, 0.3, 1.0))
+                    self._gfx.add(Color(*TC.GRAPH_GRID))
                     self._gfx.add(Line(points=[x_pos, graph_y, x_pos, graph_y + graph_h], width=0.5))
                     # Relative timestamp label
                     mins = int(t_mark) // 60
@@ -296,7 +297,7 @@ class ScrollableGraphWidget(Widget):
                     time_str = f"{mins}:{secs:02d}"
                     tex = self._make_text_texture(time_str, font_size=8,
                                                   color=(0.5, 0.5, 0.5, 1))
-                    self._gfx.add(Color(1, 1, 1, 1))
+                    self._gfx.add(Color(*TC.TEXT))
                     self._gfx.add(Rectangle(
                         texture=tex,
                         pos=(x_pos - tex.width / 2, graph_y - tex.height - dp(2)),
@@ -309,7 +310,7 @@ class ScrollableGraphWidget(Widget):
                         wall_str = f"{lt.tm_hour:02d}:{lt.tm_min:02d}:{lt.tm_sec:02d}"
                         tex2 = self._make_text_texture(wall_str, font_size=7,
                                                        color=(0.4, 0.6, 0.4, 1))
-                        self._gfx.add(Color(1, 1, 1, 1))
+                        self._gfx.add(Color(*TC.TEXT))
                         self._gfx.add(Rectangle(
                             texture=tex2,
                             pos=(x_pos - tex2.width / 2,
@@ -373,7 +374,7 @@ class ScrollableGraphWidget(Widget):
                 tex = self._make_text_texture(
                     f"{last_val:.0f}", font_size=9, color=color,
                 )
-                self._gfx.add(Color(1, 1, 1, 1))
+                self._gfx.add(Color(*TC.TEXT))
                 self._gfx.add(Rectangle(
                     texture=tex,
                     pos=(graph_x + graph_w + dp(3), last_y - tex.height / 2),
@@ -391,7 +392,7 @@ class ScrollableGraphWidget(Widget):
                     frac_m = (x_off + idx_in_slice) / max(vp - 1, 1)
                     if 0.0 <= frac_m <= 1.0:
                         x_pos = graph_x + frac_m * graph_w
-                        self._gfx.add(Color(1.0, 0.2, 1.0, 0.8))
+                        self._gfx.add(Color(*TC.THRESHOLD_LINE))
                         self._gfx.add(Line(points=[x_pos, graph_y, x_pos, graph_y + graph_h], width=1.5))
 
     @staticmethod

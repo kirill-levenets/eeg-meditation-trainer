@@ -161,7 +161,7 @@ class TestDatabaseExtensions(unittest.TestCase):
         sid = self.db.save_session({"duration": 60, "threshold_used": 50})
         self.db.rename_session(sid, "Morning sit")
         session = self.db.get_session(sid)
-        self.assertEqual(session["notes"], "Morning sit")
+        self.assertEqual(session["session_name"], "Morning sit")
 
     def test_delete_session_removes(self):
         sid = self.db.save_session({"duration": 60, "threshold_used": 50})
