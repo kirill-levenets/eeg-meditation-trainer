@@ -3,7 +3,6 @@ from typing import Callable, Dict, Optional
 from kivy.core.window import Window
 from kivy.graphics import Color, Rectangle
 from kivy.metrics import dp
-from kivy.uix.accordion import Accordion, AccordionItem
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.checkbox import CheckBox
 from kivy.uix.label import Label
@@ -13,26 +12,8 @@ from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
 
 from app.config import APP, METRICS
-from app.ui.theme import C, F, S, Icons, StyledButton, SectionLabel, Divider, PresetRow, style_accordion
+from app.ui.theme import C, F, S, Icons, StyledButton, SectionLabel, Divider, PresetRow, ThemedAccordion
 
-
-def _make_section_content() -> BoxLayout:
-    """Create a standard vertical BoxLayout for accordion section content."""
-    content = BoxLayout(
-        orientation="vertical",
-        size_hint_y=None,
-        spacing=S.GAP,
-        padding=[dp(4), S.GAP_SM],
-    )
-    content.bind(minimum_height=content.setter("height"))
-    return content
-
-
-def _wrap_in_scroll(content: BoxLayout) -> ScrollView:
-    """Wrap a content BoxLayout in a ScrollView for accordion items."""
-    sv = ScrollView()
-    sv.add_widget(content)
-    return sv
 
 
 class SettingsScreen(Screen):
@@ -76,11 +57,11 @@ class SettingsScreen(Screen):
             self._bg_rect = Rectangle(size=root.size, pos=root.pos)
         root.bind(size=self._update_bg, pos=self._update_bg)
 
-        accordion = Accordion(orientation="vertical", min_space=dp(36), anim_duration=0.15)
+        scroll = ScrollView()
+        accordion = ThemedAccordion()
 
         # --- Profile section ---
-        profile_item = AccordionItem(title="User Profile", collapse=False)
-        profile_content = _make_section_content()
+        profile_section = accordion.add_section("User Profile", collapsed=False)
 
         self._profile_current_label = Label(
             text="No user selected",
@@ -94,7 +75,7 @@ class SettingsScreen(Screen):
         self._profile_current_label.bind(
             width=lambda w, v: setattr(w, "text_size", (v, None))
         )
-        profile_content.add_widget(self._profile_current_label)
+        profile_section.add_widget(self._profile_current_label)
 
         create_row = BoxLayout(size_hint_y=None, height=S.ROW_H, spacing=S.GAP)
         self._profile_name_input = TextInput(
@@ -114,7 +95,7 @@ class SettingsScreen(Screen):
         )
         create_row.add_widget(self._profile_name_input)
         create_row.add_widget(self._profile_create_btn)
-        profile_content.add_widget(create_row)
+        profile_section.add_widget(create_row)
 
         self._profile_user_list = BoxLayout(
             orientation="vertical",
@@ -124,14 +105,10 @@ class SettingsScreen(Screen):
         self._profile_user_list.bind(
             minimum_height=self._profile_user_list.setter("height")
         )
-        profile_content.add_widget(self._profile_user_list)
-
-        profile_item.add_widget(_wrap_in_scroll(profile_content))
-        accordion.add_widget(profile_item)
+        profile_section.add_widget(self._profile_user_list)
 
         # --- Timer section ---
-        timer_item = AccordionItem(title="Timer", collapse=True)
-        timer_content = _make_section_content()
+        timer_section = accordion.add_section("Timer", collapsed=True)
 
         timer_toggle_row = BoxLayout(size_hint_y=None, height=S.ROW_SM, spacing=S.GAP)
         self._timer_enable_cb = CheckBox(
@@ -148,7 +125,7 @@ class SettingsScreen(Screen):
         timer_enable_lbl.bind(size=timer_enable_lbl.setter("text_size"))
         timer_toggle_row.add_widget(self._timer_enable_cb)
         timer_toggle_row.add_widget(timer_enable_lbl)
-        timer_content.add_widget(timer_toggle_row)
+        timer_section.add_widget(timer_toggle_row)
 
         timer_dur_row = BoxLayout(size_hint_y=None, height=S.ROW_SM, spacing=S.GAP)
         timer_dur_lbl = Label(
@@ -171,21 +148,17 @@ class SettingsScreen(Screen):
         timer_dur_row.add_widget(timer_dur_lbl)
         timer_dur_row.add_widget(self._timer_duration_slider)
         timer_dur_row.add_widget(self._timer_duration_label)
-        timer_content.add_widget(timer_dur_row)
+        timer_section.add_widget(timer_dur_row)
 
         timer_presets = PresetRow(
             values=[5, 10, 15, 20, 30],
             callback=lambda v: setattr(self._timer_duration_slider, "value", v),
             fmt="{} min",
         )
-        timer_content.add_widget(timer_presets)
-
-        timer_item.add_widget(_wrap_in_scroll(timer_content))
-        accordion.add_widget(timer_item)
+        timer_section.add_widget(timer_presets)
 
         # --- Device Status section ---
-        device_item = AccordionItem(title="Device", collapse=True)
-        device_content = _make_section_content()
+        device_section = accordion.add_section("Device", collapsed=True)
 
         self._device_status_label = Label(
             text="Not connected",
@@ -196,7 +169,7 @@ class SettingsScreen(Screen):
             halign="left",
         )
         self._device_status_label.bind(size=self._device_status_label.setter("text_size"))
-        device_content.add_widget(self._device_status_label)
+        device_section.add_widget(self._device_status_label)
 
         self._device_meta_label = Label(
             text="Mode: Mock Data",
@@ -207,7 +180,7 @@ class SettingsScreen(Screen):
             halign="left",
         )
         self._device_meta_label.bind(size=self._device_meta_label.setter("text_size"))
-        device_content.add_widget(self._device_meta_label)
+        device_section.add_widget(self._device_meta_label)
 
         # Mock / Real device switch
         device_mode_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
@@ -226,7 +199,7 @@ class SettingsScreen(Screen):
         device_mode_lbl.bind(size=device_mode_lbl.setter("text_size"))
         device_mode_row.add_widget(self._device_mode_cb)
         device_mode_row.add_widget(device_mode_lbl)
-        device_content.add_widget(device_mode_row)
+        device_section.add_widget(device_mode_row)
 
         # Scan + device list (visible when mock is off)
         self._bt_section = BoxLayout(
@@ -251,14 +224,10 @@ class SettingsScreen(Screen):
             minimum_height=self._bt_device_list.setter("height")
         )
         self._bt_section.add_widget(self._bt_device_list)
-        device_content.add_widget(self._bt_section)
-
-        device_item.add_widget(_wrap_in_scroll(device_content))
-        accordion.add_widget(device_item)
+        device_section.add_widget(self._bt_section)
 
         # --- Threshold section ---
-        threshold_item = AccordionItem(title="Threshold", collapse=True)
-        threshold_content = _make_section_content()
+        threshold_section = accordion.add_section("Threshold", collapsed=True)
 
         slider_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=S.GAP)
         self._threshold_slider = Slider(
@@ -278,13 +247,13 @@ class SettingsScreen(Screen):
         self._threshold_slider.bind(value=self._on_slider_value)
         slider_row.add_widget(self._threshold_slider)
         slider_row.add_widget(self._threshold_value_label)
-        threshold_content.add_widget(slider_row)
+        threshold_section.add_widget(slider_row)
 
         threshold_presets = PresetRow(
             values=[30, 50, 70, 85, 100],
             callback=lambda v: setattr(self._threshold_slider, 'value', v),
         )
-        threshold_content.add_widget(threshold_presets)
+        threshold_section.add_widget(threshold_presets)
 
         # Audio threshold metric picker
         audio_metric_label = Label(
@@ -296,7 +265,7 @@ class SettingsScreen(Screen):
             halign="left",
         )
         audio_metric_label.bind(size=audio_metric_label.setter("text_size"))
-        threshold_content.add_widget(audio_metric_label)
+        threshold_section.add_widget(audio_metric_label)
 
         self._audio_metric_radios: Dict[str, CheckBox] = {}
         self._audio_metric_selected: str = "shamatha_score"
@@ -327,15 +296,11 @@ class SettingsScreen(Screen):
             lbl.bind(size=lbl.setter("text_size"))
             row.add_widget(rb)
             row.add_widget(lbl)
-            threshold_content.add_widget(row)
+            threshold_section.add_widget(row)
             self._audio_metric_radios[key] = rb
 
-        threshold_item.add_widget(_wrap_in_scroll(threshold_content))
-        accordion.add_widget(threshold_item)
-
         # --- Audio section ---
-        audio_item = AccordionItem(title="Audio", collapse=True)
-        audio_content = _make_section_content()
+        audio_section = accordion.add_section("Audio", collapsed=True)
 
         audio_desc = Label(
             text=(
@@ -350,7 +315,7 @@ class SettingsScreen(Screen):
             halign="left",
         )
         audio_desc.bind(size=audio_desc.setter("text_size"))
-        audio_content.add_widget(audio_desc)
+        audio_section.add_widget(audio_desc)
 
         # Test Audio button
         self._test_audio_btn = StyledButton(
@@ -362,7 +327,7 @@ class SettingsScreen(Screen):
             height=dp(40),
         )
         self._test_audio_btn.bind(on_release=self._on_test_audio_pressed)
-        audio_content.add_widget(self._test_audio_btn)
+        audio_section.add_widget(self._test_audio_btn)
 
         # Sinking alert toggle
         sinking_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
@@ -381,7 +346,7 @@ class SettingsScreen(Screen):
         sinking_lbl.bind(size=sinking_lbl.setter("text_size"))
         sinking_row.add_widget(self._sinking_alert_cb)
         sinking_row.add_widget(sinking_lbl)
-        audio_content.add_widget(sinking_row)
+        audio_section.add_widget(sinking_row)
 
         # Subtle distraction alert toggle
         subtle_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
@@ -400,7 +365,7 @@ class SettingsScreen(Screen):
         subtle_lbl.bind(size=subtle_lbl.setter("text_size"))
         subtle_row.add_widget(self._subtle_alert_cb)
         subtle_row.add_widget(subtle_lbl)
-        audio_content.add_widget(subtle_row)
+        audio_section.add_widget(subtle_row)
 
         # Disconnect alert toggle
         disconnect_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
@@ -419,14 +384,10 @@ class SettingsScreen(Screen):
         disconnect_lbl.bind(size=disconnect_lbl.setter("text_size"))
         disconnect_row.add_widget(self._disconnect_alert_cb)
         disconnect_row.add_widget(disconnect_lbl)
-        audio_content.add_widget(disconnect_row)
-
-        audio_item.add_widget(_wrap_in_scroll(audio_content))
-        accordion.add_widget(audio_item)
+        audio_section.add_widget(disconnect_row)
 
         # --- Display section ---
-        display_item = AccordionItem(title="Display", collapse=True)
-        display_content = _make_section_content()
+        display_section = accordion.add_section("Display", collapsed=True)
 
         # Line width slider
         lw_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
@@ -446,14 +407,14 @@ class SettingsScreen(Screen):
         lw_row.add_widget(lw_label)
         lw_row.add_widget(self._line_width_slider)
         lw_row.add_widget(self._line_width_value)
-        display_content.add_widget(lw_row)
+        display_section.add_widget(lw_row)
 
         lw_presets = PresetRow(
             values=[0.5, 1.0, 1.5, 2.0, 3.0],
             callback=lambda v: setattr(self._line_width_slider, 'value', v),
             fmt="{}",
         )
-        display_content.add_widget(lw_presets)
+        display_section.add_widget(lw_presets)
 
         # Screen rotation button
         self._rotate_btn = StyledButton(
@@ -465,7 +426,7 @@ class SettingsScreen(Screen):
         )
         self._rotate_btn.bind(on_release=self._on_rotate_pressed)
         self._current_rotation: int = 0
-        display_content.add_widget(self._rotate_btn)
+        display_section.add_widget(self._rotate_btn)
 
         # Marker hotkey picker
         marker_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
@@ -499,16 +460,12 @@ class SettingsScreen(Screen):
         marker_row.add_widget(marker_lbl)
         marker_row.add_widget(self._marker_hotkey_btn)
         marker_row.add_widget(self._marker_hotkey_clear)
-        display_content.add_widget(marker_row)
+        display_section.add_widget(marker_row)
         self._marker_hotkey: str = "m"
         self._waiting_for_hotkey: bool = False
 
-        display_item.add_widget(_wrap_in_scroll(display_content))
-        accordion.add_widget(display_item)
-
         # --- Graph toggles ---
-        graph_item = AccordionItem(title="Graph Metrics", collapse=True)
-        graph_content = _make_section_content()
+        graph_section = accordion.add_section("Graph Metrics", collapsed=True)
 
         toggle_names = {
             "shamatha_score": "Shamatha Score",
@@ -537,7 +494,7 @@ class SettingsScreen(Screen):
             lbl.bind(size=lbl.setter("text_size"))
             row.add_widget(cb)
             row.add_widget(lbl)
-            graph_content.add_widget(row)
+            graph_section.add_widget(row)
             self._checkboxes[key] = cb
 
         # Custom formula visibility toggle
@@ -558,14 +515,10 @@ class SettingsScreen(Screen):
         cf_lbl.bind(size=cf_lbl.setter("text_size"))
         cf_row.add_widget(self._custom_formula_cb)
         cf_row.add_widget(cf_lbl)
-        graph_content.add_widget(cf_row)
-
-        graph_item.add_widget(_wrap_in_scroll(graph_content))
-        accordion.add_widget(graph_item)
+        graph_section.add_widget(cf_row)
 
         # --- Custom Formula section ---
-        formula_item = AccordionItem(title="Custom Formula", collapse=True)
-        formula_content = _make_section_content()
+        formula_section = accordion.add_section("Custom Formula", collapsed=True)
 
         formula_desc = Label(
             text=(
@@ -579,7 +532,7 @@ class SettingsScreen(Screen):
             halign="left",
         )
         formula_desc.bind(size=formula_desc.setter("text_size"))
-        formula_content.add_widget(formula_desc)
+        formula_section.add_widget(formula_desc)
 
         self._formula_input = TextInput(
             text="",
@@ -592,7 +545,7 @@ class SettingsScreen(Screen):
             foreground_color=C.TEXT,
         )
         self._formula_input.bind(on_text_validate=self._on_formula_submit)
-        formula_content.add_widget(self._formula_input)
+        formula_section.add_widget(self._formula_input)
 
         formula_btns = BoxLayout(
             size_hint_y=None, height=dp(34), spacing=S.GAP_SM
@@ -616,7 +569,7 @@ class SettingsScreen(Screen):
         )
         save_btn.bind(on_release=self._on_save_formula_pressed)
         formula_btns.add_widget(save_btn)
-        formula_content.add_widget(formula_btns)
+        formula_section.add_widget(formula_btns)
 
         self._formula_status = Label(
             text="",
@@ -627,7 +580,7 @@ class SettingsScreen(Screen):
             halign="left",
         )
         self._formula_status.bind(size=self._formula_status.setter("text_size"))
-        formula_content.add_widget(self._formula_status)
+        formula_section.add_widget(self._formula_status)
 
         # Saved formulas header with export button
         saved_header = BoxLayout(size_hint_y=None, height=dp(26), spacing=S.GAP_SM)
@@ -652,7 +605,7 @@ class SettingsScreen(Screen):
         )
         export_formulas_btn.bind(on_release=self._on_export_formulas_pressed)
         saved_header.add_widget(export_formulas_btn)
-        formula_content.add_widget(saved_header)
+        formula_section.add_widget(saved_header)
 
         self._saved_formulas_box = BoxLayout(
             orientation="vertical",
@@ -660,7 +613,7 @@ class SettingsScreen(Screen):
             height=dp(0),
             spacing=dp(2),
         )
-        formula_content.add_widget(self._saved_formulas_box)
+        formula_section.add_widget(self._saved_formulas_box)
 
         examples = Label(
             text=(
@@ -680,7 +633,7 @@ class SettingsScreen(Screen):
             valign="top",
         )
         examples.bind(size=examples.setter("text_size"))
-        formula_content.add_widget(examples)
+        formula_section.add_widget(examples)
 
         ref = Label(
             text=(
@@ -708,14 +661,10 @@ class SettingsScreen(Screen):
             valign="top",
         )
         ref.bind(size=ref.setter("text_size"))
-        formula_content.add_widget(ref)
-
-        formula_item.add_widget(_wrap_in_scroll(formula_content))
-        accordion.add_widget(formula_item)
+        formula_section.add_widget(ref)
 
         # --- Theme section ---
-        theme_item = AccordionItem(title="Theme", collapse=True)
-        theme_content = _make_section_content()
+        theme_section = accordion.add_section("Theme", collapsed=True)
 
         self._theme_buttons = {}
         theme_row = BoxLayout(
@@ -736,7 +685,7 @@ class SettingsScreen(Screen):
             btn.bind(on_release=self._on_theme_select)
             theme_row.add_widget(btn)
             self._theme_buttons[theme_name] = btn
-        theme_content.add_widget(theme_row)
+        theme_section.add_widget(theme_row)
 
         theme_note = Label(
             text="Theme change takes effect on next app restart",
@@ -747,17 +696,12 @@ class SettingsScreen(Screen):
             halign="left",
         )
         theme_note.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
-        theme_content.add_widget(theme_note)
+        theme_section.add_widget(theme_note)
 
-        theme_item.add_widget(_wrap_in_scroll(theme_content))
-        accordion.add_widget(theme_item)
-
-        root.add_widget(accordion)
+        scroll.add_widget(accordion)
+        root.add_widget(scroll)
         self._accordion = accordion
         self.add_widget(root)
-        # Defer accordion styling until screen has real size
-        from kivy.clock import Clock
-        Clock.schedule_once(lambda dt: style_accordion(self._accordion), 0.5)
 
     def _update_bg(self, *args) -> None:
         root = self.children[0] if self.children else None
