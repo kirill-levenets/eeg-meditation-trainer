@@ -1,6 +1,6 @@
 # EEG Meditation Trainer
 
-Cross-platform application for training Shamatha meditation using EEG neurofeedback from NeuroSky MindWave Mobile 2. Built with Python/Kivy for Android, Linux, and Windows.
+Cross-platform application for training Shamatha meditation using EEG neurofeedback from NeuroSky MindWave Mobile 2. Built with Python/Kivy for Android, Linux, Windows, and macOS.
 
 Inspired by the [EEG meditation research and Vernihor formula](https://scriptures.ru/yoga/eeg_voprosy_i_otvety.htm) from scriptures.ru.
 
@@ -15,16 +15,22 @@ Inspired by the [EEG meditation research and Vernihor formula](https://scripture
 - **Meditation timer** — Configurable duration (1-120 min) with presets, countdown display, auto-stop, custom end sound with file chooser and test button
 - **State classification** — Stable Focus, Subtle Distraction, Gross Distraction, Sinking, Neutral
 - **NeuroSky MindWave Mobile 2** — Bluetooth RFCOMM on Android (pyjnius) and Linux (Python socket); ThinkGear protocol parser; background reader thread; BT connection wait with status display; paired device scanning
-- **Settings panel** — Device status, mock/real switch, BT scan + select, threshold slider, audio metric picker (radio buttons), test audio, sinking/subtle distraction/disconnect alert toggles, line width slider, screen rotation, graph metric toggles, custom formula show/hide checkbox; all persisted per user
+- **Settings panel** — ThemedAccordion sections: User Profile, Timer, Device, Threshold (max 180), Audio, Display, Graph Metrics, Custom Formula, Theme selector; preset buttons under sliders; profile and timer inline; all persisted per user
 - **Custom formula engine** — Python-style expressions with band powers, combined/normalized bands, sqrt-relative bands, computed metrics, math functions, and windowed `avg(expr, N)`; AST-parsed with whitelist validation; save/load/export formula library per user
-- **Session diary** — Notes, tags, mood rating, CSV export with file save dialog, delete/rename sessions, tabbed signal preview (Metrics / Raw EEG / Frequencies) with markers and threshold line
+- **Session diary** — Notes, tags, mood rating, CSV export with file save dialog, tabbed signal preview (Metrics / Raw EEG / Frequencies) with markers and threshold line; inline rename/delete moved to history list; session names include device type
 - **Full signal storage** — Raw bands, computed metrics, native NeuroSky values, markers — all per-tick in SQLite with automatic schema migration
 - **CSV export** — Full session data with file chooser dialog; includes marker column
 - **Mock EEG simulation** — NeuroSky-compatible: band powers, 512Hz raw waveform, eSense values; state machine with smooth transitions
 - **User profiles** — Multiple profiles with per-user sessions, settings, and formulas; last user persisted; diary disabled until user selected
 - **Session guards** — Start blocked without user or device; stop dialog with Save/Discard/Cancel; timer auto-stop saves automatically
 - **Analytics** — Daily/weekly/monthly trends with step-20 grid lines, streak counter, storage usage display
-- **Navigation** — Tab bar with hamburger toggle button; Profile tab first
+- **Navigation** — 3-tab bottom navigation (Session / History / Settings) with Material Design icons
+- **First-run wizard** — 2-step setup on first launch (create profile, connect device or use demo mode)
+- **Session end summary** — Post-session overlay with stats and quick notes field
+- **Calendar heatmap** — GitHub-style history view colored by daily avg shamatha score; tap a day to filter sessions
+- **Theme system** — 4 themes (Dark Blue, Dark Green, Light Cream, Light Green) with live refresh; custom styled widgets with rounded corners
+- **App icon** — Custom EEG brainwave icon and Android presplash
+- **macOS support** — Native build via PyInstaller
 - **Android storage** — Tries /sdcard/EEGMeditation, falls back to app-private storage if permission denied
 
 ## Documentation
@@ -37,16 +43,22 @@ Inspired by the [EEG meditation research and Vernihor formula](https://scripture
 
 ```
 app/
-├── ui/                     # Kivy screens and widgets
-│   ├── app_manager.py          # Main app, ScreenManager, update loop, navigation
-│   ├── live_session.py         # Session screen with graph, stats, markers, controls
-│   ├── raw_eeg_screen.py       # ScrollableGraphWidget + Raw EEG screen
-│   ├── profile_screen.py       # User profile management
-│   ├── settings_screen.py      # All settings: device, audio, display, formula
-│   ├── timer_screen.py         # Meditation timer with countdown
-│   ├── diary_screen.py         # Session diary with preview graphs and CSV export
-│   ├── analytics_screen.py     # Trend graphs and summary statistics
-│   └── home_screen.py          # Home screen (alternative navigation, unused)
+├── ui/
+│   ├── theme.py                # Colors, fonts, styled widgets, ThemedAccordion
+│   ├── app_manager.py          # Main app, screen routing, session lifecycle
+│   ├── live_session.py         # Session screen (metrics + raw EEG toggle)
+│   ├── history_screen.py       # Calendar heatmap + session list
+│   ├── settings_screen.py      # Accordion settings with all config sections
+│   ├── wizard_screen.py        # First-run setup wizard
+│   ├── diary_screen.py         # Session detail view with graphs
+│   ├── raw_eeg_screen.py       # ScrollableGraphWidget
+│   ├── profile_screen.py       # User profile management (also in settings)
+│   ├── timer_screen.py         # Meditation timer (also in settings)
+│   ├── analytics_screen.py     # Trend graphs
+│   └── home_screen.py          # Legacy (unused)
+├── assets/
+│   ├── fonts/                   # Material Design Icons font
+│   └── icons/                   # App icon (PNG/ICO/ICNS) + presplash
 ├── eeg/                    # EEG data sources
 │   ├── mock_stream_v2.py       # Frequency-based EEG synthesis (active mock)
 │   ├── neurosky_stream.py      # Real Bluetooth RFCOMM + ThinkGear parser
@@ -97,7 +109,7 @@ source venv/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Run tests (241 tests)
+# Run tests (236 tests)
 python -m pytest tests/ -v
 
 # Run application
@@ -146,6 +158,21 @@ REM Output: dist\EEG_Meditation_Trainer\EEG_Meditation_Trainer.exe
 
 Requires Python 3.10-3.12 from python.org.
 
+### macOS
+
+```bash
+# macOS (CI only, or local with Homebrew SDL2)
+# brew install sdl2 sdl2_image sdl2_mixer sdl2_ttf
+# pyinstaller --windowed --icon app/assets/icons/icon.icns main.py
+```
+
+### CI
+
+```bash
+# CI: build single platform
+gh workflow run release.yml -f platform=linux  # or windows, macos, android, all
+```
+
 ## Configuration
 
 All tunable parameters in `app/config.py`:
@@ -160,8 +187,8 @@ This software is provided for educational and personal exploration purposes only
 
 ## Tech Stack
 
-- **Python 3.11** — Core language
-- **Kivy 2.3** — Cross-platform UI + SoundLoader audio
+- **Python 3.10-3.12** — Core language
+- **Kivy 2.3** — Cross-platform UI + SoundLoader audio (Android, Linux, Windows, macOS)
 - **SQLite** — Session, metrics, user profile storage
 - **Buildozer** — Android packaging
-- **PyInstaller** — Desktop executable packaging
+- **PyInstaller** — Desktop executable packaging (Linux, Windows, macOS)
