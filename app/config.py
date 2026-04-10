@@ -96,7 +96,7 @@ class AppConfig:
     DISCONNECT_CYCLES: int = 4
 
     DISCONNECT_ALERT_ENABLED: bool = False
-    USE_MOCK_DEVICE: bool = True
+    USE_MOCK_DEVICE: bool = False
 
     TIMER_ENABLED: bool = False
     TIMER_DEFAULT_MINUTES: int = 20

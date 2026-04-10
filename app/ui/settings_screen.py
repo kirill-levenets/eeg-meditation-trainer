@@ -12,7 +12,7 @@ from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
 
 from app.config import APP, METRICS
-from app.ui.theme import C, F, S, Card, StyledButton, SectionLabel, Divider
+from app.ui.theme import C, F, S, Card, StyledButton, SectionLabel, Divider, CollapsibleSection, PresetRow
 
 
 class SettingsScreen(Screen):
@@ -75,8 +75,107 @@ class SettingsScreen(Screen):
         )
         layout.add_widget(title)
 
+        # --- Profile section ---
+        profile_section = CollapsibleSection(title="User Profile", collapsed=False)
+
+        self._profile_current_label = Label(
+            text="No user selected",
+            font_size=F.BODY,
+            color=C.PRIMARY,
+            bold=True,
+            size_hint_y=None,
+            height=dp(24),
+            halign="left",
+        )
+        self._profile_current_label.bind(
+            width=lambda w, v: setattr(w, "text_size", (v, None))
+        )
+        profile_section.add_content(self._profile_current_label)
+
+        create_row = BoxLayout(size_hint_y=None, height=S.ROW_H, spacing=S.GAP)
+        self._profile_name_input = TextInput(
+            hint_text="New user name...",
+            multiline=False,
+            font_size=F.BODY,
+            foreground_color=C.TEXT,
+            background_color=list(C.BG_INPUT),
+            size_hint_x=0.6,
+        )
+        self._profile_create_btn = StyledButton(
+            text="Create",
+            bg_color=C.ACCENT,
+            bg_pressed=C.ACCENT_DIM,
+            font_size=F.BODY,
+            size_hint_x=0.4,
+        )
+        create_row.add_widget(self._profile_name_input)
+        create_row.add_widget(self._profile_create_btn)
+        profile_section.add_content(create_row)
+
+        self._profile_user_list = BoxLayout(
+            orientation="vertical",
+            size_hint_y=None,
+            spacing=S.GAP_SM,
+        )
+        self._profile_user_list.bind(
+            minimum_height=self._profile_user_list.setter("height")
+        )
+        profile_section.add_content(self._profile_user_list)
+        layout.add_widget(profile_section)
+
+        # --- Timer section ---
+        timer_section = CollapsibleSection(title="Meditation Timer", collapsed=True)
+
+        timer_toggle_row = BoxLayout(size_hint_y=None, height=S.ROW_SM, spacing=S.GAP)
+        self._timer_enable_cb = CheckBox(
+            active=False, size_hint_x=0.15,
+            size_hint_y=None, height=S.ROW_SM,
+        )
+        timer_enable_lbl = Label(
+            text="Enable Timer",
+            font_size=F.BODY,
+            color=C.TEXT,
+            size_hint_x=0.85,
+            halign="left", valign="middle",
+        )
+        timer_enable_lbl.bind(size=timer_enable_lbl.setter("text_size"))
+        timer_toggle_row.add_widget(self._timer_enable_cb)
+        timer_toggle_row.add_widget(timer_enable_lbl)
+        timer_section.add_content(timer_toggle_row)
+
+        timer_dur_row = BoxLayout(size_hint_y=None, height=S.ROW_SM, spacing=S.GAP)
+        timer_dur_lbl = Label(
+            text="Duration:", font_size=F.BODY, color=C.TEXT_SECONDARY,
+            size_hint_x=0.25, halign="left",
+        )
+        timer_dur_lbl.bind(size=timer_dur_lbl.setter("text_size"))
+        self._timer_duration_slider = Slider(
+            min=1, max=120, value=20, step=1, size_hint_x=0.55,
+        )
+        self._timer_duration_label = Label(
+            text="20 min", font_size=F.BODY, bold=True, color=C.TEXT,
+            size_hint_x=0.2,
+        )
+        self._timer_duration_slider.bind(
+            value=lambda inst, val: setattr(
+                self._timer_duration_label, "text", f"{int(val)} min"
+            )
+        )
+        timer_dur_row.add_widget(timer_dur_lbl)
+        timer_dur_row.add_widget(self._timer_duration_slider)
+        timer_dur_row.add_widget(self._timer_duration_label)
+        timer_section.add_content(timer_dur_row)
+
+        timer_presets = PresetRow(
+            values=[5, 10, 15, 20, 30],
+            callback=lambda v: setattr(self._timer_duration_slider, "value", v),
+            fmt="{} min",
+        )
+        timer_section.add_content(timer_presets)
+        layout.add_widget(timer_section)
+
         # --- Device Status section ---
-        layout.add_widget(SectionLabel(text="Device"))
+        device_section = CollapsibleSection(title="Device", collapsed=False)
 
         self._device_status_label = Label(
             text="Not connected",
@@ -87,7 +186,7 @@ class SettingsScreen(Screen):
             halign="left",
         )
         self._device_status_label.bind(size=self._device_status_label.setter("text_size"))
-        layout.add_widget(self._device_status_label)
+        device_section.add_content(self._device_status_label)
 
         self._device_meta_label = Label(
             text="Mode: Mock Data",
@@ -98,7 +197,7 @@ class SettingsScreen(Screen):
             halign="left",
         )
         self._device_meta_label.bind(size=self._device_meta_label.setter("text_size"))
-        layout.add_widget(self._device_meta_label)
+        device_section.add_content(self._device_meta_label)
 
         # Mock / Real device switch
         device_mode_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
@@ -117,7 +216,7 @@ class SettingsScreen(Screen):
         device_mode_lbl.bind(size=device_mode_lbl.setter("text_size"))
         device_mode_row.add_widget(self._device_mode_cb)
         device_mode_row.add_widget(device_mode_lbl)
-        layout.add_widget(device_mode_row)
+        device_section.add_content(device_mode_row)
 
         # Scan + device list (visible when mock is off)
         self._bt_section = BoxLayout(
@@ -142,10 +241,12 @@ class SettingsScreen(Screen):
             minimum_height=self._bt_device_list.setter("height")
         )
         self._bt_section.add_widget(self._bt_device_list)
-        layout.add_widget(self._bt_section)
+        device_section.add_content(self._bt_section)
+
+        layout.add_widget(device_section)
 
         # --- Threshold section ---
-        layout.add_widget(SectionLabel(text="Meditation Threshold"))
+        threshold_section = CollapsibleSection(title="Meditation Threshold", collapsed=False)
 
         slider_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=S.GAP)
         self._threshold_slider = Slider(
@@ -165,7 +266,13 @@ class SettingsScreen(Screen):
         self._threshold_slider.bind(value=self._on_slider_value)
         slider_row.add_widget(self._threshold_slider)
         slider_row.add_widget(self._threshold_value_label)
-        layout.add_widget(slider_row)
+        threshold_section.add_content(slider_row)
+
+        threshold_presets = PresetRow(
+            values=[30, 50, 70, 85, 100],
+            callback=lambda v: setattr(self._threshold_slider, 'value', v),
+        )
+        threshold_section.add_content(threshold_presets)
 
         # Audio threshold metric picker
         audio_metric_label = Label(
@@ -177,7 +284,7 @@ class SettingsScreen(Screen):
             halign="left",
         )
         audio_metric_label.bind(size=audio_metric_label.setter("text_size"))
-        layout.add_widget(audio_metric_label)
+        threshold_section.add_content(audio_metric_label)
 
         self._audio_metric_radios: Dict[str, CheckBox] = {}
         self._audio_metric_selected: str = "shamatha_score"
@@ -208,11 +315,13 @@ class SettingsScreen(Screen):
             lbl.bind(size=lbl.setter("text_size"))
             row.add_widget(rb)
             row.add_widget(lbl)
-            layout.add_widget(row)
+            threshold_section.add_content(row)
             self._audio_metric_radios[key] = rb
 
+        layout.add_widget(threshold_section)
+
         # --- Audio section ---
-        layout.add_widget(SectionLabel(text="Audio Feedback"))
+        audio_section = CollapsibleSection(title="Audio Feedback", collapsed=True)
 
         audio_desc = Label(
             text=(
@@ -227,7 +336,7 @@ class SettingsScreen(Screen):
             halign="left",
         )
         audio_desc.bind(size=audio_desc.setter("text_size"))
-        layout.add_widget(audio_desc)
+        audio_section.add_content(audio_desc)
 
         # Test Audio button
         self._test_audio_btn = StyledButton(
@@ -239,7 +348,7 @@ class SettingsScreen(Screen):
             height=dp(40),
         )
         self._test_audio_btn.bind(on_release=self._on_test_audio_pressed)
-        layout.add_widget(self._test_audio_btn)
+        audio_section.add_content(self._test_audio_btn)
 
         # Sinking alert toggle
         sinking_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
@@ -258,7 +367,7 @@ class SettingsScreen(Screen):
         sinking_lbl.bind(size=sinking_lbl.setter("text_size"))
         sinking_row.add_widget(self._sinking_alert_cb)
         sinking_row.add_widget(sinking_lbl)
-        layout.add_widget(sinking_row)
+        audio_section.add_content(sinking_row)
 
         # Subtle distraction alert toggle
         subtle_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
@@ -277,7 +386,7 @@ class SettingsScreen(Screen):
         subtle_lbl.bind(size=subtle_lbl.setter("text_size"))
         subtle_row.add_widget(self._subtle_alert_cb)
         subtle_row.add_widget(subtle_lbl)
-        layout.add_widget(subtle_row)
+        audio_section.add_content(subtle_row)
 
         # Disconnect alert toggle
         disconnect_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
@@ -296,10 +405,12 @@ class SettingsScreen(Screen):
         disconnect_lbl.bind(size=disconnect_lbl.setter("text_size"))
         disconnect_row.add_widget(self._disconnect_alert_cb)
         disconnect_row.add_widget(disconnect_lbl)
-        layout.add_widget(disconnect_row)
+        audio_section.add_content(disconnect_row)
+
+        layout.add_widget(audio_section)
 
         # --- Display section ---
-        layout.add_widget(SectionLabel(text="Display"))
+        display_section = CollapsibleSection(title="Display", collapsed=True)
 
         # Line width slider
         lw_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
@@ -319,7 +430,14 @@ class SettingsScreen(Screen):
         lw_row.add_widget(lw_label)
         lw_row.add_widget(self._line_width_slider)
         lw_row.add_widget(self._line_width_value)
-        layout.add_widget(lw_row)
+        display_section.add_content(lw_row)
+
+        lw_presets = PresetRow(
+            values=[0.5, 1.0, 1.5, 2.0, 3.0],
+            callback=lambda v: setattr(self._line_width_slider, 'value', v),
+            fmt="{}",
+        )
+        display_section.add_content(lw_presets)
 
         # Screen rotation button
         self._rotate_btn = StyledButton(
@@ -331,7 +449,7 @@ class SettingsScreen(Screen):
         )
         self._rotate_btn.bind(on_release=self._on_rotate_pressed)
         self._current_rotation: int = 0
-        layout.add_widget(self._rotate_btn)
+        display_section.add_content(self._rotate_btn)
 
         # Marker hotkey picker
         marker_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
@@ -365,12 +483,14 @@ class SettingsScreen(Screen):
         marker_row.add_widget(marker_lbl)
         marker_row.add_widget(self._marker_hotkey_btn)
         marker_row.add_widget(self._marker_hotkey_clear)
-        layout.add_widget(marker_row)
+        display_section.add_content(marker_row)
         self._marker_hotkey: str = "m"
         self._waiting_for_hotkey: bool = False
 
+        layout.add_widget(display_section)
+
         # --- Graph toggles ---
-        layout.add_widget(SectionLabel(text="Graph Metrics"))
+        graph_section = CollapsibleSection(title="Graph Metrics", collapsed=True)
 
         toggle_names = {
             "shamatha_score": "Shamatha Score",
@@ -399,7 +519,7 @@ class SettingsScreen(Screen):
             lbl.bind(size=lbl.setter("text_size"))
             row.add_widget(cb)
             row.add_widget(lbl)
-            layout.add_widget(row)
+            graph_section.add_content(row)
             self._checkboxes[key] = cb
 
         # Custom formula visibility toggle
@@ -420,10 +540,12 @@ class SettingsScreen(Screen):
         cf_lbl.bind(size=cf_lbl.setter("text_size"))
         cf_row.add_widget(self._custom_formula_cb)
         cf_row.add_widget(cf_lbl)
-        layout.add_widget(cf_row)
+        graph_section.add_content(cf_row)
+
+        layout.add_widget(graph_section)
 
         # --- Custom Formula section ---
-        layout.add_widget(SectionLabel(text="Custom Formula"))
+        formula_section = CollapsibleSection(title="Custom Formula", collapsed=True)
 
         formula_desc = Label(
             text=(
@@ -437,7 +559,7 @@ class SettingsScreen(Screen):
             halign="left",
         )
         formula_desc.bind(size=formula_desc.setter("text_size"))
-        layout.add_widget(formula_desc)
+        formula_section.add_content(formula_desc)
 
         self._formula_input = TextInput(
             text="",
@@ -450,7 +572,7 @@ class SettingsScreen(Screen):
             foreground_color=C.TEXT,
         )
         self._formula_input.bind(on_text_validate=self._on_formula_submit)
-        layout.add_widget(self._formula_input)
+        formula_section.add_content(self._formula_input)
 
         formula_btns = BoxLayout(
             size_hint_y=None, height=dp(34), spacing=S.GAP_SM
@@ -474,7 +596,7 @@ class SettingsScreen(Screen):
         )
         save_btn.bind(on_release=self._on_save_formula_pressed)
         formula_btns.add_widget(save_btn)
-        layout.add_widget(formula_btns)
+        formula_section.add_content(formula_btns)
 
         self._formula_status = Label(
             text="",
@@ -485,7 +607,7 @@ class SettingsScreen(Screen):
             halign="left",
         )
         self._formula_status.bind(size=self._formula_status.setter("text_size"))
-        layout.add_widget(self._formula_status)
+        formula_section.add_content(self._formula_status)
 
         # Saved formulas header with export button
         saved_header = BoxLayout(size_hint_y=None, height=dp(26), spacing=S.GAP_SM)
@@ -510,7 +632,7 @@ class SettingsScreen(Screen):
         )
         export_formulas_btn.bind(on_release=self._on_export_formulas_pressed)
         saved_header.add_widget(export_formulas_btn)
-        layout.add_widget(saved_header)
+        formula_section.add_content(saved_header)
 
         self._saved_formulas_box = BoxLayout(
             orientation="vertical",
@@ -518,7 +640,7 @@ class SettingsScreen(Screen):
             height=dp(0),
             spacing=dp(2),
         )
-        layout.add_widget(self._saved_formulas_box)
+        formula_section.add_content(self._saved_formulas_box)
 
         examples = Label(
             text=(
@@ -538,7 +660,7 @@ class SettingsScreen(Screen):
             valign="top",
         )
         examples.bind(size=examples.setter("text_size"))
-        layout.add_widget(examples)
+        formula_section.add_content(examples)
 
         ref = Label(
             text=(
@@ -566,7 +688,9 @@ class SettingsScreen(Screen):
             valign="top",
         )
         ref.bind(size=ref.setter("text_size"))
-        layout.add_widget(ref)
+        formula_section.add_content(ref)
+
+        layout.add_widget(formula_section)
 
         # --- Info section ---
         spacer = Label(size_hint_y=None, height=dp(20))
@@ -899,6 +1023,85 @@ class SettingsScreen(Screen):
 
     def set_audio_metric_callback(self, callback: Callable) -> None:
         self._on_audio_metric_change = callback
+
+    # --- Profile callbacks and methods ---
+
+    def set_profile_callbacks(self, on_switch=None, on_create=None, on_delete=None):
+        self._on_profile_switch = on_switch
+        self._on_profile_create = on_create
+        self._on_profile_delete = on_delete
+        self._profile_create_btn.bind(on_release=self._on_profile_create_pressed)
+
+    def _on_profile_create_pressed(self, *args):
+        name = self._profile_name_input.text.strip()
+        if name and self._on_profile_create:
+            self._on_profile_create(name)
+            self._profile_name_input.text = ""
+
+    def populate_users(self, users, current_user_id=None):
+        """Fill the user list in the Profile section."""
+        self._profile_user_list.clear_widgets()
+        if current_user_id is None:
+            self._profile_current_label.text = "Current: All Users"
+        else:
+            for u in users:
+                if u["id"] == current_user_id:
+                    self._profile_current_label.text = f"Current: {u['name']}"
+                    break
+
+        for u in users:
+            is_active = u["id"] == current_user_id
+            row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP_SM)
+            btn = StyledButton(
+                text=u["name"],
+                bg_color=C.ACCENT_DIM if is_active else C.BG_CARD,
+                text_color=C.TEXT if is_active else C.TEXT_SECONDARY,
+                font_size=F.BODY,
+                height=dp(36),
+                bold=is_active,
+            )
+            btn._user_id = u["id"]
+            btn.bind(on_release=lambda b: (
+                self._on_profile_switch(b._user_id) if self._on_profile_switch else None
+            ))
+            row.add_widget(btn)
+
+            del_btn = StyledButton(
+                text="x",
+                bg_color=C.BG_CARD,
+                text_color=C.DANGER,
+                font_size=F.SMALL,
+                height=dp(36),
+                size_hint_x=None,
+                width=dp(36),
+                bold=False,
+            )
+            del_btn._user_id = u["id"]
+            del_btn._user_name = u["name"]
+            del_btn.bind(on_release=lambda b: (
+                self._on_profile_delete(b._user_id) if self._on_profile_delete else None
+            ))
+            row.add_widget(del_btn)
+            self._profile_user_list.add_widget(row)
+
+    # --- Timer properties ---
+
+    @property
+    def timer_enabled(self) -> bool:
+        return self._timer_enable_cb.active
+
+    @timer_enabled.setter
+    def timer_enabled(self, value: bool):
+        self._timer_enable_cb.active = value
+
+    @property
+    def timer_minutes(self) -> int:
+        return int(self._timer_duration_slider.value)
+
+    @timer_minutes.setter
+    def timer_minutes(self, value: int):
+        self._timer_duration_slider.value = value
+        self._timer_duration_label.text = f"{value} min"
 
     @property
     def audio_metric(self) -> str:

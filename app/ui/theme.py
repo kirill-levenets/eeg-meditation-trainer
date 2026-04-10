@@ -253,6 +253,129 @@ class SectionLabel(Label):
         self.bind(size=self.setter("text_size"))
 
 
+class CollapsibleSection(BoxLayout):
+    """Tappable section header that expands/collapses its content.
+
+    Usage:
+        section = CollapsibleSection(title="Audio", collapsed=True)
+        section.add_content(widget1)
+        section.add_content(widget2)
+        parent.add_widget(section)
+    """
+
+    collapsed = BooleanProperty(False)
+
+    def __init__(self, title="", collapsed=False, **kwargs):
+        self._init_done = False
+        kwargs.setdefault("orientation", "vertical")
+        kwargs.setdefault("size_hint_y", None)
+
+        # Create content before super().__init__ to avoid issues
+        self._content = BoxLayout(
+            orientation="vertical",
+            size_hint_y=None,
+            spacing=S.GAP,
+            padding=[dp(4), S.GAP_SM],
+        )
+        self._content.bind(minimum_height=self._content.setter("height"))
+
+        super().__init__(**kwargs)
+        self._title = title
+
+        # Header row (tappable via on_touch_down)
+        self._header = BoxLayout(
+            size_hint_y=None, height=S.ROW_SM + dp(4),
+            padding=[0, dp(2)],
+        )
+        self._arrow = Label(
+            text="v" if not collapsed else ">",
+            font_size=F.BODY,
+            color=C.TEXT_MUTED,
+            size_hint_x=None,
+            width=dp(20),
+        )
+        self._label = Label(
+            text=title,
+            font_size=F.H2,
+            bold=True,
+            color=C.TEXT_SECONDARY,
+            halign="left",
+            valign="middle",
+        )
+        self._label.bind(size=self._label.setter("text_size"))
+        self._header.add_widget(self._arrow)
+        self._header.add_widget(self._label)
+        super().add_widget(self._header)
+
+        super().add_widget(Divider())
+        super().add_widget(self._content)
+
+        if collapsed:
+            self._content.height = 0
+            self._content.opacity = 0
+
+        self.bind(minimum_height=self.setter("height"))
+        self._header.bind(on_touch_down=self._on_header_tap)
+        self._init_done = True
+
+    def add_content(self, widget):
+        """Add a widget to the collapsible content area."""
+        self._content.add_widget(widget)
+
+    def _on_header_tap(self, widget, touch):
+        if not self._header.collide_point(*touch.pos):
+            return False
+        self.collapsed = not self.collapsed
+        return True
+
+    def on_collapsed(self, *args):
+        if self.collapsed:
+            self._content.saved_height = self._content.height
+            self._content.height = 0
+            self._content.opacity = 0
+            self._arrow.text = ">"
+        else:
+            self._content.opacity = 1
+            # Force recalc
+            self._content.height = 0
+            self._content.bind(minimum_height=self._content.setter("height"))
+            self._arrow.text = "v"
+
+    def add_widget(self, widget, *args, **kwargs):
+        """Redirect add_widget to content area after init."""
+        if hasattr(self, "_init_done"):
+            self._content.add_widget(widget, *args, **kwargs)
+        else:
+            super().add_widget(widget, *args, **kwargs)
+
+
+class PresetRow(BoxLayout):
+    """Row of quick-pick value buttons for a slider.
+
+    Usage:
+        presets = PresetRow(values=[30, 50, 70, 85, 100], callback=slider_set)
+    """
+
+    def __init__(self, values, callback=None, fmt="{}", **kwargs):
+        kwargs.setdefault("size_hint_y", None)
+        kwargs.setdefault("height", dp(28))
+        kwargs.setdefault("spacing", S.GAP_SM)
+        super().__init__(**kwargs)
+        for v in values:
+            btn = StyledButton(
+                text=fmt.format(v),
+                bg_color=C.BG_CARD,
+                text_color=C.TEXT_MUTED,
+                font_size=F.TINY,
+                height=dp(26),
+                bold=False,
+            )
+            btn._preset_value = v
+            if callback:
+                btn.bind(on_release=lambda b, cb=callback, val=v: cb(val))
+            self.add_widget(btn)
+
+
 class IconLabel(Label):
     """Label that renders a text icon character at a given size."""
 

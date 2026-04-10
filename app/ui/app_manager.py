@@ -243,6 +243,13 @@ class EEGMeditationApp(App):
         self._profile_screen.set_user_create_callback(self._on_user_create)
         self._profile_screen.set_user_delete_callback(self._on_user_delete)
 
+        # Profile section in settings
+        self._settings_screen.set_profile_callbacks(
+            on_switch=self._on_user_switch,
+            on_create=self._on_user_create,
+            on_delete=self._on_user_delete,
+        )
+
     def _restore_last_user(self) -> None:
         """Restore last selected user from DB settings on startup."""
         saved = self._db.get_setting("last_user_id")
@@ -1129,14 +1136,18 @@ class EEGMeditationApp(App):
     def _refresh_profile(self) -> None:
         users = self._db.get_all_users()
         self._profile_screen.populate_users(users, self._current_user_id)
+        self._settings_screen.populate_users(users, self._current_user_id)
 
     def _save_user_settings(self) -> None:
         """Persist current UI settings for the active user."""
         uid = self._current_user_id
         if not uid:
             return
-        self._db.set_user_setting(uid, "timer_enabled", str(self._timer_screen.enabled))
-        self._db.set_user_setting(uid, "timer_minutes", str(self._timer_screen._duration_minutes))
+        # Sync timer from settings screen to timer screen
+        self._timer_screen._enable_cb.active = self._settings_screen.timer_enabled
+        self._timer_screen._set_duration(self._settings_screen.timer_minutes)
+        self._db.set_user_setting(uid, "timer_enabled", str(self._settings_screen.timer_enabled))
+        self._db.set_user_setting(uid, "timer_minutes", str(self._settings_screen.timer_minutes))
         self._db.set_user_setting(uid, "timer_sound", self._timer_screen.custom_sound_path)
         self._db.set_user_setting(uid, "sinking_alert", str(self._audio.sinking_alert_enabled))
         self._db.set_user_setting(uid, "subtle_alert", str(self._audio.subtle_alert_enabled))
@@ -1175,11 +1186,14 @@ class EEGMeditationApp(App):
         if timer_on is not None:
             active = timer_on == "True"
             self._timer_screen._enable_cb.active = active
+            self._settings_screen.timer_enabled = active
 
         timer_min = g(user_id, "timer_minutes")
         if timer_min is not None:
             try:
-                self._timer_screen._set_duration(int(timer_min))
+                val = int(timer_min)
+                self._timer_screen._set_duration(val)
+                self._settings_screen.timer_minutes = val
             except (ValueError, TypeError):
                 pass
 
