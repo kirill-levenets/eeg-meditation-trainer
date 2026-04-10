@@ -431,20 +431,22 @@ class HistoryScreen(Screen):
             padding=[0, dp(6)],
         )
         btn_rename = StyledButton(
-            text="Ab",
-            bg_color=C.BG_CARD,
+            text="\u270E",
+            bg_color=C.PRIMARY,
             text_color=C.PRIMARY,
-            font_size=F.SMALL,
+            font_size=F.H3,
             height=dp(32),
             bold=False,
+            outline=True,
         )
         btn_del = StyledButton(
-            text="x",
-            bg_color=C.BG_CARD,
+            text="\u2715",
+            bg_color=C.DANGER,
             text_color=C.DANGER,
-            font_size=F.SMALL,
+            font_size=F.H3,
             height=dp(32),
             bold=False,
+            outline=True,
         )
         actions.add_widget(btn_rename)
         actions.add_widget(btn_del)
@@ -471,7 +473,7 @@ class HistoryScreen(Screen):
             size_hint_x=1,
         )
         rename_save = StyledButton(
-            text="Save",
+            text="\u2713 Save",
             bg_color=C.ACCENT,
             font_size=F.SMALL,
             height=dp(34),

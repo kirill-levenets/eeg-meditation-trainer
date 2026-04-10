@@ -210,7 +210,7 @@ class DiaryScreen(Screen):
 
         # Back button (shown when navigated from History)
         self._back_btn = StyledButton(
-            text="< Back",
+            text="\u25C0 Back",
             font_size=F.BODY,
             size_hint=(None, None),
             width=dp(90),

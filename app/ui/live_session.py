@@ -228,7 +228,7 @@ class LiveSessionScreen(Screen):
             spacing=S.GAP, padding=[S.GAP, 0],
         )
         self._btn_start = StyledButton(
-            text="Start", bg_color=C.ACCENT,
+            text="\u25B6 Start", bg_color=C.ACCENT,
             bg_pressed=C.ACCENT_DIM,
         )
         self._btn_pause = StyledButton(
@@ -236,7 +236,7 @@ class LiveSessionScreen(Screen):
             bg_pressed=C.WARM_DIM, disabled=True,
         )
         self._btn_stop = StyledButton(
-            text="Stop", bg_color=C.DANGER,
+            text="\u25A0 Stop", bg_color=C.DANGER,
             bg_pressed=C.DANGER_DIM, disabled=True,
         )
         self._btn_marker = StyledButton(

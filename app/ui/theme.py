@@ -220,6 +220,7 @@ class StyledButton(ButtonBehavior, BoxLayout):
     font_size = NumericProperty(F.BODY)
     bold = BooleanProperty(True)
     icon = StringProperty("")  # optional left-side icon text
+    outline = BooleanProperty(False)  # draw border instead of fill
 
     def __init__(self, **kwargs):
         kwargs.setdefault("size_hint_y", None)
@@ -281,9 +282,21 @@ class StyledButton(ButtonBehavior, BoxLayout):
 
     def _redraw(self, *args):
         self.canvas.before.clear()
+        bg = self._get_bg()
         with self.canvas.before:
-            Color(*self._get_bg())
-            RoundedRectangle(pos=self.pos, size=self.size, radius=[S.RADIUS])
+            if self.outline and self.state != "down":
+                Color(*C.BG_CARD)
+                RoundedRectangle(pos=self.pos, size=self.size, radius=[S.RADIUS])
+                Color(*bg[:3], 0.8)
+                Line(
+                    rounded_rectangle=[
+                        self.x, self.y, self.width, self.height, S.RADIUS,
+                    ],
+                    width=1.2,
+                )
+            else:
+                Color(*bg)
+                RoundedRectangle(pos=self.pos, size=self.size, radius=[S.RADIUS])
         if self.disabled:
             self._label.color = list(C.TEXT_MUTED)
         else:
@@ -352,36 +365,31 @@ class CollapsibleSection(BoxLayout):
     Usage:
         section = CollapsibleSection(title="Audio", collapsed=True)
         section.add_content(widget1)
-        section.add_content(widget2)
         parent.add_widget(section)
     """
 
-    collapsed = BooleanProperty(False)
-
     def __init__(self, title="", collapsed=False, **kwargs):
         self._init_done = False
+        self._is_collapsed = collapsed
         kwargs.setdefault("orientation", "vertical")
         kwargs.setdefault("size_hint_y", None)
 
-        # Create content before super().__init__ to avoid issues
         self._content = BoxLayout(
             orientation="vertical",
             size_hint_y=None,
             spacing=S.GAP,
             padding=[dp(4), S.GAP_SM],
         )
-        self._content.bind(minimum_height=self._content.setter("height"))
+        self._content.bind(minimum_height=self._on_content_height)
 
         super().__init__(**kwargs)
-        self._title = title
 
-        # Header row (tappable via on_touch_down)
         self._header = BoxLayout(
             size_hint_y=None, height=S.ROW_SM + dp(4),
             padding=[0, dp(2)],
         )
         self._arrow = Label(
-            text="v" if not collapsed else ">",
+            text=">" if collapsed else "v",
             font_size=F.BODY,
             color=C.TEXT_MUTED,
             size_hint_x=None,
@@ -399,45 +407,56 @@ class CollapsibleSection(BoxLayout):
         self._header.add_widget(self._arrow)
         self._header.add_widget(self._label)
         super().add_widget(self._header)
-
         super().add_widget(Divider())
         super().add_widget(self._content)
 
         if collapsed:
-            self._content.height = 0
             self._content.opacity = 0
+            self._content.disabled = True
 
-        self.bind(minimum_height=self.setter("height"))
-        self._header.bind(on_touch_down=self._on_header_tap)
         self._init_done = True
+        self._update_height()
+
+    def _on_content_height(self, widget, value):
+        """When content's minimum_height changes, update our total height."""
+        self._update_height()
+
+    def _update_height(self):
+        header_h = S.ROW_SM + dp(4) + dp(1)  # header + divider
+        if self._is_collapsed:
+            self.height = header_h
+        else:
+            self.height = header_h + self._content.minimum_height
 
     def add_content(self, widget):
-        """Add a widget to the collapsible content area."""
         self._content.add_widget(widget)
 
-    def _on_header_tap(self, widget, touch):
-        if not self._header.collide_point(*touch.pos):
+    def on_touch_down(self, touch):
+        # Check if touch is on the header area
+        if self._header.collide_point(*touch.pos):
+            self.toggle()
+            return True
+        # If collapsed, don't let touches reach hidden content
+        if self._is_collapsed:
             return False
-        self.collapsed = not self.collapsed
-        return True
+        return super().on_touch_down(touch)
 
-    def on_collapsed(self, *args):
-        if self.collapsed:
-            self._content.saved_height = self._content.height
-            self._content.height = 0
+    def toggle(self):
+        self._is_collapsed = not self._is_collapsed
+        if self._is_collapsed:
             self._content.opacity = 0
+            self._content.disabled = True
             self._arrow.text = ">"
         else:
             self._content.opacity = 1
-            # Force recalc
-            self._content.height = 0
-            self._content.bind(minimum_height=self._content.setter("height"))
+            self._content.disabled = False
             self._arrow.text = "v"
+        self._update_height()
 
     def add_widget(self, widget, *args, **kwargs):
-        """Redirect add_widget to content area after init."""
-        if hasattr(self, "_init_done"):
+        if self._init_done:
             self._content.add_widget(widget, *args, **kwargs)
+            self._update_height()
         else:
             super().add_widget(widget, *args, **kwargs)
 
