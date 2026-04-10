@@ -139,7 +139,7 @@ jobs:
             --noconfirm \
             --clean \
             --onedir \
-            --windowed \
+            --noconsole \
             --icon app/assets/icons/icon.icns \
             --exclude-module tkinter \
             --exclude-module _tkinter \
@@ -187,15 +187,29 @@ jobs:
       - name: Add Kivy data to bundle
         run: |
           KIVY_PATH=$(python -c "import kivy; print(kivy.__path__[0])")
-          cp -r "$KIVY_PATH/data" dist/EEG_Meditation_Trainer/kivy_install/data
-          mkdir -p dist/EEG_Meditation_Trainer/kivy_install/modules
-          cp -r "$KIVY_PATH/modules"/* dist/EEG_Meditation_Trainer/kivy_install/modules/
-          cp "$KIVY_PATH/tools/packaging/pyinstaller_hooks/pyi_rth_kivy.py" \
-             dist/EEG_Meditation_Trainer/
+          # Find the actual output directory (may be flat dir or .app bundle)
+          if [ -d "dist/EEG_Meditation_Trainer.app" ]; then
+            TARGET="dist/EEG_Meditation_Trainer.app/Contents/Frameworks"
+          elif [ -d "dist/EEG_Meditation_Trainer/_internal" ]; then
+            TARGET="dist/EEG_Meditation_Trainer/_internal"
+          else
+            TARGET="dist/EEG_Meditation_Trainer"
+          fi
+          mkdir -p "$TARGET/kivy_install"
+          cp -r "$KIVY_PATH/data" "$TARGET/kivy_install/data"
+          mkdir -p "$TARGET/kivy_install/modules"
+          cp -r "$KIVY_PATH/modules"/* "$TARGET/kivy_install/modules/"
+          echo "Kivy data copied to: $TARGET/kivy_install/"
+          ls -la "$TARGET/kivy_install/"
 
       - name: Package macOS build
         run: |
-          cd dist && zip -r ../EEG_Meditation_Trainer_macos_x64.zip EEG_Meditation_Trainer
+          cd dist
+          if [ -d "EEG_Meditation_Trainer.app" ]; then
+            zip -r ../EEG_Meditation_Trainer_macos_x64.zip EEG_Meditation_Trainer.app
+          else
+            zip -r ../EEG_Meditation_Trainer_macos_x64.zip EEG_Meditation_Trainer
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
