@@ -958,7 +958,7 @@ class SettingsScreen(Screen):
                 size_hint_x=0.65,
                 size_hint_y=None,
                 height=row_height,
-                halign="left",
+                bold=False,
             )
             load_btn.formula_index = i
             load_btn.bind(on_release=self._on_load_formula_pressed)
