@@ -34,6 +34,7 @@ from app.ui.settings_screen import SettingsScreen
 from app.ui.history_screen import HistoryScreen
 from app.ui.theme import BottomNav, C
 from app.ui.timer_screen import TimerScreen
+from app.ui.wizard_screen import WizardScreen
 
 
 class EEGMeditationApp(App):
@@ -150,6 +151,8 @@ class EEGMeditationApp(App):
         self._analytics_screen = AnalyticsScreen()
         self._timer_screen = TimerScreen()
 
+        self._wizard_screen = WizardScreen()
+        self._sm.add_widget(self._wizard_screen)
         self._sm.add_widget(self._live_screen)
         self._sm.add_widget(self._history_screen)
         self._sm.add_widget(self._settings_screen)
@@ -175,7 +178,15 @@ class EEGMeditationApp(App):
         self._link_graph_zoom()
         self._restore_last_user()
         self._refresh_profile()
-        self._auto_scan_bt()
+
+        # First-run: show wizard if no users exist
+        if not self._db.get_all_users():
+            self._sm.current = "wizard"
+            self._bottom_nav.opacity = 0
+            self._bottom_nav.disabled = True
+        else:
+            self._auto_scan_bt()
+
         return root
 
     def _link_graph_zoom(self) -> None:
@@ -190,6 +201,10 @@ class EEGMeditationApp(App):
         )
 
     def _bind_callbacks(self) -> None:
+        # Wizard
+        self._wizard_screen.set_complete_callback(self._on_wizard_complete)
+        self._wizard_screen.set_scan_callback(self._on_wizard_scan)
+
         self._live_screen.btn_start.bind(on_release=self._on_start)
         self._live_screen.btn_pause.bind(on_release=self._on_pause)
         self._live_screen.btn_stop.bind(on_release=self._on_stop)
@@ -285,6 +300,59 @@ class EEGMeditationApp(App):
                     logger.info(f"Restored last user: {user['name']} (id={uid})")
             except (ValueError, TypeError):
                 pass
+
+    def _on_wizard_complete(self, user_name: str, device_addr, device_name) -> None:
+        """Wizard finished: create user, optionally set device, go to session."""
+        # Create user
+        try:
+            self._db.create_user(user_name)
+        except Exception as e:
+            logger.warning(f"Wizard user create failed: {e}")
+        users = self._db.get_all_users()
+        for u in users:
+            if u["name"] == user_name:
+                self._current_user_id = u["id"]
+                self._db.set_setting("last_user_id", str(u["id"]))
+                break
+
+        # Set device
+        if device_addr:
+            self._real_stream.set_device(device_addr, device_name or device_addr)
+            APP.USE_MOCK_DEVICE = False
+            if self._current_user_id:
+                self._db.set_user_setting(self._current_user_id, "bt_device_address", device_addr)
+                self._db.set_user_setting(self._current_user_id, "bt_device_name", device_name or "")
+                self._db.set_user_setting(self._current_user_id, "use_mock", "False")
+            self._settings_screen._device_mode_cb.active = False
+            self._live_screen.update_device_status(False, device_name=device_name or device_addr)
+            logger.info(f"Wizard: device set to {device_name} ({device_addr})")
+        else:
+            APP.USE_MOCK_DEVICE = True
+            if self._current_user_id:
+                self._db.set_user_setting(self._current_user_id, "use_mock", "True")
+            self._settings_screen._device_mode_cb.active = True
+            self._live_screen.update_device_status(False, device_name="Mock EEG")
+            logger.info("Wizard: using mock device")
+
+        # Show nav and go to session
+        self._bottom_nav.opacity = 1
+        self._bottom_nav.disabled = False
+        self._refresh_profile()
+        self._sm.current = "live_session"
+        self._bottom_nav.active_tab = "session"
+        self._auto_scan_bt()
+        logger.info(f"Wizard complete: user '{user_name}' created")
+
+    def _on_wizard_scan(self) -> None:
+        """Scan for BT devices from wizard."""
+        import threading
+
+        def _run():
+            from kivy.clock import Clock as _Clock
+            devices = NeuroSkyStream.scan_paired_devices()
+            _Clock.schedule_once(lambda dt: self._wizard_screen.populate_devices(devices))
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def _auto_scan_bt(self) -> None:
         """Background-scan paired BT devices at startup and auto-select MindWave."""
