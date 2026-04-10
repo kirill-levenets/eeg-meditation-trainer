@@ -76,7 +76,7 @@ class SettingsScreen(Screen):
             self._bg_rect = Rectangle(size=root.size, pos=root.pos)
         root.bind(size=self._update_bg, pos=self._update_bg)
 
-        accordion = Accordion(orientation="vertical", min_space=dp(38))
+        accordion = Accordion(orientation="vertical", min_space=dp(36), anim_duration=0.15)
 
         # --- Profile section ---
         profile_item = AccordionItem(title="User Profile", collapse=False)
@@ -753,9 +753,11 @@ class SettingsScreen(Screen):
         accordion.add_widget(theme_item)
 
         root.add_widget(accordion)
-        style_accordion(accordion)
         self._accordion = accordion
         self.add_widget(root)
+        # Defer accordion styling until screen has real size
+        from kivy.clock import Clock
+        Clock.schedule_once(lambda dt: style_accordion(self._accordion), 0.5)
 
     def _update_bg(self, *args) -> None:
         root = self.children[0] if self.children else None
