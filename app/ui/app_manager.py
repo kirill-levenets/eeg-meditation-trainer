@@ -196,6 +196,9 @@ class EEGMeditationApp(App):
         self._live_screen.btn_marker.bind(on_release=self._on_marker)
         self._live_screen.overlay_cancel_btn.bind(on_release=self._on_connect_cancel)
         self._live_screen.overlay_retry_btn.bind(on_release=self._on_connect_retry)
+        self._live_screen.summary_save_btn.bind(on_release=self._on_summary_save)
+        self._live_screen.summary_history_btn.bind(on_release=self._on_summary_history)
+        self._live_screen.summary_close_btn.bind(on_release=self._on_summary_close)
 
         # Tap on graph to set marker (Android — no keyboard available)
         from kivy.utils import platform as kivy_platform
@@ -479,6 +482,25 @@ class EEGMeditationApp(App):
         self._live_screen.set_controls_idle()
         self._on_start()
 
+    def _on_summary_save(self, *args) -> None:
+        """Save notes from summary overlay."""
+        sid = self._live_screen.summary_session_id
+        notes = self._live_screen.summary_notes
+        if sid and notes:
+            self._db.update_session_notes(sid, notes)
+            self._mark_history_dirty()
+            logger.info(f"Quick notes saved for session {sid}")
+        self._live_screen.hide_summary()
+
+    def _on_summary_history(self, *args) -> None:
+        """Navigate to history from summary."""
+        self._live_screen.hide_summary()
+        self._switch_screen("history")
+
+    def _on_summary_close(self, *args) -> None:
+        """Close summary without saving notes."""
+        self._live_screen.hide_summary()
+
     def _on_pause(self, *args) -> None:
         if self._session_manager.state == SessionState.RUNNING:
             self._session_manager.pause()
@@ -589,6 +611,9 @@ class EEGMeditationApp(App):
         self._session_manager.reset()
         self._release_wake_lock()
         self._mark_history_dirty()
+
+        if stats and self._current_session_id:
+            self._live_screen.show_summary(self._current_session_id, stats)
         logger.info("Session stopped and saved")
 
     def _cancel_stop(self, popup) -> None:
@@ -634,6 +659,9 @@ class EEGMeditationApp(App):
         self._session_manager.reset()
         self._release_wake_lock()
         self._mark_history_dirty()
+
+        if save and stats and self._current_session_id:
+            self._live_screen.show_summary(self._current_session_id, stats)
 
     _BT_CONNECT_TIMEOUT = 20.0  # seconds before BT socket gives up
     _BT_SIGNAL_TIMEOUT = 15.0  # seconds to wait for EEG data after connected

@@ -9,6 +9,8 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
+from kivy.uix.scrollview import ScrollView
+from kivy.uix.textinput import TextInput
 
 from app.ui.raw_eeg_screen import RawEEGScreen, ScrollableGraphWidget
 from app.ui.theme import C, F, S, Card, Icons, StyledButton
@@ -252,6 +254,113 @@ class LiveSessionScreen(Screen):
         root.add_widget(controls)
 
         float_root.add_widget(root)
+
+        # ── Session summary overlay ──
+        self._summary = BoxLayout(
+            orientation="vertical",
+            size_hint=(1, 1),
+            pos_hint={"x": 0, "y": 0},
+            padding=dp(20),
+            spacing=S.GAP,
+        )
+        with self._summary.canvas.before:
+            Color(*C.BG_OVERLAY)
+            self._summary_bg = Rectangle(size=self._summary.size, pos=self._summary.pos)
+        self._summary.bind(
+            size=lambda w, v: setattr(self._summary_bg, "size", v),
+            pos=lambda w, v: setattr(self._summary_bg, "pos", v),
+        )
+
+        self._summary.add_widget(BoxLayout(size_hint_y=0.1))  # top spacer
+
+        self._summary_title = Label(
+            text="Session Complete",
+            font_size=F.H1,
+            bold=True,
+            color=C.ACCENT,
+            size_hint_y=None,
+            height=dp(32),
+        )
+        self._summary.add_widget(self._summary_title)
+
+        # Stats card
+        self._summary_stats_card = Card(
+            orientation="vertical",
+            size_hint_y=None,
+            height=dp(120),
+            bg_color=C.BG_CARD,
+            spacing=S.GAP_SM,
+        )
+        self._summary_stats = {}
+        for key, label_text in [
+            ("duration", "Duration"),
+            ("avg_shamatha", "Avg Shamatha"),
+            ("avg_meditation", "Avg Meditation"),
+            ("time_above", "Time Above Threshold"),
+        ]:
+            row = BoxLayout(size_hint_y=None, height=dp(24))
+            lbl = Label(
+                text=label_text, font_size=F.BODY, color=C.TEXT_SECONDARY,
+                halign="left", size_hint_x=0.6,
+            )
+            lbl.bind(size=lbl.setter("text_size"))
+            val = Label(
+                text="-", font_size=F.BODY, bold=True, color=C.TEXT,
+                halign="right", size_hint_x=0.4,
+            )
+            val.bind(size=val.setter("text_size"))
+            row.add_widget(lbl)
+            row.add_widget(val)
+            self._summary_stats_card.add_widget(row)
+            self._summary_stats[key] = val
+        self._summary.add_widget(self._summary_stats_card)
+
+        # Quick notes
+        notes_lbl = Label(
+            text="Quick notes:", font_size=F.BODY, color=C.TEXT_SECONDARY,
+            size_hint_y=None, height=dp(22), halign="left",
+        )
+        notes_lbl.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
+        self._summary.add_widget(notes_lbl)
+
+        self._summary_notes = TextInput(
+            hint_text="How was the session?",
+            multiline=True,
+            size_hint_y=None,
+            height=dp(70),
+            font_size=F.BODY,
+            foreground_color=C.TEXT,
+            background_color=list(C.BG_INPUT),
+            cursor_color=C.PRIMARY,
+        )
+        self._summary.add_widget(self._summary_notes)
+
+        # Buttons
+        summary_btns = BoxLayout(size_hint_y=None, height=S.BTN_H, spacing=S.GAP)
+        self._summary_save_btn = StyledButton(
+            text="Save", icon=Icons.CHECK,
+            bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM,
+        )
+        self._summary_history_btn = StyledButton(
+            text="View in History", icon=Icons.HISTORY,
+            bg_color=C.PRIMARY, bg_pressed=C.PRIMARY_DIM,
+        )
+        self._summary_close_btn = StyledButton(
+            text="Close",
+            bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY,
+        )
+        summary_btns.add_widget(self._summary_save_btn)
+        summary_btns.add_widget(self._summary_history_btn)
+        summary_btns.add_widget(self._summary_close_btn)
+        self._summary.add_widget(summary_btns)
+
+        self._summary.add_widget(BoxLayout(size_hint_y=0.1))  # bottom spacer
+
+        self._summary.opacity = 0
+        self._summary.size_hint = (0, 0)
+        self._summary.size = (0, 0)
+        self._summary_session_id = None
+        float_root.add_widget(self._summary)
 
         # ── Connection overlay ──
         self._overlay = BoxLayout(
@@ -530,9 +639,51 @@ class LiveSessionScreen(Screen):
         self._state_label.color = C.STATE_NEUTRAL
         self.hide_alert()
         self.hide_overlay()
+        self.hide_summary()
         for label in self._stat_labels.values():
             label.text = "0"
         self.set_controls_idle()
+
+    def show_summary(self, session_id: int, stats: dict) -> None:
+        """Show post-session summary overlay with stats and notes field."""
+        self._summary_session_id = session_id
+        # Fill stats
+        dur = stats.get("duration", 0)
+        self._summary_stats["duration"].text = f"{dur // 60}m {dur % 60:02d}s"
+        self._summary_stats["avg_shamatha"].text = f"{stats.get('avg_shamatha', 0):.0f}"
+        self._summary_stats["avg_meditation"].text = f"{stats.get('avg_meditation', 0):.0f}"
+        above = stats.get("time_above_threshold", 0)
+        self._summary_stats["time_above"].text = f"{above // 60}m {above % 60:02d}s"
+        self._summary_notes.text = ""
+        # Show
+        self._summary.opacity = 1
+        self._summary.size_hint = (1, 1)
+
+    def hide_summary(self) -> None:
+        self._summary.opacity = 0
+        self._summary.size_hint = (0, 0)
+        self._summary.size = (0, 0)
+        self._summary_session_id = None
+
+    @property
+    def summary_save_btn(self) -> StyledButton:
+        return self._summary_save_btn
+
+    @property
+    def summary_history_btn(self) -> StyledButton:
+        return self._summary_history_btn
+
+    @property
+    def summary_close_btn(self) -> StyledButton:
+        return self._summary_close_btn
+
+    @property
+    def summary_notes(self) -> str:
+        return self._summary_notes.text.strip()
+
+    @property
+    def summary_session_id(self):
+        return self._summary_session_id
 
     def _refresh_theme(self):
         """Update background and label colors when theme changes."""
