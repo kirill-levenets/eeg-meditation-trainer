@@ -1,6 +1,5 @@
 import math
 from collections import deque
-from typing import Dict
 
 from app.config import METRICS, SIGMOID
 from app.eeg.buffer import RollingBuffer, VarianceBuffer
@@ -46,7 +45,7 @@ class MetricsEngine:
         return max_scale / (1.0 + math.exp(-k * (raw - midpoint)))
 
     @staticmethod
-    def derive_bands(sample: Dict[str, float]) -> Dict[str, float]:
+    def derive_bands(sample: dict[str, float]) -> dict[str, float]:
         """Compute derived bands: alpha, beta, gamma from sub-bands."""
         alpha = sample.get("alpha1", 0.0) + sample.get("alpha2", 0.0)
         beta = sample.get("beta1", 0.0) + sample.get("beta2", 0.0)
@@ -60,7 +59,7 @@ class MetricsEngine:
         }
 
     @staticmethod
-    def normalize_bands(bands: Dict[str, float]) -> Dict[str, float]:
+    def normalize_bands(bands: dict[str, float]) -> dict[str, float]:
         """Normalize bands by total power."""
         total_power = (
             bands["alpha"]
@@ -79,14 +78,14 @@ class MetricsEngine:
             "total_power": total_power,
         }
 
-    def compute_calmness(self, norms: Dict[str, float]) -> float:
+    def compute_calmness(self, norms: dict[str, float]) -> float:
         """calmness = alpha_norm / (beta_norm + gamma_norm + eps)"""
         return norms["alpha_norm"] / (norms["beta_norm"] + norms["gamma_norm"] + 0.001)
 
     @staticmethod
     def compute_sqrt_relative_bands(
-        sample: Dict[str, float],
-    ) -> Dict[str, float]:
+        sample: dict[str, float],
+    ) -> dict[str, float]:
         """Compute sqrt-normalized relative band units.
 
         For each of the 6 bands (delta, theta, alpha1, alpha2, beta1, beta2):
@@ -96,10 +95,10 @@ class MetricsEngine:
         values = {k: max(sample.get(k, 0.0), 0.0) for k in keys}
         total = sum(values.values())
         if total < 1.0:
-            return {k: 0.0 for k in keys}
+            return dict.fromkeys(keys, 0.0)
         return {k: math.sqrt(v / total) for k, v in values.items()}
 
-    def compute_meditation_score(self, bands_sqrt: Dict[str, float]) -> float:
+    def compute_meditation_score(self, bands_sqrt: dict[str, float]) -> float:
         """Vernihor shamatha formula (Windows variant).
 
         Formula: max(0, avg(ratio, 4) * 0.75 - 0.3) * 100
@@ -128,12 +127,12 @@ class MetricsEngine:
 
         return max(0.0, avg_ratio * self._MED_SCALE - self._MED_OFFSET) * 100.0
 
-    def compute_sinking(self, norms: Dict[str, float]) -> float:
+    def compute_sinking(self, norms: dict[str, float]) -> float:
         """Sinking (dullness): sigmoid of (theta_norm + delta_norm) / (alpha_norm + beta_norm + eps)."""
         raw = (norms["theta_norm"] + norms["delta_norm"]) / (norms["alpha_norm"] + norms["beta_norm"] + 0.001)
         return self.sigmoid(raw, SIGMOID.SINKING_K, SIGMOID.SINKING_MIDPOINT)
 
-    def compute_distraction(self, norms: Dict[str, float]) -> float:
+    def compute_distraction(self, norms: dict[str, float]) -> float:
         """Gross distraction: sigmoid of (beta_norm + gamma_norm) / (alpha_norm + eps)."""
         raw = (norms["beta_norm"] + norms["gamma_norm"]) / (norms["alpha_norm"] + 0.001)
         return self.sigmoid(raw, SIGMOID.DISTRACTION_K, SIGMOID.DISTRACTION_MIDPOINT)
@@ -208,7 +207,7 @@ class MetricsEngine:
     # Minimum total power to consider data valid (suppresses startup noise)
     MIN_TOTAL_POWER: float = 100.0
 
-    def process_sample(self, raw_sample: Dict[str, float]) -> Dict[str, float]:
+    def process_sample(self, raw_sample: dict[str, float]) -> dict[str, float]:
         """Full pipeline: smooth → derive → normalize → compute all metrics."""
         smoothed = self._rolling_buffer.push_sample(raw_sample)
         bands = self.derive_bands(smoothed)
@@ -297,13 +296,4 @@ if __name__ == "__main__":
         label = s.pop("label")
         engine.reset()
         result = engine.process_sample(s)
-        print(f"\n  {label}:")
-        print(f"    med={result['meditation_score']:.0f} sham={result['shamatha_score']:.0f} "
-              f"sink={result['sinking']:.0f} dist={result['distraction']:.0f} "
-              f"subtle={result['subtle_distraction']:.0f} stab={result['stability']:.0f} "
-              f"state={result['state']}")
 
-    print("\nSigmoid tests:")
-    print(f"  sigmoid(0, 4, 1.0) = {MetricsEngine.sigmoid(0, 4, 1.0):.2f}")
-    print(f"  sigmoid(1.0, 4, 1.0) = {MetricsEngine.sigmoid(1.0, 4, 1.0):.2f}")
-    print(f"  sigmoid(3.0, 4, 1.0) = {MetricsEngine.sigmoid(3.0, 4, 1.0):.2f}")

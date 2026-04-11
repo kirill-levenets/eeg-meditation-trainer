@@ -1,20 +1,15 @@
-from typing import Dict
 
 from kivy.clock import Clock
-from kivy.graphics import Color, Rectangle, RoundedRectangle
+from kivy.graphics import Color, Rectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.button import Button
 from kivy.uix.floatlayout import FloatLayout
-from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
-from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 
 from app.ui.raw_eeg_screen import RawEEGScreen, ScrollableGraphWidget
-from app.ui.theme import C, F, S, Card, Icons, StyledButton
-
+from app.ui.theme import C, Card, F, Icons, S, StyledButton
 
 # Band colors/scales for inline raw EEG view
 _BAND_COLORS = {
@@ -201,7 +196,7 @@ class LiveSessionScreen(Screen):
             height=dp(56),
             bg_color=C.BG_CARD,
         )
-        self._stat_labels: Dict[str, Label] = {}
+        self._stat_labels: dict[str, Label] = {}
         stat_items = [
             ("shamatha_score", "Shamatha"),
             ("distraction", "Distraction"),
@@ -481,7 +476,7 @@ class LiveSessionScreen(Screen):
     def btn_marker(self) -> StyledButton:
         return self._btn_marker
 
-    def add_raw_sample(self, sample: Dict[str, float]) -> None:
+    def add_raw_sample(self, sample: dict[str, float]) -> None:
         """Feed raw EEG data to the embedded raw/band graphs."""
         waveform = sample.get("raw_eeg_waveform", [])
         if waveform:
@@ -526,7 +521,7 @@ class LiveSessionScreen(Screen):
         }
         self._state_label.color = color_map.get(state, C.STATE_NEUTRAL)
 
-    def update_stats(self, metrics: Dict[str, float]) -> None:
+    def update_stats(self, metrics: dict[str, float]) -> None:
         for key, label in self._stat_labels.items():
             val = metrics.get(key, 0.0)
             label.text = f"{val:.0f}"

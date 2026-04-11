@@ -1,7 +1,7 @@
 """Detect 50/60 Hz power line noise in raw EEG signal using FFT."""
 
 import math
-from typing import List, Optional, Tuple
+from typing import Optional
 
 from app.logger import logger
 
@@ -19,10 +19,10 @@ class PowerLineDetector:
     PEAK_RATIO: float = 5.0
 
     def __init__(self) -> None:
-        self._samples: List[float] = []
-        self._result: Optional[Tuple[bool, Optional[int]]] = None
+        self._samples: list[float] = []
+        self._result: Optional[tuple[bool, Optional[int]]] = None
 
-    def feed(self, raw_waveform: List[int]) -> None:
+    def feed(self, raw_waveform: list[int]) -> None:
         """Add raw 512Hz samples. No-op after detection is done."""
         if self._result is not None:
             return
@@ -33,7 +33,7 @@ class PowerLineDetector:
     def ready(self) -> bool:
         return self._result is not None
 
-    def result(self) -> Optional[Tuple[bool, Optional[int]]]:
+    def result(self) -> Optional[tuple[bool, Optional[int]]]:
         """Return (detected, freq_hz) or None if not ready.
 
         detected=True, freq_hz=50 means 50Hz noise found.
@@ -77,7 +77,7 @@ class PowerLineDetector:
             self._result = (False, None)
 
     @staticmethod
-    def _goertzel(samples: List[float], target_freq: float, sample_rate: int) -> float:
+    def _goertzel(samples: list[float], target_freq: float, sample_rate: int) -> float:
         """Goertzel algorithm — efficient single-frequency DFT magnitude."""
         n = len(samples)
         k = round(target_freq * n / sample_rate)

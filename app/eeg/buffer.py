@@ -1,5 +1,4 @@
 from collections import deque
-from typing import Dict, List
 
 
 class RollingBuffer:
@@ -7,7 +6,7 @@ class RollingBuffer:
 
     def __init__(self, window_size: int = 5) -> None:
         self._window_size: int = window_size
-        self._buffers: Dict[str, deque] = {}
+        self._buffers: dict[str, deque] = {}
 
     def push(self, band_name: str, value: float) -> float:
         """Push a new value and return the smoothed (rolling average) value."""
@@ -17,9 +16,9 @@ class RollingBuffer:
         buf.append(value)
         return sum(buf) / len(buf)
 
-    def push_sample(self, sample: Dict[str, float]) -> Dict[str, float]:
+    def push_sample(self, sample: dict[str, float]) -> dict[str, float]:
         """Smooth all numeric bands in a sample dict."""
-        smoothed: Dict[str, float] = {}
+        smoothed: dict[str, float] = {}
         for key, value in sample.items():
             if isinstance(value, (int, float)) and key != "timestamp":
                 smoothed[key] = self.push(key, value)
@@ -52,7 +51,7 @@ class VarianceBuffer:
             return 0.0
         return sum(self._buffer) / len(self._buffer)
 
-    def values(self) -> List[float]:
+    def values(self) -> list[float]:
         return list(self._buffer)
 
     def reset(self) -> None:
@@ -67,13 +66,10 @@ if __name__ == "__main__":
     values = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0]
     for v in values:
         smoothed = rb.push("alpha", v)
-        print(f"Input: {v}, Smoothed: {smoothed:.2f}")
 
     vb = VarianceBuffer(max_size=5)
     for v in [100.0, 100.0, 100.0, 100.0, 100.0]:
         vb.push(v)
-    print(f"Variance of constant: {vb.variance():.4f}")
 
     for v in [50.0, 150.0, 50.0, 150.0, 50.0]:
         vb.push(v)
-    print(f"Variance of oscillating: {vb.variance():.4f}")

@@ -2,7 +2,7 @@ import ast
 import math
 import operator
 from collections import deque
-from typing import Deque, Dict, List, Optional, Tuple
+from typing import Optional
 
 from app.logger import logger
 
@@ -71,8 +71,8 @@ class CustomFormulaEvaluator:
         self._formula: str = ""
         self._ast_tree: Optional[ast.Expression] = None
         self._last_error: str = ""
-        self._history: Dict[str, Deque[float]] = {}
-        self._avg_exprs: List[Tuple[str, ast.AST]] = []
+        self._history: dict[str, deque[float]] = {}
+        self._avg_exprs: list[tuple[str, ast.AST]] = []
 
     @property
     def formula(self) -> str:
@@ -86,7 +86,7 @@ class CustomFormulaEvaluator:
     def is_valid(self) -> bool:
         return self._ast_tree is not None and self._formula != ""
 
-    def set_formula(self, formula: str) -> Tuple[bool, str]:
+    def set_formula(self, formula: str) -> tuple[bool, str]:
         """Parse and validate a formula string.
 
         Returns (success, error_message).
@@ -127,7 +127,7 @@ class CustomFormulaEvaluator:
         logger.info(f"Custom formula set: {formula}")
         return True, ""
 
-    def push_variables(self, variables: Dict[str, float]) -> None:
+    def push_variables(self, variables: dict[str, float]) -> None:
         """Record current tick's variable values into the history buffer.
 
         Call this once per tick BEFORE evaluate(). Evaluates each avg()
@@ -144,7 +144,7 @@ class CustomFormulaEvaluator:
                 val = 0.0
             self._history[key].append(val)
 
-    def evaluate(self, variables: Dict[str, float]) -> float:
+    def evaluate(self, variables: dict[str, float]) -> float:
         """Evaluate the formula against the given variables.
 
         Returns 0.0 on any error (division by zero, overflow, etc.).
@@ -162,7 +162,7 @@ class CustomFormulaEvaluator:
             logger.debug(f"Custom formula eval error: {e}")
             return 0.0
 
-    def _validate_ast(self, node: ast.AST) -> Tuple[bool, str]:
+    def _validate_ast(self, node: ast.AST) -> tuple[bool, str]:
         """Recursively validate that all AST nodes are safe."""
         if isinstance(node, ast.Constant):
             if not isinstance(node.value, (int, float)):
@@ -225,7 +225,7 @@ class CustomFormulaEvaluator:
 
         return False, f"Unsupported expression: {type(node).__name__}"
 
-    def _validate_windowed_call(self, node: ast.Call) -> Tuple[bool, str]:
+    def _validate_windowed_call(self, node: ast.Call) -> tuple[bool, str]:
         """Validate avg(expression, N) call."""
         fname = node.func.id
         if len(node.args) != 2:
@@ -242,17 +242,17 @@ class CustomFormulaEvaluator:
             return False, f"{fname}() window size must be 1-{_MAX_WINDOW}"
         return True, ""
 
-    def _collect_avg_exprs(self, node: ast.AST) -> List[Tuple[str, ast.AST]]:
+    def _collect_avg_exprs(self, node: ast.AST) -> list[tuple[str, ast.AST]]:
         """Walk the AST and collect (key, expr_node) for each avg() call."""
-        exprs: Dict[str, ast.AST] = {}
+        exprs: dict[str, ast.AST] = {}
         for child in ast.walk(node):
-            if isinstance(child, ast.Call) and isinstance(child.func, ast.Name):
-                if child.func.id in _WINDOWED_FUNCTIONS and child.args:
+            if (isinstance(child, ast.Call) and isinstance(child.func, ast.Name)
+                    and child.func.id in _WINDOWED_FUNCTIONS and child.args):
                     key = ast.dump(child.args[0])
                     exprs[key] = child.args[0]
         return list(exprs.items())
 
-    def _eval_node(self, node: ast.AST, variables: Dict[str, float]) -> float:
+    def _eval_node(self, node: ast.AST, variables: dict[str, float]) -> float:
         if isinstance(node, ast.Constant):
             return float(node.value)
 
@@ -300,9 +300,8 @@ class CustomFormulaEvaluator:
                 elif isinstance(op, ast.Eq):
                     if not (left == right):
                         return 0.0
-                elif isinstance(op, ast.NotEq):
-                    if not (left != right):
-                        return 0.0
+                elif isinstance(op, ast.NotEq) and not (left != right):
+                    return 0.0
                 left = right
             return 1.0
 
@@ -314,7 +313,7 @@ class CustomFormulaEvaluator:
 
         return 0.0
 
-    def _eval_windowed(self, node: ast.Call, variables: Dict[str, float]) -> float:
+    def _eval_windowed(self, node: ast.Call, variables: dict[str, float]) -> float:
         """Evaluate avg(expression, N) using the history buffer."""
         key = ast.dump(node.args[0])
         n = int(node.args[1].value)
@@ -360,16 +359,14 @@ if __name__ == "__main__":
         ("alpha1 if alpha1 > beta1 else beta1", "Conditional expression"),
     ]
 
-    for formula, desc in formulas:
+    for formula, _desc in formulas:
         ok, err = ev.set_formula(formula)
         if ok:
             result = ev.evaluate(test_vars)
-            print(f"  {desc}: {formula} = {result:.2f}")
         else:
-            print(f"  {desc}: REJECTED - {err}")
+            pass
 
     # --- avg() windowed average tests ---
-    print("\n--- avg() windowed average tests ---")
 
     ok, err = ev.set_formula("avg(meditation_score, 5)")
     assert ok, f"avg formula should be valid: {err}"
@@ -377,7 +374,6 @@ if __name__ == "__main__":
         tick_vars = {**test_vars, "meditation_score": 50.0 + i * 5.0}
         ev.push_variables(tick_vars)
     result = ev.evaluate({"meditation_score": 95.0})
-    print(f"  avg(meditation_score, 5) after 10 ticks: {result:.2f} (expected 85.00)")
 
     ok, err = ev.set_formula("avg(alpha1, 3) / (avg(beta1, 3) + 1)")
     assert ok, f"compound avg formula should be valid: {err}"
@@ -385,7 +381,6 @@ if __name__ == "__main__":
         tick_vars = {"alpha1": 100.0 * (i + 1), "beta1": 50.0 * (i + 1)}
         ev.push_variables(tick_vars)
     result = ev.evaluate({"alpha1": 500.0, "beta1": 250.0})
-    print(f"  avg(alpha1,3)/(avg(beta1,3)+1) = {result:.4f} (expected ~1.9900)")
 
     # avg() with expression as first arg
     ok, err = ev.set_formula("avg(alpha1 + beta1, 4)")
@@ -395,7 +390,6 @@ if __name__ == "__main__":
         ev.push_variables(tick_vars)
     result = ev.evaluate({"alpha1": 600.0, "beta1": 300.0})
     # pushed: 150, 300, 450, 600, 750, 900; last 4: 450, 600, 750, 900 → avg=675
-    print(f"  avg(alpha1 + beta1, 4) = {result:.2f} (expected 675.00)")
 
     ok, err = ev.set_formula("avg(sqrt(alpha_norm) * 100, 3)")
     assert ok, f"avg(sqrt(x)*100, N) should be valid: {err}"
@@ -403,14 +397,9 @@ if __name__ == "__main__":
         ev.push_variables({"alpha_norm": val})
     result = ev.evaluate({"alpha_norm": 1.0})
     # pushed: 50, 70, 80, 90, 100; last 3: 80, 90, 100 → avg=90
-    print(f"  avg(sqrt(alpha_norm)*100, 3) = {result:.2f} (expected 90.00)")
 
     # Validation errors
     ok, err = ev.set_formula("avg(alpha1)")
-    print(f"  avg(alpha1) → REJECTED: {err}" if not ok else "  ERROR: should have been rejected")
     ok, err = ev.set_formula("avg(unknown_var, 5)")
-    print(f"  avg(unknown_var, 5) → REJECTED: {err}" if not ok else "  ERROR: should have been rejected")
     ok, err = ev.set_formula("avg(alpha1, 99999)")
-    print(f"  avg(alpha1, 99999) → REJECTED: {err}" if not ok else "  ERROR: should have been rejected")
 
-    print("\nAll custom formula tests completed.")

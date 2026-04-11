@@ -17,7 +17,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Dict, List, Optional
+from typing import Optional
 
 from app.logger import logger
 
@@ -45,10 +45,10 @@ class ThinkGearParser:
     def __init__(self) -> None:
         self._buffer: bytearray = bytearray()
 
-    def feed(self, data: bytes) -> List[Dict]:
+    def feed(self, data: bytes) -> list[dict]:
         """Feed raw bytes, return list of parsed complete packets."""
         self._buffer.extend(data)
-        results: List[Dict] = []
+        results: list[dict] = []
         while self._buffer:
             prev_len = len(self._buffer)
             packet = self._try_parse_packet()
@@ -59,7 +59,7 @@ class ThinkGearParser:
                 break
         return results
 
-    def _try_parse_packet(self) -> Optional[Dict]:
+    def _try_parse_packet(self) -> Optional[dict]:
         """Try to extract one complete ThinkGear packet from buffer."""
         # Find sync bytes 0xAA 0xAA
         while len(self._buffer) >= 2:
@@ -93,9 +93,9 @@ class ThinkGearParser:
         self._buffer = self._buffer[total_len:]
         return self._parse_payload(bytes(payload))
 
-    def _parse_payload(self, payload: bytes) -> Dict:
+    def _parse_payload(self, payload: bytes) -> dict:
         """Parse DataRows from a valid payload."""
-        result: Dict = {}
+        result: dict = {}
         i = 0
         while i < len(payload):
             # Skip EXCODE bytes
@@ -174,11 +174,11 @@ class NeuroSkyStream:
         self._device_name: Optional[str] = None
 
         # Latest consolidated sample (updated by reader thread)
-        self._latest_bands: Dict[str, float] = {name: 0.0 for name in BAND_NAMES}
+        self._latest_bands: dict[str, float] = dict.fromkeys(BAND_NAMES, 0.0)
         self._latest_attention: float = 0.0
         self._latest_meditation: float = 0.0
         self._latest_signal_quality: int = 200
-        self._raw_wave_buffer: List[int] = []
+        self._raw_wave_buffer: list[int] = []
 
         # Bluetooth objects (set during connect)
         self._bt_socket = None
@@ -223,7 +223,7 @@ class NeuroSkyStream:
     def is_connected(self) -> bool:
         return self._connected
 
-    def read_sample(self) -> Dict:
+    def read_sample(self) -> dict:
         """Return the latest consolidated EEG sample.
 
         Returns a dict matching MockEEGStream format:
@@ -231,7 +231,7 @@ class NeuroSkyStream:
         attention, meditation, timestamp, signal_quality
         """
         with self._lock:
-            sample: Dict = {}
+            sample: dict = {}
             sample["timestamp"] = time.time() - self._start_time
             for name in BAND_NAMES:
                 sample[name] = self._latest_bands.get(name, 0.0)
@@ -285,7 +285,7 @@ class NeuroSkyStream:
                         logger.error(f"NeuroSky reconnect failed: {re}")
                         self._running = False
 
-    def _apply_packet(self, pkt: Dict) -> None:
+    def _apply_packet(self, pkt: dict) -> None:
         """Update internal state from a parsed packet."""
         with self._lock:
             if "bands" in pkt:
@@ -389,7 +389,7 @@ class NeuroSkyStream:
         except Exception as e:
             logger.warning(f"cancelDiscovery failed (non-fatal): {e}")
 
-        errors: List[str] = []
+        errors: list[str] = []
 
         # Method 1: Standard secure RFCOMM
         try:
@@ -672,7 +672,7 @@ class NeuroSkyStream:
             self._desktop_socket = None
 
     @staticmethod
-    def scan_paired_devices() -> List[Dict[str, str]]:
+    def scan_paired_devices() -> list[dict[str, str]]:
         """Return list of paired Bluetooth devices.
 
         Returns [{'name': ..., 'address': ...}].
@@ -685,7 +685,7 @@ class NeuroSkyStream:
         return NeuroSkyStream._scan_paired_desktop()
 
     @staticmethod
-    def _scan_paired_android() -> List[Dict[str, str]]:
+    def _scan_paired_android() -> list[dict[str, str]]:
         """Scan paired devices via Android Bluetooth API."""
         try:
             from jnius import autoclass
@@ -701,7 +701,7 @@ class NeuroSkyStream:
             if adapter is None or not adapter.isEnabled():
                 return []
             paired = adapter.getBondedDevices()
-            devices: List[Dict[str, str]] = []
+            devices: list[dict[str, str]] = []
             iterator = paired.iterator()
             while iterator.hasNext():
                 device = iterator.next()
@@ -716,7 +716,7 @@ class NeuroSkyStream:
             return []
 
     @staticmethod
-    def _scan_paired_desktop() -> List[Dict[str, str]]:
+    def _scan_paired_desktop() -> list[dict[str, str]]:
         """Scan paired devices via bluetoothctl on Linux desktop."""
         commands = [
             ["bluetoothctl", "paired-devices"],
@@ -729,7 +729,7 @@ class NeuroSkyStream:
                 )
                 if result.returncode != 0:
                     continue
-                devices: List[Dict[str, str]] = []
+                devices: list[dict[str, str]] = []
                 for line in result.stdout.strip().splitlines():
                     # Format: "Device XX:XX:XX:XX:XX:XX DeviceName"
                     parts = line.strip().split(" ", 2)
@@ -750,7 +750,7 @@ class NeuroSkyStream:
         return []
 
     @staticmethod
-    def _scan_paired_windows() -> List[Dict[str, str]]:
+    def _scan_paired_windows() -> list[dict[str, str]]:
         """Scan for Bluetooth serial (COM) ports on Windows.
 
         Lists COM ports that are associated with Bluetooth devices.
@@ -763,7 +763,7 @@ class NeuroSkyStream:
             return []
 
         try:
-            devices: List[Dict[str, str]] = []
+            devices: list[dict[str, str]] = []
             for port_info in list_ports.comports():
                 # Filter for Bluetooth COM ports (BTHENUM in hardware ID)
                 hwid = (port_info.hwid or "").upper()

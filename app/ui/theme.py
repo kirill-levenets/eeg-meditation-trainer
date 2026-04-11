@@ -20,7 +20,6 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.scrollview import ScrollView
 
-
 # ── Icon font ────────────────────────────────────────────────────────
 
 _FONT_NAME = "materialdesignicons-webfont.ttf"
@@ -77,7 +76,8 @@ class Icons:
 
 def _create_solid_png(rgba, path):
     """Write a 1x1 solid-color PNG file for use as accordion background."""
-    import struct, zlib
+    import struct
+    import zlib
     r = int(rgba[0] * 255)
     g = int(rgba[1] * 255)
     b = int(rgba[2] * 255)
@@ -98,6 +98,7 @@ def _create_solid_png(rgba, path):
 
 # Generate solid-color PNGs for accordion backgrounds
 import tempfile as _tempfile
+
 _ACCORDION_DIR = _tempfile.mkdtemp(prefix="eeg_theme_")
 
 

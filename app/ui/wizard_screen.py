@@ -1,6 +1,7 @@
 """First-run wizard: create profile + select device in 2 steps."""
 
-from typing import Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Optional
 
 from kivy.graphics import Color, Rectangle
 from kivy.metrics import dp
@@ -9,7 +10,7 @@ from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
 from kivy.uix.textinput import TextInput
 
-from app.ui.theme import C, F, S, Icons, StyledButton, Card, ICONS_AVAILABLE
+from app.ui.theme import ICONS_AVAILABLE, C, F, Icons, S, StyledButton
 
 
 class WizardScreen(Screen):
@@ -228,7 +229,7 @@ class WizardScreen(Screen):
         if self._on_scan:
             self._on_scan()
 
-    def populate_devices(self, devices: List[Dict[str, str]]) -> None:
+    def populate_devices(self, devices: list[dict[str, str]]) -> None:
         """Show scan results."""
         self._device_list.clear_widgets()
         if not devices:

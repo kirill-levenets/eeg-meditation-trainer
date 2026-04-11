@@ -1,7 +1,7 @@
 import math
 import time as _time
 from collections import deque
-from typing import Dict, List, Optional
+from typing import Optional
 
 from kivy.core.text import Label as CoreLabel
 from kivy.core.window import Window
@@ -24,27 +24,27 @@ class ScrollableGraphWidget(Widget):
     textures on canvas.
     """
 
-    def __init__(self, colors: Dict[str, tuple], scales: Dict[str, float],
+    def __init__(self, colors: dict[str, tuple], scales: dict[str, float],
                  viewport_seconds: int = 60, show_value_labels: bool = True,
                  show_timestamps: bool = True, sample_rate: float = 0.0,
                  max_points: int = 0, bipolar: bool = False,
                  auto_scale: bool = False, grid_step: float = 20.0,
                  **kwargs) -> None:
         super().__init__(**kwargs)
-        self._colors: Dict[str, tuple] = colors
-        self._scales: Dict[str, float] = scales
+        self._colors: dict[str, tuple] = colors
+        self._scales: dict[str, float] = scales
         self._bipolar: bool = bipolar
         self._auto_scale: bool = auto_scale
         self._grid_step: float = grid_step
-        self._markers: List[int] = []
+        self._markers: list[int] = []
         self._line_width: float = 1.2
         self._sample_rate: float = sample_rate if sample_rate > 0 else (1.0 / APP.UPDATE_FREQUENCY)
         effective_max = max_points if max_points > 0 else APP.GRAPH_POINTS_MAX
         self._viewport_points: int = int(viewport_seconds * self._sample_rate)
-        self._data: Dict[str, deque] = {
+        self._data: dict[str, deque] = {
             key: deque(maxlen=effective_max) for key in colors
         }
-        self._visible: Dict[str, bool] = {key: True for key in colors}
+        self._visible: dict[str, bool] = dict.fromkeys(colors, True)
         self._scroll_offset: int = 0
         self._total_points: int = 0
         self._show_value_labels: bool = show_value_labels
@@ -59,9 +59,9 @@ class ScrollableGraphWidget(Widget):
         self._pinch_active: bool = False
         self._pinch_start_dist: float = 0.0
         self._pinch_start_viewport: int = 0
-        self._grabbed_touches: Dict[int, object] = {}
+        self._grabbed_touches: dict[int, object] = {}
         # Sync group: linked graphs zoom together
-        self._sync_group: List["ScrollableGraphWidget"] = []
+        self._sync_group: list["ScrollableGraphWidget"] = []
         self._threshold_value: Optional[float] = None
         self._threshold_scale_key: Optional[str] = None
         self._start_wall_time: Optional[float] = None
@@ -115,7 +115,7 @@ class ScrollableGraphWidget(Widget):
         self._start_wall_time = epoch
         self._redraw()
 
-    def add_point(self, values: Dict[str, float]) -> None:
+    def add_point(self, values: dict[str, float]) -> None:
         for key in self._data:
             val = values.get(key, 0.0)
             self._data[key].append(val)
@@ -123,7 +123,7 @@ class ScrollableGraphWidget(Widget):
         self._total_points = len(self._data[first_key])
         self._redraw()
 
-    def add_points_batch(self, key: str, values: List[float]) -> None:
+    def add_points_batch(self, key: str, values: list[float]) -> None:
         """Add multiple points for a single series without per-point redraw."""
         if key not in self._data:
             return
@@ -133,7 +133,7 @@ class ScrollableGraphWidget(Widget):
         self._total_points = len(self._data[first_key])
         self._redraw()
 
-    def load_static_data(self, series: Dict[str, List[float]]) -> None:
+    def load_static_data(self, series: dict[str, list[float]]) -> None:
         """Load pre-recorded data for static display (e.g. diary preview)."""
         for key in self._data:
             self._data[key].clear()
@@ -320,7 +320,7 @@ class ScrollableGraphWidget(Widget):
                 t_mark += grid_sec
 
         # Data lines + endpoint value labels
-        label_y_positions: List[float] = []
+        label_y_positions: list[float] = []
         for key, data in self._data.items():
             if not self._visible.get(key, True):
                 continue
@@ -529,7 +529,7 @@ class ScrollableGraphWidget(Widget):
         self._markers.append(idx)
         self._redraw()
 
-    def set_markers(self, markers: List[int]) -> None:
+    def set_markers(self, markers: list[int]) -> None:
         """Set all markers (for loading from DB)."""
         self._markers = list(markers)
         self._redraw()
@@ -654,7 +654,7 @@ class RawEEGScreen(Screen):
     def band_graph(self) -> ScrollableGraphWidget:
         return self._band_graph
 
-    def add_raw_sample(self, sample: Dict[str, float]) -> None:
+    def add_raw_sample(self, sample: dict[str, float]) -> None:
         """Add raw EEG sample: waveform signal + frequency bands."""
         # Oscillating EEG waveform from sub-sampled burst
         waveform = sample.get("raw_eeg_waveform", [])
@@ -702,4 +702,4 @@ class RawEEGScreen(Screen):
 
 
 if __name__ == "__main__":
-    print("RawEEGScreen module loaded OK")
+    pass

@@ -1,0 +1,83 @@
+[tool.ruff]
+preview = true
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    # Errors & correctness
+    "F821",    # undefined-name
+    "F401",    # unused-import
+    "F811",    # redefined-while-unused
+    "E722",    # bare-except (syntax-level)
+
+    # Modern Python style
+    "PLC0415", # import-outside-toplevel — no imports inside functions
+    "T201",    # print — use logger, not print()
+    "UP006",   # non-pep585-annotation — list[str] not List[str]
+    "UP007",   # non-pep604-annotation — X | None not Optional[X]
+    "UP035",   # deprecated-import — remove `from typing import List` etc.
+    "TID252",  # relative-imports — always absolute imports
+    "S105",    # hardcoded-password-string
+    "S106",    # hardcoded-password-func-arg
+
+    # Common bugs
+    "B006",    # mutable-default-argument
+    "B007",    # unused-loop-variable
+    "B018",    # useless-expression
+
+    # Code quality
+    "BLE001",  # blind-except — don't catch bare Exception without logging
+    "ASYNC100",# missing-await — coroutine created but never awaited
+    "SIM102",  # collapsible-if
+    "SIM118",  # in-dict-keys — use `key in dict` not `key in dict.keys()`
+    "SIM401",  # use dict.get instead of if/else
+    "PIE790",  # unnecessary-placeholder — redundant `pass`
+    "C4",      # unnecessary list/dict comprehension patterns
+    "RET504",  # unnecessary-assign-before-return
+    "RUF019",  # unnecessary-key-check
+    "RUF100",  # unused-noqa
+
+    # Import hygiene
+    "I001",    # unsorted-imports (isort)
+
+    # Formatting
+    "W292",    # no-newline-at-end-of-file
+]
+
+ignore = [
+    "E501",    # line-too-long
+    "W293",    # blank-line-with-whitespace
+    "E302",    # expected-2-blank-lines
+    "W291",    # trailing-whitespace
+    "F541",    # f-string-missing-placeholders
+    "E203",    # whitespace-before-punctuation
+    "RUF001",  # ambiguous-unicode-character-string — false positives on Cyrillic text
+    "RUF002",  # ambiguous-unicode-character-docstring — same
+    "RUF003",  # ambiguous-unicode-character-comment — same
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests: print, broad asserts, per-test imports
+"tests/*" = ["T201", "BLE001", "PLC0415"]
+# Lazy imports: platform-specific (jnius, bluetooth), Kivy audio, json, popups, threading
+# BT and audio: broad except is intentional safety net for unpredictable platform errors
+"app/eeg/neurosky_stream.py" = ["T201", "PLC0415", "BLE001"]
+"app/audio_feedback/noise.py" = ["T201", "PLC0415", "BLE001"]
+"app/storage/database.py" = ["T201", "PLC0415"]
+# Android wake lock, BT auto-scan, wizard — unpredictable platform errors
+"app/ui/app_manager.py" = ["PLC0415", "BLE001"]
+"app/ui/history_screen.py" = ["PLC0415"]
+"app/ui/settings_screen.py" = ["PLC0415"]
+"app/ui/diary_screen.py" = ["PLC0415", "BLE001"]
+"app/ui/theme.py" = ["PLC0415", "BLE001"]
+"app/metrics/custom_formula.py" = ["BLE001"]
+"app/ui/live_session.py" = ["PLC0415"]
+"app/ui/timer_screen.py" = ["PLC0415"]
+"app/config.py" = ["PLC0415"]
+# __main__ blocks use print()
+"app/eeg/mock_stream.py" = ["T201"]
+"app/eeg/mock_stream_v2.py" = ["T201"]
+"app/session/manager.py" = ["T201"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]

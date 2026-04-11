@@ -1,22 +1,22 @@
 import math
 import os
-from typing import Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Optional
 
 from kivy.graphics import Color, Rectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.button import Button
 from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
-from kivy.uix.screenmanager import Screen
 from kivy.uix.popup import Popup
+from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
 
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
-from app.ui.theme import C, F, S, Icons, StyledButton
+from app.ui.theme import C, F, Icons, S, StyledButton
 
 
 class _GraphAwareScrollView(ScrollView):
@@ -87,14 +87,14 @@ _BAND_FREQS = {
 _AMPLITUDE_SCALE: float = 0.0004
 
 
-def _synthesize_waveform(rows: List[Dict]) -> List[float]:
+def _synthesize_waveform(rows: list[dict]) -> list[float]:
     """Synthesize an approximate EEG waveform from stored band powers.
 
     For each 2Hz tick, generates ~256 samples (0.5s at 512Hz) by
     combining sine waves at characteristic band frequencies with
     amplitudes proportional to sqrt of the stored band power.
     """
-    waveform: List[float] = []
+    waveform: list[float] = []
     sample_idx = 0
     for row in rows:
         raw_keys = {
@@ -108,7 +108,7 @@ def _synthesize_waveform(rows: List[Dict]) -> List[float]:
             power = max(row.get(db_key, 0.0), 0.0)
             amps[band] = math.sqrt(power) * _AMPLITUDE_SCALE
 
-        for i in range(_SAMPLES_PER_TICK):
+        for _i in range(_SAMPLES_PER_TICK):
             t = sample_idx / _SYNTH_RATE
             val = 0.0
             for band, freq in _BAND_FREQS.items():
@@ -142,7 +142,6 @@ FREQ_PREVIEW_SCALES = {
 
 class SessionListItem(BoxLayout):
     """Single row in the session list."""
-    pass
 
 
 class DiaryScreen(Screen):
@@ -158,7 +157,7 @@ class DiaryScreen(Screen):
         self._on_rename_session: Optional[Callable] = None
         self._on_back: Optional[Callable] = None
         self._selected_session_id: Optional[int] = None
-        self._sessions_data: List[Dict] = []
+        self._sessions_data: list[dict] = []
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -240,7 +239,7 @@ class DiaryScreen(Screen):
             spacing=dp(4),
             padding=dp(4),
         )
-        self._detail_stats: Dict[str, Label] = {}
+        self._detail_stats: dict[str, Label] = {}
         stat_keys = [
             ("duration", "Duration (s)"),
             ("avg_meditation", "Avg Meditation"),
@@ -438,7 +437,7 @@ class DiaryScreen(Screen):
         self._detail_layout.add_widget(self._legend_container)
 
         self._active_graph_tab: str = "metrics"
-        self._cached_metrics_rows: List[Dict] = []
+        self._cached_metrics_rows: list[dict] = []
         self._graph_container.add_widget(self._metrics_graph)
         self._rebuild_legend("metrics")
 
@@ -484,7 +483,7 @@ class DiaryScreen(Screen):
             self._session_scroll.size_hint_y = 0
             self._session_scroll.opacity = 0
 
-    def populate_sessions(self, sessions: List[Dict]) -> None:
+    def populate_sessions(self, sessions: list[dict]) -> None:
         """Fill the session list from DB data."""
         self._sessions_data = sessions
         self._session_list_layout.clear_widgets()
@@ -530,7 +529,7 @@ class DiaryScreen(Screen):
             btn.text_color = C.TEXT
             self._on_session_select(sid)
 
-    def show_session_detail(self, session: Dict, from_history: bool = True) -> None:
+    def show_session_detail(self, session: dict, from_history: bool = True) -> None:
         """Display detail for a selected session."""
         if from_history:
             self._show_list_section(False)
@@ -556,17 +555,17 @@ class DiaryScreen(Screen):
         self._cached_metrics_rows = []
         self._switch_graph_tab("metrics")
 
-    def load_metrics_preview(self, metrics_rows: List[Dict]) -> None:
+    def load_metrics_preview(self, metrics_rows: list[dict]) -> None:
         """Load session metrics into all three preview graphs."""
         self._cached_metrics_rows = metrics_rows
         if not metrics_rows:
             return
         self._load_graph_data(metrics_rows)
 
-    def _load_graph_data(self, rows: List[Dict]) -> None:
+    def _load_graph_data(self, rows: list[dict]) -> None:
         """Populate all three graphs from metrics rows."""
         # Metrics graph
-        metrics_series: Dict[str, List[float]] = {k: [] for k in METRICS_PREVIEW_COLORS}
+        metrics_series: dict[str, list[float]] = {k: [] for k in METRICS_PREVIEW_COLORS}
         for row in rows:
             for key in metrics_series:
                 metrics_series[key].append(row.get(key, 0.0))
@@ -574,11 +573,11 @@ class DiaryScreen(Screen):
 
         # Raw EEG synthesized waveform from band powers
         synth = _synthesize_waveform(rows)
-        eeg_series: Dict[str, List[float]] = {"eeg": synth}
+        eeg_series: dict[str, list[float]] = {"eeg": synth}
         self._raw_eeg_graph.load_static_data(eeg_series)
 
         # Frequency bands
-        freq_series: Dict[str, List[float]] = {k: [] for k in FREQ_PREVIEW_COLORS}
+        freq_series: dict[str, list[float]] = {k: [] for k in FREQ_PREVIEW_COLORS}
         for row in rows:
             freq_series["alpha"].append(row.get("alpha1_raw", 0.0) + row.get("alpha2_raw", 0.0))
             freq_series["beta"].append(row.get("beta1_raw", 0.0) + row.get("beta2_raw", 0.0))

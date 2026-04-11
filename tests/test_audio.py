@@ -2,7 +2,11 @@ import os
 import threading
 import unittest
 
-from app.audio_feedback.noise import AudioEngine, _generate_bell_wav, _generate_noise_wav
+from app.audio_feedback.noise import (
+    AudioEngine,
+    _generate_bell_wav,
+    _generate_noise_wav,
+)
 from app.config import APP
 
 

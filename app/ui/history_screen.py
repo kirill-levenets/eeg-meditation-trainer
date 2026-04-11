@@ -6,18 +6,19 @@ to see sessions for that date; tap a session to see full detail.
 """
 
 import datetime
-from typing import Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Optional
 
 from kivy.graphics import Color, Rectangle, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
-from kivy.uix.scrollview import ScrollView
 from kivy.uix.screenmanager import Screen
+from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
-from app.ui.theme import C, F, S, Card, Icons, StyledButton, Divider
+from app.ui.theme import C, Card, Divider, F, Icons, S, StyledButton
 
 
 def _lerp_color(t: float):
@@ -47,13 +48,13 @@ class CalendarHeatmap(Widget):
         super().__init__(**kwargs)
         self.size_hint_y = None
         self.height = 7 * (self.CELL_SIZE + self.CELL_GAP) + dp(20)  # 7 rows + month labels
-        self._day_values: Dict[str, float] = {}  # "YYYY-MM-DD" -> avg_shamatha
-        self._day_rects: Dict[str, object] = {}
+        self._day_values: dict[str, float] = {}  # "YYYY-MM-DD" -> avg_shamatha
+        self._day_rects: dict[str, object] = {}
         self._on_day_tap: Optional[Callable] = None
         self._selected_date: Optional[str] = None
         self.bind(size=self._redraw, pos=self._redraw)
 
-    def set_data(self, day_values: Dict[str, float]) -> None:
+    def set_data(self, day_values: dict[str, float]) -> None:
         """Set day→score mapping and redraw."""
         self._day_values = day_values
         self._redraw()
@@ -193,7 +194,7 @@ class HistoryScreen(Screen):
         self._on_delete_session: Optional[Callable] = None
         self._on_export_csv: Optional[Callable] = None
         self._on_rename_session: Optional[Callable] = None
-        self._sessions: List[Dict] = []
+        self._sessions: list[dict] = []
         self._filtered_date: Optional[str] = None
         self._build_ui()
         C.add_listener(self._refresh_theme)
@@ -285,11 +286,11 @@ class HistoryScreen(Screen):
         self._on_export_csv = on_export_csv
         self._on_rename_session = on_rename_session
 
-    def load_sessions(self, sessions: List[Dict]) -> None:
+    def load_sessions(self, sessions: list[dict]) -> None:
         """Load all sessions and build heatmap data."""
         self._sessions = sessions
         # Build day → avg shamatha mapping
-        day_scores: Dict[str, List[float]] = {}
+        day_scores: dict[str, list[float]] = {}
         for s in sessions:
             dt_str = s.get("date_time", "")
             if len(dt_str) >= 10:
@@ -333,7 +334,7 @@ class HistoryScreen(Screen):
         self._btn_show_all.opacity = 0
         self._btn_show_all.disabled = True
 
-    def _show_sessions(self, sessions: List[Dict], header: str) -> None:
+    def _show_sessions(self, sessions: list[dict], header: str) -> None:
         """Populate the session list."""
         self._session_list.clear_widgets()
         self._date_label.text = f"{header} ({len(sessions)} sessions)"
@@ -352,7 +353,7 @@ class HistoryScreen(Screen):
         for s in sessions:
             self._session_list.add_widget(self._make_session_row(s))
 
-    def _make_session_row(self, session: Dict) -> BoxLayout:
+    def _make_session_row(self, session: dict) -> BoxLayout:
         """Create a session row: tap to view, rename/delete buttons on right."""
         sid = session.get("id", 0)
         dt_str = session.get("date_time", "")

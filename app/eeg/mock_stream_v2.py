@@ -16,13 +16,11 @@ attention, meditation, and timestamp.
 import math
 import random
 import time
-from typing import Dict, List, Tuple
 
 from app.logger import logger
 
-
 # Frequency ranges (Hz) for each EEG band
-BAND_FREQ_RANGES: Dict[str, Tuple[float, float]] = {
+BAND_FREQ_RANGES: dict[str, tuple[float, float]] = {
     "delta": (0.5, 4.0),
     "theta": (4.0, 8.0),
     "alpha1": (8.0, 10.0),
@@ -34,7 +32,7 @@ BAND_FREQ_RANGES: Dict[str, Tuple[float, float]] = {
 }
 
 # Base power (µV²-like) per band at rest
-BASE_POWER: Dict[str, float] = {
+BASE_POWER: dict[str, float] = {
     "delta": 280.0,
     "theta": 180.0,
     "alpha1": 350.0,
@@ -53,7 +51,7 @@ class BrainStateV2:
     Multipliers scale the BASE_POWER for each band.
     """
 
-    STATES: List[Tuple[str, Dict[str, float], float]] = [
+    STATES: list[tuple[str, dict[str, float], float]] = [
         ("relaxed", {
             "delta": 0.6, "theta": 0.8, "alpha1": 1.4, "alpha2": 1.3,
             "beta1": 0.4, "beta2": 0.3, "gamma1": 0.2, "gamma2": 0.15,
@@ -98,14 +96,14 @@ class MockEEGStream:
         self._current_state_idx: int = 0
         self._state_timer: float = 0.0
         self._state_duration: float = 8.0
-        self._prev_multipliers: Dict[str, float] = {}
-        self._curr_multipliers: Dict[str, float] = {}
+        self._prev_multipliers: dict[str, float] = {}
+        self._curr_multipliers: dict[str, float] = {}
         self._transition_progress: float = 1.0
         self._transition_duration: float = 5.0
 
         # Per-band synthesized frequencies (picked each epoch)
-        self._band_frequencies: Dict[str, float] = {}
-        self._band_phases: Dict[str, float] = {}
+        self._band_frequencies: dict[str, float] = {}
+        self._band_phases: dict[str, float] = {}
 
         self._init_state()
 
@@ -186,7 +184,7 @@ class MockEEGStream:
             self._regenerate_frequencies()
             logger.debug(f"MockEEG state → {name}, dur={self._state_duration:.1f}s")
 
-    def _get_effective_multipliers(self) -> Dict[str, float]:
+    def _get_effective_multipliers(self) -> dict[str, float]:
         """Interpolate between previous and current state multipliers."""
         p = self._smooth_step(self._transition_progress)
         result = {}
@@ -202,7 +200,7 @@ class MockEEGStream:
         t = max(0.0, min(1.0, t))
         return t * t * (3.0 - 2.0 * t)
 
-    def read_sample(self) -> Dict[str, float]:
+    def read_sample(self) -> dict[str, float]:
         """Generate a single mock EEG sample with frequency-based synthesis."""
         t = time.time() - self._start_time if self._running else 0.0
         self._sample_count += 1
@@ -210,7 +208,7 @@ class MockEEGStream:
         self._advance_state(0.5)
 
         multipliers = self._get_effective_multipliers()
-        sample: Dict[str, float] = {"timestamp": t}
+        sample: dict[str, float] = {"timestamp": t}
 
         for band in BASE_POWER:
             base = BASE_POWER[band]
@@ -254,7 +252,7 @@ class MockEEGStream:
         # Generate 64 sub-samples over the 0.5s tick at 128Hz effective rate
         waveform_len = 64
         dt_sub = 0.5 / waveform_len
-        waveform: List[float] = []
+        waveform: list[float] = []
         for si in range(waveform_len):
             t_sub = t - 0.5 + si * dt_sub
             val = 0.0
@@ -287,7 +285,7 @@ if __name__ == "__main__":
     print("Frequency-synthesized EEG — 20 samples:")
     print(f"{'t':>5} {'delta':>7} {'theta':>7} {'alpha1':>7} {'alpha2':>7} "
           f"{'beta1':>7} {'beta2':>7} {'gamma1':>7} {'gamma2':>7} {'att':>4} {'med':>4}")
-    for i in range(20):
+    for _i in range(20):
         s = stream.read_sample()
         print(f"{s['timestamp']:5.1f} {s['delta']:7.0f} {s['theta']:7.0f} "
               f"{s['alpha1']:7.0f} {s['alpha2']:7.0f} {s['beta1']:7.0f} "

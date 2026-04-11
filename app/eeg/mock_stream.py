@@ -1,7 +1,6 @@
 import math
 import random
 import time
-from typing import Dict, List, Tuple
 
 
 class BrainState:
@@ -15,7 +14,7 @@ class BrainState:
     - Deep calm: high alpha + theta, very low beta/gamma
     """
 
-    STATES: List[Tuple[str, Dict[str, float], float]] = [
+    STATES: list[tuple[str, dict[str, float], float]] = [
         ("relaxed", {
             "delta": 0.6, "theta": 0.8, "alpha1": 1.4, "alpha2": 1.3,
             "beta1": 0.4, "beta2": 0.3, "gamma1": 0.2, "gamma2": 0.15,
@@ -49,7 +48,7 @@ class MockEEGStream:
 
     # Base amplitudes matching NeuroSky ASIC_EEG_POWER (3-byte unsigned int)
     # Typical values from real MindWave Mobile 2 recordings
-    BASE_AMPLITUDES: Dict[str, float] = {
+    BASE_AMPLITUDES: dict[str, float] = {
         "delta": 500000.0,   # 0.5-4 Hz, dominant during drowsiness
         "theta": 150000.0,   # 4-8 Hz, meditation/drowsiness
         "alpha1": 80000.0,   # 8-10 Hz, relaxation, eyes closed
@@ -61,7 +60,7 @@ class MockEEGStream:
     }
 
     # Characteristic oscillation rates (Hz) for amplitude modulation
-    MODULATION_RATES: Dict[str, float] = {
+    MODULATION_RATES: dict[str, float] = {
         "delta": 0.03,
         "theta": 0.06,
         "alpha1": 0.10,
@@ -73,7 +72,7 @@ class MockEEGStream:
     }
 
     # Noise standard deviation as fraction of base amplitude
-    NOISE_FRACTION: Dict[str, float] = {
+    NOISE_FRACTION: dict[str, float] = {
         "delta": 0.15,
         "theta": 0.12,
         "alpha1": 0.10,
@@ -94,11 +93,11 @@ class MockEEGStream:
         self._current_state_idx: int = 0
         self._state_timer: float = 0.0
         self._state_duration: float = 30.0
-        self._prev_multipliers: Dict[str, float] = {}
-        self._curr_multipliers: Dict[str, float] = {}
+        self._prev_multipliers: dict[str, float] = {}
+        self._curr_multipliers: dict[str, float] = {}
         self._transition_progress: float = 1.0
         self._transition_duration: float = 5.0
-        self._phase_offsets: Dict[str, float] = {
+        self._phase_offsets: dict[str, float] = {
             k: random.uniform(0, 2 * math.pi) for k in self.BASE_AMPLITUDES
         }
         self._last_sample_time: float = 0.0
@@ -167,7 +166,7 @@ class MockEEGStream:
             self._transition_progress = 0.0
             self._transition_duration = random.uniform(3.0, 8.0)
 
-    def _get_effective_multipliers(self) -> Dict[str, float]:
+    def _get_effective_multipliers(self) -> dict[str, float]:
         """Interpolate between previous and current state multipliers."""
         p = self._smooth_step(self._transition_progress)
         result = {}
@@ -183,7 +182,7 @@ class MockEEGStream:
         t = max(0.0, min(1.0, t))
         return t * t * (3.0 - 2.0 * t)
 
-    def read_sample(self) -> Dict:
+    def read_sample(self) -> dict:
         """Generate a single mock EEG sample matching NeuroSky ThinkGear format.
 
         Returns dict with: delta, theta, alpha1, alpha2, beta1, beta2,
@@ -197,7 +196,7 @@ class MockEEGStream:
 
         multipliers = self._get_effective_multipliers()
 
-        sample: Dict = {"timestamp": t}
+        sample: dict = {"timestamp": t}
 
         for band in self.BASE_AMPLITUDES:
             base = self.BASE_AMPLITUDES[band]
@@ -253,7 +252,7 @@ class MockEEGStream:
         self._last_sample_time = now
         n_raw = int(dt * self.RAW_WAVE_SAMPLE_RATE)
         n_raw = max(1, min(n_raw, 1024))  # clamp
-        waveform: List[int] = []
+        waveform: list[int] = []
         amp = self.RAW_WAVE_AMPLITUDE * multipliers.get("alpha1", 1.0)
         for i in range(n_raw):
             t_raw = t + i / self.RAW_WAVE_SAMPLE_RATE
@@ -277,7 +276,7 @@ if __name__ == "__main__":
     print(f"{'t':>5} {'delta':>10} {'theta':>10} {'alpha1':>10} {'alpha2':>10} "
           f"{'beta1':>10} {'beta2':>10} {'gamma1':>10} {'gamma2':>10} "
           f"{'att':>4} {'med':>4} {'sq':>3} {'raw#':>5}")
-    for i in range(10):
+    for _i in range(10):
         s = stream.read_sample()
         wf = s.get("raw_eeg_waveform", [])
         print(f"{s['timestamp']:5.1f} {s['delta']:10.0f} {s['theta']:10.0f} "

@@ -1,4 +1,5 @@
-from typing import Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Optional
 
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
@@ -19,8 +20,8 @@ class HomeScreen(Screen):
         self._on_user_switch: Optional[Callable] = None
         self._on_user_create: Optional[Callable] = None
         self._on_navigate: Optional[Callable] = None
-        self._users: List[Dict] = []
-        self._user_map: Dict[str, int] = {}
+        self._users: list[dict] = []
+        self._user_map: dict[str, int] = {}
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -178,7 +179,7 @@ class HomeScreen(Screen):
     def set_user_create_callback(self, callback: Callable) -> None:
         self._on_user_create = callback
 
-    def populate_users(self, users: List[Dict], current_user_id: Optional[int]) -> None:
+    def populate_users(self, users: list[dict], current_user_id: Optional[int]) -> None:
         self._users = users
         self._user_map = {}
         names = []

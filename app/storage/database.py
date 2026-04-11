@@ -3,7 +3,7 @@ import io
 import os
 import sqlite3
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Optional
 
 from app.config import APP
 from app.logger import logger
@@ -137,7 +137,7 @@ class DatabaseManager:
 
         self._conn.commit()
 
-    def save_session(self, stats: Dict, user_id: Optional[int] = None,
+    def save_session(self, stats: dict, user_id: Optional[int] = None,
                      session_name: str = "") -> int:
         """Insert a session record and return its ID."""
         cursor = self._conn.execute(
@@ -165,7 +165,7 @@ class DatabaseManager:
         logger.info(f"Session {session_id} saved")
         return session_id
 
-    def save_metrics_batch(self, session_id: int, metrics_list: List[Dict]) -> None:
+    def save_metrics_batch(self, session_id: int, metrics_list: list[dict]) -> None:
         """Batch insert metrics rows with raw and computed data."""
         if not metrics_list:
             return
@@ -214,7 +214,7 @@ class DatabaseManager:
         )
         self._conn.commit()
 
-    def get_all_sessions(self, user_id: Optional[int] = None) -> List[Dict]:
+    def get_all_sessions(self, user_id: Optional[int] = None) -> list[dict]:
         """Return sessions ordered by date descending, optionally filtered by user."""
         if user_id is not None:
             cursor = self._conn.execute(
@@ -227,7 +227,7 @@ class DatabaseManager:
             )
         return [dict(row) for row in cursor.fetchall()]
 
-    def get_session(self, session_id: int) -> Optional[Dict]:
+    def get_session(self, session_id: int) -> Optional[dict]:
         """Return a single session by ID."""
         cursor = self._conn.execute(
             "SELECT * FROM sessions WHERE id = ?", (session_id,)
@@ -235,7 +235,7 @@ class DatabaseManager:
         row = cursor.fetchone()
         return dict(row) if row else None
 
-    def get_session_metrics(self, session_id: int) -> List[Dict]:
+    def get_session_metrics(self, session_id: int) -> list[dict]:
         """Return all metric rows for a session."""
         cursor = self._conn.execute(
             "SELECT * FROM metrics WHERE session_id = ? ORDER BY timestamp",
@@ -253,7 +253,7 @@ class DatabaseManager:
         )
         self._conn.commit()
 
-    def get_sessions_in_range(self, start_date: str, end_date: str) -> List[Dict]:
+    def get_sessions_in_range(self, start_date: str, end_date: str) -> list[dict]:
         """Return sessions within a date range for analytics."""
         cursor = self._conn.execute(
             "SELECT * FROM sessions WHERE date_time BETWEEN ? AND ? ORDER BY date_time",
@@ -280,12 +280,12 @@ class DatabaseManager:
         logger.info(f"User '{name}' created with id {uid}")
         return uid
 
-    def get_all_users(self) -> List[Dict]:
+    def get_all_users(self) -> list[dict]:
         """Return all user profiles."""
         cursor = self._conn.execute("SELECT * FROM users ORDER BY name")
         return [dict(row) for row in cursor.fetchall()]
 
-    def get_user(self, user_id: int) -> Optional[Dict]:
+    def get_user(self, user_id: int) -> Optional[dict]:
         """Return a single user by ID."""
         cursor = self._conn.execute("SELECT * FROM users WHERE id = ?", (user_id,))
         row = cursor.fetchone()
@@ -298,7 +298,7 @@ class DatabaseManager:
 
     # ---- Session management ----
 
-    def update_session(self, session_id: int, stats: Dict) -> None:
+    def update_session(self, session_id: int, stats: dict) -> None:
         """Update an existing session's aggregate stats."""
         self._conn.execute(
             """
@@ -360,7 +360,7 @@ class DatabaseManager:
 
     _MAX_SAVED_FORMULAS = 50
 
-    def get_saved_formulas(self, user_id: int) -> List[Dict[str, str]]:
+    def get_saved_formulas(self, user_id: int) -> list[dict[str, str]]:
         """Return saved formulas for a user as [{name, formula}, ...]."""
         import json
         raw = self.get_user_setting(user_id, "saved_formulas")
@@ -372,7 +372,7 @@ class DatabaseManager:
         except (json.JSONDecodeError, TypeError):
             return []
 
-    def _save_formulas_list(self, user_id: int, formulas: List[Dict[str, str]]) -> None:
+    def _save_formulas_list(self, user_id: int, formulas: list[dict[str, str]]) -> None:
         import json
         self.set_user_setting(user_id, "saved_formulas", json.dumps(formulas))
 
@@ -406,7 +406,7 @@ class DatabaseManager:
         except OSError:
             return 0
 
-    def get_record_counts(self) -> Dict[str, int]:
+    def get_record_counts(self) -> dict[str, int]:
         """Return row counts for sessions and metrics tables."""
         sessions = self._conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
         metrics = self._conn.execute("SELECT COUNT(*) FROM metrics").fetchone()[0]

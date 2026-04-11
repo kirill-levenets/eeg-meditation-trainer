@@ -24,7 +24,7 @@ class TestScrollableGraphWidget(unittest.TestCase):
 
     def test_max_scroll_with_enough_data(self):
         vp = self.graph.viewport_points
-        for i in range(vp + 10):
+        for _i in range(vp + 10):
             self.graph.add_point({"a": 1.0, "b": 2.0})
         self.assertEqual(self.graph.max_scroll, 10)
 
@@ -33,7 +33,7 @@ class TestScrollableGraphWidget(unittest.TestCase):
         self.assertEqual(self.graph._scroll_offset, 0)
 
     def test_clear_data(self):
-        for i in range(5):
+        for _i in range(5):
             self.graph.add_point({"a": 1.0, "b": 2.0})
         self.graph.clear_data()
         self.assertEqual(self.graph.total_points, 0)

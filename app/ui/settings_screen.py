@@ -1,4 +1,5 @@
-from typing import Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Optional
 
 from kivy.core.window import Window
 from kivy.graphics import Color, Rectangle
@@ -12,8 +13,7 @@ from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
 
 from app.config import APP, METRICS
-from app.ui.theme import C, F, S, Icons, StyledButton, SectionLabel, Divider, PresetRow, ThemedAccordion
-
+from app.ui.theme import C, F, Icons, PresetRow, S, StyledButton, ThemedAccordion
 
 
 class SettingsScreen(Screen):
@@ -39,7 +39,7 @@ class SettingsScreen(Screen):
         self._on_delete_formula: Optional[Callable] = None
         self._on_export_formulas: Optional[Callable] = None
         self._on_theme_change: Optional[Callable] = None
-        self._graph_toggles: Dict[str, bool] = {
+        self._graph_toggles: dict[str, bool] = {
             "meditation_score": True,
             "shamatha_score": True,
             "distraction": True,
@@ -267,7 +267,7 @@ class SettingsScreen(Screen):
         audio_metric_label.bind(size=audio_metric_label.setter("text_size"))
         threshold_section.add_widget(audio_metric_label)
 
-        self._audio_metric_radios: Dict[str, CheckBox] = {}
+        self._audio_metric_radios: dict[str, CheckBox] = {}
         self._audio_metric_selected: str = "shamatha_score"
         self._on_audio_metric_change: Optional[Callable] = None
         audio_metric_options = {
@@ -475,7 +475,7 @@ class SettingsScreen(Screen):
             "native_attention": "NS Attention",
             "native_meditation": "NS Meditation",
         }
-        self._checkboxes: Dict[str, CheckBox] = {}
+        self._checkboxes: dict[str, CheckBox] = {}
         for key, display_name in toggle_names.items():
             row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
             cb = CheckBox(
@@ -981,7 +981,7 @@ class SettingsScreen(Screen):
             self._device_meta_label.text = "Mode: Real Device"
 
     @property
-    def graph_toggles(self) -> Dict[str, bool]:
+    def graph_toggles(self) -> dict[str, bool]:
         return dict(self._graph_toggles)
 
     # --- Custom formula visibility ---

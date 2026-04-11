@@ -1,4 +1,5 @@
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout

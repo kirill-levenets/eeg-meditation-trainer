@@ -1,6 +1,5 @@
 import time
 from enum import Enum
-from typing import Dict, List
 
 from app.logger import logger
 
@@ -21,7 +20,7 @@ class SessionManager:
         self._elapsed: float = 0.0
         self._pause_start: float = 0.0
         self._total_paused: float = 0.0
-        self._metrics_accumulator: List[Dict[str, float]] = []
+        self._metrics_accumulator: list[dict[str, float]] = []
         self._time_above_threshold: float = 0.0
         self._current_streak: float = 0.0
         self._longest_streak: float = 0.0
@@ -73,7 +72,7 @@ class SessionManager:
             self._state = SessionState.RUNNING
             logger.info("Session resumed")
 
-    def stop(self) -> Dict:
+    def stop(self) -> dict:
         if self._state in (SessionState.RUNNING, SessionState.PAUSED):
             if self._state == SessionState.PAUSED:
                 self._total_paused += time.time() - self._pause_start
@@ -84,7 +83,7 @@ class SessionManager:
             return stats
         return {}
 
-    def add_metric(self, metric: Dict[str, float]) -> None:
+    def add_metric(self, metric: dict[str, float]) -> None:
         """Accumulate a processed metric tick for end-of-session stats."""
         if self._state == SessionState.RUNNING:
             self._metrics_accumulator.append(metric)
@@ -96,7 +95,7 @@ class SessionManager:
             else:
                 self._current_streak = 0.0
 
-    def compute_statistics(self) -> Dict:
+    def compute_statistics(self) -> dict:
         """Compute end-of-session statistics."""
         if not self._metrics_accumulator:
             return {

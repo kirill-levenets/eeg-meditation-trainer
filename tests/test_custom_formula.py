@@ -378,7 +378,7 @@ class TestAvgEvaluation(unittest.TestCase):
 
     def test_history_clears_on_new_formula(self):
         self.ev.set_formula("avg(alpha1, 5)")
-        for i in range(10):
+        for _i in range(10):
             self.ev.push_variables({"alpha1": 100.0})
         # Set new formula — history should reset
         self.ev.set_formula("avg(alpha1, 5)")

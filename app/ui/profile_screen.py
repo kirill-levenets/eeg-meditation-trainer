@@ -1,4 +1,5 @@
-from typing import Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Optional
 
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
@@ -118,7 +119,7 @@ class ProfileScreen(Screen):
     def set_user_delete_callback(self, callback: Callable) -> None:
         self._on_user_delete = callback
 
-    def populate_users(self, users: List[Dict], current_user_id: Optional[int]) -> None:
+    def populate_users(self, users: list[dict], current_user_id: Optional[int]) -> None:
         """Fill the user list."""
         self._user_list_layout.clear_widgets()
         self._selected_user_id = current_user_id

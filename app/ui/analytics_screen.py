@@ -1,4 +1,3 @@
-from typing import Dict, List
 
 from kivy.core.text import Label as CoreLabel
 from kivy.graphics import Color, Line, Rectangle
@@ -16,12 +15,12 @@ class TrendGraphWidget(Widget):
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        self._data: List[Dict] = []
+        self._data: list[dict] = []
         self._metric_key: str = "avg_shamatha"
         self._title: str = "Shamatha Trend"
         self.bind(size=self._redraw, pos=self._redraw)
 
-    def set_data(self, data: List[Dict], metric_key: str, title: str) -> None:
+    def set_data(self, data: list[dict], metric_key: str, title: str) -> None:
         self._data = data
         self._metric_key = metric_key
         self._title = title
@@ -134,7 +133,7 @@ class AnalyticsScreen(Screen):
 
         # --- Summary cards ---
         summary_row = BoxLayout(size_hint_y=None, height=dp(60), spacing=dp(4))
-        self._summary_labels: Dict[str, Label] = {}
+        self._summary_labels: dict[str, Label] = {}
         cards = [
             ("total_sessions", "Sessions"),
             ("total_minutes", "Total Min"),
@@ -209,7 +208,7 @@ class AnalyticsScreen(Screen):
     def btn_monthly(self) -> Button:
         return self._btn_monthly
 
-    def update_storage_info(self, size_bytes: int, counts: Dict[str, int]) -> None:
+    def update_storage_info(self, size_bytes: int, counts: dict[str, int]) -> None:
         """Update the storage info label with DB size and record counts."""
         if size_bytes < 1024:
             size_str = f"{size_bytes} B"
@@ -224,11 +223,11 @@ class AnalyticsScreen(Screen):
             f"{counts.get('users', 0)} users"
         )
 
-    def update_summary(self, summary: Dict) -> None:
+    def update_summary(self, summary: dict) -> None:
         for key, label in self._summary_labels.items():
             label.text = str(summary.get(key, 0))
 
-    def show_trend(self, data: List[Dict], metric_key: str, title: str) -> None:
+    def show_trend(self, data: list[dict], metric_key: str, title: str) -> None:
         self._trend_graph.set_data(data, metric_key, title)
         self._period_list.clear_widgets()
 

@@ -1,13 +1,13 @@
 import os
 import sys
 import time
-from typing import Dict, List, Optional
+from typing import Optional
 
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
-from kivy.metrics import dp
 from kivy.graphics import Color, Rectangle
+from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
@@ -27,11 +27,11 @@ from app.session.manager import SessionManager, SessionState
 from app.storage.database import DatabaseManager
 from app.ui.analytics_screen import AnalyticsScreen
 from app.ui.diary_screen import DiaryScreen
+from app.ui.history_screen import HistoryScreen
 from app.ui.live_session import LiveSessionScreen
 from app.ui.profile_screen import ProfileScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
-from app.ui.history_screen import HistoryScreen
 from app.ui.theme import BottomNav, C
 from app.ui.timer_screen import TimerScreen
 from app.ui.wizard_screen import WizardScreen
@@ -66,8 +66,8 @@ class EEGMeditationApp(App):
         self._audio: AudioEngine = AudioEngine()
         self._analytics: AnalyticsAggregator = AnalyticsAggregator(self._db)
         self._update_event: Optional[object] = None
-        self._metrics_buffer: List[Dict] = []
-        self._raw_buffer: List[Dict] = []
+        self._metrics_buffer: list[dict] = []
+        self._raw_buffer: list[dict] = []
         self._flush_counter: int = 0
         self._current_session_id: Optional[int] = None
         self._current_user_id: Optional[int] = None

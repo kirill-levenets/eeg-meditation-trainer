@@ -1,5 +1,4 @@
 from datetime import datetime, timedelta
-from typing import Dict, List
 
 from app.storage.database import DatabaseManager
 
@@ -10,7 +9,7 @@ class AnalyticsAggregator:
     def __init__(self, db: DatabaseManager) -> None:
         self._db: DatabaseManager = db
 
-    def get_daily_stats(self, days: int = 30) -> List[Dict]:
+    def get_daily_stats(self, days: int = 30) -> list[dict]:
         """Get daily aggregated stats for the last N days."""
         end = datetime.now()
         start = end - timedelta(days=days)
@@ -19,7 +18,7 @@ class AnalyticsAggregator:
         )
         return self._aggregate_by_period(sessions, "day")
 
-    def get_weekly_stats(self, weeks: int = 12) -> List[Dict]:
+    def get_weekly_stats(self, weeks: int = 12) -> list[dict]:
         """Get weekly aggregated stats for the last N weeks."""
         end = datetime.now()
         start = end - timedelta(weeks=weeks)
@@ -28,7 +27,7 @@ class AnalyticsAggregator:
         )
         return self._aggregate_by_period(sessions, "week")
 
-    def get_monthly_stats(self, months: int = 12) -> List[Dict]:
+    def get_monthly_stats(self, months: int = 12) -> list[dict]:
         """Get monthly aggregated stats for the last N months."""
         end = datetime.now()
         start = end - timedelta(days=months * 30)
@@ -38,10 +37,10 @@ class AnalyticsAggregator:
         return self._aggregate_by_period(sessions, "month")
 
     def _aggregate_by_period(
-        self, sessions: List[Dict], period: str
-    ) -> List[Dict]:
+        self, sessions: list[dict], period: str
+    ) -> list[dict]:
         """Group sessions by period and compute averages."""
-        buckets: Dict[str, List[Dict]] = {}
+        buckets: dict[str, list[dict]] = {}
 
         for s in sessions:
             dt = datetime.fromisoformat(s["date_time"])
@@ -102,7 +101,7 @@ class AnalyticsAggregator:
 
         return streak
 
-    def get_summary(self) -> Dict:
+    def get_summary(self) -> dict:
         """Get overall summary statistics."""
         sessions = self._db.get_all_sessions()
         if not sessions:
@@ -124,8 +123,8 @@ class AnalyticsAggregator:
 
 
 if __name__ == "__main__":
-    import tempfile
     import os
+    import tempfile
 
     db_path = os.path.join(tempfile.gettempdir(), "test_analytics.db")
     db = DatabaseManager(db_path=db_path)
@@ -142,14 +141,11 @@ if __name__ == "__main__":
 
     agg = AnalyticsAggregator(db)
     summary = agg.get_summary()
-    print("Summary:", summary)
 
     daily = agg.get_daily_stats(days=7)
-    print(f"Daily stats ({len(daily)} days):")
-    for d in daily:
-        print(f"  {d['period']}: {d['session_count']} sessions, avg_shamatha={d['avg_shamatha']}")
+    for _d in daily:
+        pass
 
-    print(f"Current streak: {agg.compute_streak()} days")
 
     db.close()
     os.remove(db_path)
