@@ -682,7 +682,7 @@ class DiaryScreen(Screen):
             export_dir = self._get_android_export_dir()
 
             loc_label = Label(
-                text=f"Save to:\n{export_dir}/",
+                text="Will appear in:\nDocuments/EEGMeditation/",
                 font_size=F.SMALL,
                 color=C.TEXT_SECONDARY,
                 size_hint_y=None,
@@ -769,17 +769,36 @@ class DiaryScreen(Screen):
 
             if self._selected_session_id and self._on_export_csv:
                 result = self._on_export_csv(self._selected_session_id, full_path)
-                if result:
+                if not result:
+                    self._show_export_result("No data to export", success=False)
+                    return
+
+                # On Android: copy from private storage to shared Documents
+                import sys
+                if hasattr(sys, "getandroidapilevel"):
+                    from app.storage.android_share import copy_to_documents
+                    shared = copy_to_documents(result, display_name=filename)
+                    if shared:
+                        self._show_export_result(
+                            f"Saved to:\n{shared}\n\nVisible in file browser",
+                            success=True, file_path=result,
+                        )
+                    else:
+                        # MediaStore failed — still saved to private, offer share
+                        self._show_export_result(
+                            f"Saved to app storage:\n{result}\n\n"
+                            "Use Share to send the file",
+                            success=True, file_path=result,
+                        )
+                else:
                     self._show_export_result(
                         f"File saved:\n{result}", success=True, file_path=result,
                     )
-                else:
-                    self._show_export_result("No data to export", success=False)
         except PermissionError:
             popup.dismiss()
             self._show_export_result(
                 f"Permission denied for:\n{folder}\n\n"
-                "Try a different folder or grant\nstorage permission in system settings.",
+                "Try a different folder.",
                 success=False,
             )
         except Exception as e:
