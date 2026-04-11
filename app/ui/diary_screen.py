@@ -685,21 +685,21 @@ class DiaryScreen(Screen):
             return True  # assume granted on failure (desktop/fallback)
 
     @staticmethod
-    def _get_export_dir() -> str:
-        """Get the best export directory for the current platform."""
-        import sys
-        if hasattr(sys, "getandroidapilevel"):
-            for candidate in [
-                "/sdcard/EEGMeditation/exports",
-                "/sdcard/Download",
-                "/storage/emulated/0/Download",
-            ]:
-                parent = os.path.dirname(candidate)
-                if os.path.isdir(parent):
-                    os.makedirs(candidate, exist_ok=True)
-                    return candidate
-            return os.path.expanduser("~")
-        return os.path.expanduser("~")
+    def _get_android_folder_presets() -> list[tuple[str, str]]:
+        """Return (label, path) tuples for common Android folders."""
+        presets = []
+        candidates = [
+            ("Downloads", "/sdcard/Download"),
+            ("Documents", "/sdcard/Documents"),
+            ("EEG Exports", "/sdcard/EEGMeditation/exports"),
+            ("SD Card Root", "/sdcard"),
+            ("Downloads (alt)", "/storage/emulated/0/Download"),
+        ]
+        for label, path in candidates:
+            parent = os.path.dirname(path) if path.count("/") > 2 else path
+            if os.path.isdir(parent):
+                presets.append((label, path))
+        return presets if presets else [("Home", os.path.expanduser("~"))]
 
     def _on_export_pressed(self, *args) -> None:
         if not self._selected_session_id or not self._on_export_csv:
@@ -711,37 +711,61 @@ class DiaryScreen(Screen):
         if is_android:
             granted = self._request_storage_permission()
             if not granted:
-                self._export_status.text = "Storage permission denied"
-                self._export_status.color = C.DANGER
+                self._show_export_result("Storage permission denied.\n"
+                                         "Go to system Settings > Apps >\n"
+                                         "EEG Meditation > Permissions\n"
+                                         "and enable Storage.", success=False)
                 return
-
-        export_dir = self._get_export_dir()
 
         content = BoxLayout(orientation="vertical", spacing=S.GAP, padding=S.GAP)
 
         if not is_android:
-            # Desktop: show file chooser
+            # Desktop: file chooser
             self._file_chooser = FileChooserListView(
-                path=export_dir,
+                path=os.path.expanduser("~"),
                 dirselect=True,
                 filters=["!.*"],
             )
             content.add_widget(self._file_chooser)
+            self._export_path_input = None
         else:
-            # Android: show save location
+            # Android: folder presets + custom path
             self._file_chooser = None
-            loc_label = Label(
-                text=f"Save to:\n{export_dir}",
-                font_size=F.BODY,
-                color=C.TEXT_SECONDARY,
-                size_hint_y=None,
-                height=dp(50),
-                halign="left",
-                valign="middle",
-            )
-            loc_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
-            content.add_widget(loc_label)
 
+            folder_label = Label(
+                text="Save to folder:", font_size=F.BODY, color=C.TEXT_SECONDARY,
+                size_hint_y=None, height=dp(22), halign="left",
+            )
+            folder_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
+            content.add_widget(folder_label)
+
+            presets = self._get_android_folder_presets()
+            preset_row = BoxLayout(size_hint_y=None, height=dp(34), spacing=S.GAP_SM)
+            default_path = presets[0][1] if presets else "/sdcard/Download"
+            for label, path in presets:
+                btn = StyledButton(
+                    text=label, font_size=F.TINY, height=dp(32),
+                    bg_color=C.PRIMARY if path == default_path else C.BG_CARD,
+                    text_color=C.TEXT if path == default_path else C.TEXT_SECONDARY,
+                    bold=False,
+                )
+                btn._folder_path = path
+                btn.bind(on_release=self._on_folder_preset_tap)
+                preset_row.add_widget(btn)
+            content.add_widget(preset_row)
+
+            self._export_path_input = TextInput(
+                text=default_path,
+                multiline=False,
+                font_size=F.SMALL,
+                size_hint_y=None,
+                height=dp(34),
+                foreground_color=C.TEXT,
+                background_color=list(C.BG_INPUT),
+            )
+            content.add_widget(self._export_path_input)
+
+        # Filename row
         name_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=S.GAP)
         name_label = Label(text="File name:", font_size=F.BODY, size_hint_x=0.25,
                            color=C.TEXT_SECONDARY)
@@ -772,14 +796,31 @@ class DiaryScreen(Screen):
         popup = Popup(
             title="Export CSV",
             content=content,
-            size_hint=(0.9, 0.5) if is_android else (0.95, 0.85),
+            size_hint=(0.9, 0.6) if is_android else (0.95, 0.85),
         )
+        self._export_popup = popup
         btn_cancel.bind(on_release=popup.dismiss)
-        btn_save.bind(on_release=lambda x: self._do_export(popup, export_dir))
+        btn_save.bind(on_release=lambda x: self._do_export(popup))
         popup.open()
 
-    def _do_export(self, popup, fallback_dir: str = "") -> None:
-        """Perform export."""
+    def _on_folder_preset_tap(self, btn) -> None:
+        """Update path input when a folder preset is tapped."""
+        if self._export_path_input:
+            self._export_path_input.text = btn._folder_path
+        # Highlight active preset
+        parent = btn.parent
+        if parent:
+            for child in parent.children:
+                if isinstance(child, StyledButton):
+                    if child is btn:
+                        child.bg_color = C.PRIMARY
+                        child.text_color = C.TEXT
+                    else:
+                        child.bg_color = C.BG_CARD
+                        child.text_color = C.TEXT_SECONDARY
+
+    def _do_export(self, popup) -> None:
+        """Perform export and show result popup."""
         try:
             if self._file_chooser is not None:
                 # Desktop: use FileChooser selection
@@ -790,9 +831,11 @@ class DiaryScreen(Screen):
                         folder = os.path.dirname(folder)
                 else:
                     folder = self._file_chooser.path
+            elif self._export_path_input is not None:
+                # Android: use path from input
+                folder = self._export_path_input.text.strip()
             else:
-                # Android: use predetermined directory
-                folder = fallback_dir
+                folder = os.path.expanduser("~")
 
             filename = self._export_filename.text.strip()
             if not filename:
@@ -800,21 +843,59 @@ class DiaryScreen(Screen):
             if not filename.endswith(".csv"):
                 filename += ".csv"
 
+            # Create folder if needed
+            os.makedirs(folder, exist_ok=True)
+
             full_path = os.path.join(folder, filename)
             popup.dismiss()
 
             if self._selected_session_id and self._on_export_csv:
                 result = self._on_export_csv(self._selected_session_id, full_path)
                 if result:
-                    self._export_status.text = f"Saved: {result}"
-                    self._export_status.color = C.ACCENT
+                    self._show_export_result(f"File saved:\n{result}", success=True)
                 else:
-                    self._export_status.text = "No data to export"
-                    self._export_status.color = C.WARM
+                    self._show_export_result("No data to export", success=False)
+        except PermissionError:
+            popup.dismiss()
+            self._show_export_result(
+                f"Permission denied for:\n{folder}\n\n"
+                "Try a different folder or grant\nstorage permission in system settings.",
+                success=False,
+            )
         except Exception as e:
             popup.dismiss()
-            self._export_status.text = f"Export error: {e}"
-            self._export_status.color = C.DANGER
+            self._show_export_result(f"Export error:\n{e}", success=False)
             from app.logger import logger
             logger.error(f"Export failed: {e}", exc_info=True)
+
+    def _show_export_result(self, message: str, success: bool = True) -> None:
+        """Show a result popup after export attempt."""
+        content = BoxLayout(orientation="vertical", spacing=S.GAP, padding=S.GAP)
+        msg = Label(
+            text=message,
+            font_size=F.BODY,
+            color=C.ACCENT if success else C.DANGER,
+            halign="center",
+            valign="middle",
+            size_hint_y=0.7,
+        )
+        msg.bind(size=msg.setter("text_size"))
+        content.add_widget(msg)
+
+        btn_ok = StyledButton(
+            text="OK",
+            bg_color=C.ACCENT if success else C.DANGER,
+            height=dp(40),
+            size_hint_y=None,
+        )
+        content.add_widget(btn_ok)
+
+        popup = Popup(
+            title="Export Complete" if success else "Export Failed",
+            content=content,
+            size_hint=(0.8, 0.35),
+            auto_dismiss=True,
+        )
+        btn_ok.bind(on_release=popup.dismiss)
+        popup.open()
 
