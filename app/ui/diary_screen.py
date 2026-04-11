@@ -654,75 +654,145 @@ class DiaryScreen(Screen):
                 int(self._mood_slider.value),
             )
 
+    @staticmethod
+    def _request_storage_permission() -> bool:
+        """Request WRITE_EXTERNAL_STORAGE on Android 6+. Returns True if granted."""
+        import sys
+        if not hasattr(sys, "getandroidapilevel"):
+            return True
+        try:
+            from jnius import autoclass
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+            activity = PythonActivity.mActivity
+            PackageManager = autoclass("android.content.pm.PackageManager")
+            Build_VERSION = autoclass("android.os.Build$VERSION")
+
+            perm = "android.permission.WRITE_EXTERNAL_STORAGE"
+            if Build_VERSION.SDK_INT >= 30:
+                # Android 11+: MANAGE_EXTERNAL_STORAGE or scoped storage
+                # For /sdcard/EEGMeditation we still need WRITE on older targets
+                perm_manage = "android.permission.MANAGE_EXTERNAL_STORAGE"
+                if activity.checkSelfPermission(perm_manage) == PackageManager.PERMISSION_GRANTED:
+                    return True
+            if activity.checkSelfPermission(perm) != PackageManager.PERMISSION_GRANTED:
+                activity.requestPermissions([perm], 2)
+                import time
+                time.sleep(1.5)  # wait for user to respond
+            return activity.checkSelfPermission(perm) == PackageManager.PERMISSION_GRANTED
+        except Exception as e:
+            from app.logger import logger
+            logger.warning(f"Storage permission request failed: {e}")
+            return True  # assume granted on failure (desktop/fallback)
+
+    @staticmethod
+    def _get_export_dir() -> str:
+        """Get the best export directory for the current platform."""
+        import sys
+        if hasattr(sys, "getandroidapilevel"):
+            for candidate in [
+                "/sdcard/EEGMeditation/exports",
+                "/sdcard/Download",
+                "/storage/emulated/0/Download",
+            ]:
+                parent = os.path.dirname(candidate)
+                if os.path.isdir(parent):
+                    os.makedirs(candidate, exist_ok=True)
+                    return candidate
+            return os.path.expanduser("~")
+        return os.path.expanduser("~")
+
     def _on_export_pressed(self, *args) -> None:
         if not self._selected_session_id or not self._on_export_csv:
             return
 
-        content = BoxLayout(orientation="vertical", spacing=dp(8))
+        import sys
+        is_android = hasattr(sys, "getandroidapilevel")
 
-        try:
-            import sys
-            if hasattr(sys, "getandroidapilevel"):
-                start_path = "/sdcard/Download"
-                if not os.path.isdir(start_path):
-                    start_path = os.path.expanduser("~")
-            else:
-                start_path = os.path.expanduser("~")
+        if is_android:
+            granted = self._request_storage_permission()
+            if not granted:
+                self._export_status.text = "Storage permission denied"
+                self._export_status.color = C.DANGER
+                return
+
+        export_dir = self._get_export_dir()
+
+        content = BoxLayout(orientation="vertical", spacing=S.GAP, padding=S.GAP)
+
+        if not is_android:
+            # Desktop: show file chooser
             self._file_chooser = FileChooserListView(
-                path=start_path,
+                path=export_dir,
                 dirselect=True,
                 filters=["!.*"],
             )
             content.add_widget(self._file_chooser)
-        except Exception as e:
-            from app.logger import logger
-            logger.error(f"FileChooser failed: {e}", exc_info=True)
-            self._export_status.text = f"FileChooser error: {e}"
-            return
+        else:
+            # Android: show save location
+            self._file_chooser = None
+            loc_label = Label(
+                text=f"Save to:\n{export_dir}",
+                font_size=F.BODY,
+                color=C.TEXT_SECONDARY,
+                size_hint_y=None,
+                height=dp(50),
+                halign="left",
+                valign="middle",
+            )
+            loc_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
+            content.add_widget(loc_label)
 
-        name_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
-        name_label = Label(text="File name:", font_size=dp(13), size_hint_x=0.25)
+        name_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=S.GAP)
+        name_label = Label(text="File name:", font_size=F.BODY, size_hint_x=0.25,
+                           color=C.TEXT_SECONDARY)
         self._export_filename = TextInput(
             text=f"session_{self._selected_session_id}.csv",
             multiline=False,
-            font_size=dp(13),
+            font_size=F.BODY,
             size_hint_x=0.75,
+            foreground_color=C.TEXT,
+            background_color=list(C.BG_INPUT),
         )
         name_row.add_widget(name_label)
         name_row.add_widget(self._export_filename)
         content.add_widget(name_row)
 
-        C = self._theme_C
         btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=S.GAP)
         btn_cancel = StyledButton(
             text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY, height=dp(40),
         )
         btn_save = StyledButton(
-            text="Save", bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM, height=dp(40),
+            text="Save", icon=Icons.CHECK, bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM,
+            height=dp(40),
         )
         btn_row.add_widget(btn_cancel)
         btn_row.add_widget(btn_save)
         content.add_widget(btn_row)
 
         popup = Popup(
-            title="Export CSV — choose folder",
+            title="Export CSV",
             content=content,
-            size_hint=(0.95, 0.85),
+            size_hint=(0.9, 0.5) if is_android else (0.95, 0.85),
         )
         btn_cancel.bind(on_release=popup.dismiss)
-        btn_save.bind(on_release=lambda x: self._do_export(popup))
+        btn_save.bind(on_release=lambda x: self._do_export(popup, export_dir))
         popup.open()
 
-    def _do_export(self, popup) -> None:
-        """Perform export to the selected directory."""
+    def _do_export(self, popup, fallback_dir: str = "") -> None:
+        """Perform export."""
         try:
-            selection = self._file_chooser.selection
-            if selection:
-                folder = selection[0]
-                if not os.path.isdir(folder):
-                    folder = os.path.dirname(folder)
+            if self._file_chooser is not None:
+                # Desktop: use FileChooser selection
+                selection = self._file_chooser.selection
+                if selection:
+                    folder = selection[0]
+                    if not os.path.isdir(folder):
+                        folder = os.path.dirname(folder)
+                else:
+                    folder = self._file_chooser.path
             else:
-                folder = self._file_chooser.path
+                # Android: use predetermined directory
+                folder = fallback_dir
 
             filename = self._export_filename.text.strip()
             if not filename:
@@ -736,12 +806,15 @@ class DiaryScreen(Screen):
             if self._selected_session_id and self._on_export_csv:
                 result = self._on_export_csv(self._selected_session_id, full_path)
                 if result:
-                    self._export_status.text = f"Exported: {result}"
+                    self._export_status.text = f"Saved: {result}"
+                    self._export_status.color = C.ACCENT
                 else:
                     self._export_status.text = "No data to export"
+                    self._export_status.color = C.WARM
         except Exception as e:
             popup.dismiss()
             self._export_status.text = f"Export error: {e}"
+            self._export_status.color = C.DANGER
             from app.logger import logger
             logger.error(f"Export failed: {e}", exc_info=True)
 
