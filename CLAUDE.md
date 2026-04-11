@@ -82,3 +82,15 @@ gh workflow run release.yml -f platform=windows   # or linux, macos, android, al
 - Windows CI build sets `KIVY_DOC=1` in the PyInstaller spec to prevent GL init on headless runner; Kivy data paths (`kivy_install/data/`, `kivy_install/modules/`) are constructed manually instead of importing `kivy.tools.packaging.pyinstaller_hooks`.
 - Linux CI uses system Python (ubuntu-24.04) instead of `actions/setup-python` to get `socket.AF_BLUETOOTH` support.
 - MDI icon font path resolution tries multiple candidates for cross-platform compat (standard, Android, fallback).
+
+## Documentation Rules
+
+**All documentation files must stay in sync with code changes.** When modifying features, UI, commands, architecture, or build process, update the relevant docs in the same commit or PR:
+
+- `CLAUDE.md` — Architecture, commands, design decisions. Update when adding/removing modules, changing build process, or altering key patterns.
+- `readme.md` — English README: features, project structure, build instructions, setup. Update when adding user-visible features or changing platforms/dependencies.
+- `readme_ua.md` — Ukrainian README: mirror all `readme.md` changes in Ukrainian.
+- `docs/USER_MANUAL.md` — English user manual. Update when UI flow, screens, or settings change.
+- `docs/USER_MANUAL_UA.md` — Ukrainian user manual: mirror English manual changes.
+- `IMPROVEMENTS.md` — Roadmap. Mark items as completed when implemented; add new ideas as they emerge.
+- `pyproject.toml` — Ruff config. Run `ruff check app/ tests/ main.py` before every commit; all checks must pass.
