@@ -16,7 +16,7 @@ from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
 
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
-from app.ui.theme import ICONS_AVAILABLE, C, F, Icons, S, StyledButton
+from app.ui.theme import C, F, Icons, S, StyledButton
 
 
 class _GraphAwareScrollView(ScrollView):
@@ -781,18 +781,18 @@ class DiaryScreen(Screen):
                     if shared:
                         self._show_export_result(
                             f"Saved to:\n{shared}\n\nVisible in file browser",
-                            success=True, file_path=result,
+                            success=True,
                         )
                     else:
                         # MediaStore failed — still saved to private, offer share
                         self._show_export_result(
                             f"Saved to app storage:\n{result}\n\n"
                             "Use Share to send the file",
-                            success=True, file_path=result,
+                            success=True,
                         )
                 else:
                     self._show_export_result(
-                        f"File saved:\n{result}", success=True, file_path=result,
+                        f"File saved:\n{result}", success=True,
                     )
         except PermissionError:
             popup.dismiss()
@@ -807,12 +807,8 @@ class DiaryScreen(Screen):
             from app.logger import logger
             logger.error(f"Export failed: {e}", exc_info=True)
 
-    def _show_export_result(self, message: str, success: bool = True,
-                            file_path: str = "") -> None:
-        """Show a result popup after export. On Android, offer Share button."""
-        import sys
-        is_android = hasattr(sys, "getandroidapilevel")
-
+    def _show_export_result(self, message: str, success: bool = True) -> None:
+        """Show a result popup after export attempt."""
         content = BoxLayout(orientation="vertical", spacing=S.GAP, padding=S.GAP)
         msg = Label(
             text=message,
@@ -826,18 +822,6 @@ class DiaryScreen(Screen):
         content.add_widget(msg)
 
         btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=S.GAP)
-
-        if success and is_android and file_path:
-            btn_share = StyledButton(
-                text="Share",
-                icon=Icons.PLAY if not ICONS_AVAILABLE else Icons.CHEVRON_RIGHT,
-                bg_color=C.PRIMARY,
-                bg_pressed=C.PRIMARY_DIM,
-                height=dp(40),
-            )
-            btn_share._file_path = file_path
-            btn_share.bind(on_release=self._share_file_android)
-            btn_row.add_widget(btn_share)
 
         btn_ok = StyledButton(
             text="OK",
@@ -857,55 +841,4 @@ class DiaryScreen(Screen):
         self._export_result_popup = popup
         popup.open()
 
-    @staticmethod
-    def _share_file_android(btn) -> None:
-        """Open Android share intent for the exported CSV file.
-
-        Reads the file and shares it via MediaStore content URI
-        (no FileProvider/AndroidX dependency needed).
-        """
-        file_path = btn._file_path
-        try:
-            from jnius import autoclass, cast
-
-            PythonActivity = autoclass("org.kivy.android.PythonActivity")
-            Intent = autoclass("android.content.Intent")
-            MediaStoreFiles = autoclass("android.provider.MediaStore$Files")
-            ContentValues = autoclass("android.content.ContentValues")
-
-            activity = PythonActivity.mActivity
-            resolver = activity.getContentResolver()
-
-            # Insert a temp entry into MediaStore to get a content:// URI
-            filename = os.path.basename(file_path)
-            values = ContentValues()
-            values.put("_display_name", f"share_{filename}")
-            values.put("mime_type", "text/csv")
-            values.put("relative_path", "Documents/.eeg_share_temp")
-
-            collection = MediaStoreFiles.getContentUri("external")
-            uri = resolver.insert(collection, values)
-
-            if uri is not None:
-                # Write file content to the URI
-                out = resolver.openOutputStream(uri)
-                if out:
-                    with open(file_path, "rb") as f:
-                        while chunk := f.read(8192):
-                            out.write(chunk)
-                    out.flush()
-                    out.close()
-
-                intent = Intent(Intent.ACTION_SEND)
-                intent.setType("text/csv")
-                intent.putExtra(Intent.EXTRA_STREAM, cast("android.os.Parcelable", uri))
-                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                chooser = Intent.createChooser(intent, "Share CSV")
-                activity.startActivity(chooser)
-            else:
-                from app.logger import logger
-                logger.error("Share: MediaStore insert returned None")
-        except Exception as e:
-            from app.logger import logger
-            logger.error(f"Share failed: {e}", exc_info=True)
 
