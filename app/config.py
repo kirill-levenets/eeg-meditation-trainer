@@ -60,8 +60,8 @@ class AppConfig:
 
     APP_NAME: str = "EEG Meditation Trainer"
     UPDATE_FREQUENCY: float = 0.5  # 2 Hz = every 0.5 seconds
-    GRAPH_WINDOW_SECONDS: int = 300  # 5 minutes
-    GRAPH_POINTS_MAX: int = 600  # 5min * 2Hz
+    GRAPH_WINDOW_SECONDS: int = 7200  # 2 hours
+    GRAPH_POINTS_MAX: int = 14400  # 2h * 2Hz — full session in memory
     FLUSH_INTERVAL_SECONDS: int = 60
     SIGNAL_BUFFER_SECONDS: int = 120
 

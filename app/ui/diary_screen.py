@@ -661,13 +661,25 @@ class DiaryScreen(Screen):
 
         content = BoxLayout(orientation="vertical", spacing=dp(8))
 
-        start_path = os.path.expanduser("~")
-        self._file_chooser = FileChooserListView(
-            path=start_path,
-            dirselect=True,
-            filters=["!.*"],
-        )
-        content.add_widget(self._file_chooser)
+        try:
+            import sys
+            if hasattr(sys, "getandroidapilevel"):
+                start_path = "/sdcard/Download"
+                if not os.path.isdir(start_path):
+                    start_path = os.path.expanduser("~")
+            else:
+                start_path = os.path.expanduser("~")
+            self._file_chooser = FileChooserListView(
+                path=start_path,
+                dirselect=True,
+                filters=["!.*"],
+            )
+            content.add_widget(self._file_chooser)
+        except Exception as e:
+            from app.logger import logger
+            logger.error(f"FileChooser failed: {e}", exc_info=True)
+            self._export_status.text = f"FileChooser error: {e}"
+            return
 
         name_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
         name_label = Label(text="File name:", font_size=dp(13), size_hint_x=0.25)
@@ -704,27 +716,33 @@ class DiaryScreen(Screen):
 
     def _do_export(self, popup) -> None:
         """Perform export to the selected directory."""
-        selection = self._file_chooser.selection
-        if selection:
-            folder = selection[0]
-            if not os.path.isdir(folder):
-                folder = os.path.dirname(folder)
-        else:
-            folder = self._file_chooser.path
-
-        filename = self._export_filename.text.strip()
-        if not filename:
-            filename = f"session_{self._selected_session_id}.csv"
-        if not filename.endswith(".csv"):
-            filename += ".csv"
-
-        full_path = os.path.join(folder, filename)
-        popup.dismiss()
-
-        if self._selected_session_id and self._on_export_csv:
-            result = self._on_export_csv(self._selected_session_id, full_path)
-            if result:
-                self._export_status.text = f"Exported: {result}"
+        try:
+            selection = self._file_chooser.selection
+            if selection:
+                folder = selection[0]
+                if not os.path.isdir(folder):
+                    folder = os.path.dirname(folder)
             else:
-                self._export_status.text = "No data to export"
+                folder = self._file_chooser.path
+
+            filename = self._export_filename.text.strip()
+            if not filename:
+                filename = f"session_{self._selected_session_id}.csv"
+            if not filename.endswith(".csv"):
+                filename += ".csv"
+
+            full_path = os.path.join(folder, filename)
+            popup.dismiss()
+
+            if self._selected_session_id and self._on_export_csv:
+                result = self._on_export_csv(self._selected_session_id, full_path)
+                if result:
+                    self._export_status.text = f"Exported: {result}"
+                else:
+                    self._export_status.text = "No data to export"
+        except Exception as e:
+            popup.dismiss()
+            self._export_status.text = f"Export error: {e}"
+            from app.logger import logger
+            logger.error(f"Export failed: {e}", exc_info=True)
 
