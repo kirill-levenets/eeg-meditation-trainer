@@ -13,7 +13,8 @@ If the device won't connect:
 
 1. Check battery — make sure headset is charged
 2. Check Bluetooth — enabled on phone, headset paired
-3. Clean sensors — wipe with alcohol pad for better contact
+3. Clean skin and sensors — wash forehead with soap,
+   wipe sensor pads with alcohol pad
 4. Reset pairing — remove device from BT settings,
    re-pair it (fixes most connection issues)
 5. Close other BT apps — only one app can
@@ -36,9 +37,10 @@ Connection: Bluetooth Classic RFCOMM
 ## Sensor Contact
 
 For good EEG signal:
-- Clean forehead and ear clip area
+- Wash skin in sensor area (forehead, earlobe)
+  with soap to remove oil, sweat, and dead skin
 - Wipe sensor pads with alcohol
-- Press sensor firmly against skin
+- Press sensor firmly against dry, clean skin
 - Minimize hair under the sensor
 - Signal quality shown during connection
   (0 = perfect, 200 = no contact)

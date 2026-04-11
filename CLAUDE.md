@@ -92,5 +92,7 @@ gh workflow run release.yml -f platform=windows   # or linux, macos, android, al
 - `readme_ua.md` — Ukrainian README: mirror all `readme.md` changes in Ukrainian.
 - `docs/USER_MANUAL.md` — English user manual. Update when UI flow, screens, or settings change.
 - `docs/USER_MANUAL_UA.md` — Ukrainian user manual: mirror English manual changes.
+- `app/assets/help/help_en.txt` — In-app help content (English). Update when features, connection flow, or settings change.
+- `app/assets/help/help_ua.txt` — In-app help content (Ukrainian): mirror English help changes.
 - `IMPROVEMENTS.md` — Roadmap. Mark items as completed when implemented; add new ideas as they emerge.
 - `pyproject.toml` — Ruff config. Run `ruff check app/ tests/ main.py` before every commit; all checks must pass.
