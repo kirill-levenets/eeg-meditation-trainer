@@ -4,253 +4,207 @@
 
 ## Getting Started
 
-### First Launch
+### First Launch — Setup Wizard
 
-When you open the app, you'll see the **Profile** screen (the first tab).
-Before you can start a session, you need to create a user profile.
+When you open the app for the first time, a **2-step wizard** guides you through setup:
 
-### Create a User
+1. **Step 1: Create Profile** — Enter your name. This creates your user profile for tracking sessions and settings.
+2. **Step 2: Connect Device** — Tap "Scan for Devices" to find your paired MindWave, or tap "Skip (use demo mode)" to try the app with simulated EEG data.
 
-1. Type your name in the text field
-2. Tap **Create User**
-3. Your name appears in the user list - tap it to make it active
-4. The current active user is shown at the top: "Current: YourName"
+After the wizard, you land on the Session screen ready to meditate.
 
-You can create multiple profiles (e.g. for family members). Each user has their own sessions, settings, and saved formulas. Tap any user name in the list to switch. Tap **Show All Users** to view sessions from everyone.
+On subsequent launches, the app restores your last profile and device automatically.
 
 ### Navigation
 
-The tab bar at the top has 7 tabs:
+The app has **3 tabs** at the bottom:
 
-**Profile** | **Session** | **Raw EEG** | **Settings** | **Timer** | **Diary** | **Analytics**
+**Session** | **History** | **Settings**
 
-Tap the hamburger button (**&#9776;**) on the left to hide/show the tab bar (useful on small screens).
+- **Session** — Live meditation with real-time graph and controls
+- **History** — Calendar heatmap of past sessions, session list
+- **Settings** — All configuration: profile, timer, device, threshold, audio, display, graph, formulas, themes, help
 
-The **Diary** tab is disabled until you select a user.
+---
+
+## Session
+
+### Starting a Session
+
+Tap the **Start** button. The app auto-detects and connects to your MindWave headset.
+
+**Connection overlay** shows progress:
+- "Connecting to MindWave... Timeout in 17s"
+- "Connected — Waiting for EEG data... Sensor: no contact"
+- "Sensor: good" → session starts
+
+If no device is selected, the app auto-scans for paired MindWave devices. If none found, you can scan manually in Settings > Device.
+
+### During the Session
+
+**Metrics / Raw EEG toggle** — switch between two views without leaving the session:
+- **Metrics view** — real-time scoring graph (Shamatha, Distraction, Sinking, etc.)
+- **Raw EEG view** — oscilloscope waveform (512Hz) + frequency band chart
+
+The header shows device status, elapsed time, and current state (color-coded: green=Stable Focus, yellow=Subtle Distraction, red=Gross Distraction, orange=Sinking).
+
+**Stats row** below the graph: Shamatha, Distraction, Sinking, NS Attn, NS Med.
+
+**Scrolling and zooming:** Drag left/right to scroll through up to 3 hours of history. Mouse wheel (desktop) or pinch (Android) to zoom.
+
+### Markers
+
+Tap **Mark** to place a vertical line on the graph. Use this to tag events ("heard a noise", "deep moment"). Markers are saved with the session.
+
+### Pause / Resume / Stop
+
+- **Pause** — temporarily stops recording (paused time excluded from duration)
+- **Stop** — ends the session, shows a summary card
+
+### Session End Summary
+
+After stopping, an overlay shows:
+- Duration, Avg Shamatha, Avg Meditation, Time Above Threshold
+- Quick notes text field for immediate reflection
+- **Save** — saves notes and closes
+- **View in History** — navigates to History tab
+- **Close** — dismisses without saving notes
+
+### Session Limit
+
+Sessions auto-stop after **3 hours** with an alert sound. Start a new session to continue.
+
+---
+
+## History
+
+The History tab shows a **calendar heatmap** (GitHub-style) colored by daily average Shamatha score. Brighter green = better days.
+
+### Day Filter
+
+Tap a day cell to filter sessions for that date. Tap again (or "Show All") to reset.
+
+### Session List
+
+Each session row shows:
+- Color indicator (score)
+- Session name (e.g. "14:30 - MindWave Mobile")
+- Stats (Shamatha score, duration)
+- **Pencil icon** — tap to rename inline
+- **Trash icon** — tap to delete (with confirmation)
+
+Tap a session row to view full details (graphs, notes, tags, mood).
+
+### Session Detail
+
+Shows full statistics, notes/tags/mood editor, and three graph tabs:
+- **Metrics** — all computed metrics
+- **Raw EEG** — synthesized waveform from stored band powers
+- **Frequencies** — band power chart
+
+Tap **Export CSV** to save session data. On Android, saves to `/sdcard/EEGMeditation/exports/`. On desktop, a file chooser opens.
 
 ---
 
 ## Settings
 
-Go to the **Settings** tab to configure the app before your first session.
+Settings uses collapsible accordion sections. Tap a section header to expand/collapse.
+
+### User Profile
+
+- Current user shown at top
+- Create new users, switch between them, delete (with confirmation)
+- Each user has separate sessions, settings, and formulas
+
+### Timer
+
+- Enable/disable toggle
+- Duration slider with presets: 5, 10, 15, 20, 30 minutes
+- When enabled, auto-stops session at the end and plays bell sound
 
 ### Device
 
-By default the app uses **Mock Data** (simulated EEG for testing). To use a real NeuroSky MindWave Mobile 2:
+- Device status and connection info
+- **Use Mock Data** checkbox — uncheck for real device
+- **Scan Paired Devices** — finds paired Bluetooth headsets
+- Tap a device to select it
 
-1. Make sure the headset is paired with your device via Bluetooth
-2. Uncheck **Use Mock Data**
-3. Tap **Scan Paired Devices**
-4. Tap your MindWave in the device list
-5. The status will show "Selected: MindWave Mobile"
+### Threshold
 
-On Linux you can also use the `--serial` command line flag to read from a serial port.
+- Slider (20-180) with presets: 50, 80, 100, 130, 160
+- Sets the dashed line on graphs, "time above threshold" stats, and audio feedback target
+- **Audio control metric** — choose which metric drives the audio: Shamatha, NS Meditation, NS Attention, or Custom Formula
 
-### Meditation Threshold
+### Audio
 
-The threshold slider (20-100) sets the meditation score level used for:
-- The dashed line on the session graph
-- "Time above threshold" statistics
-- Audio feedback target
-
-### Audio Control Metric
-
-Choose which metric drives the white noise volume:
-- **Meditation Score** (default) - the main shamatha formula
-- **Shamatha Score** - same as meditation in current version
-- **NS Meditation** - NeuroSky's built-in meditation value
-- **NS Attention** - NeuroSky's built-in attention value
-- **Custom Formula** - your own formula (if defined)
-
-### Audio Feedback
-
-The app provides real-time audio feedback during sessions:
-
-- **White noise** - volume decreases as your selected metric increases (quieter = deeper meditation). At threshold level, noise goes silent.
-- **Sinking alert bell** - a tingsha bell sound when drowsiness (theta+delta) gets too high. Enable/disable with the checkbox.
-- **Subtle distraction chime** - a gentle chime when short-term meditation score variance is high (mind wavering). Enable/disable with the checkbox.
-- **Disconnect alert** - warble sound when the headset loses connection. Enable/disable with the checkbox.
-
-Tap **Test Audio** to hear a sample.
+- **Test Audio** — plays noise sweep + bell + chime + warble
+- Toggle sinking alert bell, distraction chime, disconnect warble
+- Volume uses log scaling — rises quickly at first, then flattens (max 0.3)
 
 ### Display
 
-- **Line Width** (0.5-4.0) - adjust graph line thickness for your screen size
-- **Rotate Screen** - cycle through 0/90/180/270 degree rotation
+- **Line Width** slider (0.5-4.0) with presets
+- **Rotate Screen** — 0/90/180/270 degrees
+- **Marker Hotkey** — keyboard key for placing markers (desktop)
 
 ### Graph Metrics
 
-Toggle which metrics are shown on the session graph:
-- Meditation Score, Shamatha Score, Distraction, Sinking, Subtle Distraction, NS Attention, NS Meditation
-- **Show Custom Formula** - display your custom formula as an extra line on the graph
+Toggle which metrics are visible on the session graph.
 
 ### Custom Formula
 
-Enter a Python-style math expression to track as an extra metric. Examples:
+Enter a Python-style expression to track as an extra metric. See the reference section in-app for available variables and functions. Save/load formula library.
 
-```
-(alpha1 + alpha2) / (beta1 + beta2 + 1)
-sqrt(alpha_norm) * 100
-avg(meditation_score, 20) - avg(distraction, 20)
-```
+### Theme
 
-Available variables:
-- **Raw bands:** `alpha1 alpha2 beta1 beta2 gamma1 gamma2 theta delta`
-- **Combined:** `alpha beta gamma`
-- **Sqrt-relative:** `s_alpha1 s_alpha2 s_beta1 s_beta2 s_theta s_delta`
-- **Normalized:** `alpha_norm beta_norm gamma_norm theta_norm delta_norm`
-- **Metrics:** `meditation_score shamatha_score distraction sinking subtle_distraction stability calmness native_attention native_meditation`
-- **Functions:** `sqrt abs log log10 exp pow min max sin cos tanh`
-- **Windowed average:** `avg(expr, N)` - mean of last N ticks (N=1..600; at 2Hz: 10=5s, 60=30s)
+4 color themes: **Dark Blue** (default), **Dark Green**, **Light Cream**, **Light Green**. Changes apply immediately.
 
-Tap **Apply** to activate, **Save** to store for later. Saved formulas appear in a list below - tap to load, X to delete.
+### Help & Troubleshooting
+
+In-app help with quick start guide, connection troubleshooting, supported devices, sensor tips, and more.
 
 ---
 
-## Timer
+## Connection Troubleshooting
 
-Go to the **Timer** tab to set a session duration.
+If your device won't connect:
 
-1. Check **Enable Timer**
-2. Set duration with the slider or tap a preset (5, 10, 15, 20, 30, 45, 60 min)
-3. Optionally set a custom end sound: tap **Browse** to pick an audio file, or leave empty for the default bell
-4. Tap **Test Sound** to preview
+1. **Check battery** — make sure the headset is charged/has fresh battery
+2. **Check Bluetooth** — enabled on your phone/computer, headset is paired in system BT settings
+3. **Clean sensors** — wipe the forehead sensor and ear clip with an alcohol pad
+4. **Reset pairing** — remove the device from BT settings, then re-pair it (fixes most issues)
+5. **Close other BT apps** — only one app can hold the RFCOMM connection at a time
+6. **Restart headset** — turn off, wait 5 seconds, turn on
+7. **Test with manufacturer's app** — if it also can't connect, the headset may be faulty
 
-When enabled, the timer starts automatically when you begin a session. The large countdown display shows remaining time. When it reaches 00:00, the session stops automatically and plays the end sound.
+### Supported Devices
 
----
+Any headset with NeuroSky TGAM module and Bluetooth Classic:
+- NeuroSky MindWave Mobile / Mobile 2
+- BrainLink SE / Lite / Pro
+- MindLink Brainwave
+- Sichiray headsets
 
-## Running a Session
+**Note:** Bluetooth Classic (RFCOMM) only — BLE headsets are not supported.
 
-Go to the **Session** tab.
+### Sensor Contact Tips
 
-### Start
-
-Tap **Start**. If using a real device, the app will show "Connecting..." until the headset sends data. With mock data, the session starts immediately.
-
-The header shows:
-- Device status (left) - connected/disconnected indicator
-- Session start time and elapsed duration (center)
-- Current state (right) - color-coded: green=Stable Focus, yellow=Subtle Distraction, red=Gross Distraction, orange=Sinking
-
-### During the Session
-
-The graph shows real-time metrics scrolling left-to-right:
-- **Blue** - Meditation Score
-- **Green** - Shamatha Score
-- **Red** - Distraction
-- **Orange** - Sinking
-- **Yellow** - Subtle Distraction
-- **Purple** - NS Attention
-- **Cyan** - NS Meditation
-- **Pink** - Custom Formula (if enabled)
-
-The X-axis shows relative time (minutes:seconds) and wall-clock time below it. Horizontal grid lines are at every 20 units. The dashed horizontal line marks your threshold.
-
-Below the graph, six stat boxes show current values.
-
-**Scrolling and zooming the graph:**
-- Drag left/right to scroll through history
-- Mouse wheel (desktop) or pinch gesture (Android) to zoom in/out
-
-### Markers
-
-Tap **Mark** during a session to place a vertical magenta line on the graph at the current moment. Use this to mark events (e.g. "heard a noise", "felt distracted", "deep moment"). Markers are saved with the session and visible in the diary.
-
-### Pause / Resume
-
-Tap **Pause** to temporarily stop recording. The button changes to **Resume** - tap it to continue. Paused time is not counted in session duration.
-
-### Stop
-
-Tap **Stop** to end the session. A dialog appears with three options:
-- **Save** - save all session data to the database
-- **Discard** - delete the session (including any data already flushed to DB)
-- **Cancel** - dismiss the dialog and resume the session
-
----
-
-## Raw EEG
-
-Go to the **Raw EEG** tab during a session to see detailed signal data.
-
-Two synchronized graphs:
-- **Top: Raw EEG Signal** - the actual electrical waveform at 512Hz. This is what the headset measures - a composite of all brain wave frequencies.
-- **Bottom: Frequency Bands** - five bands extracted by the headset: Alpha (green), Beta (yellow), Gamma (red), Theta (blue), Delta (purple)
-
-Drag either graph to scroll - both stay synced. Zoom with mouse wheel or pinch.
-
----
-
-## Diary
-
-Go to the **Diary** tab to review past sessions (requires a selected user).
-
-### Session List
-
-The top half shows all sessions for the current user, newest first. Each entry shows:
-session number, date/time, duration, and average Shamatha score. Tap to select.
-
-### Session Details
-
-The bottom half shows details of the selected session:
-
-- **Statistics** - duration, averages, time above threshold, longest streak, mood
-- **Notes** - free text field for session reflections
-- **Tags** - comma-separated labels (e.g. "morning, calm, focused")
-- **Mood** - slider from 1 to 5
-- **Save Notes** - persist your notes, tags, and mood rating
-
-### Session Graphs
-
-Three tabs below the notes section:
-- **Metrics** - all computed metrics (same as session graph but for the saved data)
-- **Raw EEG** - synthesized waveform from stored band powers
-- **Frequencies** - band power chart (Alpha, Beta, Gamma, Theta, Delta)
-
-All three graphs show markers (magenta vertical lines) if any were placed during the session. Drag to scroll, scroll wheel/pinch to zoom.
-
-### Export
-
-Tap **Export CSV** to save session data as a CSV file. A file dialog opens where you can choose the folder and filename. The CSV includes all raw band powers, computed metrics, timestamps, and a marker column (1 = marker present).
-
-### Rename / Delete
-
-- Type a new name and tap **Rename** to change the session title
-- Tap **Delete Session** and confirm to permanently remove a session
-
----
-
-## Analytics
-
-Go to the **Analytics** tab for long-term trends.
-
-### Summary Cards
-
-Four cards at the top show overall statistics:
-- **Sessions** - total number of sessions
-- **Total Min** - total meditation time in minutes
-- **Avg Shamatha** - average shamatha score across all sessions
-- **Streak** - current daily practice streak
-
-### Trend Chart
-
-Tap **Daily**, **Weekly**, or **Monthly** to view a bar chart of average Shamatha scores over time. Below the chart, each period shows: date range, session count, average Shamatha, and total duration.
-
-### Storage Info
-
-At the bottom: database file size, number of sessions, total data points, and number of users.
+For good EEG signal quality:
+- Clean your forehead (remove oil/sweat)
+- Wipe sensor pads with alcohol
+- Press the sensor firmly against skin
+- Minimize hair under the sensor
+- Signal quality during connection: 0 = perfect, 200 = no contact
 
 ---
 
 ## Tips
 
-- **Start with mock data** to learn the interface before connecting a real headset
-- **Set your threshold** based on your experience level - beginners may want 40-50, experienced meditators 70-80
-- **Use markers** to note significant moments during practice for later review
-- **Review the diary** after each session - write notes while the experience is fresh
-- **Track trends** in analytics to see your progress over weeks and months
-- **Try custom formulas** to experiment with different metrics (e.g. pure alpha/beta ratio)
-- **Enable the timer** for consistent session lengths
+- **Try demo mode first** to learn the interface before connecting a real headset
+- **Set your threshold** based on experience level — beginners: 40-60, experienced: 80-130
+- **Use markers** to note significant moments during practice
+- **Write quick notes** in the session summary right after stopping
+- **Review the heatmap** to track your consistency over weeks
+- **Try custom formulas** to experiment with different metrics
 - On Android, the screen stays on during sessions (wake lock)
 - All settings are saved per-user and restored on next launch
