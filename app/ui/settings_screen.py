@@ -13,7 +13,16 @@ from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
 
 from app.config import APP, METRICS
-from app.ui.theme import C, F, Icons, PresetRow, S, StyledButton, ThemedAccordion
+from app.ui.theme import (
+    C,
+    Divider,
+    F,
+    Icons,
+    PresetRow,
+    S,
+    StyledButton,
+    ThemedAccordion,
+)
 
 
 class SettingsScreen(Screen):
@@ -697,6 +706,104 @@ class SettingsScreen(Screen):
         )
         theme_note.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
         theme_section.add_widget(theme_note)
+
+        # --- Help section ---
+        help_section = accordion.add_section("Help & Troubleshooting", collapsed=True)
+
+        help_topics = [
+            ("Quick Start", (
+                "1. Create a profile (Settings > User Profile)\n"
+                "2. Turn on your MindWave headset\n"
+                "3. Pair it in system Bluetooth settings\n"
+                "4. Go to Session tab, press Start\n"
+                "5. The app auto-detects and connects\n"
+                "6. Meditate! Audio feedback guides you"
+            )),
+            ("Connection Troubleshooting", (
+                "If the device won't connect:\n\n"
+                "1. Check battery — make sure headset is charged\n"
+                "2. Check Bluetooth — enabled on phone, headset paired\n"
+                "3. Clean sensors — wipe with alcohol pad for better contact\n"
+                "4. Reset pairing — remove device from BT settings,\n"
+                "   re-pair it (fixes most connection issues)\n"
+                "5. Close other BT apps — only one app can\n"
+                "   hold the RFCOMM connection at a time\n"
+                "6. Restart headset — turn off, wait 5s, turn on\n"
+                "7. Test with manufacturer's app — if it also\n"
+                "   can't connect, the headset may be faulty"
+            )),
+            ("Supported Devices", (
+                "Any headset with NeuroSky TGAM module:\n"
+                "- NeuroSky MindWave Mobile / Mobile 2\n"
+                "- BrainLink SE / Lite / Pro\n"
+                "- MindLink Brainwave\n"
+                "- Sichiray headsets\n\n"
+                "Connection: Bluetooth Classic RFCOMM\n"
+                "(not BLE — must be Classic Bluetooth)"
+            )),
+            ("Sensor Contact", (
+                "For good EEG signal:\n"
+                "- Clean forehead and ear clip area\n"
+                "- Wipe sensor pads with alcohol\n"
+                "- Press sensor firmly against skin\n"
+                "- Minimize hair under the sensor\n"
+                "- Signal quality shown during connection\n"
+                "  (0 = perfect, 200 = no contact)"
+            )),
+            ("Audio Feedback", (
+                "Rain noise volume = meditation quality:\n"
+                "- Quieter = deeper meditation\n"
+                "- Volume rises slowly (log curve)\n"
+                "- Max volume capped at 0.3\n\n"
+                "Alert sounds:\n"
+                "- Bell = sinking/dullness detected\n"
+                "- Chime = subtle distraction\n"
+                "- Warble = device disconnected\n\n"
+                "Configure in Audio section above"
+            )),
+            ("Themes", (
+                "4 color themes available:\n"
+                "- Dark Blue (default)\n"
+                "- Dark Green\n"
+                "- Light Cream\n"
+                "- Light Green\n\n"
+                "Change in Theme section above.\n"
+                "Takes effect immediately."
+            )),
+            ("About", (
+                "EEG Meditation Trainer v1.1\n"
+                "Shamatha meditation with neurofeedback\n\n"
+                "Open source — contributions welcome\n"
+                "Not a medical device"
+            )),
+        ]
+
+        for topic_title, topic_text in help_topics:
+            topic_label = Label(
+                text=f"[b]{topic_title}[/b]",
+                markup=True,
+                font_size=F.BODY,
+                color=C.PRIMARY,
+                size_hint_y=None,
+                height=dp(24),
+                halign="left",
+            )
+            topic_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
+            help_section.add_widget(topic_label)
+
+            body = Label(
+                text=topic_text,
+                font_size=F.SMALL,
+                color=C.TEXT_SECONDARY,
+                size_hint_y=None,
+                halign="left",
+                valign="top",
+            )
+            body.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
+            body.bind(texture_size=lambda w, v: setattr(w, "height", v[1] + dp(8)))
+            help_section.add_widget(body)
+
+            help_section.add_widget(Divider())
 
         scroll.add_widget(accordion)
         root.add_widget(scroll)
