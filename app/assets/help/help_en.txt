@@ -1,0 +1,77 @@
+## Quick Start
+
+1. Create a profile (Settings > User Profile)
+2. Turn on your MindWave headset
+3. Pair it in system Bluetooth settings
+4. Go to Session tab, press Start
+5. The app auto-detects and connects
+6. Meditate! Audio feedback guides you
+
+## Connection Troubleshooting
+
+If the device won't connect:
+
+1. Check battery — make sure headset is charged
+2. Check Bluetooth — enabled on phone, headset paired
+3. Clean sensors — wipe with alcohol pad for better contact
+4. Reset pairing — remove device from BT settings,
+   re-pair it (fixes most connection issues)
+5. Close other BT apps — only one app can
+   hold the RFCOMM connection at a time
+6. Restart headset — turn off, wait 5s, turn on
+7. Test with manufacturer's app — if it also
+   can't connect, the headset may be faulty
+
+## Supported Devices
+
+Any headset with NeuroSky TGAM module:
+- NeuroSky MindWave Mobile / Mobile 2
+- BrainLink SE / Lite / Pro
+- MindLink Brainwave
+- Sichiray headsets
+
+Connection: Bluetooth Classic RFCOMM
+(not BLE — must be Classic Bluetooth)
+
+## Sensor Contact
+
+For good EEG signal:
+- Clean forehead and ear clip area
+- Wipe sensor pads with alcohol
+- Press sensor firmly against skin
+- Minimize hair under the sensor
+- Signal quality shown during connection
+  (0 = perfect, 200 = no contact)
+
+## Audio Feedback
+
+Rain noise volume = meditation quality:
+- Quieter = deeper meditation
+- Volume rises slowly (log curve)
+- Max volume capped at 0.3
+
+Alert sounds:
+- Bell = sinking/dullness detected
+- Chime = subtle distraction
+- Warble = device disconnected
+
+Configure in Audio section above
+
+## Themes
+
+4 color themes available:
+- Dark Blue (default)
+- Dark Green
+- Light Cream
+- Light Green
+
+Change in Theme section above.
+Takes effect immediately.
+
+## About
+
+EEG Meditation Trainer v1.1
+Shamatha meditation with neurofeedback
+
+Open source — contributions welcome
+Not a medical device
