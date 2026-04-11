@@ -655,63 +655,16 @@ class DiaryScreen(Screen):
             )
 
     @staticmethod
-    def _request_storage_permission() -> bool:
-        """Request storage permissions on Android. Returns True if granted.
+    def _get_android_export_dir() -> str:
+        """Get writable export directory on Android.
 
-        Android 6-10: requests READ/WRITE_EXTERNAL_STORAGE via runtime dialog.
-        Android 11+: WRITE_EXTERNAL_STORAGE is ignored; opens the
-        MANAGE_EXTERNAL_STORAGE settings page if not already granted.
+        Uses the same base dir as the DB (tested for write access at startup).
+        Falls back to app-private storage if /sdcard isn't writable.
         """
-        import sys
-        if not hasattr(sys, "getandroidapilevel"):
-            return True
-        try:
-            from jnius import autoclass
-            PythonActivity = autoclass("org.kivy.android.PythonActivity")
-            activity = PythonActivity.mActivity
-            PackageManager = autoclass("android.content.pm.PackageManager")
-            Build_VERSION = autoclass("android.os.Build$VERSION")
-            api = Build_VERSION.SDK_INT
-
-            if api >= 30:
-                # Android 11+: need MANAGE_EXTERNAL_STORAGE
-                Environment = autoclass("android.os.Environment")
-                if Environment.isExternalStorageManager():
-                    return True
-                # Open the "All files access" settings page
-                Intent = autoclass("android.content.Intent")
-                Settings = autoclass("android.provider.Settings")
-                Uri = autoclass("android.net.Uri")
-                intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
-                intent.setData(Uri.parse(f"package:{activity.getPackageName()}"))
-                activity.startActivity(intent)
-                # Wait for user to grant and return
-                import time
-                time.sleep(3.0)
-                return Environment.isExternalStorageManager()
-
-            # Android 6-10: request READ + WRITE via runtime dialog
-            perms = [
-                "android.permission.READ_EXTERNAL_STORAGE",
-                "android.permission.WRITE_EXTERNAL_STORAGE",
-            ]
-            missing = [
-                p for p in perms
-                if activity.checkSelfPermission(p) != PackageManager.PERMISSION_GRANTED
-            ]
-            if missing:
-                activity.requestPermissions(missing, 2)
-                import time
-                time.sleep(2.0)
-            # Check if granted
-            return all(
-                activity.checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED
-                for p in perms
-            )
-        except Exception as e:
-            from app.logger import logger
-            logger.warning(f"Storage permission request failed: {e}")
-            return True  # assume granted on failure
+        from app.config import APP
+        export_dir = os.path.join(os.path.dirname(APP.DB_PATH), "exports")
+        os.makedirs(export_dir, exist_ok=True)
+        return export_dir
 
     def _on_export_pressed(self, *args) -> None:
         if not self._selected_session_id or not self._on_export_csv:
@@ -720,34 +673,33 @@ class DiaryScreen(Screen):
         import sys
         is_android = hasattr(sys, "getandroidapilevel")
 
-        if is_android:
-            granted = self._request_storage_permission()
-            if not granted:
-                self._show_export_result("Storage permission denied.\n"
-                                         "Go to system Settings > Apps >\n"
-                                         "EEG Meditation > Permissions\n"
-                                         "and enable Storage.", success=False)
-                return
-
         content = BoxLayout(orientation="vertical", spacing=S.GAP, padding=S.GAP)
 
-        # File chooser for both platforms — different start paths
         if is_android:
-            start_path = "/sdcard"
-            for candidate in ["/sdcard/Download", "/sdcard/Documents", "/sdcard"]:
-                if os.path.isdir(candidate):
-                    start_path = candidate
-                    break
-        else:
-            start_path = os.path.expanduser("~")
+            # Android: save directly to app's writable dir (no FileChooser —
+            # it can't browse /sdcard on Android 11+ without special permission)
+            self._file_chooser = None
+            export_dir = self._get_android_export_dir()
 
-        self._file_chooser = FileChooserListView(
-            path=start_path,
-            dirselect=True,
-            filters=["!.*"],
-        )
-        content.add_widget(self._file_chooser)
-        self._export_path_input = None
+            loc_label = Label(
+                text=f"Save to:\n{export_dir}/",
+                font_size=F.SMALL,
+                color=C.TEXT_SECONDARY,
+                size_hint_y=None,
+                height=dp(40),
+                halign="left",
+                valign="middle",
+            )
+            loc_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
+            content.add_widget(loc_label)
+        else:
+            # Desktop: FileChooser
+            self._file_chooser = FileChooserListView(
+                path=os.path.expanduser("~"),
+                dirselect=True,
+                filters=["!.*"],
+            )
+            content.add_widget(self._file_chooser)
 
         # Filename row
         name_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=S.GAP)
@@ -780,7 +732,7 @@ class DiaryScreen(Screen):
         popup = Popup(
             title="Export CSV",
             content=content,
-            size_hint=(0.95, 0.85),
+            size_hint=(0.9, 0.4) if is_android else (0.95, 0.85),
         )
         self._export_popup = popup
         btn_cancel.bind(on_release=popup.dismiss)
@@ -790,13 +742,18 @@ class DiaryScreen(Screen):
     def _do_export(self, popup) -> None:
         """Perform export and show result popup."""
         try:
-            selection = self._file_chooser.selection
-            if selection:
-                folder = selection[0]
-                if not os.path.isdir(folder):
-                    folder = os.path.dirname(folder)
+            if self._file_chooser is not None:
+                # Desktop
+                selection = self._file_chooser.selection
+                if selection:
+                    folder = selection[0]
+                    if not os.path.isdir(folder):
+                        folder = os.path.dirname(folder)
+                else:
+                    folder = self._file_chooser.path
             else:
-                folder = self._file_chooser.path
+                # Android
+                folder = self._get_android_export_dir()
 
             filename = self._export_filename.text.strip()
             if not filename:
