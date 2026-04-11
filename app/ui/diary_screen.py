@@ -656,7 +656,12 @@ class DiaryScreen(Screen):
 
     @staticmethod
     def _request_storage_permission() -> bool:
-        """Request WRITE_EXTERNAL_STORAGE on Android 6+. Returns True if granted."""
+        """Request storage permissions on Android. Returns True if granted.
+
+        Android 6-10: requests READ/WRITE_EXTERNAL_STORAGE via runtime dialog.
+        Android 11+: WRITE_EXTERNAL_STORAGE is ignored; opens the
+        MANAGE_EXTERNAL_STORAGE settings page if not already granted.
+        """
         import sys
         if not hasattr(sys, "getandroidapilevel"):
             return True
@@ -666,23 +671,47 @@ class DiaryScreen(Screen):
             activity = PythonActivity.mActivity
             PackageManager = autoclass("android.content.pm.PackageManager")
             Build_VERSION = autoclass("android.os.Build$VERSION")
+            api = Build_VERSION.SDK_INT
 
-            perm = "android.permission.WRITE_EXTERNAL_STORAGE"
-            if Build_VERSION.SDK_INT >= 30:
-                # Android 11+: MANAGE_EXTERNAL_STORAGE or scoped storage
-                # For /sdcard/EEGMeditation we still need WRITE on older targets
-                perm_manage = "android.permission.MANAGE_EXTERNAL_STORAGE"
-                if activity.checkSelfPermission(perm_manage) == PackageManager.PERMISSION_GRANTED:
+            if api >= 30:
+                # Android 11+: need MANAGE_EXTERNAL_STORAGE
+                Environment = autoclass("android.os.Environment")
+                if Environment.isExternalStorageManager():
                     return True
-            if activity.checkSelfPermission(perm) != PackageManager.PERMISSION_GRANTED:
-                activity.requestPermissions([perm], 2)
+                # Open the "All files access" settings page
+                Intent = autoclass("android.content.Intent")
+                Settings = autoclass("android.provider.Settings")
+                Uri = autoclass("android.net.Uri")
+                intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                intent.setData(Uri.parse(f"package:{activity.getPackageName()}"))
+                activity.startActivity(intent)
+                # Wait for user to grant and return
                 import time
-                time.sleep(1.5)  # wait for user to respond
-            return activity.checkSelfPermission(perm) == PackageManager.PERMISSION_GRANTED
+                time.sleep(3.0)
+                return Environment.isExternalStorageManager()
+
+            # Android 6-10: request READ + WRITE via runtime dialog
+            perms = [
+                "android.permission.READ_EXTERNAL_STORAGE",
+                "android.permission.WRITE_EXTERNAL_STORAGE",
+            ]
+            missing = [
+                p for p in perms
+                if activity.checkSelfPermission(p) != PackageManager.PERMISSION_GRANTED
+            ]
+            if missing:
+                activity.requestPermissions(missing, 2)
+                import time
+                time.sleep(2.0)
+            # Check if granted
+            return all(
+                activity.checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED
+                for p in perms
+            )
         except Exception as e:
             from app.logger import logger
             logger.warning(f"Storage permission request failed: {e}")
-            return True  # assume granted on failure (desktop/fallback)
+            return True  # assume granted on failure
 
     def _on_export_pressed(self, *args) -> None:
         if not self._selected_session_id or not self._on_export_csv:
