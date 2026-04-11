@@ -40,6 +40,13 @@ select = [
     # Import hygiene
     "I001",    # unsorted-imports (isort)
 
+    # Complexity — relaxed thresholds for Kivy UI code
+    "C901",    # function too complex (cyclomatic complexity)
+    "PLR0911", # too many return statements
+    "PLR0912", # too many branches
+    "PLR0913", # too many function arguments
+    "PLR0915", # too many statements in function
+
     # Formatting
     "W292",    # no-newline-at-end-of-file
 ]
@@ -59,25 +66,41 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Tests: print, broad asserts, per-test imports
 "tests/*" = ["T201", "BLE001", "PLC0415"]
-# Lazy imports: platform-specific (jnius, bluetooth), Kivy audio, json, popups, threading
-# BT and audio: broad except is intentional safety net for unpredictable platform errors
-"app/eeg/neurosky_stream.py" = ["T201", "PLC0415", "BLE001"]
-"app/audio_feedback/noise.py" = ["T201", "PLC0415", "BLE001"]
-"app/storage/database.py" = ["T201", "PLC0415"]
-# Android wake lock, BT auto-scan, wizard — unpredictable platform errors
-"app/ui/app_manager.py" = ["PLC0415", "BLE001"]
-"app/ui/history_screen.py" = ["PLC0415"]
-"app/ui/settings_screen.py" = ["PLC0415"]
-"app/ui/diary_screen.py" = ["PLC0415", "BLE001"]
-"app/ui/theme.py" = ["PLC0415", "BLE001"]
-"app/metrics/custom_formula.py" = ["BLE001"]
-"app/ui/live_session.py" = ["PLC0415"]
-"app/ui/timer_screen.py" = ["PLC0415"]
-"app/config.py" = ["PLC0415"]
 # __main__ blocks use print()
 "app/eeg/mock_stream.py" = ["T201"]
 "app/eeg/mock_stream_v2.py" = ["T201"]
 "app/session/manager.py" = ["T201"]
+# BT protocol: broad except, lazy platform imports, complex parser
+"app/eeg/neurosky_stream.py" = ["T201", "PLC0415", "BLE001", "PLR0912"]
+# Audio: broad except + lazy Kivy SoundLoader import
+"app/audio_feedback/noise.py" = ["T201", "PLC0415", "BLE001"]
+# DB: lazy json import, print in __main__
+"app/storage/database.py" = ["T201", "PLC0415"]
+# AST validator/evaluator: deeply branched by design
+"app/metrics/custom_formula.py" = ["BLE001", "PLR0911", "PLR0912"]
+# Android storage resolution
+"app/config.py" = ["PLC0415"]
+# App manager: complex orchestration, Android wake lock, threading
+"app/ui/app_manager.py" = ["PLC0415", "BLE001", "PLR0912", "PLR0915"]
+# UI screens: _build_ui methods are long but flat widget construction
+"app/ui/live_session.py" = ["PLC0415", "PLR0915"]
+"app/ui/settings_screen.py" = ["PLC0415", "PLR0915"]
+"app/ui/diary_screen.py" = ["PLC0415", "BLE001", "PLR0915"]
+"app/ui/history_screen.py" = ["PLC0415"]
+"app/ui/timer_screen.py" = ["PLC0415"]
+# Graph _redraw: inherently complex rendering loop
+"app/ui/raw_eeg_screen.py" = ["C901", "PLR0912", "PLR0915"]
+# Theme: struct/zlib imports for PNG gen, broad except in listeners
+"app/ui/theme.py" = ["PLC0415", "BLE001"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 30  # default 10; relaxed for parser/eval/tick loops
+
+[tool.ruff.lint.pylint]
+max-args = 10        # default 5; Kivy widgets take many kwargs
+max-returns = 8      # default 6
+max-branches = 15    # default 12
+max-statements = 80  # default 50; _build_ui methods are long but flat
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
