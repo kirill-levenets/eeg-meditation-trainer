@@ -843,6 +843,17 @@ class EEGMeditationApp(App):
         if self._session_manager.state != SessionState.RUNNING:
             return
 
+        # Auto-stop when session reaches max duration
+        if self._session_manager.elapsed_seconds >= APP.SESSION_MAX_SECONDS:
+            logger.info(f"Session reached max duration ({APP.SESSION_MAX_SECONDS}s), auto-stopping")
+            self._audio.play_disconnect_alert()
+            self._live_screen.show_alert(
+                f"Session recording limit reached ({APP.SESSION_MAX_SECONDS // 3600}h). "
+                "Session saved. Start a new one to continue."
+            )
+            self._stop_and_save()
+            return
+
         # Update settings status when real BT device connects
         if (not self._bt_connected_notified
                 and not APP.USE_MOCK_DEVICE
