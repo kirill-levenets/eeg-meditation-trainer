@@ -16,7 +16,7 @@ from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
 
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
-from app.ui.theme import C, F, Icons, S, StyledButton
+from app.ui.theme import ICONS_AVAILABLE, C, F, Icons, S, StyledButton
 
 
 class _GraphAwareScrollView(ScrollView):
@@ -770,7 +770,9 @@ class DiaryScreen(Screen):
             if self._selected_session_id and self._on_export_csv:
                 result = self._on_export_csv(self._selected_session_id, full_path)
                 if result:
-                    self._show_export_result(f"File saved:\n{result}", success=True)
+                    self._show_export_result(
+                        f"File saved:\n{result}", success=True, file_path=result,
+                    )
                 else:
                     self._show_export_result("No data to export", success=False)
         except PermissionError:
@@ -786,8 +788,12 @@ class DiaryScreen(Screen):
             from app.logger import logger
             logger.error(f"Export failed: {e}", exc_info=True)
 
-    def _show_export_result(self, message: str, success: bool = True) -> None:
-        """Show a result popup after export attempt."""
+    def _show_export_result(self, message: str, success: bool = True,
+                            file_path: str = "") -> None:
+        """Show a result popup after export. On Android, offer Share button."""
+        import sys
+        is_android = hasattr(sys, "getandroidapilevel")
+
         content = BoxLayout(orientation="vertical", spacing=S.GAP, padding=S.GAP)
         msg = Label(
             text=message,
@@ -795,25 +801,74 @@ class DiaryScreen(Screen):
             color=C.ACCENT if success else C.DANGER,
             halign="center",
             valign="middle",
-            size_hint_y=0.7,
+            size_hint_y=0.6,
         )
         msg.bind(size=msg.setter("text_size"))
         content.add_widget(msg)
+
+        btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=S.GAP)
+
+        if success and is_android and file_path:
+            btn_share = StyledButton(
+                text="Share",
+                icon=Icons.PLAY if not ICONS_AVAILABLE else Icons.CHEVRON_RIGHT,
+                bg_color=C.PRIMARY,
+                bg_pressed=C.PRIMARY_DIM,
+                height=dp(40),
+            )
+            btn_share._file_path = file_path
+            btn_share.bind(on_release=self._share_file_android)
+            btn_row.add_widget(btn_share)
 
         btn_ok = StyledButton(
             text="OK",
             bg_color=C.ACCENT if success else C.DANGER,
             height=dp(40),
-            size_hint_y=None,
         )
-        content.add_widget(btn_ok)
+        btn_row.add_widget(btn_ok)
+        content.add_widget(btn_row)
 
         popup = Popup(
             title="Export Complete" if success else "Export Failed",
             content=content,
-            size_hint=(0.8, 0.35),
+            size_hint=(0.8, 0.4),
             auto_dismiss=True,
         )
         btn_ok.bind(on_release=popup.dismiss)
+        self._export_result_popup = popup
         popup.open()
+
+    @staticmethod
+    def _share_file_android(btn) -> None:
+        """Open Android share intent for the exported CSV file."""
+        file_path = btn._file_path
+        try:
+            from jnius import autoclass, cast
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+            Intent = autoclass("android.content.Intent")
+            Uri = autoclass("android.net.Uri")
+            File = autoclass("java.io.File")
+            FileProvider = autoclass("androidx.core.content.FileProvider")
+
+            activity = PythonActivity.mActivity
+            java_file = File(file_path)
+
+            # Use FileProvider for content:// URI (required on Android 7+)
+            authority = f"{activity.getPackageName()}.fileprovider"
+            try:
+                uri = FileProvider.getUriForFile(activity, authority, java_file)
+            except Exception:
+                # Fallback: direct file URI (works on older Android)
+                uri = Uri.fromFile(java_file)
+
+            intent = Intent(Intent.ACTION_SEND)
+            intent.setType("text/csv")
+            intent.putExtra(Intent.EXTRA_STREAM, cast("android.os.Parcelable", uri))
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+            chooser = Intent.createChooser(intent, "Share CSV")
+            activity.startActivity(chooser)
+        except Exception as e:
+            from app.logger import logger
+            logger.error(f"Share failed: {e}", exc_info=True)
 
