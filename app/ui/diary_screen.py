@@ -684,23 +684,6 @@ class DiaryScreen(Screen):
             logger.warning(f"Storage permission request failed: {e}")
             return True  # assume granted on failure (desktop/fallback)
 
-    @staticmethod
-    def _get_android_folder_presets() -> list[tuple[str, str]]:
-        """Return (label, path) tuples for common Android folders."""
-        presets = []
-        candidates = [
-            ("Downloads", "/sdcard/Download"),
-            ("Documents", "/sdcard/Documents"),
-            ("EEG Exports", "/sdcard/EEGMeditation/exports"),
-            ("SD Card Root", "/sdcard"),
-            ("Downloads (alt)", "/storage/emulated/0/Download"),
-        ]
-        for label, path in candidates:
-            parent = os.path.dirname(path) if path.count("/") > 2 else path
-            if os.path.isdir(parent):
-                presets.append((label, path))
-        return presets if presets else [("Home", os.path.expanduser("~"))]
-
     def _on_export_pressed(self, *args) -> None:
         if not self._selected_session_id or not self._on_export_csv:
             return
@@ -719,51 +702,23 @@ class DiaryScreen(Screen):
 
         content = BoxLayout(orientation="vertical", spacing=S.GAP, padding=S.GAP)
 
-        if not is_android:
-            # Desktop: file chooser
-            self._file_chooser = FileChooserListView(
-                path=os.path.expanduser("~"),
-                dirselect=True,
-                filters=["!.*"],
-            )
-            content.add_widget(self._file_chooser)
-            self._export_path_input = None
+        # File chooser for both platforms — different start paths
+        if is_android:
+            start_path = "/sdcard"
+            for candidate in ["/sdcard/Download", "/sdcard/Documents", "/sdcard"]:
+                if os.path.isdir(candidate):
+                    start_path = candidate
+                    break
         else:
-            # Android: folder presets + custom path
-            self._file_chooser = None
+            start_path = os.path.expanduser("~")
 
-            folder_label = Label(
-                text="Save to folder:", font_size=F.BODY, color=C.TEXT_SECONDARY,
-                size_hint_y=None, height=dp(22), halign="left",
-            )
-            folder_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
-            content.add_widget(folder_label)
-
-            presets = self._get_android_folder_presets()
-            preset_row = BoxLayout(size_hint_y=None, height=dp(34), spacing=S.GAP_SM)
-            default_path = presets[0][1] if presets else "/sdcard/Download"
-            for label, path in presets:
-                btn = StyledButton(
-                    text=label, font_size=F.TINY, height=dp(32),
-                    bg_color=C.PRIMARY if path == default_path else C.BG_CARD,
-                    text_color=C.TEXT if path == default_path else C.TEXT_SECONDARY,
-                    bold=False,
-                )
-                btn._folder_path = path
-                btn.bind(on_release=self._on_folder_preset_tap)
-                preset_row.add_widget(btn)
-            content.add_widget(preset_row)
-
-            self._export_path_input = TextInput(
-                text=default_path,
-                multiline=False,
-                font_size=F.SMALL,
-                size_hint_y=None,
-                height=dp(34),
-                foreground_color=C.TEXT,
-                background_color=list(C.BG_INPUT),
-            )
-            content.add_widget(self._export_path_input)
+        self._file_chooser = FileChooserListView(
+            path=start_path,
+            dirselect=True,
+            filters=["!.*"],
+        )
+        content.add_widget(self._file_chooser)
+        self._export_path_input = None
 
         # Filename row
         name_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=S.GAP)
@@ -796,46 +751,23 @@ class DiaryScreen(Screen):
         popup = Popup(
             title="Export CSV",
             content=content,
-            size_hint=(0.9, 0.6) if is_android else (0.95, 0.85),
+            size_hint=(0.95, 0.85),
         )
         self._export_popup = popup
         btn_cancel.bind(on_release=popup.dismiss)
         btn_save.bind(on_release=lambda x: self._do_export(popup))
         popup.open()
 
-    def _on_folder_preset_tap(self, btn) -> None:
-        """Update path input when a folder preset is tapped."""
-        if self._export_path_input:
-            self._export_path_input.text = btn._folder_path
-        # Highlight active preset
-        parent = btn.parent
-        if parent:
-            for child in parent.children:
-                if isinstance(child, StyledButton):
-                    if child is btn:
-                        child.bg_color = C.PRIMARY
-                        child.text_color = C.TEXT
-                    else:
-                        child.bg_color = C.BG_CARD
-                        child.text_color = C.TEXT_SECONDARY
-
     def _do_export(self, popup) -> None:
         """Perform export and show result popup."""
         try:
-            if self._file_chooser is not None:
-                # Desktop: use FileChooser selection
-                selection = self._file_chooser.selection
-                if selection:
-                    folder = selection[0]
-                    if not os.path.isdir(folder):
-                        folder = os.path.dirname(folder)
-                else:
-                    folder = self._file_chooser.path
-            elif self._export_path_input is not None:
-                # Android: use path from input
-                folder = self._export_path_input.text.strip()
+            selection = self._file_chooser.selection
+            if selection:
+                folder = selection[0]
+                if not os.path.isdir(folder):
+                    folder = os.path.dirname(folder)
             else:
-                folder = os.path.expanduser("~")
+                folder = self._file_chooser.path
 
             filename = self._export_filename.text.strip()
             if not filename:
