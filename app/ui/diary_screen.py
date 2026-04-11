@@ -859,34 +859,52 @@ class DiaryScreen(Screen):
 
     @staticmethod
     def _share_file_android(btn) -> None:
-        """Open Android share intent for the exported CSV file."""
+        """Open Android share intent for the exported CSV file.
+
+        Reads the file and shares it via MediaStore content URI
+        (no FileProvider/AndroidX dependency needed).
+        """
         file_path = btn._file_path
         try:
             from jnius import autoclass, cast
+
             PythonActivity = autoclass("org.kivy.android.PythonActivity")
             Intent = autoclass("android.content.Intent")
-            Uri = autoclass("android.net.Uri")
-            File = autoclass("java.io.File")
-            FileProvider = autoclass("androidx.core.content.FileProvider")
+            MediaStoreFiles = autoclass("android.provider.MediaStore$Files")
+            ContentValues = autoclass("android.content.ContentValues")
 
             activity = PythonActivity.mActivity
-            java_file = File(file_path)
+            resolver = activity.getContentResolver()
 
-            # Use FileProvider for content:// URI (required on Android 7+)
-            authority = f"{activity.getPackageName()}.fileprovider"
-            try:
-                uri = FileProvider.getUriForFile(activity, authority, java_file)
-            except Exception:
-                # Fallback: direct file URI (works on older Android)
-                uri = Uri.fromFile(java_file)
+            # Insert a temp entry into MediaStore to get a content:// URI
+            filename = os.path.basename(file_path)
+            values = ContentValues()
+            values.put("_display_name", f"share_{filename}")
+            values.put("mime_type", "text/csv")
+            values.put("relative_path", "Documents/.eeg_share_temp")
 
-            intent = Intent(Intent.ACTION_SEND)
-            intent.setType("text/csv")
-            intent.putExtra(Intent.EXTRA_STREAM, cast("android.os.Parcelable", uri))
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            collection = MediaStoreFiles.getContentUri("external")
+            uri = resolver.insert(collection, values)
 
-            chooser = Intent.createChooser(intent, "Share CSV")
-            activity.startActivity(chooser)
+            if uri is not None:
+                # Write file content to the URI
+                out = resolver.openOutputStream(uri)
+                if out:
+                    with open(file_path, "rb") as f:
+                        while chunk := f.read(8192):
+                            out.write(chunk)
+                    out.flush()
+                    out.close()
+
+                intent = Intent(Intent.ACTION_SEND)
+                intent.setType("text/csv")
+                intent.putExtra(Intent.EXTRA_STREAM, cast("android.os.Parcelable", uri))
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                chooser = Intent.createChooser(intent, "Share CSV")
+                activity.startActivity(chooser)
+            else:
+                from app.logger import logger
+                logger.error("Share: MediaStore insert returned None")
         except Exception as e:
             from app.logger import logger
             logger.error(f"Share failed: {e}", exc_info=True)
