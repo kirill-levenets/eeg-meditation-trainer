@@ -11,7 +11,11 @@
 
 If the device won't connect:
 
-1. Check battery — make sure headset is charged
+1. Check battery — the #1 cause of connection problems.
+   Replace the AAA battery if headset connects but
+   shows "not streaming". Use NiMH rechargeable (1.2V),
+   ignore the red LED (calibrated for 1.5V alkaline).
+   Avoid Li-ion 1.5V rechargeable batteries.
 2. Check Bluetooth — enabled on phone, headset paired
 3. Clean skin and sensors — wash forehead with soap,
    wipe sensor pads with alcohol pad
@@ -20,7 +24,10 @@ If the device won't connect:
 5. Close other BT apps — only one app can
    hold the RFCOMM connection at a time
 6. Restart headset — turn off, wait 5s, turn on
-7. Test with manufacturer's app — if it also
+7. "Connected but not streaming" — weak battery.
+   BT radio works on less power than the EEG chip.
+   Replace the battery.
+8. Test with manufacturer's app — if it also
    can't connect, the headset may be faulty
 
 ## Supported Devices
