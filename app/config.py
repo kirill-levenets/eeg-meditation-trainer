@@ -3,24 +3,29 @@ import sys
 
 
 def _resolve_android_base_dir() -> str:
-    """Try /sdcard/EEGMeditation, fall back to app-private storage."""
-    ext = os.path.join("/sdcard", "EEGMeditation")
-    try:
-        os.makedirs(ext, exist_ok=True)
-        # Verify we can actually write
-        test = os.path.join(ext, ".writetest")
-        with open(test, "w") as f:
-            f.write("ok")
-        os.remove(test)
-        return ext
-    except (PermissionError, OSError):
-        pass
+    """Use app-private storage for database (always writable, stable path).
+
+    Older versions stored the DB under /sdcard/EEGMeditation which breaks on
+    Android 11+ scoped storage — the write-test can pass one launch and fail
+    the next, causing a different DB path each time (wizard re-appears).
+    Now we always use app_storage_path() and migrate the old DB if found.
+    """
     try:
         from android.storage import app_storage_path  # type: ignore
         p = os.path.join(app_storage_path(), "EEGMeditation")
     except ImportError:
         p = os.path.join(os.path.expanduser("~"), "EEGMeditation")
     os.makedirs(p, exist_ok=True)
+
+    # Migrate DB from old /sdcard location if it exists and new one doesn't
+    old_db = os.path.join("/sdcard", "EEGMeditation", "meditation.db")
+    new_db = os.path.join(p, "meditation.db")
+    if os.path.isfile(old_db) and not os.path.isfile(new_db):
+        try:
+            import shutil
+            shutil.copy2(old_db, new_db)
+        except (PermissionError, OSError):
+            pass
     return p
 
 

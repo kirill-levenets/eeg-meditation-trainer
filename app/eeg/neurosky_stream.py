@@ -27,6 +27,7 @@ _IS_WINDOWS: bool = sys.platform == "win32"
 THINKGEAR_SYNC = 0xAA
 THINKGEAR_EXCODE = 0x55
 
+CODE_BATTERY = 0x01
 CODE_POOR_SIGNAL = 0x02
 CODE_ATTENTION = 0x04
 CODE_MEDITATION = 0x05
@@ -113,7 +114,9 @@ class ThinkGearParser:
                     break
                 value = payload[i]
                 i += 1
-                if code == CODE_POOR_SIGNAL:
+                if code == CODE_BATTERY:
+                    result["battery"] = value  # 0-127, ~3V scale
+                elif code == CODE_POOR_SIGNAL:
                     result["signal_quality"] = value
                 elif code == CODE_ATTENTION:
                     result["attention"] = float(value)
@@ -179,6 +182,9 @@ class NeuroSkyStream:
         self._latest_meditation: float = 0.0
         self._latest_signal_quality: int = 200
         self._raw_wave_buffer: list[int] = []
+        self._last_packet_time: float = 0.0  # monotonic time of last parsed packet
+        self._last_connect_error: str = ""  # human-readable error from last failed connect
+        self._battery_level: int = -1  # 0-127 from ThinkGear, -1 = unknown
 
         # Bluetooth objects (set during connect)
         self._bt_socket = None
@@ -205,6 +211,14 @@ class NeuroSkyStream:
         self._start_time = time.time()
         self._sample_count = 0
         self._parser = ThinkGearParser()
+        # Reset sample state so stale data from a previous session
+        # doesn't trick the signal-wait check into thinking data is flowing.
+        self._latest_bands = dict.fromkeys(BAND_NAMES, 0.0)
+        self._latest_attention = 0.0
+        self._latest_meditation = 0.0
+        self._latest_signal_quality = 200
+        self._raw_wave_buffer.clear()
+        self._last_packet_time = 0.0
         self._thread = threading.Thread(target=self._read_loop, daemon=True)
         self._thread.start()
         logger.info("NeuroSky stream started")
@@ -219,9 +233,27 @@ class NeuroSkyStream:
         self._close_socket()
         logger.info("NeuroSky stream stopped")
 
+    def reset_sample_state(self) -> None:
+        """Clear cached sample data between sessions (connection stays alive)."""
+        with self._lock:
+            self._latest_bands = dict.fromkeys(BAND_NAMES, 0.0)
+            self._latest_attention = 0.0
+            self._latest_meditation = 0.0
+            self._latest_signal_quality = 200
+            self._raw_wave_buffer.clear()
+            self._last_packet_time = 0.0
+            self._sample_count = 0
+
     @property
     def is_connected(self) -> bool:
         return self._connected
+
+    @property
+    def seconds_since_last_packet(self) -> float:
+        """Seconds elapsed since last parsed EEG packet (monotonic)."""
+        if self._last_packet_time == 0.0:
+            return 0.0
+        return time.monotonic() - self._last_packet_time
 
     def read_sample(self) -> dict:
         """Return the latest consolidated EEG sample.
@@ -238,6 +270,7 @@ class NeuroSkyStream:
             sample["attention"] = self._latest_attention
             sample["meditation"] = self._latest_meditation
             sample["signal_quality"] = self._latest_signal_quality
+            sample["battery"] = self._battery_level
             # Drain raw wave buffer for waveform graph
             if self._raw_wave_buffer:
                 sample["raw_eeg_waveform"] = list(self._raw_wave_buffer)
@@ -249,8 +282,18 @@ class NeuroSkyStream:
         """Background thread: connect and read ThinkGear packets."""
         try:
             self._connect_bluetooth()
+            self._last_connect_error = ""
         except Exception as e:
             logger.error(f"NeuroSky BT connect failed: {e}")
+            err = str(e)
+            if "Host is down" in err:
+                self._last_connect_error = "Headset is asleep or off.\nTurn it on and retry."
+            elif "Device or resource busy" in err:
+                self._last_connect_error = "Bluetooth busy.\nWait 15 seconds and retry."
+            elif "timed out" in err.lower():
+                self._last_connect_error = "Connection timed out.\nCheck headset is on and in range."
+            else:
+                self._last_connect_error = "Check headset is on and paired."
             self._running = False
             self._connected = False
             return
@@ -272,6 +315,8 @@ class NeuroSkyStream:
                 for pkt in packets:
                     self._apply_packet(pkt)
             except Exception as e:
+                if not self._running:
+                    break  # socket closed by stop(), not a real error
                 logger.error(f"NeuroSky read error: {e}")
                 self._connected = False
                 time.sleep(2.0)
@@ -296,6 +341,9 @@ class NeuroSkyStream:
                 self._latest_meditation = pkt["meditation"]
             if "signal_quality" in pkt:
                 self._latest_signal_quality = pkt["signal_quality"]
+            if "battery" in pkt:
+                self._battery_level = pkt["battery"]
+            self._last_packet_time = time.monotonic()
             if "raw_wave" in pkt:
                 self._raw_wave_buffer.append(pkt["raw_wave"])
                 if len(self._raw_wave_buffer) > 1024:
@@ -451,6 +499,24 @@ class NeuroSkyStream:
 
     # ---- Desktop Linux backend ----
 
+    @staticmethod
+    def _bluez_disconnect(address: str) -> None:
+        """Ask BlueZ to drop any existing connection to this device.
+
+        Clears stale RFCOMM state that causes EBUSY / silent connection
+        failures even after the headset has been power-cycled.
+        """
+        try:
+            result = subprocess.run(
+                ["bluetoothctl", "disconnect", address],
+                capture_output=True, text=True, timeout=5,
+            )
+            out = (result.stdout + result.stderr).strip()
+            if out:
+                logger.info(f"bluetoothctl disconnect: {out}")
+        except Exception as e:
+            logger.debug(f"bluetoothctl disconnect skipped: {e}")
+
     def _connect_desktop(self) -> None:
         """Open RFCOMM socket via Python socket module (Linux desktop).
 
@@ -462,18 +528,36 @@ class NeuroSkyStream:
         # Try native socket.AF_BLUETOOTH first (available when Python was
         # compiled with libbluetooth-dev headers)
         if hasattr(_socket, "AF_BLUETOOTH"):
-            try:
-                BTPROTO_RFCOMM = 3
-                sock = _socket.socket(
-                    _socket.AF_BLUETOOTH, _socket.SOCK_STREAM, BTPROTO_RFCOMM
-                )
-                sock.connect((self._device_address, 1))  # channel 1 for SPP
-                sock.settimeout(5.0)
-                self._desktop_socket = sock
-                logger.info("Desktop RFCOMM socket connected (native)")
-                return
-            except Exception as e:
-                raise RuntimeError(f"Desktop RFCOMM connect failed: {e}")
+            BTPROTO_RFCOMM = 3
+            last_err = None
+            # Retry loop: BlueZ may hold the RFCOMM channel as EBUSY for a
+            # few seconds after a previous connection attempt timed out.
+            for attempt in range(4):
+                if not self._running:
+                    raise RuntimeError("Stopped during connect")
+                try:
+                    sock = _socket.socket(
+                        _socket.AF_BLUETOOTH, _socket.SOCK_STREAM, BTPROTO_RFCOMM
+                    )
+                    # Blocking + timeout so EINPROGRESS is handled internally.
+                    sock.settimeout(30.0)
+                    sock.connect((self._device_address, 1))  # channel 1 for SPP
+                    sock.settimeout(5.0)  # read timeout after connected
+                    self._desktop_socket = sock
+                    logger.info("Desktop RFCOMM socket connected (native)")
+                    return
+                except OSError as e:
+                    last_err = e
+                    sock.close()
+                    # errno 16 = EBUSY: BlueZ still holding the channel
+                    if e.errno == 16 and attempt < 3:
+                        logger.info(f"RFCOMM busy, waiting 5s (attempt {attempt + 1}/4)")
+                        # Just wait — bluetoothctl disconnect makes it worse
+                        # by killing the ACL link and sending the headset dark.
+                        time.sleep(5.0)
+                        continue
+                    break
+            raise RuntimeError(f"Desktop RFCOMM connect failed: {last_err}")
 
         # Fallback: PyBluez BluetoothSocket (works independently of
         # CPython's socket module BT support)
@@ -488,8 +572,9 @@ class NeuroSkyStream:
 
         try:
             sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
+            sock.settimeout(30.0)
             sock.connect((self._device_address, 1))
-            sock.settimeout(5.0)
+            sock.settimeout(5.0)  # read timeout after connected
             self._desktop_socket = sock
             logger.info("Desktop RFCOMM socket connected (PyBluez)")
         except Exception as e:
@@ -619,14 +704,15 @@ class NeuroSkyStream:
 
     def _read_bytes_desktop(self, max_bytes: int) -> bytes:
         """Read bytes using Python socket (desktop Linux)."""
-        if self._desktop_socket is None:
+        if self._desktop_socket is None or not self._running:
             return b""
         try:
             return self._desktop_socket.recv(max_bytes)
         except _socket.timeout:
             return b""
         except Exception as e:
-            logger.debug(f"_read_bytes_desktop error: {e}")
+            if self._running:
+                logger.debug(f"_read_bytes_desktop error: {e}")
             raise
 
     def _read_bytes_windows(self, max_bytes: int) -> bytes:

@@ -22,6 +22,7 @@ class SessionManager:
         self._total_paused: float = 0.0
         self._metrics_accumulator: list[dict[str, float]] = []
         self._time_above_threshold: float = 0.0
+        self._time_shamatha_90: float = 0.0
         self._current_streak: float = 0.0
         self._longest_streak: float = 0.0
         self._threshold_used: int = 50
@@ -55,6 +56,7 @@ class SessionManager:
             self._total_paused = 0.0
             self._metrics_accumulator = []
             self._time_above_threshold = 0.0
+            self._time_shamatha_90 = 0.0
             self._current_streak = 0.0
             self._longest_streak = 0.0
             self._threshold_used = threshold
@@ -94,6 +96,8 @@ class SessionManager:
                     self._longest_streak = self._current_streak
             else:
                 self._current_streak = 0.0
+            if metric.get("shamatha_score", 0) >= 90:
+                self._time_shamatha_90 += 0.5
 
     def compute_statistics(self) -> dict:
         """Compute end-of-session statistics."""
@@ -105,6 +109,7 @@ class SessionManager:
                 "avg_shamatha": 0.0,
                 "max_meditation": 0.0,
                 "time_above_threshold": int(self._time_above_threshold),
+                "time_shamatha_90": 0,
                 "longest_streak": 0,
                 "distraction_rate": 0.0,
                 "sinking_rate": 0.0,
@@ -128,6 +133,7 @@ class SessionManager:
             "avg_shamatha": round(avg_sha, 2),
             "max_meditation": round(max_med, 2),
             "time_above_threshold": int(self._time_above_threshold),
+            "time_shamatha_90": int(self._time_shamatha_90),
             "longest_streak": int(self._longest_streak),
             "distraction_rate": round(distraction_count / n * 100, 1),
             "sinking_rate": round(sinking_count / n * 100, 1),
@@ -138,6 +144,7 @@ class SessionManager:
         self._metrics_accumulator = []
         self._elapsed = 0.0
         self._time_above_threshold = 0.0
+        self._time_shamatha_90 = 0.0
         self._current_streak = 0.0
         self._longest_streak = 0.0
         self._total_paused = 0.0

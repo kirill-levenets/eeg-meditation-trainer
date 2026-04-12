@@ -32,7 +32,7 @@ from app.ui.live_session import LiveSessionScreen
 from app.ui.profile_screen import ProfileScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
-from app.ui.theme import BottomNav, C
+from app.ui.theme import BottomNav, C, F, StyledButton
 from app.ui.timer_screen import TimerScreen
 from app.ui.wizard_screen import WizardScreen
 
@@ -152,8 +152,8 @@ class EEGMeditationApp(App):
         self._timer_screen = TimerScreen()
 
         self._wizard_screen = WizardScreen()
-        self._sm.add_widget(self._wizard_screen)
         self._sm.add_widget(self._live_screen)
+        self._sm.add_widget(self._wizard_screen)
         self._sm.add_widget(self._history_screen)
         self._sm.add_widget(self._settings_screen)
         self._sm.add_widget(self._profile_screen)
@@ -179,11 +179,11 @@ class EEGMeditationApp(App):
         self._restore_last_user()
         self._refresh_profile()
 
-        # First-run: show wizard if no users exist
+        # First-run: show name entry popup if no users exist.
+        # Uses a Popup instead of the wizard Screen because TextInput
+        # inside a Screen doesn't get keyboard focus on some platforms.
         if not self._db.get_all_users():
-            self._sm.current = "wizard"
-            self._bottom_nav.opacity = 0
-            self._bottom_nav.disabled = True
+            Clock.schedule_once(self._show_first_run_popup, 0.5)
         else:
             self._auto_scan_bt()
 
@@ -301,8 +301,75 @@ class EEGMeditationApp(App):
             except (ValueError, TypeError):
                 pass
 
+    def _show_first_run_popup(self, dt) -> None:
+        """Show a name-entry popup on first run (no users in DB).
+
+        Uses Popup instead of the wizard Screen because Kivy TextInput
+        doesn't get keyboard focus inside a Screen on some Android
+        devices and on early-display screens.
+        """
+        content = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(12))
+
+        welcome = Label(
+            text="Welcome! Enter your name\nto create a profile:",
+            font_size=F.BODY, color=C.TEXT,
+            size_hint_y=None, height=dp(48),
+            halign="center",
+        )
+        welcome.bind(size=welcome.setter("text_size"))
+        content.add_widget(welcome)
+
+        from kivy.uix.textinput import TextInput as _TI
+        name_input = _TI(
+            hint_text="Your name...",
+            multiline=False,
+            font_size=F.H2,
+            size_hint_y=None,
+            height=dp(48),
+            foreground_color=C.TEXT,
+            background_color=list(C.BG_INPUT),
+            cursor_color=C.PRIMARY,
+        )
+        content.add_widget(name_input)
+
+        error_label = Label(
+            text="", font_size=F.SMALL, color=C.DANGER,
+            size_hint_y=None, height=dp(20),
+        )
+        content.add_widget(error_label)
+
+        btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+        ok_btn = StyledButton(
+            text="Create Profile", bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM,
+        )
+        btn_row.add_widget(ok_btn)
+        content.add_widget(btn_row)
+
+        popup = Popup(
+            title="First-time Setup",
+            content=content,
+            size_hint=(0.85, 0.45),
+            auto_dismiss=False,
+        )
+
+        def _on_ok(*_args):
+            name = name_input.text.strip()
+            if not name or len(name) < 2:
+                error_label.text = "Name must be at least 2 characters"
+                return
+            popup.dismiss()
+            # Reuse the existing wizard-complete flow (with no device)
+            self._on_wizard_complete(name, None, None)
+
+        ok_btn.bind(on_release=_on_ok)
+        name_input.bind(on_text_validate=_on_ok)
+        popup.open()
+
     def _on_wizard_complete(self, user_name: str, device_addr, device_name) -> None:
         """Wizard finished: create user, optionally set device, go to session."""
+        if not user_name or len(user_name.strip()) < 2:
+            logger.warning(f"Wizard complete with invalid name: '{user_name}', ignoring")
+            return
         # Create user
         try:
             self._db.create_user(user_name)
@@ -500,10 +567,10 @@ class EEGMeditationApp(App):
         self._live_screen.hide_alert()
         self._live_screen.set_controls_running()
 
-        self._eeg_stream.start()
         self._acquire_wake_lock()
 
         if APP.USE_MOCK_DEVICE:
+            self._eeg_stream.start()
             self._waiting_for_bt = False
             self._session_manager.start(threshold=threshold)
             self._audio.start()
@@ -512,7 +579,22 @@ class EEGMeditationApp(App):
             self._live_screen.update_state("Running")
             self._live_screen.set_start_time(time.time())
             self._live_screen.hide_overlay()
+        elif self._real_stream.is_connected:
+            # BT still connected from previous session — reuse it
+            self._real_stream.reset_sample_state()
+            self._waiting_for_bt = False
+            name = self._real_stream._device_name or "Real EEG"
+            self._session_manager.start(threshold=threshold)
+            self._audio.start()
+            self._audio.play_connect_sound()
+            self._timer_screen.start_countdown()
+            self._live_screen.update_device_status(True, device_name=name)
+            self._live_screen.update_state("Running")
+            self._live_screen.set_start_time(time.time())
+            self._live_screen.hide_overlay()
+            logger.info(f"Reusing existing BT connection to {name}")
         else:
+            self._eeg_stream.start()
             self._waiting_for_bt = True
             self._pending_threshold = threshold
             name = self._real_stream._device_name or "Real EEG"
@@ -657,7 +739,10 @@ class EEGMeditationApp(App):
             self._update_event = None
 
         stats = self._session_manager.stop()
-        self._eeg_stream.stop()
+        # Keep real BT connection alive between sessions to avoid EBUSY on reconnect.
+        # Only the mock stream gets stopped here; real stream stays connected.
+        if APP.USE_MOCK_DEVICE:
+            self._eeg_stream.stop()
         self._audio.stop()
 
         if stats:
@@ -697,7 +782,8 @@ class EEGMeditationApp(App):
         popup.dismiss()
 
         stats = self._session_manager.stop()
-        self._eeg_stream.stop()
+        if APP.USE_MOCK_DEVICE:
+            self._eeg_stream.stop()
         self._audio.stop()
 
         if save and stats:
@@ -731,17 +817,36 @@ class EEGMeditationApp(App):
         if save and stats and self._current_session_id:
             self._live_screen.show_summary(self._current_session_id, stats)
 
-    _BT_CONNECT_TIMEOUT = 20.0  # seconds before BT socket gives up
-    _BT_SIGNAL_TIMEOUT = 15.0  # seconds to wait for EEG data after connected
+    _BT_CONNECT_TIMEOUT = 30.0  # seconds before BT socket gives up
+    _BT_SIGNAL_TIMEOUT = 8.0   # seconds to wait for EEG packets after connected
+    _STALE_DATA_THRESHOLD = 10.0  # seconds with no new packets before warning
 
-    def _update_tick(self, dt: float) -> None:
-        """Main 2 Hz processing loop."""
-        # Handle BT connection wait phase
-        if getattr(self, '_waiting_for_bt', False):
-            elapsed = time.time() - self._bt_connect_start
-            name = self._real_stream._device_name or "Real EEG"
+    def _check_stale_data(self) -> None:
+        """Auto-stop session when the real device stops sending EEG data."""
+        if APP.USE_MOCK_DEVICE:
+            return
+        stale_secs = self._real_stream.seconds_since_last_packet
+        if stale_secs <= 0:
+            self._stale_data_warned = False
+            return
+        if stale_secs > self._STALE_DATA_THRESHOLD:
+            if not getattr(self, '_stale_data_warned', False):
+                self._stale_data_warned = True
+                logger.warning(f"Stale EEG data: no packets for {stale_secs:.0f}s, auto-stopping")
+                self._live_screen.show_alert(
+                    "No new EEG data for 10s.\n"
+                    "Session stopped. Check headset."
+                )
+                self._stop_and_save()
+        else:
+            self._stale_data_warned = False
 
-            if self._real_stream.is_connected:
+    def _handle_bt_wait(self) -> None:
+        """Handle the BT connection wait phase (called from _update_tick)."""
+        elapsed = time.time() - self._bt_connect_start
+        name = self._real_stream._device_name or "Real EEG"
+
+        if self._real_stream.is_connected:
                 # BT socket connected — waiting for actual EEG data
                 if not getattr(self, '_bt_signal_start', None):
                     self._bt_signal_start = time.time()
@@ -753,6 +858,9 @@ class EEGMeditationApp(App):
                 total = sum(raw_sample.get(k, 0.0) for k in
                             ("delta", "theta", "alpha1", "alpha2",
                              "beta1", "beta2", "gamma1", "gamma2"))
+
+                # Check if headset is actually streaming packets
+                has_packets = self._real_stream.seconds_since_last_packet > 0
 
                 if total > 0:
                     self._waiting_for_bt = False
@@ -771,8 +879,11 @@ class EEGMeditationApp(App):
                     self._live_screen.hide_overlay()
                     self._settings_screen.update_device_status(True, name=name)
                     logger.info(f"BT device {name} connected, session started")
-                elif signal_elapsed > self._BT_SIGNAL_TIMEOUT:
-                    # Connected but no EEG data
+                elif signal_elapsed > self._BT_SIGNAL_TIMEOUT and not has_packets:
+                    # No packets — ThinkGear didn't start streaming.
+                    # Don't try RFCOMM reconnect: closing the socket triggers
+                    # EBUSY that blocks reconnection for 60+ seconds.
+                    # The only reliable fix is a headset power cycle.
                     self._waiting_for_bt = False
                     self._bt_signal_start = None
                     self._real_stream.stop()
@@ -783,13 +894,14 @@ class EEGMeditationApp(App):
                     self._live_screen.update_device_status(False, device_name=name)
                     self._live_screen.show_overlay_retry(
                         f"Connected to {name} but\n"
-                        "no EEG signal received.\n"
-                        "Check headset sensor contact."
+                        "headset not streaming.\n"
+                        "Try replacing the battery,\n"
+                        "or turn OFF, wait 5 sec, turn ON."
                     )
                     self._release_wake_lock()
-                    logger.error("BT connected but no EEG signal, timed out")
+                    logger.error("No ThinkGear packets — likely low battery or needs power cycle")
                 else:
-                    # Show signal quality feedback
+                    # Show signal quality feedback (keep waiting if packets arrive)
                     if sq == 200:
                         sensor_info = "Sensor: no contact"
                     elif sq > 50:
@@ -798,46 +910,62 @@ class EEGMeditationApp(App):
                         sensor_info = f"Sensor: fair (quality {sq})"
                     else:
                         sensor_info = "Sensor: good"
+                    if has_packets:
+                        # Headset streaming — no timeout, wait for contact
+                        wait_msg = "Place sensor on forehead..."
+                    else:
+                        wait_msg = f"Waiting for EEG data... {signal_remaining}s"
+                    logger.debug(
+                        f"BT signal wait: sq={sq} total={total:.0f} "
+                        f"packets={'yes' if has_packets else 'no'} "
+                        f"elapsed={signal_elapsed:.0f}s"
+                    )
                     self._live_screen.update_overlay(
                         f"Connected to {name}\n"
-                        f"Waiting for EEG data... {signal_remaining}s\n"
+                        f"{wait_msg}\n"
                         f"{sensor_info}"
                     )
-            elif not self._real_stream._running:
-                # Connection thread ended with error
-                self._waiting_for_bt = False
-                self._bt_signal_start = None
-                if self._update_event:
-                    self._update_event.cancel()
-                    self._update_event = None
-                self._live_screen.set_controls_idle()
-                self._live_screen.update_device_status(False)
-                self._live_screen.show_overlay_retry(
-                    f"Connection to {name} failed.\nCheck device is on and paired."
-                )
-                logger.error("BT connection failed, session aborted")
-            elif elapsed > self._BT_CONNECT_TIMEOUT:
-                # Timeout waiting for BT socket
-                self._waiting_for_bt = False
-                self._bt_signal_start = None
-                self._real_stream.stop()
-                if self._update_event:
-                    self._update_event.cancel()
-                    self._update_event = None
-                self._live_screen.set_controls_idle()
-                self._live_screen.update_device_status(False)
-                self._live_screen.show_overlay_retry(
-                    f"Connection to {name} timed out.\n"
-                    "Make sure the device is turned on\nand in range."
-                )
-                self._release_wake_lock()
-                logger.error("BT connection timed out")
-            else:
-                # Still waiting for BT socket — show countdown
-                remaining = int(self._BT_CONNECT_TIMEOUT - elapsed)
-                self._live_screen.update_overlay(
-                    f"Connecting to {name}...\nTimeout in {remaining}s"
-                )
+        elif not self._real_stream._running:
+            # Connection thread ended with error
+            self._waiting_for_bt = False
+            self._bt_signal_start = None
+            if self._update_event:
+                self._update_event.cancel()
+                self._update_event = None
+            self._live_screen.set_controls_idle()
+            self._live_screen.update_device_status(False)
+            hint = self._real_stream._last_connect_error or "Check device is on and paired."
+            self._live_screen.show_overlay_retry(
+                f"Connection to {name} failed.\n{hint}"
+            )
+            logger.error("BT connection failed, session aborted")
+        elif elapsed > self._BT_CONNECT_TIMEOUT:
+            # Timeout waiting for BT socket
+            self._waiting_for_bt = False
+            self._bt_signal_start = None
+            self._real_stream.stop()
+            if self._update_event:
+                self._update_event.cancel()
+                self._update_event = None
+            self._live_screen.set_controls_idle()
+            self._live_screen.update_device_status(False)
+            self._live_screen.show_overlay_retry(
+                f"Connection to {name} timed out.\n"
+                "Make sure the device is turned on\nand in range."
+            )
+            self._release_wake_lock()
+            logger.error("BT connection timed out")
+        else:
+            # Still waiting for BT socket — show countdown
+            remaining = int(self._BT_CONNECT_TIMEOUT - elapsed)
+            self._live_screen.update_overlay(
+                f"Connecting to {name}...\nTimeout in {remaining}s"
+            )
+
+    def _update_tick(self, dt: float) -> None:
+        """Main 2 Hz processing loop."""
+        if getattr(self, '_waiting_for_bt', False):
+            self._handle_bt_wait()
             return
 
         if self._session_manager.state != SessionState.RUNNING:
@@ -875,8 +1003,22 @@ class EEGMeditationApp(App):
             self._audio.play_disconnect_alert()
             logger.warning(f"BT device {name} disconnected during session")
 
+        self._check_stale_data()
+
         raw_sample = self._eeg_stream.read_sample()
         metrics = self._metrics_engine.process_sample(raw_sample)
+
+        # Low battery warning (ThinkGear reports 0-127, warn below ~20%)
+        battery = raw_sample.get("battery", -1)
+        if battery != -1 and battery < 25 and not getattr(self, '_low_battery_warned', False):
+            self._low_battery_warned = True
+            pct = int(battery / 127 * 100)
+            self._live_screen.show_alert(
+                f"Low headset battery ({pct}%).\n"
+                "Replace battery soon to avoid\n"
+                "connection problems."
+            )
+            logger.warning(f"Low headset battery: {battery}/127 ({pct}%)")
 
         # Feed raw waveform to power line noise detector
         detector = getattr(self, '_noise_detector', None)
@@ -900,11 +1042,13 @@ class EEGMeditationApp(App):
                      ("delta", "theta", "alpha1", "alpha2", "beta1", "beta2", "gamma1", "gamma2")}
             logger.debug(f"Raw sample #{self._tick_count}: {bands}")
             native_med = raw_sample.get("meditation", -1)
+            bat = raw_sample.get("battery", -1)
+            bat_str = f" bat={bat}/127" if bat >= 0 else ""
             logger.debug(f"Metrics: med={metrics.get('meditation_score', 0):.0f} "
                          f"sham={metrics.get('shamatha_score', 0):.0f} "
                          f"sink={metrics.get('sinking', 0):.0f} "
                          f"dist={metrics.get('distraction', 0):.0f} "
-                         f"native_med={native_med:.0f}")
+                         f"native_med={native_med:.0f}{bat_str}")
 
         # Evaluate custom formula if active
         if self._custom_formula.is_valid:
@@ -1464,7 +1608,15 @@ class EEGMeditationApp(App):
         return True
 
     def on_stop(self) -> None:
-        """Cleanup on app exit."""
+        """Cleanup on app exit.
+
+        We intentionally do NOT call _real_stream.stop() here.  Letting the
+        process exit naturally allows the kernel to close the RFCOMM socket
+        while BlueZ may keep the ACL link alive.  This means the *next* app
+        launch can open a fresh RFCOMM on the existing ACL link and the
+        ThinkGear ASIC will resume streaming immediately — avoiding the
+        "connected but no packets" problem caused by a stale ACL.
+        """
         self._save_user_settings()
         if self._session_manager.state in (SessionState.RUNNING, SessionState.PAUSED):
             self._stop_and_save()

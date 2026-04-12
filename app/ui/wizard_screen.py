@@ -1,5 +1,6 @@
 """First-run wizard: create profile + select device in 2 steps."""
 
+import sys
 from collections.abc import Callable
 from typing import Optional
 
@@ -7,10 +8,13 @@ from kivy.graphics import Color, Rectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
+from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
 from kivy.uix.textinput import TextInput
 
 from app.ui.theme import ICONS_AVAILABLE, C, F, Icons, S, StyledButton
+
+_IS_ANDROID = hasattr(sys, "getandroidapilevel")
 
 
 class WizardScreen(Screen):
@@ -21,6 +25,7 @@ class WizardScreen(Screen):
         self.name = "wizard"
         self._on_complete: Optional[Callable] = None
         self._on_scan: Optional[Callable] = None
+        self._user_name: str = ""
         self._step = 1
         self._build_ui()
 
@@ -82,17 +87,33 @@ class WizardScreen(Screen):
         name_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
         self._step1.add_widget(name_label)
 
-        self._name_input = TextInput(
-            hint_text="Enter your name...",
-            multiline=False,
-            font_size=F.H2,
-            size_hint_y=None,
-            height=dp(48),
-            foreground_color=C.TEXT,
-            background_color=list(C.BG_INPUT),
-            cursor_color=C.PRIMARY,
-        )
-        self._step1.add_widget(self._name_input)
+        if _IS_ANDROID:
+            # Android: inline TextInput on wizard screen doesn't get keyboard.
+            # Use a button that opens a Popup (Popup TextInputs work fine).
+            self._name_input = None
+            name_btn = StyledButton(
+                text="Tap to enter name...",
+                bg_color=C.BG_INPUT, text_color=C.TEXT_MUTED,
+                font_size=F.H2,
+                bold=False,
+            )
+            name_btn.bind(on_release=self._open_name_popup)
+            self._name_btn = name_btn
+            self._step1.add_widget(name_btn)
+        else:
+            # Desktop: inline TextInput works fine
+            self._name_btn = None
+            self._name_input = TextInput(
+                hint_text="Enter your name...",
+                multiline=False,
+                font_size=F.H2,
+                size_hint_y=None,
+                height=dp(48),
+                foreground_color=C.TEXT,
+                background_color=list(C.BG_INPUT),
+                cursor_color=C.PRIMARY,
+            )
+            self._step1.add_widget(self._name_input)
 
         name_hint = Label(
             text="This creates your profile to track sessions and settings",
@@ -181,8 +202,9 @@ class WizardScreen(Screen):
         skip_btn.bind(on_release=self._on_skip)
         self._step2.add_widget(skip_btn)
 
-        # Hidden initially
+        # Hidden and disabled initially
         self._step2.opacity = 0
+        self._step2.disabled = True
         self._step2.size_hint_y = 0
         self._step2.height = 0
         root.add_widget(self._step2)
@@ -199,21 +221,75 @@ class WizardScreen(Screen):
         """Called to trigger BT scan. Should call populate_devices() with results."""
         self._on_scan = cb
 
+    def _open_name_popup(self, *args) -> None:
+        """Android: open a popup with TextInput for name entry."""
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
+        text_input = TextInput(
+            hint_text="Enter your name...",
+            text=self._user_name,
+            multiline=False,
+            font_size=F.H2,
+            size_hint_y=None,
+            height=dp(48),
+            foreground_color=C.TEXT,
+            background_color=list(C.BG_INPUT),
+            cursor_color=C.PRIMARY,
+        )
+        content.add_widget(text_input)
+
+        btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+        ok_btn = StyledButton(
+            text="OK", bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM,
+        )
+        cancel_btn = StyledButton(
+            text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_MUTED,
+        )
+        btn_row.add_widget(ok_btn)
+        btn_row.add_widget(cancel_btn)
+        content.add_widget(btn_row)
+
+        popup = Popup(
+            title="Your name",
+            content=content,
+            size_hint=(0.85, 0.35),
+            auto_dismiss=False,
+        )
+
+        def _on_ok(*_args):
+            name = text_input.text.strip()
+            if name and len(name) >= 2:
+                self._user_name = name
+                self._name_btn.text = name
+                self._name_btn.text_color = C.TEXT
+                self._name_error.text = ""
+            popup.dismiss()
+
+        def _on_cancel(*_args):
+            popup.dismiss()
+
+        ok_btn.bind(on_release=_on_ok)
+        cancel_btn.bind(on_release=_on_cancel)
+        text_input.bind(on_text_validate=_on_ok)
+        popup.open()
+
     def _on_name_next(self, *args) -> None:
-        name = self._name_input.text.strip()
-        if not name:
+        # Get name from inline TextInput (desktop) or popup result (Android)
+        if self._name_input is not None:
+            name = self._name_input.text.strip()
+            if name and len(name) >= 2:
+                self._user_name = name
+        if not self._user_name:
             self._name_error.text = "Please enter a name"
             return
-        if len(name) < 2:
+        if len(self._user_name) < 2:
             self._name_error.text = "Name too short"
             return
         self._name_error.text = ""
-        self._user_name = name
 
         # Transition to step 2
         self._step = 2
         self._step_label.text = "Step 2 of 2"
-        self._title.text = f"Hi, {name}!"
+        self._title.text = f"Hi, {self._user_name}!"
         self._subtitle.text = "Now let's connect your device"
 
         self._step1.opacity = 0
@@ -221,6 +297,7 @@ class WizardScreen(Screen):
         self._step1.height = 0
 
         self._step2.opacity = 1
+        self._step2.disabled = False
         self._step2.size_hint_y = 1
 
     def _on_scan_pressed(self, *args) -> None:
@@ -254,9 +331,9 @@ class WizardScreen(Screen):
             self._device_list.add_widget(btn)
 
     def _on_device_pick(self, btn) -> None:
-        if self._on_complete:
+        if self._on_complete and self._user_name:
             self._on_complete(self._user_name, btn._dev_addr, btn._dev_name)
 
     def _on_skip(self, *args) -> None:
-        if self._on_complete:
+        if self._on_complete and self._user_name:
             self._on_complete(self._user_name, None, None)

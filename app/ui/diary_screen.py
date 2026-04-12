@@ -16,7 +16,7 @@ from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
 
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
-from app.ui.theme import C, F, Icons, S, StyledButton
+from app.ui.theme import C, F, Icons, S, StyledButton, format_duration
 
 
 class _GraphAwareScrollView(ScrollView):
@@ -235,17 +235,18 @@ class DiaryScreen(Screen):
         self._stats_grid = GridLayout(
             cols=2,
             size_hint_y=None,
-            height=dp(180),
+            height=dp(204),
             spacing=dp(4),
             padding=dp(4),
         )
         self._detail_stats: dict[str, Label] = {}
         stat_keys = [
-            ("duration", "Duration (s)"),
+            ("duration", "Duration"),
             ("avg_meditation", "Avg Meditation"),
             ("avg_shamatha", "Avg Shamatha"),
-            ("time_above_threshold", "Time Above Threshold (s)"),
-            ("longest_streak", "Longest Meditation Streak (s)"),
+            ("time_above_threshold", "Time Above Threshold"),
+            ("time_shamatha_90", "Time Shamatha \u2265 90"),
+            ("longest_streak", "Longest Streak"),
             ("threshold_used", "Threshold Used"),
             ("mood_rating", "Mood Rating"),
         ]
@@ -504,7 +505,7 @@ class DiaryScreen(Screen):
             btn = StyledButton(
                 text=(
                     f"#{s['id']}  {s.get('date_time', '')[:16]}  "
-                    f"{s.get('duration', 0) // 60}min  "
+                    f"{format_duration(s.get('duration', 0))}  "
                     f"Shamatha: {s.get('avg_shamatha', 0):.0f}"
                 ),
                 height=dp(36),
@@ -536,9 +537,14 @@ class DiaryScreen(Screen):
         self._selected_session_id = session.get("id")
         self._detail_title.text = f"Session #{session.get('id', '?')} — {session.get('date_time', '')[:16]}"
 
+        _time_keys = {"duration", "time_above_threshold", "longest_streak",
+                      "time_shamatha_90"}
         for key, label in self._detail_stats.items():
             val = session.get(key, "-")
-            label.text = str(val)
+            if key in _time_keys and isinstance(val, (int, float)):
+                label.text = format_duration(int(val))
+            else:
+                label.text = str(val)
 
         self._notes_input.text = session.get("notes", "")
         self._tags_input.text = session.get("tags", "")
@@ -547,7 +553,7 @@ class DiaryScreen(Screen):
         if not session_name:
             dt = session.get("date_time", "")[:16]
             dur = session.get("duration", 0) or 0
-            session_name = f"Session {dt} ({dur // 60}min)"
+            session_name = f"Session {dt} ({format_duration(dur)})"
         # session_name used for title display only (rename moved to History)
         self._metrics_graph.clear_data()
         self._raw_eeg_graph.clear_data()

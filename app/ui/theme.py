@@ -43,6 +43,18 @@ if _ICON_FONT:
     ICONS_AVAILABLE = True
 
 
+def format_duration(seconds: int) -> str:
+    """Human-friendly duration: seconds if <1m, minutes if <1h, hours otherwise."""
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        m, s = divmod(seconds, 60)
+        return f"{m}m {s:02d}s"
+    h, rem = divmod(seconds, 3600)
+    m = rem // 60
+    return f"{h}h {m:02d}m"
+
+
 class Icons:
     """Material Design Icon codepoints (used with font_name='Icons')."""
     PLAY = "\U000F040A"

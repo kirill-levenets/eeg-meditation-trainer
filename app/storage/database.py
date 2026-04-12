@@ -134,6 +134,9 @@ class DatabaseManager:
         if "session_name" not in sess_cols:
             self._conn.execute("ALTER TABLE sessions ADD COLUMN session_name TEXT DEFAULT ''")
             logger.info("Migrated: added column sessions.session_name")
+        if "time_shamatha_90" not in sess_cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN time_shamatha_90 INTEGER DEFAULT 0")
+            logger.info("Migrated: added column sessions.time_shamatha_90")
 
         self._conn.commit()
 
@@ -144,8 +147,9 @@ class DatabaseManager:
             """
             INSERT INTO sessions
             (user_id, date_time, duration, threshold_used, avg_meditation, avg_shamatha,
-             max_meditation, time_above_threshold, longest_streak, session_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             max_meditation, time_above_threshold, longest_streak, session_name,
+             time_shamatha_90)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -158,6 +162,7 @@ class DatabaseManager:
                 stats.get("time_above_threshold", 0),
                 stats.get("longest_streak", 0),
                 session_name,
+                stats.get("time_shamatha_90", 0),
             ),
         )
         self._conn.commit()
@@ -305,7 +310,7 @@ class DatabaseManager:
             UPDATE sessions
             SET duration = ?, threshold_used = ?, avg_meditation = ?,
                 avg_shamatha = ?, max_meditation = ?, time_above_threshold = ?,
-                longest_streak = ?
+                longest_streak = ?, time_shamatha_90 = ?
             WHERE id = ?
             """,
             (
@@ -316,6 +321,7 @@ class DatabaseManager:
                 stats.get("max_meditation", 0),
                 stats.get("time_above_threshold", 0),
                 stats.get("longest_streak", 0),
+                stats.get("time_shamatha_90", 0),
                 session_id,
             ),
         )

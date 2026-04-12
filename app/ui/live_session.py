@@ -9,7 +9,7 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.textinput import TextInput
 
 from app.ui.raw_eeg_screen import RawEEGScreen, ScrollableGraphWidget
-from app.ui.theme import C, Card, F, Icons, S, StyledButton
+from app.ui.theme import C, Card, F, Icons, S, StyledButton, format_duration
 
 # Band colors/scales for inline raw EEG view
 _BAND_COLORS = {
@@ -282,7 +282,7 @@ class LiveSessionScreen(Screen):
         self._summary_stats_card = Card(
             orientation="vertical",
             size_hint_y=None,
-            height=dp(120),
+            height=dp(144),
             bg_color=C.BG_CARD,
             spacing=S.GAP_SM,
         )
@@ -292,6 +292,7 @@ class LiveSessionScreen(Screen):
             ("avg_shamatha", "Avg Shamatha"),
             ("avg_meditation", "Avg Meditation"),
             ("time_above", "Time Above Threshold"),
+            ("time_shamatha_90", "Time Shamatha \u2265 90"),
         ]:
             row = BoxLayout(size_hint_y=None, height=dp(24))
             lbl = Label(
@@ -644,11 +645,13 @@ class LiveSessionScreen(Screen):
         self._summary_session_id = session_id
         # Fill stats
         dur = stats.get("duration", 0)
-        self._summary_stats["duration"].text = f"{dur // 60}m {dur % 60:02d}s"
+        self._summary_stats["duration"].text = format_duration(dur)
         self._summary_stats["avg_shamatha"].text = f"{stats.get('avg_shamatha', 0):.0f}"
         self._summary_stats["avg_meditation"].text = f"{stats.get('avg_meditation', 0):.0f}"
         above = stats.get("time_above_threshold", 0)
-        self._summary_stats["time_above"].text = f"{above // 60}m {above % 60:02d}s"
+        self._summary_stats["time_above"].text = format_duration(above)
+        sham90 = stats.get("time_shamatha_90", 0)
+        self._summary_stats["time_shamatha_90"].text = format_duration(sham90)
         self._summary_notes.text = ""
         # Show
         self._summary.opacity = 1

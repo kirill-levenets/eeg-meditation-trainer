@@ -18,7 +18,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
-from app.ui.theme import C, Card, Divider, F, Icons, S, StyledButton
+from app.ui.theme import C, Card, Divider, F, Icons, S, StyledButton, format_duration
 
 
 def _lerp_color(t: float):
@@ -362,10 +362,8 @@ class HistoryScreen(Screen):
         name = session.get("session_name", "") or ""
 
         time_str = dt_str[11:16] if len(dt_str) > 16 else dt_str
-        dur_min = duration // 60
-        dur_sec = duration % 60
         if not name:
-            name = f"{time_str} ({dur_min}m {dur_sec:02d}s)"
+            name = f"{time_str} ({format_duration(duration)})"
 
         # Outer wrapper holds the normal row + hidden rename input
         wrapper = BoxLayout(
@@ -409,7 +407,7 @@ class HistoryScreen(Screen):
         )
         name_label.bind(size=name_label.setter("text_size"))
         stats_line = Label(
-            text=f"Shamatha: {avg_sh:.0f}  |  {dur_min}m {dur_sec:02d}s",
+            text=f"Shamatha: {avg_sh:.0f}  |  {format_duration(duration)}",
             font_size=F.TINY,
             color=C.TEXT_MUTED,
             halign="left",
