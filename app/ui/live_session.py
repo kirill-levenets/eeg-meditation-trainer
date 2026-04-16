@@ -9,7 +9,7 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.textinput import TextInput
 
 from app.ui.raw_eeg_screen import RawEEGScreen, ScrollableGraphWidget
-from app.ui.theme import C, Card, F, Icons, S, StyledButton, format_duration
+from app.ui.theme import C, Card, F, Icons, PresetRow, S, StyledButton, format_duration
 
 # Band colors/scales for inline raw EEG view
 _BAND_COLORS = {
@@ -220,6 +220,20 @@ class LiveSessionScreen(Screen):
             self._stat_labels[key] = value_lbl
             stats_card.add_widget(box)
         root.add_widget(stats_card)
+
+        # ── Duration presets (pre-session config) ──
+        self._duration_presets = PresetRow(
+            items=[
+                ("5 min", 5),
+                ("10 min", 10),
+                ("15 min", 15),
+                ("20 min", 20),
+                ("Free", None),
+            ],
+            callback=self._on_duration_preset,
+            height=dp(32),
+        )
+        root.add_widget(self._duration_presets)
 
         # ── Controls ──
         controls = BoxLayout(
@@ -551,6 +565,7 @@ class LiveSessionScreen(Screen):
         self._btn_pause.disabled = False
         self._btn_stop.disabled = False
         self._btn_marker.disabled = False
+        self._set_duration_presets_visible(False)
 
     def set_controls_paused(self) -> None:
         self._btn_start.disabled = True
@@ -558,6 +573,7 @@ class LiveSessionScreen(Screen):
         self._btn_pause.disabled = False
         self._btn_stop.disabled = False
         self._btn_marker.disabled = True
+        self._set_duration_presets_visible(False)
 
     def set_controls_idle(self) -> None:
         self._btn_start.disabled = False
@@ -565,6 +581,26 @@ class LiveSessionScreen(Screen):
         self._btn_pause.text = "Pause"
         self._btn_stop.disabled = True
         self._btn_marker.disabled = True
+        self._set_duration_presets_visible(True)
+
+    def _set_duration_presets_visible(self, visible: bool) -> None:
+        self._duration_presets.height = dp(32) if visible else 0
+        self._duration_presets.opacity = 1.0 if visible else 0.0
+        self._duration_presets.disabled = not visible
+
+    # ── Duration preset hooks ──
+    on_duration_preset = None  # set by AppManager; called with value (int or None)
+
+    def _on_duration_preset(self, value) -> None:
+        if self.on_duration_preset is not None:
+            self.on_duration_preset(value)
+
+    def refresh_duration_preset(self, timer_enabled: bool, timer_minutes: int) -> None:
+        """Highlight the preset matching current timer state."""
+        if not timer_enabled:
+            self._duration_presets.set_selected(None)
+        else:
+            self._duration_presets.set_selected(timer_minutes)
 
     def show_overlay(self, text: str = "Connecting...") -> None:
         """Show semi-transparent connection overlay with animated dots."""
