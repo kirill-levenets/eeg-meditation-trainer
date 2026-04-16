@@ -13,7 +13,7 @@ package.domain = org.eeg
 source.dir = .
 
 # (list) Source files to include (let empty to include all the files)
-source.include_exts = py,png,jpg,kv,atlas,wav,ttf
+source.include_exts = py,png,jpg,kv,atlas,wav,ttf,txt
 
 # (list) Source files to exclude (let empty to not exclude anything)
 source.exclude_exts =
@@ -22,7 +22,7 @@ source.exclude_exts =
 source.exclude_dirs = tests,venv,.git,__pycache__,.buildozer,docs,tools,.claude,bin
 
 # (list) List of exclusions using pattern matching
-source.exclude_patterns = *.db,*.db-shm,*.db-wal,*.csv,*.pyc,*.eeg,*.ods,*.md,*.sh,*.bat,*.spec,*.txt
+source.exclude_patterns = *.db,*.db-shm,*.db-wal,*.csv,*.pyc,*.eeg,*.ods,*.md,*.sh,*.bat,*.spec
 
 # (str) Application versioning
 version = 1.0.0
