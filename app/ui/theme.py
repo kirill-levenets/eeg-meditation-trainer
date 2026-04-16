@@ -622,30 +622,69 @@ class _AccordionSection(BoxLayout):
 
 
 class PresetRow(BoxLayout):
-    """Row of quick-pick value buttons for a slider.
+    """Row of quick-pick value buttons for a slider or action.
 
-    Usage:
-        presets = PresetRow(values=[30, 50, 70, 85, 100], callback=slider_set)
+    Two APIs:
+        # numeric presets
+        presets = PresetRow(values=[30, 50, 70], callback=slider_set, fmt="{}")
+
+        # labelled presets (allows non-numeric entries like "Free")
+        presets = PresetRow(
+            items=[("5 min", 5), ("Free", None)],
+            callback=handler,
+        )
+
+    Optional selection highlight:
+        presets.set_selected(5)      # highlights the "5 min" button
+        presets.set_selected(None)   # highlights "Free" if present, else clears all
     """
 
-    def __init__(self, values, callback=None, fmt="{}", **kwargs):
+    def __init__(self, values=None, items=None, callback=None, fmt="{}", **kwargs):
         kwargs.setdefault("size_hint_y", None)
         kwargs.setdefault("height", dp(28))
         kwargs.setdefault("spacing", S.GAP_SM)
         super().__init__(**kwargs)
-        for v in values:
+
+        if items is None:
+            if values is None:
+                raise ValueError("PresetRow requires either 'values' or 'items'")
+            items = [(fmt.format(v), v) for v in values]
+
+        self._buttons: dict = {}
+        self._default_bg = list(C.BG_CARD)
+        self._default_text = list(C.TEXT_MUTED)
+        self._selected_bg = list(C.ACCENT)
+        self._selected_text = list(C.TEXT)
+
+        for label, value in items:
             btn = StyledButton(
-                text=fmt.format(v),
-                bg_color=C.BG_CARD,
-                text_color=C.TEXT_MUTED,
+                text=label,
+                bg_color=self._default_bg,
+                text_color=self._default_text,
                 font_size=F.TINY,
                 height=dp(26),
                 bold=False,
             )
-            btn._preset_value = v
+            btn._preset_value = value
             if callback:
-                btn.bind(on_release=lambda b, cb=callback, val=v: cb(val))
+                btn.bind(on_release=lambda b, cb=callback, val=value: cb(val))
+            self._buttons[value] = btn
             self.add_widget(btn)
+
+    def set_selected(self, value) -> None:
+        """Highlight the button whose stored value equals `value`; clear others.
+
+        If `value` is not a key, all buttons are un-highlighted.
+        """
+        for key, btn in self._buttons.items():
+            if key == value:
+                btn.bg_color = self._selected_bg
+                btn.text_color = self._selected_text
+                btn.bold = True
+            else:
+                btn.bg_color = self._default_bg
+                btn.text_color = self._default_text
+                btn.bold = False
 
 
 class IconLabel(Label):
