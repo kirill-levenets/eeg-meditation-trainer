@@ -13,6 +13,7 @@ Inspired by the [EEG meditation research and Vernihor formula](https://scripture
 - **Session markers** — Place vertical markers on all graphs during a session to tag significant moments; markers stored in DB, displayed in diary previews, exported in CSV as a separate column
 - **Multi-channel audio engine** — Ch1: gapless white noise (volume scales with configurable metric); Ch2: tingsha bell for sinking alerts; Ch3: chime for subtle distraction; Ch4: warble for disconnect alert. Configurable audio control metric (Meditation, Shamatha, NS Meditation, NS Attention, Custom Formula)
 - **Meditation timer** — Configurable duration (1-120 min) with presets, countdown display, auto-stop, custom end sound with file chooser and test button
+- **Session duration presets on Live Session** — Quick-select 5 / 10 / 15 / 20 min or Free directly above the Start button; selected preset is highlighted
 - **State classification** — Stable Focus, Subtle Distraction, Gross Distraction, Sinking, Neutral
 - **NeuroSky MindWave Mobile 2** — Bluetooth RFCOMM on Android (pyjnius) and Linux (Python socket); ThinkGear protocol parser; background reader thread; BT connection wait with status display; paired device scanning
 - **Settings panel** — ThemedAccordion sections: User Profile, Timer, Device, Threshold (max 180), Audio, Display, Graph Metrics, Custom Formula, Theme selector; preset buttons under sliders; profile and timer inline; all persisted per user

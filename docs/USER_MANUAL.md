@@ -31,6 +31,8 @@ The app has **3 tabs** at the bottom:
 
 ### Starting a Session
 
+Before starting, pick a session length from the preset row above the Start button: **5**, **10**, **15**, or **20 minutes**, or **Free** for no timer. Tapping a numeric preset enables the timer and sets the duration; tapping Free disables the timer. The selected preset is highlighted. If you set a custom duration via Settings → Timer (e.g. 25 min), no preset is highlighted. The preset row hides while a session is running and reappears when you stop.
+
 Tap the **Start** button. The app auto-detects and connects to your MindWave headset.
 
 **Connection overlay** shows progress:
