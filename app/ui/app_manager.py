@@ -893,10 +893,8 @@ class EEGMeditationApp(App):
                     self._live_screen.set_controls_idle()
                     self._live_screen.update_device_status(False, device_name=name)
                     self._live_screen.show_overlay_retry(
-                        f"Connected to {name} but\n"
-                        "headset not streaming.\n"
-                        "Try replacing the battery,\n"
-                        "or turn OFF, wait 5 sec, turn ON."
+                        "No EEG data received.\n"
+                        "Check battery or restart headset."
                     )
                     self._release_wake_lock()
                     logger.error("No ThinkGear packets — likely low battery or needs power cycle")

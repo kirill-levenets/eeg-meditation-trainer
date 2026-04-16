@@ -378,12 +378,12 @@ class LiveSessionScreen(Screen):
 
         self._overlay_status = Label(
             text="",
-            font_size=F.H1,
+            font_size=F.BODY,
             color=C.TEXT,
             halign="center",
             valign="middle",
             size_hint_y=None,
-            height=dp(80),
+            height=dp(100),
         )
         self._overlay_status.bind(size=self._overlay_status.setter("text_size"))
         self._overlay.add_widget(self._overlay_status)
