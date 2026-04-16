@@ -834,8 +834,8 @@ class EEGMeditationApp(App):
                 self._stale_data_warned = True
                 logger.warning(f"Stale EEG data: no packets for {stale_secs:.0f}s, auto-stopping")
                 self._live_screen.show_alert(
-                    "No new EEG data for 10s.\n"
-                    "Session stopped. Check headset."
+                    "No EEG data. Session stopped.\n"
+                    "Check headset and battery."
                 )
                 self._stop_and_save()
         else:
@@ -1014,9 +1014,7 @@ class EEGMeditationApp(App):
             self._low_battery_warned = True
             pct = int(battery / 127 * 100)
             self._live_screen.show_alert(
-                f"Low headset battery ({pct}%).\n"
-                "Replace battery soon to avoid\n"
-                "connection problems."
+                f"Low headset battery ({pct}%)."
             )
             logger.warning(f"Low headset battery: {battery}/127 ({pct}%)")
 

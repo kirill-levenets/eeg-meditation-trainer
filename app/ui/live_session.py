@@ -620,7 +620,8 @@ class LiveSessionScreen(Screen):
     def show_alert(self, text: str) -> None:
         """Show a warning banner below the header."""
         self._alert_label.text = text
-        self._alert_label.height = dp(28)
+        lines = max(1, text.count("\n") + 1)
+        self._alert_label.height = dp(18) * lines
 
     def hide_alert(self) -> None:
         self._alert_label.text = ""
