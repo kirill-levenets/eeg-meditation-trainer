@@ -256,7 +256,7 @@ class LiveSessionScreen(Screen):
             bg_pressed=C.ACCENT_DIM,
         )
         chev_kwargs = (
-            {"icon": Icons.CHEVRON_DOWN} if ICONS_AVAILABLE else {"text": "v"}
+            {"icon": Icons.MENU_DOWN} if ICONS_AVAILABLE else {"text": "v"}
         )
         self._btn_duration_expand = StyledButton(
             bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM,
