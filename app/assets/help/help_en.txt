@@ -4,8 +4,8 @@
 2. Turn on your MindWave headset
 3. Pair it in system Bluetooth settings
 4. Go to Session tab; tap the chevron on Start
-   to pick a duration (5/10/15/20 min or Free),
-   then press Start
+   to open the duration picker (5/10/15/20 min
+   or Free), then press Start
 5. The app auto-detects and connects
 6. Meditate! Audio feedback guides you
 
