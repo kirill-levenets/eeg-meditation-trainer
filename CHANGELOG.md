@@ -9,12 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Session duration presets on the Live Session screen: quick-select
-  **5 / 10 / 15 / 20 min** or **Free** directly above the Start button,
-  with the active choice highlighted. Tapping a preset updates the timer
-  settings immediately; Free disables the timer. The preset row is hidden
-  while a session is running. Settings → Timer preset row aligned to
-  [5, 10, 15, 20] for consistency.
+- **Session duration picker on the Live Session screen.** The Start button
+  now shows the active duration (e.g. `Start · 10 min` or `Start · Free`)
+  and carries a chevron on its right side. Tapping the chevron opens an
+  inline row of presets (**5 / 10 / 15 / 20 min** or **Free**) directly
+  above the controls; tapping a preset sets the timer and collapses the
+  row. The main Start zone simply starts the session with whatever is set.
+  Settings → Timer preset row aligned to [5, 10, 15, 20] for consistency.
 
 ## [1.1.1] - 2026-04-12
 
