@@ -250,18 +250,19 @@ class LiveSessionScreen(Screen):
             spacing=S.GAP, padding=[S.GAP, 0],
         )
 
-        # Start + chevron form a visual cluster with a tiny separator
+        # Start + duration-picker form a visual cluster with a tiny separator
         self._btn_start = StyledButton(
             text="Start", icon=Icons.PLAY, bg_color=C.ACCENT,
             bg_pressed=C.ACCENT_DIM,
         )
-        chev_kwargs = (
-            {"icon": Icons.MENU_DOWN} if ICONS_AVAILABLE else {"text": "v"}
+        duration_kwargs = (
+            {"icon": Icons.MENU_DOWN} if ICONS_AVAILABLE else {}
         )
         self._btn_duration_expand = StyledButton(
+            text="Free",  # updated by refresh_duration_preset
             bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM,
-            size_hint_x=None, width=dp(36), font_size=F.H3,
-            **chev_kwargs,
+            size_hint_x=None, width=dp(96), font_size=F.BODY,
+            **duration_kwargs,
         )
         self._btn_duration_expand.bind(on_release=self._open_duration_popup)
         start_cluster = BoxLayout(
@@ -652,13 +653,13 @@ class LiveSessionScreen(Screen):
             self._duration_popup = None
 
     def refresh_duration_preset(self, timer_enabled: bool, timer_minutes: int) -> None:
-        """Cache timer state and update the Start label."""
+        """Cache timer state and update the duration-picker label."""
         self._current_timer_enabled = timer_enabled
         self._current_timer_minutes = timer_minutes
         if not timer_enabled:
-            self._btn_start.text = "Start \u00b7 Free"
+            self._btn_duration_expand.text = "Free"
         else:
-            self._btn_start.text = f"Start \u00b7 {timer_minutes} min"
+            self._btn_duration_expand.text = f"{timer_minutes} min"
 
     def show_overlay(self, text: str = "Connecting...") -> None:
         """Show semi-transparent connection overlay with animated dots."""

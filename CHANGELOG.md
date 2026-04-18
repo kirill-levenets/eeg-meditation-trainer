@@ -9,14 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Session duration picker on the Live Session screen.** The Start button
-  now shows the active duration (e.g. `Start · 10 min` or `Start · Free`)
-  and carries a chevron on its right side. Tapping the chevron opens a
-  modal popup with five preset choices (**5 / 10 / 15 / 20 min** or
-  **Free**); the current preset is highlighted. Picking one applies the
-  timer and dismisses the popup. The main Start zone simply starts the
-  session with whatever is set. Settings → Timer preset row aligned to
-  [5, 10, 15, 20] for consistency.
+- **Session duration picker on the Live Session screen.** The Start
+  controls now split into a simple `Start` button and an adjacent
+  duration-picker button that shows the active choice (e.g. `▼ 10 min`
+  or `▼ Free`). Tapping the duration button opens a modal popup with
+  five preset choices (**5 / 10 / 15 / 20 min** or **Free**); the current
+  preset is highlighted. Picking one applies the timer and dismisses the
+  popup. Start simply begins the session with whatever is set. Settings →
+  Timer preset row aligned to [5, 10, 15, 20] for consistency.
 
 ## [1.1.1] - 2026-04-12
 

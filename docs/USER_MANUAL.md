@@ -31,9 +31,9 @@ The app has **3 tabs** at the bottom:
 
 ### Starting a Session
 
-The **Start** button shows the session length currently configured — for example `Start · 10 min` or `Start · Free` when the timer is off. To change it, tap the small chevron on the right side of the Start button. A popup appears with five choices: **5**, **10**, **15**, or **20 minutes**, or **Free** to disable the timer. The currently active choice is highlighted. Tap a preset to apply it and dismiss the popup; the Start label updates to match. Tap outside the popup to dismiss without changes. If you set a custom duration via Settings → Timer (e.g. 25 min), the Start label still shows the current value.
+Next to the **Start** button there is a small **duration picker** that shows the current session length — for example `▼ 10 min` or `▼ Free` when the timer is off. Tapping the duration button opens a popup with five choices: **5**, **10**, **15**, or **20 minutes**, or **Free** to disable the timer. The currently active choice is highlighted. Tap a preset to apply it and dismiss the popup; the duration button label updates to match. Tap outside the popup to dismiss without changes. If you set a custom duration via Settings → Timer (e.g. 25 min), the duration button still shows the current value.
 
-Tap the main **Start** zone to begin the session — the app auto-detects and connects to your MindWave headset.
+Tap **Start** to begin the session — the app auto-detects and connects to your MindWave headset.
 
 **Connection overlay** shows progress:
 - "Connecting to MindWave... Timeout in 17s"
