@@ -5,6 +5,19 @@ All notable changes to the EEG Meditation Trainer are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Session duration picker on the Live Session screen.** The Start
+  controls now split into a simple `Start` button and an adjacent
+  duration-picker button that shows the active choice (e.g. `▼ 10 min`
+  or `▼ Free`). Tapping the duration button opens a modal popup with
+  five preset choices (**5 / 10 / 15 / 20 min** or **Free**); the current
+  preset is highlighted. Picking one applies the timer and dismisses the
+  popup. Start simply begins the session with whatever is set. Settings →
+  Timer preset row aligned to [5, 10, 15, 20] for consistency.
+
 ## [1.1.1] - 2026-04-12
 
 ### Fixed

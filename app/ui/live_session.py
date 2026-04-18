@@ -5,11 +5,29 @@ from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
+from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
 from kivy.uix.textinput import TextInput
 
 from app.ui.raw_eeg_screen import RawEEGScreen, ScrollableGraphWidget
-from app.ui.theme import C, Card, F, Icons, S, StyledButton, format_duration
+from app.ui.theme import (
+    ICONS_AVAILABLE,
+    C,
+    Card,
+    F,
+    Icons,
+    S,
+    StyledButton,
+    format_duration,
+)
+
+_DURATION_PRESETS = [
+    ("5 min", 5),
+    ("10 min", 10),
+    ("15 min", 15),
+    ("20 min", 20),
+    ("Free", None),
+]
 
 # Band colors/scales for inline raw EEG view
 _BAND_COLORS = {
@@ -221,15 +239,40 @@ class LiveSessionScreen(Screen):
             stats_card.add_widget(box)
         root.add_widget(stats_card)
 
+        # Current timer state cached for popup highlighting
+        self._current_timer_enabled = False
+        self._current_timer_minutes = 0
+        self._duration_popup = None
+
         # ── Controls ──
         controls = BoxLayout(
             size_hint_y=None, height=S.BTN_H + dp(4),
             spacing=S.GAP, padding=[S.GAP, 0],
         )
+
+        # Start + duration-picker form a visual cluster with a tiny separator
         self._btn_start = StyledButton(
             text="Start", icon=Icons.PLAY, bg_color=C.ACCENT,
             bg_pressed=C.ACCENT_DIM,
         )
+        duration_kwargs = (
+            {"icon": Icons.MENU_DOWN} if ICONS_AVAILABLE else {}
+        )
+        self._btn_duration_expand = StyledButton(
+            text="Free",  # updated by refresh_duration_preset
+            bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM,
+            size_hint_x=None, width=dp(96), font_size=F.BODY,
+            **duration_kwargs,
+        )
+        self._btn_duration_expand.bind(on_release=self._open_duration_popup)
+        start_cluster = BoxLayout(
+            orientation="horizontal",
+            spacing=dp(1),  # tiny separator
+            size_hint_y=None, height=S.BTN_H,
+        )
+        start_cluster.add_widget(self._btn_start)
+        start_cluster.add_widget(self._btn_duration_expand)
+
         self._btn_pause = StyledButton(
             text="Pause", icon=Icons.PAUSE, bg_color=C.WARM,
             bg_pressed=C.WARM_DIM, disabled=True,
@@ -242,7 +285,7 @@ class LiveSessionScreen(Screen):
             text="Mark", icon=Icons.MARKER, bg_color=C.PURPLE,
             bg_pressed=C.PURPLE_DIM, disabled=True,
         )
-        controls.add_widget(self._btn_start)
+        controls.add_widget(start_cluster)
         controls.add_widget(self._btn_pause)
         controls.add_widget(self._btn_stop)
         controls.add_widget(self._btn_marker)
@@ -547,6 +590,7 @@ class LiveSessionScreen(Screen):
 
     def set_controls_running(self) -> None:
         self._btn_start.disabled = True
+        self._btn_duration_expand.disabled = True
         self._btn_pause.text = "Pause"
         self._btn_pause.disabled = False
         self._btn_stop.disabled = False
@@ -554,6 +598,7 @@ class LiveSessionScreen(Screen):
 
     def set_controls_paused(self) -> None:
         self._btn_start.disabled = True
+        self._btn_duration_expand.disabled = True
         self._btn_pause.text = "Resume"
         self._btn_pause.disabled = False
         self._btn_stop.disabled = False
@@ -561,10 +606,60 @@ class LiveSessionScreen(Screen):
 
     def set_controls_idle(self) -> None:
         self._btn_start.disabled = False
+        self._btn_duration_expand.disabled = False
         self._btn_pause.disabled = True
         self._btn_pause.text = "Pause"
         self._btn_stop.disabled = True
         self._btn_marker.disabled = True
+
+    # ── Duration preset hooks ──
+    on_duration_preset = None  # set by AppManager; called with value (int or None)
+
+    def _open_duration_popup(self, *_args) -> None:
+        """Open a modal Popup to pick a session duration preset."""
+        body = BoxLayout(orientation="vertical", spacing=S.GAP_SM, padding=S.GAP)
+        for label, value in _DURATION_PRESETS:
+            is_active = (
+                (value is None and not self._current_timer_enabled)
+                or (
+                    value is not None
+                    and self._current_timer_enabled
+                    and value == self._current_timer_minutes
+                )
+            )
+            btn = StyledButton(
+                text=label,
+                bg_color=C.ACCENT if is_active else C.BG_CARD,
+                text_color=C.TEXT if is_active else C.TEXT_SECONDARY,
+                bold=is_active,
+                height=dp(44),
+            )
+            btn.bind(on_release=lambda b, v=value: self._pick_from_popup(v))
+            body.add_widget(btn)
+        self._duration_popup = Popup(
+            title="Session duration",
+            content=body,
+            size_hint=(0.7, None),
+            height=dp(360),
+            auto_dismiss=True,
+        )
+        self._duration_popup.open()
+
+    def _pick_from_popup(self, value) -> None:
+        if self.on_duration_preset is not None:
+            self.on_duration_preset(value)
+        if self._duration_popup is not None:
+            self._duration_popup.dismiss()
+            self._duration_popup = None
+
+    def refresh_duration_preset(self, timer_enabled: bool, timer_minutes: int) -> None:
+        """Cache timer state and update the duration-picker label."""
+        self._current_timer_enabled = timer_enabled
+        self._current_timer_minutes = timer_minutes
+        if not timer_enabled:
+            self._btn_duration_expand.text = "Free"
+        else:
+            self._btn_duration_expand.text = f"{timer_minutes} min"
 
     def show_overlay(self, text: str = "Connecting...") -> None:
         """Show semi-transparent connection overlay with animated dots."""

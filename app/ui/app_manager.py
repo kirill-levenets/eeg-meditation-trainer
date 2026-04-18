@@ -209,6 +209,7 @@ class EEGMeditationApp(App):
         self._live_screen.btn_pause.bind(on_release=self._on_pause)
         self._live_screen.btn_stop.bind(on_release=self._on_stop)
         self._live_screen.btn_marker.bind(on_release=self._on_marker)
+        self._live_screen.on_duration_preset = self._on_duration_preset
         self._live_screen.overlay_cancel_btn.bind(on_release=self._on_connect_cancel)
         self._live_screen.overlay_retry_btn.bind(on_release=self._on_connect_retry)
         self._live_screen.summary_save_btn.bind(on_release=self._on_summary_save)
@@ -1124,6 +1125,19 @@ class EEGMeditationApp(App):
             self._pending_marker = True
             logger.info("Marker placed")
 
+    def _on_duration_preset(self, value) -> None:
+        """Handle Live Session preset tap: update timer settings + persist."""
+        if value is None:
+            self._settings_screen.timer_enabled = False
+        else:
+            self._settings_screen.timer_enabled = True
+            self._settings_screen.timer_minutes = value
+        self._save_user_settings()
+        self._live_screen.refresh_duration_preset(
+            self._settings_screen.timer_enabled,
+            self._settings_screen.timer_minutes,
+        )
+
     def _on_threshold_change(self, value: int) -> None:
         self._metrics_engine.meditation_threshold = value
         self._audio.set_threshold(value)
@@ -1594,6 +1608,11 @@ class EEGMeditationApp(App):
         if marker_hk is not None:
             self._settings_screen.marker_hotkey = marker_hk
 
+        # Sync live-screen preset highlight with loaded timer state
+        self._live_screen.refresh_duration_preset(
+            self._settings_screen.timer_enabled,
+            self._settings_screen.timer_minutes,
+        )
         self._refresh_saved_formulas()
         logger.debug(f"Loaded settings for user {user_id}")
 

@@ -197,7 +197,7 @@ class SettingsScreen(Screen):
         timer_section.add_widget(timer_dur_row)
 
         timer_presets = PresetRow(
-            values=[5, 10, 15, 20, 30],
+            values=[5, 10, 15, 20],
             callback=lambda v: setattr(self._timer_duration_slider, "value", v),
             fmt="{} min",
         )
