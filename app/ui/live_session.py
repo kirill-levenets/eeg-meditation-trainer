@@ -125,37 +125,32 @@ class LiveSessionScreen(Screen):
         )
 
         # ── Header ──
-        header = BoxLayout(size_hint_y=None, height=S.NAV_H, spacing=S.GAP)
+        header = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP_SM)
         self._device_label = Label(
             text="[Mock EEG]",
-            size_hint_x=0.25,
+            size_hint_x=1 / 3,
             color=C.DEVICE_IDLE,
-            font_size=F.BODY,
-        )
-        timer_box = BoxLayout(orientation="vertical", size_hint_x=0.25)
-        self._start_time_label = Label(
-            text="",
-            font_size=F.TINY,
-            color=C.TEXT_MUTED,
-            size_hint_y=0.4,
+            font_size=F.SMALL,
         )
         self._timer_label = Label(
             text="00:00",
-            font_size=dp(18),
+            size_hint_x=1 / 3,
+            font_size=F.BODY,
             bold=True,
             color=C.TEXT,
-            size_hint_y=0.6,
         )
-        timer_box.add_widget(self._start_time_label)
-        timer_box.add_widget(self._timer_label)
+        # Deprecated alias kept so _refresh_theme and reset_display can reference it
+        # without branching; both point to the same single label now.
+        self._start_time_label = self._timer_label
+        self._start_time_str: str = ""  # wall-clock string cached for combined display
         self._state_label = Label(
             text="IDLE",
-            size_hint_x=0.5,
-            font_size=F.H3,
+            size_hint_x=1 / 3,
+            font_size=F.BODY,
             color=C.TEXT_SECONDARY,
         )
         header.add_widget(self._device_label)
-        header.add_widget(timer_box)
+        header.add_widget(self._timer_label)
         header.add_widget(self._state_label)
         root.add_widget(header)
 
@@ -354,7 +349,7 @@ class LiveSessionScreen(Screen):
         bottom_bar.add_widget(self._btn_pause)
         bottom_bar.add_widget(self._btn_stop)
         bottom_bar.add_widget(self._btn_marker)
-        root.add_widget(bottom_bar)
+        self._body.add_widget(bottom_bar)
 
         float_root.add_widget(root)
 
@@ -625,13 +620,16 @@ class LiveSessionScreen(Screen):
         })
 
     def update_timer(self, text: str) -> None:
-        self._timer_label.text = text
+        if self._start_time_str:
+            self._timer_label.text = f"{self._start_time_str} · {text}"
+        else:
+            self._timer_label.text = text
 
     def set_start_time(self, epoch: float) -> None:
-        """Display session start wall-clock time and pass it to the graph."""
+        """Cache session start wall-clock time, update combined timer, and pass to graph."""
         import time
         lt = time.localtime(epoch)
-        self._start_time_label.text = f"started {lt.tm_hour:02d}:{lt.tm_min:02d}:{lt.tm_sec:02d}"
+        self._start_time_str = f"{lt.tm_hour:02d}:{lt.tm_min:02d}"
         self._graph.set_start_wall_time(epoch)
 
     def update_state(self, state: str) -> None:
@@ -810,8 +808,8 @@ class LiveSessionScreen(Screen):
     def reset_display(self) -> None:
         self._graph.clear_data()
         self._graph.set_start_wall_time(None)
+        self._start_time_str = ""
         self._timer_label.text = "00:00"
-        self._start_time_label.text = ""
         self._state_label.text = "IDLE"
         self._state_label.color = C.STATE_NEUTRAL
         self.hide_alert()
@@ -909,7 +907,6 @@ class LiveSessionScreen(Screen):
             self._overlay_bg = Rectangle(size=self._overlay.size, pos=self._overlay.pos)
         # Update label colors
         self._device_label.color = C.DEVICE_IDLE
-        self._start_time_label.color = C.TEXT_MUTED
         self._timer_label.color = C.TEXT
         self._state_label.color = C.STATE_NEUTRAL
         self._alert_label.color = C.WARM
