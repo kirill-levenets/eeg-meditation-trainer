@@ -77,11 +77,12 @@ class EEGMeditationApp(App):
         self._wake_lock = None
 
     def _acquire_wake_lock(self) -> None:
-        """Keep screen on during session (Android only)."""
+        """Keep CPU running + screen on during session (Android only)."""
         if not hasattr(sys, "getandroidapilevel"):
             return
         try:
             from android.runnable import run_on_ui_thread
+
             @run_on_ui_thread
             def _set_flag():
                 from jnius import autoclass
@@ -90,16 +91,34 @@ class EEGMeditationApp(App):
                 WindowManager = autoclass("android.view.WindowManager$LayoutParams")
                 activity.getWindow().addFlags(WindowManager.FLAG_KEEP_SCREEN_ON)
             _set_flag()
-            logger.info("Wake lock acquired (screen will stay on)")
+
+            # Partial wake lock keeps CPU alive when screen is off.
+            from jnius import autoclass
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+            Context = autoclass("android.content.Context")
+            PowerManager = autoclass("android.os.PowerManager")
+            pm = PythonActivity.mActivity.getSystemService(Context.POWER_SERVICE)
+            self._wake_lock = pm.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK, "eegmeditation:session"
+            )
+            self._wake_lock.acquire()
+            logger.info("Wake lock acquired (partial + screen-on).")
         except Exception as e:
             logger.warning(f"Failed to acquire wake lock: {e}")
 
     def _release_wake_lock(self) -> None:
-        """Allow screen to turn off again (Android only)."""
+        """Release wake locks (Android only)."""
         if not hasattr(sys, "getandroidapilevel"):
             return
         try:
+            if self._wake_lock is not None:
+                try:
+                    self._wake_lock.release()
+                except Exception:
+                    pass
+                self._wake_lock = None
             from android.runnable import run_on_ui_thread
+
             @run_on_ui_thread
             def _clear_flag():
                 from jnius import autoclass
@@ -108,9 +127,34 @@ class EEGMeditationApp(App):
                 WindowManager = autoclass("android.view.WindowManager$LayoutParams")
                 activity.getWindow().clearFlags(WindowManager.FLAG_KEEP_SCREEN_ON)
             _clear_flag()
-            logger.info("Wake lock released")
+            logger.info("Wake lock released.")
         except Exception as e:
             logger.warning(f"Failed to release wake lock: {e}")
+
+    def _start_session_keep_alive_service(self) -> None:
+        """Start the Android foreground service that protects the session from OS kill."""
+        if not hasattr(sys, "getandroidapilevel"):
+            return
+        try:
+            from jnius import autoclass
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+            service_cls = autoclass("org.eeg.eegmeditation.ServiceSessionkeepalive")
+            service_cls.start(PythonActivity.mActivity, "")
+            logger.info("SessionKeepAlive service started.")
+        except Exception as e:
+            logger.warning(f"Failed to start SessionKeepAlive service: {e}")
+
+    def _stop_session_keep_alive_service(self) -> None:
+        if not hasattr(sys, "getandroidapilevel"):
+            return
+        try:
+            from jnius import autoclass
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+            service_cls = autoclass("org.eeg.eegmeditation.ServiceSessionkeepalive")
+            service_cls.stop(PythonActivity.mActivity)
+            logger.info("SessionKeepAlive service stopped.")
+        except Exception as e:
+            logger.warning(f"Failed to stop SessionKeepAlive service: {e}")
 
     # Map bottom-nav tab keys to screen groups
     _TAB_SCREENS = {
@@ -573,6 +617,7 @@ class EEGMeditationApp(App):
         self._live_screen.set_controls_running()
 
         self._acquire_wake_lock()
+        self._start_session_keep_alive_service()
 
         if APP.USE_MOCK_DEVICE:
             self._eeg_stream.start()
@@ -627,6 +672,7 @@ class EEGMeditationApp(App):
                 self._update_event.cancel()
                 self._update_event = None
             self._release_wake_lock()
+            self._stop_session_keep_alive_service()
         self._live_screen.set_controls_idle()
         self._live_screen.update_device_status(False)
         self._live_screen.update_state("IDLE")
@@ -686,6 +732,7 @@ class EEGMeditationApp(App):
             self._live_screen.update_state("Cancelled")
             self._timer_screen.reset()
             self._release_wake_lock()
+            self._stop_session_keep_alive_service()
             logger.info("Session cancelled during BT connection wait")
             return
 
@@ -768,6 +815,7 @@ class EEGMeditationApp(App):
         self._timer_screen.reset()
         self._session_manager.reset()
         self._release_wake_lock()
+        self._stop_session_keep_alive_service()
         self._mark_history_dirty()
 
         if stats and self._current_session_id:
@@ -817,6 +865,7 @@ class EEGMeditationApp(App):
         self._timer_screen.reset()
         self._session_manager.reset()
         self._release_wake_lock()
+        self._stop_session_keep_alive_service()
         self._mark_history_dirty()
 
         if save and stats and self._current_session_id:
@@ -902,6 +951,7 @@ class EEGMeditationApp(App):
                         "Check battery or restart headset."
                     )
                     self._release_wake_lock()
+                    self._stop_session_keep_alive_service()
                     logger.error("No ThinkGear packets — likely low battery or needs power cycle")
                 else:
                     # Show signal quality feedback (keep waiting if packets arrive)
@@ -957,6 +1007,7 @@ class EEGMeditationApp(App):
                 "Make sure the device is turned on\nand in range."
             )
             self._release_wake_lock()
+            self._stop_session_keep_alive_service()
             logger.error("BT connection timed out")
         else:
             # Still waiting for BT socket — show countdown
