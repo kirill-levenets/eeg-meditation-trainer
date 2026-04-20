@@ -7,6 +7,7 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
+from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 
 from app.ui.raw_eeg_screen import RawEEGScreen, ScrollableGraphWidget
@@ -207,10 +208,9 @@ class LiveSessionScreen(Screen):
         self._raw_container.add_widget(band_legend)
 
         # Graph area holder — swaps between metrics and raw views
-        self._graph_area = BoxLayout(size_hint_y=0.45)
+        self._graph_area = BoxLayout(size_hint_y=None, height=dp(400))
         self._graph_area.add_widget(self._metrics_container)
         self._active_view = "metrics"
-        root.add_widget(self._graph_area)
 
         # ── Stats row ──
         stats_card = Card(
@@ -219,6 +219,7 @@ class LiveSessionScreen(Screen):
             height=dp(56),
             bg_color=C.BG_CARD,
         )
+        self._stats_card = stats_card
         self._stat_labels: dict[str, Label] = {}
         stat_items = [
             ("shamatha_score", "Shamatha"),
@@ -242,7 +243,19 @@ class LiveSessionScreen(Screen):
             box.add_widget(value_lbl)
             self._stat_labels[key] = value_lbl
             stats_card.add_widget(box)
-        root.add_widget(stats_card)
+
+        # Scrollable body: graph + stats
+        self._scroll = ScrollView(size_hint=(1, 1))
+        self._body = BoxLayout(
+            orientation="vertical",
+            size_hint_y=None,
+            spacing=S.GAP_SM,
+        )
+        self._body.bind(minimum_height=self._body.setter("height"))
+        self._body.add_widget(self._graph_area)
+        self._body.add_widget(stats_card)
+        self._scroll.add_widget(self._body)
+        root.add_widget(self._scroll)
 
         # Current timer state cached for popup highlighting
         self._current_timer_enabled = False
@@ -250,7 +263,7 @@ class LiveSessionScreen(Screen):
         self._duration_popup = None
 
         # ── Controls ──
-        controls = BoxLayout(
+        bottom_bar = BoxLayout(
             size_hint_y=None, height=S.BTN_H + dp(4),
             spacing=S.GAP, padding=[S.GAP, 0],
         )
@@ -290,11 +303,11 @@ class LiveSessionScreen(Screen):
             text="Mark", icon=Icons.MARKER, bg_color=C.PURPLE,
             bg_pressed=C.PURPLE_DIM, disabled=True,
         )
-        controls.add_widget(start_cluster)
-        controls.add_widget(self._btn_pause)
-        controls.add_widget(self._btn_stop)
-        controls.add_widget(self._btn_marker)
-        root.add_widget(controls)
+        bottom_bar.add_widget(start_cluster)
+        bottom_bar.add_widget(self._btn_pause)
+        bottom_bar.add_widget(self._btn_stop)
+        bottom_bar.add_widget(self._btn_marker)
+        root.add_widget(bottom_bar)
 
         float_root.add_widget(root)
 
