@@ -18,6 +18,10 @@ build_venv_android/
 *.swp
 *.swo
 
+# Local scratch files (kept on disk, not in git)
+IMPROVEMENTS.md
+docs/superpowers/
+
 # Database
 *.db
 *.db-shm
