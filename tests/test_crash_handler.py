@@ -112,3 +112,32 @@ def test_reentrance_guard_prevents_second_dialog(monkeypatch):
         t2, v2, tb2 = __import__("sys").exc_info()
     ch._handle_exception(t2, v2, tb2, source="main", app=MagicMock())
     assert len(scheduled) == 1  # second call blocked
+
+
+def test_install_sets_all_three_hooks(monkeypatch):
+    import sys
+    import threading
+
+    import app.crash_handler as ch
+
+    original_sys = sys.excepthook
+    original_thr = threading.excepthook
+
+    app = MagicMock()
+    ch.install_crash_handler(app)
+
+    assert sys.excepthook is not original_sys
+    assert threading.excepthook is not original_thr
+
+    # Kivy ExceptionManager handler — our wrapper must be registered
+    from kivy.base import ExceptionManager
+    assert any(
+        isinstance(h, ch._KivyExceptionHandler) for h in ExceptionManager.handlers
+    )
+
+    # Cleanup so later tests aren't polluted
+    sys.excepthook = original_sys
+    threading.excepthook = original_thr
+    ExceptionManager.handlers[:] = [
+        h for h in ExceptionManager.handlers if not isinstance(h, ch._KivyExceptionHandler)
+    ]

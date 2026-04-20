@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as _dt
 import platform as _platform
 import sys as _sys
-import threading as _threading  # noqa: F401 — used by Task 8 thread hook
+import threading as _threading
 import traceback as _traceback
 from typing import Optional
 
@@ -208,3 +208,46 @@ class CrashDialog:
             auto_dismiss=False,
         )
         cls._popup.open()
+
+
+def _sys_hook(exc_type, exc_value, tb) -> None:
+    _handle_exception(exc_type, exc_value, tb, source="main", app=_STATE["app"])
+
+
+def _thread_hook(args) -> None:
+    _handle_exception(
+        args.exc_type, args.exc_value, args.exc_traceback,
+        source=f"thread:{getattr(args.thread, 'name', 'unknown')}",
+        app=_STATE["app"],
+    )
+
+
+_KivyExceptionHandler = None  # type: ignore[assignment]
+
+
+def install_crash_handler(app) -> None:
+    """Install sys, Kivy, and thread exception hooks."""
+    _STATE["app"] = app
+
+    _sys.excepthook = _sys_hook
+    _threading.excepthook = _thread_hook
+
+    try:
+        from kivy.base import ExceptionHandler, ExceptionManager  # noqa: PLC0415
+
+        class _Handler(ExceptionHandler):
+            def handle_exception(self, inst):
+                import sys as _s  # noqa: PLC0415
+                exc_type, exc_value, tb = _s.exc_info()
+                _handle_exception(
+                    exc_type, exc_value, tb, source="kivy-loop", app=_STATE["app"]
+                )
+                return ExceptionManager.PASS
+
+        # Make the class type discoverable for tests
+        global _KivyExceptionHandler
+        _KivyExceptionHandler = _Handler
+
+        ExceptionManager.add_handler(_Handler())
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to register Kivy ExceptionManager handler.")

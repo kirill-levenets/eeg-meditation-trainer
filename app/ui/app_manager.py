@@ -119,6 +119,9 @@ class EEGMeditationApp(App):
     }
 
     def build(self) -> BoxLayout:
+        from app.crash_handler import install_crash_handler
+        install_crash_handler(self)
+
         # Restore saved theme before building UI
         saved_theme = self._db.get_setting("theme")
         if saved_theme:
