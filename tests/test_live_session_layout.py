@@ -1,3 +1,7 @@
+from unittest.mock import MagicMock
+
+from kivy.metrics import dp
+
 from app.ui.live_session import _compute_graph_height
 
 
@@ -11,11 +15,6 @@ def test_graph_respects_floor_on_tiny_viewport():
 
 def test_graph_at_exact_floor():
     assert _compute_graph_height(viewport_h=240.0, floor_dp=240.0) == 240.0
-
-
-from unittest.mock import MagicMock
-
-from kivy.metrics import dp
 
 
 def test_reflow_assigns_graph_height_from_scroll():

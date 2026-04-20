@@ -78,10 +78,13 @@ class LiveSessionScreen(Screen):
         self.name = "live_session"
         self._build_ui()
         C.add_listener(self._refresh_theme)
+        # Scroll height tracking is persistent (the widget itself lives for the screen's lifetime)
+        self._scroll.bind(height=self._reflow)
+
+    def on_enter(self, *args) -> None:
         from kivy.core.window import Window
         Window.bind(on_resize=self._reflow, on_rotate=self._reflow)
-        self._scroll.bind(height=self._reflow)
-        Clock.schedule_once(lambda dt: self._reflow(), 0)
+        self._reflow()
 
     def _build_ui(self) -> None:
         float_root = FloatLayout()
