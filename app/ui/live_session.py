@@ -71,6 +71,21 @@ def _compute_graph_height(viewport_h: float, floor_dp: float) -> float:
     return max(viewport_h, floor_dp)
 
 
+def _compute_graph_height_adaptive(
+    viewport_h: float,
+    stats_h: float,
+    bottom_h: float,
+    spacing: float,
+    min_fixed_graph: float,
+    min_graph_floor: float,
+) -> float:
+    """Pick graph height: fixed (fills leftover) if tall enough, else scroll-mode (fills viewport)."""
+    fixed_graph = viewport_h - stats_h - bottom_h - spacing
+    if fixed_graph >= min_fixed_graph:
+        return max(fixed_graph, min_graph_floor)
+    return max(viewport_h, min_graph_floor)
+
+
 def _format_stats_slots(
     mode: str, metrics: dict, stats: dict
 ) -> tuple[list[str], list[str]]:
@@ -305,7 +320,7 @@ class LiveSessionScreen(Screen):
         self._duration_popup = None
 
         # ── Controls ──
-        bottom_bar = BoxLayout(
+        self._bottom_bar = BoxLayout(
             size_hint_y=None, height=S.BTN_H + dp(4),
             spacing=S.GAP, padding=[S.GAP, 0],
         )
@@ -345,11 +360,11 @@ class LiveSessionScreen(Screen):
             text="Mark", icon=Icons.MARKER, bg_color=C.PURPLE,
             bg_pressed=C.PURPLE_DIM, disabled=True,
         )
-        bottom_bar.add_widget(start_cluster)
-        bottom_bar.add_widget(self._btn_pause)
-        bottom_bar.add_widget(self._btn_stop)
-        bottom_bar.add_widget(self._btn_marker)
-        self._body.add_widget(bottom_bar)
+        self._bottom_bar.add_widget(start_cluster)
+        self._bottom_bar.add_widget(self._btn_pause)
+        self._bottom_bar.add_widget(self._btn_stop)
+        self._bottom_bar.add_widget(self._btn_marker)
+        self._body.add_widget(self._bottom_bar)
 
         float_root.add_widget(root)
 
@@ -534,11 +549,19 @@ class LiveSessionScreen(Screen):
         self.add_widget(float_root)
 
     def _reflow(self, *args) -> None:
-        """Resize graph_area to fill scroll viewport (floor = dp(240))."""
-        if not hasattr(self, "_scroll") or not hasattr(self, "_graph_area"):
+        """Resize graph to fill viewport OR to leftover space if viewport is tall enough."""
+        needed = ("_scroll", "_graph_area", "_stats_card", "_bottom_bar")
+        if not all(hasattr(self, a) for a in needed):
             return
-        self._graph_area.height = _compute_graph_height(
-            viewport_h=self._scroll.height, floor_dp=dp(240)
+        # spacing between body's 3 children (graph, stats_card, bottom_bar) = 2 gaps
+        spacing = S.GAP_SM * 2
+        self._graph_area.height = _compute_graph_height_adaptive(
+            viewport_h=self._scroll.height,
+            stats_h=self._stats_card.height,
+            bottom_h=self._bottom_bar.height,
+            spacing=spacing,
+            min_fixed_graph=dp(400),
+            min_graph_floor=dp(240),
         )
 
     def on_leave(self, *args) -> None:
