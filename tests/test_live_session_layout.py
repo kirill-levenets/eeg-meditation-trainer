@@ -27,7 +27,7 @@ def test_reflow_assigns_graph_height_from_scroll():
 
     screen._reflow()
 
-    screen._graph_area.height == max(900.0, dp(240))
+    assert screen._graph_area.height == max(900.0, dp(240))
 
 
 def test_reflow_respects_floor_on_small_scroll():
