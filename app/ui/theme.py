@@ -83,6 +83,7 @@ class Icons:
     BRAIN = "\U000F09D8"
     PLUS = "\U000F0415"
     REFRESH = "\U000F0450"
+    SWAP_HORIZONTAL = "\U000F01B6"
 
 
 # ── Color palette ────────────────────────────────────────────────────

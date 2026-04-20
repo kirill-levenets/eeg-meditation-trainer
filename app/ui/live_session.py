@@ -256,6 +256,8 @@ class LiveSessionScreen(Screen):
             ("native_attention", "NS Attn"),
             ("native_meditation", "NS Med"),
         ]
+        self._stat_title_labels: dict = {}
+        self._stat_keys_in_order = [k for k, _ in stat_items]
         for key, title in stat_items:
             box = BoxLayout(orientation="vertical")
             title_lbl = Label(
@@ -269,8 +271,20 @@ class LiveSessionScreen(Screen):
             )
             box.add_widget(title_lbl)
             box.add_widget(value_lbl)
+            self._stat_title_labels[key] = title_lbl
             self._stat_labels[key] = value_lbl
             stats_card.add_widget(box)
+
+        self._stats_mode = "live"
+        self._btn_stats_toggle = StyledButton(
+            text="",
+            icon=Icons.SWAP_HORIZONTAL if ICONS_AVAILABLE else "<>",
+            size_hint_x=None,
+            width=dp(32),
+            bg_color=C.BG_CARD,
+        )
+        self._btn_stats_toggle.bind(on_release=self._toggle_stats_mode)
+        stats_card.add_widget(self._btn_stats_toggle)
 
         # Scrollable body: graph + stats
         self._scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False)
@@ -627,9 +641,14 @@ class LiveSessionScreen(Screen):
         self._state_label.color = color_map.get(state, C.STATE_NEUTRAL)
 
     def update_stats(self, metrics: dict[str, float]) -> None:
-        for key, label in self._stat_labels.items():
-            val = metrics.get(key, 0.0)
-            label.text = f"{val:.0f}"
+        self._last_metrics = metrics
+        stats = {}
+        try:
+            from kivy.app import App
+            stats = App.get_running_app()._session_manager.compute_statistics()
+        except Exception:
+            pass
+        self._render_stats(metrics, stats)
 
     def update_device_status(
         self, connected: bool, device_name: str = "", connecting: bool = False
@@ -839,6 +858,39 @@ class LiveSessionScreen(Screen):
     @property
     def summary_session_id(self):
         return self._summary_session_id
+
+    def _toggle_stats_mode(self, *_args) -> None:
+        self._stats_mode = "aggregate" if self._stats_mode == "live" else "live"
+        self._apply_stats_mode_styling()
+        # Force immediate refresh using last known values
+        metrics = getattr(self, "_last_metrics", {}) or {}
+        stats = {}
+        try:
+            from kivy.app import App
+            stats = App.get_running_app()._session_manager.compute_statistics()
+        except Exception:
+            pass
+        self._render_stats(metrics, stats)
+        # Persist
+        try:
+            from kivy.app import App
+            App.get_running_app()._save_user_settings()
+        except Exception:
+            pass
+
+    def _apply_stats_mode_styling(self) -> None:
+        # Icon color indicates active mode
+        active = self._stats_mode == "aggregate"
+        try:
+            self._btn_stats_toggle.bg_color = C.PRIMARY if active else C.BG_CARD
+        except Exception:
+            pass
+
+    def _render_stats(self, metrics: dict, stats: dict) -> None:
+        titles, values = _format_stats_slots(self._stats_mode, metrics=metrics, stats=stats)
+        for i, key in enumerate(self._stat_keys_in_order):
+            self._stat_labels[key].text = values[i]
+            self._stat_title_labels[key].text = titles[i]
 
     def _refresh_theme(self):
         """Update background and label colors when theme changes."""
