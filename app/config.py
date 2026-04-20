@@ -1,6 +1,8 @@
 import os
 import sys
 
+APP_VERSION = "1.0.0"
+
 
 def _resolve_android_base_dir() -> str:
     """Use app-private storage for database (always writable, stable path).
