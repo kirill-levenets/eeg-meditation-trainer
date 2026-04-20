@@ -70,6 +70,27 @@ def _compute_graph_height(viewport_h: float, floor_dp: float) -> float:
     return max(viewport_h, floor_dp)
 
 
+def _format_stats_slots(
+    mode: str, metrics: dict, stats: dict
+) -> tuple[list[str], list[str]]:
+    """Return (titles, values) for the 5 bottom-row slots."""
+    if mode == "aggregate":
+        titles = ["Avg Sham", "Avg Med", ">Thresh", "\u226590", "Streak"]
+        values = [
+            f"{stats.get('avg_shamatha', 0.0):.1f}",
+            f"{stats.get('avg_meditation', 0.0):.1f}",
+            format_duration(int(stats.get("time_above_threshold", 0))),
+            format_duration(int(stats.get("time_shamatha_90", 0))),
+            format_duration(int(stats.get("longest_streak", 0))),
+        ]
+        return titles, values
+    # live mode (default)
+    titles = ["Shamatha", "Distraction", "Sinking", "NS Attn", "NS Med"]
+    keys = ["shamatha_score", "distraction", "sinking", "native_attention", "native_meditation"]
+    values = [str(int(round(metrics.get(k, 0)))) for k in keys]
+    return titles, values
+
+
 class LiveSessionScreen(Screen):
     """Main session screen with graph, stats, and controls."""
 
