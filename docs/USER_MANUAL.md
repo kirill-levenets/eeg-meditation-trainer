@@ -76,6 +76,18 @@ After stopping, an overlay shows:
 
 Sessions auto-stop after **3 hours** with an alert sound. Start a new session to continue.
 
+### Bottom stats toggle
+
+Tap the swap icon on the right of the stats row to switch between **live** instant values (Shamatha, Distraction, Sinking, NS Attn, NS Med) and **session aggregates** (Avg Shamatha, Avg Meditation, Time above Threshold, Time ≥90, Longest Streak). Your choice persists.
+
+### Locked-screen sessions (Android)
+
+You can start a session, lock the phone, and the session will continue for hours. A persistent notification indicates the session is active. If the connection drops or the session ends unexpectedly, a short warble sound plays so you notice.
+
+### If the app crashes
+
+If an unexpected error occurs, a dialog appears with a pre-filled crash report — already copied to your clipboard. Paste it into a new issue at `github.com/kirill-levenets/eeg-meditation-trainer/issues` and tap **Dismiss & Exit**.
+
 ---
 
 ## History

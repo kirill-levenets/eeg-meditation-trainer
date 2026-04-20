@@ -33,6 +33,10 @@ Inspired by the [EEG meditation research and Vernihor formula](https://scripture
 - **App icon** — Custom EEG brainwave icon and Android presplash
 - **macOS support** — Native build via PyInstaller
 - **Android storage** — Tries /sdcard/EEGMeditation, falls back to app-private storage if permission denied
+- **Landscape-aware Live Session layout** — the graph fills the viewport at any orientation; controls stay pinned at the bottom.
+- **Multi-hour locked-screen sessions on Android** — foreground service + partial wake lock keeps the session running with the screen off.
+- **Global crash handler** — in-app dialog with a pre-formatted crash report copied to clipboard.
+- **Toggle bottom stats card** between live metrics and session aggregates.
 
 ## Documentation
 

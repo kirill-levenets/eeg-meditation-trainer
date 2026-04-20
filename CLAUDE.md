@@ -88,6 +88,10 @@ gh workflow run release.yml -f platform=windows   # or linux, macos, android, al
 - Windows CI build sets `KIVY_DOC=1` in the PyInstaller spec to prevent GL init on headless runner; Kivy data paths (`kivy_install/data/`, `kivy_install/modules/`) are constructed manually instead of importing `kivy.tools.packaging.pyinstaller_hooks`.
 - Linux CI uses system Python (ubuntu-24.04) instead of `actions/setup-python` to get `socket.AF_BLUETOOTH` support.
 - MDI icon font path resolution tries multiple candidates for cross-platform compat (standard, Android, fallback).
+- Live Session layout wraps the graph + stats in a ScrollView with a pinned bottom bar; `_reflow()` runs on `Window.on_resize` / `on_rotate` so the graph always fills the viewport (floor dp(240)).
+- Global crash handler (`app/crash_handler.py`) installs `sys.excepthook`, `threading.excepthook`, and a Kivy `ExceptionManager` handler; all three funnel into a modal dialog that auto-copies a markdown report to the clipboard. Dismiss exits via `app.stop()`.
+- Android sessions hold a `PARTIAL_WAKE_LOCK` and run a foreground service (`service/session_keep_alive.py`, declared via `services =` in buildozer.spec) for multi-hour locked-screen operation. `SessionManager.stop(reason)` plays a short warble alert for non-user terminations (`stale_data`, `bt_lost`, `error`).
+- Stats card toggle: tapping the swap icon flips all 5 slots between live instant values and session aggregates (`avg_shamatha`, `avg_meditation`, `time_above_threshold`, `time_shamatha_90`, `longest_streak`). Mode persists per user via the existing JSON user-settings column.
 
 ## Documentation Rules
 

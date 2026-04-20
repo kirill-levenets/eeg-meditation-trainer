@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Landscape-aware Live Session layout with pinned bottom bar and scrollable body.
+- Global crash handler with markdown report copied to clipboard.
+- Multi-hour locked-screen operation on Android via foreground service + partial wake lock.
+- Short warble alert when a session terminates unexpectedly (BT lost, stale data).
+- Toggle between live and aggregate stats on the bottom of the session screen.
 - **Session duration picker on the Live Session screen.** The Start
   controls now split into a simple `Start` button and an adjacent
   duration-picker button that shows the active choice (e.g. `▼ 10 min`
