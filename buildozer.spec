@@ -36,6 +36,9 @@ icon.filename = app/assets/icons/icon_512.png
 # (list) Application requirements
 requirements = python3,kivy==2.3.0,pyjnius,android
 
+# (list) Services (foreground services declared here)
+services = SessionKeepAlive:service/session_keep_alive.py:foreground
+
 # (str) Supported orientation (landscape, sensorLandscape, portrait, sensorPortrait, all)
 orientation = portrait, landscape
 
@@ -48,7 +51,7 @@ fullscreen = 0
 # ACCESS_FINE_LOCATION: required by Android 6-11 for BT scanning (not used for actual location)
 # WRITE/READ_EXTERNAL_STORAGE: CSV export on Android <11
 # MANAGE_EXTERNAL_STORAGE: CSV export on Android 11+ (all files access)
-android.permissions = BLUETOOTH,BLUETOOTH_ADMIN,BLUETOOTH_CONNECT,BLUETOOTH_SCAN,ACCESS_FINE_LOCATION,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,MANAGE_EXTERNAL_STORAGE
+android.permissions = BLUETOOTH,BLUETOOTH_ADMIN,BLUETOOTH_CONNECT,BLUETOOTH_SCAN,ACCESS_FINE_LOCATION,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,MANAGE_EXTERNAL_STORAGE,WAKE_LOCK,FOREGROUND_SERVICE,FOREGROUND_SERVICE_MEDIA_PLAYBACK,POST_NOTIFICATIONS
 
 # (int) Target Android API
 android.api = 33
