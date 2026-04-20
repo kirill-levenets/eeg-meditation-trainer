@@ -245,10 +245,10 @@ class LiveSessionScreen(Screen):
             stats_card.add_widget(box)
 
         # Scrollable body: graph + stats
-        self._scroll = ScrollView(size_hint=(1, 1))
+        self._scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False)
         self._body = BoxLayout(
             orientation="vertical",
-            size_hint_y=None,
+            size_hint=(1, None),
             spacing=S.GAP_SM,
         )
         self._body.bind(minimum_height=self._body.setter("height"))
