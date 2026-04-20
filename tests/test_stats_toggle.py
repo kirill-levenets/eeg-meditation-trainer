@@ -43,3 +43,15 @@ def test_idle_aggregate_shows_zeros():
         "longest_streak": 0,
     })
     assert values == ["0.0", "0.0", "0s", "0s", "0s"]
+
+
+def test_stats_view_mode_roundtrips_user_settings(tmp_path):
+    """Saving and loading stats_view_mode via the Database API preserves the value."""
+    from app.storage.database import DatabaseManager
+
+    db_path = str(tmp_path / "test.db")
+    db = DatabaseManager(db_path=db_path)
+    uid = db.create_user("alice")
+    db.set_user_setting(uid, "stats_view_mode", "aggregate")
+    value = db.get_user_setting(uid, "stats_view_mode")
+    assert value == "aggregate"

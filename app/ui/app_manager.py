@@ -1527,6 +1527,9 @@ class EEGMeditationApp(App):
         )
         self._db.set_user_setting(uid, "audio_metric", self._audio_metric_key)
         self._db.set_user_setting(uid, "marker_hotkey", self._settings_screen.marker_hotkey)
+        self._db.set_user_setting(
+            uid, "stats_view_mode", getattr(self._live_screen, "_stats_mode", "live")
+        )
         logger.debug(f"Saved settings for user {uid}")
 
     def _load_user_settings(self, user_id: int) -> None:
@@ -1662,6 +1665,14 @@ class EEGMeditationApp(App):
         marker_hk = g(user_id, "marker_hotkey")
         if marker_hk is not None:
             self._settings_screen.marker_hotkey = marker_hk
+
+        stats_mode = g(user_id, "stats_view_mode")
+        if stats_mode in ("live", "aggregate"):
+            try:
+                self._live_screen._stats_mode = stats_mode
+                self._live_screen._apply_stats_mode_styling()
+            except Exception:
+                pass
 
         # Sync live-screen preset highlight with loaded timer state
         self._live_screen.refresh_duration_preset(
