@@ -85,7 +85,7 @@ ignore = [
 # App manager: complex orchestration, Android wake lock, threading
 "app/ui/app_manager.py" = ["PLC0415", "BLE001", "PLR0912", "PLR0915"]
 # UI screens: _build_ui methods are long but flat widget construction
-"app/ui/live_session.py" = ["PLC0415", "PLR0915"]
+"app/ui/live_session.py" = ["PLC0415", "PLR0915", "BLE001"]
 "app/ui/settings_screen.py" = ["PLC0415", "PLR0915"]
 "app/ui/diary_screen.py" = ["PLC0415", "BLE001", "PLR0915"]
 "app/ui/history_screen.py" = ["PLC0415"]

@@ -78,6 +78,10 @@ class LiveSessionScreen(Screen):
         self.name = "live_session"
         self._build_ui()
         C.add_listener(self._refresh_theme)
+        from kivy.core.window import Window
+        Window.bind(on_resize=self._reflow, on_rotate=self._reflow)
+        self._scroll.bind(height=self._reflow)
+        Clock.schedule_once(lambda dt: self._reflow(), 0)
 
     def _build_ui(self) -> None:
         float_root = FloatLayout()
@@ -490,6 +494,21 @@ class LiveSessionScreen(Screen):
         float_root.add_widget(self._overlay)
 
         self.add_widget(float_root)
+
+    def _reflow(self, *args) -> None:
+        """Resize graph_area to fill scroll viewport (floor = dp(240))."""
+        if not hasattr(self, "_scroll") or not hasattr(self, "_graph_area"):
+            return
+        self._graph_area.height = _compute_graph_height(
+            viewport_h=self._scroll.height, floor_dp=dp(240)
+        )
+
+    def on_leave(self, *args) -> None:
+        from kivy.core.window import Window
+        try:
+            Window.unbind(on_resize=self._reflow, on_rotate=self._reflow)
+        except Exception:
+            pass
 
     def _set_view(self, view: str) -> None:
         """Switch between 'metrics' and 'raw' graph views."""
