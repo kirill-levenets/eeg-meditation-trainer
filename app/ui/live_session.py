@@ -97,6 +97,7 @@ class LiveSessionScreen(Screen):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.name = "live_session"
+        self._last_metrics: dict = {}
         self._build_ui()
         C.add_listener(self._refresh_theme)
         # Scroll height tracking is persistent (the widget itself lives for the screen's lifetime)

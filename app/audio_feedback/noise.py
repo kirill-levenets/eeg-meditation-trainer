@@ -461,7 +461,7 @@ class AudioEngine:
         self._play_disconnect()
         logger.info("Disconnect alert played")
 
-    def play_alert(self, duration_s: float = 3.0) -> None:
+    def play_alert(self) -> None:
         """Play the disconnect warble channel briefly as a termination alert."""
         try:
             self._play_disconnect()
