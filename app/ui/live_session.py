@@ -9,6 +9,7 @@ from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
+from kivy.uix.widget import Widget
 
 from app.ui.raw_eeg_screen import RawEEGScreen, ScrollableGraphWidget
 from app.ui.theme import (
@@ -277,15 +278,18 @@ class LiveSessionScreen(Screen):
             stats_card.add_widget(box)
 
         self._stats_mode = "live"
+        toggle_box = BoxLayout(orientation="vertical", size_hint_x=None, width=dp(56))
+        toggle_box.add_widget(Widget())  # spacer, matches title_lbl size_hint_y=0.4
         self._btn_stats_toggle = StyledButton(
-            text="",
-            icon=Icons.SWAP_HORIZONTAL if ICONS_AVAILABLE else "<>",
-            size_hint_x=None,
-            width=dp(32),
+            text="LIVE",
+            size_hint_y=0.6,
+            font_size=F.SMALL,
             bg_color=C.BG_CARD,
         )
+        toggle_box.add_widget(self._btn_stats_toggle)
         self._btn_stats_toggle.bind(on_release=self._toggle_stats_mode)
-        stats_card.add_widget(self._btn_stats_toggle)
+        stats_card.add_widget(toggle_box)
+        self._apply_stats_mode_styling()
 
         # Scrollable body: graph + stats
         self._scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False)
@@ -880,10 +884,10 @@ class LiveSessionScreen(Screen):
             pass
 
     def _apply_stats_mode_styling(self) -> None:
-        # Icon color indicates active mode
         active = self._stats_mode == "aggregate"
         try:
             self._btn_stats_toggle.bg_color = C.PRIMARY if active else C.BG_CARD
+            self._btn_stats_toggle.text = "AVG" if active else "LIVE"
         except Exception:
             pass
 
