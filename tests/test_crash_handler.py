@@ -90,3 +90,25 @@ def test_format_report_handles_missing_session_manager():
 
     assert "unknown" in report.lower()
     assert "early-boom" in report
+
+
+def test_reentrance_guard_prevents_second_dialog(monkeypatch):
+    import app.crash_handler as ch
+
+    scheduled = []
+    monkeypatch.setattr(ch, "_schedule_dialog", lambda report: scheduled.append(report))
+
+    ch._STATE["in_dialog"] = False
+    try:
+        raise RuntimeError("first")
+    except RuntimeError:
+        t, v, tb = __import__("sys").exc_info()
+    ch._handle_exception(t, v, tb, source="main", app=MagicMock())
+    assert len(scheduled) == 1
+
+    try:
+        raise RuntimeError("second")
+    except RuntimeError:
+        t2, v2, tb2 = __import__("sys").exc_info()
+    ch._handle_exception(t2, v2, tb2, source="main", app=MagicMock())
+    assert len(scheduled) == 1  # second call blocked

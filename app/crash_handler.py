@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import datetime as _dt
+import logging
 import platform as _platform
-import sys as _sys  # noqa: F401 — used by Tasks 6/7 hooks
-import threading as _threading  # noqa: F401 — used by Task 6 thread hook
+import sys as _sys
+import threading as _threading  # noqa: F401 — used by Task 8 thread hook
 import traceback as _traceback
 
 from app.config import APP_VERSION
+
+logger = logging.getLogger(__name__)
 
 
 def _kivy_version() -> str:
@@ -87,3 +90,31 @@ def _format_report(exc_type, exc_value, tb, source: str, app) -> str:
         f"```\n{tb_lines}```\n\n"
         f"</details>\n"
     )
+
+
+_STATE = {"in_dialog": False, "app": None}
+
+
+def _schedule_dialog(report: str) -> None:
+    """Show the CrashDialog on the Kivy main thread. Overridden in tests."""
+    try:
+        from kivy.clock import Clock  # noqa: PLC0415
+
+        Clock.schedule_once(lambda dt: CrashDialog.show(report, _STATE["app"]), 0)  # noqa: F821
+    except Exception:
+        logger.exception("Failed to schedule crash dialog; falling back to stderr.")
+        _sys.stderr.write(report)
+
+
+def _handle_exception(exc_type, exc_value, tb, source: str, app) -> None:
+    if _STATE["in_dialog"]:
+        _sys.stderr.write("Re-entrant exception during crash dialog:\n")
+        _traceback.print_exception(exc_type, exc_value, tb)
+        return
+    _STATE["in_dialog"] = True
+    try:
+        report = _format_report(exc_type, exc_value, tb, source=source, app=app)
+        _schedule_dialog(report)
+    except Exception:
+        logger.exception("Crash handler itself failed.")
+        _traceback.print_exception(exc_type, exc_value, tb)
