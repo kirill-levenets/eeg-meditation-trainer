@@ -126,7 +126,7 @@ def test_duration_picker_label_boundary():
 
 def test_duration_picker_width_narrow_is_chevron_sized():
     from app.ui.live_session import _duration_picker_width
-    assert _duration_picker_width(window_w=300, narrow_threshold=480) == dp(5)
+    assert _duration_picker_width(window_w=300, narrow_threshold=480) == dp(10)
 
 
 def test_duration_picker_width_wide_is_compact_label():

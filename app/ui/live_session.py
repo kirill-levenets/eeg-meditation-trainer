@@ -107,6 +107,13 @@ def _format_stats_slots(
     return titles, values
 
 
+# Duration picker responsive sizing — below narrow threshold the button
+# collapses to an icon-only pill so the Start button can claim the width.
+_DURATION_PICKER_NARROW_THRESHOLD = dp(480)
+_DURATION_PICKER_NARROW_WIDTH = dp(10)
+_DURATION_PICKER_WIDE_WIDTH = dp(56)
+
+
 def _duration_picker_label(
     window_w: float,
     timer_enabled: bool,
@@ -125,7 +132,11 @@ def _duration_picker_label(
 
 def _duration_picker_width(window_w: float, narrow_threshold: float) -> float:
     """Return duration-picker button width (narrow = chevron only)."""
-    return dp(5) if window_w < narrow_threshold else dp(56)
+    return (
+        _DURATION_PICKER_NARROW_WIDTH
+        if window_w < narrow_threshold
+        else _DURATION_PICKER_WIDE_WIDTH
+    )
 
 
 class LiveSessionScreen(Screen):
@@ -357,7 +368,7 @@ class LiveSessionScreen(Screen):
         self._btn_duration_expand = StyledButton(
             text="\u221e",  # updated by refresh_duration_preset
             bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM,
-            size_hint_x=None, width=dp(5), font_size=F.BODY,
+            size_hint_x=None, width=_DURATION_PICKER_NARROW_WIDTH, font_size=F.BODY,
             **duration_kwargs,
         )
         self._btn_duration_expand.bind(on_release=self._open_duration_popup)
@@ -798,11 +809,11 @@ class LiveSessionScreen(Screen):
             window_w=Window.width,
             timer_enabled=self._current_timer_enabled,
             timer_minutes=self._current_timer_minutes,
-            narrow_threshold=dp(480),
+            narrow_threshold=_DURATION_PICKER_NARROW_THRESHOLD,
         )
         self._btn_duration_expand.width = _duration_picker_width(
             window_w=Window.width,
-            narrow_threshold=dp(480),
+            narrow_threshold=_DURATION_PICKER_NARROW_THRESHOLD,
         )
 
     def show_overlay(self, text: str = "Connecting...") -> None:
