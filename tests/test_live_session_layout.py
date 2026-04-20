@@ -119,3 +119,22 @@ def test_duration_picker_label_boundary():
     assert _duration_picker_label(window_w=480, timer_enabled=False, timer_minutes=0, narrow_threshold=480) == "\u221e"
     # Just below → narrow
     assert _duration_picker_label(window_w=479, timer_enabled=False, timer_minutes=0, narrow_threshold=480) == ""
+
+
+# ── _duration_picker_width tests ──
+
+
+def test_duration_picker_width_narrow_is_chevron_sized():
+    from app.ui.live_session import _duration_picker_width
+    assert _duration_picker_width(window_w=300, narrow_threshold=480) == dp(36)
+
+
+def test_duration_picker_width_wide_is_compact_label():
+    from app.ui.live_session import _duration_picker_width
+    assert _duration_picker_width(window_w=800, narrow_threshold=480) == dp(56)
+
+
+def test_duration_picker_width_boundary_uses_wide():
+    from app.ui.live_session import _duration_picker_width
+    # At exactly threshold → wide (strict less-than)
+    assert _duration_picker_width(window_w=480, narrow_threshold=480) == dp(56)

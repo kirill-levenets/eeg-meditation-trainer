@@ -123,6 +123,11 @@ def _duration_picker_label(
     return f"{timer_minutes}m"
 
 
+def _duration_picker_width(window_w: float, narrow_threshold: float) -> float:
+    """Return duration-picker button width (narrow = chevron only)."""
+    return dp(36) if window_w < narrow_threshold else dp(56)
+
+
 class LiveSessionScreen(Screen):
     """Main session screen with graph, stats, and controls."""
 
@@ -352,7 +357,7 @@ class LiveSessionScreen(Screen):
         self._btn_duration_expand = StyledButton(
             text="\u221e",  # updated by refresh_duration_preset
             bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM,
-            size_hint_x=None, width=dp(60), font_size=F.BODY,
+            size_hint_x=None, width=dp(36), font_size=F.BODY,
             **duration_kwargs,
         )
         self._btn_duration_expand.bind(on_release=self._open_duration_popup)
@@ -787,12 +792,16 @@ class LiveSessionScreen(Screen):
         self._apply_duration_picker_label()
 
     def _apply_duration_picker_label(self) -> None:
-        """Compute current-window label for the duration picker and apply."""
+        """Compute current-window label + width for the duration picker and apply."""
         from kivy.core.window import Window
         self._btn_duration_expand.text = _duration_picker_label(
             window_w=Window.width,
             timer_enabled=self._current_timer_enabled,
             timer_minutes=self._current_timer_minutes,
+            narrow_threshold=dp(480),
+        )
+        self._btn_duration_expand.width = _duration_picker_width(
+            window_w=Window.width,
             narrow_threshold=dp(480),
         )
 
