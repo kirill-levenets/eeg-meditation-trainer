@@ -156,15 +156,18 @@ class CrashDialog:
         banner.bind(size=banner.setter("text_size"))
         root.add_widget(banner)
 
-        scroll = ScrollView(size_hint=(1, 1))
+        scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False)
         text = TextInput(
             text=report,
             readonly=True,
             font_name="Roboto",
             size_hint_y=None,
-            height=dp(400),
+            # Height driven by content so the whole report renders;
+            # ScrollView handles scrolling for overflow.
         )
+        text.bind(minimum_height=text.setter("height"))
         scroll.add_widget(text)
+        text.cursor = (0, 0)  # show the top of the report, not the end
         root.add_widget(scroll)
 
         btn_row = BoxLayout(
