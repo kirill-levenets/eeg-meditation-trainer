@@ -26,6 +26,11 @@ class SessionManager:
         self._current_streak: float = 0.0
         self._longest_streak: float = 0.0
         self._threshold_used: int = 50
+        self._audio = None
+
+    def set_audio(self, audio) -> None:
+        """Attach the audio engine so non-user stops can play the alert."""
+        self._audio = audio
 
     @property
     def state(self) -> SessionState:
@@ -81,13 +86,11 @@ class SessionManager:
                 self._total_paused += time.time() - self._pause_start
             self._elapsed = time.time() - self._start_time - self._total_paused
             self._state = SessionState.FINISHED
-            if reason != "user":
-                audio = getattr(self, "_audio", None)
-                if audio is not None:
-                    try:
-                        audio.play_alert()
-                    except Exception:
-                        pass
+            if reason != "user" and self._audio is not None:
+                try:
+                    self._audio.play_alert()
+                except Exception:
+                    pass
             stats = self.compute_statistics()
             logger.info(f"Session stopped. Duration: {self._elapsed:.0f}s, reason={reason}")
             return stats

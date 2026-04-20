@@ -64,6 +64,7 @@ class EEGMeditationApp(App):
         self._session_manager: SessionManager = SessionManager()
         self._db: DatabaseManager = DatabaseManager()
         self._audio: AudioEngine = AudioEngine()
+        self._session_manager.set_audio(self._audio)
         self._analytics: AnalyticsAggregator = AnalyticsAggregator(self._db)
         self._update_event: Optional[object] = None
         self._metrics_buffer: list[dict] = []

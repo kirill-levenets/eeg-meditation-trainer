@@ -48,3 +48,10 @@ def test_stop_default_reason_is_user():
     mgr = _make_manager()
     mgr.stop()
     mgr._audio.play_alert.assert_not_called()
+
+
+def test_set_audio_attaches_engine():
+    mgr = SessionManager()
+    fake_audio = MagicMock()
+    mgr.set_audio(fake_audio)
+    assert mgr._audio is fake_audio
