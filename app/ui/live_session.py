@@ -125,7 +125,7 @@ def _duration_picker_label(
 
 def _duration_picker_width(window_w: float, narrow_threshold: float) -> float:
     """Return duration-picker button width (narrow = chevron only)."""
-    return dp(36) if window_w < narrow_threshold else dp(56)
+    return dp(5) if window_w < narrow_threshold else dp(56)
 
 
 class LiveSessionScreen(Screen):
@@ -357,7 +357,7 @@ class LiveSessionScreen(Screen):
         self._btn_duration_expand = StyledButton(
             text="\u221e",  # updated by refresh_duration_preset
             bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM,
-            size_hint_x=None, width=dp(36), font_size=F.BODY,
+            size_hint_x=None, width=dp(5), font_size=F.BODY,
             **duration_kwargs,
         )
         self._btn_duration_expand.bind(on_release=self._open_duration_popup)
