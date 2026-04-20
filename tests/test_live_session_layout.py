@@ -85,3 +85,37 @@ def test_adaptive_boundary_case_exactly_at_threshold():
         min_fixed_graph=400, min_graph_floor=240,
     )
     assert result == 400
+
+
+# ── _duration_picker_label tests ──
+
+
+def test_duration_picker_label_narrow_returns_empty():
+    from app.ui.live_session import _duration_picker_label
+    assert _duration_picker_label(window_w=300, timer_enabled=False, timer_minutes=0, narrow_threshold=480) == ""
+    assert _duration_picker_label(window_w=300, timer_enabled=True, timer_minutes=15, narrow_threshold=480) == ""
+
+
+def test_duration_picker_label_wide_free_returns_infinity():
+    from app.ui.live_session import _duration_picker_label
+    assert _duration_picker_label(window_w=800, timer_enabled=False, timer_minutes=0, narrow_threshold=480) == "\u221e"
+
+
+def test_duration_picker_label_wide_numeric_minutes():
+    from app.ui.live_session import _duration_picker_label
+    assert _duration_picker_label(window_w=800, timer_enabled=True, timer_minutes=5, narrow_threshold=480) == "5m"
+    assert _duration_picker_label(window_w=800, timer_enabled=True, timer_minutes=45, narrow_threshold=480) == "45m"
+
+
+def test_duration_picker_label_wide_whole_hours():
+    from app.ui.live_session import _duration_picker_label
+    assert _duration_picker_label(window_w=800, timer_enabled=True, timer_minutes=60, narrow_threshold=480) == "1h"
+    assert _duration_picker_label(window_w=800, timer_enabled=True, timer_minutes=120, narrow_threshold=480) == "2h"
+
+
+def test_duration_picker_label_boundary():
+    from app.ui.live_session import _duration_picker_label
+    # At exactly 480 → not narrow (use strict less-than)
+    assert _duration_picker_label(window_w=480, timer_enabled=False, timer_minutes=0, narrow_threshold=480) == "\u221e"
+    # Just below → narrow
+    assert _duration_picker_label(window_w=479, timer_enabled=False, timer_minutes=0, narrow_threshold=480) == ""

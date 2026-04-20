@@ -107,6 +107,22 @@ def _format_stats_slots(
     return titles, values
 
 
+def _duration_picker_label(
+    window_w: float,
+    timer_enabled: bool,
+    timer_minutes: int,
+    narrow_threshold: float,
+) -> str:
+    """Return the duration-picker button text, empty on narrow screens."""
+    if window_w < narrow_threshold:
+        return ""
+    if not timer_enabled:
+        return "\u221e"
+    if timer_minutes >= 60 and timer_minutes % 60 == 0:
+        return f"{timer_minutes // 60}h"
+    return f"{timer_minutes}m"
+
+
 class LiveSessionScreen(Screen):
     """Main session screen with graph, stats, and controls."""
 
@@ -563,6 +579,12 @@ class LiveSessionScreen(Screen):
             min_fixed_graph=dp(400),
             min_graph_floor=dp(240),
         )
+        # Also refresh the duration-picker label so narrow-screen text drops away
+        if hasattr(self, "_btn_duration_expand") and hasattr(self, "_current_timer_enabled"):
+            try:
+                self._apply_duration_picker_label()
+            except Exception:
+                pass
 
     def on_leave(self, *args) -> None:
         from kivy.core.window import Window
@@ -762,14 +784,17 @@ class LiveSessionScreen(Screen):
         """Cache timer state and update the duration-picker label."""
         self._current_timer_enabled = timer_enabled
         self._current_timer_minutes = timer_minutes
-        if not timer_enabled:
-            self._btn_duration_expand.text = "\u221e"  # infinity
-        else:
-            # Compact format: "5m", "10m", "60m" — or "1h" / "2h" for whole hours
-            if timer_minutes >= 60 and timer_minutes % 60 == 0:
-                self._btn_duration_expand.text = f"{timer_minutes // 60}h"
-            else:
-                self._btn_duration_expand.text = f"{timer_minutes}m"
+        self._apply_duration_picker_label()
+
+    def _apply_duration_picker_label(self) -> None:
+        """Compute current-window label for the duration picker and apply."""
+        from kivy.core.window import Window
+        self._btn_duration_expand.text = _duration_picker_label(
+            window_w=Window.width,
+            timer_enabled=self._current_timer_enabled,
+            timer_minutes=self._current_timer_minutes,
+            narrow_threshold=dp(480),
+        )
 
     def show_overlay(self, text: str = "Connecting...") -> None:
         """Show semi-transparent connection overlay with animated dots."""
