@@ -7,6 +7,7 @@ import platform as _platform
 import sys as _sys
 import threading as _threading  # noqa: F401 — used by Task 8 thread hook
 import traceback as _traceback
+from typing import Optional
 
 from app.config import APP_VERSION
 from app.logger import logger
@@ -98,7 +99,7 @@ def _schedule_dialog(report: str) -> None:
     try:
         from kivy.clock import Clock  # noqa: PLC0415
 
-        Clock.schedule_once(lambda dt: CrashDialog.show(report, _STATE["app"]), 0)  # noqa: F821
+        Clock.schedule_once(lambda dt: CrashDialog.show(report, _STATE["app"]), 0)
     except Exception:  # noqa: BLE001
         logger.exception("Failed to schedule crash dialog; falling back to stderr.")
         _sys.stderr.write(report)
@@ -116,3 +117,94 @@ def _handle_exception(exc_type, exc_value, tb, source: str, app) -> None:
     except Exception:  # noqa: BLE001
         logger.exception("Crash handler itself failed.")
         _traceback.print_exception(exc_type, exc_value, tb)
+
+
+class CrashDialog:
+    """Modal popup that auto-copies the crash report to the clipboard."""
+
+    _popup: Optional[object] = None
+
+    @classmethod
+    def show(cls, report: str, app) -> None:
+        from kivy.core.clipboard import Clipboard  # noqa: PLC0415
+        from kivy.metrics import dp  # noqa: PLC0415
+        from kivy.uix.boxlayout import BoxLayout  # noqa: PLC0415
+        from kivy.uix.button import Button  # noqa: PLC0415
+        from kivy.uix.label import Label  # noqa: PLC0415
+        from kivy.uix.popup import Popup  # noqa: PLC0415
+        from kivy.uix.scrollview import ScrollView  # noqa: PLC0415
+        from kivy.uix.textinput import TextInput  # noqa: PLC0415
+
+        try:
+            Clipboard.copy(report)
+        except Exception:  # noqa: BLE001
+            logger.exception("Clipboard copy failed during crash dialog.")
+
+        root = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12))
+        banner = Label(
+            text=(
+                "The app hit an unexpected error. The report below has been "
+                "copied to your clipboard. Paste it into a new GitHub issue at "
+                "github.com/kirill-levenets/eeg-meditation-trainer/issues so we "
+                "can fix it."
+            ),
+            size_hint_y=None,
+            height=dp(72),
+            halign="left",
+            valign="top",
+        )
+        banner.bind(size=banner.setter("text_size"))
+        root.add_widget(banner)
+
+        scroll = ScrollView(size_hint=(1, 1))
+        text = TextInput(
+            text=report,
+            readonly=True,
+            font_name="Roboto",
+            size_hint_y=None,
+            height=dp(400),
+        )
+        scroll.add_widget(text)
+        root.add_widget(scroll)
+
+        btn_row = BoxLayout(
+            orientation="horizontal",
+            size_hint_y=None,
+            height=dp(48),
+            spacing=dp(8),
+        )
+        btn_copy = Button(text="Copied \u2713")
+        btn_dismiss = Button(text="Dismiss & Exit")
+
+        def _on_copy(_btn):
+            try:
+                Clipboard.copy(report)
+                btn_copy.text = "Copied \u2713"
+            except Exception:  # noqa: BLE001
+                btn_copy.text = "Copy failed"
+
+        def _on_dismiss(_btn):
+            try:
+                cls._popup.dismiss()
+            except Exception:  # noqa: BLE001
+                pass
+            _STATE["in_dialog"] = False
+            try:
+                if app is not None:
+                    app.stop()
+            except Exception:  # noqa: BLE001
+                logger.exception("app.stop() failed during crash dismiss.")
+
+        btn_copy.bind(on_release=_on_copy)
+        btn_dismiss.bind(on_release=_on_dismiss)
+        btn_row.add_widget(btn_copy)
+        btn_row.add_widget(btn_dismiss)
+        root.add_widget(btn_row)
+
+        cls._popup = Popup(
+            title="Unexpected error",
+            content=root,
+            size_hint=(0.92, 0.92),
+            auto_dismiss=False,
+        )
+        cls._popup.open()
