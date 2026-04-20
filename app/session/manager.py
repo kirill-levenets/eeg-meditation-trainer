@@ -74,14 +74,22 @@ class SessionManager:
             self._state = SessionState.RUNNING
             logger.info("Session resumed")
 
-    def stop(self) -> dict:
+    def stop(self, reason: str = "user") -> dict:
+        """Stop the session. reason ∈ {'user', 'stale_data', 'bt_lost', 'error'}."""
         if self._state in (SessionState.RUNNING, SessionState.PAUSED):
             if self._state == SessionState.PAUSED:
                 self._total_paused += time.time() - self._pause_start
             self._elapsed = time.time() - self._start_time - self._total_paused
             self._state = SessionState.FINISHED
+            if reason != "user":
+                audio = getattr(self, "_audio", None)
+                if audio is not None:
+                    try:
+                        audio.play_alert()
+                    except Exception:
+                        pass
             stats = self.compute_statistics()
-            logger.info(f"Session stopped. Duration: {self._elapsed:.0f}s")
+            logger.info(f"Session stopped. Duration: {self._elapsed:.0f}s, reason={reason}")
             return stats
         return {}
 

@@ -69,7 +69,7 @@ ignore = [
 # __main__ blocks use print()
 "app/eeg/mock_stream.py" = ["T201"]
 "app/eeg/mock_stream_v2.py" = ["T201"]
-"app/session/manager.py" = ["T201"]
+"app/session/manager.py" = ["T201", "BLE001"]
 # BT protocol: broad except, lazy platform imports, complex parser
 "app/eeg/neurosky_stream.py" = ["T201", "PLC0415", "BLE001", "PLR0912"]
 # Audio: broad except + lazy Kivy SoundLoader import
