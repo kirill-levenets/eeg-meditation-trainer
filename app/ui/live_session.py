@@ -334,9 +334,9 @@ class LiveSessionScreen(Screen):
             {"icon": Icons.MENU_DOWN} if ICONS_AVAILABLE else {}
         )
         self._btn_duration_expand = StyledButton(
-            text="Free",  # updated by refresh_duration_preset
+            text="\u221e",  # updated by refresh_duration_preset
             bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM,
-            size_hint_x=None, width=dp(96), font_size=F.BODY,
+            size_hint_x=None, width=dp(60), font_size=F.BODY,
             **duration_kwargs,
         )
         self._btn_duration_expand.bind(on_release=self._open_duration_popup)
@@ -763,9 +763,13 @@ class LiveSessionScreen(Screen):
         self._current_timer_enabled = timer_enabled
         self._current_timer_minutes = timer_minutes
         if not timer_enabled:
-            self._btn_duration_expand.text = "Free"
+            self._btn_duration_expand.text = "\u221e"  # infinity
         else:
-            self._btn_duration_expand.text = f"{timer_minutes} min"
+            # Compact format: "5m", "10m", "60m" — or "1h" / "2h" for whole hours
+            if timer_minutes >= 60 and timer_minutes % 60 == 0:
+                self._btn_duration_expand.text = f"{timer_minutes // 60}h"
+            else:
+                self._btn_duration_expand.text = f"{timer_minutes}m"
 
     def show_overlay(self, text: str = "Connecting...") -> None:
         """Show semi-transparent connection overlay with animated dots."""
