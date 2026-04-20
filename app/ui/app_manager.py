@@ -737,13 +737,13 @@ class EEGMeditationApp(App):
         ts = time.strftime("%H:%M")
         return f"{ts} - {device}"
 
-    def _stop_and_save(self) -> None:
+    def _stop_and_save(self, reason: str = "user") -> None:
         """Stop session and save data immediately (no dialog)."""
         if self._update_event:
             self._update_event.cancel()
             self._update_event = None
 
-        stats = self._session_manager.stop()
+        stats = self._session_manager.stop(reason=reason)
         # Keep real BT connection alive between sessions to avoid EBUSY on reconnect.
         # Only the mock stream gets stopped here; real stream stays connected.
         if APP.USE_MOCK_DEVICE:
@@ -786,7 +786,7 @@ class EEGMeditationApp(App):
         """Finish stopping the session, optionally saving data."""
         popup.dismiss()
 
-        stats = self._session_manager.stop()
+        stats = self._session_manager.stop(reason="user")
         if APP.USE_MOCK_DEVICE:
             self._eeg_stream.stop()
         self._audio.stop()
@@ -842,7 +842,7 @@ class EEGMeditationApp(App):
                     "No EEG data. Session stopped.\n"
                     "Check headset and battery."
                 )
-                self._stop_and_save()
+                self._stop_and_save(reason="stale_data")
         else:
             self._stale_data_warned = False
 
