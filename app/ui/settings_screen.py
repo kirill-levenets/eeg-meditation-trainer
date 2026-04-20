@@ -744,6 +744,69 @@ class SettingsScreen(Screen):
         theme_note.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
         theme_section.add_widget(theme_note)
 
+        # --- Developer Tools section ---
+        dev_section = accordion.add_section("Developer Tools", collapsed=True)
+
+        dev_desc = Label(
+            text="Trigger unhandled exceptions to verify crash-handler hooks.",
+            font_size=F.SMALL,
+            size_hint_y=None,
+            height=dp(20),
+            color=C.TEXT_SECONDARY,
+            halign="left",
+        )
+        dev_desc.bind(size=dev_desc.setter("text_size"))
+        dev_section.add_widget(dev_desc)
+
+        def _trigger_kivy_crash(_btn):
+            raise RuntimeError("dev-trigger kivy-loop")
+
+        def _trigger_clock_crash(_btn):
+            from kivy.clock import Clock
+
+            def _boom(dt):
+                raise RuntimeError("dev-trigger kivy-clock")
+
+            Clock.schedule_once(_boom, 0)
+
+        def _trigger_thread_crash(_btn):
+            import threading
+
+            def _boom():
+                raise RuntimeError("dev-trigger thread")
+
+            threading.Thread(target=_boom, daemon=True, name="CrashTestThread").start()
+
+        btn_kivy = StyledButton(
+            text="Crash: Kivy event",
+            font_size=F.BODY,
+            bg_color=C.DANGER,
+            size_hint_y=None,
+            height=dp(36),
+        )
+        btn_kivy.bind(on_release=_trigger_kivy_crash)
+        dev_section.add_widget(btn_kivy)
+
+        btn_clock = StyledButton(
+            text="Crash: Kivy clock",
+            font_size=F.BODY,
+            bg_color=C.DANGER,
+            size_hint_y=None,
+            height=dp(36),
+        )
+        btn_clock.bind(on_release=_trigger_clock_crash)
+        dev_section.add_widget(btn_clock)
+
+        btn_thread = StyledButton(
+            text="Crash: thread",
+            font_size=F.BODY,
+            bg_color=C.DANGER,
+            size_hint_y=None,
+            height=dp(36),
+        )
+        btn_thread.bind(on_release=_trigger_thread_crash)
+        dev_section.add_widget(btn_thread)
+
         # --- Help section (loaded from app/assets/help/) ---
         help_section = accordion.add_section("Help & Troubleshooting", collapsed=True)
         help_topics = _load_help_topics()
