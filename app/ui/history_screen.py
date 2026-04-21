@@ -18,7 +18,6 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
-from app.logger import logger
 from app.ui.theme import C, Card, Divider, F, Icons, S, StyledButton, format_duration
 
 
@@ -268,6 +267,10 @@ class HistoryScreen(Screen):
             padding=[0, S.GAP_SM],
         )
         self._session_list.bind(minimum_height=self._session_list.setter("height"))
+        # Single manual touch router for the session list. Avoids flakiness
+        # with Kivy's nested widget on_touch_down dispatch: we explicitly find
+        # which row/action the tap landed on and call the right callback.
+        self._session_list.bind(on_touch_down=self._list_touch_down)
         scroll.add_widget(self._session_list)
         root.add_widget(scroll)
 
@@ -421,11 +424,10 @@ class HistoryScreen(Screen):
         info.add_widget(stats_line)
         row.add_widget(info)
 
-        # Tap on row → view session detail
-        row._session_id = sid
-        row.bind(on_touch_down=lambda w, t: self._row_tapped(w, t))
+        # Row/button actions are routed manually via _list_touch_down
+        # at the session-list level. See _list_touch_down for details.
 
-        # Right side: rename + delete buttons
+        # Right side: rename + delete buttons (visual only)
         actions = BoxLayout(
             orientation="horizontal",
             size_hint_x=None,
@@ -512,41 +514,23 @@ class HistoryScreen(Screen):
                     self._on_rename_session(sid, txt)
             _toggle_rename()
 
-        btn_rename.bind(on_release=_toggle_rename)
-
-        # DEBUG instrumentation for delete path
-        def _del_on_press(*a):
-            logger.info(f"[DBG] btn_del on_press sid={sid} pos={btn_del.pos} size={btn_del.size}")
-
-        def _del_on_release(*a):
-            logger.info(f"[DBG] btn_del on_release sid={sid} → calling _confirm_delete")
-            self._confirm_delete(sid, name)
-
-        btn_del.bind(on_press=_del_on_press, on_release=_del_on_release)
-
-        # Also log any touch landing on btn_del
-        _orig_touch = btn_del.on_touch_down
-
-        def _del_touch_down(touch, _orig=_orig_touch, _btn=btn_del, _sid=sid):
-            inside = _btn.collide_point(*touch.pos)
-            logger.info(
-                f"[DBG] btn_del on_touch_down sid={_sid} "
-                f"touch=({touch.pos[0]:.0f},{touch.pos[1]:.0f}) "
-                f"btn.pos=({_btn.x:.0f},{_btn.y:.0f}) btn.size=({_btn.width:.0f},{_btn.height:.0f}) "
-                f"inside={inside}"
-            )
-            return _orig(touch)
-
-        btn_del.on_touch_down = _del_touch_down
-
+        # rename_save and rename_input still fire directly (they're inside
+        # the expanded rename_row which _list_touch_down lets propagate).
         rename_save.bind(on_release=_do_rename)
         rename_input.bind(on_text_validate=_do_rename)
+
+        # Store per-wrapper opts so the session-list router can dispatch.
+        wrapper._session_opts = {
+            "sid": sid,
+            "name": name,
+            "rename_row": rename_row,
+            "toggle_rename": _toggle_rename,
+        }
 
         return wrapper
 
     def _confirm_delete(self, session_id: int, name: str) -> None:
         """Show a delete confirmation popup."""
-        logger.info(f"[DBG] _confirm_delete ENTRY sid={session_id} name='{name}'")
         from kivy.uix.popup import Popup
 
         content = BoxLayout(orientation="vertical", spacing=S.GAP, padding=S.GAP)
@@ -590,25 +574,40 @@ class HistoryScreen(Screen):
         btn_confirm.bind(on_release=_do_delete)
         popup.open()
 
-    def _row_tapped(self, widget, touch) -> bool:
-        if not widget.collide_point(*touch.pos):
+    def _list_touch_down(self, list_widget, touch) -> bool:
+        """Single touch router for the session list.
+
+        Bypasses Kivy's flaky nested dispatch for row actions. We walk the
+        visible wrappers, find the one the tap landed in, and route to
+        rename/delete/navigate based on x-position.
+        """
+        if not list_widget.collide_point(*touch.pos):
             return False
-        # Don't trigger if touch landed on a button inside the row
-        for child in widget.walk():
-            if isinstance(child, StyledButton) and child.collide_point(*touch.pos):
-                logger.info(
-                    f"[DBG] _row_tapped: button collided at "
-                    f"({touch.pos[0]:.0f},{touch.pos[1]:.0f}); skipping nav"
-                )
+        for wrapper in list_widget.children:
+            opts = getattr(wrapper, "_session_opts", None)
+            if opts is None:
+                continue
+            if not wrapper.collide_point(*touch.pos):
+                continue
+            rename_row = opts["rename_row"]
+            # If rename editor is open and touch is in it, let Kivy dispatch
+            # normally so the TextInput + Save button work.
+            if rename_row.opacity > 0 and rename_row.collide_point(*touch.pos):
                 return False
-        sid = getattr(widget, "_session_id", None)
-        logger.info(
-            f"[DBG] _row_tapped: NAVIGATING sid={sid} at "
-            f"({touch.pos[0]:.0f},{touch.pos[1]:.0f})"
-        )
-        if sid and self._on_session_select:
-            self._on_session_select(sid)
-        return True
+            # actions strip: rightmost dp(80) of the row area
+            actions_left = wrapper.right - dp(80)
+            if touch.x >= actions_left:
+                mid = actions_left + dp(80) / 2
+                if touch.x < mid:
+                    opts["toggle_rename"]()
+                else:
+                    self._confirm_delete(opts["sid"], opts["name"])
+                return True
+            # Body tap → open session detail
+            if self._on_session_select:
+                self._on_session_select(opts["sid"])
+            return True
+        return False
 
     def _refresh_theme(self):
         """Update background when theme changes."""
