@@ -9,7 +9,6 @@ import datetime
 from collections.abc import Callable
 from typing import Optional
 
-from kivy.clock import Clock
 from kivy.graphics import Color, Rectangle, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
@@ -19,7 +18,6 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
-from app.logger import logger
 from app.ui.theme import C, Card, Divider, F, Icons, S, StyledButton, format_duration
 
 
@@ -455,44 +453,19 @@ class HistoryScreen(Screen):
         actions.add_widget(btn_del)
         row.add_widget(actions)
 
-        # Sole tap handler for the actions area. Any tap anywhere in the 80dp
-        # actions strip triggers the correct action by x-position.
-        def _actions_touch(widget, touch):
-            if not widget.collide_point(*touch.pos):
-                return False
-            mid = widget.x + widget.width / 2
-            logger.info(
-                f"[history] _actions_touch sid={sid} touch=({touch.x:.0f},{touch.y:.0f}) "
-                f"actions.pos=({widget.x:.0f},{widget.y:.0f}) size=({widget.width:.0f},{widget.height:.0f}) "
-                f"mid={mid:.0f} → {'rename' if touch.x < mid else 'delete'}"
-            )
-            if touch.x < mid:
-                btn_rename.state = "down"
-
-                def _reset(_dt, _b=btn_rename):
-                    _b.state = "normal"
-                Clock.schedule_once(_reset, 0.1)
-                _toggle_rename()
-            else:
-                btn_del.state = "down"
-
-                def _reset_d(_dt, _b=btn_del):
-                    _b.state = "normal"
-                Clock.schedule_once(_reset_d, 0.1)
-                self._confirm_delete(sid, name)
-            return True
-
-        actions.bind(on_touch_down=_actions_touch)
-
         wrapper.add_widget(row)
 
-        # Hidden rename input row (shown when rename button pressed)
+        # Hidden rename input row (shown when rename button pressed).
+        # disabled=True is required — otherwise the fixed-size rename_save
+        # button inside stays 60×34dp at the wrapper's bottom edge and
+        # steals touches from the delete button above it.
         rename_row = BoxLayout(
             size_hint_y=None,
             height=0,
             spacing=S.GAP_SM,
             padding=[dp(10), 0],
             opacity=0,
+            disabled=True,
         )
         rename_input = TextInput(
             text=name,
@@ -518,23 +491,19 @@ class HistoryScreen(Screen):
 
         # Wire rename toggle
         def _toggle_rename(*args):
-            logger.info(f"[history] _toggle_rename sid={sid} current_opacity={rename_row.opacity}")
             if rename_row.opacity == 0:
                 rename_row.opacity = 1
                 rename_row.height = dp(38)
+                rename_row.disabled = False
                 wrapper.height = dp(56) + dp(38) + dp(2)
                 rename_input.focus = True
             else:
                 rename_row.opacity = 0
                 rename_row.height = 0
+                rename_row.disabled = True
                 wrapper.height = dp(56)
 
         def _do_rename(*args):
-            import traceback
-            logger.info(
-                f"[history] _do_rename sid={sid} text='{rename_input.text}' "
-                f"caller={traceback.extract_stack()[-2]}"
-            )
             txt = rename_input.text.strip()
             if txt:
                 name_label.text = txt
@@ -542,8 +511,8 @@ class HistoryScreen(Screen):
                     self._on_rename_session(sid, txt)
             _toggle_rename()
 
-        # btn_rename / btn_del actions are handled by _actions_touch above —
-        # no on_release bindings on them (they had dead-zone bugs).
+        btn_rename.bind(on_release=_toggle_rename)
+        btn_del.bind(on_release=lambda *a: self._confirm_delete(sid, name))
         rename_save.bind(on_release=_do_rename)
         rename_input.bind(on_text_validate=_do_rename)
 
