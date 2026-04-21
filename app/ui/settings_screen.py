@@ -379,7 +379,7 @@ class SettingsScreen(Screen):
         # Sinking alert toggle
         sinking_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
         self._sinking_alert_cb = CheckBox(
-            active=True, size_hint_x=0.15,
+            active=False, size_hint_x=0.15,
             size_hint_y=None, height=dp(36),
         )
         self._sinking_alert_cb.bind(active=self._on_sinking_alert_change)
@@ -398,7 +398,7 @@ class SettingsScreen(Screen):
         # Subtle distraction alert toggle
         subtle_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
         self._subtle_alert_cb = CheckBox(
-            active=True, size_hint_x=0.15,
+            active=False, size_hint_x=0.15,
             size_hint_y=None, height=dp(36),
         )
         self._subtle_alert_cb.bind(active=self._on_subtle_alert_change)

@@ -127,7 +127,7 @@ class TestAudioFeedback(unittest.TestCase):
         gen.cleanup()
 
     def test_sinking_alert_enabled_default(self):
-        self.assertTrue(self.gen.sinking_alert_enabled)
+        self.assertFalse(self.gen.sinking_alert_enabled)
 
     def test_sinking_alert_toggle(self):
         self.gen.sinking_alert_enabled = False

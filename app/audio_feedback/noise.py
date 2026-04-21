@@ -160,8 +160,8 @@ class AudioEngine:
         self._noise_path: str = ""
         self._bell_path: str = ""
         self._sinking_cooldown_until: float = 0.0
-        self._sinking_alert_enabled: bool = True
-        self._subtle_alert_enabled: bool = True
+        self._sinking_alert_enabled: bool = False
+        self._subtle_alert_enabled: bool = False
         self._disconnect_alert_enabled: bool = APP.DISCONNECT_ALERT_ENABLED
         self._test_active: bool = False
         self._rate: int = APP.WHITE_NOISE_SAMPLE_RATE
