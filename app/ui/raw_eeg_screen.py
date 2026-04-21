@@ -10,6 +10,7 @@ from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
+from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
 from app.config import APP
@@ -541,6 +542,46 @@ class ScrollableGraphWidget(Widget):
         self._scroll_offset = 0
         self._markers = []
         self._redraw()
+
+
+class GraphAwareScrollView(ScrollView):
+    """ScrollView that yields touches to ScrollableGraphWidget children inside it.
+
+    Without this, a ScrollView wrapping the graph intercepts press-and-drag
+    (treats it as outer scroll) and multi-touch gestures (pinch), preventing
+    the graph's own on_touch_down/move handlers from receiving them. This
+    subclass first checks whether the touch is over a graph; if so, it
+    dispatches directly to the graph and skips ScrollView's own grab logic.
+    """
+
+    def _graph_under_touch(self, touch):
+        for child in self._walk_children():
+            if isinstance(child, ScrollableGraphWidget) and child.collide_point(*touch.pos):
+                return child
+        return None
+
+    def _walk_children(self):
+        stack = list(self.children)
+        while stack:
+            child = stack.pop()
+            yield child
+            if hasattr(child, "children"):
+                stack.extend(child.children)
+
+    def on_scroll_start(self, touch, check_children=True):
+        if (
+            hasattr(touch, "button")
+            and touch.button in ("scrollup", "scrolldown")
+            and self._graph_under_touch(touch) is not None
+        ):
+            return False
+        return super().on_scroll_start(touch, check_children)
+
+    def on_touch_down(self, touch):
+        graph = self._graph_under_touch(touch)
+        if graph is not None:
+            return graph.dispatch("on_touch_down", touch)
+        return super().on_touch_down(touch)
 
 
 class RawEEGScreen(Screen):

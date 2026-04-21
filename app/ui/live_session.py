@@ -7,11 +7,14 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
-from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
-from app.ui.raw_eeg_screen import RawEEGScreen, ScrollableGraphWidget
+from app.ui.raw_eeg_screen import (
+    GraphAwareScrollView,
+    RawEEGScreen,
+    ScrollableGraphWidget,
+)
 from app.ui.theme import (
     ICONS_AVAILABLE,
     C,
@@ -332,7 +335,7 @@ class LiveSessionScreen(Screen):
         self._apply_stats_mode_styling()
 
         # Scrollable body: graph + stats
-        self._scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False)
+        self._scroll = GraphAwareScrollView(size_hint=(1, 1), do_scroll_x=False)
         self._body = BoxLayout(
             orientation="vertical",
             size_hint=(1, None),

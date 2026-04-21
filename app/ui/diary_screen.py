@@ -15,29 +15,8 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
 
-from app.ui.raw_eeg_screen import ScrollableGraphWidget
+from app.ui.raw_eeg_screen import GraphAwareScrollView, ScrollableGraphWidget
 from app.ui.theme import C, F, Icons, S, StyledButton, format_duration
-
-
-class _GraphAwareScrollView(ScrollView):
-    """ScrollView that yields mouse scroll to graph widgets inside it."""
-
-    def on_scroll_start(self, touch, check_children=True):
-        if hasattr(touch, "button") and touch.button in ("scrollup", "scrolldown"):
-            # If scroll is over a graph widget, let the graph handle zoom
-            for child in self._walk_children():
-                if isinstance(child, ScrollableGraphWidget) and child.collide_point(*touch.pos):
-                    return False
-        return super().on_scroll_start(touch, check_children)
-
-    def _walk_children(self):
-        """Yield all descendants recursively."""
-        stack = list(self.children)
-        while stack:
-            child = stack.pop()
-            yield child
-            if hasattr(child, "children"):
-                stack.extend(child.children)
 
 METRICS_PREVIEW_COLORS = {
     "meditation_score": (0.2, 0.6, 1.0, 1.0),
@@ -196,7 +175,7 @@ class DiaryScreen(Screen):
         root.add_widget(self._session_scroll)
 
         # --- Detail panel ---
-        detail_scroll = _GraphAwareScrollView(size_hint_y=0.6)
+        detail_scroll = GraphAwareScrollView(size_hint_y=0.6)
         self._detail_layout = BoxLayout(
             orientation="vertical",
             padding=dp(8),
