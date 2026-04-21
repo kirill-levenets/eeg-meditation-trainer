@@ -1683,9 +1683,16 @@ class EEGMeditationApp(App):
         logger.debug(f"Loaded settings for user {user_id}")
 
     def on_pause(self) -> bool:
-        """Called when app is paused (Android home/switch). Save settings
-        because the OS may kill the process without calling on_stop."""
+        """Android lifecycle: keep running during an active session."""
         self._save_user_settings()
+        try:
+            state = self._session_manager.state
+        except Exception:
+            state = None
+        if state in (SessionState.RUNNING, SessionState.PAUSED):
+            # Session work must continue — prevent Android from pausing us.
+            logger.info(f"on_pause: refusing pause (session state={state.name})")
+            return False
         return True
 
     def on_stop(self) -> None:
