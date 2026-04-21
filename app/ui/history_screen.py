@@ -453,6 +453,26 @@ class HistoryScreen(Screen):
         actions.add_widget(btn_del)
         row.add_widget(actions)
 
+        # Fallback touch dispatcher for the actions area. On Android,
+        # ButtonBehavior inside nested BoxLayouts sometimes has dead zones
+        # around the icon. This observer fires after the button's own
+        # on_touch_down; if neither button registered the press (state stayed
+        # "normal"), we route the tap to the correct button by x-position.
+        def _actions_touch(widget, touch):
+            if not widget.collide_point(*touch.pos):
+                return False
+            if btn_rename.state == "down" or btn_del.state == "down":
+                # ButtonBehavior handled it — no fallback needed.
+                return False
+            mid = widget.x + widget.width / 2
+            if touch.x < mid:
+                _toggle_rename()
+            else:
+                self._confirm_delete(sid, name)
+            return True
+
+        actions.bind(on_touch_down=_actions_touch)
+
         wrapper.add_widget(row)
 
         # Hidden rename input row (shown when rename button pressed)
