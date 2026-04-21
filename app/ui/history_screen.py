@@ -9,6 +9,7 @@ import datetime
 from collections.abc import Callable
 from typing import Optional
 
+from kivy.clock import Clock
 from kivy.graphics import Color, Rectangle, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
@@ -453,21 +454,29 @@ class HistoryScreen(Screen):
         actions.add_widget(btn_del)
         row.add_widget(actions)
 
-        # Fallback touch dispatcher for the actions area. On Android,
-        # ButtonBehavior inside nested BoxLayouts sometimes has dead zones
-        # around the icon. This observer fires after the button's own
-        # on_touch_down; if neither button registered the press (state stayed
-        # "normal"), we route the tap to the correct button by x-position.
+        # Sole tap handler for the actions area. Any tap anywhere in the 80dp
+        # actions strip triggers the correct action by x-position. This bypasses
+        # ButtonBehavior touch handling entirely (which had dead-zone bugs on
+        # both Android and desktop Kivy for unknown reasons). The buttons below
+        # are visual-only — their on_release bindings have been removed.
         def _actions_touch(widget, touch):
             if not widget.collide_point(*touch.pos):
                 return False
-            if btn_rename.state == "down" or btn_del.state == "down":
-                # ButtonBehavior handled it — no fallback needed.
-                return False
             mid = widget.x + widget.width / 2
             if touch.x < mid:
+                # Left half → rename. Flash the button visually.
+                btn_rename.state = "down"
+
+                def _reset(_dt, _b=btn_rename):
+                    _b.state = "normal"
+                Clock.schedule_once(_reset, 0.1)
                 _toggle_rename()
             else:
+                btn_del.state = "down"
+
+                def _reset_d(_dt, _b=btn_del):
+                    _b.state = "normal"
+                Clock.schedule_once(_reset_d, 0.1)
                 self._confirm_delete(sid, name)
             return True
 
@@ -525,12 +534,10 @@ class HistoryScreen(Screen):
                     self._on_rename_session(sid, txt)
             _toggle_rename()
 
-        btn_rename.bind(on_release=_toggle_rename)
+        # btn_rename / btn_del actions are handled by _actions_touch above —
+        # no on_release bindings on them (they had dead-zone bugs).
         rename_save.bind(on_release=_do_rename)
         rename_input.bind(on_text_validate=_do_rename)
-
-        # Wire delete with confirmation
-        btn_del.bind(on_release=lambda *a: self._confirm_delete(sid, name))
 
         return wrapper
 
