@@ -19,6 +19,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
+from app.logger import logger
 from app.ui.theme import C, Card, Divider, F, Icons, S, StyledButton, format_duration
 
 
@@ -455,16 +456,17 @@ class HistoryScreen(Screen):
         row.add_widget(actions)
 
         # Sole tap handler for the actions area. Any tap anywhere in the 80dp
-        # actions strip triggers the correct action by x-position. This bypasses
-        # ButtonBehavior touch handling entirely (which had dead-zone bugs on
-        # both Android and desktop Kivy for unknown reasons). The buttons below
-        # are visual-only — their on_release bindings have been removed.
+        # actions strip triggers the correct action by x-position.
         def _actions_touch(widget, touch):
             if not widget.collide_point(*touch.pos):
                 return False
             mid = widget.x + widget.width / 2
+            logger.info(
+                f"[history] _actions_touch sid={sid} touch=({touch.x:.0f},{touch.y:.0f}) "
+                f"actions.pos=({widget.x:.0f},{widget.y:.0f}) size=({widget.width:.0f},{widget.height:.0f}) "
+                f"mid={mid:.0f} → {'rename' if touch.x < mid else 'delete'}"
+            )
             if touch.x < mid:
-                # Left half → rename. Flash the button visually.
                 btn_rename.state = "down"
 
                 def _reset(_dt, _b=btn_rename):
@@ -516,6 +518,7 @@ class HistoryScreen(Screen):
 
         # Wire rename toggle
         def _toggle_rename(*args):
+            logger.info(f"[history] _toggle_rename sid={sid} current_opacity={rename_row.opacity}")
             if rename_row.opacity == 0:
                 rename_row.opacity = 1
                 rename_row.height = dp(38)
@@ -527,6 +530,11 @@ class HistoryScreen(Screen):
                 wrapper.height = dp(56)
 
         def _do_rename(*args):
+            import traceback
+            logger.info(
+                f"[history] _do_rename sid={sid} text='{rename_input.text}' "
+                f"caller={traceback.extract_stack()[-2]}"
+            )
             txt = rename_input.text.strip()
             if txt:
                 name_label.text = txt
