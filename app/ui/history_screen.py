@@ -429,14 +429,13 @@ class HistoryScreen(Screen):
             size_hint_x=None,
             width=dp(80),
             spacing=dp(2),
-            padding=[0, dp(6)],
         )
         btn_rename = StyledButton(
             text="", icon=Icons.PENCIL,
             bg_color=C.PRIMARY,
             text_color=C.PRIMARY,
             font_size=F.SMALL,
-            height=dp(32),
+            size_hint_y=1,  # fill parent height so click area matches visible area
             bold=False,
             outline=True,
         )
@@ -445,7 +444,7 @@ class HistoryScreen(Screen):
             bg_color=C.DANGER,
             text_color=C.DANGER,
             font_size=F.SMALL,
-            height=dp(32),
+            size_hint_y=1,
             bold=False,
             outline=True,
         )
