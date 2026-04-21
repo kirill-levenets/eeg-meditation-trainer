@@ -18,6 +18,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
+from app.logger import logger
 from app.ui.theme import C, Card, Divider, F, Icons, S, StyledButton, format_duration
 
 
@@ -512,7 +513,32 @@ class HistoryScreen(Screen):
             _toggle_rename()
 
         btn_rename.bind(on_release=_toggle_rename)
-        btn_del.bind(on_release=lambda *a: self._confirm_delete(sid, name))
+
+        # DEBUG instrumentation for delete path
+        def _del_on_press(*a):
+            logger.info(f"[DBG] btn_del on_press sid={sid} pos={btn_del.pos} size={btn_del.size}")
+
+        def _del_on_release(*a):
+            logger.info(f"[DBG] btn_del on_release sid={sid} → calling _confirm_delete")
+            self._confirm_delete(sid, name)
+
+        btn_del.bind(on_press=_del_on_press, on_release=_del_on_release)
+
+        # Also log any touch landing on btn_del
+        _orig_touch = btn_del.on_touch_down
+
+        def _del_touch_down(touch, _orig=_orig_touch, _btn=btn_del, _sid=sid):
+            inside = _btn.collide_point(*touch.pos)
+            logger.info(
+                f"[DBG] btn_del on_touch_down sid={_sid} "
+                f"touch=({touch.pos[0]:.0f},{touch.pos[1]:.0f}) "
+                f"btn.pos=({_btn.x:.0f},{_btn.y:.0f}) btn.size=({_btn.width:.0f},{_btn.height:.0f}) "
+                f"inside={inside}"
+            )
+            return _orig(touch)
+
+        btn_del.on_touch_down = _del_touch_down
+
         rename_save.bind(on_release=_do_rename)
         rename_input.bind(on_text_validate=_do_rename)
 
@@ -520,6 +546,7 @@ class HistoryScreen(Screen):
 
     def _confirm_delete(self, session_id: int, name: str) -> None:
         """Show a delete confirmation popup."""
+        logger.info(f"[DBG] _confirm_delete ENTRY sid={session_id} name='{name}'")
         from kivy.uix.popup import Popup
 
         content = BoxLayout(orientation="vertical", spacing=S.GAP, padding=S.GAP)
@@ -569,8 +596,16 @@ class HistoryScreen(Screen):
         # Don't trigger if touch landed on a button inside the row
         for child in widget.walk():
             if isinstance(child, StyledButton) and child.collide_point(*touch.pos):
+                logger.info(
+                    f"[DBG] _row_tapped: button collided at "
+                    f"({touch.pos[0]:.0f},{touch.pos[1]:.0f}); skipping nav"
+                )
                 return False
         sid = getattr(widget, "_session_id", None)
+        logger.info(
+            f"[DBG] _row_tapped: NAVIGATING sid={sid} at "
+            f"({touch.pos[0]:.0f},{touch.pos[1]:.0f})"
+        )
         if sid and self._on_session_select:
             self._on_session_select(sid)
         return True
