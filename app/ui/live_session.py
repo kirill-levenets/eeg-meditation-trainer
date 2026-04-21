@@ -110,7 +110,7 @@ def _format_stats_slots(
 # Duration picker responsive sizing — below narrow threshold the button
 # collapses to an icon-only pill so the Start button can claim the width.
 _DURATION_PICKER_NARROW_THRESHOLD = dp(480)
-_DURATION_PICKER_NARROW_WIDTH = dp(10)
+_DURATION_PICKER_NARROW_WIDTH = dp(20)
 _DURATION_PICKER_WIDE_WIDTH = dp(56)
 
 
@@ -172,7 +172,7 @@ class LiveSessionScreen(Screen):
         )
 
         # ── Header ──
-        header = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP_SM)
+        header = BoxLayout(size_hint_y=None, height=dp(10), spacing=S.GAP_SM)
         self._device_label = Label(
             text="[Mock EEG]",
             size_hint_x=1 / 3,
