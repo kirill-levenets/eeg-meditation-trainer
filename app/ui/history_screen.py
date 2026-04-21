@@ -379,6 +379,7 @@ class HistoryScreen(Screen):
             height=dp(56),
             bg_color=C.BG_CARD,
             spacing=S.GAP_SM,
+            padding=0,
         )
 
         # Score indicator (colored bar)
