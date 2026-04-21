@@ -296,6 +296,10 @@ class EEGMeditationApp(App):
 
         # Hide custom formula on graph until enabled via checkbox
         self._live_screen.graph.set_visible("custom_formula", False)
+        # Apply default metric visibility (Shamatha only for new users;
+        # _restore_user_settings will override for existing users)
+        for key, active in self._settings_screen._graph_toggles.items():
+            self._live_screen.graph.set_visible(key, active)
         self._audio_metric_key: str = "shamatha_score"
 
         self._diary_screen.set_session_select_callback(self._on_session_select)
@@ -1204,6 +1208,8 @@ class EEGMeditationApp(App):
         if metric == "sinking":
             self._audio.sinking_alert_enabled = active
             self._settings_screen._sinking_alert_cb.active = active
+        enabled_keys = [k for k, v in self._settings_screen._graph_toggles.items() if v]
+        self._live_screen._rebuild_metric_legend(enabled_keys)
         logger.debug(f"Graph toggle: {metric}={'on' if active else 'off'}")
 
     def _on_test_audio(self) -> None:
@@ -1589,6 +1595,13 @@ class EEGMeditationApp(App):
                 active = saved == "True"
                 cb.active = active
                 self._live_screen.graph.set_visible(key, active)
+            else:
+                # New user: apply the default from _graph_toggles
+                default = self._settings_screen._graph_toggles.get(key, True)
+                self._live_screen.graph.set_visible(key, default)
+        # Rebuild legend to reflect restored/default visibility
+        enabled_keys = [k for k, v in self._settings_screen._graph_toggles.items() if v]
+        self._live_screen._rebuild_metric_legend(enabled_keys)
 
         # Skip BT/mock restore if --serial override is active
         if not self.serial_device_override:

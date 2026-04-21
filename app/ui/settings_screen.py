@@ -86,11 +86,12 @@ class SettingsScreen(Screen):
         self._on_export_formulas: Optional[Callable] = None
         self._on_theme_change: Optional[Callable] = None
         self._graph_toggles: dict[str, bool] = {
-            "meditation_score": True,
             "shamatha_score": True,
-            "distraction": True,
-            "sinking": True,
-            "subtle_distraction": True,
+            "distraction": False,
+            "sinking": False,
+            "subtle_distraction": False,
+            "native_attention": False,
+            "native_meditation": False,
         }
         self._build_ui()
 
@@ -525,7 +526,7 @@ class SettingsScreen(Screen):
         for key, display_name in toggle_names.items():
             row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
             cb = CheckBox(
-                active=True, size_hint_x=0.15,
+                active=self._graph_toggles.get(key, True), size_hint_x=0.15,
                 size_hint_y=None, height=dp(36),
             )
             cb.metric_key = key

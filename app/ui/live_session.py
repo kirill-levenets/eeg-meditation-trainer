@@ -240,12 +240,10 @@ class LiveSessionScreen(Screen):
         )
         self._metrics_container.add_widget(self._graph)
 
-        legend = BoxLayout(size_hint_y=None, height=dp(18), spacing=S.GAP_SM)
-        for metric, color in METRICS_COLORS.items():
-            short = metric.replace("_score", "").replace("_", " ").title()
-            lbl = Label(text=short, font_size=F.TINY, color=color)
-            legend.add_widget(lbl)
-        self._metrics_container.add_widget(legend)
+        self._legend = BoxLayout(size_hint_y=None, height=dp(18), spacing=S.GAP_SM)
+        self._metrics_container.add_widget(self._legend)
+        # Legend is populated by _rebuild_metric_legend; start with Shamatha only
+        self._rebuild_metric_legend(["shamatha_score"])
 
         # ── Raw EEG view (hidden initially) ──
         self._raw_container = BoxLayout(orientation="vertical", spacing=S.GAP_SM)
@@ -627,6 +625,16 @@ class LiveSessionScreen(Screen):
             self._btn_view_raw.bg_color = C.BG_CARD
             self._btn_view_raw.text_color = C.TEXT_SECONDARY
         self._active_view = view
+
+    def _rebuild_metric_legend(self, enabled_keys: list) -> None:
+        """Clear and re-populate the metrics legend with only the enabled metrics."""
+        self._legend.clear_widgets()
+        for metric, color in METRICS_COLORS.items():
+            if metric not in enabled_keys:
+                continue
+            short = metric.replace("_score", "").replace("_", " ").title()
+            lbl = Label(text=short, font_size=F.TINY, color=color)
+            self._legend.add_widget(lbl)
 
     @property
     def graph(self) -> ScrollableGraphWidget:
