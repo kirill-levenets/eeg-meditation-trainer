@@ -430,6 +430,7 @@ class LiveSessionScreen(Screen):
         self._btn_start = StyledButton(
             text="Start", icon=Icons.PLAY, bg_color=C.ACCENT,
             bg_pressed=C.ACCENT_DIM,
+            vertical=True,
         )
         self._btn_duration_expand = _DurationPickerButton(
             size_hint_x=None,
@@ -450,14 +451,17 @@ class LiveSessionScreen(Screen):
         self._btn_pause = StyledButton(
             text="Pause", icon=Icons.PAUSE, bg_color=C.WARM,
             bg_pressed=C.WARM_DIM, disabled=True,
+            vertical=True,
         )
         self._btn_stop = StyledButton(
             text="Stop", icon=Icons.STOP, bg_color=C.DANGER,
             bg_pressed=C.DANGER_DIM, disabled=True,
+            vertical=True,
         )
         self._btn_marker = StyledButton(
             text="Mark", icon=Icons.MARKER, bg_color=C.PURPLE,
             bg_pressed=C.PURPLE_DIM, disabled=True,
+            vertical=True,
         )
         self._bottom_bar.add_widget(start_cluster)
         self._bottom_bar.add_widget(self._btn_pause)

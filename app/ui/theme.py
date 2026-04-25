@@ -356,14 +356,17 @@ class StyledButton(ButtonBehavior, BoxLayout):
     def __init__(self, **kwargs):
         kwargs.setdefault("size_hint_y", None)
         kwargs.setdefault("height", S.BTN_H)
+        vertical = kwargs.pop("vertical", False)
         super().__init__(**kwargs)
-        self.orientation = "horizontal"
-        self.padding = [dp(12), 0]
+        self.orientation = "vertical" if vertical else "horizontal"
+        self.padding = [dp(2), dp(2)] if vertical else [dp(12), 0]
 
+        # Text-only label sizing depends on layout direction.
+        text_font = (F.TINY if vertical and self.icon else self.font_size)
         self._label = Label(
             text=self.text,
             color=self.text_color,
-            font_size=self.font_size,
+            font_size=text_font,
             bold=self.bold,
             halign="center",
             valign="middle",
@@ -384,6 +387,21 @@ class StyledButton(ButtonBehavior, BoxLayout):
                 )
                 self._icon_label.bind(size=self._icon_label.setter("text_size"))
                 self.add_widget(self._icon_label)
+            elif vertical:
+                # Icon on top, text on bottom — mobile tab-bar convention.
+                self._icon_label = Label(
+                    text=self.icon,
+                    font_size=self.font_size + dp(2),
+                    color=self.text_color,
+                    halign="center",
+                    valign="middle",
+                    size_hint_y=0.6,
+                    **icon_kwargs,
+                )
+                self._icon_label.bind(size=self._icon_label.setter("text_size"))
+                self._label.size_hint_y = 0.4
+                self.add_widget(self._icon_label)
+                self.add_widget(self._label)
             else:
                 self._icon_label = Label(
                     text=self.icon,
