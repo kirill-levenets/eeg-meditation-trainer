@@ -626,11 +626,22 @@ class EEGMeditationApp(App):
         logger.debug("SessionTick thread started")
 
     def _stop_tick_thread(self) -> None:
-        """Signal the tick thread to exit and join briefly."""
+        """Signal the tick thread to exit and join briefly.
+
+        Safe to call from the tick thread itself: skips join() in that case
+        (joining the current thread raises RuntimeError, which would swallow
+        the rest of the calling tick — that bug caused the connect-overlay
+        countdown to freeze when BT failure paths called this from inside
+        _handle_bt_wait).
+        """
         self._tick_stop_event.set()
         t = self._tick_thread
         self._tick_thread = None
-        if t is not None and t.is_alive():
+        if (
+            t is not None
+            and t.is_alive()
+            and t is not threading.current_thread()
+        ):
             t.join(timeout=1.0)
         logger.debug("SessionTick thread stopped")
 
