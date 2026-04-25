@@ -142,6 +142,86 @@ def _duration_picker_width(window_w: float, narrow_threshold: float) -> float:
     )
 
 
+class _DurationPickerButton(BoxLayout):
+    """Compact 2-row duration picker: text on top, chevron on bottom.
+
+    Built as a custom widget rather than StyledButton because StyledButton
+    enforces dp(12) horizontal padding, which clips contents on narrow widths.
+    Press feedback via on_touch_down/up; uses a callback for activation.
+    """
+
+    def __init__(self, on_release=None, **kwargs):
+        super().__init__(**kwargs)
+        self.orientation = "vertical"
+        self.padding = 0
+        self.spacing = 0
+        self._on_release = on_release
+        self._pressed = False
+
+        self._text_label = Label(
+            text="",
+            font_size=F.TINY,
+            bold=True,
+            color=C.TEXT,
+            halign="center",
+            valign="middle",
+            size_hint_y=0.55,
+        )
+        self._text_label.bind(size=self._text_label.setter("text_size"))
+
+        self._chevron_label = Label(
+            text=Icons.MENU_DOWN if ICONS_AVAILABLE else "v",
+            font_name="Icons" if ICONS_AVAILABLE else "Roboto",
+            font_size=F.SMALL,
+            color=C.TEXT,
+            halign="center",
+            valign="middle",
+            size_hint_y=0.45,
+        )
+        self._chevron_label.bind(size=self._chevron_label.setter("text_size"))
+
+        self.add_widget(self._text_label)
+        self.add_widget(self._chevron_label)
+
+        self.bind(size=self._redraw, pos=self._redraw)
+        self._redraw()
+
+    @property
+    def text(self) -> str:
+        return self._text_label.text
+
+    @text.setter
+    def text(self, value: str) -> None:
+        self._text_label.text = value
+
+    def _redraw(self, *args) -> None:
+        self.canvas.before.clear()
+        bg = C.ACCENT_DIM if self._pressed else C.ACCENT
+        with self.canvas.before:
+            Color(*bg)
+            from kivy.graphics import RoundedRectangle
+            RoundedRectangle(pos=self.pos, size=self.size, radius=[S.RADIUS])
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            self._pressed = True
+            self._redraw()
+            touch.grab(self)
+            return True
+        return super().on_touch_down(touch)
+
+    def on_touch_up(self, touch):
+        if touch.grab_current is self:
+            touch.ungrab(self)
+            was_inside = self.collide_point(*touch.pos)
+            self._pressed = False
+            self._redraw()
+            if was_inside and self._on_release is not None:
+                self._on_release(self)
+            return True
+        return super().on_touch_up(touch)
+
+
 class LiveSessionScreen(Screen):
     """Main session screen with graph, stats, and controls."""
 
@@ -363,16 +443,14 @@ class LiveSessionScreen(Screen):
             text="Start", icon=Icons.PLAY, bg_color=C.ACCENT,
             bg_pressed=C.ACCENT_DIM,
         )
-        duration_kwargs = (
-            {"icon": Icons.MENU_DOWN} if ICONS_AVAILABLE else {}
+        self._btn_duration_expand = _DurationPickerButton(
+            size_hint_x=None,
+            size_hint_y=None,
+            width=_DURATION_PICKER_NARROW_WIDTH,
+            height=S.BTN_H,
+            on_release=self._open_duration_popup,
         )
-        self._btn_duration_expand = StyledButton(
-            text="\u221e",  # updated by refresh_duration_preset
-            bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM,
-            size_hint_x=None, width=_DURATION_PICKER_NARROW_WIDTH, font_size=F.BODY,
-            **duration_kwargs,
-        )
-        self._btn_duration_expand.bind(on_release=self._open_duration_popup)
+        self._btn_duration_expand.text = "\u221e"  # updated by refresh_duration_preset
         start_cluster = BoxLayout(
             orientation="horizontal",
             spacing=dp(1),  # tiny separator
