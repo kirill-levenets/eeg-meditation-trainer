@@ -19,7 +19,7 @@ class DatabaseManager:
 
     def _init_db(self) -> None:
         os.makedirs(os.path.dirname(self._db_path) or ".", exist_ok=True)
-        self._conn = sqlite3.connect(self._db_path)
+        self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._create_tables()

@@ -1,5 +1,6 @@
 import os
 import sys
+import threading
 import time
 from typing import Optional
 
@@ -66,7 +67,8 @@ class EEGMeditationApp(App):
         self._audio: AudioEngine = AudioEngine()
         self._session_manager.set_audio(self._audio)
         self._analytics: AnalyticsAggregator = AnalyticsAggregator(self._db)
-        self._update_event: Optional[object] = None
+        self._tick_thread: Optional[threading.Thread] = None
+        self._tick_stop_event: threading.Event = threading.Event()
         self._metrics_buffer: list[dict] = []
         self._raw_buffer: list[dict] = []
         self._flush_counter: int = 0
@@ -597,6 +599,61 @@ class EEGMeditationApp(App):
 
         threading.Thread(target=_scan_and_connect, daemon=True).start()
 
+    # ------------------------------------------------------------------
+    # Background tick thread (replaces Clock.schedule_interval so that
+    # compute / audio / DB work continues while Android screen is locked)
+    # ------------------------------------------------------------------
+
+    def _on_main(self, fn) -> None:
+        """Queue callable on Kivy's main thread.
+
+        Thread-safe per Kivy docs.  During Kivy pause (screen locked) the
+        call is buffered and executed when the app resumes.
+        """
+        Clock.schedule_once(lambda dt: fn(), 0)
+
+    def _start_tick_thread(self) -> None:
+        """Start the 2 Hz tick loop in a background daemon thread.
+
+        Survives Kivy pause (Android screen lock) because it runs outside
+        the UI thread.
+        """
+        self._tick_stop_event.clear()
+        self._tick_thread = threading.Thread(
+            target=self._tick_loop, daemon=True, name="SessionTick"
+        )
+        self._tick_thread.start()
+        logger.debug("SessionTick thread started")
+
+    def _stop_tick_thread(self) -> None:
+        """Signal the tick thread to exit and join briefly."""
+        self._tick_stop_event.set()
+        t = self._tick_thread
+        self._tick_thread = None
+        if t is not None and t.is_alive():
+            t.join(timeout=1.0)
+        logger.debug("SessionTick thread stopped")
+
+    def _tick_loop(self) -> None:
+        """Daemon-thread loop: call _update_tick every UPDATE_FREQUENCY seconds."""
+        import time as _t
+        interval = APP.UPDATE_FREQUENCY
+        next_t = _t.monotonic()
+        while not self._tick_stop_event.is_set():
+            try:
+                self._update_tick(interval)
+            except Exception:
+                logger.exception("Error in session tick loop")
+            next_t += interval
+            remaining = next_t - _t.monotonic()
+            if remaining > 0:
+                if self._tick_stop_event.wait(remaining):
+                    break
+            else:
+                next_t = _t.monotonic()
+
+    # ------------------------------------------------------------------
+
     def _start_session_common(self) -> None:
         """Shared session startup logic after device is resolved."""
         threshold = self._settings_screen.threshold
@@ -660,21 +717,17 @@ class EEGMeditationApp(App):
             )
             logger.info(f"Waiting for BT connection to {name}")
 
-        self._update_event = Clock.schedule_interval(
-            self._update_tick, APP.UPDATE_FREQUENCY
-        )
+        self._start_tick_thread()
         self._tick_count = 0
         logger.info("Session started via UI")
 
     def _on_connect_cancel(self, *args) -> None:
         """Cancel button on connection overlay."""
         self._live_screen.hide_overlay()
-        if self._waiting_for_bt or getattr(self, '_update_event', None):
+        if self._waiting_for_bt or self._tick_thread is not None:
             self._real_stream.stop()
             self._waiting_for_bt = False
-            if self._update_event:
-                self._update_event.cancel()
-                self._update_event = None
+            self._stop_tick_thread()
             self._release_wake_lock()
             self._stop_session_keep_alive_service()
         self._live_screen.set_controls_idle()
@@ -711,24 +764,19 @@ class EEGMeditationApp(App):
             self._session_manager.pause()
             self._live_screen.set_controls_paused()
             self._audio.stop()
-            if self._update_event:
-                self._update_event.cancel()
+            self._stop_tick_thread()
             logger.info("Session paused")
         elif self._session_manager.state == SessionState.PAUSED:
             self._session_manager.resume()
             self._live_screen.set_controls_running()
             self._audio.start()
-            self._update_event = Clock.schedule_interval(
-                self._update_tick, APP.UPDATE_FREQUENCY
-            )
+            self._start_tick_thread()
             logger.info("Session resumed")
 
     def _on_stop(self, *args) -> None:
         # If still waiting for BT, session never started — just clean up
         if getattr(self, '_waiting_for_bt', False):
-            if self._update_event:
-                self._update_event.cancel()
-                self._update_event = None
+            self._stop_tick_thread()
             self._waiting_for_bt = False
             self._eeg_stream.stop()
             self._live_screen.set_controls_idle()
@@ -740,10 +788,8 @@ class EEGMeditationApp(App):
             logger.info("Session cancelled during BT connection wait")
             return
 
-        # Pause the update loop while the dialog is open
-        if self._update_event:
-            self._update_event.cancel()
-            self._update_event = None
+        # Pause the tick thread while the dialog is open
+        self._stop_tick_thread()
 
         content = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(12))
         content.add_widget(Label(
@@ -790,9 +836,7 @@ class EEGMeditationApp(App):
 
     def _stop_and_save(self, reason: str = "user") -> None:
         """Stop session and save data immediately (no dialog)."""
-        if self._update_event:
-            self._update_event.cancel()
-            self._update_event = None
+        self._stop_tick_thread()
 
         stats = self._session_manager.stop(reason=reason)
         # Keep real BT connection alive between sessions to avoid EBUSY on reconnect.
@@ -829,9 +873,7 @@ class EEGMeditationApp(App):
     def _cancel_stop(self, popup) -> None:
         """Resume the session after cancelling stop."""
         popup.dismiss()
-        self._update_event = Clock.schedule_interval(
-            self._update_tick, APP.UPDATE_FREQUENCY
-        )
+        self._start_tick_thread()
         logger.info("Stop cancelled, session resumed")
 
     def _finish_stop(self, popup, save: bool) -> None:
@@ -880,7 +922,10 @@ class EEGMeditationApp(App):
     _STALE_DATA_THRESHOLD = 10.0  # seconds with no new packets before warning
 
     def _check_stale_data(self) -> None:
-        """Auto-stop session when the real device stops sending EEG data."""
+        """Auto-stop session when the real device stops sending EEG data.
+
+        Called from the tick thread; UI calls dispatched via _on_main.
+        """
         if APP.USE_MOCK_DEVICE:
             return
         stale_secs = self._real_stream.seconds_since_last_packet
@@ -891,16 +936,22 @@ class EEGMeditationApp(App):
             if not getattr(self, '_stale_data_warned', False):
                 self._stale_data_warned = True
                 logger.warning(f"Stale EEG data: no packets for {stale_secs:.0f}s, auto-stopping")
-                self._live_screen.show_alert(
-                    "No EEG data. Session stopped.\n"
-                    "Check headset and battery."
-                )
-                self._stop_and_save(reason="stale_data")
+                self._on_main(lambda: (
+                    self._live_screen.show_alert(
+                        "No EEG data. Session stopped.\n"
+                        "Check headset and battery."
+                    ),
+                    self._stop_and_save(reason="stale_data"),
+                ))
         else:
             self._stale_data_warned = False
 
     def _handle_bt_wait(self) -> None:
-        """Handle the BT connection wait phase (called from _update_tick)."""
+        """Handle the BT connection wait phase (called from _update_tick).
+
+        Runs on the background tick thread — all Kivy UI calls are dispatched
+        via _on_main so they execute safely on the main thread.
+        """
         elapsed = time.time() - self._bt_connect_start
         name = self._real_stream._device_name or "Real EEG"
 
@@ -928,14 +979,15 @@ class EEGMeditationApp(App):
                     )
                     self._audio.start()
                     self._audio.play_connect_sound()
-                    self._timer_screen.start_countdown()
-                    self._live_screen.update_device_status(
-                        True, device_name=name
-                    )
-                    self._live_screen.update_state("Running")
-                    self._live_screen.set_start_time(time.time())
-                    self._live_screen.hide_overlay()
-                    self._settings_screen.update_device_status(True, name=name)
+                    _n = name
+                    self._on_main(lambda n=_n: (
+                        self._timer_screen.start_countdown(),
+                        self._live_screen.update_device_status(True, device_name=n),
+                        self._live_screen.update_state("Running"),
+                        self._live_screen.set_start_time(time.time()),
+                        self._live_screen.hide_overlay(),
+                        self._settings_screen.update_device_status(True, name=n),
+                    ))
                     logger.info(f"BT device {name} connected, session started")
                 elif signal_elapsed > self._BT_SIGNAL_TIMEOUT and not has_packets:
                     # No packets — ThinkGear didn't start streaming.
@@ -945,15 +997,16 @@ class EEGMeditationApp(App):
                     self._waiting_for_bt = False
                     self._bt_signal_start = None
                     self._real_stream.stop()
-                    if self._update_event:
-                        self._update_event.cancel()
-                        self._update_event = None
-                    self._live_screen.set_controls_idle()
-                    self._live_screen.update_device_status(False, device_name=name)
-                    self._live_screen.show_overlay_retry(
-                        "No EEG data received.\n"
-                        "Check battery or restart headset."
-                    )
+                    self._stop_tick_thread()
+                    _n = name
+                    self._on_main(lambda n=_n: (
+                        self._live_screen.set_controls_idle(),
+                        self._live_screen.update_device_status(False, device_name=n),
+                        self._live_screen.show_overlay_retry(
+                            "No EEG data received.\n"
+                            "Check battery or restart headset."
+                        ),
+                    ))
                     self._release_wake_lock()
                     self._stop_session_keep_alive_service()
                     logger.error("No ThinkGear packets — likely low battery or needs power cycle")
@@ -977,51 +1030,55 @@ class EEGMeditationApp(App):
                         f"packets={'yes' if has_packets else 'no'} "
                         f"elapsed={signal_elapsed:.0f}s"
                     )
-                    self._live_screen.update_overlay(
-                        f"Connected to {name}\n"
-                        f"{wait_msg}\n"
-                        f"{sensor_info}"
-                    )
+                    _msg = f"Connected to {name}\n{wait_msg}\n{sensor_info}"
+                    self._on_main(lambda m=_msg: self._live_screen.update_overlay(m))
         elif not self._real_stream._running:
             # Connection thread ended with error
             self._waiting_for_bt = False
             self._bt_signal_start = None
-            if self._update_event:
-                self._update_event.cancel()
-                self._update_event = None
-            self._live_screen.set_controls_idle()
-            self._live_screen.update_device_status(False)
+            self._stop_tick_thread()
             hint = self._real_stream._last_connect_error or "Check device is on and paired."
-            self._live_screen.show_overlay_retry(
-                f"Connection to {name} failed.\n{hint}"
-            )
+            _n = name
+            _h = hint
+            self._on_main(lambda n=_n, h=_h: (
+                self._live_screen.set_controls_idle(),
+                self._live_screen.update_device_status(False),
+                self._live_screen.show_overlay_retry(
+                    f"Connection to {n} failed.\n{h}"
+                ),
+            ))
             logger.error("BT connection failed, session aborted")
         elif elapsed > self._BT_CONNECT_TIMEOUT:
             # Timeout waiting for BT socket
             self._waiting_for_bt = False
             self._bt_signal_start = None
             self._real_stream.stop()
-            if self._update_event:
-                self._update_event.cancel()
-                self._update_event = None
-            self._live_screen.set_controls_idle()
-            self._live_screen.update_device_status(False)
-            self._live_screen.show_overlay_retry(
-                f"Connection to {name} timed out.\n"
-                "Make sure the device is turned on\nand in range."
-            )
+            self._stop_tick_thread()
+            _n = name
+            self._on_main(lambda n=_n: (
+                self._live_screen.set_controls_idle(),
+                self._live_screen.update_device_status(False),
+                self._live_screen.show_overlay_retry(
+                    f"Connection to {n} timed out.\n"
+                    "Make sure the device is turned on\nand in range."
+                ),
+            ))
             self._release_wake_lock()
             self._stop_session_keep_alive_service()
             logger.error("BT connection timed out")
         else:
             # Still waiting for BT socket — show countdown
             remaining = int(self._BT_CONNECT_TIMEOUT - elapsed)
-            self._live_screen.update_overlay(
-                f"Connecting to {name}...\nTimeout in {remaining}s"
-            )
+            _msg = f"Connecting to {name}...\nTimeout in {remaining}s"
+            self._on_main(lambda m=_msg: self._live_screen.update_overlay(m))
 
     def _update_tick(self, dt: float) -> None:
-        """Main 2 Hz processing loop."""
+        """Main 2 Hz processing loop.
+
+        Runs on the background SessionTick thread.  All Kivy widget calls are
+        dispatched via _on_main so they execute on the main thread.  Audio,
+        metrics compute, and DB writes are thread-safe and stay direct.
+        """
         if getattr(self, '_waiting_for_bt', False):
             self._handle_bt_wait()
             return
@@ -1033,11 +1090,12 @@ class EEGMeditationApp(App):
         if self._session_manager.elapsed_seconds >= APP.SESSION_MAX_SECONDS:
             logger.info(f"Session reached max duration ({APP.SESSION_MAX_SECONDS}s), auto-stopping")
             self._audio.play_disconnect_alert()
-            self._live_screen.show_alert(
+            _limit_msg = (
                 f"Session recording limit reached ({APP.SESSION_MAX_SECONDS // 3600}h). "
                 "Session saved. Start a new one to continue."
             )
-            self._stop_and_save()
+            self._on_main(lambda m=_limit_msg: self._live_screen.show_alert(m))
+            self._on_main(lambda: self._stop_and_save())
             return
 
         # Update settings status when real BT device connects
@@ -1046,7 +1104,8 @@ class EEGMeditationApp(App):
                 and self._real_stream.is_connected):
             self._bt_connected_notified = True
             name = self._real_stream._device_name or "Real EEG"
-            self._settings_screen.update_device_status(True, name=name)
+            _n = name
+            self._on_main(lambda n=_n: self._settings_screen.update_device_status(True, name=n))
             logger.info(f"Settings updated: {name} connected")
 
         # Detect BT disconnect during session
@@ -1055,9 +1114,10 @@ class EEGMeditationApp(App):
                 and not self._real_stream.is_connected):
             self._bt_connected_notified = False
             name = self._real_stream._device_name or "Real EEG"
-            self._live_screen.update_device_status(
-                False, device_name=name, connecting=True
-            )
+            _n = name
+            self._on_main(lambda n=_n: self._live_screen.update_device_status(
+                False, device_name=n, connecting=True
+            ))
             self._audio.play_disconnect_alert()
             logger.warning(f"BT device {name} disconnected during session")
 
@@ -1071,9 +1131,8 @@ class EEGMeditationApp(App):
         if battery != -1 and battery < 25 and not getattr(self, '_low_battery_warned', False):
             self._low_battery_warned = True
             pct = int(battery / 127 * 100)
-            self._live_screen.show_alert(
-                f"Low headset battery ({pct}%)."
-            )
+            _bat_msg = f"Low headset battery ({pct}%)."
+            self._on_main(lambda m=_bat_msg: self._live_screen.show_alert(m))
             logger.warning(f"Low headset battery: {battery}/127 ({pct}%)")
 
         # Feed raw waveform to power line noise detector
@@ -1085,10 +1144,11 @@ class EEGMeditationApp(App):
             if detector.ready():
                 detected, freq = detector.result()
                 if detected:
-                    self._live_screen.show_alert(
+                    _noise_msg = (
                         f"Warning: {freq} Hz power line noise detected. "
                         f"Check notch filter setting or move away from electrical equipment."
                     )
+                    self._on_main(lambda m=_noise_msg: self._live_screen.show_alert(m))
                     logger.warning(f"Power line noise detected: {freq} Hz")
 
         # Log raw sample every 10 ticks (~5s at 2Hz)
@@ -1123,34 +1183,42 @@ class EEGMeditationApp(App):
         self._metrics_buffer.append(full_record)
         self._raw_buffer.append(raw_sample)
 
+        # Audio is thread-safe — update directly
         self._audio.update(metrics.get(self._audio_metric_key, 0))
         if self._tick_count > 10:
             self._audio.update_sinking(metrics.get("sinking", 0))
             self._audio.update_subtle_distraction(metrics.get("subtle_distraction", 0))
 
-        self._live_screen.graph.add_point(metrics)
-        self._live_screen.update_stats(metrics)
-        self._live_screen.update_state(metrics.get("state", "Neutral"))
-        self._live_screen.update_timer(self._session_manager.elapsed_formatted)
-
-        self._live_screen.add_raw_sample(raw_sample)
-
-        # Handle pending marker (after points added so indices are current)
-        if self._pending_marker:
+        # UI updates — dispatch to main thread
+        _elapsed_fmt = self._session_manager.elapsed_formatted
+        _marker_pending = self._pending_marker
+        if _marker_pending:
             self._pending_marker = False
             full_record["marker"] = 1
-            self._live_screen.graph.add_marker()
-            self._live_screen.raw_graph.add_marker()
-            self._live_screen.band_graph.add_marker()
 
-        # Timer countdown
+        def _ui_update(
+            m=metrics, rs=raw_sample, ef=_elapsed_fmt, mp=_marker_pending
+        ) -> None:
+            self._live_screen.graph.add_point(m)
+            self._live_screen.update_stats(m)
+            self._live_screen.update_state(m.get("state", "Neutral"))
+            self._live_screen.update_timer(ef)
+            self._live_screen.add_raw_sample(rs)
+            if mp:
+                self._live_screen.graph.add_marker()
+                self._live_screen.raw_graph.add_marker()
+                self._live_screen.band_graph.add_marker()
+
+        self._on_main(_ui_update)
+
+        # Timer countdown — tick() is pure counter, no UI
         if self._timer_screen.tick(APP.UPDATE_FREQUENCY):
             logger.info("Timer expired, auto-stopping session")
             self._audio.play_timer_sound(self._timer_screen.custom_sound_path)
-            self._stop_and_save()
+            self._on_main(lambda: self._stop_and_save())
             return
 
-        # Flush buffer to DB every 60 seconds
+        # Flush buffer to DB every 60 seconds (DB opened with check_same_thread=False)
         self._flush_counter += 1
         ticks_per_flush = int(APP.FLUSH_INTERVAL_SECONDS / APP.UPDATE_FREQUENCY)
         if self._flush_counter >= ticks_per_flush and self._metrics_buffer:
@@ -1696,16 +1764,14 @@ class EEGMeditationApp(App):
         logger.debug(f"Loaded settings for user {user_id}")
 
     def on_pause(self) -> bool:
-        """Android lifecycle: keep running during an active session."""
+        """Android lifecycle: save settings and allow Kivy to pause cleanly.
+
+        Session work (compute, audio, DB flush) continues via the background
+        tick thread and the foreground service even while the UI is paused.
+        Per Kivy docs returning False here would *stop* the app, not prevent
+        the pause — so we always return True.
+        """
         self._save_user_settings()
-        try:
-            state = self._session_manager.state
-        except Exception:
-            state = None
-        if state in (SessionState.RUNNING, SessionState.PAUSED):
-            # Session work must continue — prevent Android from pausing us.
-            logger.info(f"on_pause: refusing pause (session state={state.name})")
-            return False
         return True
 
     def on_stop(self) -> None:
