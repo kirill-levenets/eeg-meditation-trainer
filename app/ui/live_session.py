@@ -112,34 +112,7 @@ def _format_stats_slots(
 
 # Duration picker responsive sizing — below narrow threshold the button
 # collapses to an icon-only pill so the Start button can claim the width.
-_DURATION_PICKER_NARROW_THRESHOLD = dp(480)
-_DURATION_PICKER_NARROW_WIDTH = dp(20)
-_DURATION_PICKER_WIDE_WIDTH = dp(56)
-
-
-def _duration_picker_label(
-    window_w: float,
-    timer_enabled: bool,
-    timer_minutes: int,
-    narrow_threshold: float,
-) -> str:
-    """Return the duration-picker button text, empty on narrow screens."""
-    if window_w < narrow_threshold:
-        return ""
-    if not timer_enabled:
-        return "\u221e"
-    if timer_minutes >= 60 and timer_minutes % 60 == 0:
-        return f"{timer_minutes // 60}h"
-    return f"{timer_minutes}m"
-
-
-def _duration_picker_width(window_w: float, narrow_threshold: float) -> float:
-    """Return duration-picker button width (narrow = chevron only)."""
-    return (
-        _DURATION_PICKER_NARROW_WIDTH
-        if window_w < narrow_threshold
-        else _DURATION_PICKER_WIDE_WIDTH
-    )
+_DURATION_PICKER_WIDTH = dp(20)
 
 
 class _DurationPickerButton(BoxLayout):
@@ -184,6 +157,8 @@ class _DurationPickerButton(BoxLayout):
         self.add_widget(self._chevron_label)
 
         self.bind(size=self._redraw, pos=self._redraw)
+        # Refresh background + label colors when the theme palette changes.
+        C.add_listener(self._refresh_theme)
         self._redraw()
 
     @property
@@ -194,12 +169,17 @@ class _DurationPickerButton(BoxLayout):
     def text(self, value: str) -> None:
         self._text_label.text = value
 
+    def _refresh_theme(self) -> None:
+        self._text_label.color = C.TEXT
+        self._chevron_label.color = C.TEXT
+        self._redraw()
+
     def _redraw(self, *args) -> None:
+        from kivy.graphics import RoundedRectangle
         self.canvas.before.clear()
         bg = C.ACCENT_DIM if self._pressed else C.ACCENT
         with self.canvas.before:
             Color(*bg)
-            from kivy.graphics import RoundedRectangle
             RoundedRectangle(pos=self.pos, size=self.size, radius=[S.RADIUS])
 
     def on_touch_down(self, touch):
@@ -446,7 +426,7 @@ class LiveSessionScreen(Screen):
         self._btn_duration_expand = _DurationPickerButton(
             size_hint_x=None,
             size_hint_y=None,
-            width=_DURATION_PICKER_NARROW_WIDTH,
+            width=_DURATION_PICKER_WIDTH,
             height=S.BTN_H,
             on_release=self._open_duration_popup,
         )
@@ -674,13 +654,6 @@ class LiveSessionScreen(Screen):
             min_fixed_graph=dp(400),
             min_graph_floor=dp(240),
         )
-        # Also refresh the duration-picker label so narrow-screen text drops away
-        if hasattr(self, "_btn_duration_expand") and hasattr(self, "_current_timer_enabled"):
-            try:
-                self._apply_duration_picker_label()
-            except Exception:
-                pass
-
     def on_leave(self, *args) -> None:
         from kivy.core.window import Window
         try:
@@ -892,18 +865,14 @@ class LiveSessionScreen(Screen):
         self._apply_duration_picker_label()
 
     def _apply_duration_picker_label(self) -> None:
-        """Compute current-window label + width for the duration picker and apply."""
-        from kivy.core.window import Window
-        self._btn_duration_expand.text = _duration_picker_label(
-            window_w=Window.width,
-            timer_enabled=self._current_timer_enabled,
-            timer_minutes=self._current_timer_minutes,
-            narrow_threshold=_DURATION_PICKER_NARROW_THRESHOLD,
-        )
-        self._btn_duration_expand.width = _duration_picker_width(
-            window_w=Window.width,
-            narrow_threshold=_DURATION_PICKER_NARROW_THRESHOLD,
-        )
+        """Update duration picker text. Width stays fixed at the compact size."""
+        # Always show the compact label; width is fixed at construction time.
+        if not self._current_timer_enabled:
+            self._btn_duration_expand.text = "∞"
+        elif self._current_timer_minutes >= 60 and self._current_timer_minutes % 60 == 0:
+            self._btn_duration_expand.text = f"{self._current_timer_minutes // 60}h"
+        else:
+            self._btn_duration_expand.text = f"{self._current_timer_minutes}m"
 
     def show_overlay(self, text: str = "Connecting...") -> None:
         """Show semi-transparent connection overlay with animated dots."""
