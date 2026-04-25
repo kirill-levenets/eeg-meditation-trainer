@@ -70,7 +70,10 @@ source "${VENV_DIR}/bin/activate"
 
 echo "Installing buildozer and dependencies..."
 pip install --upgrade pip
-pip install buildozer==1.5.0 cython==3.0.10
+# setuptools<78 provides the distutils compat shim that buildozer 1.5.0
+# imports (`from distutils.version import LooseVersion`). Python 3.12 removed
+# stdlib distutils, so without this pin the build fails on import.
+pip install 'setuptools<78' buildozer==1.5.0 cython==3.0.10
 
 echo
 echo "=== Building Android APK (${BUILD_TYPE}) ==="
