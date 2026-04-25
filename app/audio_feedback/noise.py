@@ -11,6 +11,148 @@ from typing import Optional
 from app.config import APP
 from app.logger import logger
 
+# ---------------------------------------------------------------------------
+# Noise-player abstraction
+# ---------------------------------------------------------------------------
+
+class _KivyNoisePlayer:
+    """Kivy SoundLoader-backed noise loop. Used on desktop platforms."""
+
+    def __init__(self, path: str) -> None:
+        from kivy.core.audio import SoundLoader
+        snd = SoundLoader.load(path)
+        if snd is None:
+            raise RuntimeError(f"SoundLoader could not load {path!r}")
+        snd.loop = True
+        self._snd = snd
+        self.loop: bool = True
+
+    @property
+    def volume(self) -> float:
+        return self._snd.volume
+
+    @volume.setter
+    def volume(self, v: float) -> None:
+        self._snd.volume = max(0.0, min(1.0, float(v)))
+
+    def play(self) -> None:
+        self._snd.play()
+
+    def stop(self) -> None:
+        self._snd.stop()
+
+    def unload(self) -> None:
+        try:
+            self._snd.stop()
+            self._snd.unload()
+        except Exception:
+            pass
+
+
+class _AndroidMediaNoisePlayer:
+    """MediaPlayer-backed noise loop. Keeps playing through screen lock."""
+
+    def __init__(self, path: str) -> None:
+        from jnius import autoclass
+        MediaPlayer = autoclass("android.media.MediaPlayer")
+        AudioAttributes = autoclass("android.media.AudioAttributes")
+        AudioAttributesBuilder = autoclass("android.media.AudioAttributes$Builder")
+
+        self._mp = MediaPlayer()
+        attrs = (
+            AudioAttributesBuilder()
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+            .build()
+        )
+        self._mp.setAudioAttributes(attrs)
+        self._mp.setDataSource(path)
+        self._mp.setLooping(True)
+        self._mp.prepare()  # synchronous — fine for small WAV files
+        self._volume: float = 0.0
+        self._mp.setVolume(0.0, 0.0)
+        self.loop: bool = True
+        self._playing: bool = False
+
+        # Request audio focus so Android treats this as intentional media
+        # playback. Failure is non-fatal; MediaPlayer still plays.
+        self._audio_mgr = None
+        self._focus_request = None
+        try:
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+            Context = autoclass("android.content.Context")
+            AudioManager = autoclass("android.media.AudioManager")
+            AudioFocusRequestBuilder = autoclass(
+                "android.media.AudioFocusRequest$Builder"
+            )
+            mgr = PythonActivity.mActivity.getSystemService(Context.AUDIO_SERVICE)
+            self._audio_mgr = mgr
+            focus_request = (
+                AudioFocusRequestBuilder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(attrs)
+                .build()
+            )
+            self._focus_request = focus_request
+            mgr.requestAudioFocus(focus_request)
+        except Exception as e:
+            logger.warning(f"Audio focus request failed (non-fatal): {e}")
+
+    @property
+    def volume(self) -> float:
+        return self._volume
+
+    @volume.setter
+    def volume(self, v: float) -> None:
+        v = max(0.0, min(1.0, float(v)))
+        self._volume = v
+        try:
+            self._mp.setVolume(v, v)
+        except Exception:
+            pass
+
+    def play(self) -> None:
+        try:
+            self._mp.start()
+            self._playing = True
+        except Exception:
+            pass
+
+    def stop(self) -> None:
+        try:
+            if self._playing:
+                self._mp.pause()
+                self._mp.seekTo(0)
+                self._playing = False
+        except Exception:
+            pass
+
+    def unload(self) -> None:
+        try:
+            self.stop()
+            self._mp.release()
+        except Exception:
+            pass
+        try:
+            if self._audio_mgr and self._focus_request:
+                self._audio_mgr.abandonAudioFocusRequest(self._focus_request)
+        except Exception:
+            pass
+
+
+def _make_noise_player(path: str):
+    """Return the right noise player for this platform.
+
+    On Android, tries MediaPlayer first (survives screen lock). Falls back to
+    SoundLoader if MediaPlayer init fails. Desktop always uses SoundLoader.
+    """
+    from kivy.utils import platform as kplat
+    if kplat == "android":
+        try:
+            return _AndroidMediaNoisePlayer(path)
+        except Exception as e:
+            logger.warning(f"Falling back to SoundLoader for noise: {e}")
+    return _KivyNoisePlayer(path)
+
 METRICS_THRESHOLD_FALLBACK = 100
 _FADE_SAMPLES = 512
 _NOISE_BUFFER_SECONDS = 10
@@ -205,18 +347,16 @@ class AudioEngine:
     def _start_noise_loop(self) -> None:
         """Load and start the pre-generated noise WAV in a loop."""
         try:
-            from kivy.core.audio import SoundLoader
             if self._noise_sound:
                 self._noise_sound.stop()
                 self._noise_sound.unload()
-            snd = SoundLoader.load(self._noise_path)
-            if snd:
-                snd.loop = True
-                snd.volume = self._volume
-                snd.play()
-                self._noise_sound = snd
+            snd = _make_noise_player(self._noise_path)
+            snd.loop = True
+            snd.volume = self._volume
+            snd.play()
+            self._noise_sound = snd
         except Exception as e:
-            logger.warning(f"Failed to load noise WAV: {e}")
+            logger.warning(f"Failed to load noise: {e}")
 
     def _set_noise_volume(self, volume: float) -> None:
         """Set target volume — the ramp thread interpolates smoothly toward it."""
@@ -355,7 +495,7 @@ class AudioEngine:
         with self._lock:
             self._start_noise_loop()
         self._ensure_ramp_thread()
-        logger.info("Audio engine started (SoundLoader)")
+        logger.info("Audio engine started")
 
     def stop(self) -> None:
         """Stop all audio playback."""
