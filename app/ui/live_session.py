@@ -156,7 +156,7 @@ class _DurationPickerButton(BoxLayout):
         self.add_widget(self._text_label)
         self.add_widget(self._chevron_label)
 
-        self.bind(size=self._redraw, pos=self._redraw)
+        self.bind(size=self._redraw, pos=self._redraw, disabled=self._redraw)
         # Refresh background + label colors when the theme palette changes.
         C.add_listener(self._refresh_theme)
         self._redraw()
@@ -170,20 +170,28 @@ class _DurationPickerButton(BoxLayout):
         self._text_label.text = value
 
     def _refresh_theme(self) -> None:
-        self._text_label.color = C.TEXT
-        self._chevron_label.color = C.TEXT
         self._redraw()
 
     def _redraw(self, *args) -> None:
         from kivy.graphics import RoundedRectangle
         self.canvas.before.clear()
-        bg = C.ACCENT_DIM if self._pressed else C.ACCENT
+        if self.disabled:
+            bg = C.BG_CARD
+        elif self._pressed:
+            bg = C.ACCENT_DIM
+        else:
+            bg = C.ACCENT
         with self.canvas.before:
             Color(*bg)
             RoundedRectangle(pos=self.pos, size=self.size, radius=[S.RADIUS])
+        label_color = C.TEXT_MUTED if self.disabled else C.TEXT
+        self._text_label.color = label_color
+        self._chevron_label.color = label_color
 
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos):
+            if self.disabled:
+                return True
             self._pressed = True
             self._redraw()
             touch.grab(self)
