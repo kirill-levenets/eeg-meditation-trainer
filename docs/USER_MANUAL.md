@@ -52,7 +52,7 @@ The header shows device status, elapsed time, and current state (color-coded: gr
 
 **Stats row** below the graph: Shamatha, Distraction, Sinking, NS Attn, NS Med.
 
-**Scrolling and zooming:** Drag left/right to scroll through up to 3 hours of history. Mouse wheel (desktop) or pinch (Android) to zoom.
+**Scrolling and zooming:** Press and drag left/right on the graph to scroll through up to 3 hours of history (works on both desktop and Android). Mouse wheel (desktop) or pinch (Android) to zoom in/out on the time axis.
 
 ### Markers
 
@@ -82,7 +82,7 @@ Tap the swap icon on the right of the stats row to switch between **live** insta
 
 ### Locked-screen sessions (Android)
 
-You can start a session, lock the phone, and the session will continue for hours. A persistent notification indicates the session is active. If the connection drops or the session ends unexpectedly, a short warble sound plays so you notice.
+You can start a session, lock the phone, and the session will continue for hours. A persistent notification indicates the session is active. EEG processing, metrics computation, and audio volume adjustments all continue uninterrupted on a background thread — audio keeps playing even while the screen is off. The connection-attempt countdown in the overlay also runs to completion cleanly (no freezing on slow Bluetooth connects). If the connection drops or the session ends unexpectedly, a short warble sound plays so you notice.
 
 ### If the app crashes
 

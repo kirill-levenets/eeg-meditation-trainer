@@ -87,6 +87,16 @@ Shamatha meditation with neurofeedback
 Open source — contributions welcome
 Not a medical device
 
+## Locked-Screen Sessions (Android)
+
+You can start a session, lock the screen, and
+EEG processing and audio feedback continue
+uninterrupted. The noise channel uses Android
+MediaPlayer so it survives screen lock. A
+persistent notification stays visible while
+the session is active. If the session stops
+unexpectedly, a warble sound plays to alert you.
+
 ## App Crashes
 
 If the app hits an unexpected error, a crash dialog

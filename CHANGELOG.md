@@ -22,6 +22,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   preset is highlighted. Picking one applies the timer and dismisses the
   popup. Start simply begins the session with whatever is set. Settings →
   Timer preset row aligned to [5, 10, 15, 20] for consistency.
+- `StyledButton(vertical=True)` for 2-row icon-top/text-bottom buttons.
+- `GraphAwareScrollView` yields drag and multi-touch to graph widgets (press-drag scrolls time axis; pinch zooms).
+- Custom `_DurationPickerButton` (compact 2-row pill) for the Live Session timer dropdown.
+- Live/Aggregate stats toggle on the Live Session screen, persisted per user.
+- Default Shamatha-only metric legend for new users.
+- Adaptive landscape layout (`_compute_graph_height_adaptive`).
+
+### Changed
+
+- 2 Hz session tick moved from Kivy Clock to a daemon thread; UI updates dispatched via `Clock.schedule_once`.
+- Android noise channel uses `MediaPlayer` (with `USAGE_MEDIA` audio attributes) so audio survives screen lock.
+- `on_pause()` always returns True (the previous False return was killing the app on screen lock).
+- History row touch routing replaced with a single `_list_touch_down` handler at the session-list level (Android tap-target reliability).
+- Bottom-bar action buttons (Start/Pause/Stop/Mark) render as 2-row icon+text.
+
+### Fixed
+
+- Connect-overlay countdown freezing on slow BT connects (`_stop_tick_thread` no longer joins the current thread).
+- Sinking bell / distraction chime default OFF for new users.
+- Stats toggle button vertical alignment + clearer "LIVE"/"AVG" text.
 
 ## [1.1.1] - 2026-04-12
 

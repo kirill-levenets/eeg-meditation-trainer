@@ -33,8 +33,9 @@ Inspired by the [EEG meditation research and Vernihor formula](https://scripture
 - **App icon** — Custom EEG brainwave icon and Android presplash
 - **macOS support** — Native build via PyInstaller
 - **Android storage** — Tries /sdcard/EEGMeditation, falls back to app-private storage if permission denied
-- **Landscape-aware Live Session layout** — the graph fills the viewport at any orientation; controls stay pinned at the bottom.
-- **Multi-hour locked-screen sessions on Android** — foreground service + partial wake lock keeps the session running with the screen off.
+- **Adaptive landscape layout** — fixed graph height when viewport is tall; scroll mode when short (graph would fall below dp(400)); controls live inside the scrollable body.
+- **Multi-hour locked-screen sessions on Android** — foreground service + partial wake lock keeps the session running with the screen off; EEG compute and audio volume updates run on a daemon thread independent of Kivy's main loop.
+- **Audio continues playing through screen lock on Android** — noise channel uses `MediaPlayer` (`USAGE_MEDIA` audio attributes) instead of SDL2 mixer so it survives screen lock.
 - **Global crash handler** — in-app dialog with a pre-formatted crash report copied to clipboard.
 - **Toggle bottom stats card** between live metrics and session aggregates.
 
