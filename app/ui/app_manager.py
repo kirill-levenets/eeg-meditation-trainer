@@ -280,6 +280,7 @@ class EEGMeditationApp(App):
         self._settings_screen.set_device_mode_callback(self._on_device_mode_toggle)
         self._settings_screen.set_scan_devices_callback(self._on_scan_devices)
         self._settings_screen.set_device_select_callback(self._on_device_select)
+        self._settings_screen.set_copy_diagnostics_callback(self._on_copy_diagnostics)
         self._settings_screen.set_line_width_callback(self._on_line_width_change)
         self._settings_screen.set_rotate_screen_callback(self._on_rotate_screen)
         self._settings_screen.set_custom_formula_callback(self._on_custom_formula_change)
@@ -476,6 +477,16 @@ class EEGMeditationApp(App):
 
         threading.Thread(target=_run, daemon=True).start()
 
+    @staticmethod
+    def _filter_mindwave(devices: list) -> list:
+        """Subset of `devices` whose name looks like a NeuroSky MindWave."""
+        out = []
+        for dev in devices:
+            name = (dev.get("name") or "").lower()
+            if "mindwave" in name or "neurosky" in name:
+                out.append(dev)
+        return out
+
     def _auto_scan_bt(self) -> None:
         """Background-scan paired BT devices at startup and auto-select MindWave."""
         if self.serial_device_override:
@@ -490,13 +501,23 @@ class EEGMeditationApp(App):
         def _on_scan_done(devices):
             if not devices:
                 return
-            # Auto-select first MindWave device
-            for dev in devices:
-                name = (dev.get("name") or "").lower()
-                if "mindwave" in name or "neurosky" in name:
-                    self._on_device_select(dev["address"], dev["name"])
-                    logger.info(f"Auto-selected BT device: {dev['name']}")
-                    return
+            matches = self._filter_mindwave(devices)
+            if len(matches) == 1:
+                self._on_device_select(matches[0]["address"], matches[0]["name"])
+                logger.info(f"Auto-selected BT device: {matches[0]['name']}")
+                return
+            if len(matches) > 1:
+                # Multiple NeuroSky devices paired — user must choose explicitly.
+                logger.info(
+                    f"Found {len(matches)} MindWave devices — routing to settings picker"
+                )
+                self._settings_screen.populate_bt_devices(matches)
+                self._switch_screen("settings")
+                self._settings_screen.focus_device_section(
+                    f"Found {len(matches)} MindWave devices.\n"
+                    "Pick the one you want to use."
+                )
+                return
             # No MindWave found — populate settings list for manual pick
             self._settings_screen.populate_bt_devices(devices)
 
@@ -563,21 +584,27 @@ class EEGMeditationApp(App):
 
         def _scan_and_connect():
             devices = NeuroSkyStream.scan_paired_devices()
-            mindwave = None
-            for dev in devices:
-                name = (dev.get("name") or "").lower()
-                if "mindwave" in name or "neurosky" in name:
-                    mindwave = dev
-                    break
+            matches = self._filter_mindwave(devices)
 
             def _on_main_thread(dt):
-                if mindwave:
+                if len(matches) == 1:
+                    mindwave = matches[0]
                     self._on_device_select(mindwave["address"], mindwave["name"])
                     self._eeg_stream = self._real_stream
                     self._live_screen.update_overlay(
                         f"Found {mindwave['name']}\nConnecting..."
                     )
                     self._start_session_common()
+                elif len(matches) > 1:
+                    # Multiple NeuroSky devices paired — user must pick.
+                    self._settings_screen.populate_bt_devices(matches)
+                    self._live_screen.set_controls_idle()
+                    self._live_screen.hide_overlay()
+                    self._switch_screen("settings")
+                    self._settings_screen.focus_device_section(
+                        f"Found {len(matches)} MindWave devices.\n"
+                        "Pick the one you want to use, then press Start again."
+                    )
                 elif devices:
                     # Found BT devices but no MindWave
                     self._settings_screen.populate_bt_devices(devices)
@@ -1059,6 +1086,7 @@ class EEGMeditationApp(App):
                 ),
             ))
             logger.error("BT connection failed, session aborted")
+            self._report_bt_connect_failure(name, hint)
         elif elapsed > self._BT_CONNECT_TIMEOUT:
             # Timeout waiting for BT socket
             self._waiting_for_bt = False
@@ -1449,6 +1477,70 @@ class EEGMeditationApp(App):
         if self._current_user_id:
             self._db.set_user_setting(self._current_user_id, "bt_device_address", address)
             self._db.set_user_setting(self._current_user_id, "bt_device_name", name)
+
+    def _report_bt_connect_failure(self, device_name: str, hint: str) -> None:
+        """Fire a soft-error dialog for a failed BT connect (cooldown-gated).
+
+        The retry overlay already tells the user *something* went wrong; this
+        adds a copy-pasteable technical report so they can forward it when
+        the friendly hint isn't enough.
+        """
+        from app.crash_handler import report_soft_error
+
+        addr = self._real_stream._device_address or "(unset)"
+        last_err = self._real_stream._last_connect_error or "(none)"
+        detail = (
+            f"Device: {device_name} ({addr})\n"
+            f"Hint shown to user: {hint}\n"
+            f"Stream last_connect_error: {last_err}\n"
+        )
+        report_soft_error("bt_connect_failed", detail, app=self)
+
+    def _on_copy_diagnostics(self) -> None:
+        """Build a diagnostic report and show it via the soft-error dialog.
+
+        User-initiated, so we bypass the per-label cooldown — the user
+        explicitly asked for the report.
+        """
+        from app.crash_handler import report_soft_error
+
+        try:
+            paired = NeuroSkyStream.scan_paired_devices()
+        except Exception as e:
+            paired = []
+            logger.warning(f"Diagnostics: BT scan failed: {e}")
+
+        try:
+            paired_summary = "\n".join(
+                f"  - {d.get('name') or 'Unknown'}  ({d.get('address')})"
+                for d in paired
+            ) or "  (none)"
+        except Exception:
+            paired_summary = "  (failed to enumerate)"
+
+        current_addr = self._real_stream._device_address or "(none)"
+        current_name = self._real_stream._device_name or "(none)"
+        last_err = self._real_stream._last_connect_error or "(none)"
+        last_packet = self._real_stream.seconds_since_last_packet
+        signal = self._real_stream._latest_signal_quality
+        battery = self._real_stream._battery_level
+        sample_rate = APP.WHITE_NOISE_SAMPLE_RATE
+        max_volume = APP.MAX_VOLUME
+        use_mock = APP.USE_MOCK_DEVICE
+
+        detail = (
+            f"USE_MOCK_DEVICE: {use_mock}\n"
+            f"Selected device: {current_name} ({current_addr})\n"
+            f"Last connect error: {last_err}\n"
+            f"Seconds since last packet: {last_packet:.1f}\n"
+            f"Latest signal quality: {signal}\n"
+            f"Battery level (raw): {battery}\n"
+            f"Audio sample rate: {sample_rate} Hz\n"
+            f"Max volume: {max_volume}\n"
+            f"Paired BT devices ({len(paired)}):\n{paired_summary}\n"
+        )
+
+        report_soft_error("user_diagnostics", detail, app=self, force=True)
 
     def _on_session_select(self, session_id: int) -> None:
         session = self._db.get_session(session_id)

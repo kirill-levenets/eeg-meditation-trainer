@@ -587,6 +587,12 @@ class _AccordionSection(BoxLayout):
             padding=[S.GAP_SM, S.GAP_SM],
         )
         self._content.bind(minimum_height=self._content.setter("height"))
+        # Also re-fire _update_height when grandchild widgets resize the
+        # content (e.g. populate_bt_devices appending rows after the section
+        # was already opened). Without this, _scroll.height keeps the value
+        # snapshotted on the original add_widget call and the ScrollView
+        # clips later additions to a single visible row.
+        self._content.bind(minimum_height=lambda *_: self._update_height())
         self._scroll = ScrollView(size_hint_y=None, height=0)
         self._scroll.add_widget(self._content)
         super().add_widget(self._scroll)
@@ -613,6 +619,13 @@ class _AccordionSection(BoxLayout):
             self._set_collapsed(False)
         else:
             self._set_collapsed(True)
+
+    def open(self):
+        """Programmatically expand this section and collapse siblings."""
+        if self._accordion:
+            self._accordion._on_section_open(self)
+        if self._collapsed:
+            self._set_collapsed(False)
 
     def _set_collapsed(self, collapsed, notify=True):
         self._collapsed = collapsed

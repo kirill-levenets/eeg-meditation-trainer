@@ -1,4 +1,10 @@
-"""Global crash handler — installs sys/Kivy/thread exception hooks, pops dialog."""
+"""Global crash handler — installs sys/Kivy/thread exception hooks, pops dialog.
+
+Also exposes `report_soft_error(label, detail)` for handled-but-significant
+errors that aren't fatal but that we still want the user to be able to copy
+into a bug report. These reuse the same dialog with a non-fatal banner and
+without exiting the app on dismiss.
+"""
 
 from __future__ import annotations
 
@@ -6,11 +12,16 @@ import datetime as _dt
 import platform as _platform
 import sys as _sys
 import threading as _threading
+import time as _time
 import traceback as _traceback
-from typing import Optional
+from typing import Any
 
 from app.config import APP_VERSION
 from app.logger import logger
+
+# Per-label cooldown for soft errors so one flaky subsystem can't spam dialogs.
+_SOFT_ERROR_COOLDOWN_S: float = 60.0
+_SOFT_ERROR_LAST: dict[str, float] = {}
 
 
 def _kivy_version() -> str:
@@ -94,12 +105,17 @@ def _format_report(exc_type, exc_value, tb, source: str, app) -> str:
 _STATE = {"in_dialog": False, "app": None}
 
 
-def _schedule_dialog(report: str) -> None:
+def _schedule_dialog(report: str, fatal: bool = True, title: str = "") -> None:
     """Show the CrashDialog on the Kivy main thread. Overridden in tests."""
     try:
         from kivy.clock import Clock  # noqa: PLC0415
 
-        Clock.schedule_once(lambda dt: CrashDialog.show(report, _STATE["app"]), 0)
+        Clock.schedule_once(
+            lambda dt: CrashDialog.show(
+                report, _STATE["app"], fatal=fatal, title=title,
+            ),
+            0,
+        )
     except Exception:  # noqa: BLE001
         logger.exception("Failed to schedule crash dialog; falling back to stderr.")
         _sys.stderr.write(report)
@@ -119,13 +135,78 @@ def _handle_exception(exc_type, exc_value, tb, source: str, app) -> None:
         _traceback.print_exception(exc_type, exc_value, tb)
 
 
-class CrashDialog:
-    """Modal popup that auto-copies the crash report to the clipboard."""
+def _format_soft_report(label: str, detail: str, app) -> str:
+    """Same report shape as a crash, minus the traceback section."""
+    timestamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    body = (
+        f"### EEG Meditation Trainer diagnostic report\n\n"
+        f"- **App:** {APP_VERSION}\n"
+        f"- **Platform:** {_platform_string()}\n"
+        f"- **Python:** {_platform.python_version()}\n"
+        f"- **Kivy:** {_kivy_version()}\n"
+        f"- **Device:** {_device_name(app)}\n"
+        f"- **Session:** {_session_state(app)}\n"
+        f"- **Source:** soft:{label}\n"
+        f"- **Timestamp:** {timestamp}\n"
+    )
+    if detail:
+        body += f"\n<details><summary>Detail</summary>\n\n```\n{detail}\n```\n\n</details>\n"
+    return body
 
-    _popup: Optional[object] = None
+
+def report_soft_error(
+    label: str, detail: str = "", *, app=None, force: bool = False,
+) -> bool:
+    """Surface a non-fatal diagnostic report to the user.
+
+    `label` is a stable category name (e.g. "bt_connect_failed"). The same
+    label fires at most once per `_SOFT_ERROR_COOLDOWN_S` so a flaky subsystem
+    can't spam dialogs. Returns True if the dialog was scheduled, False if
+    suppressed by cooldown or re-entrance.
+
+    Pass `force=True` to bypass the cooldown (use only for user-initiated
+    actions like the "Copy diagnostics" button).
+    """
+    if _STATE["in_dialog"]:
+        return False
+    now = _time.monotonic()
+    if not force:
+        last = _SOFT_ERROR_LAST.get(label, 0.0)
+        if now - last < _SOFT_ERROR_COOLDOWN_S:
+            logger.debug(f"soft-error '{label}' suppressed (cooldown)")
+            return False
+    _SOFT_ERROR_LAST[label] = now
+
+    target_app = app if app is not None else _STATE["app"]
+    try:
+        report = _format_soft_report(label, detail, target_app)
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to build soft-error report")
+        return False
+
+    _STATE["in_dialog"] = True
+    try:
+        _schedule_dialog(report, fatal=False)
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to schedule soft-error dialog")
+        _STATE["in_dialog"] = False
+        return False
+    return True
+
+
+class CrashDialog:
+    """Modal popup that auto-copies the crash report to the clipboard.
+
+    `fatal=True` (default): banner says the app hit an unexpected error and
+    Dismiss exits the app — used for true crashes from sys/thread/Kivy hooks.
+    `fatal=False`: used for soft errors and on-demand diagnostics; banner is
+    informational and Dismiss simply closes the popup without stopping the app.
+    """
+
+    _popup: Any = None
 
     @classmethod
-    def show(cls, report: str, app) -> None:
+    def show(cls, report: str, app, fatal: bool = True, title: str = "") -> None:
         from kivy.core.clipboard import Clipboard  # noqa: PLC0415
         from kivy.metrics import dp  # noqa: PLC0415
         from kivy.uix.boxlayout import BoxLayout  # noqa: PLC0415
@@ -141,13 +222,21 @@ class CrashDialog:
             logger.exception("Clipboard copy failed during crash dialog.")
 
         root = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12))
-        banner = Label(
-            text=(
+        if fatal:
+            banner_text = (
                 "The app hit an unexpected error. The report below has been "
                 "copied to your clipboard. Paste it into a new GitHub issue at "
                 "github.com/kirill-levenets/eeg-meditation-trainer/issues so we "
                 "can fix it."
-            ),
+            )
+        else:
+            banner_text = (
+                "Diagnostic report — already copied to your clipboard. Paste it "
+                "into Telegram / email / GitHub if you'd like help with this issue. "
+                "You can keep using the app."
+            )
+        banner = Label(
+            text=banner_text,
             size_hint_y=None,
             height=dp(72),
             halign="left",
@@ -177,7 +266,7 @@ class CrashDialog:
             spacing=dp(8),
         )
         btn_copy = Button(text="Copied \u2713")
-        btn_dismiss = Button(text="Dismiss & Exit")
+        btn_dismiss = Button(text="Dismiss & Exit" if fatal else "Close")
 
         def _on_copy(_btn):
             try:
@@ -188,10 +277,13 @@ class CrashDialog:
 
         def _on_dismiss(_btn):
             try:
-                cls._popup.dismiss()
+                if cls._popup is not None:
+                    cls._popup.dismiss()
             except Exception:  # noqa: BLE001
                 pass
             _STATE["in_dialog"] = False
+            if not fatal:
+                return
             try:
                 if app is not None:
                     app.stop()
@@ -204,13 +296,21 @@ class CrashDialog:
         btn_row.add_widget(btn_dismiss)
         root.add_widget(btn_row)
 
+        if title:
+            popup_title = title
+        elif fatal:
+            popup_title = "Unexpected error"
+        else:
+            popup_title = "Diagnostic report"
+
         cls._popup = Popup(
-            title="Unexpected error",
+            title=popup_title,
             content=root,
             size_hint=(0.92, 0.92),
             auto_dismiss=False,
         )
-        cls._popup.open()
+        if cls._popup is not None:
+            cls._popup.open()
 
 
 def _sys_hook(exc_type, exc_value, tb) -> None:

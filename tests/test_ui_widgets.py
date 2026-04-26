@@ -1,6 +1,9 @@
 import unittest
 
+from kivy.metrics import dp
+
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
+from app.ui.theme import ThemedAccordion
 
 
 class TestScrollableGraphWidget(unittest.TestCase):
@@ -226,6 +229,104 @@ class TestAnalyticsStorageInfo(unittest.TestCase):
         screen = AnalyticsScreen()
         screen.update_storage_info(5242880, {"sessions": 50, "metrics": 100000, "users": 3})
         self.assertIn("5.0 MB", screen._storage_label.text)
+
+
+class TestAccordionGrandchildGrowth(unittest.TestCase):
+    """Regression: when content height grows AFTER the section was first
+    opened (e.g. populate_bt_devices appending rows after the user opened
+    the Device accordion), _scroll.height must track the new minimum_height.
+    Without the bind, _scroll.height stayed at the initial snapshot and the
+    ScrollView clipped all but the first row on Android."""
+
+    def test_scroll_tracks_content_minimum_height_after_open(self):
+        acc = ThemedAccordion()
+        section = acc.add_section("Device", collapsed=False)
+
+        # Simulate the snapshot taken when the section was opened with a
+        # near-empty content (e.g. only a Scan button, ~36dp).
+        section._content.minimum_height = dp(40)
+        baseline = section._scroll.height
+
+        # Now grandchildren get appended — _content.minimum_height grows.
+        # The fix binds this directly to _update_height so _scroll.height
+        # follows. Without the fix, _scroll.height stays at `baseline`.
+        section._content.minimum_height = dp(220)
+
+        self.assertGreater(
+            section._scroll.height, baseline,
+            "section _scroll.height did not track _content.minimum_height "
+            "growth — accordion will clip newly added rows.",
+        )
+        self.assertEqual(section._scroll.height, dp(220))
+
+    def test_collapsed_section_keeps_scroll_at_zero(self):
+        # Collapsed sections must stay at 0 height regardless of content
+        # changes (otherwise collapsed sections would expand silently).
+        acc = ThemedAccordion()
+        section = acc.add_section("Device", collapsed=True)
+        section._content.minimum_height = dp(220)
+        self.assertEqual(section._scroll.height, 0)
+
+    def test_open_method_expands_section(self):
+        acc = ThemedAccordion()
+        s1 = acc.add_section("A", collapsed=False)
+        s2 = acc.add_section("B", collapsed=True)
+        # Opening B must collapse A (only one section open at a time).
+        s2.open()
+        self.assertFalse(s2._collapsed)
+        self.assertTrue(s1._collapsed)
+
+
+class TestSettingsDevicePicker(unittest.TestCase):
+    """Multi-device routing surface on SettingsScreen."""
+
+    def setUp(self):
+        from app.ui.settings_screen import SettingsScreen
+        self.screen = SettingsScreen()
+
+    def test_focus_device_section_shows_banner_and_opens_section(self):
+        # Device section starts collapsed. focus_device_section should open it
+        # and set the banner text + non-zero height.
+        self.assertTrue(self.screen._device_section._collapsed)
+        self.screen.focus_device_section("Pick one of 3 devices")
+        self.assertFalse(self.screen._device_section._collapsed)
+        self.assertEqual(
+            self.screen._device_picker_banner.text, "Pick one of 3 devices",
+        )
+        self.assertGreater(self.screen._device_picker_banner.height, 0)
+
+    def test_update_device_status_connected_clears_banner(self):
+        self.screen.focus_device_section("Pick one")
+        self.assertGreater(self.screen._device_picker_banner.height, 0)
+        # Once a device is connected, the prompt must disappear.
+        self.screen.update_device_status(True, name="MindWave A")
+        self.assertEqual(self.screen._device_picker_banner.text, "")
+        self.assertEqual(self.screen._device_picker_banner.height, 0)
+
+
+class TestFilterMindwave(unittest.TestCase):
+    """Static helper used by both auto-scan and start-session paths."""
+
+    def test_filter_mindwave_picks_only_matching_names(self):
+        from app.ui.app_manager import EEGMeditationApp
+        devices = [
+            {"name": "Bose QC35", "address": "AA:00"},
+            {"name": "MindWave Mobile 2", "address": "AA:01"},
+            {"name": "neurosky_42", "address": "AA:02"},
+            {"name": "Apple Watch", "address": "AA:03"},
+            {"name": "MINDWAVE", "address": "AA:04"},
+        ]
+        out = EEGMeditationApp._filter_mindwave(devices)
+        self.assertEqual([d["address"] for d in out], ["AA:01", "AA:02", "AA:04"])
+
+    def test_filter_mindwave_handles_missing_name(self):
+        from app.ui.app_manager import EEGMeditationApp
+        out = EEGMeditationApp._filter_mindwave([
+            {"address": "AA:01"},                  # no 'name' key
+            {"name": None, "address": "AA:02"},    # None name
+            {"name": "", "address": "AA:03"},      # empty name
+        ])
+        self.assertEqual(out, [])
 
 
 if __name__ == "__main__":

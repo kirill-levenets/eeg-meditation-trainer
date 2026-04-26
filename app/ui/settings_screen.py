@@ -77,6 +77,7 @@ class SettingsScreen(Screen):
         self._on_device_mode_toggle: Optional[Callable] = None
         self._on_scan_devices: Optional[Callable] = None
         self._on_device_select: Optional[Callable] = None
+        self._on_copy_diagnostics: Optional[Callable] = None
         self._on_line_width_change: Optional[Callable] = None
         self._on_rotate_screen: Optional[Callable] = None
         self._on_custom_formula_change: Optional[Callable] = None
@@ -206,6 +207,25 @@ class SettingsScreen(Screen):
 
         # --- Device Status section ---
         device_section = accordion.add_section("Device", collapsed=True)
+        self._device_section = device_section
+
+        # One-shot banner used by focus_device_section(message). Empty/0-height
+        # by default so it doesn't take space; populated when we route the
+        # user here (e.g. multiple MindWave devices found, scan returned 0).
+        self._device_picker_banner = Label(
+            text="",
+            font_size=F.BODY,
+            color=C.WARM,
+            bold=True,
+            size_hint_y=None,
+            height=0,
+            halign="left", valign="middle",
+            opacity=0,
+        )
+        self._device_picker_banner.bind(
+            size=self._device_picker_banner.setter("text_size")
+        )
+        device_section.add_widget(self._device_picker_banner)
 
         self._device_status_label = Label(
             text="Not connected",
@@ -272,6 +292,20 @@ class SettingsScreen(Screen):
         )
         self._bt_section.add_widget(self._bt_device_list)
         device_section.add_widget(self._bt_section)
+
+        # On-demand diagnostics button — useful for users we can't reach in
+        # person. Builds a copy-pasteable report with platform/device/audio
+        # state and opens the same dialog the crash handler uses.
+        self._diagnostics_btn = StyledButton(
+            text="Copy Diagnostics",
+            font_size=F.SMALL,
+            bg_color=C.BG_CARD,
+            text_color=C.TEXT_SECONDARY,
+            size_hint_y=None,
+            height=dp(32),
+        )
+        self._diagnostics_btn.bind(on_release=self._on_diagnostics_pressed)
+        device_section.add_widget(self._diagnostics_btn)
 
         # --- Threshold section ---
         threshold_section = accordion.add_section("Threshold", collapsed=True)
@@ -841,6 +875,7 @@ class SettingsScreen(Screen):
         scroll.add_widget(accordion)
         root.add_widget(scroll)
         self._accordion = accordion
+        self._settings_scroll = scroll
         self.add_widget(root)
 
     def _update_bg(self, *args) -> None:
@@ -1076,6 +1111,13 @@ class SettingsScreen(Screen):
     def set_device_select_callback(self, callback: Callable) -> None:
         self._on_device_select = callback
 
+    def set_copy_diagnostics_callback(self, callback: Callable) -> None:
+        self._on_copy_diagnostics = callback
+
+    def _on_diagnostics_pressed(self, *_args) -> None:
+        if self._on_copy_diagnostics:
+            self._on_copy_diagnostics()
+
     def populate_bt_devices(self, devices: list) -> None:
         """Populate the BT device list with scan results."""
         self._bt_device_list.clear_widgets()
@@ -1110,6 +1152,8 @@ class SettingsScreen(Screen):
         if connected:
             self._device_status_label.text = f"Connected: {name}" if name else "Connected"
             self._device_status_label.color = C.CONNECTED
+            # User has resolved the picker prompt — clear the banner.
+            self._set_device_picker_banner("")
         else:
             self._device_status_label.text = "Not connected"
             self._device_status_label.color = C.DISCONNECTED
@@ -1119,6 +1163,46 @@ class SettingsScreen(Screen):
             self._device_meta_label.text = "Mode: Mock Data"
         else:
             self._device_meta_label.text = "Mode: Real Device"
+
+    def _set_device_picker_banner(self, message: str) -> None:
+        """Show or hide the picker banner above the device list."""
+        if message:
+            self._device_picker_banner.text = message
+            self._device_picker_banner.height = dp(48)
+            self._device_picker_banner.opacity = 1
+        else:
+            self._device_picker_banner.text = ""
+            self._device_picker_banner.height = 0
+            self._device_picker_banner.opacity = 0
+
+    def focus_device_section(self, message: str = "") -> None:
+        """Open the Device accordion, scroll it into view, and surface a prompt.
+
+        Used when the app needs the user's attention on device selection — e.g.
+        multiple MindWave devices paired, or a scan returned zero results and we
+        want the user to retry / check permissions.
+        """
+        from kivy.clock import Clock
+
+        if hasattr(self, "_device_section") and self._device_section is not None:
+            self._device_section.open()
+        if message:
+            self._set_device_picker_banner(message)
+        else:
+            self._set_device_picker_banner("")
+
+        def _scroll(_dt):
+            scroll = getattr(self, "_settings_scroll", None)
+            section = getattr(self, "_device_section", None)
+            if scroll is not None and section is not None:
+                try:
+                    scroll.scroll_to(section)
+                except Exception:  # noqa: BLE001
+                    pass
+
+        # Defer to next frame so the section's expanded height is laid out
+        # before we ask the ScrollView to bring it into view.
+        Clock.schedule_once(_scroll, 0)
 
     @property
     def graph_toggles(self) -> dict[str, bool]:

@@ -42,6 +42,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Connect-overlay countdown freezing on slow BT connects (`_stop_tick_thread` no longer joins the current thread).
 - Sinking bell / distraction chime default OFF for new users.
 - Stats toggle button vertical alignment + clearer "LIVE"/"AVG" text.
+- **Settings → Device list clipped to a single row on Android.** When the
+  Device accordion section was opened *before* the Bluetooth scan
+  populated the list, `_AccordionSection._scroll.height` snapshotted the
+  empty content height and never grew when rows were appended later. The
+  `_content.minimum_height` is now bound to `_update_height`, so the
+  ScrollView tracks grandchild growth.
+
+### Added
+
+- **Multi-device picker.** When more than one paired device matches
+  `mindwave`/`neurosky` (case-insensitive) on auto-scan or on session
+  start, the app no longer silently picks the first one — it routes the
+  user to Settings → Device, opens the section, scrolls it into view,
+  shows a "pick one" banner and lists only the matching devices. The
+  banner is cleared automatically once a device connects.
+  (`SettingsScreen.focus_device_section`, `EEGMeditationApp._filter_mindwave`.)
+- **Soft-error / diagnostics dialog.** New `crash_handler.report_soft_error(label, detail)`
+  reuses the crash dialog with a non-fatal banner and a "Close" button
+  (no `app.stop()`). Per-label cooldown (60 s) prevents one flaky
+  subsystem from spamming the user. Wired to the BT-connect-failure path
+  so users get a copy-pasteable technical report alongside the friendly
+  retry overlay. New **Copy Diagnostics** button in Settings → Device
+  builds a report on demand (paired BT list, current device, last
+  connect error, signal/battery, audio config) and pops the same dialog
+  bypassing the cooldown.
 
 ## [1.1.1] - 2026-04-12
 

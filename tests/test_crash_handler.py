@@ -114,6 +114,91 @@ def test_reentrance_guard_prevents_second_dialog(monkeypatch):
     assert len(scheduled) == 1  # second call blocked
 
 
+def test_report_soft_error_schedules_dialog_with_label(monkeypatch):
+    """First call with a fresh label must schedule a non-fatal dialog."""
+    import app.crash_handler as ch
+
+    scheduled = []
+    monkeypatch.setattr(
+        ch, "_schedule_dialog",
+        lambda report, fatal=True, title="": scheduled.append((report, fatal)),
+    )
+    ch._STATE["in_dialog"] = False
+    ch._SOFT_ERROR_LAST.clear()
+
+    app = _FakeApp(session_state="RUNNING", device_name="MindWave Mobile 2")
+    ok = ch.report_soft_error("bt_connect_failed", "errno 16", app=app)
+    try:
+        assert ok is True
+        assert len(scheduled) == 1
+        report, fatal = scheduled[0]
+        assert fatal is False
+        assert "diagnostic report" in report.lower()
+        assert "soft:bt_connect_failed" in report
+        assert "errno 16" in report
+        assert "MindWave Mobile 2" in report
+    finally:
+        ch._STATE["in_dialog"] = False
+
+
+def test_report_soft_error_cooldown_suppresses_repeats(monkeypatch):
+    """Same label inside the cooldown window must NOT pop a second dialog."""
+    import app.crash_handler as ch
+
+    scheduled = []
+    monkeypatch.setattr(
+        ch, "_schedule_dialog",
+        lambda report, fatal=True, title="": scheduled.append(report),
+    )
+    ch._STATE["in_dialog"] = False
+    ch._SOFT_ERROR_LAST.clear()
+
+    app = _FakeApp()
+    assert ch.report_soft_error("bt_connect_failed", "first", app=app) is True
+    ch._STATE["in_dialog"] = False  # simulate dialog dismissed
+    assert ch.report_soft_error("bt_connect_failed", "second", app=app) is False
+    assert len(scheduled) == 1
+
+
+def test_report_soft_error_force_bypasses_cooldown(monkeypatch):
+    """User-initiated 'Copy Diagnostics' must always pop, even on re-tap."""
+    import app.crash_handler as ch
+
+    scheduled = []
+    monkeypatch.setattr(
+        ch, "_schedule_dialog",
+        lambda report, fatal=True, title="": scheduled.append(report),
+    )
+    ch._STATE["in_dialog"] = False
+    ch._SOFT_ERROR_LAST.clear()
+
+    app = _FakeApp()
+    ch.report_soft_error("user_diagnostics", "first", app=app)
+    ch._STATE["in_dialog"] = False
+    ch.report_soft_error("user_diagnostics", "second", app=app, force=True)
+    assert len(scheduled) == 2
+
+
+def test_report_soft_error_blocked_during_active_dialog(monkeypatch):
+    """If a (fatal) crash dialog is up, soft errors must not interrupt it."""
+    import app.crash_handler as ch
+
+    scheduled = []
+    monkeypatch.setattr(
+        ch, "_schedule_dialog",
+        lambda report, fatal=True, title="": scheduled.append(report),
+    )
+    ch._STATE["in_dialog"] = True  # a crash dialog is currently up
+    ch._SOFT_ERROR_LAST.clear()
+
+    app = _FakeApp()
+    try:
+        assert ch.report_soft_error("anything", "noise", app=app) is False
+        assert scheduled == []
+    finally:
+        ch._STATE["in_dialog"] = False
+
+
 def test_install_sets_all_three_hooks(monkeypatch):
     import sys
     import threading
