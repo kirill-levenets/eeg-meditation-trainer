@@ -1,73 +1,79 @@
 import unittest
 
 from app.config import APP
-from app.ui.timer_screen import TimerScreen
+from app.session.timer_state import TimerState
 
 
-class TestTimerScreen(unittest.TestCase):
-    """Test meditation timer functionality."""
+class TestTimerState(unittest.TestCase):
+    """Headless timer state used by the session tick loop.
+
+    Replaces the old TimerScreen tests — that Screen was orphaned (no nav
+    entry, no UI access path) and was removed when the file picker / Test
+    Sound / countdown display moved into Settings → Timer.
+    """
 
     def setUp(self):
-        self.timer = TimerScreen()
+        self.timer = TimerState()
 
     def test_default_disabled(self):
         self.assertFalse(self.timer.enabled)
 
-    def test_enable_toggle(self):
-        self.timer._enable_cb.active = True
+    def test_set_enabled(self):
+        self.timer.set_enabled(True)
         self.assertTrue(self.timer.enabled)
+        self.timer.set_enabled(False)
+        self.assertFalse(self.timer.enabled)
 
-    def test_duration_default(self):
-        self.assertEqual(self.timer._duration_minutes, APP.TIMER_DEFAULT_MINUTES)
+    def test_default_duration(self):
+        self.assertEqual(self.timer.duration_minutes, APP.TIMER_DEFAULT_MINUTES)
 
-    def test_set_duration(self):
-        self.timer._set_duration(30)
-        self.assertEqual(self.timer._duration_minutes, 30)
+    def test_set_duration_clamps_to_at_least_one(self):
+        self.timer.set_duration(0)
+        self.assertEqual(self.timer.duration_minutes, 1)
+        self.timer.set_duration(15)
+        self.assertEqual(self.timer.duration_minutes, 15)
 
     def test_tick_returns_false_when_disabled(self):
         self.assertFalse(self.timer.tick(0.5))
 
-    def test_countdown(self):
-        self.timer._enable_cb.active = True
-        self.timer._set_duration(1)  # 1 minute
+    def test_countdown_decrements_remaining(self):
+        self.timer.set_enabled(True)
+        self.timer.set_duration(1)  # 1 minute
         self.timer.start_countdown()
-        self.assertEqual(self.timer._remaining_seconds, 60.0)
-        expired = self.timer.tick(30.0)
-        self.assertFalse(expired)
-        self.assertEqual(self.timer._remaining_seconds, 30.0)
+        self.assertEqual(self.timer.remaining_seconds, 60.0)
+        self.assertFalse(self.timer.tick(30.0))
+        self.assertEqual(self.timer.remaining_seconds, 30.0)
 
-    def test_timer_expires(self):
-        self.timer._enable_cb.active = True
-        self.timer._set_duration(1)
+    def test_timer_expires_when_countdown_reaches_zero(self):
+        self.timer.set_enabled(True)
+        self.timer.set_duration(1)
         self.timer.start_countdown()
-        expired = self.timer.tick(61.0)
-        self.assertTrue(expired)
+        self.assertTrue(self.timer.tick(61.0))
+        self.assertEqual(self.timer.remaining_seconds, 0.0)
 
-    def test_reset(self):
-        self.timer._enable_cb.active = True
-        self.timer._set_duration(5)
+    def test_reset_clears_remaining(self):
+        self.timer.set_enabled(True)
+        self.timer.set_duration(5)
         self.timer.start_countdown()
         self.timer.tick(10.0)
         self.timer.reset()
-        self.assertEqual(self.timer._remaining_seconds, 0.0)
+        self.assertEqual(self.timer.remaining_seconds, 0.0)
 
     def test_duration_seconds_property(self):
-        self.timer._set_duration(20)
+        self.timer.set_duration(20)
         self.assertEqual(self.timer.duration_seconds, 1200.0)
 
     def test_custom_sound_path_default_empty(self):
         self.assertEqual(self.timer.custom_sound_path, "")
 
-    def test_custom_sound_path_set(self):
-        self.timer._sound_path_input.text = "/tmp/bell.wav"
+    def test_custom_sound_path_strips_whitespace(self):
+        self.timer.set_custom_sound_path("  /tmp/bell.wav  ")
         self.assertEqual(self.timer.custom_sound_path, "/tmp/bell.wav")
 
-    def test_test_sound_callback(self):
-        called = []
-        self.timer.set_test_sound_callback(lambda: called.append(True))
-        self.timer._on_test_sound_pressed()
-        self.assertEqual(len(called), 1)
+    def test_custom_sound_path_handles_none(self):
+        self.timer.set_custom_sound_path("")
+        self.assertEqual(self.timer.custom_sound_path, "")
 
 
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    unittest.main()

@@ -190,22 +190,61 @@ class TestDiaryScreenUI(unittest.TestCase):
 
 
 
-class TestTimerEnableDisplay(unittest.TestCase):
-    """Test timer countdown display updates on enable toggle."""
+class TestSettingsTimerSoundRow(unittest.TestCase):
+    """Custom timer-sound row was moved from the orphan TimerScreen
+    into the Settings → Timer accordion. It must round-trip through the
+    `timer_sound_path` property and notify the change callback so
+    TimerState stays in sync."""
 
-    def test_enable_shows_duration(self):
-        from app.ui.timer_screen import TimerScreen
-        timer = TimerScreen()
-        timer._set_duration(15)
-        timer._enable_cb.active = True
-        self.assertEqual(timer._countdown_label.text, "15:00")
+    def setUp(self):
+        from app.ui.settings_screen import SettingsScreen
+        self.screen = SettingsScreen()
 
-    def test_disable_shows_dashes(self):
-        from app.ui.timer_screen import TimerScreen
-        timer = TimerScreen()
-        timer._enable_cb.active = True
-        timer._enable_cb.active = False
-        self.assertEqual(timer._countdown_label.text, "--:--")
+    def test_timer_sound_path_round_trip(self):
+        self.screen.timer_sound_path = "/tmp/bell.wav"
+        self.assertEqual(self.screen.timer_sound_path, "/tmp/bell.wav")
+        self.assertEqual(self.screen._timer_sound_input.text, "/tmp/bell.wav")
+
+    def test_path_change_callback_fires_with_stripped_value(self):
+        captured = []
+        self.screen.set_timer_sound_change_callback(captured.append)
+        self.screen._timer_sound_input.text = "  /tmp/foo.mp3  "
+        self.assertEqual(captured, ["/tmp/foo.mp3"])
+
+    def test_test_button_invokes_callback(self):
+        called = []
+        self.screen.set_test_timer_sound_callback(lambda: called.append(True))
+        self.screen._timer_sound_test_btn.dispatch("on_release")
+        self.assertEqual(called, [True])
+
+    def test_test_button_toggles_to_stop_then_back(self):
+        # Long custom files would otherwise keep playing with no UI control
+        # to interrupt them. The Test button doubles as a Stop button.
+        played = []
+        stopped = []
+        self.screen.set_test_timer_sound_callback(lambda: played.append(True))
+        self.screen.set_stop_timer_sound_callback(lambda: stopped.append(True))
+
+        self.assertEqual(self.screen._timer_sound_test_btn.text, "Test")
+        self.screen._timer_sound_test_btn.dispatch("on_release")
+        self.assertEqual(self.screen._timer_sound_test_btn.text, "Stop")
+        self.assertEqual(played, [True])
+        self.assertEqual(stopped, [])
+
+        # Second tap stops playback and reverts text.
+        self.screen._timer_sound_test_btn.dispatch("on_release")
+        self.assertEqual(self.screen._timer_sound_test_btn.text, "Test")
+        self.assertEqual(stopped, [True])
+        self.assertEqual(played, [True])  # unchanged
+
+    def test_natural_playback_end_resets_button_text(self):
+        self.screen.set_test_timer_sound_callback(lambda: None)
+        self.screen._timer_sound_test_btn.dispatch("on_release")
+        self.assertEqual(self.screen._timer_sound_test_btn.text, "Stop")
+        # Sound.on_stop fires → app_manager calls notify_timer_sound_test_ended.
+        self.screen.notify_timer_sound_test_ended()
+        self.assertEqual(self.screen._timer_sound_test_btn.text, "Test")
+        self.assertFalse(self.screen._timer_sound_test_playing)
 
 
 class TestAnalyticsStorageInfo(unittest.TestCase):

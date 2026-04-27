@@ -92,6 +92,11 @@ class AppConfig:
     SINKING_ALERT_COOLDOWN: float = 15.0
     BELL_FREQUENCY: float = 800.0
     BELL_DURATION: float = 0.6
+    # Separate bell for the meditation timer end — deeper, longer, more
+    # singing-bowl-like. The sinking-alert bell stays short/high above so
+    # mid-session attention pings remain crisp.
+    TIMER_BELL_FREQUENCY: float = 220.0
+    TIMER_BELL_DURATION: float = 4.0
 
     SUBTLE_ALERT_THRESHOLD: float = 30.0
     SUBTLE_ALERT_COOLDOWN: float = 20.0

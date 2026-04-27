@@ -310,6 +310,7 @@ class AudioEngine:
         self._tmpdir: str = tempfile.mkdtemp(prefix="eeg_audio_")
         self._noise_path = os.path.join(self._tmpdir, "noise.wav")
         self._bell_path = os.path.join(self._tmpdir, "bell.wav")
+        self._timer_bell_path = os.path.join(self._tmpdir, "timer_bell.wav")
         self._chime_path = os.path.join(self._tmpdir, "chime.wav")
         self._disconnect_path = os.path.join(self._tmpdir, "disconnect.wav")
         self._chime_sound: object = None
@@ -329,6 +330,11 @@ class AudioEngine:
             self._rate, APP.BELL_FREQUENCY, APP.BELL_DURATION,
         )
         _write_wav(self._bell_path, pcm, self._rate)
+
+        pcm = _generate_bell_wav(
+            self._rate, APP.TIMER_BELL_FREQUENCY, APP.TIMER_BELL_DURATION,
+        )
+        _write_wav(self._timer_bell_path, pcm, self._rate)
 
         pcm = _generate_chime_wav(
             self._rate, APP.CHIME_FREQUENCY, APP.CHIME_DURATION,
@@ -572,7 +578,8 @@ class AudioEngine:
         t.start()
 
     def play_timer_sound(self, custom_path: str = "") -> None:
-        """Play timer end sound: custom WAV if provided, else default bell."""
+        """Play timer end sound: custom WAV if provided, else default
+        timer bell (deeper / longer than the sinking-alert bell)."""
         if custom_path and os.path.isfile(custom_path):
             try:
                 from kivy.core.audio import SoundLoader
@@ -586,8 +593,34 @@ class AudioEngine:
                     return
             except Exception as e:
                 logger.warning(f"Failed to play custom sound: {e}")
-        self._play_bell()
-        logger.info("Timer sound: default bell")
+        # Default: play the dedicated timer bell (NOT the short sinking
+        # alert bell). Reuse the same _bell_sound slot so summary buttons
+        # and stop_timer_bell() can stop it through one path.
+        if self._bell_sound:
+            try:
+                self._bell_sound.stop()
+                self._bell_sound.unload()
+            except Exception:
+                pass
+        self._bell_sound = self._play_sound(self._timer_bell_path, 0.9)
+        logger.info("Timer sound: default timer bell")
+
+    def stop_timer_bell(self) -> None:
+        """Stop the timer-end bell early (e.g. user pressed a summary button).
+
+        Safe to call when nothing is playing — the existing reference is
+        cleared either way, so subsequent `_audio.start()` / new sessions
+        don't carry a stale Sound across.
+        """
+        snd = self._bell_sound
+        if not snd:
+            return
+        try:
+            snd.stop()
+            snd.unload()
+        except Exception:
+            pass
+        self._bell_sound = None
 
     def play_connect_sound(self) -> None:
         """Play a chime to confirm device connected."""
@@ -643,7 +676,13 @@ class AudioEngine:
     def cleanup(self) -> None:
         """Stop playback, unload sounds, remove temp files."""
         self.stop()
-        for path in (self._noise_path, self._bell_path, self._chime_path, self._disconnect_path):
+        for path in (
+            self._noise_path,
+            self._bell_path,
+            self._timer_bell_path,
+            self._chime_path,
+            self._disconnect_path,
+        ):
             try:
                 if path and os.path.exists(path):
                     os.remove(path)

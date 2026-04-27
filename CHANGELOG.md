@@ -9,6 +9,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.0] - 2026-04-27
 
+### Fixed (timer overhaul, folded into the v1.2.0 retag)
+
+- **Timer-end sound was inaudible**: when the meditation timer expired,
+  the bell was started by the tick thread and then unloaded ~10–50 ms
+  later by the immediate `_audio.stop()` inside `_stop_and_save`. The
+  log line "Timer sound: default bell" appeared but no audible bell
+  played. Reordered the timer-expiry path to play the bell *after*
+  `_stop_and_save` (so the engine teardown can't truncate it) and added
+  `AudioEngine.stop_timer_bell()`. The bell now keeps playing on the
+  summary card until the file ends naturally, or the user taps any
+  summary button (Save / View in History / Close), which calls
+  `stop_timer_bell` first. Starting a new session also pre-emptively
+  stops any leftover bell.
+- **Custom timer-end sound was unreachable in the UI**: the path input,
+  Browse (file chooser) and Test buttons lived on `app/ui/timer_screen.py`,
+  which was registered in the screen manager but had no nav entry, so
+  no user could actually set a custom WAV. Moved those controls into
+  Settings → Timer accordion. The orphan `TimerScreen` is removed; the
+  countdown logic moved to the headless `app/session/timer_state.py`
+  (`TimerState`).
+- **Custom timer-end sound was not restored at launch**: the path was
+  written to user settings but read back into the orphan widget,
+  effectively losing it on every launch. The persisted value now
+  restores into both `TimerState` and the new Settings input.
+
+### Added (timer overhaul, folded into the v1.2.0 retag)
+
+- `AudioEngine.stop_timer_bell()` — stop only the timer-end bell early,
+  used by summary-button handlers to honour user-driven dismissals.
+- `TimerState` — Kivy-free model with `enabled`, `duration_minutes`,
+  `remaining_seconds`, `custom_sound_path`, `start_countdown()`, `tick()`
+  and `reset()`. Drives the session tick loop directly.
+- **Default timer-end bell is now deeper and longer** (220 Hz fundamental,
+  4 s decay vs the previous 800 Hz / 0.6 s tingsha). Generated to a
+  separate `timer_bell.wav` so the sinking-alert bell stays short and
+  high for crisp mid-session pings. Configurable via
+  `APP.TIMER_BELL_FREQUENCY` / `APP.TIMER_BELL_DURATION`.
+- **Test button doubles as a Stop button.** Tapping Test in
+  Settings → Timer starts the configured sound and flips the button
+  text to "Stop"; tapping it again interrupts playback. The button
+  reverts to "Test" automatically when the file ends naturally
+  (Sound.on_stop binding, scheduled on the main thread).
+
+### Removed (timer overhaul, folded into the v1.2.0 retag)
+
+- `app/ui/timer_screen.py` — the orphan `TimerScreen` UI was unreachable
+  through the bottom nav (which only lists session / history / settings)
+  and its widgets (countdown label, file picker, Test Sound) were dead
+  code. Functionality moved as described above.
+
 ### Added
 
 - Landscape-aware Live Session layout with pinned bottom bar and scrollable body.

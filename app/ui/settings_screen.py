@@ -78,6 +78,10 @@ class SettingsScreen(Screen):
         self._on_scan_devices: Optional[Callable] = None
         self._on_device_select: Optional[Callable] = None
         self._on_copy_diagnostics: Optional[Callable] = None
+        self._on_timer_sound_change: Optional[Callable] = None
+        self._on_test_timer_sound: Optional[Callable] = None
+        self._on_stop_timer_sound: Optional[Callable] = None
+        self._timer_sound_test_playing: bool = False
         self._on_line_width_change: Optional[Callable] = None
         self._on_rotate_screen: Optional[Callable] = None
         self._on_custom_formula_change: Optional[Callable] = None
@@ -204,6 +208,55 @@ class SettingsScreen(Screen):
             fmt="{} min",
         )
         timer_section.add_widget(timer_presets)
+
+        # Custom timer-end sound: path input + browse + test buttons.
+        # When empty, the synthesised tingsha bell is used.
+        timer_sound_lbl = Label(
+            text="Timer End Sound (optional)",
+            font_size=F.SMALL,
+            color=C.TEXT_SECONDARY,
+            size_hint_y=None, height=dp(20),
+            halign="left",
+        )
+        timer_sound_lbl.bind(size=timer_sound_lbl.setter("text_size"))
+        timer_section.add_widget(timer_sound_lbl)
+
+        timer_sound_row = BoxLayout(
+            size_hint_y=None, height=dp(36), spacing=S.GAP_SM,
+        )
+        self._timer_sound_input = TextInput(
+            hint_text="Default bell",
+            text="",
+            multiline=False,
+            font_size=F.SMALL,
+            foreground_color=C.TEXT,
+            background_color=list(C.BG_INPUT),
+            size_hint_x=0.5,
+        )
+        self._timer_sound_input.bind(text=self._on_timer_sound_path_change)
+        self._timer_sound_browse_btn = StyledButton(
+            text="Browse",
+            font_size=F.SMALL,
+            bg_color=C.BG_CARD,
+            text_color=C.TEXT,
+            size_hint_x=0.25,
+            size_hint_y=None,
+            height=dp(36),
+        )
+        self._timer_sound_browse_btn.bind(on_release=self._on_timer_sound_browse)
+        self._timer_sound_test_btn = StyledButton(
+            text="Test",
+            font_size=F.SMALL,
+            bg_color=C.PRIMARY_DIM,
+            size_hint_x=0.25,
+            size_hint_y=None,
+            height=dp(36),
+        )
+        self._timer_sound_test_btn.bind(on_release=self._on_timer_sound_test)
+        timer_sound_row.add_widget(self._timer_sound_input)
+        timer_sound_row.add_widget(self._timer_sound_browse_btn)
+        timer_sound_row.add_widget(self._timer_sound_test_btn)
+        timer_section.add_widget(timer_sound_row)
 
         # --- Device Status section ---
         device_section = accordion.add_section("Device", collapsed=True)
@@ -1117,6 +1170,86 @@ class SettingsScreen(Screen):
     def _on_diagnostics_pressed(self, *_args) -> None:
         if self._on_copy_diagnostics:
             self._on_copy_diagnostics()
+
+    # --- Timer end sound: path input, browse, test ----------------------
+
+    @property
+    def timer_sound_path(self) -> str:
+        return self._timer_sound_input.text.strip()
+
+    @timer_sound_path.setter
+    def timer_sound_path(self, value: str) -> None:
+        self._timer_sound_input.text = value or ""
+
+    def set_timer_sound_change_callback(self, callback: Callable) -> None:
+        self._on_timer_sound_change = callback
+
+    def set_test_timer_sound_callback(self, callback: Callable) -> None:
+        self._on_test_timer_sound = callback
+
+    def set_stop_timer_sound_callback(self, callback: Callable) -> None:
+        self._on_stop_timer_sound = callback
+
+    def _on_timer_sound_path_change(self, _instance, value: str) -> None:
+        if self._on_timer_sound_change:
+            self._on_timer_sound_change(value.strip())
+
+    def _on_timer_sound_test(self, *_args) -> None:
+        """Toggle play/stop for the test sound — long custom files would
+        otherwise keep playing with no UI control to interrupt."""
+        if self._timer_sound_test_playing:
+            if self._on_stop_timer_sound:
+                self._on_stop_timer_sound()
+            self.notify_timer_sound_test_ended()
+        else:
+            if self._on_test_timer_sound:
+                self._on_test_timer_sound()
+            self._timer_sound_test_playing = True
+            self._timer_sound_test_btn.text = "Stop"
+
+    def notify_timer_sound_test_ended(self) -> None:
+        """Called by app_manager when the test playback ends naturally
+        (Sound.on_stop fires) so the button text reverts."""
+        self._timer_sound_test_playing = False
+        self._timer_sound_test_btn.text = "Test"
+
+    def _on_timer_sound_browse(self, *_args) -> None:
+        """Open a file chooser popup for audio files."""
+        from kivy.uix.button import Button
+        from kivy.uix.filechooser import FileChooserListView
+        from kivy.uix.popup import Popup
+
+        start_path = os.path.expanduser("~")
+        chooser = FileChooserListView(
+            path=start_path,
+            filters=["*.wav", "*.mp3", "*.ogg", "*.flac", "*.m4a"],
+        )
+        content = BoxLayout(orientation="vertical", spacing=dp(8))
+        content.add_widget(chooser)
+        btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
+        btn_cancel = Button(text="Cancel", font_size=F.SMALL)
+        btn_select = Button(
+            text="Select", font_size=F.SMALL,
+            background_color=(0.2, 0.6, 0.3, 1.0),
+        )
+        btn_row.add_widget(btn_cancel)
+        btn_row.add_widget(btn_select)
+        content.add_widget(btn_row)
+        popup = Popup(
+            title="Choose audio file",
+            content=content,
+            size_hint=(0.9, 0.85),
+        )
+
+        def _on_select(*_):
+            sel = chooser.selection
+            if sel:
+                self._timer_sound_input.text = sel[0]
+            popup.dismiss()
+
+        btn_cancel.bind(on_release=popup.dismiss)
+        btn_select.bind(on_release=_on_select)
+        popup.open()
 
     def populate_bt_devices(self, devices: list) -> None:
         """Populate the BT device list with scan results."""

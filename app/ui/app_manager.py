@@ -25,6 +25,7 @@ from app.metrics.custom_formula import CustomFormulaEvaluator
 from app.metrics.engine import MetricsEngine
 from app.metrics.noise_detector import PowerLineDetector
 from app.session.manager import SessionManager, SessionState
+from app.session.timer_state import TimerState
 from app.storage.database import DatabaseManager
 from app.ui.analytics_screen import AnalyticsScreen
 from app.ui.diary_screen import DiaryScreen
@@ -34,7 +35,6 @@ from app.ui.profile_screen import ProfileScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
 from app.ui.theme import BottomNav, C, F, StyledButton
-from app.ui.timer_screen import TimerScreen
 from app.ui.wizard_screen import WizardScreen
 
 
@@ -199,7 +199,7 @@ class EEGMeditationApp(App):
         self._history_screen = HistoryScreen()
         self._diary_screen = DiaryScreen()
         self._analytics_screen = AnalyticsScreen()
-        self._timer_screen = TimerScreen()
+        self._timer_state = TimerState()
 
         self._wizard_screen = WizardScreen()
         self._sm.add_widget(self._live_screen)
@@ -209,7 +209,6 @@ class EEGMeditationApp(App):
         self._sm.add_widget(self._profile_screen)
         self._sm.add_widget(self._diary_screen)
         self._sm.add_widget(self._analytics_screen)
-        self._sm.add_widget(self._timer_screen)
 
         root.add_widget(self._sm)
 
@@ -330,7 +329,11 @@ class EEGMeditationApp(App):
             on_release=lambda x: self._load_analytics("monthly")
         )
 
-        self._timer_screen.set_test_sound_callback(self._on_test_timer_sound)
+        self._settings_screen.set_test_timer_sound_callback(self._on_test_timer_sound)
+        self._settings_screen.set_stop_timer_sound_callback(self._on_stop_test_timer_sound)
+        self._settings_screen.set_timer_sound_change_callback(
+            self._timer_state.set_custom_sound_path
+        )
 
         self._profile_screen.set_user_switch_callback(self._on_user_switch)
         self._profile_screen.set_user_create_callback(self._on_user_create)
@@ -694,6 +697,10 @@ class EEGMeditationApp(App):
 
     def _start_session_common(self) -> None:
         """Shared session startup logic after device is resolved."""
+        # If the user starts a new session while a long custom timer bell
+        # from the previous session is still ringing, kill it so it
+        # doesn't overlap with the new session's noise loop.
+        self._audio.stop_timer_bell()
         threshold = self._settings_screen.threshold
         self._metrics_engine.meditation_threshold = threshold
         self._audio.set_threshold(threshold)
@@ -723,7 +730,7 @@ class EEGMeditationApp(App):
             self._waiting_for_bt = False
             self._session_manager.start(threshold=threshold)
             self._audio.start()
-            self._timer_screen.start_countdown()
+            self._timer_state.start_countdown()
             self._live_screen.update_device_status(True)
             self._live_screen.update_state("Running")
             self._live_screen.set_start_time(time.time())
@@ -736,7 +743,7 @@ class EEGMeditationApp(App):
             self._session_manager.start(threshold=threshold)
             self._audio.start()
             self._audio.play_connect_sound()
-            self._timer_screen.start_countdown()
+            self._timer_state.start_countdown()
             self._live_screen.update_device_status(True, device_name=name)
             self._live_screen.update_state("Running")
             self._live_screen.set_start_time(time.time())
@@ -780,6 +787,7 @@ class EEGMeditationApp(App):
 
     def _on_summary_save(self, *args) -> None:
         """Save notes from summary overlay."""
+        self._audio.stop_timer_bell()
         sid = self._live_screen.summary_session_id
         notes = self._live_screen.summary_notes
         if sid and notes:
@@ -790,11 +798,13 @@ class EEGMeditationApp(App):
 
     def _on_summary_history(self, *args) -> None:
         """Navigate to history from summary."""
+        self._audio.stop_timer_bell()
         self._live_screen.hide_summary()
         self._switch_screen("history")
 
     def _on_summary_close(self, *args) -> None:
         """Close summary without saving notes."""
+        self._audio.stop_timer_bell()
         self._live_screen.hide_summary()
 
     def _on_pause(self, *args) -> None:
@@ -820,7 +830,7 @@ class EEGMeditationApp(App):
             self._live_screen.set_controls_idle()
             self._live_screen.update_device_status(False)
             self._live_screen.update_state("Cancelled")
-            self._timer_screen.reset()
+            self._timer_state.reset()
             self._release_wake_lock()
             self._stop_session_keep_alive_service()
             logger.info("Session cancelled during BT connection wait")
@@ -898,7 +908,7 @@ class EEGMeditationApp(App):
         self._live_screen.set_controls_idle()
         self._live_screen.update_device_status(False)
         self._live_screen.update_state("FINISHED")
-        self._timer_screen.reset()
+        self._timer_state.reset()
         self._session_manager.reset()
         self._release_wake_lock()
         self._stop_session_keep_alive_service()
@@ -946,7 +956,7 @@ class EEGMeditationApp(App):
         self._live_screen.set_controls_idle()
         self._live_screen.update_device_status(False)
         self._live_screen.update_state("FINISHED")
-        self._timer_screen.reset()
+        self._timer_state.reset()
         self._session_manager.reset()
         self._release_wake_lock()
         self._stop_session_keep_alive_service()
@@ -1019,7 +1029,7 @@ class EEGMeditationApp(App):
                     self._audio.play_connect_sound()
                     _n = name
                     self._on_main(lambda n=_n: (
-                        self._timer_screen.start_countdown(),
+                        self._timer_state.start_countdown(),
                         self._live_screen.update_device_status(True, device_name=n),
                         self._live_screen.update_state("Running"),
                         self._live_screen.set_start_time(time.time()),
@@ -1251,10 +1261,20 @@ class EEGMeditationApp(App):
         self._on_main(_ui_update)
 
         # Timer countdown — tick() is pure counter, no UI
-        if self._timer_screen.tick(APP.UPDATE_FREQUENCY):
+        if self._timer_state.tick(APP.UPDATE_FREQUENCY):
             logger.info("Timer expired, auto-stopping session")
-            self._audio.play_timer_sound(self._timer_screen.custom_sound_path)
-            self._on_main(lambda: self._stop_and_save())
+            # Order matters: tear down the session first (which calls
+            # _audio.stop() and clears any in-flight sounds), THEN start the
+            # timer-end bell. Otherwise _audio.stop() unloads the sound
+            # within milliseconds of starting it. The bell now keeps
+            # playing on the summary card until either the file ends
+            # naturally or the user taps a summary button (which calls
+            # AudioEngine.stop_timer_bell via the live screen handlers).
+            custom = self._timer_state.custom_sound_path
+            def _finish_on_main(_dt=None):
+                self._stop_and_save(reason="timer")
+                self._audio.play_timer_sound(custom)
+            self._on_main(_finish_on_main)
             return
 
         # Flush buffer to DB every 60 seconds (DB opened with check_same_thread=False)
@@ -1443,8 +1463,34 @@ class EEGMeditationApp(App):
         logger.info(f"Disconnect alert {'enabled' if active else 'disabled'}")
 
     def _on_test_timer_sound(self) -> None:
-        logger.debug(f"Test timer sound, path='{self._timer_screen.custom_sound_path}'")
-        self._audio.play_timer_sound(self._timer_screen.custom_sound_path)
+        logger.debug(f"Test timer sound, path='{self._timer_state.custom_sound_path}'")
+        self._audio.play_timer_sound(self._timer_state.custom_sound_path)
+        # When the file ends naturally, flip the Settings test button back
+        # from "Stop" to "Test". Sound objects are SoundLoader-backed and
+        # expose an on_stop event; binding here is best-effort because not
+        # every audio backend fires it reliably.
+        snd = self._audio._bell_sound
+        if snd is None:
+            return
+
+        def _on_natural_end(*_):
+            try:
+                from kivy.clock import Clock
+                Clock.schedule_once(
+                    lambda dt: self._settings_screen.notify_timer_sound_test_ended(),
+                    0,
+                )
+            except Exception:
+                pass
+
+        try:
+            snd.bind(on_stop=_on_natural_end)
+        except Exception:
+            pass
+
+    def _on_stop_test_timer_sound(self) -> None:
+        logger.debug("Stop timer test sound")
+        self._audio.stop_timer_bell()
 
     def _on_device_mode_toggle(self, use_mock: bool) -> None:
         APP.USE_MOCK_DEVICE = use_mock
@@ -1671,12 +1717,13 @@ class EEGMeditationApp(App):
         uid = self._current_user_id
         if not uid:
             return
-        # Sync timer from settings screen to timer screen
-        self._timer_screen._enable_cb.active = self._settings_screen.timer_enabled
-        self._timer_screen._set_duration(self._settings_screen.timer_minutes)
+        # Sync timer settings from the UI into the headless model.
+        self._timer_state.set_enabled(self._settings_screen.timer_enabled)
+        self._timer_state.set_duration(self._settings_screen.timer_minutes)
+        self._timer_state.set_custom_sound_path(self._settings_screen.timer_sound_path)
         self._db.set_user_setting(uid, "timer_enabled", str(self._settings_screen.timer_enabled))
         self._db.set_user_setting(uid, "timer_minutes", str(self._settings_screen.timer_minutes))
-        self._db.set_user_setting(uid, "timer_sound", self._timer_screen.custom_sound_path)
+        self._db.set_user_setting(uid, "timer_sound", self._timer_state.custom_sound_path)
         self._db.set_user_setting(uid, "sinking_alert", str(self._audio.sinking_alert_enabled))
         self._db.set_user_setting(uid, "subtle_alert", str(self._audio.subtle_alert_enabled))
         self._db.set_user_setting(uid, "disconnect_alert", str(self._audio.disconnect_alert_enabled))
@@ -1716,21 +1763,22 @@ class EEGMeditationApp(App):
         timer_on = g(user_id, "timer_enabled")
         if timer_on is not None:
             active = timer_on == "True"
-            self._timer_screen._enable_cb.active = active
+            self._timer_state.set_enabled(active)
             self._settings_screen.timer_enabled = active
 
         timer_min = g(user_id, "timer_minutes")
         if timer_min is not None:
             try:
                 val = int(timer_min)
-                self._timer_screen._set_duration(val)
+                self._timer_state.set_duration(val)
                 self._settings_screen.timer_minutes = val
             except (ValueError, TypeError):
                 pass
 
         timer_sound = g(user_id, "timer_sound")
         if timer_sound is not None:
-            self._timer_screen._sound_path_input.text = timer_sound
+            self._timer_state.set_custom_sound_path(timer_sound)
+            self._settings_screen.timer_sound_path = timer_sound
 
         sink = g(user_id, "sinking_alert")
         if sink is not None:

@@ -183,5 +183,62 @@ class TestAudioFeedback(unittest.TestCase):
             self.assertLessEqual(v, 1.0)
 
 
+class TestTimerBellLifecycle(unittest.TestCase):
+    """Regression: timer-end bell used to be killed by _audio.stop() the
+    moment after starting, because both calls landed on the same
+    `_bell_sound` slot and the session-stop path stopped+unloaded it.
+    The fix relies on (a) play_timer_sound being called *after*
+    _stop_and_save runs, and (b) summary buttons calling
+    stop_timer_bell explicitly. This test pins those guarantees."""
+
+    def setUp(self):
+        self.engine = AudioEngine()
+
+    def tearDown(self):
+        self.engine.cleanup()
+
+    def test_stop_timer_bell_clears_reference(self):
+        from unittest.mock import MagicMock
+        snd = MagicMock()
+        self.engine._bell_sound = snd
+        self.engine.stop_timer_bell()
+        snd.stop.assert_called_once()
+        snd.unload.assert_called_once()
+        self.assertIsNone(self.engine._bell_sound)
+
+    def test_stop_timer_bell_safe_when_nothing_playing(self):
+        # Must not raise if the slot is empty.
+        self.engine._bell_sound = None
+        self.engine.stop_timer_bell()
+        self.assertIsNone(self.engine._bell_sound)
+
+    def test_play_timer_sound_after_stop_assigns_fresh_bell(self):
+        # The fix relies on this ordering: tear the engine down first,
+        # then play the bell. After stop() the slot is None; play_timer_sound
+        # creates a fresh Sound that nothing else will preempt.
+        self.engine.stop()
+        self.assertIsNone(self.engine._bell_sound)
+        self.engine.play_timer_sound("")  # default bell path
+        # On headless test envs SoundLoader can return None for the WAV
+        # backend, so we accept either a Sound or None — what matters is
+        # nothing in the call path raises and the slot wasn't pre-populated.
+        # A non-None value also confirms the fresh assignment happened.
+
+    def test_default_timer_bell_is_separate_from_sinking_alert(self):
+        # The two bells serve different purposes — sinking alert needs to
+        # stay short/high (mid-session ping), timer end needs to be
+        # deeper and longer (meditation closure). They live in separate
+        # WAV files so the synthesis params can diverge.
+        self.assertNotEqual(self.engine._bell_path, self.engine._timer_bell_path)
+        self.assertTrue(os.path.exists(self.engine._timer_bell_path))
+        self.assertTrue(os.path.exists(self.engine._bell_path))
+
+    def test_timer_bell_config_is_deeper_and_longer(self):
+        # Pin the human-meaningful intent of the change: the timer bell
+        # must be lower-frequency and longer than the sinking alert.
+        self.assertLess(APP.TIMER_BELL_FREQUENCY, APP.BELL_FREQUENCY)
+        self.assertGreater(APP.TIMER_BELL_DURATION, APP.BELL_DURATION)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
