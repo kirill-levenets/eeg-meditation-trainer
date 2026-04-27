@@ -22,7 +22,7 @@ class _FakeApp:
 
 
 def test_format_report_contains_required_sections():
-    from app.config import APP
+    from app.config import APP, APP_VERSION
     from app.crash_handler import _format_report
 
     APP.USE_MOCK_DEVICE = False  # force real path
@@ -38,7 +38,7 @@ def test_format_report_contains_required_sections():
 
     assert "EEG Meditation Trainer crash report" in report
     assert "App:" in report
-    assert "1.0.0" in report
+    assert APP_VERSION in report
     assert "Platform:" in report
     assert "Python:" in report
     assert "Kivy:" in report
