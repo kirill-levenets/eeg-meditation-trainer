@@ -1879,6 +1879,19 @@ class EEGMeditationApp(App):
         self._refresh_saved_formulas()
         logger.debug(f"Loaded settings for user {user_id}")
 
+    def on_start(self) -> None:
+        """Replay any errors that occurred before the UI was up.
+
+        Diagnostics from `app/config.py` (DB migrations etc.) accumulate in
+        `crash_handler._PRE_APP_ERRORS` because Kivy's Clock isn't alive at
+        import time. We flush them now via `report_soft_error`.
+        """
+        try:
+            from app.crash_handler import flush_pre_app_errors
+            flush_pre_app_errors()
+        except Exception:
+            logger.exception("flush_pre_app_errors failed")
+
     def on_pause(self) -> bool:
         """Android lifecycle: save settings and allow Kivy to pause cleanly.
 

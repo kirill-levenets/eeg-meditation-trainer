@@ -26,8 +26,12 @@ def _resolve_android_base_dir() -> str:
         try:
             import shutil
             shutil.copy2(old_db, new_db)
-        except (PermissionError, OSError):
-            pass
+        except (PermissionError, OSError) as e:
+            from app.crash_handler import queue_pre_app_error
+            queue_pre_app_error(
+                "db_migration_android",
+                f"Could not migrate DB from {old_db} to {new_db}: {e}",
+            )
     return p
 
 
