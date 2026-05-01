@@ -217,6 +217,30 @@ class TestDatabaseExtensions(unittest.TestCase):
         self.assertEqual(updated["threshold_used"], 80)
         self.assertAlmostEqual(updated["avg_meditation"], 120.0)
 
+    def test_create_user_duplicate_raises(self):
+        from app.storage.database import UserExistsError
+        self.db.create_user("Alice")
+        with self.assertRaises(UserExistsError) as ctx:
+            self.db.create_user("Alice")
+        err = ctx.exception
+        self.assertEqual(err.name, "Alice")
+        self.assertIsInstance(err.user_id, int)
+        self.assertGreater(err.user_id, 0)
+
+    def test_find_user_by_name_existing(self):
+        uid = self.db.create_user("Bob")
+        found = self.db.find_user_by_name("Bob")
+        self.assertIsNotNone(found)
+        self.assertEqual(found["id"], uid)
+        self.assertEqual(found["name"], "Bob")
+
+    def test_find_user_by_name_missing(self):
+        self.assertIsNone(self.db.find_user_by_name("Nonexistent"))
+
+    def test_find_user_by_name_case_sensitive(self):
+        self.db.create_user("Charlie")
+        self.assertIsNone(self.db.find_user_by_name("charlie"))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

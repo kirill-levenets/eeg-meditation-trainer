@@ -9,6 +9,15 @@ from app.config import APP
 from app.logger import logger
 
 
+class UserExistsError(Exception):
+    """Raised by DatabaseManager.create_user when the name already exists."""
+
+    def __init__(self, user_id: int, name: str) -> None:
+        super().__init__(f"User '{name}' already exists (id={user_id})")
+        self.user_id = user_id
+        self.name = name
+
+
 class DatabaseManager:
     """SQLite storage for sessions, metrics timeseries, and user profiles."""
 
@@ -275,15 +284,31 @@ class DatabaseManager:
     # ---- User profile methods ----
 
     def create_user(self, name: str) -> int:
-        """Create a new user profile. Returns user ID."""
-        cursor = self._conn.execute(
-            "INSERT INTO users (name, created_at) VALUES (?, ?)",
-            (name, datetime.now().isoformat()),
-        )
-        self._conn.commit()
+        """Create a new user profile. Returns user ID.
+
+        Raises:
+            UserExistsError: if a user with this name already exists.
+        """
+        try:
+            cursor = self._conn.execute(
+                "INSERT INTO users (name, created_at) VALUES (?, ?)",
+                (name, datetime.now().isoformat()),
+            )
+            self._conn.commit()
+        except sqlite3.IntegrityError:
+            existing = self.find_user_by_name(name)
+            if existing:
+                raise UserExistsError(user_id=existing["id"], name=name) from None
+            raise
         uid = cursor.lastrowid
         logger.info(f"User '{name}' created with id {uid}")
         return uid
+
+    def find_user_by_name(self, name: str) -> Optional[dict]:
+        """Return the user row matching `name` exactly (case-sensitive), or None."""
+        cursor = self._conn.execute("SELECT * FROM users WHERE name = ?", (name,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
 
     def get_all_users(self) -> list[dict]:
         """Return all user profiles."""
