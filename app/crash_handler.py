@@ -354,3 +354,29 @@ def install_crash_handler(app) -> None:
         ExceptionManager.add_handler(_Handler())
     except Exception:  # noqa: BLE001
         logger.exception("Failed to register Kivy ExceptionManager handler.")
+
+
+# Errors that occur before the Kivy app is up (e.g. config.py migrations)
+# accumulate here and are replayed once on_start() fires.
+_PRE_APP_ERRORS: list[tuple[str, str]] = []
+
+
+def queue_pre_app_error(label: str, detail: str) -> None:
+    """Queue a diagnostic to be surfaced once the app's UI is alive.
+
+    Use from code that runs at import-time (config.py migrations etc.) where
+    report_soft_error can't fire yet.
+    """
+    _PRE_APP_ERRORS.append((label, detail))
+
+
+def flush_pre_app_errors() -> None:
+    """Replay queued pre-app errors via report_soft_error.
+
+    Call from EEGMeditationApp.on_start() after the main UI is built.
+    The 60s per-label cooldown in report_soft_error still applies.
+    """
+    pending = list(_PRE_APP_ERRORS)
+    _PRE_APP_ERRORS.clear()
+    for label, detail in pending:
+        report_soft_error(label, detail)

@@ -226,3 +226,39 @@ def test_install_sets_all_three_hooks(monkeypatch):
     ExceptionManager.handlers[:] = [
         h for h in ExceptionManager.handlers if not isinstance(h, ch._KivyExceptionHandler)
     ]
+
+
+def test_queue_pre_app_errors_then_flush(monkeypatch):
+    from app import crash_handler
+
+    captured: list[tuple[str, str]] = []
+
+    def fake_report(label, detail, *, app=None, force=False):
+        captured.append((label, detail))
+        return True
+
+    monkeypatch.setattr(crash_handler, "report_soft_error", fake_report)
+
+    crash_handler._PRE_APP_ERRORS.clear()
+
+    crash_handler.queue_pre_app_error("test_label_a", "detail-a")
+    crash_handler.queue_pre_app_error("test_label_b", "detail-b")
+    assert len(crash_handler._PRE_APP_ERRORS) == 2
+
+    crash_handler.flush_pre_app_errors()
+    assert captured == [("test_label_a", "detail-a"), ("test_label_b", "detail-b")]
+    assert crash_handler._PRE_APP_ERRORS == []
+
+
+def test_flush_pre_app_errors_when_empty_is_noop(monkeypatch):
+    from app import crash_handler
+
+    captured: list = []
+    monkeypatch.setattr(
+        crash_handler, "report_soft_error",
+        lambda *a, **kw: captured.append(a) or True,
+    )
+
+    crash_handler._PRE_APP_ERRORS.clear()
+    crash_handler.flush_pre_app_errors()
+    assert captured == []
