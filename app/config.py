@@ -45,6 +45,7 @@ def _maybe_migrate_desktop_db(new_dir: str, legacy_dirs: list) -> None:
     if os.path.isfile(new_db):
         return
     import shutil
+
     from app.crash_handler import queue_pre_app_error
 
     for old_dir in legacy_dirs:
@@ -82,6 +83,22 @@ def _resolve_desktop_base_dir() -> str:
     p = os.path.join(base, "EEGMeditation")
     os.makedirs(p, exist_ok=True)
     return p
+
+
+def _resolve_desktop_base_dir_with_migration() -> str:
+    """Resolve the desktop base dir AND migrate any legacy DB once.
+
+    Legacy locations checked, in priority order:
+      1) directory next to the executable (frozen builds)
+      2) project root (development runs)
+    """
+    base = _resolve_desktop_base_dir()
+    legacy_dirs = []
+    if getattr(sys, "frozen", False):
+        legacy_dirs.append(os.path.dirname(os.path.abspath(sys.executable)))
+    legacy_dirs.append(os.path.dirname(os.path.dirname(__file__)))
+    _maybe_migrate_desktop_db(base, legacy_dirs)
+    return base
 
 
 class SigmoidConfig:
@@ -130,9 +147,7 @@ class AppConfig:
     _ANDROID: bool = hasattr(sys, "getandroidapilevel")
     _BASE_DIR: str = (
         _resolve_android_base_dir() if _ANDROID
-        else os.path.dirname(os.path.abspath(sys.executable))
-        if getattr(sys, 'frozen', False)
-        else os.path.dirname(os.path.dirname(__file__))
+        else _resolve_desktop_base_dir_with_migration()
     )
     DB_PATH: str = os.path.join(_BASE_DIR, DB_NAME)
 
