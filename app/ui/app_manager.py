@@ -15,7 +15,6 @@ from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import ScreenManager, SlideTransition
 
-from app.analytics.aggregator import AnalyticsAggregator
 from app.audio_feedback.noise import AudioEngine
 from app.config import APP
 from app.eeg.mock_stream_v2 import MockEEGStream
@@ -27,7 +26,6 @@ from app.metrics.noise_detector import PowerLineDetector
 from app.session.manager import SessionManager, SessionState
 from app.session.timer_state import TimerState
 from app.storage.database import DatabaseManager
-from app.ui.analytics_screen import AnalyticsScreen
 from app.ui.diary_screen import DiaryScreen
 from app.ui.history_screen import HistoryScreen
 from app.ui.live_session import LiveSessionScreen
@@ -66,7 +64,6 @@ class EEGMeditationApp(App):
         self._db: DatabaseManager = DatabaseManager()
         self._audio: AudioEngine = AudioEngine()
         self._session_manager.set_audio(self._audio)
-        self._analytics: AnalyticsAggregator = AnalyticsAggregator(self._db)
         self._tick_thread: Optional[threading.Thread] = None
         self._tick_stop_event: threading.Event = threading.Event()
         self._metrics_buffer: list[dict] = []
@@ -198,7 +195,6 @@ class EEGMeditationApp(App):
         self._settings_screen = SettingsScreen()
         self._history_screen = HistoryScreen()
         self._diary_screen = DiaryScreen()
-        self._analytics_screen = AnalyticsScreen()
         self._timer_state = TimerState()
 
         self._wizard_screen = WizardScreen()
@@ -208,7 +204,6 @@ class EEGMeditationApp(App):
         self._sm.add_widget(self._settings_screen)
         self._sm.add_widget(self._profile_screen)
         self._sm.add_widget(self._diary_screen)
-        self._sm.add_widget(self._analytics_screen)
 
         root.add_widget(self._sm)
 
@@ -317,16 +312,6 @@ class EEGMeditationApp(App):
             on_delete_session=self._on_delete_session,
             on_export_csv=self._on_export_csv,
             on_rename_session=self._on_rename_session,
-        )
-
-        self._analytics_screen.btn_daily.bind(
-            on_release=lambda x: self._load_analytics("daily")
-        )
-        self._analytics_screen.btn_weekly.bind(
-            on_release=lambda x: self._load_analytics("weekly")
-        )
-        self._analytics_screen.btn_monthly.bind(
-            on_release=lambda x: self._load_analytics("monthly")
         )
 
         self._settings_screen.set_test_timer_sound_callback(self._on_test_timer_sound)
@@ -550,8 +535,6 @@ class EEGMeditationApp(App):
             self._refresh_history()
         elif name == "diary":
             self._refresh_diary()
-        elif name == "analytics":
-            self._refresh_analytics()
         elif name == "profile":
             self._refresh_profile()
         # Sync bottom nav highlight
@@ -1657,24 +1640,6 @@ class EEGMeditationApp(App):
     def _refresh_diary(self) -> None:
         sessions = self._db.get_all_sessions(user_id=self._current_user_id)
         self._diary_screen.populate_sessions(sessions)
-
-    def _refresh_analytics(self) -> None:
-        summary = self._analytics.get_summary()
-        self._analytics_screen.update_summary(summary)
-        self._analytics_screen.update_storage_info(
-            self._db.get_db_size_bytes(),
-            self._db.get_record_counts(),
-        )
-        self._load_analytics("daily")
-
-    def _load_analytics(self, period: str) -> None:
-        if period == "daily":
-            data = self._analytics.get_daily_stats(days=30)
-        elif period == "weekly":
-            data = self._analytics.get_weekly_stats(weeks=12)
-        else:
-            data = self._analytics.get_monthly_stats(months=12)
-        self._analytics_screen.show_trend(data, "avg_shamatha", f"Shamatha ({period})")
 
     def _on_user_switch(self, user_id: Optional[int]) -> None:
         """Switch the active user profile."""
