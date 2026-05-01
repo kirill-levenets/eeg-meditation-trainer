@@ -31,6 +31,35 @@ def _resolve_android_base_dir() -> str:
     return p
 
 
+def _maybe_migrate_desktop_db(new_dir: str, legacy_dirs: list) -> None:
+    """One-time copy of meditation.db from legacy desktop locations.
+
+    Tries each legacy_dir in order. The first one with a meditation.db
+    that's missing at new_dir wins — copy it across. The legacy file
+    is left in place (manual rollback path).
+
+    Failures are queued via queue_pre_app_error so the user sees what
+    went wrong once the UI is up. Best-effort — we don't crash startup.
+    """
+    new_db = os.path.join(new_dir, "meditation.db")
+    if os.path.isfile(new_db):
+        return
+    import shutil
+    from app.crash_handler import queue_pre_app_error
+
+    for old_dir in legacy_dirs:
+        old_db = os.path.join(old_dir, "meditation.db")
+        if os.path.isfile(old_db):
+            try:
+                shutil.copy2(old_db, new_db)
+            except (PermissionError, OSError) as e:
+                queue_pre_app_error(
+                    "db_migration_desktop",
+                    f"Could not migrate DB from {old_db} to {new_db}: {e}",
+                )
+            return
+
+
 def _resolve_desktop_base_dir() -> str:
     """Return the user-data directory for the EEGMeditation DB on desktop.
 
