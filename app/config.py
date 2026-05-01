@@ -31,6 +31,30 @@ def _resolve_android_base_dir() -> str:
     return p
 
 
+def _resolve_desktop_base_dir() -> str:
+    """Return the user-data directory for the EEGMeditation DB on desktop.
+
+    - Linux: $XDG_DATA_HOME/EEGMeditation, falling back to ~/.local/share/EEGMeditation
+    - Windows: %APPDATA%/EEGMeditation
+    - macOS: ~/Library/Application Support/EEGMeditation
+
+    Creates the directory if missing. Migration of any pre-existing DB at
+    legacy locations (next to the binary, project root) is handled by the
+    caller via _maybe_migrate_desktop_db().
+    """
+    if sys.platform.startswith("linux"):
+        base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    elif sys.platform == "win32":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+    elif sys.platform == "darwin":
+        base = os.path.expanduser("~/Library/Application Support")
+    else:
+        base = os.path.expanduser("~/.local/share")
+    p = os.path.join(base, "EEGMeditation")
+    os.makedirs(p, exist_ok=True)
+    return p
+
+
 class SigmoidConfig:
     """Sigmoid normalization parameters for easy calibration."""
 
