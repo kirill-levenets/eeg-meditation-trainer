@@ -107,6 +107,7 @@ class UserPickerForm(BoxLayout):
         # on_touch_up override below, which is reliable.
         self._name_input.bind(on_text_validate=lambda *a: self._on_create_pressed())
         self._name_input.bind(focus=self._on_input_focus_change)
+        self._name_input.bind(text=self._on_input_text_change)
         # Defensive: explicitly enable so any stray `disabled=True` from
         # parent state changes (the existing-panel toggling, etc.) can't
         # leave the input in a non-interactive state.
@@ -161,20 +162,41 @@ class UserPickerForm(BoxLayout):
     def _on_input_focus_change(self, instance, focused):
         logger.debug(f"[user_picker] _name_input focus={focused}")
 
+    def _on_input_text_change(self, instance, text):
+        """Filter the existing-profiles dropdown as the user types."""
+        self._render_filtered_list(text)
+
     # ---- Population ----
 
     def populate_users(self, users: list[dict]) -> None:
+        """Set the full user list. The visible dropdown is then derived
+        from this list and the current input text."""
         self._users = users
+        self._render_filtered_list(self._name_input.text)
+
+    def _render_filtered_list(self, query: str) -> None:
+        """Re-render the existing-profiles dropdown with users whose name
+        contains `query` (case-insensitive). Empty query shows all."""
         self._existing_list.clear_widgets()
-        n = len(users)
+        q = query.strip().lower()
+        if q:
+            filtered = [u for u in self._users if q in u["name"].lower()]
+        else:
+            filtered = list(self._users)
+
+        n = len(filtered)
         if n == 0:
             self._existing_panel.opacity = 0
             self._existing_panel.disabled = True
             self._existing_panel.height = 0
             return
+
         self._existing_panel.opacity = 1
         self._existing_panel.disabled = False
-        self._existing_header.text = f"Existing profiles ({n})"
+        if q:
+            self._existing_header.text = f"Matches ({n})"
+        else:
+            self._existing_header.text = f"Existing profiles ({n})"
 
         max_visible = 5
         row_h = dp(40)
@@ -182,7 +204,7 @@ class UserPickerForm(BoxLayout):
         self._existing_scroll.height = scroll_h
         self._existing_panel.height = dp(22) + scroll_h + dp(4)
 
-        for u in users:
+        for u in filtered:
             row = self._make_user_row(u, row_h)
             self._existing_list.add_widget(row)
 

@@ -98,3 +98,51 @@ def test_clear_resets_input_and_error():
     form.clear()
     assert form._name_input.text == ""
     assert form._error_row.opacity == 0
+
+
+def test_typing_filters_existing_profiles_list():
+    form = UserPickerForm(
+        on_create=lambda name: None,
+        on_pick_existing=lambda uid: None,
+    )
+    form.populate_users([
+        {"id": 1, "name": "Alice"},
+        {"id": 2, "name": "Bob"},
+        {"id": 3, "name": "Alfred"},
+    ])
+    # Empty input → all 3 visible
+    assert "(3)" in form._existing_header.text
+
+    form._name_input.text = "al"  # case-insensitive substring
+    # Two matches: "Alice", "Alfred"
+    assert "(2)" in form._existing_header.text
+    assert form._existing_panel.opacity == 1
+    assert "matches" in form._existing_header.text.lower()
+
+
+def test_typing_unique_name_collapses_dropdown():
+    form = UserPickerForm(
+        on_create=lambda name: None,
+        on_pick_existing=lambda uid: None,
+    )
+    form.populate_users([{"id": 1, "name": "Alice"}])
+    form._name_input.text = "Bob"
+    # No matches → panel hidden
+    assert form._existing_panel.opacity == 0
+    assert form._existing_panel.disabled is True
+
+
+def test_clearing_input_restores_full_list():
+    form = UserPickerForm(
+        on_create=lambda name: None,
+        on_pick_existing=lambda uid: None,
+    )
+    form.populate_users([
+        {"id": 1, "name": "Alice"},
+        {"id": 2, "name": "Bob"},
+    ])
+    form._name_input.text = "xyz"
+    assert form._existing_panel.opacity == 0
+    form._name_input.text = ""
+    assert form._existing_panel.opacity == 1
+    assert "(2)" in form._existing_header.text
