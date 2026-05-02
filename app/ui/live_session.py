@@ -313,6 +313,9 @@ class LiveSessionScreen(Screen):
         # visually marked even when custom_formula (scale 200) widens
         # max_scale and pushes 100 into the middle of the graph.
         self._graph.set_reference_line(100.0)
+        # Heatmap-color the shamatha line: blue at 0 → red at 100+.
+        # Colour tracks meditation depth visually instead of a flat hue.
+        self._graph.set_heatmap_color("shamatha_score")
         self._metrics_container.add_widget(self._graph)
 
         self._legend = BoxLayout(size_hint_y=None, height=dp(18), spacing=S.GAP_SM)
