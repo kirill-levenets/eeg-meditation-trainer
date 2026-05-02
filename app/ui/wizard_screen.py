@@ -13,6 +13,7 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.textinput import TextInput
 
 from app.ui.theme import ICONS_AVAILABLE, C, F, Icons, S, StyledButton
+from app.ui.widgets.user_picker import UserPickerForm
 
 _IS_ANDROID = hasattr(sys, "getandroidapilevel")
 
@@ -25,6 +26,7 @@ class WizardScreen(Screen):
         self.name = "wizard"
         self._on_complete: Optional[Callable] = None
         self._on_scan: Optional[Callable] = None
+        self._on_pick_existing: Optional[Callable] = None
         self._user_name: str = ""
         self._step = 1
         self._build_ui()
@@ -73,7 +75,7 @@ class WizardScreen(Screen):
         )
         root.add_widget(self._step_label)
 
-        # --- Step 1: Name input ---
+        # --- Step 1: Name input via shared UserPickerForm ---
         self._step1 = BoxLayout(orientation="vertical", spacing=S.GAP)
 
         name_label = Label(
@@ -87,33 +89,17 @@ class WizardScreen(Screen):
         name_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
         self._step1.add_widget(name_label)
 
+        self._user_form = UserPickerForm(
+            on_create=self._on_form_create,
+            on_pick_existing=self._on_form_pick_existing,
+        )
+        self._step1.add_widget(self._user_form)
+
+        # Android: inline TextInput inside a Screen often loses keyboard
+        # focus. Re-route the form's TextInput to a Popup TextInput on
+        # Android, then write the result back into the form.
         if _IS_ANDROID:
-            # Android: inline TextInput on wizard screen doesn't get keyboard.
-            # Use a button that opens a Popup (Popup TextInputs work fine).
-            self._name_input = None
-            name_btn = StyledButton(
-                text="Tap to enter name...",
-                bg_color=C.BG_INPUT, text_color=C.TEXT_MUTED,
-                font_size=F.H2,
-                bold=False,
-            )
-            name_btn.bind(on_release=self._open_name_popup)
-            self._name_btn = name_btn
-            self._step1.add_widget(name_btn)
-        else:
-            # Desktop: inline TextInput works fine
-            self._name_btn = None
-            self._name_input = TextInput(
-                hint_text="Enter your name...",
-                multiline=False,
-                font_size=F.H2,
-                size_hint_y=None,
-                height=dp(48),
-                foreground_color=C.TEXT,
-                background_color=list(C.BG_INPUT),
-                cursor_color=C.PRIMARY,
-            )
-            self._step1.add_widget(self._name_input)
+            self._user_form._name_input.bind(focus=self._open_name_popup_if_focused)
 
         name_hint = Label(
             text="This creates your profile to track sessions and settings",
@@ -126,21 +112,6 @@ class WizardScreen(Screen):
         name_hint.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
         self._step1.add_widget(name_hint)
 
-        self._name_next_btn = StyledButton(
-            text="Next", icon=Icons.CHEVRON_RIGHT if ICONS_AVAILABLE else "",
-            bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM,
-        )
-        self._name_next_btn.bind(on_release=self._on_name_next)
-        self._step1.add_widget(self._name_next_btn)
-
-        self._name_error = Label(
-            text="",
-            font_size=F.SMALL,
-            color=C.DANGER,
-            size_hint_y=None,
-            height=dp(20),
-        )
-        self._step1.add_widget(self._name_error)
         root.add_widget(self._step1)
 
         # --- Step 2: Device selection ---
@@ -221,72 +192,25 @@ class WizardScreen(Screen):
         """Called to trigger BT scan. Should call populate_devices() with results."""
         self._on_scan = cb
 
-    def _open_name_popup(self, *args) -> None:
-        """Android: open a popup with TextInput for name entry."""
-        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
-        text_input = TextInput(
-            hint_text="Enter your name...",
-            text=self._user_name,
-            multiline=False,
-            font_size=F.H2,
-            size_hint_y=None,
-            height=dp(48),
-            foreground_color=C.TEXT,
-            background_color=list(C.BG_INPUT),
-            cursor_color=C.PRIMARY,
-        )
-        content.add_widget(text_input)
+    def set_pick_existing_callback(self, cb: Callable) -> None:
+        """Called with the existing user_id when picked from the form."""
+        self._on_pick_existing = cb
 
-        btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
-        ok_btn = StyledButton(
-            text="OK", bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM,
-        )
-        cancel_btn = StyledButton(
-            text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_MUTED,
-        )
-        btn_row.add_widget(ok_btn)
-        btn_row.add_widget(cancel_btn)
-        content.add_widget(btn_row)
+    def populate_existing_users(self, users: list[dict]) -> None:
+        """Refresh the form's existing-profiles panel."""
+        if self._user_form is not None:
+            self._user_form.populate_users(users)
 
-        popup = Popup(
-            title="Your name",
-            content=content,
-            size_hint=(0.85, 0.35),
-            auto_dismiss=False,
-        )
+    def _on_form_create(self, name: str) -> None:
+        """User typed a new name and pressed Create — advance to step 2."""
+        self._user_name = name
+        self._advance_to_step2()
 
-        def _on_ok(*_args):
-            name = text_input.text.strip()
-            if name and len(name) >= 2:
-                self._user_name = name
-                self._name_btn.text = name
-                self._name_btn.text_color = C.TEXT
-                self._name_error.text = ""
-            popup.dismiss()
+    def _on_form_pick_existing(self, user_id: int) -> None:
+        if self._on_pick_existing:
+            self._on_pick_existing(user_id)
 
-        def _on_cancel(*_args):
-            popup.dismiss()
-
-        ok_btn.bind(on_release=_on_ok)
-        cancel_btn.bind(on_release=_on_cancel)
-        text_input.bind(on_text_validate=_on_ok)
-        popup.open()
-
-    def _on_name_next(self, *args) -> None:
-        # Get name from inline TextInput (desktop) or popup result (Android)
-        if self._name_input is not None:
-            name = self._name_input.text.strip()
-            if name and len(name) >= 2:
-                self._user_name = name
-        if not self._user_name:
-            self._name_error.text = "Please enter a name"
-            return
-        if len(self._user_name) < 2:
-            self._name_error.text = "Name too short"
-            return
-        self._name_error.text = ""
-
-        # Transition to step 2
+    def _advance_to_step2(self) -> None:
         self._step = 2
         self._step_label.text = "Step 2 of 2"
         self._title.text = f"Hi, {self._user_name}!"
@@ -299,6 +223,53 @@ class WizardScreen(Screen):
         self._step2.opacity = 1
         self._step2.disabled = False
         self._step2.size_hint_y = 1
+
+    def _open_name_popup_if_focused(self, instance, focused: bool) -> None:
+        """Android-only: hijack focus on the form's TextInput → open Popup TextInput."""
+        if not focused:
+            return
+        instance.focus = False
+        self._open_name_popup_for_form(instance)
+
+    def _open_name_popup_for_form(self, target_input) -> None:
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
+        text_input = TextInput(
+            hint_text="Enter your name...",
+            text=target_input.text,
+            multiline=False,
+            font_size=F.H2,
+            size_hint_y=None, height=dp(48),
+            foreground_color=C.TEXT,
+            background_color=list(C.BG_INPUT),
+            cursor_color=C.PRIMARY,
+        )
+        content.add_widget(text_input)
+        btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+        ok_btn = StyledButton(text="OK", bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM)
+        cancel_btn = StyledButton(
+            text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_MUTED,
+        )
+        btn_row.add_widget(ok_btn)
+        btn_row.add_widget(cancel_btn)
+        content.add_widget(btn_row)
+        popup = Popup(
+            title="Your name",
+            content=content,
+            size_hint=(0.85, 0.35),
+            auto_dismiss=False,
+        )
+
+        def _on_ok(*_a):
+            target_input.text = text_input.text.strip()
+            popup.dismiss()
+
+        def _on_cancel(*_a):
+            popup.dismiss()
+
+        ok_btn.bind(on_release=_on_ok)
+        cancel_btn.bind(on_release=_on_cancel)
+        text_input.bind(on_text_validate=_on_ok)
+        popup.open()
 
     def _on_scan_pressed(self, *args) -> None:
         self._scan_status.text = "Scanning..."

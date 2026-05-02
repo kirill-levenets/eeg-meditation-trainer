@@ -248,6 +248,10 @@ class EEGMeditationApp(App):
         # Wizard
         self._wizard_screen.set_complete_callback(self._on_wizard_complete)
         self._wizard_screen.set_scan_callback(self._on_wizard_scan)
+        self._wizard_screen.set_pick_existing_callback(
+            lambda uid: self._on_pick_existing_user(uid, source="wizard"),
+        )
+        self._wizard_screen.populate_existing_users(self._db.get_all_users())
 
         self._live_screen.btn_start.bind(on_release=self._on_start)
         self._live_screen.btn_pause.bind(on_release=self._on_pause)
