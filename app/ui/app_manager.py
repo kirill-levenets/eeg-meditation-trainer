@@ -1263,13 +1263,18 @@ class EEGMeditationApp(App):
             # Kivy's Clock — paused while the screen is locked — so
             # the noise kept playing past the timer end.
             self._audio.stop()
-            # UI cleanup + bell still go through the main thread (Kivy
-            # widget calls + SoundLoader). On Android, this fires when
-            # the user unlocks; the audio is already stopped.
+            # If the screen is locked at expiry, we deliberately skip the
+            # bell. SoundLoader / SDL_mixer state is fragile post-pause:
+            # trying to load+play a sound on resume hangs the main thread
+            # (ANR → black screen). The user wouldn't hear the bell during
+            # lock anyway, and the session has already ended at the data
+            # layer (audio stopped + DB will flush).
+            should_play_bell = not self._is_paused
             custom = self._timer_state.custom_sound_path
             def _finish_on_main(_dt=None):
                 self._stop_and_save(reason="timer")
-                self._audio.play_timer_sound(custom)
+                if should_play_bell:
+                    self._audio.play_timer_sound(custom)
             self._on_main(_finish_on_main)
             return
 
@@ -2235,6 +2240,7 @@ class EEGMeditationApp(App):
         loop chokes (black-screen / app freeze).
         """
         self._is_paused = True
+        logger.info("on_pause fired — _is_paused=True")
         self._save_user_settings()
         return True
 
@@ -2248,6 +2254,7 @@ class EEGMeditationApp(App):
         BT alerts) drains on its own from Kivy's Clock.
         """
         self._is_paused = False
+        logger.info("on_resume fired — _is_paused=False")
         try:
             Clock.schedule_once(lambda dt: self._refresh_ui_after_resume(), 0)
         except Exception:
