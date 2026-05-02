@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from typing import Optional
 
+from kivy.clock import Clock
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
@@ -217,18 +218,18 @@ class UserPickerForm(BoxLayout):
 
     # ---- User actions ----
 
-    def on_touch_down(self, touch):
-        # Force-focus the input when a touch lands on it. The default
-        # propagation through nested BoxLayout + ScrollView + accordion
-        # sometimes fails to grab focus on Kivy desktop — likely a touch
-        # being captured by ScrollView's scroll-detection delay before
-        # FocusBehavior can claim it. We claim focus here directly,
-        # which is reliable across platforms.
-        handled = super().on_touch_down(touch)
+    def on_touch_up(self, touch):
+        # Force-focus the input on touch-up. Touch-down propagation through
+        # nested ScrollView + accordion races with FocusBehavior's keyboard
+        # handoff and the focus we briefly grab gets dropped. By touch-up
+        # (after the deferred ScrollView dispatch and any keyboard release
+        # callbacks), setting focus=True sticks reliably.
+        handled = super().on_touch_up(touch)
         if (not self._name_input.disabled
                 and self._name_input.collide_point(*touch.pos)):
-            self._name_input.focus = True
-            return True
+            Clock.schedule_once(
+                lambda dt: setattr(self._name_input, "focus", True), 0,
+            )
         return handled
 
     def _on_create_pressed(self) -> None:
