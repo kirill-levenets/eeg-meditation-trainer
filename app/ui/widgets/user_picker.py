@@ -100,7 +100,11 @@ class UserPickerForm(BoxLayout):
             font_size=F.BODY,
             size_hint_x=0.35,
         )
-        self._create_btn.bind(on_release=lambda *a: self._on_create_pressed())
+        # Don't bind Create on_release — ButtonBehavior's on_release fires
+        # via Kivy's deferred ScrollView dispatch chain, which on this
+        # platform sometimes drops the event entirely (same root cause as
+        # the input focus issue). We route the click through our own
+        # on_touch_up override below, which is reliable.
         self._name_input.bind(on_text_validate=lambda *a: self._on_create_pressed())
         self._name_input.bind(focus=self._on_input_focus_change)
         # Defensive: explicitly enable so any stray `disabled=True` from
@@ -219,17 +223,23 @@ class UserPickerForm(BoxLayout):
     # ---- User actions ----
 
     def on_touch_up(self, touch):
-        # Force-focus the input on touch-up. Touch-down propagation through
-        # nested ScrollView + accordion races with FocusBehavior's keyboard
-        # handoff and the focus we briefly grab gets dropped. By touch-up
-        # (after the deferred ScrollView dispatch and any keyboard release
-        # callbacks), setting focus=True sticks reliably.
+        # Touch-up router for input focus + Create button.
+        # Touch-down propagation through nested ScrollView + accordion
+        # races with Kivy's FocusBehavior and ButtonBehavior chains: the
+        # input briefly gets focus before losing it, and the Create
+        # button's on_release sometimes never fires. We claim both events
+        # explicitly here on touch-up (after dispatch settles), via a
+        # Clock.schedule_once so the action runs on the next idle tick.
         handled = super().on_touch_up(touch)
+        pos = touch.pos
         if (not self._name_input.disabled
-                and self._name_input.collide_point(*touch.pos)):
+                and self._name_input.collide_point(*pos)):
             Clock.schedule_once(
                 lambda dt: setattr(self._name_input, "focus", True), 0,
             )
+        elif (not self._create_btn.disabled
+                and self._create_btn.collide_point(*pos)):
+            Clock.schedule_once(lambda dt: self._on_create_pressed(), 0)
         return handled
 
     def _on_create_pressed(self) -> None:
