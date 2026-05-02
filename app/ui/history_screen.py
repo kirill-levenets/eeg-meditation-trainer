@@ -549,6 +549,19 @@ class HistoryScreen(Screen):
         if value > 0:
             self._graph_row.height = value
 
+    def _redraw_heatmap_after_layout(self, *args):
+        """Force a heatmap _redraw on the next Clock tick.
+
+        When set_view_mode flips heatmap.height from 0 to cal_h, the size
+        bind fires _redraw synchronously — but heatmap.y is still its
+        stale value from the bars view (top of graph_wrap). Cells render
+        offset above the visible area. The next-frame Clock callback runs
+        AFTER Kivy's layout pass has corrected heatmap.y, so the redraw
+        uses the right coordinates.
+        """
+        from kivy.clock import Clock
+        Clock.schedule_once(lambda dt: self._heatmap._redraw(), 0)
+
     def set_view_mode(self, mode: str) -> None:
         """Switch between 'calendar' and 'bars'."""
         if mode not in ("calendar", "bars"):
@@ -571,6 +584,8 @@ class HistoryScreen(Screen):
             self._btn_bars.bg_color = C.BG_CARD
             self._btn_bars.text_color = C.TEXT_SECONDARY
             self._btn_bars.bold = False
+            # Re-render after parent re-layout settles heatmap.y
+            self._redraw_heatmap_after_layout()
         else:
             self._heatmap.opacity = 0
             self._heatmap.disabled = True

@@ -9,6 +9,7 @@ from kivy.uix.label import Label
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 
+from app.logger import logger
 from app.ui.theme import C, F, S, StyledButton
 
 
@@ -100,6 +101,7 @@ class UserPickerForm(BoxLayout):
         )
         self._create_btn.bind(on_release=lambda *a: self._on_create_pressed())
         self._name_input.bind(on_text_validate=lambda *a: self._on_create_pressed())
+        self._name_input.bind(focus=self._on_input_focus_change)
         # Defensive: explicitly enable so any stray `disabled=True` from
         # parent state changes (the existing-panel toggling, etc.) can't
         # leave the input in a non-interactive state.
@@ -150,6 +152,9 @@ class UserPickerForm(BoxLayout):
         btn_row.add_widget(self._btn_change_name)
         self._error_row.add_widget(btn_row)
         self.add_widget(self._error_row)
+
+    def _on_input_focus_change(self, instance, focused):
+        logger.debug(f"[user_picker] _name_input focus={focused}")
 
     # ---- Population ----
 
