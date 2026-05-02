@@ -9,7 +9,7 @@ import datetime
 from collections.abc import Callable
 from typing import Optional
 
-from kivy.graphics import Color, Rectangle, RoundedRectangle
+from kivy.graphics import Color, Line, Rectangle, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
@@ -181,6 +181,122 @@ class CalendarHeatmap(Widget):
             if dow == 6:
                 col += 1
             current += datetime.timedelta(days=1)
+
+
+class Last14DaysBars(Widget):
+    """14-day bar chart of avg shamatha — alternative to the calendar heatmap.
+
+    Public API mirrors CalendarHeatmap so HistoryScreen can swap them.
+    """
+
+    DAYS = 14
+    MIN_BAR_HEIGHT = dp(2)
+    BASELINE_HEIGHT = dp(20)  # space for date labels under bars
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.size_hint_y = None
+        self.height = dp(132)
+        self._day_values: dict[str, float] = {}
+        self._cell_positions: dict[str, tuple] = {}
+        self._on_day_tap: Optional[Callable] = None
+        self._selected_date: Optional[str] = None
+        self.bind(size=self._redraw, pos=self._redraw)
+
+    def set_data(self, day_values: dict[str, float]) -> None:
+        self._day_values = day_values
+        self._redraw()
+
+    def set_day_tap_callback(self, cb: Callable) -> None:
+        self._on_day_tap = cb
+
+    def on_touch_down(self, touch):
+        if not self.collide_point(*touch.pos):
+            return super().on_touch_down(touch)
+        for date_str, (rx, ry, rw, rh) in self._cell_positions.items():
+            if rx <= touch.x <= rx + rw and ry <= touch.y <= ry + rh:
+                self._selected_date = date_str
+                self._redraw()
+                if self._on_day_tap:
+                    self._on_day_tap(date_str)
+                return True
+        return super().on_touch_down(touch)
+
+    def _redraw(self, *args):
+        self.canvas.clear()
+        self._cell_positions = {}
+        if self.width < 10 or self.height < 10:
+            return
+
+        today = datetime.date.today()
+        days = [today - datetime.timedelta(days=i) for i in range(self.DAYS - 1, -1, -1)]
+
+        pad_x = dp(4)
+        avail_w = max(self.width - 2 * pad_x, dp(10))
+        slot_w = avail_w / self.DAYS
+        bar_w = max(slot_w - dp(4), dp(4))
+
+        graph_h = self.height - self.BASELINE_HEIGHT
+        graph_y = self.y + self.BASELINE_HEIGHT
+
+        with self.canvas:
+            # Threshold reference line at y=50
+            Color(*C.TEXT_MUTED)
+            ref_y = graph_y + graph_h * 0.5
+            Line(
+                points=[self.x + pad_x, ref_y, self.x + self.width - pad_x, ref_y],
+                width=1, dash_offset=2, dash_length=4,
+            )
+
+            for idx, day in enumerate(days):
+                cx = self.x + pad_x + idx * slot_w + (slot_w - bar_w) / 2
+                date_str = day.isoformat()
+                score = self._day_values.get(date_str, 0)
+
+                if score > 0:
+                    bar_h = max(score / 100.0 * graph_h, self.MIN_BAR_HEIGHT)
+                else:
+                    bar_h = self.MIN_BAR_HEIGHT
+
+                color = _lerp_color(score) if score > 0 else C.BG_CARD
+
+                if date_str == self._selected_date:
+                    Color(1.0, 1.0, 1.0, 0.9)
+                    Rectangle(
+                        pos=(cx - dp(1), graph_y - dp(1)),
+                        size=(bar_w + dp(2), bar_h + dp(2)),
+                    )
+
+                Color(*color)
+                RoundedRectangle(
+                    pos=(cx, graph_y), size=(bar_w, bar_h), radius=[dp(2)],
+                )
+                self._cell_positions[date_str] = (cx, graph_y, bar_w, bar_h)
+
+        self._render_labels(days, pad_x, slot_w, bar_w)
+
+    def _render_labels(self, days, pad_x, slot_w, bar_w):
+        """Day-of-week initial under each bar; day-number on the first slot of each new month."""
+        for child in list(self.children):
+            self.remove_widget(child)
+        dow_initials = ["M", "T", "W", "T", "F", "S", "S"]
+        for idx, day in enumerate(days):
+            cx = self.x + pad_x + idx * slot_w + (slot_w - bar_w) / 2
+            initial = dow_initials[day.weekday()]
+            day_num = day.day
+            text = initial if day_num != 1 and idx > 0 else f"{day_num}"
+            lbl = Label(
+                text=text,
+                font_size=F.TINY,
+                color=C.TEXT_MUTED,
+                size_hint=(None, None),
+                size=(bar_w + dp(8), dp(16)),
+                pos=(cx - dp(4), self.y),
+                halign="center",
+                valign="middle",
+            )
+            lbl.text_size = lbl.size
+            self.add_widget(lbl)
 
 
 class HistoryScreen(Screen):
