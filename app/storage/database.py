@@ -364,7 +364,9 @@ class DatabaseManager:
     # ---- Settings persistence ----
 
     def get_setting(self, key: str) -> Optional[str]:
-        """Get a persisted setting value."""
+        """Get a persisted setting value, or None if the DB is closed."""
+        if self._conn is None:
+            return None
         cursor = self._conn.execute(
             "SELECT value FROM app_settings WHERE key = ?", (key,)
         )
@@ -372,7 +374,15 @@ class DatabaseManager:
         return row[0] if row else None
 
     def set_setting(self, key: str, value: str) -> None:
-        """Set a persisted setting value (upsert)."""
+        """Set a persisted setting value (upsert). No-op if DB is closed.
+
+        Defended against post-close writes so a Restore→Stop path that
+        runs `_save_user_settings` after the DB conn was already torn down
+        doesn't crash on AttributeError.
+        """
+        if self._conn is None:
+            logger.debug(f"set_setting({key!r}) skipped — DB is closed")
+            return
         self._conn.execute(
             "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
             (key, value),

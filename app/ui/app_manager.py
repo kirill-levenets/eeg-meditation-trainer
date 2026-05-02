@@ -1885,6 +1885,11 @@ class EEGMeditationApp(App):
             self._db = DatabaseManager(db_path=APP.DB_PATH)
             return
 
+        # DB is now closed and the file replaced. Tell on_stop to skip
+        # _save_user_settings (which would crash on a closed conn anyway,
+        # and would also clobber the freshly-restored state).
+        self._restoring = True
+
         content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
         content.add_widget(Label(
             text="Database restored.\n\nThe app will now exit — please relaunch.",
@@ -2252,8 +2257,13 @@ class EEGMeditationApp(App):
         launch can open a fresh RFCOMM on the existing ACL link and the
         ThinkGear ASIC will resume streaming immediately — avoiding the
         "connected but no packets" problem caused by a stale ACL.
+
+        After a Restore-database, _restoring is set so we skip
+        _save_user_settings: the DB file has just been replaced and writing
+        the current in-memory settings would clobber the imported state.
         """
-        self._save_user_settings()
+        if not getattr(self, "_restoring", False):
+            self._save_user_settings()
         if self._session_manager.state in (SessionState.RUNNING, SessionState.PAUSED):
             self._stop_and_save()
         self._audio.cleanup()

@@ -23,7 +23,18 @@ class UserPickerForm(BoxLayout):
         on_delete: Optional[Callable[[int], None]] = None,
         **kwargs,
     ) -> None:
-        super().__init__(orientation="vertical", spacing=S.GAP_SM, **kwargs)
+        # size_hint_y=None + minimum_height is required so the form sizes
+        # correctly inside an accordion section's ScrollView (which sets
+        # _scroll.height from _content.minimum_height). Without this the
+        # section snapshots a height that excludes the existing-profiles
+        # list and the form gets clipped.
+        super().__init__(
+            orientation="vertical",
+            spacing=S.GAP_SM,
+            size_hint_y=None,
+            **kwargs,
+        )
+        self.bind(minimum_height=self.setter("height"))
         self._on_create = on_create
         self._on_pick_existing = on_pick_existing
         self._on_count = on_count
