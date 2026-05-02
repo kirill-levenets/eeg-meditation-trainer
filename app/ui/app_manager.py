@@ -339,6 +339,9 @@ class EEGMeditationApp(App):
         )
         self._settings_screen.set_session_counter(self._count_sessions_for_user)
 
+        # Data Backup section
+        self._settings_screen.set_backup_callback(self._on_backup_pressed)
+
     def _restore_last_user(self) -> None:
         """Restore last selected user from DB settings on startup."""
         saved = self._db.get_setting("last_user_id")
@@ -1656,6 +1659,99 @@ class EEGMeditationApp(App):
 
     def _count_sessions_for_user(self, user_id: int) -> int:
         return len(self._db.get_all_sessions(user_id=user_id))
+
+    # --- Data Backup ---
+
+    def _is_android(self) -> bool:
+        return hasattr(sys, "getandroidapilevel")
+
+    def _on_backup_pressed(self) -> None:
+        """Backup the live DB to a user-visible location."""
+        from datetime import datetime as _dt
+
+        from app.crash_handler import report_soft_error
+
+        ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"meditation_backup_{ts}.db"
+
+        if self._is_android():
+            target_dir = "/sdcard/Documents/EEGMeditation"
+            try:
+                os.makedirs(target_dir, exist_ok=True)
+            except (PermissionError, OSError) as e:
+                report_soft_error(
+                    "backup_failed", f"Could not create {target_dir}: {e}",
+                )
+                return
+            target_path = os.path.join(target_dir, filename)
+            self._run_backup_async(target_path)
+        else:
+            self._open_backup_save_picker(filename)
+
+    def _run_backup_async(self, target_path: str) -> None:
+        import threading
+
+        from kivy.clock import Clock as _Clock
+
+        from app.crash_handler import report_soft_error
+        from app.storage import backup as _backup
+
+        self._settings_screen.show_backup_status("Backing up…")
+
+        def _worker():
+            try:
+                _backup.make_backup(self._db, target_path)
+            except (PermissionError, OSError) as exc:
+                err_msg = f"Backup to {target_path} failed: {exc}"
+                _Clock.schedule_once(
+                    lambda dt, _msg=err_msg: report_soft_error("backup_failed", _msg),
+                )
+                return
+            _Clock.schedule_once(lambda dt: self._settings_screen.show_backup_status(
+                f"Saved to {target_path}",
+            ))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _open_backup_save_picker(self, default_filename: str) -> None:
+        from kivy.uix.filechooser import FileChooserListView
+        from kivy.uix.popup import Popup
+        from kivy.uix.textinput import TextInput
+
+        from app.config import APP
+        from app.ui.theme import StyledButton
+
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
+        chooser = FileChooserListView(
+            path=os.path.dirname(APP.DB_PATH),
+            filters=["*.db"],
+            size_hint_y=0.7,
+        )
+        name_input = TextInput(
+            text=default_filename,
+            multiline=False,
+            size_hint_y=None,
+            height=dp(40),
+        )
+        btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
+        ok = StyledButton(text="Save", bg_color=C.ACCENT)
+        cancel = StyledButton(text="Cancel", bg_color=C.BG_CARD,
+                              text_color=C.TEXT_MUTED)
+        btn_row.add_widget(ok)
+        btn_row.add_widget(cancel)
+        content.add_widget(chooser)
+        content.add_widget(name_input)
+        content.add_widget(btn_row)
+        popup = Popup(title="Save backup", content=content, size_hint=(0.9, 0.9))
+
+        def _do_save(*_a):
+            target = os.path.join(chooser.path, name_input.text.strip())
+            popup.dismiss()
+            self._run_backup_async(target)
+
+        ok.bind(on_release=_do_save)
+        cancel.bind(on_release=popup.dismiss)
+        popup.open()
 
     def _on_pick_existing_user(self, user_id: int, source: str) -> None:
         """User picked an existing profile from a UserPickerForm.
