@@ -545,9 +545,21 @@ class HistoryScreen(Screen):
 
         Bound to both _heatmap.height and _bars.height. Each toggles to 0
         when hidden; we ignore those zeros and pick up the non-zero one.
+
+        BoxLayout only re-runs its layout when a child's `size_hint` (not
+        `height`) changes. So merely setting `graph_row.height = value`
+        doesn't move `graph_row.y` to accommodate the new size — the
+        rest of the screen stays put and graph_row's top grows upward,
+        eventually clipping above the title. Force the parent to lay out
+        again so graph_row gets a correct y, and the heatmap inside gets
+        a new pos that triggers its size/pos-bound _redraw.
         """
-        if value > 0:
-            self._graph_row.height = value
+        if value <= 0:
+            return
+        self._graph_row.height = value
+        parent = self._graph_row.parent
+        if parent is not None:
+            parent._trigger_layout()
 
     def _redraw_heatmap_after_layout(self, *args):
         """Force a heatmap _redraw after Kivy's layout pass settles.
