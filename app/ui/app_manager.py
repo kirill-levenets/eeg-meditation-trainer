@@ -417,17 +417,17 @@ class EEGMeditationApp(App):
         if not user_name or len(user_name.strip()) < 2:
             logger.warning(f"Wizard complete with invalid name: '{user_name}', ignoring")
             return
-        # Create user
+        # Create user (or adopt an existing one with the same name)
+        from app.storage.database import UserExistsError
+
         try:
-            self._db.create_user(user_name)
-        except Exception as e:
-            logger.warning(f"Wizard user create failed: {e}")
-        users = self._db.get_all_users()
-        for u in users:
-            if u["name"] == user_name:
-                self._current_user_id = u["id"]
-                self._db.set_setting("last_user_id", str(u["id"]))
-                break
+            uid = self._db.create_user(user_name)
+            self._current_user_id = uid
+            self._db.set_setting("last_user_id", str(uid))
+        except UserExistsError as e:
+            self._current_user_id = e.user_id
+            self._db.set_setting("last_user_id", str(e.user_id))
+            logger.info(f"Wizard: adopting existing user {e.name} (id={e.user_id})")
 
         # Set device
         if device_addr:
@@ -1667,11 +1667,26 @@ class EEGMeditationApp(App):
         self._db.set_user_setting(self._current_user_id, "history_view_mode", mode)
 
     def _on_user_create(self, name: str) -> None:
-        """Create a new user and refresh the profile list."""
+        """Create a new user and refresh the profile list.
+
+        Routes UserExistsError to the active picker form (Settings) for
+        inline duplicate handling.
+        """
+        from app.storage.database import UserExistsError
+
         try:
             self._db.create_user(name)
+        except UserExistsError as e:
+            form = getattr(self._settings_screen, "_user_picker_form", None)
+            if form is not None:
+                form.show_duplicate_error(user_id=e.user_id, name=e.name)
+            return
         except Exception as e:
-            logger.warning(f"Could not create user '{name}': {e}")
+            from app.crash_handler import report_soft_error
+            report_soft_error(
+                "user_create_failed", f"Could not create user '{name}': {e}",
+            )
+            return
         self._refresh_profile()
 
     def _on_user_delete(self, user_id: int) -> None:
