@@ -77,6 +77,18 @@ def test_use_existing_button_fires_pick_callback():
     assert received == [99]
 
 
+def test_use_existing_clears_error_region():
+    form = UserPickerForm(
+        on_create=lambda name: None,
+        on_pick_existing=lambda uid: None,
+    )
+    form.show_duplicate_error(user_id=42, name="Alice")
+    assert form._error_row.opacity == 1
+    form._btn_use_existing.dispatch("on_release")
+    assert form._error_row.opacity == 0
+    assert form._error_row.disabled is True
+
+
 def test_change_name_button_clears_error_region():
     form = UserPickerForm(
         on_create=lambda name: None,

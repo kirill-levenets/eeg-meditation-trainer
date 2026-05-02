@@ -283,8 +283,16 @@ class UserPickerForm(BoxLayout):
         self._on_pick_existing(user_id)
 
     def _on_use_existing_pressed(self) -> None:
-        if self._duplicate_user_id is not None:
-            self._on_pick_existing(self._duplicate_user_id)
+        if self._duplicate_user_id is None:
+            return
+        uid = self._duplicate_user_id
+        # Hide the inline error region — user is picking the existing
+        # profile, the duplicate prompt no longer applies.
+        self._error_row.opacity = 0
+        self._error_row.disabled = True
+        self._error_row.height = 0
+        self._duplicate_user_id = None
+        self._on_pick_existing(uid)
 
     def _on_change_name_pressed(self) -> None:
         self._error_row.opacity = 0
