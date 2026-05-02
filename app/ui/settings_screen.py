@@ -24,6 +24,7 @@ from app.ui.theme import (
     StyledButton,
     ThemedAccordion,
 )
+from app.ui.widgets.user_picker import UserPickerForm
 
 
 def _load_help_topics(lang: str = "en") -> list[tuple[str, str]]:
@@ -68,6 +69,10 @@ class SettingsScreen(Screen):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.name = "settings"
+        self._on_profile_switch: Optional[Callable] = None
+        self._on_profile_create: Optional[Callable] = None
+        self._on_profile_delete: Optional[Callable] = None
+        self._session_counter: Optional[Callable[[int], int]] = None
         self._on_threshold_change: Optional[Callable] = None
         self._on_toggle_change: Optional[Callable] = None
         self._on_test_audio: Optional[Callable] = None
@@ -129,35 +134,13 @@ class SettingsScreen(Screen):
         )
         profile_section.add_widget(self._profile_current_label)
 
-        create_row = BoxLayout(size_hint_y=None, height=S.ROW_H, spacing=S.GAP)
-        self._profile_name_input = TextInput(
-            hint_text="New user name...",
-            multiline=False,
-            font_size=F.BODY,
-            foreground_color=C.TEXT,
-            background_color=list(C.BG_INPUT),
-            size_hint_x=0.6,
+        self._user_picker_form = UserPickerForm(
+            on_create=self._on_form_create_pressed,
+            on_pick_existing=self._on_form_pick_existing,
+            on_count=self._count_user_sessions,
+            on_delete=self._on_form_delete_pressed,
         )
-        self._profile_create_btn = StyledButton(
-            text="Create",
-            bg_color=C.ACCENT,
-            bg_pressed=C.ACCENT_DIM,
-            font_size=F.BODY,
-            size_hint_x=0.4,
-        )
-        create_row.add_widget(self._profile_name_input)
-        create_row.add_widget(self._profile_create_btn)
-        profile_section.add_widget(create_row)
-
-        self._profile_user_list = BoxLayout(
-            orientation="vertical",
-            size_hint_y=None,
-            spacing=S.GAP_SM,
-        )
-        self._profile_user_list.bind(
-            minimum_height=self._profile_user_list.setter("height")
-        )
-        profile_section.add_widget(self._profile_user_list)
+        profile_section.add_widget(self._user_picker_form)
 
         # --- Timer section ---
         timer_section = accordion.add_section("Timer", collapsed=True)
@@ -1403,7 +1386,32 @@ class SettingsScreen(Screen):
         self._on_profile_switch = on_switch
         self._on_profile_create = on_create
         self._on_profile_delete = on_delete
-        self._profile_create_btn.bind(on_release=self._on_profile_create_pressed)
+
+    def set_session_counter(self, fn):
+        """app_manager wires this to count per-user sessions for the form."""
+        self._session_counter = fn
+
+    def _count_user_sessions(self, user_id: int) -> int:
+        if getattr(self, "_session_counter", None) is None:
+            return 0
+        return self._session_counter(user_id)
+
+    def _on_form_create_pressed(self, name: str) -> None:
+        if self._on_profile_create:
+            self._on_profile_create(name)
+
+    def _on_form_pick_existing(self, user_id: int) -> None:
+        if self._on_profile_switch:
+            self._on_profile_switch(user_id)
+
+    def _on_form_delete_pressed(self, user_id: int) -> None:
+        # Look up the name from the most recently populated list
+        name = ""
+        for u in self._user_picker_form._users:
+            if u["id"] == user_id:
+                name = u["name"]
+                break
+        self._confirm_user_delete(user_id, name)
 
     def _confirm_user_delete(self, user_id, user_name):
         """Show confirmation before deleting a user."""
@@ -1431,15 +1439,9 @@ class SettingsScreen(Screen):
         btn_confirm.bind(on_release=_do_delete)
         popup.open()
 
-    def _on_profile_create_pressed(self, *args):
-        name = self._profile_name_input.text.strip()
-        if name and self._on_profile_create:
-            self._on_profile_create(name)
-            self._profile_name_input.text = ""
-
     def populate_users(self, users, current_user_id=None):
-        """Fill the user list in the Profile section."""
-        self._profile_user_list.clear_widgets()
+        """Fill the user picker form."""
+        self._user_picker_form.populate_users(users)
         if current_user_id is None:
             self._profile_current_label.text = "Current: All Users"
         else:
@@ -1447,40 +1449,6 @@ class SettingsScreen(Screen):
                 if u["id"] == current_user_id:
                     self._profile_current_label.text = f"Current: {u['name']}"
                     break
-
-        for u in users:
-            is_active = u["id"] == current_user_id
-            row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP_SM)
-            btn = StyledButton(
-                text=u["name"],
-                bg_color=C.ACCENT_DIM if is_active else C.BG_CARD,
-                text_color=C.TEXT if is_active else C.TEXT_SECONDARY,
-                font_size=F.BODY,
-                height=dp(36),
-                bold=is_active,
-            )
-            btn._user_id = u["id"]
-            btn.bind(on_release=lambda b: (
-                self._on_profile_switch(b._user_id) if self._on_profile_switch else None
-            ))
-            row.add_widget(btn)
-
-            del_btn = StyledButton(
-                text="", icon=Icons.DELETE,
-                bg_color=C.DANGER,
-                text_color=C.DANGER,
-                font_size=F.SMALL,
-                height=dp(36),
-                size_hint_x=None,
-                width=dp(40),
-                bold=False,
-                outline=True,
-            )
-            del_btn._user_id = u["id"]
-            del_btn._user_name = u["name"]
-            del_btn.bind(on_release=lambda b: self._confirm_user_delete(b._user_id, b._user_name))
-            row.add_widget(del_btn)
-            self._profile_user_list.add_widget(row)
 
     # --- Timer properties ---
 

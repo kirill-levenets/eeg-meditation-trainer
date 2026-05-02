@@ -337,6 +337,7 @@ class EEGMeditationApp(App):
             on_create=self._on_user_create,
             on_delete=self._on_user_delete,
         )
+        self._settings_screen.set_session_counter(self._count_sessions_for_user)
 
     def _restore_last_user(self) -> None:
         """Restore last selected user from DB settings on startup."""
@@ -1652,6 +1653,9 @@ class EEGMeditationApp(App):
         if not self._current_user_id:
             return
         self._db.set_user_setting(self._current_user_id, "history_view_mode", mode)
+
+    def _count_sessions_for_user(self, user_id: int) -> int:
+        return len(self._db.get_all_sessions(user_id=user_id))
 
     def _on_user_create(self, name: str) -> None:
         """Create a new user and refresh the profile list.
