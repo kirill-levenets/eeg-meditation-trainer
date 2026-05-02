@@ -418,8 +418,11 @@ class HistoryScreen(Screen):
         root.add_widget(title)
 
         # Graph row: graph (calendar OR bars) on the left, narrow toggle
-        # column (Cal / 14d) on the right. Row height tracks the visible
-        # graph's height so the heatmap can grow when the window widens.
+        # column (Cal / 14d) on the right. Row height matches the active
+        # widget. Only one of heatmap/bars is parented at a time — the
+        # inactive one is removed from graph_wrap. BoxLayout natively
+        # observes its own children list, so swapping fires a layout
+        # pass automatically.
         self._graph_row = BoxLayout(
             orientation="horizontal",
             size_hint_y=None,
@@ -427,27 +430,21 @@ class HistoryScreen(Screen):
             spacing=dp(4),
         )
 
-        # Graph wrapper holds both views; only one is visible at a time
-        # (the other has height=0 + opacity=0).
-        graph_wrap = BoxLayout(orientation="vertical", size_hint_x=1)
+        self._graph_wrap = BoxLayout(orientation="vertical", size_hint_x=1)
 
-        # Calendar heatmap
+        # Calendar heatmap (initial active widget).
         self._heatmap = CalendarHeatmap()
         self._heatmap.set_day_tap_callback(self._on_day_tap)
-        self._heatmap.bind(height=self._on_active_graph_height_change)
-        graph_wrap.add_widget(self._heatmap)
+        self._heatmap.bind(height=self._on_active_widget_height)
+        self._graph_wrap.add_widget(self._heatmap)
 
-        # Bar-chart view (initially hidden)
+        # Bar-chart view — built but NOT parented yet. Added when user
+        # toggles to bars view.
         self._bars = Last14DaysBars()
         self._bars.set_day_tap_callback(self._on_day_tap)
-        self._bars.opacity = 0
-        self._bars.disabled = True
-        self._bars.size_hint_y = None
-        self._bars.height = 0
-        self._bars.bind(height=self._on_active_graph_height_change)
-        graph_wrap.add_widget(self._bars)
+        self._bars.bind(height=self._on_active_widget_height)
 
-        self._graph_row.add_widget(graph_wrap)
+        self._graph_row.add_widget(self._graph_wrap)
 
         # Toggle column on the right — fixed 40dp wide, two compact buttons
         # stacked vertically.
@@ -540,79 +537,78 @@ class HistoryScreen(Screen):
         self._on_export_csv = on_export_csv
         self._on_rename_session = on_rename_session
 
-    def _on_active_graph_height_change(self, instance, value):
-        """Match graph_row height to whichever child widget is active.
+    def _on_active_widget_height(self, instance, value):
+        """Track the active widget's height onto graph_row.
 
-        Bound to both _heatmap.height and _bars.height. Each toggles to 0
-        when hidden; we ignore those zeros and pick up the non-zero one.
-
-        BoxLayout only re-runs its layout when a child's `size_hint` (not
-        `height`) changes. So merely setting `graph_row.height = value`
-        doesn't move `graph_row.y` to accommodate the new size — the
-        rest of the screen stays put and graph_row's top grows upward,
-        eventually clipping above the title. Force the parent to lay out
-        again so graph_row gets a correct y, and the heatmap inside gets
-        a new pos that triggers its size/pos-bound _redraw.
+        The widget swap pattern in `set_view_mode` re-parents heatmap or
+        bars into graph_wrap; whichever is currently parented is the
+        ACTIVE widget. Its height changes (e.g., heatmap recomputing its
+        adaptive cell on window resize) should propagate to graph_row so
+        the screen layout grows/shrinks accordingly.
         """
-        if value <= 0:
+        if instance.parent is None or value <= 0:
             return
-        self._graph_row.height = value
-        parent = self._graph_row.parent
-        if parent is not None:
-            parent._trigger_layout()
+        if value != self._graph_row.height:
+            self._graph_row.height = value
+            self._cascade_layout()
 
-    def _redraw_heatmap_after_layout(self, *args):
-        """Force a heatmap _redraw after Kivy's layout pass settles.
+    def _cascade_layout(self):
+        """Synchronous layout pass: root → graph_row → graph_wrap.
 
-        When set_view_mode flips heatmap.height from 0 to cal_h, the size
-        bind fires _redraw synchronously — but heatmap.y is still its
-        stale value from the bars view (top of graph_wrap). Cells render
-        offset. We schedule a redraw twice:
-        - 0s: at end of current tick (catches simple cases)
-        - 0.05s: after one frame (catches deferred BoxLayout layout pass)
+        BoxLayout only re-runs its layout when its own size/pos/children
+        change. After we change graph_row.height (an explicit `height`
+        on a `size_hint_y=None` child), the root needs to be told to
+        re-position graph_row, then the graph_row layout positions
+        graph_wrap, then graph_wrap positions its child. We force the
+        cascade explicitly so the user sees the new layout immediately
+        instead of waiting for a window resize.
         """
-        from kivy.clock import Clock
-        Clock.schedule_once(lambda dt: self._heatmap._redraw(), 0)
-        Clock.schedule_once(lambda dt: self._heatmap._redraw(), 0.05)
+        if self._root.parent is not None:
+            self._root.do_layout()
+        self._graph_row.do_layout()
+        self._graph_wrap.do_layout()
 
     def set_view_mode(self, mode: str) -> None:
-        """Switch between 'calendar' and 'bars'."""
+        """Switch between 'calendar' and 'bars'.
+
+        Architectural note: we swap which widget is parented in
+        graph_wrap (clear_widgets + add_widget) rather than juggling
+        opacity + height on two coexisting widgets. BoxLayout fires its
+        own layout pass when its `children` list changes, which is the
+        only Kivy-native trigger we can rely on for child swap. We then
+        cascade do_layout() synchronously so graph_row.y / heatmap.pos /
+        bar.pos all update in the same turn (no waiting on next-frame
+        layout, no stale render flicker).
+        """
         if mode not in ("calendar", "bars"):
             return
         self._view_mode = mode
+        self._graph_wrap.clear_widgets()
         if mode == "calendar":
-            # Compute current cell-based height (it adapts to width)
             cell = self._heatmap._compute_cell_size()
             cal_h = 7 * (cell + self._heatmap.CELL_GAP) + self._heatmap.TOP_MARGIN
-            self._heatmap.opacity = 1
-            self._heatmap.disabled = False
-            self._heatmap.size_hint_y = None
             self._heatmap.height = cal_h
-            self._bars.opacity = 0
-            self._bars.disabled = True
-            self._bars.height = 0
+            self._graph_wrap.add_widget(self._heatmap)
+            self._graph_row.height = cal_h
             self._btn_calendar.bg_color = C.PRIMARY
             self._btn_calendar.text_color = C.TEXT
             self._btn_calendar.bold = True
             self._btn_bars.bg_color = C.BG_CARD
             self._btn_bars.text_color = C.TEXT_SECONDARY
             self._btn_bars.bold = False
-            # Re-render after parent re-layout settles heatmap.y
-            self._redraw_heatmap_after_layout()
         else:
-            self._heatmap.opacity = 0
-            self._heatmap.disabled = True
-            self._heatmap.height = 0
-            self._bars.opacity = 1
-            self._bars.disabled = False
-            self._bars.size_hint_y = None
             self._bars.height = dp(132)
+            self._graph_wrap.add_widget(self._bars)
+            self._graph_row.height = dp(132)
             self._btn_calendar.bg_color = C.BG_CARD
             self._btn_calendar.text_color = C.TEXT_SECONDARY
             self._btn_calendar.bold = False
             self._btn_bars.bg_color = C.PRIMARY
             self._btn_bars.text_color = C.TEXT
             self._btn_bars.bold = True
+        # Force the synchronous layout cascade so the user sees the new
+        # geometry immediately.
+        self._cascade_layout()
 
     def set_view_mode_callback(self, cb: Callable) -> None:
         """Called with the new mode string when the user toggles."""

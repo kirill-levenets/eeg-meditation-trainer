@@ -44,21 +44,19 @@ def test_last14_days_bars_callback_invoked_on_known_position():
         assert received == [today_iso]
 
 
-def test_history_screen_set_view_mode_toggles_widget_visibility():
+def test_history_screen_set_view_mode_swaps_active_widget():
     from app.ui.history_screen import HistoryScreen
     screen = HistoryScreen()
 
     screen.set_view_mode("calendar")
-    assert screen._heatmap.opacity == 1
-    assert screen._bars.opacity == 0
-    assert screen._heatmap.disabled is False
-    assert screen._bars.disabled is True
+    # Only heatmap is parented in graph_wrap
+    assert screen._heatmap.parent is screen._graph_wrap
+    assert screen._bars.parent is None
 
     screen.set_view_mode("bars")
-    assert screen._heatmap.opacity == 0
-    assert screen._bars.opacity == 1
-    assert screen._heatmap.disabled is True
-    assert screen._bars.disabled is False
+    # Now only bars is parented
+    assert screen._heatmap.parent is None
+    assert screen._bars.parent is screen._graph_wrap
 
 
 def test_history_screen_view_mode_callback_fires_on_toggle():
