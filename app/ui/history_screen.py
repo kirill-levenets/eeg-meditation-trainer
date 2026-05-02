@@ -187,11 +187,16 @@ class Last14DaysBars(Widget):
     """14-day bar chart of avg shamatha — alternative to the calendar heatmap.
 
     Public API mirrors CalendarHeatmap so HistoryScreen can swap them.
+    Renders a y-axis with gridlines/labels at 0/25/50/75/100, per-bar score
+    labels above non-empty bars, and a polyline trend through bar tops.
     """
 
     DAYS = 14
     MIN_BAR_HEIGHT = dp(2)
     BASELINE_HEIGHT = dp(20)  # space for date labels under bars
+    PAD_LEFT = dp(24)         # space for y-axis labels
+    PAD_RIGHT = dp(4)
+    GRID_VALUES = (0, 25, 50, 75, 100)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -231,25 +236,30 @@ class Last14DaysBars(Widget):
         today = datetime.date.today()
         days = [today - datetime.timedelta(days=i) for i in range(self.DAYS - 1, -1, -1)]
 
-        pad_x = dp(4)
-        avail_w = max(self.width - 2 * pad_x, dp(10))
+        avail_w = max(self.width - self.PAD_LEFT - self.PAD_RIGHT, dp(10))
         slot_w = avail_w / self.DAYS
         bar_w = max(slot_w - dp(4), dp(4))
 
         graph_h = self.height - self.BASELINE_HEIGHT
         graph_y = self.y + self.BASELINE_HEIGHT
+        graph_x_left = self.x + self.PAD_LEFT
+        graph_x_right = self.x + self.width - self.PAD_RIGHT
+
+        # Track bar-top centers so we can stitch a trend polyline below
+        trend_points: list[float] = []
 
         with self.canvas:
-            # Threshold reference line at y=50
-            Color(*C.TEXT_MUTED)
-            ref_y = graph_y + graph_h * 0.5
-            Line(
-                points=[self.x + pad_x, ref_y, self.x + self.width - pad_x, ref_y],
-                width=1, dash_offset=2, dash_length=4,
-            )
+            # Horizontal gridlines at 0/25/50/75/100
+            for v in self.GRID_VALUES:
+                gy = graph_y + (v / 100.0) * graph_h
+                Color(*C.TEXT_MUTED)
+                Line(
+                    points=[graph_x_left, gy, graph_x_right, gy],
+                    width=1, dash_offset=2, dash_length=4,
+                )
 
             for idx, day in enumerate(days):
-                cx = self.x + pad_x + idx * slot_w + (slot_w - bar_w) / 2
+                cx = graph_x_left + idx * slot_w + (slot_w - bar_w) / 2
                 date_str = day.isoformat()
                 score = self._day_values.get(date_str, 0)
 
@@ -273,19 +283,46 @@ class Last14DaysBars(Widget):
                 )
                 self._cell_positions[date_str] = (cx, graph_y, bar_w, bar_h)
 
-        self._render_labels(days, pad_x, slot_w, bar_w)
+                if score > 0:
+                    trend_points.extend([cx + bar_w / 2, graph_y + bar_h])
 
-    def _render_labels(self, days, pad_x, slot_w, bar_w):
-        """Day-of-week initial under each bar; day-number on the first slot of each new month."""
+            # Trend polyline through bar tops (only days with data)
+            if len(trend_points) >= 4:
+                Color(*C.PRIMARY)
+                Line(points=trend_points, width=1.4)
+
+        self._render_labels(days, slot_w, bar_w, graph_x_left, graph_y, graph_h)
+
+    def _render_labels(self, days, slot_w, bar_w, graph_x_left, graph_y, graph_h):
+        """Y-axis labels (0/25/50/75/100), day labels under bars, and per-bar scores."""
         for child in list(self.children):
             self.remove_widget(child)
+
+        # Y-axis labels on the left
+        for v in self.GRID_VALUES:
+            gy = graph_y + (v / 100.0) * graph_h
+            ylbl = Label(
+                text=str(v),
+                font_size=F.TINY,
+                color=C.TEXT_MUTED,
+                size_hint=(None, None),
+                size=(self.PAD_LEFT - dp(2), dp(14)),
+                pos=(self.x, gy - dp(7)),
+                halign="right",
+                valign="middle",
+            )
+            ylbl.text_size = ylbl.size
+            self.add_widget(ylbl)
+
+        # Day-of-week initials under each bar (day-number on the first slot
+        # of each new month) and per-bar score numbers above non-empty bars
         dow_initials = ["M", "T", "W", "T", "F", "S", "S"]
         for idx, day in enumerate(days):
-            cx = self.x + pad_x + idx * slot_w + (slot_w - bar_w) / 2
+            cx = graph_x_left + idx * slot_w + (slot_w - bar_w) / 2
             initial = dow_initials[day.weekday()]
             day_num = day.day
             text = initial if day_num != 1 and idx > 0 else f"{day_num}"
-            lbl = Label(
+            day_lbl = Label(
                 text=text,
                 font_size=F.TINY,
                 color=C.TEXT_MUTED,
@@ -295,8 +332,25 @@ class Last14DaysBars(Widget):
                 halign="center",
                 valign="middle",
             )
-            lbl.text_size = lbl.size
-            self.add_widget(lbl)
+            day_lbl.text_size = day_lbl.size
+            self.add_widget(day_lbl)
+
+            date_str = day.isoformat()
+            score = self._day_values.get(date_str, 0)
+            if score > 0:
+                bar_h = max(score / 100.0 * graph_h, self.MIN_BAR_HEIGHT)
+                score_lbl = Label(
+                    text=f"{int(round(score))}",
+                    font_size=F.TINY,
+                    color=C.TEXT,
+                    size_hint=(None, None),
+                    size=(bar_w + dp(12), dp(12)),
+                    pos=(cx - dp(6), graph_y + bar_h),
+                    halign="center",
+                    valign="bottom",
+                )
+                score_lbl.text_size = score_lbl.size
+                self.add_widget(score_lbl)
 
 
 class HistoryScreen(Screen):
@@ -342,38 +396,24 @@ class HistoryScreen(Screen):
         title.bind(size=title.setter("text_size"))
         root.add_widget(title)
 
-        # View-mode toggle: Calendar / 14-Day
-        toggle_row = BoxLayout(
+        # Graph row: graph (calendar OR bars) on the left, narrow toggle
+        # column (Cal / 14d) on the right.
+        graph_row = BoxLayout(
+            orientation="horizontal",
             size_hint_y=None,
-            height=dp(36),
-            spacing=S.GAP_SM,
+            height=dp(132),
+            spacing=dp(4),
         )
-        self._btn_calendar = StyledButton(
-            text="Calendar",
-            bg_color=C.PRIMARY,
-            text_color=C.TEXT,
-            font_size=F.SMALL,
-            height=dp(36),
-            bold=True,
-        )
-        self._btn_bars = StyledButton(
-            text="14-Day",
-            bg_color=C.BG_CARD,
-            text_color=C.TEXT_SECONDARY,
-            font_size=F.SMALL,
-            height=dp(36),
-            bold=False,
-        )
-        self._btn_calendar.bind(on_release=lambda *a: self._on_toggle_pressed("calendar"))
-        self._btn_bars.bind(on_release=lambda *a: self._on_toggle_pressed("bars"))
-        toggle_row.add_widget(self._btn_calendar)
-        toggle_row.add_widget(self._btn_bars)
-        root.add_widget(toggle_row)
+
+        # Graph wrapper holds both views; only one is visible at a time
+        # (the other has height=0 + opacity=0). Wrapper height matches
+        # graph_row so the visible graph fills its row.
+        graph_wrap = BoxLayout(orientation="vertical", size_hint_x=1)
 
         # Calendar heatmap
         self._heatmap = CalendarHeatmap()
         self._heatmap.set_day_tap_callback(self._on_day_tap)
-        root.add_widget(self._heatmap)
+        graph_wrap.add_widget(self._heatmap)
 
         # Bar-chart view (initially hidden)
         self._bars = Last14DaysBars()
@@ -382,7 +422,39 @@ class HistoryScreen(Screen):
         self._bars.disabled = True
         self._bars.size_hint_y = None
         self._bars.height = 0
-        root.add_widget(self._bars)
+        graph_wrap.add_widget(self._bars)
+
+        graph_row.add_widget(graph_wrap)
+
+        # Toggle column on the right — fixed 40dp wide, two compact buttons
+        # stacked vertically.
+        toggle_col = BoxLayout(
+            orientation="vertical",
+            size_hint_x=None,
+            width=dp(40),
+            spacing=dp(4),
+        )
+        self._btn_calendar = StyledButton(
+            text="Cal",
+            bg_color=C.PRIMARY,
+            text_color=C.TEXT,
+            font_size=F.SMALL,
+            bold=True,
+        )
+        self._btn_bars = StyledButton(
+            text="14d",
+            bg_color=C.BG_CARD,
+            text_color=C.TEXT_SECONDARY,
+            font_size=F.SMALL,
+            bold=False,
+        )
+        self._btn_calendar.bind(on_release=lambda *a: self._on_toggle_pressed("calendar"))
+        self._btn_bars.bind(on_release=lambda *a: self._on_toggle_pressed("bars"))
+        toggle_col.add_widget(self._btn_calendar)
+        toggle_col.add_widget(self._btn_bars)
+        graph_row.add_widget(toggle_col)
+
+        root.add_widget(graph_row)
 
         # Date label + Show All button
         date_row = BoxLayout(size_hint_y=None, height=dp(28), spacing=S.GAP)
