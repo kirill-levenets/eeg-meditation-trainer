@@ -66,6 +66,11 @@ class EEGMeditationApp(App):
         self._session_manager.set_audio(self._audio)
         self._tick_thread: Optional[threading.Thread] = None
         self._tick_stop_event: threading.Event = threading.Event()
+        # Android pause state: when True, tick thread skips per-tick UI
+        # work (graph add_point, stats updates) so a long screen-lock
+        # doesn't accumulate thousands of Clock callbacks that flood the
+        # main loop on resume (which previously caused a black screen).
+        self._is_paused: bool = False
         self._metrics_buffer: list[dict] = []
         self._raw_buffer: list[dict] = []
         self._flush_counter: int = 0
@@ -1236,18 +1241,28 @@ class EEGMeditationApp(App):
                 self._live_screen.raw_graph.add_marker()
                 self._live_screen.band_graph.add_marker()
 
-        self._on_main(_ui_update)
+        # Skip per-tick UI work while the app is paused (Android screen
+        # locked). Otherwise N minutes locked at 2 Hz queues ~120·N Clock
+        # callbacks — each doing a full graph redraw — which flood the
+        # main loop on resume and previously caused a black-screen freeze
+        # severe enough to require force-closing the app.
+        if not self._is_paused:
+            self._on_main(_ui_update)
 
         # Timer countdown — tick() is pure counter, no UI
         if self._timer_state.tick(APP.UPDATE_FREQUENCY):
             logger.info("Timer expired, auto-stopping session")
-            # Order matters: tear down the session first (which calls
-            # _audio.stop() and clears any in-flight sounds), THEN start the
-            # timer-end bell. Otherwise _audio.stop() unloads the sound
-            # within milliseconds of starting it. The bell now keeps
-            # playing on the summary card until either the file ends
-            # naturally or the user taps a summary button (which calls
-            # AudioEngine.stop_timer_bell via the live screen handlers).
+            # Stop the audio loop on the tick thread directly so the
+            # white-noise actually ends at timer-expiry even when the
+            # screen is locked (the noise channel is MediaPlayer-based
+            # on Android and `AudioEngine.stop()` is thread-safe).
+            # Without this, _on_main below would queue stop() through
+            # Kivy's Clock — paused while the screen is locked — so
+            # the noise kept playing past the timer end.
+            self._audio.stop()
+            # UI cleanup + bell still go through the main thread (Kivy
+            # widget calls + SoundLoader). On Android, this fires when
+            # the user unlocks; the audio is already stopped.
             custom = self._timer_state.custom_sound_path
             def _finish_on_main(_dt=None):
                 self._stop_and_save(reason="timer")
@@ -2244,9 +2259,40 @@ class EEGMeditationApp(App):
         tick thread and the foreground service even while the UI is paused.
         Per Kivy docs returning False here would *stop* the app, not prevent
         the pause — so we always return True.
+
+        Also flips `_is_paused` so the tick thread skips per-tick UI work
+        (graph add_point, stats updates). Otherwise N minutes of locked
+        screen accumulates ~120·N Clock callbacks, each redrawing the
+        whole graph; on resume they all fire in a burst and the render
+        loop chokes (black-screen / app freeze).
         """
+        self._is_paused = True
         self._save_user_settings()
         return True
+
+    def on_resume(self) -> None:
+        """Android lifecycle: app foreground after a pause (screen unlock).
+
+        The tick thread skipped per-tick UI updates while paused, so the
+        graph and stats labels are stale. Drop the pause flag and force
+        a single UI refresh from current session state. Anything queued
+        through `_on_main` during the pause (e.g. timer-expiry finish,
+        BT alerts) drains on its own from Kivy's Clock.
+        """
+        self._is_paused = False
+        try:
+            Clock.schedule_once(lambda dt: self._refresh_ui_after_resume(), 0)
+        except Exception:
+            logger.exception("on_resume UI refresh failed")
+
+    def _refresh_ui_after_resume(self) -> None:
+        """Sync UI labels to current session state after Android resume."""
+        if self._session_manager.state != SessionState.RUNNING:
+            return
+        try:
+            self._live_screen.update_timer(self._session_manager.elapsed_formatted)
+        except Exception:
+            logger.exception("update_timer on resume failed")
 
     def on_stop(self) -> None:
         """Cleanup on app exit.
