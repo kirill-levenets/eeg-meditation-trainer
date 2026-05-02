@@ -341,6 +341,7 @@ class EEGMeditationApp(App):
 
         # Data Backup section
         self._settings_screen.set_backup_callback(self._on_backup_pressed)
+        self._settings_screen.set_restore_callback(self._on_restore_pressed)
 
     def _restore_last_user(self) -> None:
         """Restore last selected user from DB settings on startup."""
@@ -1712,6 +1713,196 @@ class EEGMeditationApp(App):
             ))
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_restore_pressed(self) -> None:
+        """Pick a backup file and restore it."""
+        if self._is_android():
+            self._open_restore_picker_android()
+        else:
+            self._open_restore_picker_desktop()
+
+    def _open_restore_picker_android(self) -> None:
+        from kivy.uix.popup import Popup
+
+        from app.crash_handler import report_soft_error
+        from app.ui.theme import StyledButton
+
+        target_dir = "/sdcard/Documents/EEGMeditation"
+        try:
+            files = sorted(
+                f for f in os.listdir(target_dir) if f.endswith(".db")
+            )
+        except FileNotFoundError:
+            files = []
+        except (PermissionError, OSError) as e:
+            report_soft_error(
+                "restore_failed", f"Could not list {target_dir}: {e}",
+            )
+            return
+
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
+        popup = Popup(title="Pick a backup", content=content, size_hint=(0.9, 0.7))
+
+        if not files:
+            content.add_widget(Label(
+                text="No backup files found in\nDocuments/EEGMeditation/",
+                halign="center", valign="middle", color=C.TEXT_MUTED,
+            ))
+        else:
+            for fname in files:
+                full = os.path.join(target_dir, fname)
+                btn = StyledButton(
+                    text=fname,
+                    bg_color=C.BG_CARD,
+                    text_color=C.TEXT,
+                    font_size=F.BODY,
+                    bold=False,
+                    size_hint_y=None,
+                    height=dp(44),
+                )
+
+                def _make_handler(_full, _popup):
+                    def _on_release(*_a):
+                        _popup.dismiss()
+                        self._confirm_restore(_full)
+                    return _on_release
+
+                btn.bind(on_release=_make_handler(full, popup))
+                content.add_widget(btn)
+
+        cancel = StyledButton(
+            text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_MUTED,
+            size_hint_y=None, height=dp(40),
+        )
+        cancel.bind(on_release=popup.dismiss)
+        content.add_widget(cancel)
+        popup.open()
+
+    def _open_restore_picker_desktop(self) -> None:
+        from kivy.uix.filechooser import FileChooserListView
+        from kivy.uix.popup import Popup
+
+        from app.config import APP
+        from app.ui.theme import StyledButton
+
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
+        chooser = FileChooserListView(
+            path=os.path.dirname(APP.DB_PATH),
+            filters=["*.db"],
+            size_hint_y=0.85,
+        )
+        btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
+        ok = StyledButton(text="Restore", bg_color=C.PRIMARY)
+        cancel = StyledButton(
+            text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_MUTED,
+        )
+        btn_row.add_widget(ok)
+        btn_row.add_widget(cancel)
+        content.add_widget(chooser)
+        content.add_widget(btn_row)
+        popup = Popup(title="Pick a backup", content=content, size_hint=(0.9, 0.9))
+
+        def _do_pick(*_a):
+            if not chooser.selection:
+                return
+            popup.dismiss()
+            self._confirm_restore(chooser.selection[0])
+
+        ok.bind(on_release=_do_pick)
+        cancel.bind(on_release=popup.dismiss)
+        popup.open()
+
+    def _confirm_restore(self, source_path: str) -> None:
+        """Validate, then show confirm dialog → on OK, replace + restart."""
+        from kivy.uix.popup import Popup
+
+        from app.crash_handler import report_soft_error
+        from app.storage.backup import validate_backup
+        from app.ui.theme import StyledButton
+
+        ok, msg = validate_backup(source_path)
+        if not ok:
+            report_soft_error(
+                "restore_invalid",
+                f"Selected file is not a valid backup: {msg}",
+                force=True,
+            )
+            return
+
+        n = self._db.get_record_counts()["sessions"]
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
+        content.add_widget(Label(
+            text=(
+                f"Replace current database with backup?\n\n"
+                f"Your current sessions ({n}) will be replaced.\n"
+                f"This cannot be undone."
+            ),
+            halign="center", valign="middle", color=C.TEXT,
+        ))
+        btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+        ok_btn = StyledButton(text="Restore", bg_color=C.DANGER)
+        cancel_btn = StyledButton(
+            text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_MUTED,
+        )
+        btn_row.add_widget(ok_btn)
+        btn_row.add_widget(cancel_btn)
+        content.add_widget(btn_row)
+        popup = Popup(title="Restore database", content=content, size_hint=(0.85, 0.5))
+
+        def _do_restore(*_a):
+            popup.dismiss()
+            self._do_restore_and_restart(source_path)
+
+        ok_btn.bind(on_release=_do_restore)
+        cancel_btn.bind(on_release=popup.dismiss)
+        popup.open()
+
+    def _do_restore_and_restart(self, source_path: str) -> None:
+        from kivy.app import App as _App
+        from kivy.uix.popup import Popup
+
+        from app.config import APP
+        from app.crash_handler import report_soft_error
+        from app.storage.backup import restore_backup
+        from app.ui.theme import StyledButton
+
+        try:
+            self._db.close()
+        except Exception:
+            logger.exception("DB close before restore failed")
+            return
+
+        try:
+            restore_backup(source_path, APP.DB_PATH)
+        except (PermissionError, OSError) as e:
+            report_soft_error(
+                "restore_failed", f"Restore from {source_path} failed: {e}",
+            )
+            self._db = DatabaseManager(db_path=APP.DB_PATH)
+            return
+        except Exception as e:
+            report_soft_error("restore_failed", f"Restore failed: {e}")
+            self._db = DatabaseManager(db_path=APP.DB_PATH)
+            return
+
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
+        content.add_widget(Label(
+            text="Database restored.\n\nThe app will now exit — please relaunch.",
+            halign="center", valign="middle", color=C.TEXT,
+        ))
+        ok = StyledButton(text="OK", bg_color=C.ACCENT)
+        content.add_widget(ok)
+        popup = Popup(
+            title="Restore complete", content=content,
+            size_hint=(0.8, 0.4), auto_dismiss=False,
+        )
+
+        def _quit(*_a):
+            popup.dismiss()
+            _App.get_running_app().stop()
+
+        ok.bind(on_release=_quit)
+        popup.open()
 
     def _open_backup_save_picker(self, default_filename: str) -> None:
         from kivy.uix.filechooser import FileChooserListView
