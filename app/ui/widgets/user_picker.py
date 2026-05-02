@@ -45,14 +45,17 @@ class UserPickerForm(BoxLayout):
 
     def _build_ui(self) -> None:
         # --- (1) Existing users panel ---
+        # Height is set explicitly in populate_users so the empty-state
+        # collapse to 0 sticks (a minimum_height bind would auto-restore
+        # it to the header's height = ~22dp).
         self._existing_panel = BoxLayout(
             orientation="vertical",
             size_hint_y=None,
+            height=0,
             spacing=dp(2),
             opacity=0,
             disabled=True,
         )
-        self._existing_panel.bind(minimum_height=self._existing_panel.setter("height"))
 
         self._existing_header = Label(
             text="Existing profiles (0)",
@@ -97,6 +100,12 @@ class UserPickerForm(BoxLayout):
         )
         self._create_btn.bind(on_release=lambda *a: self._on_create_pressed())
         self._name_input.bind(on_text_validate=lambda *a: self._on_create_pressed())
+        # Defensive: explicitly enable so any stray `disabled=True` from
+        # parent state changes (the existing-panel toggling, etc.) can't
+        # leave the input in a non-interactive state.
+        self._name_input.disabled = False
+        self._create_btn.disabled = False
+        input_row.disabled = False
         input_row.add_widget(self._name_input)
         input_row.add_widget(self._create_btn)
         self.add_widget(input_row)

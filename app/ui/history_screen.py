@@ -36,18 +36,26 @@ def _lerp_color(t: float):
 class CalendarHeatmap(Widget):
     """GitHub-style grid of day cells, colored by value.
 
-    Shows ~16 weeks (4 months) of data. Each column is a week,
-    rows are Mon-Sun. Scrolls horizontally for older data.
+    Shows WEEKS_VISIBLE weeks of data. Cell size adapts to the widget's
+    available width so the heatmap fills its row when the window resizes.
     """
 
-    CELL_SIZE = dp(14)
+    CELL_SIZE = dp(14)       # minimum / default cell size
     CELL_GAP = dp(2)
+    LEFT_MARGIN = dp(22)     # space for day-of-week labels
+    TOP_MARGIN = dp(20)      # space for month labels
     WEEKS_VISIBLE = 18
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.size_hint_y = None
-        self.height = 7 * (self.CELL_SIZE + self.CELL_GAP) + dp(20)  # 7 rows + month labels
+        self.height = 7 * (self.CELL_SIZE + self.CELL_GAP) + self.TOP_MARGIN
+
+    def _compute_cell_size(self) -> float:
+        """Cell size that fills the available width given WEEKS_VISIBLE columns."""
+        avail = max(self.width - self.LEFT_MARGIN, dp(10))
+        cell = avail / self.WEEKS_VISIBLE - self.CELL_GAP
+        return max(cell, self.CELL_SIZE)
         self._day_values: dict[str, float] = {}  # "YYYY-MM-DD" -> avg_shamatha
         self._day_rects: dict[str, object] = {}
         self._on_day_tap: Optional[Callable] = None
@@ -81,9 +89,14 @@ class CalendarHeatmap(Widget):
         today = datetime.date.today()
         # Start from WEEKS_VISIBLE weeks ago, aligned to Monday
         start = today - datetime.timedelta(days=today.weekday(), weeks=self.WEEKS_VISIBLE - 1)
-        cell = self.CELL_SIZE
+        cell = self._compute_cell_size()
         gap = self.CELL_GAP
-        x0 = self.x + dp(22)  # leave space for day-of-week labels
+        # Update self.height to match the (possibly resized) cell so the
+        # graph row in HistoryScreen tracks via its size_hint_y=None bind.
+        new_height = 7 * (cell + gap) + self.TOP_MARGIN
+        if abs(self.height - new_height) > 0.5:
+            self.height = new_height
+        x0 = self.x + self.LEFT_MARGIN
         y_top = self.top - dp(18)  # leave space for month labels
 
         with self.canvas:
@@ -397,8 +410,9 @@ class HistoryScreen(Screen):
         root.add_widget(title)
 
         # Graph row: graph (calendar OR bars) on the left, narrow toggle
-        # column (Cal / 14d) on the right.
-        graph_row = BoxLayout(
+        # column (Cal / 14d) on the right. Row height tracks the visible
+        # graph's height so the heatmap can grow when the window widens.
+        self._graph_row = BoxLayout(
             orientation="horizontal",
             size_hint_y=None,
             height=dp(132),
@@ -406,13 +420,13 @@ class HistoryScreen(Screen):
         )
 
         # Graph wrapper holds both views; only one is visible at a time
-        # (the other has height=0 + opacity=0). Wrapper height matches
-        # graph_row so the visible graph fills its row.
+        # (the other has height=0 + opacity=0).
         graph_wrap = BoxLayout(orientation="vertical", size_hint_x=1)
 
         # Calendar heatmap
         self._heatmap = CalendarHeatmap()
         self._heatmap.set_day_tap_callback(self._on_day_tap)
+        self._heatmap.bind(height=self._on_active_graph_height_change)
         graph_wrap.add_widget(self._heatmap)
 
         # Bar-chart view (initially hidden)
@@ -422,9 +436,10 @@ class HistoryScreen(Screen):
         self._bars.disabled = True
         self._bars.size_hint_y = None
         self._bars.height = 0
+        self._bars.bind(height=self._on_active_graph_height_change)
         graph_wrap.add_widget(self._bars)
 
-        graph_row.add_widget(graph_wrap)
+        self._graph_row.add_widget(graph_wrap)
 
         # Toggle column on the right — fixed 40dp wide, two compact buttons
         # stacked vertically.
@@ -452,9 +467,9 @@ class HistoryScreen(Screen):
         self._btn_bars.bind(on_release=lambda *a: self._on_toggle_pressed("bars"))
         toggle_col.add_widget(self._btn_calendar)
         toggle_col.add_widget(self._btn_bars)
-        graph_row.add_widget(toggle_col)
+        self._graph_row.add_widget(toggle_col)
 
-        root.add_widget(graph_row)
+        root.add_widget(self._graph_row)
 
         # Date label + Show All button
         date_row = BoxLayout(size_hint_y=None, height=dp(28), spacing=S.GAP)
@@ -517,18 +532,28 @@ class HistoryScreen(Screen):
         self._on_export_csv = on_export_csv
         self._on_rename_session = on_rename_session
 
+    def _on_active_graph_height_change(self, instance, value):
+        """Match graph_row height to whichever child widget is active.
+
+        Bound to both _heatmap.height and _bars.height. Each toggles to 0
+        when hidden; we ignore those zeros and pick up the non-zero one.
+        """
+        if value > 0:
+            self._graph_row.height = value
+
     def set_view_mode(self, mode: str) -> None:
         """Switch between 'calendar' and 'bars'."""
         if mode not in ("calendar", "bars"):
             return
         self._view_mode = mode
         if mode == "calendar":
+            # Compute current cell-based height (it adapts to width)
+            cell = self._heatmap._compute_cell_size()
+            cal_h = 7 * (cell + self._heatmap.CELL_GAP) + self._heatmap.TOP_MARGIN
             self._heatmap.opacity = 1
             self._heatmap.disabled = False
             self._heatmap.size_hint_y = None
-            self._heatmap.height = (
-                7 * (self._heatmap.CELL_SIZE + self._heatmap.CELL_GAP) + dp(20)
-            )
+            self._heatmap.height = cal_h
             self._bars.opacity = 0
             self._bars.disabled = True
             self._bars.height = 0
