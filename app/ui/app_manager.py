@@ -1657,6 +1657,41 @@ class EEGMeditationApp(App):
     def _count_sessions_for_user(self, user_id: int) -> int:
         return len(self._db.get_all_sessions(user_id=user_id))
 
+    def _on_pick_existing_user(self, user_id: int, source: str) -> None:
+        """User picked an existing profile from a UserPickerForm.
+
+        source ∈ {'first_run', 'wizard', 'settings'}.
+        - 'settings' → just switch user.
+        - 'first_run' / 'wizard' → if a saved bt_device_address exists,
+          run the full wizard-complete flow with it (skip step 2).
+          Otherwise: wizard advances to step 2; first_run pop falls
+          through to wizard-complete with no device.
+        """
+        user = self._db.get_user(user_id)
+        if not user:
+            logger.warning(f"_on_pick_existing_user: user {user_id} not found")
+            return
+        name = user["name"]
+
+        if source == "settings":
+            self._on_user_switch(user_id)
+            return
+
+        addr = self._db.get_user_setting(user_id, "bt_device_address")
+        dev_name = self._db.get_user_setting(user_id, "bt_device_name") or name
+        if addr:
+            logger.info(f"Existing user {name} has saved device — skipping step 2")
+            self._on_wizard_complete(name, addr, dev_name)
+            return
+
+        if source == "wizard":
+            self._current_user_id = user_id
+            self._db.set_setting("last_user_id", str(user_id))
+            self._wizard_screen._user_name = name
+            self._wizard_screen._advance_to_step2()
+        else:  # first_run
+            self._on_wizard_complete(name, None, None)
+
     def _on_user_create(self, name: str) -> None:
         """Create a new user and refresh the profile list.
 
