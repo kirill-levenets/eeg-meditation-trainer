@@ -312,6 +312,8 @@ class HistoryScreen(Screen):
         self._on_rename_session: Optional[Callable] = None
         self._sessions: list[dict] = []
         self._filtered_date: Optional[str] = None
+        self._view_mode: str = "calendar"
+        self._on_view_mode_change: Optional[Callable] = None
         self._build_ui()
         C.add_listener(self._refresh_theme)
 
@@ -340,10 +342,47 @@ class HistoryScreen(Screen):
         title.bind(size=title.setter("text_size"))
         root.add_widget(title)
 
+        # View-mode toggle: Calendar / 14-Day
+        toggle_row = BoxLayout(
+            size_hint_y=None,
+            height=dp(36),
+            spacing=S.GAP_SM,
+        )
+        self._btn_calendar = StyledButton(
+            text="Calendar",
+            bg_color=C.PRIMARY,
+            text_color=C.TEXT,
+            font_size=F.SMALL,
+            height=dp(36),
+            bold=True,
+        )
+        self._btn_bars = StyledButton(
+            text="14-Day",
+            bg_color=C.BG_CARD,
+            text_color=C.TEXT_SECONDARY,
+            font_size=F.SMALL,
+            height=dp(36),
+            bold=False,
+        )
+        self._btn_calendar.bind(on_release=lambda *a: self._on_toggle_pressed("calendar"))
+        self._btn_bars.bind(on_release=lambda *a: self._on_toggle_pressed("bars"))
+        toggle_row.add_widget(self._btn_calendar)
+        toggle_row.add_widget(self._btn_bars)
+        root.add_widget(toggle_row)
+
         # Calendar heatmap
         self._heatmap = CalendarHeatmap()
         self._heatmap.set_day_tap_callback(self._on_day_tap)
         root.add_widget(self._heatmap)
+
+        # Bar-chart view (initially hidden)
+        self._bars = Last14DaysBars()
+        self._bars.set_day_tap_callback(self._on_day_tap)
+        self._bars.opacity = 0
+        self._bars.disabled = True
+        self._bars.size_hint_y = None
+        self._bars.height = 0
+        root.add_widget(self._bars)
 
         # Date label + Show All button
         date_row = BoxLayout(size_hint_y=None, height=dp(28), spacing=S.GAP)
@@ -406,6 +445,51 @@ class HistoryScreen(Screen):
         self._on_export_csv = on_export_csv
         self._on_rename_session = on_rename_session
 
+    def set_view_mode(self, mode: str) -> None:
+        """Switch between 'calendar' and 'bars'."""
+        if mode not in ("calendar", "bars"):
+            return
+        self._view_mode = mode
+        if mode == "calendar":
+            self._heatmap.opacity = 1
+            self._heatmap.disabled = False
+            self._heatmap.size_hint_y = None
+            self._heatmap.height = (
+                7 * (self._heatmap.CELL_SIZE + self._heatmap.CELL_GAP) + dp(20)
+            )
+            self._bars.opacity = 0
+            self._bars.disabled = True
+            self._bars.height = 0
+            self._btn_calendar.bg_color = C.PRIMARY
+            self._btn_calendar.text_color = C.TEXT
+            self._btn_calendar.bold = True
+            self._btn_bars.bg_color = C.BG_CARD
+            self._btn_bars.text_color = C.TEXT_SECONDARY
+            self._btn_bars.bold = False
+        else:
+            self._heatmap.opacity = 0
+            self._heatmap.disabled = True
+            self._heatmap.height = 0
+            self._bars.opacity = 1
+            self._bars.disabled = False
+            self._bars.size_hint_y = None
+            self._bars.height = dp(132)
+            self._btn_calendar.bg_color = C.BG_CARD
+            self._btn_calendar.text_color = C.TEXT_SECONDARY
+            self._btn_calendar.bold = False
+            self._btn_bars.bg_color = C.PRIMARY
+            self._btn_bars.text_color = C.TEXT
+            self._btn_bars.bold = True
+
+    def set_view_mode_callback(self, cb: Callable) -> None:
+        """Called with the new mode string when the user toggles."""
+        self._on_view_mode_change = cb
+
+    def _on_toggle_pressed(self, mode: str) -> None:
+        self.set_view_mode(mode)
+        if self._on_view_mode_change:
+            self._on_view_mode_change(mode)
+
     def load_sessions(self, sessions: list[dict]) -> None:
         """Load all sessions and build heatmap data."""
         self._sessions = sessions
@@ -423,6 +507,7 @@ class HistoryScreen(Screen):
             day_avg[day] = sum(scores) / len(scores) if scores else 0
 
         self._heatmap.set_data(day_avg)
+        self._bars.set_data(day_avg)
         # Show all sessions initially
         self._show_sessions(sessions, "All sessions")
 
