@@ -309,6 +309,10 @@ class LiveSessionScreen(Screen):
             viewport_seconds=60,
             size_hint_y=1,
         )
+        # Reference line at the per-metric maximum so level 100 is
+        # visually marked even when custom_formula (scale 200) widens
+        # max_scale and pushes 100 into the middle of the graph.
+        self._graph.set_reference_line(100.0)
         self._metrics_container.add_widget(self._graph)
 
         self._legend = BoxLayout(size_hint_y=None, height=dp(18), spacing=S.GAP_SM)

@@ -65,6 +65,10 @@ class ScrollableGraphWidget(Widget):
         self._sync_group: list["ScrollableGraphWidget"] = []
         self._threshold_value: Optional[float] = None
         self._threshold_scale_key: Optional[str] = None
+        # Reference line: solid horizontal line at a fixed value, drawn
+        # distinctly from the (dashed) threshold line. Used on the metrics
+        # graph to mark level 100 — the per-metric maximum.
+        self._reference_value: Optional[float] = None
         self._start_wall_time: Optional[float] = None
         self._scroll_change_callback = None
         self._tap_callback = None
@@ -79,6 +83,14 @@ class ScrollableGraphWidget(Widget):
         """Set a horizontal threshold line. scale_key picks which series scale to use."""
         self._threshold_value = value
         self._threshold_scale_key = scale_key
+        self._redraw()
+
+    def set_reference_line(self, value: Optional[float]) -> None:
+        """Set a solid horizontal reference line at `value` (graph units).
+
+        Drawn distinctly from the dashed threshold line. Pass None to clear.
+        """
+        self._reference_value = value
         self._redraw()
 
     @property
@@ -266,6 +278,16 @@ class ScrollableGraphWidget(Widget):
                     pos=(graph_x + graph_w + dp(3), y_thresh - tex.height / 2),
                     size=tex.size,
                 ))
+
+        # Reference line (solid, drawn after threshold so it's on top).
+        # Used to mark level 100 on the metrics graph.
+        if self._reference_value is not None and not self._bipolar:
+            frac_r = min(self._reference_value / max_scale, 1.0) if max_scale > 0 else 0.0
+            y_ref = graph_y + frac_r * graph_h
+            self._gfx.add(Color(0.6, 0.6, 0.6, 0.7))
+            self._gfx.add(Line(
+                points=[graph_x, y_ref, graph_x + graph_w, y_ref], width=1,
+            ))
 
         if end_idx <= start_idx:
             return
