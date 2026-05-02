@@ -313,6 +313,9 @@ class EEGMeditationApp(App):
             on_export_csv=self._on_export_csv,
             on_rename_session=self._on_rename_session,
         )
+        self._history_screen.set_view_mode_callback(
+            self._on_history_view_mode_change,
+        )
 
         self._settings_screen.set_test_timer_sound_callback(self._on_test_timer_sound)
         self._settings_screen.set_stop_timer_sound_callback(self._on_stop_test_timer_sound)
@@ -1657,6 +1660,12 @@ class EEGMeditationApp(App):
         self._mark_history_dirty()
         self._refresh_profile()
 
+    def _on_history_view_mode_change(self, mode: str) -> None:
+        """Persist the user's preferred History view layout."""
+        if not self._current_user_id:
+            return
+        self._db.set_user_setting(self._current_user_id, "history_view_mode", mode)
+
     def _on_user_create(self, name: str) -> None:
         """Create a new user and refresh the profile list."""
         try:
@@ -1870,6 +1879,9 @@ class EEGMeditationApp(App):
                 self._live_screen._apply_stats_mode_styling()
             except Exception:
                 pass
+
+        history_mode = g(user_id, "history_view_mode") or "calendar"
+        self._history_screen.set_view_mode(history_mode)
 
         # Sync live-screen preset highlight with loaded timer state
         self._live_screen.refresh_duration_preset(
