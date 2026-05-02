@@ -9,7 +9,6 @@ from kivy.uix.label import Label
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 
-from app.logger import logger
 from app.ui.theme import C, F, S, StyledButton
 
 
@@ -214,18 +213,18 @@ class UserPickerForm(BoxLayout):
     # ---- User actions ----
 
     def on_touch_down(self, touch):
-        # Diagnostic: log touch routing inside the form so we can trace
-        # where clicks land when the input field appears unresponsive.
-        in_form = self.collide_point(*touch.pos)
-        in_input = self._name_input.collide_point(*touch.pos)
-        in_create = self._create_btn.collide_point(*touch.pos)
-        logger.debug(
-            f"[user_picker] touch_down at {touch.pos} "
-            f"in_form={in_form} in_input={in_input} in_create={in_create} "
-            f"input_pos={self._name_input.pos} input_size={self._name_input.size} "
-            f"input_disabled={self._name_input.disabled}"
-        )
-        return super().on_touch_down(touch)
+        # Force-focus the input when a touch lands on it. The default
+        # propagation through nested BoxLayout + ScrollView + accordion
+        # sometimes fails to grab focus on Kivy desktop — likely a touch
+        # being captured by ScrollView's scroll-detection delay before
+        # FocusBehavior can claim it. We claim focus here directly,
+        # which is reliable across platforms.
+        handled = super().on_touch_down(touch)
+        if (not self._name_input.disabled
+                and self._name_input.collide_point(*touch.pos)):
+            self._name_input.focus = True
+            return True
+        return handled
 
     def _on_create_pressed(self) -> None:
         name = self._name_input.text.strip()

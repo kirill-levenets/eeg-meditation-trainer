@@ -41,6 +41,7 @@ class CalendarHeatmap(Widget):
     """
 
     CELL_SIZE = dp(14)       # minimum / default cell size
+    CELL_MAX = dp(28)        # cap so a wide window doesn't make the heatmap huge
     CELL_GAP = dp(2)
     LEFT_MARGIN = dp(22)     # space for day-of-week labels
     TOP_MARGIN = dp(20)      # space for month labels
@@ -57,10 +58,12 @@ class CalendarHeatmap(Widget):
         self.bind(size=self._redraw, pos=self._redraw)
 
     def _compute_cell_size(self) -> float:
-        """Cell size that fills the available width given WEEKS_VISIBLE columns."""
+        """Cell size that fills the available width given WEEKS_VISIBLE columns,
+        clamped to [CELL_SIZE, CELL_MAX] so the heatmap stays a reasonable
+        height on wide windows."""
         avail = max(self.width - self.LEFT_MARGIN, dp(10))
         cell = avail / self.WEEKS_VISIBLE - self.CELL_GAP
-        return max(cell, self.CELL_SIZE)
+        return max(self.CELL_SIZE, min(cell, self.CELL_MAX))
         self._day_values: dict[str, float] = {}  # "YYYY-MM-DD" -> avg_shamatha
         self._day_rects: dict[str, object] = {}
         self._on_day_tap: Optional[Callable] = None
