@@ -73,6 +73,8 @@ class SettingsScreen(Screen):
         self._on_profile_create: Optional[Callable] = None
         self._on_profile_delete: Optional[Callable] = None
         self._session_counter: Optional[Callable[[int], int]] = None
+        self._on_backup_pressed: Optional[Callable] = None
+        self._on_restore_pressed: Optional[Callable] = None
         self._on_threshold_change: Optional[Callable] = None
         self._on_toggle_change: Optional[Callable] = None
         self._on_test_audio: Optional[Callable] = None
@@ -342,6 +344,47 @@ class SettingsScreen(Screen):
         )
         self._diagnostics_btn.bind(on_release=self._on_diagnostics_pressed)
         device_section.add_widget(self._diagnostics_btn)
+
+        # --- Data Backup section ---
+        backup_section = accordion.add_section("Data Backup", collapsed=True)
+
+        self._backup_btn = StyledButton(
+            text="Backup database",
+            bg_color=C.ACCENT,
+            bg_pressed=C.ACCENT_DIM,
+            font_size=F.BODY,
+            size_hint_y=None,
+            height=dp(40),
+        )
+        self._restore_btn = StyledButton(
+            text="Restore database",
+            bg_color=C.PRIMARY,
+            bg_pressed=C.PRIMARY_DIM,
+            font_size=F.BODY,
+            size_hint_y=None,
+            height=dp(40),
+        )
+        self._backup_status = Label(
+            text="",
+            font_size=F.SMALL,
+            color=C.TEXT_MUTED,
+            size_hint_y=None,
+            height=dp(22),
+            halign="left",
+            valign="middle",
+        )
+        self._backup_status.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
+
+        self._backup_btn.bind(on_release=lambda *a: (
+            self._on_backup_pressed() if self._on_backup_pressed else None
+        ))
+        self._restore_btn.bind(on_release=lambda *a: (
+            self._on_restore_pressed() if self._on_restore_pressed else None
+        ))
+
+        backup_section.add_widget(self._backup_btn)
+        backup_section.add_widget(self._restore_btn)
+        backup_section.add_widget(self._backup_status)
 
         # --- Threshold section ---
         threshold_section = accordion.add_section("Threshold", collapsed=True)
@@ -1390,6 +1433,15 @@ class SettingsScreen(Screen):
     def set_session_counter(self, fn):
         """app_manager wires this to count per-user sessions for the form."""
         self._session_counter = fn
+
+    def set_backup_callback(self, cb: Callable) -> None:
+        self._on_backup_pressed = cb
+
+    def set_restore_callback(self, cb: Callable) -> None:
+        self._on_restore_pressed = cb
+
+    def show_backup_status(self, text: str) -> None:
+        self._backup_status.text = text
 
     def _count_user_sessions(self, user_id: int) -> int:
         if getattr(self, "_session_counter", None) is None:
