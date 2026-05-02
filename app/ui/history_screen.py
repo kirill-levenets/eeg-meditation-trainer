@@ -50,6 +50,11 @@ class CalendarHeatmap(Widget):
         super().__init__(**kwargs)
         self.size_hint_y = None
         self.height = 7 * (self.CELL_SIZE + self.CELL_GAP) + self.TOP_MARGIN
+        self._day_values: dict[str, float] = {}  # "YYYY-MM-DD" -> avg_shamatha
+        self._cell_positions: dict[str, tuple] = {}
+        self._on_day_tap: Optional[Callable] = None
+        self._selected_date: Optional[str] = None
+        self.bind(size=self._redraw, pos=self._redraw)
 
     def _compute_cell_size(self) -> float:
         """Cell size that fills the available width given WEEKS_VISIBLE columns."""
