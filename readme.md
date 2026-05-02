@@ -24,15 +24,17 @@ Inspired by the [EEG meditation research and Vernihor formula](https://scripture
 - **Mock EEG simulation** — NeuroSky-compatible: band powers, 512Hz raw waveform, eSense values; state machine with smooth transitions
 - **User profiles** — Multiple profiles with per-user sessions, settings, and formulas; last user persisted; diary disabled until user selected
 - **Session guards** — Start blocked without user or device; stop dialog with Save/Discard/Cancel; timer auto-stop saves automatically
-- **Analytics** — Daily/weekly/monthly trends with step-20 grid lines, streak counter, storage usage display
 - **Navigation** — 3-tab bottom navigation (Session / History / Settings) with Material Design icons
-- **First-run wizard** — 2-step setup on first launch (create profile, connect device or use demo mode)
+- **First-run wizard** — 2-step setup on first launch (create profile, connect device or use demo mode); existing profiles surface in a picker so reinstalls don't lose history
+- **Existing-user picker** — Wizard, first-run popup, and Settings → User Profile share one form: pick an existing profile or type a new name; duplicate names trigger an inline "Use existing 'X'" / "Change name" choice (DB enforces unique names)
 - **Session end summary** — Post-session overlay with stats and quick notes field
-- **Calendar heatmap** — GitHub-style history view colored by daily avg shamatha score; tap a day to filter sessions
+- **History view** — Calendar heatmap (GitHub-style by avg shamatha) **or** 14-day bar chart, toggleable per user; tap a day in either to filter the session list
 - **Theme system** — 4 themes (Dark Blue, Dark Green, Light Cream, Light Green) with live refresh; custom styled widgets with rounded corners
 - **App icon** — Custom EEG brainwave icon and Android presplash
 - **macOS support** — Native build via PyInstaller
 - **Android storage** — Tries /sdcard/EEGMeditation, falls back to app-private storage if permission denied
+- **Desktop DB location** — Linux `~/.local/share/EEGMeditation/`, Windows `%APPDATA%\EEGMeditation\`, macOS `~/Library/Application Support/EEGMeditation/`; one-time migration of any pre-existing DB at the old project-root / next-to-binary path
+- **Manual Backup / Restore** — Settings → Data Backup writes a transaction-safe copy of your sessions (SQLite online backup API) to `Documents/EEGMeditation/` on Android (Telegram-/MTP-friendly) or a user-chosen location on desktop; Restore validates the file then force-restarts the app
 - **Adaptive landscape layout** — fixed graph height when viewport is tall; scroll mode when short (graph would fall below dp(400)); controls live inside the scrollable body.
 - **Multi-hour locked-screen sessions on Android** — foreground service + partial wake lock keeps the session running with the screen off; EEG compute and audio volume updates run on a daemon thread independent of Kivy's main loop.
 - **Audio continues playing through screen lock on Android** — noise channel uses `MediaPlayer` (`USAGE_MEDIA` audio attributes) instead of SDL2 mixer so it survives screen lock.
@@ -53,15 +55,14 @@ app/
 │   ├── theme.py                # Colors, fonts, styled widgets, ThemedAccordion
 │   ├── app_manager.py          # Main app, screen routing, session lifecycle
 │   ├── live_session.py         # Session screen (metrics + raw EEG toggle)
-│   ├── history_screen.py       # Calendar heatmap + session list
-│   ├── settings_screen.py      # Accordion settings with all config sections
+│   ├── history_screen.py       # Calendar/14-Day toggle + session list
+│   ├── settings_screen.py      # Accordion settings: User Profile, Timer, Device, Data Backup, …
 │   ├── wizard_screen.py        # First-run setup wizard
 │   ├── diary_screen.py         # Session detail view with graphs
 │   ├── raw_eeg_screen.py       # ScrollableGraphWidget
-│   ├── profile_screen.py       # User profile management (also in settings)
-│   ├── timer_screen.py         # Meditation timer (also in settings)
-│   ├── analytics_screen.py     # Trend graphs
-│   └── home_screen.py          # Legacy (unused)
+│   ├── profile_screen.py       # Legacy user profile management (kept for now)
+│   └── widgets/
+│       └── user_picker.py      # Shared UserPickerForm (wizard, popup, settings)
 ├── assets/
 │   ├── fonts/                   # Material Design Icons font
 │   └── icons/                   # App icon (PNG/ICO/ICNS) + presplash
@@ -78,10 +79,10 @@ app/
 ├── session/
 │   └── manager.py              # Start/Pause/Resume/Stop state machine
 ├── storage/
-│   └── database.py             # SQLite: sessions, metrics, users, settings, CSV export
-├── analytics/
-│   └── aggregator.py           # Daily/weekly/monthly trend computation
-├── config.py               # Sigmoid params, thresholds, app constants, Android storage
+│   ├── database.py             # SQLite: sessions, metrics, users, settings, CSV export
+│   └── backup.py               # make_backup / validate_backup / restore_backup
+├── config.py               # Sigmoid params, thresholds, app constants, Android+Desktop DB paths
+├── crash_handler.py        # Global error UI; report_soft_error + pre-app error queue
 └── logger.py               # Centralized logging
 
 tools/
