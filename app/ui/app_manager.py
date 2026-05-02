@@ -32,7 +32,7 @@ from app.ui.live_session import LiveSessionScreen
 from app.ui.profile_screen import ProfileScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
-from app.ui.theme import BottomNav, C, F, StyledButton
+from app.ui.theme import BottomNav, C, F
 from app.ui.wizard_screen import WizardScreen
 
 
@@ -351,14 +351,16 @@ class EEGMeditationApp(App):
     def _show_first_run_popup(self, dt) -> None:
         """Show a name-entry popup on first run (no users in DB).
 
-        Uses Popup instead of the wizard Screen because Kivy TextInput
-        doesn't get keyboard focus inside a Screen on some Android
-        devices and on early-display screens.
+        After uninstall→reinstall on Android, the DB may persist with
+        existing profiles — UserPickerForm surfaces them so the user can
+        adopt instead of creating a duplicate name.
         """
-        content = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(12))
+        from app.ui.widgets.user_picker import UserPickerForm
+
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
 
         welcome = Label(
-            text="Welcome! Enter your name\nto create a profile:",
+            text="Welcome! Create a profile or pick an existing one:",
             font_size=F.BODY, color=C.TEXT,
             size_hint_y=None, height=dp(48),
             halign="center",
@@ -366,50 +368,31 @@ class EEGMeditationApp(App):
         welcome.bind(size=welcome.setter("text_size"))
         content.add_widget(welcome)
 
-        from kivy.uix.textinput import TextInput as _TI
-        name_input = _TI(
-            hint_text="Your name...",
-            multiline=False,
-            font_size=F.H2,
-            size_hint_y=None,
-            height=dp(48),
-            foreground_color=C.TEXT,
-            background_color=list(C.BG_INPUT),
-            cursor_color=C.PRIMARY,
-        )
-        content.add_widget(name_input)
-
-        error_label = Label(
-            text="", font_size=F.SMALL, color=C.DANGER,
-            size_hint_y=None, height=dp(20),
-        )
-        content.add_widget(error_label)
-
-        btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
-        ok_btn = StyledButton(
-            text="Create Profile", bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM,
-        )
-        btn_row.add_widget(ok_btn)
-        content.add_widget(btn_row)
-
         popup = Popup(
             title="First-time Setup",
             content=content,
-            size_hint=(0.85, 0.45),
+            size_hint=(0.9, 0.7),
             auto_dismiss=False,
         )
 
-        def _on_ok(*_args):
-            name = name_input.text.strip()
-            if not name or len(name) < 2:
-                error_label.text = "Name must be at least 2 characters"
-                return
+        def _on_create(name: str) -> None:
             popup.dismiss()
-            # Reuse the existing wizard-complete flow (with no device)
             self._on_wizard_complete(name, None, None)
 
-        ok_btn.bind(on_release=_on_ok)
-        name_input.bind(on_text_validate=_on_ok)
+        def _on_pick(user_id: int) -> None:
+            popup.dismiss()
+            self._on_pick_existing_user(user_id, source="first_run")
+
+        form = UserPickerForm(
+            on_create=_on_create,
+            on_pick_existing=_on_pick,
+        )
+        existing_users = self._db.get_all_users()
+        form.populate_users(existing_users)
+        content.add_widget(form)
+
+        # Stash form so duplicate-error routing can find it
+        self._first_run_form = form
         popup.open()
 
     def _on_wizard_complete(self, user_name: str, device_addr, device_name) -> None:
