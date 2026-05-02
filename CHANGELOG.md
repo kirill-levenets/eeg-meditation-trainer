@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **History view toggle**: Calendar heatmap / 14-day bar chart segmented control on the History screen. Both views share day-tap-to-filter behavior. Selection persists per user as `history_view_mode`.
+- **`Last14DaysBars` widget** (`app/ui/history_screen.py`) — bar chart of the last 14 days' avg shamatha, mirroring `CalendarHeatmap`'s public API.
+- **Shared `UserPickerForm`** widget (`app/ui/widgets/user_picker.py`) used by the wizard, the first-run popup, and Settings → User Profile. Existing profiles are listed; typing a duplicate name surfaces an inline "Use existing 'X'" / "Change name" choice instead of failing silently.
+- **Wizard skip-step-2** when an existing profile with a saved BT device is picked — onboarding goes directly to the live session.
+- **Settings → Data Backup** section with **Backup database** / **Restore database** buttons.
+  - Backup uses SQLite's online `Connection.backup()` API (transaction-safe).
+  - Android writes to `/sdcard/Documents/EEGMeditation/meditation_backup_YYYYMMDD_HHMMSS.db` (visible to file managers, Telegram, `adb pull`).
+  - Desktop opens a Kivy `FileChooserPopup`.
+  - Restore validates that the file is a real SQLite DB with `users` and `sessions` tables, asks for confirmation, then force-restarts the app via a "Please relaunch" popup.
+- **`DatabaseManager.find_user_by_name`** and typed **`UserExistsError`** raised by `create_user` on duplicate.
+- **`crash_handler.queue_pre_app_error` / `flush_pre_app_errors`** for diagnostics that occur before the Kivy app is up (e.g. `config.py` migrations). Replayed from `EEGMeditationApp.on_start()`.
+
+### Changed
+
+- **Desktop DB path moved** from project-root / next-to-binary to the platform user-data folder:
+  - Linux: `${XDG_DATA_HOME:-~/.local/share}/EEGMeditation/`
+  - Windows: `%APPDATA%\EEGMeditation\`
+  - macOS: `~/Library/Application Support/EEGMeditation/`
+
+  On first launch, an existing DB at the old path is copied across automatically. The old file is left in place for manual rollback — you can safely delete it after verifying the move worked.
+- **DB migration failures** (Android `/sdcard → app_storage_path`, desktop legacy → user-data) now surface a diagnostic via the in-app error dialog instead of being silently swallowed. **Project policy**: any I/O exception we can't reasonably ignore must use `report_soft_error(label, detail)` (or `queue_pre_app_error` if pre-app-start).
+
+### Removed
+
+- **`AnalyticsScreen`, `HomeScreen`, `AnalyticsAggregator`** — unreachable from the bottom nav. Their functionality is replaced by the new History view toggle. Roadmap entry added for a project-wide dead-code audit.
+
 ## [1.2.0] - 2026-04-27
 
 ### Fixed (timer overhaul, folded into the v1.2.0 retag)
