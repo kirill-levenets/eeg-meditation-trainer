@@ -5,6 +5,8 @@ Design direction: calm, focused, minimal — dark theme with soft accents.
 """
 
 import os
+import struct
+import zlib
 
 from kivy.core.text import LabelBase
 from kivy.graphics import Color, Line, Rectangle, RoundedRectangle
@@ -92,8 +94,6 @@ class Icons:
 
 def _create_solid_png(rgba, path):
     """Write a 1x1 solid-color PNG file for use as accordion background."""
-    import struct
-    import zlib
     r = int(rgba[0] * 255)
     g = int(rgba[1] * 255)
     b = int(rgba[2] * 255)

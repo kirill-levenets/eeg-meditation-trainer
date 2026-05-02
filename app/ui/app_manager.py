@@ -2,6 +2,7 @@ import os
 import sys
 import threading
 import time
+from datetime import datetime as _dt
 from typing import Optional
 
 from kivy.app import App
@@ -11,12 +12,20 @@ from kivy.graphics import Color, Rectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
+from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import ScreenManager, SlideTransition
+from kivy.uix.textinput import TextInput
+from kivy.utils import platform as kivy_platform
 
 from app.audio_feedback.noise import AudioEngine
 from app.config import APP
+from app.crash_handler import (
+    flush_pre_app_errors,
+    install_crash_handler,
+    report_soft_error,
+)
 from app.eeg.mock_stream_v2 import MockEEGStream
 from app.eeg.neurosky_stream import NeuroSkyStream
 from app.logger import logger
@@ -25,14 +34,17 @@ from app.metrics.engine import MetricsEngine
 from app.metrics.noise_detector import PowerLineDetector
 from app.session.manager import SessionManager, SessionState
 from app.session.timer_state import TimerState
-from app.storage.database import DatabaseManager
+from app.storage import backup as _backup
+from app.storage.backup import restore_backup, validate_backup
+from app.storage.database import DatabaseManager, UserExistsError
 from app.ui.diary_screen import DiaryScreen
 from app.ui.history_screen import HistoryScreen
 from app.ui.live_session import LiveSessionScreen
 from app.ui.profile_screen import ProfileScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
-from app.ui.theme import BottomNav, C, F
+from app.ui.theme import BottomNav, C, F, StyledButton
+from app.ui.widgets.user_picker import UserPickerForm
 from app.ui.wizard_screen import WizardScreen
 
 
@@ -168,7 +180,6 @@ class EEGMeditationApp(App):
     }
 
     def build(self) -> BoxLayout:
-        from app.crash_handler import install_crash_handler
         install_crash_handler(self)
 
         # Restore saved theme before building UI
@@ -270,7 +281,6 @@ class EEGMeditationApp(App):
         self._live_screen.summary_close_btn.bind(on_release=self._on_summary_close)
 
         # Tap on graph to set marker (Android — no keyboard available)
-        from kivy.utils import platform as kivy_platform
         if kivy_platform == "android":
             self._live_screen.graph.set_tap_callback(self._on_marker)
 
@@ -369,7 +379,6 @@ class EEGMeditationApp(App):
         existing profiles — UserPickerForm surfaces them so the user can
         adopt instead of creating a duplicate name.
         """
-        from app.ui.widgets.user_picker import UserPickerForm
 
         content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
 
@@ -415,7 +424,6 @@ class EEGMeditationApp(App):
             logger.warning(f"Wizard complete with invalid name: '{user_name}', ignoring")
             return
         # Create user (or adopt an existing one with the same name)
-        from app.storage.database import UserExistsError
 
         try:
             uid = self._db.create_user(user_name)
@@ -456,12 +464,10 @@ class EEGMeditationApp(App):
 
     def _on_wizard_scan(self) -> None:
         """Scan for BT devices from wizard."""
-        import threading
 
         def _run():
-            from kivy.clock import Clock as _Clock
             devices = NeuroSkyStream.scan_paired_devices()
-            _Clock.schedule_once(lambda dt: self._wizard_screen.populate_devices(devices))
+            Clock.schedule_once(lambda dt: self._wizard_screen.populate_devices(devices))
 
         threading.Thread(target=_run, daemon=True).start()
 
@@ -509,7 +515,6 @@ class EEGMeditationApp(App):
             # No MindWave found — populate settings list for manual pick
             self._settings_screen.populate_bt_devices(devices)
 
-        import threading
 
         def _run():
             try:
@@ -566,7 +571,6 @@ class EEGMeditationApp(App):
         self._live_screen.set_controls_running()
         logger.info("Auto-scanning for BT device before session start")
 
-        import threading
 
         def _scan_and_connect():
             devices = NeuroSkyStream.scan_paired_devices()
@@ -660,21 +664,20 @@ class EEGMeditationApp(App):
 
     def _tick_loop(self) -> None:
         """Daemon-thread loop: call _update_tick every UPDATE_FREQUENCY seconds."""
-        import time as _t
         interval = APP.UPDATE_FREQUENCY
-        next_t = _t.monotonic()
+        next_t = time.monotonic()
         while not self._tick_stop_event.is_set():
             try:
                 self._update_tick(interval)
             except Exception:
                 logger.exception("Error in session tick loop")
             next_t += interval
-            remaining = next_t - _t.monotonic()
+            remaining = next_t - time.monotonic()
             if remaining > 0:
                 if self._tick_stop_event.wait(remaining):
                     break
             else:
-                next_t = _t.monotonic()
+                next_t = time.monotonic()
 
     # ------------------------------------------------------------------
 
@@ -1346,7 +1349,6 @@ class EEGMeditationApp(App):
         logger.debug(f"Line width changed to {width}")
 
     def _on_rotate_screen(self, rotation: int) -> None:
-        from kivy.core.window import Window
         Window.rotation = rotation
         logger.info(f"Screen rotation set to {rotation}")
 
@@ -1468,7 +1470,6 @@ class EEGMeditationApp(App):
 
         def _on_natural_end(*_):
             try:
-                from kivy.clock import Clock
                 Clock.schedule_once(
                     lambda dt: self._settings_screen.notify_timer_sound_test_ended(),
                     0,
@@ -1524,7 +1525,6 @@ class EEGMeditationApp(App):
         adds a copy-pasteable technical report so they can forward it when
         the friendly hint isn't enough.
         """
-        from app.crash_handler import report_soft_error
 
         addr = self._real_stream._device_address or "(unset)"
         last_err = self._real_stream._last_connect_error or "(none)"
@@ -1541,7 +1541,6 @@ class EEGMeditationApp(App):
         User-initiated, so we bypass the per-label cooldown — the user
         explicitly asked for the report.
         """
-        from app.crash_handler import report_soft_error
 
         try:
             paired = NeuroSkyStream.scan_paired_devices()
@@ -1683,9 +1682,7 @@ class EEGMeditationApp(App):
 
     def _on_backup_pressed(self) -> None:
         """Backup the live DB to a user-visible location."""
-        from datetime import datetime as _dt
 
-        from app.crash_handler import report_soft_error
 
         ts = _dt.now().strftime("%Y%m%d_%H%M%S")
         filename = f"meditation_backup_{ts}.db"
@@ -1705,12 +1702,8 @@ class EEGMeditationApp(App):
             self._open_backup_save_picker(filename)
 
     def _run_backup_async(self, target_path: str) -> None:
-        import threading
 
-        from kivy.clock import Clock as _Clock
 
-        from app.crash_handler import report_soft_error
-        from app.storage import backup as _backup
 
         self._settings_screen.show_backup_status("Backing up…")
 
@@ -1719,11 +1712,11 @@ class EEGMeditationApp(App):
                 _backup.make_backup(self._db, target_path)
             except (PermissionError, OSError) as exc:
                 err_msg = f"Backup to {target_path} failed: {exc}"
-                _Clock.schedule_once(
+                Clock.schedule_once(
                     lambda dt, _msg=err_msg: report_soft_error("backup_failed", _msg),
                 )
                 return
-            _Clock.schedule_once(lambda dt: self._settings_screen.show_backup_status(
+            Clock.schedule_once(lambda dt: self._settings_screen.show_backup_status(
                 f"Saved to {target_path}",
             ))
 
@@ -1737,10 +1730,7 @@ class EEGMeditationApp(App):
             self._open_restore_picker_desktop()
 
     def _open_restore_picker_android(self) -> None:
-        from kivy.uix.popup import Popup
 
-        from app.crash_handler import report_soft_error
-        from app.ui.theme import StyledButton
 
         target_dir = "/sdcard/Documents/EEGMeditation"
         try:
@@ -1794,11 +1784,7 @@ class EEGMeditationApp(App):
         popup.open()
 
     def _open_restore_picker_desktop(self) -> None:
-        from kivy.uix.filechooser import FileChooserListView
-        from kivy.uix.popup import Popup
 
-        from app.config import APP
-        from app.ui.theme import StyledButton
 
         content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
         chooser = FileChooserListView(
@@ -1829,11 +1815,7 @@ class EEGMeditationApp(App):
 
     def _confirm_restore(self, source_path: str) -> None:
         """Validate, then show confirm dialog → on OK, replace + restart."""
-        from kivy.uix.popup import Popup
 
-        from app.crash_handler import report_soft_error
-        from app.storage.backup import validate_backup
-        from app.ui.theme import StyledButton
 
         ok, msg = validate_backup(source_path)
         if not ok:
@@ -1873,13 +1855,7 @@ class EEGMeditationApp(App):
         popup.open()
 
     def _do_restore_and_restart(self, source_path: str) -> None:
-        from kivy.app import App as _App
-        from kivy.uix.popup import Popup
 
-        from app.config import APP
-        from app.crash_handler import report_soft_error
-        from app.storage.backup import restore_backup
-        from app.ui.theme import StyledButton
 
         try:
             self._db.close()
@@ -1919,18 +1895,13 @@ class EEGMeditationApp(App):
 
         def _quit(*_a):
             popup.dismiss()
-            _App.get_running_app().stop()
+            App.get_running_app().stop()
 
         ok.bind(on_release=_quit)
         popup.open()
 
     def _open_backup_save_picker(self, default_filename: str) -> None:
-        from kivy.uix.filechooser import FileChooserListView
-        from kivy.uix.popup import Popup
-        from kivy.uix.textinput import TextInput
 
-        from app.config import APP
-        from app.ui.theme import StyledButton
 
         content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
         chooser = FileChooserListView(
@@ -2005,7 +1976,6 @@ class EEGMeditationApp(App):
         Routes UserExistsError to the active picker form (Settings) for
         inline duplicate handling.
         """
-        from app.storage.database import UserExistsError
 
         try:
             self._db.create_user(name)
@@ -2015,7 +1985,6 @@ class EEGMeditationApp(App):
                 form.show_duplicate_error(user_id=e.user_id, name=e.name)
             return
         except Exception as e:
-            from app.crash_handler import report_soft_error
             report_soft_error(
                 "user_create_failed", f"Could not create user '{name}': {e}",
             )
@@ -2247,7 +2216,6 @@ class EEGMeditationApp(App):
         import time. We flush them now via `report_soft_error`.
         """
         try:
-            from app.crash_handler import flush_pre_app_errors
             flush_pre_app_errors()
         except Exception:
             logger.exception("flush_pre_app_errors failed")

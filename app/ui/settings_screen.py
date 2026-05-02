@@ -1,13 +1,18 @@
 import os
+import threading
 from collections.abc import Callable
 from typing import Optional
 
-from kivy.core.window import Window
+from kivy.clock import Clock
+from kivy.core.window import Keyboard, Window
 from kivy.graphics import Color, Rectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.button import Button
 from kivy.uix.checkbox import CheckBox
+from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.label import Label
+from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.slider import Slider
@@ -15,6 +20,7 @@ from kivy.uix.textinput import TextInput
 
 from app.config import APP, METRICS
 from app.ui.theme import (
+    THEMES,
     C,
     Divider,
     F,
@@ -830,7 +836,6 @@ class SettingsScreen(Screen):
         theme_row = BoxLayout(
             size_hint_y=None, height=dp(36), spacing=S.GAP_SM,
         )
-        from app.ui.theme import THEMES
         for theme_name in THEMES:
             is_active = theme_name == C.theme_name
             btn = StyledButton(
@@ -876,15 +881,12 @@ class SettingsScreen(Screen):
             raise RuntimeError("dev-trigger kivy-loop")
 
         def _trigger_clock_crash(_btn):
-            from kivy.clock import Clock
-
             def _boom(dt):
                 raise RuntimeError("dev-trigger kivy-clock")
 
             Clock.schedule_once(_boom, 0)
 
         def _trigger_thread_crash(_btn):
-            import threading
 
             def _boom():
                 raise RuntimeError("dev-trigger thread")
@@ -1030,7 +1032,6 @@ class SettingsScreen(Screen):
         Window.unbind(on_key_down=self._on_hotkey_capture)
         self._waiting_for_hotkey = False
         # Use codepoint (printable char) or Kivy key name
-        from kivy.core.window import Keyboard
         key_name = codepoint if codepoint else Keyboard.keycode_to_string(Keyboard(), key)
         if key_name:
             self._marker_hotkey = key_name
@@ -1241,10 +1242,6 @@ class SettingsScreen(Screen):
 
     def _on_timer_sound_browse(self, *_args) -> None:
         """Open a file chooser popup for audio files."""
-        from kivy.uix.button import Button
-        from kivy.uix.filechooser import FileChooserListView
-        from kivy.uix.popup import Popup
-
         start_path = os.path.expanduser("~")
         chooser = FileChooserListView(
             path=start_path,
@@ -1341,8 +1338,6 @@ class SettingsScreen(Screen):
         multiple MindWave devices paired, or a scan returned zero results and we
         want the user to retry / check permissions.
         """
-        from kivy.clock import Clock
-
         if hasattr(self, "_device_section") and self._device_section is not None:
             self._device_section.open()
         if message:
@@ -1467,7 +1462,6 @@ class SettingsScreen(Screen):
 
     def _confirm_user_delete(self, user_id, user_name):
         """Show confirmation before deleting a user."""
-        from kivy.uix.popup import Popup
         content = BoxLayout(orientation="vertical", spacing=S.GAP, padding=S.GAP)
         content.add_widget(Label(
             text=f'Delete user "{user_name}"?\nAll their settings will be lost.',

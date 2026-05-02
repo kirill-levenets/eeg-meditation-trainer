@@ -1,5 +1,6 @@
 import math
 import os
+import sys
 from collections.abc import Callable
 from typing import Optional
 
@@ -15,6 +16,8 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
 
+from app.config import APP
+from app.logger import logger
 from app.ui.raw_eeg_screen import GraphAwareScrollView, ScrollableGraphWidget
 from app.ui.theme import C, F, Icons, S, StyledButton, format_duration
 
@@ -646,7 +649,6 @@ class DiaryScreen(Screen):
         Uses the same base dir as the DB (tested for write access at startup).
         Falls back to app-private storage if /sdcard isn't writable.
         """
-        from app.config import APP
         export_dir = os.path.join(os.path.dirname(APP.DB_PATH), "exports")
         os.makedirs(export_dir, exist_ok=True)
         return export_dir
@@ -655,7 +657,6 @@ class DiaryScreen(Screen):
         if not self._selected_session_id or not self._on_export_csv:
             return
 
-        import sys
         is_android = hasattr(sys, "getandroidapilevel")
 
         content = BoxLayout(orientation="vertical", spacing=S.GAP, padding=S.GAP)
@@ -758,8 +759,9 @@ class DiaryScreen(Screen):
                     self._show_export_result("No data to export", success=False)
                     return
 
-                # On Android: copy from private storage to shared Documents
-                import sys
+                # On Android: copy from private storage to shared Documents.
+                # `copy_to_documents` is imported lazily because the module
+                # uses pyjnius and is only safe on Android.
                 if hasattr(sys, "getandroidapilevel"):
                     from app.storage.android_share import copy_to_documents
                     shared = copy_to_documents(result, display_name=filename)
@@ -789,7 +791,6 @@ class DiaryScreen(Screen):
         except Exception as e:
             popup.dismiss()
             self._show_export_result(f"Export error:\n{e}", success=False)
-            from app.logger import logger
             logger.error(f"Export failed: {e}", exc_info=True)
 
     def _show_export_result(self, message: str, success: bool = True) -> None:

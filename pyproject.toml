@@ -82,18 +82,17 @@ ignore = [
 "app/metrics/custom_formula.py" = ["BLE001", "PLR0911", "PLR0912"]
 # Android storage resolution
 "app/config.py" = ["PLC0415"]
-# App manager: complex orchestration, Android wake lock, threading
+# App manager: Android pyjnius lazy import, broad except, threading
 "app/ui/app_manager.py" = ["PLC0415", "BLE001", "PLR0912", "PLR0915"]
 # UI screens: _build_ui methods are long but flat widget construction
-"app/ui/live_session.py" = ["PLC0415", "PLR0915", "BLE001"]
-"app/ui/settings_screen.py" = ["PLC0415", "PLR0915"]
+"app/ui/live_session.py" = ["PLR0915", "BLE001"]
+"app/ui/settings_screen.py" = ["PLR0915"]
+# diary: Android-only `copy_to_documents` lazy import inside Android branch
 "app/ui/diary_screen.py" = ["PLC0415", "BLE001", "PLR0915"]
-"app/ui/history_screen.py" = ["PLC0415"]
-"app/ui/timer_screen.py" = ["PLC0415"]
 # Graph _redraw: inherently complex rendering loop
 "app/ui/raw_eeg_screen.py" = ["C901", "PLR0912", "PLR0915"]
-# Theme: struct/zlib imports for PNG gen, broad except in listeners
-"app/ui/theme.py" = ["PLC0415", "BLE001"]
+# Theme: broad except in listeners
+"app/ui/theme.py" = ["BLE001"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 30  # default 10; relaxed for parser/eval/tick loops

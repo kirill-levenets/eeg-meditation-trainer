@@ -13,6 +13,7 @@ from kivy.graphics import Color, Line, Rectangle, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
+from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
@@ -861,7 +862,6 @@ class HistoryScreen(Screen):
 
     def _confirm_delete(self, session_id: int, name: str) -> None:
         """Show a delete confirmation popup."""
-        from kivy.uix.popup import Popup
 
         content = BoxLayout(orientation="vertical", spacing=S.GAP, padding=S.GAP)
         content.add_widget(Label(
