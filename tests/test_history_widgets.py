@@ -69,3 +69,45 @@ def test_history_screen_view_mode_callback_fires_on_toggle():
     assert received == ["bars"]
     screen._on_toggle_pressed("calendar")
     assert received == ["bars", "calendar"]
+
+
+def test_confirm_delete_label_shows_name_visibly(monkeypatch):
+    # Regression (caught on-device): the name was invisible on the always-dark
+    # Kivy popup because the label used C.TEXT, which is dark in light themes
+    # (dark-on-dark). Body text must be light. text_size must also track size
+    # so the name wraps instead of overflowing the narrow mobile popup.
+    from kivy.uix.label import Label
+
+    import app.ui.history_screen as hs_mod
+    from app.ui.history_screen import HistoryScreen
+
+    captured = {}
+
+    class _FakePopup:
+        def __init__(self, **kwargs):
+            captured["content"] = kwargs.get("content")
+
+        def open(self):
+            captured["opened"] = True
+
+        def dismiss(self, *args):
+            pass
+
+    monkeypatch.setattr(hs_mod, "Popup", _FakePopup)
+
+    screen = HistoryScreen()
+    name = "14:32 - MindWave Mobile (very long session name)"
+    screen._confirm_delete(7, name)
+
+    content = captured["content"]
+    labels = [w for w in content.children if isinstance(w, Label)]
+    assert labels, "no message label in confirm-delete dialog"
+    msg = labels[0]
+    assert name in msg.text
+
+    # Light enough to read on the dark popup chrome (the original C.TEXT in a
+    # light theme had luminance ~0.15 and was invisible).
+    assert sum(msg.color[:3]) / 3 > 0.7
+
+    msg.size = (300, 80)  # binding fires synchronously on size change
+    assert list(msg.text_size) == [300, 80]

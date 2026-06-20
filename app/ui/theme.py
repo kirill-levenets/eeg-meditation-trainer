@@ -304,6 +304,11 @@ class _ColorAccessor:
 
 C = _ColorAccessor()
 
+# Kivy's Popup chrome (background + title) is always dark and is never themed,
+# so popup body text must stay light in every palette — the themed C.TEXT is
+# dark in the light themes and renders dark-on-dark (invisible).
+POPUP_TEXT = (0.93, 0.93, 0.95, 1.0)
+
 
 # ── Typography ───────────────────────────────────────────────────────
 

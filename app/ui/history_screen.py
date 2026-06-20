@@ -19,7 +19,17 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
-from app.ui.theme import C, Card, Divider, F, Icons, S, StyledButton, format_duration
+from app.ui.theme import (
+    POPUP_TEXT,
+    C,
+    Card,
+    Divider,
+    F,
+    Icons,
+    S,
+    StyledButton,
+    format_duration,
+)
 
 
 def _lerp_color(t: float):
@@ -864,14 +874,21 @@ class HistoryScreen(Screen):
         """Show a delete confirmation popup."""
 
         content = BoxLayout(orientation="vertical", spacing=S.GAP, padding=S.GAP)
-        content.add_widget(Label(
+        msg_label = Label(
             text=f"Delete session\n\"{name}\"?",
             font_size=F.BODY,
-            color=C.TEXT,
+            # Kivy's Popup chrome is always dark (never themed), so the body
+            # text must be light too — C.TEXT is dark in the light themes and
+            # rendered the name invisible (dark-on-dark). The text_size binding
+            # below makes halign/valign work so a long name wraps instead of
+            # overflowing the narrow mobile popup.
+            color=POPUP_TEXT,
             halign="center",
             valign="middle",
             size_hint_y=0.6,
-        ))
+        )
+        msg_label.bind(size=msg_label.setter("text_size"))
+        content.add_widget(msg_label)
         btn_row = BoxLayout(spacing=S.GAP, size_hint_y=0.4)
         btn_cancel = StyledButton(
             text="Cancel",
@@ -891,7 +908,7 @@ class HistoryScreen(Screen):
         popup = Popup(
             title="Confirm Delete",
             content=content,
-            size_hint=(0.7, 0.3),
+            size_hint=(0.85, 0.35),
             auto_dismiss=True,
         )
         btn_cancel.bind(on_release=popup.dismiss)

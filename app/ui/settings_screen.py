@@ -20,6 +20,7 @@ from kivy.uix.textinput import TextInput
 
 from app.config import APP, METRICS
 from app.ui.theme import (
+    POPUP_TEXT,
     THEMES,
     C,
     Divider,
@@ -1463,11 +1464,13 @@ class SettingsScreen(Screen):
     def _confirm_user_delete(self, user_id, user_name):
         """Show confirmation before deleting a user."""
         content = BoxLayout(orientation="vertical", spacing=S.GAP, padding=S.GAP)
-        content.add_widget(Label(
+        msg_label = Label(
             text=f'Delete user "{user_name}"?\nAll their settings will be lost.',
-            font_size=F.BODY, color=C.TEXT,
+            font_size=F.BODY, color=POPUP_TEXT,  # dark popup chrome: keep body light
             halign="center", valign="middle", size_hint_y=0.6,
-        ))
+        )
+        msg_label.bind(size=msg_label.setter("text_size"))
+        content.add_widget(msg_label)
         btn_row = BoxLayout(spacing=S.GAP, size_hint_y=0.4)
         btn_cancel = StyledButton(text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY, height=dp(38))
         btn_confirm = StyledButton(text="Delete", icon=Icons.DELETE, bg_color=C.DANGER, height=dp(38))
