@@ -179,9 +179,12 @@ class ScrollableGraphWidget(Widget):
     def load_static_data(self, series: dict[str, list[float]]) -> None:
         """Load pre-recorded data for static display (e.g. diary preview)."""
         for key in self._data:
-            self._data[key].clear()
-            for val in series.get(key, []):
-                self._data[key].append(val)
+            d = self._data[key]
+            d.clear()
+            # extend() is a C-level bulk copy; a Python `for v: append(v)` loop
+            # over 30k raw-EEG samples used to take ~1.5 s on Android and
+            # contributed to a post-resume ANR after a screen-lock session.
+            d.extend(series.get(key, []))
         first_key = next(iter(self._data))
         self._total_points = len(self._data[first_key])
         self._scroll_offset = 0

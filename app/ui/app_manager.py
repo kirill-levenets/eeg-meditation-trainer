@@ -2,6 +2,7 @@ import os
 import sys
 import threading
 import time
+from collections import deque
 from datetime import datetime as _dt
 from typing import Optional
 
@@ -39,7 +40,7 @@ from app.storage.backup import restore_backup, validate_backup
 from app.storage.database import DatabaseManager, UserExistsError
 from app.ui.diary_screen import DiaryScreen
 from app.ui.history_screen import HistoryScreen
-from app.ui.live_session import LiveSessionScreen
+from app.ui.live_session import METRICS_COLORS, LiveSessionScreen
 from app.ui.profile_screen import ProfileScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
@@ -85,6 +86,15 @@ class EEGMeditationApp(App):
         self._is_paused: bool = False
         self._metrics_buffer: list[dict] = []
         self._raw_buffer: list[dict] = []
+        # Session-lifetime mirrors of what would have gone into the live
+        # graphs. Tick thread appends to these regardless of pause state;
+        # on resume we reload graphs from these in a single batch instead
+        # of replaying N per-tick UI updates. Bounded by graph capacity.
+        self._ui_metrics_history: deque[dict] = deque(maxlen=APP.GRAPH_POINTS_MAX)
+        self._ui_band_history: deque[dict] = deque(maxlen=APP.GRAPH_POINTS_MAX)
+        self._ui_raw_waveform: deque[float] = deque(maxlen=512 * 60)
+        self._ui_last_metrics: dict = {}
+        self._ui_last_state: str = "Neutral"
         self._flush_counter: int = 0
         self._current_session_id: Optional[int] = None
         self._current_user_id: Optional[int] = None
@@ -694,6 +704,11 @@ class EEGMeditationApp(App):
         self._noise_detector = PowerLineDetector() if not APP.USE_MOCK_DEVICE else None
         self._metrics_buffer = []
         self._raw_buffer = []
+        self._ui_metrics_history.clear()
+        self._ui_band_history.clear()
+        self._ui_raw_waveform.clear()
+        self._ui_last_metrics = {}
+        self._ui_last_state = "Neutral"
         self._flush_counter = 0
         self._tick_count = 0
         self._current_session_id = None
@@ -868,16 +883,20 @@ class EEGMeditationApp(App):
         ts = time.strftime("%H:%M")
         return f"{ts} - {device}"
 
-    def _stop_and_save(self, reason: str = "user") -> None:
-        """Stop session and save data immediately (no dialog)."""
-        self._stop_tick_thread()
+    def _persist_session_data(self, reason: str) -> dict:
+        """Stop the session and write final stats + metrics to the DB.
 
+        Tick-thread-safe: contains NO Kivy/UI calls so it can run directly on
+        the daemon tick thread at timer expiry. That makes the finished session
+        durable even if Android kills the app during a screen lock before the
+        user unlocks — the main-thread Clock (and `_on_main`) is paused while
+        locked, so deferring the save risked losing the whole session.
+        """
         stats = self._session_manager.stop(reason=reason)
         # Keep real BT connection alive between sessions to avoid EBUSY on reconnect.
         # Only the mock stream gets stopped here; real stream stays connected.
         if APP.USE_MOCK_DEVICE:
             self._eeg_stream.stop()
-        self._audio.stop()
 
         if stats:
             if self._current_session_id is not None:
@@ -890,19 +909,69 @@ class EEGMeditationApp(App):
             if self._metrics_buffer:
                 self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
                 self._metrics_buffer = []
+        return stats
 
+    def _reload_live_graphs_from_mirror(self) -> None:
+        """Batch-reload the 3 live graphs from the session-lifetime mirror
+        buffers (one load_static_data per graph). Used on Android resume and on
+        session finish: during a screen lock the per-tick add_point is skipped
+        (mirror buffers fill instead), so without this the live graph would
+        show only the pre-lock portion of the session."""
+        metrics_snapshot = list(self._ui_metrics_history)
+        band_snapshot = list(self._ui_band_history)
+        waveform_snapshot = list(self._ui_raw_waveform)
+        if metrics_snapshot:
+            metric_series = {
+                key: [d.get(key, 0.0) for d in metrics_snapshot]
+                for key in METRICS_COLORS
+            }
+            self._live_screen.graph.load_static_data(metric_series)
+        if band_snapshot:
+            band_keys = ("alpha", "beta", "gamma", "theta", "delta")
+            band_series = {
+                key: [d.get(key, 0.0) for d in band_snapshot]
+                for key in band_keys
+            }
+            self._live_screen.band_graph.load_static_data(band_series)
+        if waveform_snapshot:
+            self._live_screen.raw_graph.load_static_data({"eeg": waveform_snapshot})
+
+    def _finalize_stop_ui(self, stats: dict, session_id: Optional[int]) -> None:
+        """Main-thread UI teardown after a session has been persisted."""
+        # Reload the live graph from the mirror buffers so it shows the FULL
+        # session (the locked portion never reached the live graph via the
+        # per-tick path). Otherwise closing the summary reveals a stale graph
+        # covering only the pre-lock seconds while History shows the real
+        # duration.
+        try:
+            self._reload_live_graphs_from_mirror()
+        except Exception:
+            logger.exception("graph reload on stop failed")
         self._live_screen.set_controls_idle()
         self._live_screen.update_device_status(False)
         self._live_screen.update_state("FINISHED")
+        # Sync the header timer to the final duration (it froze at lock time).
+        if stats:
+            secs = int(stats.get("duration", 0))
+            self._live_screen.update_timer(f"{secs // 60:02d}:{secs % 60:02d}")
         self._timer_state.reset()
         self._session_manager.reset()
         self._release_wake_lock()
         self._stop_session_keep_alive_service()
         self._mark_history_dirty()
+        if stats and session_id:
+            self._live_screen.show_summary(session_id, stats)
 
-        if stats and self._current_session_id:
-            self._live_screen.show_summary(self._current_session_id, stats)
-        logger.info("Session stopped and saved")
+    def _stop_and_save(self, reason: str = "user") -> None:
+        """Stop session and save data immediately (no dialog). Main-thread path."""
+        t_start = time.monotonic()
+        self._stop_tick_thread()
+        stats = self._persist_session_data(reason)
+        self._audio.stop()
+        self._finalize_stop_ui(stats, self._current_session_id)
+        logger.info(
+            f"Session stopped and saved (took {time.monotonic() - t_start:.3f}s)"
+        )
 
     def _cancel_stop(self, popup) -> None:
         """Resume the session after cancelling stop."""
@@ -1011,16 +1080,24 @@ class EEGMeditationApp(App):
                     self._session_manager.start(
                         threshold=self._pending_threshold
                     )
-                    self._audio.start()
-                    self._audio.play_connect_sound()
+                    # Arm the countdown on THIS thread before the next tick()
+                    # reads it. Deferring it via _on_main let a stalled main
+                    # thread leave remaining_seconds=0, so the very next tick
+                    # fired the timer instantly — a 0s "timer-ended" session.
+                    self._timer_state.start_countdown()
                     _n = name
                     self._on_main(lambda n=_n: (
-                        self._timer_state.start_countdown(),
                         self._live_screen.update_device_status(True, device_name=n),
                         self._live_screen.update_state("Running"),
                         self._live_screen.set_start_time(time.time()),
                         self._live_screen.hide_overlay(),
                         self._settings_screen.update_device_status(True, name=n),
+                        # Start audio on the main thread together with hiding the
+                        # overlay, so white-noise never plays while the connecting
+                        # loader is still visible (previously non-atomic: audio
+                        # started on the tick thread, overlay hide was deferred).
+                        self._audio.start(),
+                        self._audio.play_connect_sound(),
                     ))
                     logger.info(f"BT device {name} connected, session started")
                 elif signal_elapsed > self._BT_SIGNAL_TIMEOUT and not has_packets:
@@ -1224,6 +1301,29 @@ class EEGMeditationApp(App):
             self._audio.update_sinking(metrics.get("sinking", 0))
             self._audio.update_subtle_distraction(metrics.get("subtle_distraction", 0))
 
+        # Mirror what the UI graphs would have received. Done here on the
+        # tick thread (no Kivy graphics ops) so the data exists even while
+        # the UI is paused (Android screen lock); on resume we batch-reload
+        # the graphs from these mirrors instead of replaying N per-tick
+        # Clock callbacks (which previously flooded the main loop and
+        # caused a black screen).
+        self._ui_metrics_history.append(dict(metrics))
+        _band_record = {
+            "alpha": raw_sample.get("alpha1", 0.0) + raw_sample.get("alpha2", 0.0),
+            "beta": raw_sample.get("beta1", 0.0) + raw_sample.get("beta2", 0.0),
+            "gamma": raw_sample.get("gamma1", 0.0) + raw_sample.get("gamma2", 0.0),
+            "theta": raw_sample.get("theta", 0.0),
+            "delta": raw_sample.get("delta", 0.0),
+        }
+        self._ui_band_history.append(_band_record)
+        _waveform = raw_sample.get("raw_eeg_waveform")
+        if _waveform:
+            self._ui_raw_waveform.extend(_waveform)
+        else:
+            self._ui_raw_waveform.append(sum(_band_record.values()))
+        self._ui_last_metrics = metrics
+        self._ui_last_state = metrics.get("state", "Neutral")
+
         # UI updates — dispatch to main thread
         _elapsed_fmt = self._session_manager.elapsed_formatted
         _marker_pending = self._pending_marker
@@ -1262,20 +1362,36 @@ class EEGMeditationApp(App):
             # Without this, _on_main below would queue stop() through
             # Kivy's Clock — paused while the screen is locked — so
             # the noise kept playing past the timer end.
-            self._audio.stop()
-            # If the screen is locked at expiry, we deliberately skip the
-            # bell. SoundLoader / SDL_mixer state is fragile post-pause:
-            # trying to load+play a sound on resume hangs the main thread
-            # (ANR → black screen). The user wouldn't hear the bell during
-            # lock anyway, and the session has already ended at the data
-            # layer (audio stopped + DB will flush).
-            should_play_bell = not self._is_paused
-            custom = self._timer_state.custom_sound_path
+            # Persist FIRST, on THIS daemon thread, before any audio teardown.
+            # The finished session must be saved even though the screen may be
+            # locked. (Originally _audio.stop() ran here first and DEADLOCKED
+            # the tick thread: MediaPlayer.release() synchronises with its
+            # event handler on the main Looper, which is PAUSED during lock —
+            # so the save never ran and the whole session was lost.)
+            stats = self._persist_session_data(reason="timer")
+            session_id = self._current_session_id
+            # Silence the noise with a non-blocking volume→0 (setVolume is a
+            # direct native call, safe from this thread even while locked).
+            # The real stop()/release() teardown is deferred to the main
+            # thread below, where the Looper is live and release() won't hang.
+            self._audio.mute()
+            # Stop the tick loop NOW (in the thread itself) so it doesn't keep
+            # iterating through the pause while _finish_on_main waits on the
+            # paused Clock.
+            self._tick_stop_event.set()
             def _finish_on_main(_dt=None):
-                self._stop_and_save(reason="timer")
-                if should_play_bell:
-                    self._audio.play_timer_sound(custom)
+                self._audio.stop()  # full noise teardown on the main thread
+                self._finalize_stop_ui(stats, session_id)
             self._on_main(_finish_on_main)
+            # Ring the gong LAST, on this thread, so it sounds at the timer end
+            # even with the screen locked: it routes through a MediaPlayer
+            # (USAGE_MEDIA), which plays through lock — SoundLoader is silenced
+            # while locked. Only create/start runs here (release is deferred to
+            # the main thread via stop_timer_bell). Done last on purpose: the
+            # save, mute, and summary dispatch above are all complete, so even
+            # if MediaPlayer setup were to block during lock, nothing critical
+            # is lost.
+            self._audio.play_timer_sound(self._timer_state.custom_sound_path)
             return
 
         # Flush buffer to DB every 60 seconds (DB opened with check_same_thread=False)
@@ -2261,13 +2377,39 @@ class EEGMeditationApp(App):
             logger.exception("on_resume UI refresh failed")
 
     def _refresh_ui_after_resume(self) -> None:
-        """Sync UI labels to current session state after Android resume."""
+        """Sync UI to current session state after Android resume.
+
+        If the session is no longer RUNNING (e.g. timer expired during
+        pause and ``_finish_on_main`` already fired ``_stop_and_save`` →
+        the summary card now covers the live screen), skip the graph
+        reload entirely. Combining 3 graph reloads with the heavy work
+        in ``_stop_and_save`` on the first frame after resume previously
+        blocked the UI thread long enough to trigger an Android ANR
+        ('App not responding' / black screen).
+
+        While the session is RUNNING, reload all three live graphs in a
+        single batch from the session-lifetime mirror buffers (one
+        ``load_static_data`` call per graph, one redraw each), then
+        refresh the stats/state/timer labels from the latest sample.
+        """
+        t_start = time.monotonic()
         if self._session_manager.state != SessionState.RUNNING:
+            logger.info("on_resume: session not RUNNING → skipping graph reload")
             return
+        try:
+            self._reload_live_graphs_from_mirror()
+            if self._ui_last_metrics:
+                self._live_screen.update_stats(self._ui_last_metrics)
+                self._live_screen.update_state(self._ui_last_state)
+        except Exception:
+            logger.exception("graph reload on resume failed")
         try:
             self._live_screen.update_timer(self._session_manager.elapsed_formatted)
         except Exception:
             logger.exception("update_timer on resume failed")
+        logger.info(
+            f"on_resume: refresh complete in {time.monotonic() - t_start:.3f}s"
+        )
 
     def on_stop(self) -> None:
         """Cleanup on app exit.
