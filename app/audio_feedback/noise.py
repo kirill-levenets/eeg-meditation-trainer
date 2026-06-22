@@ -50,9 +50,11 @@ class _KivyNoisePlayer:
 
 
 class _AndroidMediaNoisePlayer:
-    """MediaPlayer-backed noise loop. Keeps playing through screen lock."""
+    """MediaPlayer-backed player. USAGE_MEDIA so it keeps playing through
+    screen lock (SDL_mixer/SoundLoader is silenced while locked). Used for the
+    looping noise (loop=True) and the one-shot timer gong (loop=False)."""
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, loop: bool = True) -> None:
         from jnius import autoclass
         MediaPlayer = autoclass("android.media.MediaPlayer")
         AudioAttributes = autoclass("android.media.AudioAttributes")
@@ -67,7 +69,7 @@ class _AndroidMediaNoisePlayer:
         )
         self._mp.setAudioAttributes(attrs)
         self._mp.setDataSource(path)
-        self._mp.setLooping(True)
+        self._mp.setLooping(loop)
         self._mp.prepare()  # synchronous — fine for small WAV files
         self._volume: float = 0.0
         self._mp.setVolume(0.0, 0.0)
@@ -127,16 +129,22 @@ class _AndroidMediaNoisePlayer:
             pass
 
     def unload(self) -> None:
+        # release() MUST run even if stop() raises (IllegalStateException on a
+        # MediaPlayer left in a bad state after an aborted session) — otherwise
+        # the native player leaks and audio keeps playing until GC.
         try:
             self.stop()
+        except Exception:
+            logger.exception("MediaPlayer stop during unload failed")
+        try:
             self._mp.release()
         except Exception:
-            pass
+            logger.exception("MediaPlayer release failed")
         try:
             if self._audio_mgr and self._focus_request:
                 self._audio_mgr.abandonAudioFocusRequest(self._focus_request)
         except Exception:
-            pass
+            logger.exception("MediaPlayer abandonAudioFocusRequest failed")
 
 
 def _make_noise_player(path: str):
@@ -299,6 +307,7 @@ class AudioEngine:
         self._is_playing: bool = False
         self._noise_sound: object = None
         self._bell_sound: object = None
+        self._timer_bell_player: object = None  # Android MediaPlayer gong (lock-through)
         self._noise_path: str = ""
         self._bell_path: str = ""
         self._sinking_cooldown_until: float = 0.0
@@ -503,6 +512,26 @@ class AudioEngine:
         self._ensure_ramp_thread()
         logger.info("Audio engine started")
 
+    def mute(self) -> None:
+        """Silence the noise immediately without tearing down the player.
+
+        Tick-thread-safe: only touches volume (MediaPlayer.setVolume is a
+        direct native call with no main-Looper sync, so it works even while
+        the screen is locked — unlike stop()/release(), which deadlock the
+        tick thread against the paused main Looper). Use this at timer expiry
+        on the tick thread; do the full stop()/release() teardown later on
+        the main thread.
+        """
+        self._ramp_running = False  # stop the ramp from re-raising volume
+        self._volume = 0.0
+        self._target_volume = 0.0
+        snd = getattr(self, "_noise_sound", None)
+        if snd is not None:
+            try:
+                snd.volume = 0.0
+            except Exception:
+                logger.exception("mute: setting noise volume failed")
+
     def stop(self) -> None:
         """Stop all audio playback."""
         self._ramp_running = False
@@ -516,7 +545,7 @@ class AudioEngine:
                     snd.stop()
                     snd.unload()
                 except Exception:
-                    pass
+                    logger.exception(f"Failed to stop/unload {snd_attr}")
                 setattr(self, snd_attr, None)
         self._is_playing = False
         self._volume = 0.0
@@ -578,40 +607,61 @@ class AudioEngine:
         t.start()
 
     def play_timer_sound(self, custom_path: str = "") -> None:
-        """Play timer end sound: custom WAV if provided, else default
-        timer bell (deeper / longer than the sinking-alert bell)."""
-        if custom_path and os.path.isfile(custom_path):
+        """Play the timer-end gong so it sounds even with the screen locked.
+
+        On Android the gong goes through a one-shot MediaPlayer (USAGE_MEDIA),
+        like the noise — SoundLoader/SDL_mixer is silenced while the screen is
+        locked, so a meditation bell played that way would never be heard at
+        the actual timer end. Desktop falls back to SoundLoader.
+
+        Safe to call from the tick thread: only create()/prepare()/start()
+        run here (no MediaPlayer.release(), which would deadlock against the
+        paused main Looper during lock — see _release_timer_bell, which runs
+        on the main thread via stop_timer_bell()).
+        """
+        path = custom_path if (custom_path and os.path.isfile(custom_path)) else self._timer_bell_path
+        from kivy.utils import platform as kplat
+        if kplat == "android":
             try:
-                from kivy.core.audio import SoundLoader
-                snd = SoundLoader.load(custom_path)
-                if snd:
-                    snd.loop = False
-                    snd.volume = 1.0
-                    snd.play()
-                    self._bell_sound = snd
-                    logger.info(f"Timer sound: {custom_path}")
-                    return
-            except Exception as e:
-                logger.warning(f"Failed to play custom sound: {e}")
-        # Default: play the dedicated timer bell (NOT the short sinking
-        # alert bell). Reuse the same _bell_sound slot so summary buttons
-        # and stop_timer_bell() can stop it through one path.
+                player = _AndroidMediaNoisePlayer(path, loop=False)
+                player.volume = 1.0
+                player.play()
+                self._timer_bell_player = player
+                logger.info("Timer gong (MediaPlayer, lock-through)")
+                return
+            except Exception:
+                logger.exception("MediaPlayer gong failed; falling back to SoundLoader")
         if self._bell_sound:
             try:
                 self._bell_sound.stop()
                 self._bell_sound.unload()
             except Exception:
-                pass
-        self._bell_sound = self._play_sound(self._timer_bell_path, 0.9)
-        logger.info("Timer sound: default timer bell")
+                logger.exception("Failed to clear prior bell before timer sound")
+        self._bell_sound = self._play_sound(path, 0.9)
+        logger.info("Timer gong (SoundLoader)")
+
+    def _release_timer_bell(self) -> None:
+        """Release the MediaPlayer gong. MUST run on the main thread (its
+        event handler is on the main Looper; release() from the tick thread
+        deadlocks while the screen is locked)."""
+        player = self._timer_bell_player
+        if player is None:
+            return
+        try:
+            player.unload()
+        except Exception:
+            logger.exception("Failed to release timer gong player")
+        self._timer_bell_player = None
 
     def stop_timer_bell(self) -> None:
         """Stop the timer-end bell early (e.g. user pressed a summary button).
 
-        Safe to call when nothing is playing — the existing reference is
-        cleared either way, so subsequent `_audio.start()` / new sessions
-        don't carry a stale Sound across.
+        Safe to call when nothing is playing — references are cleared either
+        way, so subsequent `_audio.start()` / new sessions don't carry a stale
+        player across. Called from the main thread (summary buttons / session
+        start), where releasing the MediaPlayer gong is safe.
         """
+        self._release_timer_bell()
         snd = self._bell_sound
         if not snd:
             return
@@ -619,7 +669,7 @@ class AudioEngine:
             snd.stop()
             snd.unload()
         except Exception:
-            pass
+            logger.exception("Failed to stop/unload bell")
         self._bell_sound = None
 
     def play_connect_sound(self) -> None:

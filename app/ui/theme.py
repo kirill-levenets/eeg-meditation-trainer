@@ -5,6 +5,8 @@ Design direction: calm, focused, minimal — dark theme with soft accents.
 """
 
 import os
+import struct
+import zlib
 
 from kivy.core.text import LabelBase
 from kivy.graphics import Color, Line, Rectangle, RoundedRectangle
@@ -92,8 +94,6 @@ class Icons:
 
 def _create_solid_png(rgba, path):
     """Write a 1x1 solid-color PNG file for use as accordion background."""
-    import struct
-    import zlib
     r = int(rgba[0] * 255)
     g = int(rgba[1] * 255)
     b = int(rgba[2] * 255)
@@ -303,6 +303,11 @@ class _ColorAccessor:
 
 
 C = _ColorAccessor()
+
+# Kivy's Popup chrome (background + title) is always dark and is never themed,
+# so popup body text must stay light in every palette — the themed C.TEXT is
+# dark in the light themes and renders dark-on-dark (invisible).
+POPUP_TEXT = (0.93, 0.93, 0.95, 1.0)
 
 
 # ── Typography ───────────────────────────────────────────────────────

@@ -1,6 +1,10 @@
 
+import time
+
+from kivy.app import App
 from kivy.clock import Clock
-from kivy.graphics import Color, Rectangle
+from kivy.core.window import Window
+from kivy.graphics import Color, Rectangle, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
@@ -173,7 +177,6 @@ class _DurationPickerButton(BoxLayout):
         self._redraw()
 
     def _redraw(self, *args) -> None:
-        from kivy.graphics import RoundedRectangle
         self.canvas.before.clear()
         if self.disabled:
             bg = C.BG_CARD
@@ -223,7 +226,6 @@ class LiveSessionScreen(Screen):
         self._scroll.bind(height=self._reflow)
 
     def on_enter(self, *args) -> None:
-        from kivy.core.window import Window
         Window.bind(on_resize=self._reflow, on_rotate=self._reflow)
         self._reflow()
 
@@ -309,6 +311,13 @@ class LiveSessionScreen(Screen):
             viewport_seconds=60,
             size_hint_y=1,
         )
+        # Reference line at the per-metric maximum so level 100 is
+        # visually marked even when custom_formula (scale 200) widens
+        # max_scale and pushes 100 into the middle of the graph.
+        self._graph.set_reference_line(100.0)
+        # Heatmap-color the shamatha line: blue at 0 → red at 100+.
+        # Colour tracks meditation depth visually instead of a flat hue.
+        self._graph.set_heatmap_color("shamatha_score")
         self._metrics_container.add_widget(self._graph)
 
         self._legend = BoxLayout(size_hint_y=None, height=dp(18), spacing=S.GAP_SM)
@@ -667,7 +676,6 @@ class LiveSessionScreen(Screen):
             min_graph_floor=dp(240),
         )
     def on_leave(self, *args) -> None:
-        from kivy.core.window import Window
         try:
             Window.unbind(on_resize=self._reflow, on_rotate=self._reflow)
         except Exception:
@@ -762,7 +770,6 @@ class LiveSessionScreen(Screen):
 
     def set_start_time(self, epoch: float) -> None:
         """Cache session start wall-clock time, update combined timer, and pass to graph."""
-        import time
         lt = time.localtime(epoch)
         self._start_time_str = f"{lt.tm_hour:02d}:{lt.tm_min:02d}"
         self._graph.set_start_wall_time(epoch)
@@ -782,7 +789,6 @@ class LiveSessionScreen(Screen):
         self._last_metrics = metrics
         stats = {}
         try:
-            from kivy.app import App
             stats = App.get_running_app()._session_manager.compute_statistics()
         except Exception:
             pass
@@ -1011,14 +1017,12 @@ class LiveSessionScreen(Screen):
         metrics = getattr(self, "_last_metrics", {}) or {}
         stats = {}
         try:
-            from kivy.app import App
             stats = App.get_running_app()._session_manager.compute_statistics()
         except Exception:
             pass
         self._render_stats(metrics, stats)
         # Persist
         try:
-            from kivy.app import App
             App.get_running_app()._save_user_settings()
         except Exception:
             pass

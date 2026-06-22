@@ -86,11 +86,14 @@ class SessionManager:
                 self._total_paused += time.time() - self._pause_start
             self._elapsed = time.time() - self._start_time - self._total_paused
             self._state = SessionState.FINISHED
-            if reason != "user" and self._audio is not None:
+            # Only failure terminations warble. "user" and "timer" are planned
+            # stops (timer plays its own gong), and timer-end persistence runs
+            # on the daemon tick thread where SoundLoader playback is unsafe.
+            if reason in ("stale_data", "bt_lost", "error") and self._audio is not None:
                 try:
                     self._audio.play_alert()
                 except Exception:
-                    pass
+                    logger.exception("play_alert on session stop failed")
             stats = self.compute_statistics()
             logger.info(f"Session stopped. Duration: {self._elapsed:.0f}s, reason={reason}")
             return stats
@@ -114,7 +117,7 @@ class SessionManager:
         """Compute end-of-session statistics."""
         if not self._metrics_accumulator:
             return {
-                "duration": int(self._elapsed),
+                "duration": int(self.elapsed_seconds),
                 "threshold_used": self._threshold_used,
                 "avg_meditation": 0.0,
                 "avg_shamatha": 0.0,
@@ -138,7 +141,7 @@ class SessionManager:
         )
 
         return {
-            "duration": int(self._elapsed),
+            "duration": int(self.elapsed_seconds),
             "threshold_used": self._threshold_used,
             "avg_meditation": round(avg_med, 2),
             "avg_shamatha": round(avg_sha, 2),

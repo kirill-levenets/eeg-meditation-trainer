@@ -1,13 +1,18 @@
 import os
+import threading
 from collections.abc import Callable
 from typing import Optional
 
-from kivy.core.window import Window
+from kivy.clock import Clock
+from kivy.core.window import Keyboard, Window
 from kivy.graphics import Color, Rectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.button import Button
 from kivy.uix.checkbox import CheckBox
+from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.label import Label
+from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.slider import Slider
@@ -15,6 +20,8 @@ from kivy.uix.textinput import TextInput
 
 from app.config import APP, METRICS
 from app.ui.theme import (
+    POPUP_TEXT,
+    THEMES,
     C,
     Divider,
     F,
@@ -24,6 +31,7 @@ from app.ui.theme import (
     StyledButton,
     ThemedAccordion,
 )
+from app.ui.widgets.user_picker import UserPickerForm
 
 
 def _load_help_topics(lang: str = "en") -> list[tuple[str, str]]:
@@ -68,6 +76,12 @@ class SettingsScreen(Screen):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.name = "settings"
+        self._on_profile_switch: Optional[Callable] = None
+        self._on_profile_create: Optional[Callable] = None
+        self._on_profile_delete: Optional[Callable] = None
+        self._session_counter: Optional[Callable[[int], int]] = None
+        self._on_backup_pressed: Optional[Callable] = None
+        self._on_restore_pressed: Optional[Callable] = None
         self._on_threshold_change: Optional[Callable] = None
         self._on_toggle_change: Optional[Callable] = None
         self._on_test_audio: Optional[Callable] = None
@@ -129,35 +143,13 @@ class SettingsScreen(Screen):
         )
         profile_section.add_widget(self._profile_current_label)
 
-        create_row = BoxLayout(size_hint_y=None, height=S.ROW_H, spacing=S.GAP)
-        self._profile_name_input = TextInput(
-            hint_text="New user name...",
-            multiline=False,
-            font_size=F.BODY,
-            foreground_color=C.TEXT,
-            background_color=list(C.BG_INPUT),
-            size_hint_x=0.6,
+        self._user_picker_form = UserPickerForm(
+            on_create=self._on_form_create_pressed,
+            on_pick_existing=self._on_form_pick_existing,
+            on_count=self._count_user_sessions,
+            on_delete=self._on_form_delete_pressed,
         )
-        self._profile_create_btn = StyledButton(
-            text="Create",
-            bg_color=C.ACCENT,
-            bg_pressed=C.ACCENT_DIM,
-            font_size=F.BODY,
-            size_hint_x=0.4,
-        )
-        create_row.add_widget(self._profile_name_input)
-        create_row.add_widget(self._profile_create_btn)
-        profile_section.add_widget(create_row)
-
-        self._profile_user_list = BoxLayout(
-            orientation="vertical",
-            size_hint_y=None,
-            spacing=S.GAP_SM,
-        )
-        self._profile_user_list.bind(
-            minimum_height=self._profile_user_list.setter("height")
-        )
-        profile_section.add_widget(self._profile_user_list)
+        profile_section.add_widget(self._user_picker_form)
 
         # --- Timer section ---
         timer_section = accordion.add_section("Timer", collapsed=True)
@@ -359,6 +351,47 @@ class SettingsScreen(Screen):
         )
         self._diagnostics_btn.bind(on_release=self._on_diagnostics_pressed)
         device_section.add_widget(self._diagnostics_btn)
+
+        # --- Data Backup section ---
+        backup_section = accordion.add_section("Data Backup", collapsed=True)
+
+        self._backup_btn = StyledButton(
+            text="Backup database",
+            bg_color=C.ACCENT,
+            bg_pressed=C.ACCENT_DIM,
+            font_size=F.BODY,
+            size_hint_y=None,
+            height=dp(40),
+        )
+        self._restore_btn = StyledButton(
+            text="Restore database",
+            bg_color=C.PRIMARY,
+            bg_pressed=C.PRIMARY_DIM,
+            font_size=F.BODY,
+            size_hint_y=None,
+            height=dp(40),
+        )
+        self._backup_status = Label(
+            text="",
+            font_size=F.SMALL,
+            color=C.TEXT_MUTED,
+            size_hint_y=None,
+            height=dp(22),
+            halign="left",
+            valign="middle",
+        )
+        self._backup_status.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
+
+        self._backup_btn.bind(on_release=lambda *a: (
+            self._on_backup_pressed() if self._on_backup_pressed else None
+        ))
+        self._restore_btn.bind(on_release=lambda *a: (
+            self._on_restore_pressed() if self._on_restore_pressed else None
+        ))
+
+        backup_section.add_widget(self._backup_btn)
+        backup_section.add_widget(self._restore_btn)
+        backup_section.add_widget(self._backup_status)
 
         # --- Threshold section ---
         threshold_section = accordion.add_section("Threshold", collapsed=True)
@@ -804,7 +837,6 @@ class SettingsScreen(Screen):
         theme_row = BoxLayout(
             size_hint_y=None, height=dp(36), spacing=S.GAP_SM,
         )
-        from app.ui.theme import THEMES
         for theme_name in THEMES:
             is_active = theme_name == C.theme_name
             btn = StyledButton(
@@ -850,15 +882,12 @@ class SettingsScreen(Screen):
             raise RuntimeError("dev-trigger kivy-loop")
 
         def _trigger_clock_crash(_btn):
-            from kivy.clock import Clock
-
             def _boom(dt):
                 raise RuntimeError("dev-trigger kivy-clock")
 
             Clock.schedule_once(_boom, 0)
 
         def _trigger_thread_crash(_btn):
-            import threading
 
             def _boom():
                 raise RuntimeError("dev-trigger thread")
@@ -1004,7 +1033,6 @@ class SettingsScreen(Screen):
         Window.unbind(on_key_down=self._on_hotkey_capture)
         self._waiting_for_hotkey = False
         # Use codepoint (printable char) or Kivy key name
-        from kivy.core.window import Keyboard
         key_name = codepoint if codepoint else Keyboard.keycode_to_string(Keyboard(), key)
         if key_name:
             self._marker_hotkey = key_name
@@ -1215,10 +1243,6 @@ class SettingsScreen(Screen):
 
     def _on_timer_sound_browse(self, *_args) -> None:
         """Open a file chooser popup for audio files."""
-        from kivy.uix.button import Button
-        from kivy.uix.filechooser import FileChooserListView
-        from kivy.uix.popup import Popup
-
         start_path = os.path.expanduser("~")
         chooser = FileChooserListView(
             path=start_path,
@@ -1315,8 +1339,6 @@ class SettingsScreen(Screen):
         multiple MindWave devices paired, or a scan returned zero results and we
         want the user to retry / check permissions.
         """
-        from kivy.clock import Clock
-
         if hasattr(self, "_device_section") and self._device_section is not None:
             self._device_section.open()
         if message:
@@ -1403,17 +1425,52 @@ class SettingsScreen(Screen):
         self._on_profile_switch = on_switch
         self._on_profile_create = on_create
         self._on_profile_delete = on_delete
-        self._profile_create_btn.bind(on_release=self._on_profile_create_pressed)
+
+    def set_session_counter(self, fn):
+        """app_manager wires this to count per-user sessions for the form."""
+        self._session_counter = fn
+
+    def set_backup_callback(self, cb: Callable) -> None:
+        self._on_backup_pressed = cb
+
+    def set_restore_callback(self, cb: Callable) -> None:
+        self._on_restore_pressed = cb
+
+    def show_backup_status(self, text: str) -> None:
+        self._backup_status.text = text
+
+    def _count_user_sessions(self, user_id: int) -> int:
+        if getattr(self, "_session_counter", None) is None:
+            return 0
+        return self._session_counter(user_id)
+
+    def _on_form_create_pressed(self, name: str) -> None:
+        if self._on_profile_create:
+            self._on_profile_create(name)
+
+    def _on_form_pick_existing(self, user_id: int) -> None:
+        if self._on_profile_switch:
+            self._on_profile_switch(user_id)
+
+    def _on_form_delete_pressed(self, user_id: int) -> None:
+        # Look up the name from the most recently populated list
+        name = ""
+        for u in self._user_picker_form._users:
+            if u["id"] == user_id:
+                name = u["name"]
+                break
+        self._confirm_user_delete(user_id, name)
 
     def _confirm_user_delete(self, user_id, user_name):
         """Show confirmation before deleting a user."""
-        from kivy.uix.popup import Popup
         content = BoxLayout(orientation="vertical", spacing=S.GAP, padding=S.GAP)
-        content.add_widget(Label(
+        msg_label = Label(
             text=f'Delete user "{user_name}"?\nAll their settings will be lost.',
-            font_size=F.BODY, color=C.TEXT,
+            font_size=F.BODY, color=POPUP_TEXT,  # dark popup chrome: keep body light
             halign="center", valign="middle", size_hint_y=0.6,
-        ))
+        )
+        msg_label.bind(size=msg_label.setter("text_size"))
+        content.add_widget(msg_label)
         btn_row = BoxLayout(spacing=S.GAP, size_hint_y=0.4)
         btn_cancel = StyledButton(text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY, height=dp(38))
         btn_confirm = StyledButton(text="Delete", icon=Icons.DELETE, bg_color=C.DANGER, height=dp(38))
@@ -1431,15 +1488,9 @@ class SettingsScreen(Screen):
         btn_confirm.bind(on_release=_do_delete)
         popup.open()
 
-    def _on_profile_create_pressed(self, *args):
-        name = self._profile_name_input.text.strip()
-        if name and self._on_profile_create:
-            self._on_profile_create(name)
-            self._profile_name_input.text = ""
-
     def populate_users(self, users, current_user_id=None):
-        """Fill the user list in the Profile section."""
-        self._profile_user_list.clear_widgets()
+        """Fill the user picker form."""
+        self._user_picker_form.populate_users(users)
         if current_user_id is None:
             self._profile_current_label.text = "Current: All Users"
         else:
@@ -1447,40 +1498,6 @@ class SettingsScreen(Screen):
                 if u["id"] == current_user_id:
                     self._profile_current_label.text = f"Current: {u['name']}"
                     break
-
-        for u in users:
-            is_active = u["id"] == current_user_id
-            row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP_SM)
-            btn = StyledButton(
-                text=u["name"],
-                bg_color=C.ACCENT_DIM if is_active else C.BG_CARD,
-                text_color=C.TEXT if is_active else C.TEXT_SECONDARY,
-                font_size=F.BODY,
-                height=dp(36),
-                bold=is_active,
-            )
-            btn._user_id = u["id"]
-            btn.bind(on_release=lambda b: (
-                self._on_profile_switch(b._user_id) if self._on_profile_switch else None
-            ))
-            row.add_widget(btn)
-
-            del_btn = StyledButton(
-                text="", icon=Icons.DELETE,
-                bg_color=C.DANGER,
-                text_color=C.DANGER,
-                font_size=F.SMALL,
-                height=dp(36),
-                size_hint_x=None,
-                width=dp(40),
-                bold=False,
-                outline=True,
-            )
-            del_btn._user_id = u["id"]
-            del_btn._user_name = u["name"]
-            del_btn.bind(on_release=lambda b: self._confirm_user_delete(b._user_id, b._user_name))
-            row.add_widget(del_btn)
-            self._profile_user_list.add_widget(row)
 
     # --- Timer properties ---
 

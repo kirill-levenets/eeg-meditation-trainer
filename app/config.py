@@ -26,9 +26,83 @@ def _resolve_android_base_dir() -> str:
         try:
             import shutil
             shutil.copy2(old_db, new_db)
-        except (PermissionError, OSError):
-            pass
+        except (PermissionError, OSError) as e:
+            from app.crash_handler import queue_pre_app_error
+            queue_pre_app_error(
+                "db_migration_android",
+                f"Could not migrate DB from {old_db} to {new_db}: {e}",
+            )
     return p
+
+
+def _maybe_migrate_desktop_db(new_dir: str, legacy_dirs: list) -> None:
+    """One-time copy of meditation.db from legacy desktop locations.
+
+    Tries each legacy_dir in order. The first one with a meditation.db
+    that's missing at new_dir wins — copy it across. The legacy file
+    is left in place (manual rollback path).
+
+    Failures are queued via queue_pre_app_error so the user sees what
+    went wrong once the UI is up. Best-effort — we don't crash startup.
+    """
+    new_db = os.path.join(new_dir, "meditation.db")
+    if os.path.isfile(new_db):
+        return
+    import shutil
+
+    from app.crash_handler import queue_pre_app_error
+
+    for old_dir in legacy_dirs:
+        old_db = os.path.join(old_dir, "meditation.db")
+        if os.path.isfile(old_db):
+            try:
+                shutil.copy2(old_db, new_db)
+            except (PermissionError, OSError) as e:
+                queue_pre_app_error(
+                    "db_migration_desktop",
+                    f"Could not migrate DB from {old_db} to {new_db}: {e}",
+                )
+            return
+
+
+def _resolve_desktop_base_dir() -> str:
+    """Return the user-data directory for the EEGMeditation DB on desktop.
+
+    - Linux: $XDG_DATA_HOME/EEGMeditation, falling back to ~/.local/share/EEGMeditation
+    - Windows: %APPDATA%/EEGMeditation
+    - macOS: ~/Library/Application Support/EEGMeditation
+
+    Creates the directory if missing. Migration of any pre-existing DB at
+    legacy locations (next to the binary, project root) is handled by the
+    caller via _maybe_migrate_desktop_db().
+    """
+    if sys.platform.startswith("linux"):
+        base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    elif sys.platform == "win32":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+    elif sys.platform == "darwin":
+        base = os.path.expanduser("~/Library/Application Support")
+    else:
+        base = os.path.expanduser("~/.local/share")
+    p = os.path.join(base, "EEGMeditation")
+    os.makedirs(p, exist_ok=True)
+    return p
+
+
+def _resolve_desktop_base_dir_with_migration() -> str:
+    """Resolve the desktop base dir AND migrate any legacy DB once.
+
+    Legacy locations checked, in priority order:
+      1) directory next to the executable (frozen builds)
+      2) project root (development runs)
+    """
+    base = _resolve_desktop_base_dir()
+    legacy_dirs = []
+    if getattr(sys, "frozen", False):
+        legacy_dirs.append(os.path.dirname(os.path.abspath(sys.executable)))
+    legacy_dirs.append(os.path.dirname(os.path.dirname(__file__)))
+    _maybe_migrate_desktop_db(base, legacy_dirs)
+    return base
 
 
 class SigmoidConfig:
@@ -77,9 +151,7 @@ class AppConfig:
     _ANDROID: bool = hasattr(sys, "getandroidapilevel")
     _BASE_DIR: str = (
         _resolve_android_base_dir() if _ANDROID
-        else os.path.dirname(os.path.abspath(sys.executable))
-        if getattr(sys, 'frozen', False)
-        else os.path.dirname(os.path.dirname(__file__))
+        else _resolve_desktop_base_dir_with_migration()
     )
     DB_PATH: str = os.path.join(_BASE_DIR, DB_NAME)
 

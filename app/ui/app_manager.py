@@ -2,6 +2,8 @@ import os
 import sys
 import threading
 import time
+from collections import deque
+from datetime import datetime as _dt
 from typing import Optional
 
 from kivy.app import App
@@ -11,13 +13,20 @@ from kivy.graphics import Color, Rectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
+from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import ScreenManager, SlideTransition
+from kivy.uix.textinput import TextInput
+from kivy.utils import platform as kivy_platform
 
-from app.analytics.aggregator import AnalyticsAggregator
 from app.audio_feedback.noise import AudioEngine
 from app.config import APP
+from app.crash_handler import (
+    flush_pre_app_errors,
+    install_crash_handler,
+    report_soft_error,
+)
 from app.eeg.mock_stream_v2 import MockEEGStream
 from app.eeg.neurosky_stream import NeuroSkyStream
 from app.logger import logger
@@ -26,15 +35,17 @@ from app.metrics.engine import MetricsEngine
 from app.metrics.noise_detector import PowerLineDetector
 from app.session.manager import SessionManager, SessionState
 from app.session.timer_state import TimerState
-from app.storage.database import DatabaseManager
-from app.ui.analytics_screen import AnalyticsScreen
+from app.storage import backup as _backup
+from app.storage.backup import restore_backup, validate_backup
+from app.storage.database import DatabaseManager, UserExistsError
 from app.ui.diary_screen import DiaryScreen
 from app.ui.history_screen import HistoryScreen
-from app.ui.live_session import LiveSessionScreen
+from app.ui.live_session import METRICS_COLORS, LiveSessionScreen
 from app.ui.profile_screen import ProfileScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
 from app.ui.theme import BottomNav, C, F, StyledButton
+from app.ui.widgets.user_picker import UserPickerForm
 from app.ui.wizard_screen import WizardScreen
 
 
@@ -66,11 +77,24 @@ class EEGMeditationApp(App):
         self._db: DatabaseManager = DatabaseManager()
         self._audio: AudioEngine = AudioEngine()
         self._session_manager.set_audio(self._audio)
-        self._analytics: AnalyticsAggregator = AnalyticsAggregator(self._db)
         self._tick_thread: Optional[threading.Thread] = None
         self._tick_stop_event: threading.Event = threading.Event()
+        # Android pause state: when True, tick thread skips per-tick UI
+        # work (graph add_point, stats updates) so a long screen-lock
+        # doesn't accumulate thousands of Clock callbacks that flood the
+        # main loop on resume (which previously caused a black screen).
+        self._is_paused: bool = False
         self._metrics_buffer: list[dict] = []
         self._raw_buffer: list[dict] = []
+        # Session-lifetime mirrors of what would have gone into the live
+        # graphs. Tick thread appends to these regardless of pause state;
+        # on resume we reload graphs from these in a single batch instead
+        # of replaying N per-tick UI updates. Bounded by graph capacity.
+        self._ui_metrics_history: deque[dict] = deque(maxlen=APP.GRAPH_POINTS_MAX)
+        self._ui_band_history: deque[dict] = deque(maxlen=APP.GRAPH_POINTS_MAX)
+        self._ui_raw_waveform: deque[float] = deque(maxlen=512 * 60)
+        self._ui_last_metrics: dict = {}
+        self._ui_last_state: str = "Neutral"
         self._flush_counter: int = 0
         self._current_session_id: Optional[int] = None
         self._current_user_id: Optional[int] = None
@@ -166,7 +190,6 @@ class EEGMeditationApp(App):
     }
 
     def build(self) -> BoxLayout:
-        from app.crash_handler import install_crash_handler
         install_crash_handler(self)
 
         # Restore saved theme before building UI
@@ -198,7 +221,6 @@ class EEGMeditationApp(App):
         self._settings_screen = SettingsScreen()
         self._history_screen = HistoryScreen()
         self._diary_screen = DiaryScreen()
-        self._analytics_screen = AnalyticsScreen()
         self._timer_state = TimerState()
 
         self._wizard_screen = WizardScreen()
@@ -208,7 +230,6 @@ class EEGMeditationApp(App):
         self._sm.add_widget(self._settings_screen)
         self._sm.add_widget(self._profile_screen)
         self._sm.add_widget(self._diary_screen)
-        self._sm.add_widget(self._analytics_screen)
 
         root.add_widget(self._sm)
 
@@ -253,6 +274,10 @@ class EEGMeditationApp(App):
         # Wizard
         self._wizard_screen.set_complete_callback(self._on_wizard_complete)
         self._wizard_screen.set_scan_callback(self._on_wizard_scan)
+        self._wizard_screen.set_pick_existing_callback(
+            lambda uid: self._on_pick_existing_user(uid, source="wizard"),
+        )
+        self._wizard_screen.populate_existing_users(self._db.get_all_users())
 
         self._live_screen.btn_start.bind(on_release=self._on_start)
         self._live_screen.btn_pause.bind(on_release=self._on_pause)
@@ -266,7 +291,6 @@ class EEGMeditationApp(App):
         self._live_screen.summary_close_btn.bind(on_release=self._on_summary_close)
 
         # Tap on graph to set marker (Android — no keyboard available)
-        from kivy.utils import platform as kivy_platform
         if kivy_platform == "android":
             self._live_screen.graph.set_tap_callback(self._on_marker)
 
@@ -318,15 +342,8 @@ class EEGMeditationApp(App):
             on_export_csv=self._on_export_csv,
             on_rename_session=self._on_rename_session,
         )
-
-        self._analytics_screen.btn_daily.bind(
-            on_release=lambda x: self._load_analytics("daily")
-        )
-        self._analytics_screen.btn_weekly.bind(
-            on_release=lambda x: self._load_analytics("weekly")
-        )
-        self._analytics_screen.btn_monthly.bind(
-            on_release=lambda x: self._load_analytics("monthly")
+        self._history_screen.set_view_mode_callback(
+            self._on_history_view_mode_change,
         )
 
         self._settings_screen.set_test_timer_sound_callback(self._on_test_timer_sound)
@@ -345,6 +362,11 @@ class EEGMeditationApp(App):
             on_create=self._on_user_create,
             on_delete=self._on_user_delete,
         )
+        self._settings_screen.set_session_counter(self._count_sessions_for_user)
+
+        # Data Backup section
+        self._settings_screen.set_backup_callback(self._on_backup_pressed)
+        self._settings_screen.set_restore_callback(self._on_restore_pressed)
 
     def _restore_last_user(self) -> None:
         """Restore last selected user from DB settings on startup."""
@@ -363,14 +385,15 @@ class EEGMeditationApp(App):
     def _show_first_run_popup(self, dt) -> None:
         """Show a name-entry popup on first run (no users in DB).
 
-        Uses Popup instead of the wizard Screen because Kivy TextInput
-        doesn't get keyboard focus inside a Screen on some Android
-        devices and on early-display screens.
+        After uninstall→reinstall on Android, the DB may persist with
+        existing profiles — UserPickerForm surfaces them so the user can
+        adopt instead of creating a duplicate name.
         """
-        content = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(12))
+
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
 
         welcome = Label(
-            text="Welcome! Enter your name\nto create a profile:",
+            text="Welcome! Create a profile or pick an existing one:",
             font_size=F.BODY, color=C.TEXT,
             size_hint_y=None, height=dp(48),
             halign="center",
@@ -378,50 +401,31 @@ class EEGMeditationApp(App):
         welcome.bind(size=welcome.setter("text_size"))
         content.add_widget(welcome)
 
-        from kivy.uix.textinput import TextInput as _TI
-        name_input = _TI(
-            hint_text="Your name...",
-            multiline=False,
-            font_size=F.H2,
-            size_hint_y=None,
-            height=dp(48),
-            foreground_color=C.TEXT,
-            background_color=list(C.BG_INPUT),
-            cursor_color=C.PRIMARY,
-        )
-        content.add_widget(name_input)
-
-        error_label = Label(
-            text="", font_size=F.SMALL, color=C.DANGER,
-            size_hint_y=None, height=dp(20),
-        )
-        content.add_widget(error_label)
-
-        btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
-        ok_btn = StyledButton(
-            text="Create Profile", bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM,
-        )
-        btn_row.add_widget(ok_btn)
-        content.add_widget(btn_row)
-
         popup = Popup(
             title="First-time Setup",
             content=content,
-            size_hint=(0.85, 0.45),
+            size_hint=(0.9, 0.7),
             auto_dismiss=False,
         )
 
-        def _on_ok(*_args):
-            name = name_input.text.strip()
-            if not name or len(name) < 2:
-                error_label.text = "Name must be at least 2 characters"
-                return
+        def _on_create(name: str) -> None:
             popup.dismiss()
-            # Reuse the existing wizard-complete flow (with no device)
             self._on_wizard_complete(name, None, None)
 
-        ok_btn.bind(on_release=_on_ok)
-        name_input.bind(on_text_validate=_on_ok)
+        def _on_pick(user_id: int) -> None:
+            popup.dismiss()
+            self._on_pick_existing_user(user_id, source="first_run")
+
+        form = UserPickerForm(
+            on_create=_on_create,
+            on_pick_existing=_on_pick,
+        )
+        existing_users = self._db.get_all_users()
+        form.populate_users(existing_users)
+        content.add_widget(form)
+
+        # Stash form so duplicate-error routing can find it
+        self._first_run_form = form
         popup.open()
 
     def _on_wizard_complete(self, user_name: str, device_addr, device_name) -> None:
@@ -429,17 +433,16 @@ class EEGMeditationApp(App):
         if not user_name or len(user_name.strip()) < 2:
             logger.warning(f"Wizard complete with invalid name: '{user_name}', ignoring")
             return
-        # Create user
+        # Create user (or adopt an existing one with the same name)
+
         try:
-            self._db.create_user(user_name)
-        except Exception as e:
-            logger.warning(f"Wizard user create failed: {e}")
-        users = self._db.get_all_users()
-        for u in users:
-            if u["name"] == user_name:
-                self._current_user_id = u["id"]
-                self._db.set_setting("last_user_id", str(u["id"]))
-                break
+            uid = self._db.create_user(user_name)
+            self._current_user_id = uid
+            self._db.set_setting("last_user_id", str(uid))
+        except UserExistsError as e:
+            self._current_user_id = e.user_id
+            self._db.set_setting("last_user_id", str(e.user_id))
+            logger.info(f"Wizard: adopting existing user {e.name} (id={e.user_id})")
 
         # Set device
         if device_addr:
@@ -471,12 +474,10 @@ class EEGMeditationApp(App):
 
     def _on_wizard_scan(self) -> None:
         """Scan for BT devices from wizard."""
-        import threading
 
         def _run():
-            from kivy.clock import Clock as _Clock
             devices = NeuroSkyStream.scan_paired_devices()
-            _Clock.schedule_once(lambda dt: self._wizard_screen.populate_devices(devices))
+            Clock.schedule_once(lambda dt: self._wizard_screen.populate_devices(devices))
 
         threading.Thread(target=_run, daemon=True).start()
 
@@ -524,7 +525,6 @@ class EEGMeditationApp(App):
             # No MindWave found — populate settings list for manual pick
             self._settings_screen.populate_bt_devices(devices)
 
-        import threading
 
         def _run():
             try:
@@ -550,8 +550,6 @@ class EEGMeditationApp(App):
             self._refresh_history()
         elif name == "diary":
             self._refresh_diary()
-        elif name == "analytics":
-            self._refresh_analytics()
         elif name == "profile":
             self._refresh_profile()
         # Sync bottom nav highlight
@@ -583,7 +581,6 @@ class EEGMeditationApp(App):
         self._live_screen.set_controls_running()
         logger.info("Auto-scanning for BT device before session start")
 
-        import threading
 
         def _scan_and_connect():
             devices = NeuroSkyStream.scan_paired_devices()
@@ -677,21 +674,20 @@ class EEGMeditationApp(App):
 
     def _tick_loop(self) -> None:
         """Daemon-thread loop: call _update_tick every UPDATE_FREQUENCY seconds."""
-        import time as _t
         interval = APP.UPDATE_FREQUENCY
-        next_t = _t.monotonic()
+        next_t = time.monotonic()
         while not self._tick_stop_event.is_set():
             try:
                 self._update_tick(interval)
             except Exception:
                 logger.exception("Error in session tick loop")
             next_t += interval
-            remaining = next_t - _t.monotonic()
+            remaining = next_t - time.monotonic()
             if remaining > 0:
                 if self._tick_stop_event.wait(remaining):
                     break
             else:
-                next_t = _t.monotonic()
+                next_t = time.monotonic()
 
     # ------------------------------------------------------------------
 
@@ -708,6 +704,11 @@ class EEGMeditationApp(App):
         self._noise_detector = PowerLineDetector() if not APP.USE_MOCK_DEVICE else None
         self._metrics_buffer = []
         self._raw_buffer = []
+        self._ui_metrics_history.clear()
+        self._ui_band_history.clear()
+        self._ui_raw_waveform.clear()
+        self._ui_last_metrics = {}
+        self._ui_last_state = "Neutral"
         self._flush_counter = 0
         self._tick_count = 0
         self._current_session_id = None
@@ -882,16 +883,20 @@ class EEGMeditationApp(App):
         ts = time.strftime("%H:%M")
         return f"{ts} - {device}"
 
-    def _stop_and_save(self, reason: str = "user") -> None:
-        """Stop session and save data immediately (no dialog)."""
-        self._stop_tick_thread()
+    def _persist_session_data(self, reason: str) -> dict:
+        """Stop the session and write final stats + metrics to the DB.
 
+        Tick-thread-safe: contains NO Kivy/UI calls so it can run directly on
+        the daemon tick thread at timer expiry. That makes the finished session
+        durable even if Android kills the app during a screen lock before the
+        user unlocks — the main-thread Clock (and `_on_main`) is paused while
+        locked, so deferring the save risked losing the whole session.
+        """
         stats = self._session_manager.stop(reason=reason)
         # Keep real BT connection alive between sessions to avoid EBUSY on reconnect.
         # Only the mock stream gets stopped here; real stream stays connected.
         if APP.USE_MOCK_DEVICE:
             self._eeg_stream.stop()
-        self._audio.stop()
 
         if stats:
             if self._current_session_id is not None:
@@ -904,19 +909,69 @@ class EEGMeditationApp(App):
             if self._metrics_buffer:
                 self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
                 self._metrics_buffer = []
+        return stats
 
+    def _reload_live_graphs_from_mirror(self) -> None:
+        """Batch-reload the 3 live graphs from the session-lifetime mirror
+        buffers (one load_static_data per graph). Used on Android resume and on
+        session finish: during a screen lock the per-tick add_point is skipped
+        (mirror buffers fill instead), so without this the live graph would
+        show only the pre-lock portion of the session."""
+        metrics_snapshot = list(self._ui_metrics_history)
+        band_snapshot = list(self._ui_band_history)
+        waveform_snapshot = list(self._ui_raw_waveform)
+        if metrics_snapshot:
+            metric_series = {
+                key: [d.get(key, 0.0) for d in metrics_snapshot]
+                for key in METRICS_COLORS
+            }
+            self._live_screen.graph.load_static_data(metric_series)
+        if band_snapshot:
+            band_keys = ("alpha", "beta", "gamma", "theta", "delta")
+            band_series = {
+                key: [d.get(key, 0.0) for d in band_snapshot]
+                for key in band_keys
+            }
+            self._live_screen.band_graph.load_static_data(band_series)
+        if waveform_snapshot:
+            self._live_screen.raw_graph.load_static_data({"eeg": waveform_snapshot})
+
+    def _finalize_stop_ui(self, stats: dict, session_id: Optional[int]) -> None:
+        """Main-thread UI teardown after a session has been persisted."""
+        # Reload the live graph from the mirror buffers so it shows the FULL
+        # session (the locked portion never reached the live graph via the
+        # per-tick path). Otherwise closing the summary reveals a stale graph
+        # covering only the pre-lock seconds while History shows the real
+        # duration.
+        try:
+            self._reload_live_graphs_from_mirror()
+        except Exception:
+            logger.exception("graph reload on stop failed")
         self._live_screen.set_controls_idle()
         self._live_screen.update_device_status(False)
         self._live_screen.update_state("FINISHED")
+        # Sync the header timer to the final duration (it froze at lock time).
+        if stats:
+            secs = int(stats.get("duration", 0))
+            self._live_screen.update_timer(f"{secs // 60:02d}:{secs % 60:02d}")
         self._timer_state.reset()
         self._session_manager.reset()
         self._release_wake_lock()
         self._stop_session_keep_alive_service()
         self._mark_history_dirty()
+        if stats and session_id:
+            self._live_screen.show_summary(session_id, stats)
 
-        if stats and self._current_session_id:
-            self._live_screen.show_summary(self._current_session_id, stats)
-        logger.info("Session stopped and saved")
+    def _stop_and_save(self, reason: str = "user") -> None:
+        """Stop session and save data immediately (no dialog). Main-thread path."""
+        t_start = time.monotonic()
+        self._stop_tick_thread()
+        stats = self._persist_session_data(reason)
+        self._audio.stop()
+        self._finalize_stop_ui(stats, self._current_session_id)
+        logger.info(
+            f"Session stopped and saved (took {time.monotonic() - t_start:.3f}s)"
+        )
 
     def _cancel_stop(self, popup) -> None:
         """Resume the session after cancelling stop."""
@@ -1025,16 +1080,24 @@ class EEGMeditationApp(App):
                     self._session_manager.start(
                         threshold=self._pending_threshold
                     )
-                    self._audio.start()
-                    self._audio.play_connect_sound()
+                    # Arm the countdown on THIS thread before the next tick()
+                    # reads it. Deferring it via _on_main let a stalled main
+                    # thread leave remaining_seconds=0, so the very next tick
+                    # fired the timer instantly — a 0s "timer-ended" session.
+                    self._timer_state.start_countdown()
                     _n = name
                     self._on_main(lambda n=_n: (
-                        self._timer_state.start_countdown(),
                         self._live_screen.update_device_status(True, device_name=n),
                         self._live_screen.update_state("Running"),
                         self._live_screen.set_start_time(time.time()),
                         self._live_screen.hide_overlay(),
                         self._settings_screen.update_device_status(True, name=n),
+                        # Start audio on the main thread together with hiding the
+                        # overlay, so white-noise never plays while the connecting
+                        # loader is still visible (previously non-atomic: audio
+                        # started on the tick thread, overlay hide was deferred).
+                        self._audio.start(),
+                        self._audio.play_connect_sound(),
                     ))
                     logger.info(f"BT device {name} connected, session started")
                 elif signal_elapsed > self._BT_SIGNAL_TIMEOUT and not has_packets:
@@ -1238,6 +1301,29 @@ class EEGMeditationApp(App):
             self._audio.update_sinking(metrics.get("sinking", 0))
             self._audio.update_subtle_distraction(metrics.get("subtle_distraction", 0))
 
+        # Mirror what the UI graphs would have received. Done here on the
+        # tick thread (no Kivy graphics ops) so the data exists even while
+        # the UI is paused (Android screen lock); on resume we batch-reload
+        # the graphs from these mirrors instead of replaying N per-tick
+        # Clock callbacks (which previously flooded the main loop and
+        # caused a black screen).
+        self._ui_metrics_history.append(dict(metrics))
+        _band_record = {
+            "alpha": raw_sample.get("alpha1", 0.0) + raw_sample.get("alpha2", 0.0),
+            "beta": raw_sample.get("beta1", 0.0) + raw_sample.get("beta2", 0.0),
+            "gamma": raw_sample.get("gamma1", 0.0) + raw_sample.get("gamma2", 0.0),
+            "theta": raw_sample.get("theta", 0.0),
+            "delta": raw_sample.get("delta", 0.0),
+        }
+        self._ui_band_history.append(_band_record)
+        _waveform = raw_sample.get("raw_eeg_waveform")
+        if _waveform:
+            self._ui_raw_waveform.extend(_waveform)
+        else:
+            self._ui_raw_waveform.append(sum(_band_record.values()))
+        self._ui_last_metrics = metrics
+        self._ui_last_state = metrics.get("state", "Neutral")
+
         # UI updates — dispatch to main thread
         _elapsed_fmt = self._session_manager.elapsed_formatted
         _marker_pending = self._pending_marker
@@ -1258,23 +1344,54 @@ class EEGMeditationApp(App):
                 self._live_screen.raw_graph.add_marker()
                 self._live_screen.band_graph.add_marker()
 
-        self._on_main(_ui_update)
+        # Skip per-tick UI work while the app is paused (Android screen
+        # locked). Otherwise N minutes locked at 2 Hz queues ~120·N Clock
+        # callbacks — each doing a full graph redraw — which flood the
+        # main loop on resume and previously caused a black-screen freeze
+        # severe enough to require force-closing the app.
+        if not self._is_paused:
+            self._on_main(_ui_update)
 
         # Timer countdown — tick() is pure counter, no UI
         if self._timer_state.tick(APP.UPDATE_FREQUENCY):
             logger.info("Timer expired, auto-stopping session")
-            # Order matters: tear down the session first (which calls
-            # _audio.stop() and clears any in-flight sounds), THEN start the
-            # timer-end bell. Otherwise _audio.stop() unloads the sound
-            # within milliseconds of starting it. The bell now keeps
-            # playing on the summary card until either the file ends
-            # naturally or the user taps a summary button (which calls
-            # AudioEngine.stop_timer_bell via the live screen handlers).
-            custom = self._timer_state.custom_sound_path
+            # Stop the audio loop on the tick thread directly so the
+            # white-noise actually ends at timer-expiry even when the
+            # screen is locked (the noise channel is MediaPlayer-based
+            # on Android and `AudioEngine.stop()` is thread-safe).
+            # Without this, _on_main below would queue stop() through
+            # Kivy's Clock — paused while the screen is locked — so
+            # the noise kept playing past the timer end.
+            # Persist FIRST, on THIS daemon thread, before any audio teardown.
+            # The finished session must be saved even though the screen may be
+            # locked. (Originally _audio.stop() ran here first and DEADLOCKED
+            # the tick thread: MediaPlayer.release() synchronises with its
+            # event handler on the main Looper, which is PAUSED during lock —
+            # so the save never ran and the whole session was lost.)
+            stats = self._persist_session_data(reason="timer")
+            session_id = self._current_session_id
+            # Silence the noise with a non-blocking volume→0 (setVolume is a
+            # direct native call, safe from this thread even while locked).
+            # The real stop()/release() teardown is deferred to the main
+            # thread below, where the Looper is live and release() won't hang.
+            self._audio.mute()
+            # Stop the tick loop NOW (in the thread itself) so it doesn't keep
+            # iterating through the pause while _finish_on_main waits on the
+            # paused Clock.
+            self._tick_stop_event.set()
             def _finish_on_main(_dt=None):
-                self._stop_and_save(reason="timer")
-                self._audio.play_timer_sound(custom)
+                self._audio.stop()  # full noise teardown on the main thread
+                self._finalize_stop_ui(stats, session_id)
             self._on_main(_finish_on_main)
+            # Ring the gong LAST, on this thread, so it sounds at the timer end
+            # even with the screen locked: it routes through a MediaPlayer
+            # (USAGE_MEDIA), which plays through lock — SoundLoader is silenced
+            # while locked. Only create/start runs here (release is deferred to
+            # the main thread via stop_timer_bell). Done last on purpose: the
+            # save, mute, and summary dispatch above are all complete, so even
+            # if MediaPlayer setup were to block during lock, nothing critical
+            # is lost.
+            self._audio.play_timer_sound(self._timer_state.custom_sound_path)
             return
 
         # Flush buffer to DB every 60 seconds (DB opened with check_same_thread=False)
@@ -1353,7 +1470,6 @@ class EEGMeditationApp(App):
         logger.debug(f"Line width changed to {width}")
 
     def _on_rotate_screen(self, rotation: int) -> None:
-        from kivy.core.window import Window
         Window.rotation = rotation
         logger.info(f"Screen rotation set to {rotation}")
 
@@ -1475,7 +1591,6 @@ class EEGMeditationApp(App):
 
         def _on_natural_end(*_):
             try:
-                from kivy.clock import Clock
                 Clock.schedule_once(
                     lambda dt: self._settings_screen.notify_timer_sound_test_ended(),
                     0,
@@ -1531,7 +1646,6 @@ class EEGMeditationApp(App):
         adds a copy-pasteable technical report so they can forward it when
         the friendly hint isn't enough.
         """
-        from app.crash_handler import report_soft_error
 
         addr = self._real_stream._device_address or "(unset)"
         last_err = self._real_stream._last_connect_error or "(none)"
@@ -1548,7 +1662,6 @@ class EEGMeditationApp(App):
         User-initiated, so we bypass the per-label cooldown — the user
         explicitly asked for the report.
         """
-        from app.crash_handler import report_soft_error
 
         try:
             paired = NeuroSkyStream.scan_paired_devices()
@@ -1658,24 +1771,6 @@ class EEGMeditationApp(App):
         sessions = self._db.get_all_sessions(user_id=self._current_user_id)
         self._diary_screen.populate_sessions(sessions)
 
-    def _refresh_analytics(self) -> None:
-        summary = self._analytics.get_summary()
-        self._analytics_screen.update_summary(summary)
-        self._analytics_screen.update_storage_info(
-            self._db.get_db_size_bytes(),
-            self._db.get_record_counts(),
-        )
-        self._load_analytics("daily")
-
-    def _load_analytics(self, period: str) -> None:
-        if period == "daily":
-            data = self._analytics.get_daily_stats(days=30)
-        elif period == "weekly":
-            data = self._analytics.get_weekly_stats(weeks=12)
-        else:
-            data = self._analytics.get_monthly_stats(months=12)
-        self._analytics_screen.show_trend(data, "avg_shamatha", f"Shamatha ({period})")
-
     def _on_user_switch(self, user_id: Optional[int]) -> None:
         """Switch the active user profile."""
         # Save current user's settings before switching
@@ -1692,12 +1787,329 @@ class EEGMeditationApp(App):
         self._mark_history_dirty()
         self._refresh_profile()
 
+    def _on_history_view_mode_change(self, mode: str) -> None:
+        """Persist the user's preferred History view layout."""
+        if not self._current_user_id:
+            return
+        self._db.set_user_setting(self._current_user_id, "history_view_mode", mode)
+
+    def _count_sessions_for_user(self, user_id: int) -> int:
+        return len(self._db.get_all_sessions(user_id=user_id))
+
+    # --- Data Backup ---
+
+    def _is_android(self) -> bool:
+        return hasattr(sys, "getandroidapilevel")
+
+    def _on_backup_pressed(self) -> None:
+        """Backup the live DB to a user-visible location."""
+
+
+        ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"meditation_backup_{ts}.db"
+
+        if self._is_android():
+            target_dir = "/sdcard/Documents/EEGMeditation"
+            try:
+                os.makedirs(target_dir, exist_ok=True)
+            except (PermissionError, OSError) as e:
+                report_soft_error(
+                    "backup_failed", f"Could not create {target_dir}: {e}",
+                )
+                return
+            target_path = os.path.join(target_dir, filename)
+            self._run_backup_async(target_path)
+        else:
+            self._open_backup_save_picker(filename)
+
+    def _run_backup_async(self, target_path: str) -> None:
+
+
+
+        self._settings_screen.show_backup_status("Backing up…")
+
+        def _worker():
+            try:
+                _backup.make_backup(self._db, target_path)
+            except (PermissionError, OSError) as exc:
+                err_msg = f"Backup to {target_path} failed: {exc}"
+                Clock.schedule_once(
+                    lambda dt, _msg=err_msg: report_soft_error("backup_failed", _msg),
+                )
+                return
+            Clock.schedule_once(lambda dt: self._settings_screen.show_backup_status(
+                f"Saved to {target_path}",
+            ))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_restore_pressed(self) -> None:
+        """Pick a backup file and restore it."""
+        if self._is_android():
+            self._open_restore_picker_android()
+        else:
+            self._open_restore_picker_desktop()
+
+    def _open_restore_picker_android(self) -> None:
+
+
+        target_dir = "/sdcard/Documents/EEGMeditation"
+        try:
+            files = sorted(
+                f for f in os.listdir(target_dir) if f.endswith(".db")
+            )
+        except FileNotFoundError:
+            files = []
+        except (PermissionError, OSError) as e:
+            report_soft_error(
+                "restore_failed", f"Could not list {target_dir}: {e}",
+            )
+            return
+
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
+        popup = Popup(title="Pick a backup", content=content, size_hint=(0.9, 0.7))
+
+        if not files:
+            content.add_widget(Label(
+                text="No backup files found in\nDocuments/EEGMeditation/",
+                halign="center", valign="middle", color=C.TEXT_MUTED,
+            ))
+        else:
+            for fname in files:
+                full = os.path.join(target_dir, fname)
+                btn = StyledButton(
+                    text=fname,
+                    bg_color=C.BG_CARD,
+                    text_color=C.TEXT,
+                    font_size=F.BODY,
+                    bold=False,
+                    size_hint_y=None,
+                    height=dp(44),
+                )
+
+                def _make_handler(_full, _popup):
+                    def _on_release(*_a):
+                        _popup.dismiss()
+                        self._confirm_restore(_full)
+                    return _on_release
+
+                btn.bind(on_release=_make_handler(full, popup))
+                content.add_widget(btn)
+
+        cancel = StyledButton(
+            text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_MUTED,
+            size_hint_y=None, height=dp(40),
+        )
+        cancel.bind(on_release=popup.dismiss)
+        content.add_widget(cancel)
+        popup.open()
+
+    def _open_restore_picker_desktop(self) -> None:
+
+
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
+        chooser = FileChooserListView(
+            path=os.path.dirname(APP.DB_PATH),
+            filters=["*.db"],
+            size_hint_y=0.85,
+        )
+        btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
+        ok = StyledButton(text="Restore", bg_color=C.PRIMARY)
+        cancel = StyledButton(
+            text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_MUTED,
+        )
+        btn_row.add_widget(ok)
+        btn_row.add_widget(cancel)
+        content.add_widget(chooser)
+        content.add_widget(btn_row)
+        popup = Popup(title="Pick a backup", content=content, size_hint=(0.9, 0.9))
+
+        def _do_pick(*_a):
+            if not chooser.selection:
+                return
+            popup.dismiss()
+            self._confirm_restore(chooser.selection[0])
+
+        ok.bind(on_release=_do_pick)
+        cancel.bind(on_release=popup.dismiss)
+        popup.open()
+
+    def _confirm_restore(self, source_path: str) -> None:
+        """Validate, then show confirm dialog → on OK, replace + restart."""
+
+
+        ok, msg = validate_backup(source_path)
+        if not ok:
+            report_soft_error(
+                "restore_invalid",
+                f"Selected file is not a valid backup: {msg}",
+                force=True,
+            )
+            return
+
+        n = self._db.get_record_counts()["sessions"]
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
+        content.add_widget(Label(
+            text=(
+                f"Replace current database with backup?\n\n"
+                f"Your current sessions ({n}) will be replaced.\n"
+                f"This cannot be undone."
+            ),
+            halign="center", valign="middle", color=C.TEXT,
+        ))
+        btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+        ok_btn = StyledButton(text="Restore", bg_color=C.DANGER)
+        cancel_btn = StyledButton(
+            text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_MUTED,
+        )
+        btn_row.add_widget(ok_btn)
+        btn_row.add_widget(cancel_btn)
+        content.add_widget(btn_row)
+        popup = Popup(title="Restore database", content=content, size_hint=(0.85, 0.5))
+
+        def _do_restore(*_a):
+            popup.dismiss()
+            self._do_restore_and_restart(source_path)
+
+        ok_btn.bind(on_release=_do_restore)
+        cancel_btn.bind(on_release=popup.dismiss)
+        popup.open()
+
+    def _do_restore_and_restart(self, source_path: str) -> None:
+
+
+        try:
+            self._db.close()
+        except Exception:
+            logger.exception("DB close before restore failed")
+            return
+
+        try:
+            restore_backup(source_path, APP.DB_PATH)
+        except (PermissionError, OSError) as e:
+            report_soft_error(
+                "restore_failed", f"Restore from {source_path} failed: {e}",
+            )
+            self._db = DatabaseManager(db_path=APP.DB_PATH)
+            return
+        except Exception as e:
+            report_soft_error("restore_failed", f"Restore failed: {e}")
+            self._db = DatabaseManager(db_path=APP.DB_PATH)
+            return
+
+        # DB is now closed and the file replaced. Tell on_stop to skip
+        # _save_user_settings (which would crash on a closed conn anyway,
+        # and would also clobber the freshly-restored state).
+        self._restoring = True
+
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
+        content.add_widget(Label(
+            text="Database restored.\n\nThe app will now exit — please relaunch.",
+            halign="center", valign="middle", color=C.TEXT,
+        ))
+        ok = StyledButton(text="OK", bg_color=C.ACCENT)
+        content.add_widget(ok)
+        popup = Popup(
+            title="Restore complete", content=content,
+            size_hint=(0.8, 0.4), auto_dismiss=False,
+        )
+
+        def _quit(*_a):
+            popup.dismiss()
+            App.get_running_app().stop()
+
+        ok.bind(on_release=_quit)
+        popup.open()
+
+    def _open_backup_save_picker(self, default_filename: str) -> None:
+
+
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
+        chooser = FileChooserListView(
+            path=os.path.dirname(APP.DB_PATH),
+            filters=["*.db"],
+            size_hint_y=0.7,
+        )
+        name_input = TextInput(
+            text=default_filename,
+            multiline=False,
+            size_hint_y=None,
+            height=dp(40),
+        )
+        btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
+        ok = StyledButton(text="Save", bg_color=C.ACCENT)
+        cancel = StyledButton(text="Cancel", bg_color=C.BG_CARD,
+                              text_color=C.TEXT_MUTED)
+        btn_row.add_widget(ok)
+        btn_row.add_widget(cancel)
+        content.add_widget(chooser)
+        content.add_widget(name_input)
+        content.add_widget(btn_row)
+        popup = Popup(title="Save backup", content=content, size_hint=(0.9, 0.9))
+
+        def _do_save(*_a):
+            target = os.path.join(chooser.path, name_input.text.strip())
+            popup.dismiss()
+            self._run_backup_async(target)
+
+        ok.bind(on_release=_do_save)
+        cancel.bind(on_release=popup.dismiss)
+        popup.open()
+
+    def _on_pick_existing_user(self, user_id: int, source: str) -> None:
+        """User picked an existing profile from a UserPickerForm.
+
+        source ∈ {'first_run', 'wizard', 'settings'}.
+        - 'settings' → just switch user.
+        - 'first_run' / 'wizard' → if a saved bt_device_address exists,
+          run the full wizard-complete flow with it (skip step 2).
+          Otherwise: wizard advances to step 2; first_run pop falls
+          through to wizard-complete with no device.
+        """
+        user = self._db.get_user(user_id)
+        if not user:
+            logger.warning(f"_on_pick_existing_user: user {user_id} not found")
+            return
+        name = user["name"]
+
+        if source == "settings":
+            self._on_user_switch(user_id)
+            return
+
+        addr = self._db.get_user_setting(user_id, "bt_device_address")
+        dev_name = self._db.get_user_setting(user_id, "bt_device_name") or name
+        if addr:
+            logger.info(f"Existing user {name} has saved device — skipping step 2")
+            self._on_wizard_complete(name, addr, dev_name)
+            return
+
+        if source == "wizard":
+            self._current_user_id = user_id
+            self._db.set_setting("last_user_id", str(user_id))
+            self._wizard_screen._user_name = name
+            self._wizard_screen._advance_to_step2()
+        else:  # first_run
+            self._on_wizard_complete(name, None, None)
+
     def _on_user_create(self, name: str) -> None:
-        """Create a new user and refresh the profile list."""
+        """Create a new user and refresh the profile list.
+
+        Routes UserExistsError to the active picker form (Settings) for
+        inline duplicate handling.
+        """
+
         try:
             self._db.create_user(name)
+        except UserExistsError as e:
+            form = getattr(self._settings_screen, "_user_picker_form", None)
+            if form is not None:
+                form.show_duplicate_error(user_id=e.user_id, name=e.name)
+            return
         except Exception as e:
-            logger.warning(f"Could not create user '{name}': {e}")
+            report_soft_error(
+                "user_create_failed", f"Could not create user '{name}': {e}",
+            )
+            return
         self._refresh_profile()
 
     def _on_user_delete(self, user_id: int) -> None:
@@ -1906,6 +2318,9 @@ class EEGMeditationApp(App):
             except Exception:
                 pass
 
+        history_mode = g(user_id, "history_view_mode") or "calendar"
+        self._history_screen.set_view_mode(history_mode)
+
         # Sync live-screen preset highlight with loaded timer state
         self._live_screen.refresh_duration_preset(
             self._settings_screen.timer_enabled,
@@ -1914,6 +2329,18 @@ class EEGMeditationApp(App):
         self._refresh_saved_formulas()
         logger.debug(f"Loaded settings for user {user_id}")
 
+    def on_start(self) -> None:
+        """Replay any errors that occurred before the UI was up.
+
+        Diagnostics from `app/config.py` (DB migrations etc.) accumulate in
+        `crash_handler._PRE_APP_ERRORS` because Kivy's Clock isn't alive at
+        import time. We flush them now via `report_soft_error`.
+        """
+        try:
+            flush_pre_app_errors()
+        except Exception:
+            logger.exception("flush_pre_app_errors failed")
+
     def on_pause(self) -> bool:
         """Android lifecycle: save settings and allow Kivy to pause cleanly.
 
@@ -1921,9 +2348,68 @@ class EEGMeditationApp(App):
         tick thread and the foreground service even while the UI is paused.
         Per Kivy docs returning False here would *stop* the app, not prevent
         the pause — so we always return True.
+
+        Also flips `_is_paused` so the tick thread skips per-tick UI work
+        (graph add_point, stats updates). Otherwise N minutes of locked
+        screen accumulates ~120·N Clock callbacks, each redrawing the
+        whole graph; on resume they all fire in a burst and the render
+        loop chokes (black-screen / app freeze).
         """
+        self._is_paused = True
+        logger.info("on_pause fired — _is_paused=True")
         self._save_user_settings()
         return True
+
+    def on_resume(self) -> None:
+        """Android lifecycle: app foreground after a pause (screen unlock).
+
+        The tick thread skipped per-tick UI updates while paused, so the
+        graph and stats labels are stale. Drop the pause flag and force
+        a single UI refresh from current session state. Anything queued
+        through `_on_main` during the pause (e.g. timer-expiry finish,
+        BT alerts) drains on its own from Kivy's Clock.
+        """
+        self._is_paused = False
+        logger.info("on_resume fired — _is_paused=False")
+        try:
+            Clock.schedule_once(lambda dt: self._refresh_ui_after_resume(), 0)
+        except Exception:
+            logger.exception("on_resume UI refresh failed")
+
+    def _refresh_ui_after_resume(self) -> None:
+        """Sync UI to current session state after Android resume.
+
+        If the session is no longer RUNNING (e.g. timer expired during
+        pause and ``_finish_on_main`` already fired ``_stop_and_save`` →
+        the summary card now covers the live screen), skip the graph
+        reload entirely. Combining 3 graph reloads with the heavy work
+        in ``_stop_and_save`` on the first frame after resume previously
+        blocked the UI thread long enough to trigger an Android ANR
+        ('App not responding' / black screen).
+
+        While the session is RUNNING, reload all three live graphs in a
+        single batch from the session-lifetime mirror buffers (one
+        ``load_static_data`` call per graph, one redraw each), then
+        refresh the stats/state/timer labels from the latest sample.
+        """
+        t_start = time.monotonic()
+        if self._session_manager.state != SessionState.RUNNING:
+            logger.info("on_resume: session not RUNNING → skipping graph reload")
+            return
+        try:
+            self._reload_live_graphs_from_mirror()
+            if self._ui_last_metrics:
+                self._live_screen.update_stats(self._ui_last_metrics)
+                self._live_screen.update_state(self._ui_last_state)
+        except Exception:
+            logger.exception("graph reload on resume failed")
+        try:
+            self._live_screen.update_timer(self._session_manager.elapsed_formatted)
+        except Exception:
+            logger.exception("update_timer on resume failed")
+        logger.info(
+            f"on_resume: refresh complete in {time.monotonic() - t_start:.3f}s"
+        )
 
     def on_stop(self) -> None:
         """Cleanup on app exit.
@@ -1934,8 +2420,13 @@ class EEGMeditationApp(App):
         launch can open a fresh RFCOMM on the existing ACL link and the
         ThinkGear ASIC will resume streaming immediately — avoiding the
         "connected but no packets" problem caused by a stale ACL.
+
+        After a Restore-database, _restoring is set so we skip
+        _save_user_settings: the DB file has just been replaced and writing
+        the current in-memory settings would clobber the imported state.
         """
-        self._save_user_settings()
+        if not getattr(self, "_restoring", False):
+            self._save_user_settings()
         if self._session_manager.state in (SessionState.RUNNING, SessionState.PAUSED):
             self._stop_and_save()
         self._audio.cleanup()

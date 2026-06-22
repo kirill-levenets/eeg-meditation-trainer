@@ -9,16 +9,27 @@ import datetime
 from collections.abc import Callable
 from typing import Optional
 
-from kivy.graphics import Color, Rectangle, RoundedRectangle
+from kivy.graphics import Color, Line, Rectangle, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
+from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
-from app.ui.theme import C, Card, Divider, F, Icons, S, StyledButton, format_duration
+from app.ui.theme import (
+    POPUP_TEXT,
+    C,
+    Card,
+    Divider,
+    F,
+    Icons,
+    S,
+    StyledButton,
+    format_duration,
+)
 
 
 def _lerp_color(t: float):
@@ -36,18 +47,34 @@ def _lerp_color(t: float):
 class CalendarHeatmap(Widget):
     """GitHub-style grid of day cells, colored by value.
 
-    Shows ~16 weeks (4 months) of data. Each column is a week,
-    rows are Mon-Sun. Scrolls horizontally for older data.
+    Shows WEEKS_VISIBLE weeks of data. Cell size adapts to the widget's
+    available width so the heatmap fills its row when the window resizes.
     """
 
-    CELL_SIZE = dp(14)
+    CELL_SIZE = dp(14)       # minimum / default cell size
+    CELL_MAX = dp(28)        # cap so a wide window doesn't make the heatmap huge
     CELL_GAP = dp(2)
+    LEFT_MARGIN = dp(22)     # space for day-of-week labels
+    TOP_MARGIN = dp(20)      # space for month labels
     WEEKS_VISIBLE = 18
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.size_hint_y = None
-        self.height = 7 * (self.CELL_SIZE + self.CELL_GAP) + dp(20)  # 7 rows + month labels
+        self.height = 7 * (self.CELL_SIZE + self.CELL_GAP) + self.TOP_MARGIN
+        self._day_values: dict[str, float] = {}  # "YYYY-MM-DD" -> avg_shamatha
+        self._cell_positions: dict[str, tuple] = {}
+        self._on_day_tap: Optional[Callable] = None
+        self._selected_date: Optional[str] = None
+        self.bind(size=self._redraw, pos=self._redraw)
+
+    def _compute_cell_size(self) -> float:
+        """Cell size that fills the available width given WEEKS_VISIBLE columns,
+        clamped to [CELL_SIZE, CELL_MAX] so the heatmap stays a reasonable
+        height on wide windows."""
+        avail = max(self.width - self.LEFT_MARGIN, dp(10))
+        cell = avail / self.WEEKS_VISIBLE - self.CELL_GAP
+        return max(self.CELL_SIZE, min(cell, self.CELL_MAX))
         self._day_values: dict[str, float] = {}  # "YYYY-MM-DD" -> avg_shamatha
         self._day_rects: dict[str, object] = {}
         self._on_day_tap: Optional[Callable] = None
@@ -81,9 +108,14 @@ class CalendarHeatmap(Widget):
         today = datetime.date.today()
         # Start from WEEKS_VISIBLE weeks ago, aligned to Monday
         start = today - datetime.timedelta(days=today.weekday(), weeks=self.WEEKS_VISIBLE - 1)
-        cell = self.CELL_SIZE
+        cell = self._compute_cell_size()
         gap = self.CELL_GAP
-        x0 = self.x + dp(22)  # leave space for day-of-week labels
+        # Update self.height to match the (possibly resized) cell so the
+        # graph row in HistoryScreen tracks via its size_hint_y=None bind.
+        new_height = 7 * (cell + gap) + self.TOP_MARGIN
+        if abs(self.height - new_height) > 0.5:
+            self.height = new_height
+        x0 = self.x + self.LEFT_MARGIN
         y_top = self.top - dp(18)  # leave space for month labels
 
         with self.canvas:
@@ -183,6 +215,176 @@ class CalendarHeatmap(Widget):
             current += datetime.timedelta(days=1)
 
 
+class Last14DaysBars(Widget):
+    """14-day bar chart of avg shamatha — alternative to the calendar heatmap.
+
+    Public API mirrors CalendarHeatmap so HistoryScreen can swap them.
+    Renders a y-axis with gridlines/labels at 0/25/50/75/100, per-bar score
+    labels above non-empty bars, and a polyline trend through bar tops.
+    """
+
+    DAYS = 14
+    MIN_BAR_HEIGHT = dp(2)
+    BASELINE_HEIGHT = dp(20)  # space for date labels under bars
+    PAD_LEFT = dp(24)         # space for y-axis labels
+    PAD_RIGHT = dp(4)
+    GRID_VALUES = (0, 25, 50, 75, 100)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.size_hint_y = None
+        self.height = dp(132)
+        self._day_values: dict[str, float] = {}
+        self._cell_positions: dict[str, tuple] = {}
+        self._on_day_tap: Optional[Callable] = None
+        self._selected_date: Optional[str] = None
+        self.bind(size=self._redraw, pos=self._redraw)
+
+    def set_data(self, day_values: dict[str, float]) -> None:
+        self._day_values = day_values
+        self._redraw()
+
+    def set_day_tap_callback(self, cb: Callable) -> None:
+        self._on_day_tap = cb
+
+    def on_touch_down(self, touch):
+        if not self.collide_point(*touch.pos):
+            return super().on_touch_down(touch)
+        for date_str, (rx, ry, rw, rh) in self._cell_positions.items():
+            if rx <= touch.x <= rx + rw and ry <= touch.y <= ry + rh:
+                self._selected_date = date_str
+                self._redraw()
+                if self._on_day_tap:
+                    self._on_day_tap(date_str)
+                return True
+        return super().on_touch_down(touch)
+
+    def _redraw(self, *args):
+        self.canvas.clear()
+        self._cell_positions = {}
+        if self.width < 10 or self.height < 10:
+            return
+
+        today = datetime.date.today()
+        days = [today - datetime.timedelta(days=i) for i in range(self.DAYS - 1, -1, -1)]
+
+        avail_w = max(self.width - self.PAD_LEFT - self.PAD_RIGHT, dp(10))
+        slot_w = avail_w / self.DAYS
+        bar_w = max(slot_w - dp(4), dp(4))
+
+        graph_h = self.height - self.BASELINE_HEIGHT
+        graph_y = self.y + self.BASELINE_HEIGHT
+        graph_x_left = self.x + self.PAD_LEFT
+        graph_x_right = self.x + self.width - self.PAD_RIGHT
+
+        # Track bar-top centers so we can stitch a trend polyline below
+        trend_points: list[float] = []
+
+        with self.canvas:
+            # Horizontal gridlines at 0/25/50/75/100
+            for v in self.GRID_VALUES:
+                gy = graph_y + (v / 100.0) * graph_h
+                Color(*C.TEXT_MUTED)
+                Line(
+                    points=[graph_x_left, gy, graph_x_right, gy],
+                    width=1, dash_offset=2, dash_length=4,
+                )
+
+            for idx, day in enumerate(days):
+                cx = graph_x_left + idx * slot_w + (slot_w - bar_w) / 2
+                date_str = day.isoformat()
+                score = self._day_values.get(date_str, 0)
+
+                if score > 0:
+                    bar_h = max(score / 100.0 * graph_h, self.MIN_BAR_HEIGHT)
+                else:
+                    bar_h = self.MIN_BAR_HEIGHT
+
+                color = _lerp_color(score) if score > 0 else C.BG_CARD
+
+                if date_str == self._selected_date:
+                    Color(1.0, 1.0, 1.0, 0.9)
+                    Rectangle(
+                        pos=(cx - dp(1), graph_y - dp(1)),
+                        size=(bar_w + dp(2), bar_h + dp(2)),
+                    )
+
+                Color(*color)
+                RoundedRectangle(
+                    pos=(cx, graph_y), size=(bar_w, bar_h), radius=[dp(2)],
+                )
+                self._cell_positions[date_str] = (cx, graph_y, bar_w, bar_h)
+
+                if score > 0:
+                    trend_points.extend([cx + bar_w / 2, graph_y + bar_h])
+
+            # Trend polyline through bar tops (only days with data)
+            if len(trend_points) >= 4:
+                Color(*C.PRIMARY)
+                Line(points=trend_points, width=1.4)
+
+        self._render_labels(days, slot_w, bar_w, graph_x_left, graph_y, graph_h)
+
+    def _render_labels(self, days, slot_w, bar_w, graph_x_left, graph_y, graph_h):
+        """Y-axis labels (0/25/50/75/100), day labels under bars, and per-bar scores."""
+        for child in list(self.children):
+            self.remove_widget(child)
+
+        # Y-axis labels on the left
+        for v in self.GRID_VALUES:
+            gy = graph_y + (v / 100.0) * graph_h
+            ylbl = Label(
+                text=str(v),
+                font_size=F.TINY,
+                color=C.TEXT_MUTED,
+                size_hint=(None, None),
+                size=(self.PAD_LEFT - dp(2), dp(14)),
+                pos=(self.x, gy - dp(7)),
+                halign="right",
+                valign="middle",
+            )
+            ylbl.text_size = ylbl.size
+            self.add_widget(ylbl)
+
+        # Day-of-week initials under each bar (day-number on the first slot
+        # of each new month) and per-bar score numbers above non-empty bars
+        dow_initials = ["M", "T", "W", "T", "F", "S", "S"]
+        for idx, day in enumerate(days):
+            cx = graph_x_left + idx * slot_w + (slot_w - bar_w) / 2
+            initial = dow_initials[day.weekday()]
+            day_num = day.day
+            text = initial if day_num != 1 and idx > 0 else f"{day_num}"
+            day_lbl = Label(
+                text=text,
+                font_size=F.TINY,
+                color=C.TEXT_MUTED,
+                size_hint=(None, None),
+                size=(bar_w + dp(8), dp(16)),
+                pos=(cx - dp(4), self.y),
+                halign="center",
+                valign="middle",
+            )
+            day_lbl.text_size = day_lbl.size
+            self.add_widget(day_lbl)
+
+            date_str = day.isoformat()
+            score = self._day_values.get(date_str, 0)
+            if score > 0:
+                bar_h = max(score / 100.0 * graph_h, self.MIN_BAR_HEIGHT)
+                score_lbl = Label(
+                    text=f"{int(round(score))}",
+                    font_size=F.TINY,
+                    color=C.TEXT,
+                    size_hint=(None, None),
+                    size=(bar_w + dp(12), dp(12)),
+                    pos=(cx - dp(6), graph_y + bar_h),
+                    halign="center",
+                    valign="bottom",
+                )
+                score_lbl.text_size = score_lbl.size
+                self.add_widget(score_lbl)
+
+
 class HistoryScreen(Screen):
     """Unified history: calendar heatmap + session list + session detail."""
 
@@ -196,6 +398,8 @@ class HistoryScreen(Screen):
         self._on_rename_session: Optional[Callable] = None
         self._sessions: list[dict] = []
         self._filtered_date: Optional[str] = None
+        self._view_mode: str = "calendar"
+        self._on_view_mode_change: Optional[Callable] = None
         self._build_ui()
         C.add_listener(self._refresh_theme)
 
@@ -224,10 +428,64 @@ class HistoryScreen(Screen):
         title.bind(size=title.setter("text_size"))
         root.add_widget(title)
 
-        # Calendar heatmap
+        # Graph row: graph (calendar OR bars) on the left, narrow toggle
+        # column (Cal / 14d) on the right. Row height matches the active
+        # widget. Only one of heatmap/bars is parented at a time — the
+        # inactive one is removed from graph_wrap. BoxLayout natively
+        # observes its own children list, so swapping fires a layout
+        # pass automatically.
+        self._graph_row = BoxLayout(
+            orientation="horizontal",
+            size_hint_y=None,
+            height=dp(132),
+            spacing=dp(4),
+        )
+
+        self._graph_wrap = BoxLayout(orientation="vertical", size_hint_x=1)
+
+        # Calendar heatmap (initial active widget).
         self._heatmap = CalendarHeatmap()
         self._heatmap.set_day_tap_callback(self._on_day_tap)
-        root.add_widget(self._heatmap)
+        self._heatmap.bind(height=self._on_active_widget_height)
+        self._graph_wrap.add_widget(self._heatmap)
+
+        # Bar-chart view — built but NOT parented yet. Added when user
+        # toggles to bars view.
+        self._bars = Last14DaysBars()
+        self._bars.set_day_tap_callback(self._on_day_tap)
+        self._bars.bind(height=self._on_active_widget_height)
+
+        self._graph_row.add_widget(self._graph_wrap)
+
+        # Toggle column on the right — fixed 40dp wide, two compact buttons
+        # stacked vertically.
+        toggle_col = BoxLayout(
+            orientation="vertical",
+            size_hint_x=None,
+            width=dp(40),
+            spacing=dp(4),
+        )
+        self._btn_calendar = StyledButton(
+            text="Cal",
+            bg_color=C.PRIMARY,
+            text_color=C.TEXT,
+            font_size=F.SMALL,
+            bold=True,
+        )
+        self._btn_bars = StyledButton(
+            text="14d",
+            bg_color=C.BG_CARD,
+            text_color=C.TEXT_SECONDARY,
+            font_size=F.SMALL,
+            bold=False,
+        )
+        self._btn_calendar.bind(on_release=lambda *a: self._on_toggle_pressed("calendar"))
+        self._btn_bars.bind(on_release=lambda *a: self._on_toggle_pressed("bars"))
+        toggle_col.add_widget(self._btn_calendar)
+        toggle_col.add_widget(self._btn_bars)
+        self._graph_row.add_widget(toggle_col)
+
+        root.add_widget(self._graph_row)
 
         # Date label + Show All button
         date_row = BoxLayout(size_hint_y=None, height=dp(28), spacing=S.GAP)
@@ -290,6 +548,88 @@ class HistoryScreen(Screen):
         self._on_export_csv = on_export_csv
         self._on_rename_session = on_rename_session
 
+    def _on_active_widget_height(self, instance, value):
+        """Track the active widget's height onto graph_row.
+
+        The widget swap pattern in `set_view_mode` re-parents heatmap or
+        bars into graph_wrap; whichever is currently parented is the
+        ACTIVE widget. Its height changes (e.g., heatmap recomputing its
+        adaptive cell on window resize) should propagate to graph_row so
+        the screen layout grows/shrinks accordingly.
+        """
+        if instance.parent is None or value <= 0:
+            return
+        if value != self._graph_row.height:
+            self._graph_row.height = value
+            self._cascade_layout()
+
+    def _cascade_layout(self):
+        """Synchronous layout pass: root → graph_row → graph_wrap.
+
+        BoxLayout only re-runs its layout when its own size/pos/children
+        change. After we change graph_row.height (an explicit `height`
+        on a `size_hint_y=None` child), the root needs to be told to
+        re-position graph_row, then the graph_row layout positions
+        graph_wrap, then graph_wrap positions its child. We force the
+        cascade explicitly so the user sees the new layout immediately
+        instead of waiting for a window resize.
+        """
+        if self._root.parent is not None:
+            self._root.do_layout()
+        self._graph_row.do_layout()
+        self._graph_wrap.do_layout()
+
+    def set_view_mode(self, mode: str) -> None:
+        """Switch between 'calendar' and 'bars'.
+
+        Architectural note: we swap which widget is parented in
+        graph_wrap (clear_widgets + add_widget) rather than juggling
+        opacity + height on two coexisting widgets. BoxLayout fires its
+        own layout pass when its `children` list changes, which is the
+        only Kivy-native trigger we can rely on for child swap. We then
+        cascade do_layout() synchronously so graph_row.y / heatmap.pos /
+        bar.pos all update in the same turn (no waiting on next-frame
+        layout, no stale render flicker).
+        """
+        if mode not in ("calendar", "bars"):
+            return
+        self._view_mode = mode
+        self._graph_wrap.clear_widgets()
+        if mode == "calendar":
+            cell = self._heatmap._compute_cell_size()
+            cal_h = 7 * (cell + self._heatmap.CELL_GAP) + self._heatmap.TOP_MARGIN
+            self._heatmap.height = cal_h
+            self._graph_wrap.add_widget(self._heatmap)
+            self._graph_row.height = cal_h
+            self._btn_calendar.bg_color = C.PRIMARY
+            self._btn_calendar.text_color = C.TEXT
+            self._btn_calendar.bold = True
+            self._btn_bars.bg_color = C.BG_CARD
+            self._btn_bars.text_color = C.TEXT_SECONDARY
+            self._btn_bars.bold = False
+        else:
+            self._bars.height = dp(132)
+            self._graph_wrap.add_widget(self._bars)
+            self._graph_row.height = dp(132)
+            self._btn_calendar.bg_color = C.BG_CARD
+            self._btn_calendar.text_color = C.TEXT_SECONDARY
+            self._btn_calendar.bold = False
+            self._btn_bars.bg_color = C.PRIMARY
+            self._btn_bars.text_color = C.TEXT
+            self._btn_bars.bold = True
+        # Force the synchronous layout cascade so the user sees the new
+        # geometry immediately.
+        self._cascade_layout()
+
+    def set_view_mode_callback(self, cb: Callable) -> None:
+        """Called with the new mode string when the user toggles."""
+        self._on_view_mode_change = cb
+
+    def _on_toggle_pressed(self, mode: str) -> None:
+        self.set_view_mode(mode)
+        if self._on_view_mode_change:
+            self._on_view_mode_change(mode)
+
     def load_sessions(self, sessions: list[dict]) -> None:
         """Load all sessions and build heatmap data."""
         self._sessions = sessions
@@ -307,6 +647,7 @@ class HistoryScreen(Screen):
             day_avg[day] = sum(scores) / len(scores) if scores else 0
 
         self._heatmap.set_data(day_avg)
+        self._bars.set_data(day_avg)
         # Show all sessions initially
         self._show_sessions(sessions, "All sessions")
 
@@ -531,17 +872,23 @@ class HistoryScreen(Screen):
 
     def _confirm_delete(self, session_id: int, name: str) -> None:
         """Show a delete confirmation popup."""
-        from kivy.uix.popup import Popup
 
         content = BoxLayout(orientation="vertical", spacing=S.GAP, padding=S.GAP)
-        content.add_widget(Label(
+        msg_label = Label(
             text=f"Delete session\n\"{name}\"?",
             font_size=F.BODY,
-            color=C.TEXT,
+            # Kivy's Popup chrome is always dark (never themed), so the body
+            # text must be light too — C.TEXT is dark in the light themes and
+            # rendered the name invisible (dark-on-dark). The text_size binding
+            # below makes halign/valign work so a long name wraps instead of
+            # overflowing the narrow mobile popup.
+            color=POPUP_TEXT,
             halign="center",
             valign="middle",
             size_hint_y=0.6,
-        ))
+        )
+        msg_label.bind(size=msg_label.setter("text_size"))
+        content.add_widget(msg_label)
         btn_row = BoxLayout(spacing=S.GAP, size_hint_y=0.4)
         btn_cancel = StyledButton(
             text="Cancel",
@@ -561,7 +908,7 @@ class HistoryScreen(Screen):
         popup = Popup(
             title="Confirm Delete",
             content=content,
-            size_hint=(0.7, 0.3),
+            size_hint=(0.85, 0.35),
             auto_dismiss=True,
         )
         btn_cancel.bind(on_release=popup.dismiss)

@@ -1,3 +1,4 @@
+import colorsys
 import math
 import time as _time
 from collections import deque
@@ -46,6 +47,9 @@ class ScrollableGraphWidget(Widget):
             key: deque(maxlen=effective_max) for key in colors
         }
         self._visible: dict[str, bool] = dict.fromkeys(colors, True)
+        # Series in this set are rendered with per-segment heatmap coloring
+        # (blue at 0 → red at 100+) instead of the per-key fixed color.
+        self._heatmap_keys: set[str] = set()
         self._scroll_offset: int = 0
         self._total_points: int = 0
         self._show_value_labels: bool = show_value_labels
@@ -65,6 +69,10 @@ class ScrollableGraphWidget(Widget):
         self._sync_group: list["ScrollableGraphWidget"] = []
         self._threshold_value: Optional[float] = None
         self._threshold_scale_key: Optional[str] = None
+        # Reference line: solid horizontal line at a fixed value, drawn
+        # distinctly from the (dashed) threshold line. Used on the metrics
+        # graph to mark level 100 — the per-metric maximum.
+        self._reference_value: Optional[float] = None
         self._start_wall_time: Optional[float] = None
         self._scroll_change_callback = None
         self._tap_callback = None
@@ -80,6 +88,40 @@ class ScrollableGraphWidget(Widget):
         self._threshold_value = value
         self._threshold_scale_key = scale_key
         self._redraw()
+
+    def set_reference_line(self, value: Optional[float]) -> None:
+        """Set a solid horizontal reference line at `value` (graph units).
+
+        Drawn distinctly from the dashed threshold line. Pass None to clear.
+        """
+        self._reference_value = value
+        self._redraw()
+
+    def set_heatmap_color(self, key: str, enabled: bool = True) -> None:
+        """Render `key` series with per-segment heatmap coloring.
+
+        Color gradient: dark blue at value=0, through cyan/green/yellow,
+        to red at value=100+ (clamped). Useful for the shamatha score
+        line so the visual color tracks meditation depth even when the
+        line crosses 100.
+        """
+        if enabled:
+            self._heatmap_keys.add(key)
+        else:
+            self._heatmap_keys.discard(key)
+        self._redraw()
+
+    @staticmethod
+    def _heatmap_color(value: float) -> tuple:
+        """Blue→red gradient via HSV.
+
+        0 → blue (hue 240°), 100+ → red (hue 0°).  Clamps below 0 and
+        above 100. Uses high saturation/value for vivid line color.
+        """
+        t = max(0.0, min(value / 100.0, 1.0))
+        hue = (1.0 - t) * (240.0 / 360.0)
+        r, g, b = colorsys.hsv_to_rgb(hue, 0.9, 0.95)
+        return (r, g, b, 1.0)
 
     @property
     def total_points(self) -> int:
@@ -137,9 +179,12 @@ class ScrollableGraphWidget(Widget):
     def load_static_data(self, series: dict[str, list[float]]) -> None:
         """Load pre-recorded data for static display (e.g. diary preview)."""
         for key in self._data:
-            self._data[key].clear()
-            for val in series.get(key, []):
-                self._data[key].append(val)
+            d = self._data[key]
+            d.clear()
+            # extend() is a C-level bulk copy; a Python `for v: append(v)` loop
+            # over 30k raw-EEG samples used to take ~1.5 s on Android and
+            # contributed to a post-resume ANR after a screen-lock session.
+            d.extend(series.get(key, []))
         first_key = next(iter(self._data))
         self._total_points = len(self._data[first_key])
         self._scroll_offset = 0
@@ -267,6 +312,16 @@ class ScrollableGraphWidget(Widget):
                     size=tex.size,
                 ))
 
+        # Reference line (solid, drawn after threshold so it's on top).
+        # Used to mark level 100 on the metrics graph.
+        if self._reference_value is not None and not self._bipolar:
+            frac_r = min(self._reference_value / max_scale, 1.0) if max_scale > 0 else 0.0
+            y_ref = graph_y + frac_r * graph_h
+            self._gfx.add(Color(0.6, 0.6, 0.6, 0.7))
+            self._gfx.add(Line(
+                points=[graph_x, y_ref, graph_x + graph_w, y_ref], width=1,
+            ))
+
         if end_idx <= start_idx:
             return
 
@@ -333,12 +388,14 @@ class ScrollableGraphWidget(Widget):
             color = self._colors[key]
             scale = self._scales.get(key, 100.0)
             draw_scale = max_scale if not self._bipolar else scale
-            self._gfx.add(Color(*color))
+            heatmap = key in self._heatmap_keys
 
-            points = []
             n = len(slice_data)
             vp = max(self._viewport_points, n)
             x_offset = vp - n
+
+            # Compute (x, y) for each point once.
+            xy: list[tuple[float, float]] = []
             for i, val in enumerate(slice_data):
                 x = graph_x + ((x_offset + i) / max(vp - 1, 1)) * graph_w
                 if self._bipolar:
@@ -346,17 +403,33 @@ class ScrollableGraphWidget(Widget):
                     y = graph_y + max(0.0, min(norm, 1.0)) * graph_h
                 else:
                     y = graph_y + min(max(val, 0.0) / draw_scale, 1.0) * graph_h
-                points.extend([x, y])
+                xy.append((x, y))
 
-            if len(points) >= 4:
-                max_coords = 1024  # 512 points × 2 coords each
-                if len(points) <= max_coords:
-                    self._gfx.add(Line(points=points, width=dp(self._line_width)))
-                else:
-                    for chunk_start in range(0, len(points) - 2, max_coords - 2):
-                        chunk = points[chunk_start:chunk_start + max_coords]
-                        if len(chunk) >= 4:
-                            self._gfx.add(Line(points=chunk, width=dp(self._line_width)))
+            if heatmap and not self._bipolar:
+                # Per-segment heatmap coloring (color follows the value).
+                # One Line per segment; the segment color is derived from
+                # the average of its two endpoint values.
+                lw = dp(self._line_width)
+                for i in range(len(xy) - 1):
+                    v_avg = (slice_data[i] + slice_data[i + 1]) * 0.5
+                    self._gfx.add(Color(*self._heatmap_color(v_avg)))
+                    self._gfx.add(Line(
+                        points=[xy[i][0], xy[i][1], xy[i + 1][0], xy[i + 1][1]],
+                        width=lw,
+                    ))
+            else:
+                # Single-color line (original behaviour).
+                self._gfx.add(Color(*color))
+                points = [coord for x, y in xy for coord in (x, y)]
+                if len(points) >= 4:
+                    max_coords = 1024  # 512 points × 2 coords each
+                    if len(points) <= max_coords:
+                        self._gfx.add(Line(points=points, width=dp(self._line_width)))
+                    else:
+                        for chunk_start in range(0, len(points) - 2, max_coords - 2):
+                            chunk = points[chunk_start:chunk_start + max_coords]
+                            if len(chunk) >= 4:
+                                self._gfx.add(Line(points=chunk, width=dp(self._line_width)))
 
             # Realtime value label at right edge of line
             if self._show_value_labels and slice_data:

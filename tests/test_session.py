@@ -1,3 +1,4 @@
+import time
 import unittest
 
 from app.session.manager import SessionManager, SessionState
@@ -5,6 +6,33 @@ from app.session.manager import SessionManager, SessionState
 
 class TestSessionManager(unittest.TestCase):
     """Test session lifecycle."""
+
+    def test_compute_statistics_duration_nonzero_while_running(self):
+        # Regression: a 60s partial DB flush calls compute_statistics() on a
+        # RUNNING session. It must report live elapsed, not the unfinalized
+        # _elapsed field (which is 0 until stop()) — otherwise a session killed
+        # mid-run leaves a 0-duration row in History.
+        sm = SessionManager()
+        sm.start(threshold=50)
+        sm._start_time = time.time() - 5.0  # simulate 5s elapsed
+        sm.add_metric({"meditation_score": 60, "shamatha_score": 40, "state": "x"})
+        stats = sm.compute_statistics()
+        self.assertGreaterEqual(stats["duration"], 4)
+        self.assertEqual(sm.state, SessionState.RUNNING)  # not mutated by stats
+
+    def test_compute_statistics_duration_nonzero_with_no_metrics(self):
+        sm = SessionManager()
+        sm.start(threshold=50)
+        sm._start_time = time.time() - 7.0
+        stats = sm.compute_statistics()  # empty-accumulator branch
+        self.assertGreaterEqual(stats["duration"], 6)
+
+    def test_stop_duration_unchanged_by_elapsed_seconds_switch(self):
+        sm = SessionManager()
+        sm.start(threshold=50)
+        sm._start_time = time.time() - 3.0
+        stats = sm.stop()
+        self.assertGreaterEqual(stats["duration"], 2)
 
     def test_start_stop(self):
         sm = SessionManager()

@@ -103,3 +103,27 @@ If the app hits an unexpected error, a crash dialog
 will appear with the full report already copied to
 your clipboard. Please paste it into a new GitHub
 issue so we can fix it.
+
+## Data Backup
+
+Settings → Data Backup → tap "Backup database"
+to write a copy of your session history to a file.
+On Android, backups go to Documents/EEGMeditation/
+and are visible to file managers and Telegram's
+file picker. On desktop, you choose where to save.
+
+Tap "Restore database" to replace the current
+database with a backup file. This cannot be undone
+— your current sessions are replaced. The app will
+exit after restoring; relaunch to see your imported
+history.
+
+## User Profiles
+
+If you've used the app before and reinstall (or
+move to a new device by restoring a backup), your
+existing profiles are shown when you create a
+profile. Tap an existing profile to keep using it,
+or type a new name to start fresh. Names must be
+unique — if you type a name that exists, you'll be
+offered a "Use existing" / "Change name" choice.

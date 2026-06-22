@@ -92,11 +92,16 @@ If an unexpected error occurs, a dialog appears with a pre-filled crash report �
 
 ## History
 
-The History tab shows a **calendar heatmap** (GitHub-style) colored by daily average Shamatha score. Brighter green = better days.
+The History tab has a segmented toggle at the top: **Calendar** / **14-Day**.
+
+- **Calendar** — GitHub-style heatmap colored by daily average Shamatha score. Brighter green = better days.
+- **14-Day** — Bar chart of the last 14 days, one bar per day, height proportional to that day's average Shamatha. Empty days show as a thin baseline so streaks/gaps are visible.
+
+The selected mode is persisted per user.
 
 ### Day Filter
 
-Tap a day cell to filter sessions for that date. Tap again (or "Show All") to reset.
+In either view, tap a day (cell or bar) to filter the session list below to that date. Tap the same day again (or **Show All**) to reset.
 
 ### Session List
 
@@ -126,9 +131,20 @@ Settings uses collapsible accordion sections. Tap a section header to expand/col
 
 ### User Profile
 
-- Current user shown at top
-- Create new users, switch between them, delete (with confirmation)
-- Each user has separate sessions, settings, and formulas
+- Current user shown at top.
+- **Existing profiles** appear in a list at the top of the form. Tap one to switch to it.
+- Type a new name into the input and tap **Create** to add a profile.
+- If the name you typed already exists, an inline message offers two buttons: **Use existing 'X'** (switch to that profile) or **Change name** (back to the input). Names are unique and case-sensitive.
+- Each user has separate sessions, settings, and formulas. The **X** button on a row deletes that profile after a confirmation.
+
+### Data Backup
+
+Settings → **Data Backup** lets you save a copy of your sessions to a file and restore it later.
+
+- **Backup database** — writes a transaction-safe copy of the live database. On Android the backup goes to `Documents/EEGMeditation/meditation_backup_YYYYMMDD_HHMMSS.db` (visible to file managers and Telegram's "attach file" picker). On desktop, a save dialog opens.
+- **Restore database** — pick a backup file. The app validates it (must be a real SQLite file with `users` and `sessions` tables), shows a confirmation dialog with the current session count, then replaces the live database. The app will exit after restoring — relaunch it to see your imported history.
+
+The Restore replaces your current database and cannot be undone. Use Backup first if you want to keep the current state.
 
 ### Timer
 

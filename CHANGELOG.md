@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Session ended instantly when starting with a real device + timer**: on the BT-connect path `start_countdown()` was dispatched to the main thread while the tick thread proceeded to `tick()`; if the main thread stalled at connect, `remaining` was still 0 and the timer fired on the first tick (a 0-second "timer-ended" session). The countdown is now armed on the tick thread before the loop can read it.
+- **History duration showed 0**: `compute_statistics()` read the `_elapsed` field (0 until `stop()`), so the 60-second partial flush wrote a duration-0 row that persisted if the app was later killed. It now uses the live `elapsed_seconds`.
+- **Session lost / app frozen at timer end with the screen locked**: `_audio.stop()` ran on the daemon tick thread and called `MediaPlayer.release()`, which synchronizes with the player's event handler on the **main Looper** — paused during lock — and deadlocked the tick thread, so the session never saved and the noise never stopped. Timer-end now persists the session first on the tick thread, silences the noise with a non-blocking `mute()`, and defers the real teardown to the main thread.
+- **Meditation gong did not ring at timer end while locked**: the bell used SoundLoader, which Android silences during screen lock. The timer gong now plays through a one-shot `MediaPlayer` (USAGE_MEDIA) so it sounds at the timer end with the screen off.
+- **Stale graph after a locked timer session**: closing the summary revealed a graph covering only the pre-lock seconds (the locked portion never reached the live graph via the per-tick path). The live graphs are now reloaded in one batch from the session-lifetime mirror buffers on both resume and finish, and the header timer is synced to the final duration.
+- **Delete-confirmation dialog text invisible in light themes**: the session/user name used `C.TEXT` (dark) on Kivy's always-dark popup chrome. Added a theme-independent `POPUP_TEXT` constant and a `text_size` binding (wrap) for the History session-delete and Settings user-delete dialogs.
+- **White-noise could play while the connect overlay was still visible**: audio start is now dispatched atomically with hiding the overlay instead of starting on the tick thread ahead of it. `MediaPlayer.unload()` always calls `release()` even if `stop()` raised, and audio-teardown failures are logged instead of silently swallowed.
+
+### Added
+
+- **History view toggle**: Calendar heatmap / 14-day bar chart segmented control on the History screen. Both views share day-tap-to-filter behavior. Selection persists per user as `history_view_mode`.
+- **`Last14DaysBars` widget** (`app/ui/history_screen.py`) — bar chart of the last 14 days' avg shamatha, mirroring `CalendarHeatmap`'s public API.
+- **Shared `UserPickerForm`** widget (`app/ui/widgets/user_picker.py`) used by the wizard, the first-run popup, and Settings → User Profile. Existing profiles are listed; typing a duplicate name surfaces an inline "Use existing 'X'" / "Change name" choice instead of failing silently.
+- **Wizard skip-step-2** when an existing profile with a saved BT device is picked — onboarding goes directly to the live session.
+- **Settings → Data Backup** section with **Backup database** / **Restore database** buttons.
+  - Backup uses SQLite's online `Connection.backup()` API (transaction-safe).
+  - Android writes to `/sdcard/Documents/EEGMeditation/meditation_backup_YYYYMMDD_HHMMSS.db` (visible to file managers, Telegram, `adb pull`).
+  - Desktop opens a Kivy `FileChooserPopup`.
+  - Restore validates that the file is a real SQLite DB with `users` and `sessions` tables, asks for confirmation, then force-restarts the app via a "Please relaunch" popup.
+- **`DatabaseManager.find_user_by_name`** and typed **`UserExistsError`** raised by `create_user` on duplicate.
+- **`crash_handler.queue_pre_app_error` / `flush_pre_app_errors`** for diagnostics that occur before the Kivy app is up (e.g. `config.py` migrations). Replayed from `EEGMeditationApp.on_start()`.
+
+### Changed
+
+- **Desktop DB path moved** from project-root / next-to-binary to the platform user-data folder:
+  - Linux: `${XDG_DATA_HOME:-~/.local/share}/EEGMeditation/`
+  - Windows: `%APPDATA%\EEGMeditation\`
+  - macOS: `~/Library/Application Support/EEGMeditation/`
+
+  On first launch, an existing DB at the old path is copied across automatically. The old file is left in place for manual rollback — you can safely delete it after verifying the move worked.
+- **DB migration failures** (Android `/sdcard → app_storage_path`, desktop legacy → user-data) now surface a diagnostic via the in-app error dialog instead of being silently swallowed. **Project policy**: any I/O exception we can't reasonably ignore must use `report_soft_error(label, detail)` (or `queue_pre_app_error` if pre-app-start).
+
+### Removed
+
+- **`AnalyticsScreen`, `HomeScreen`, `AnalyticsAggregator`** — unreachable from the bottom nav. Their functionality is replaced by the new History view toggle. Roadmap entry added for a project-wide dead-code audit.
+
 ## [1.2.0] - 2026-04-27
 
 ### Fixed (timer overhaul, folded into the v1.2.0 retag)

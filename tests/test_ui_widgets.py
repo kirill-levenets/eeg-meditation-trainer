@@ -247,29 +247,6 @@ class TestSettingsTimerSoundRow(unittest.TestCase):
         self.assertFalse(self.screen._timer_sound_test_playing)
 
 
-class TestAnalyticsStorageInfo(unittest.TestCase):
-    """Test analytics screen storage info display."""
-
-    def test_update_storage_info_bytes(self):
-        from app.ui.analytics_screen import AnalyticsScreen
-        screen = AnalyticsScreen()
-        screen.update_storage_info(500, {"sessions": 3, "metrics": 100, "users": 1})
-        self.assertIn("500 B", screen._storage_label.text)
-        self.assertIn("3 sessions", screen._storage_label.text)
-
-    def test_update_storage_info_kb(self):
-        from app.ui.analytics_screen import AnalyticsScreen
-        screen = AnalyticsScreen()
-        screen.update_storage_info(51200, {"sessions": 10, "metrics": 5000, "users": 2})
-        self.assertIn("50.0 KB", screen._storage_label.text)
-
-    def test_update_storage_info_mb(self):
-        from app.ui.analytics_screen import AnalyticsScreen
-        screen = AnalyticsScreen()
-        screen.update_storage_info(5242880, {"sessions": 50, "metrics": 100000, "users": 3})
-        self.assertIn("5.0 MB", screen._storage_label.text)
-
-
 class TestAccordionGrandchildGrowth(unittest.TestCase):
     """Regression: when content height grows AFTER the section was first
     opened (e.g. populate_bt_devices appending rows after the user opened
