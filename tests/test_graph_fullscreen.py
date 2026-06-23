@@ -29,8 +29,8 @@ class TestGraphFullscreen(unittest.TestCase):
         self.assertIn(app._fullscreen_overlay, app._float_root.children)
         self.assertIsNot(g.parent, parent)                 # reparented out
         self.assertIsNone(g._expand_callback)              # glyph hidden in fullscreen
-        self.assertEqual(tuple(g.size_hint), (1, 1))       # fills the overlay
-        self.assertEqual(g.pos_hint, {"x": 0, "y": 0})
+        self.assertEqual(tuple(g.size_hint), (1, 1))       # fills the overlay slot
+        self.assertEqual(g.pos_hint, {})                   # in a BoxLayout, not positioned
 
     def test_close_restores(self):
         app, parent, g = self._make()

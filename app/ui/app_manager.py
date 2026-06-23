@@ -318,11 +318,19 @@ class EEGMeditationApp(App):
             pos=lambda w, v: setattr(bg, "pos", v),
         )
 
-        graph.set_expand_callback(None)  # hide the expand glyph while fullscreen
+        # Hide the on-graph glyphs while fullscreen (restored on close); the
+        # series callback is owned by LiveSessionScreen, so capture it.
+        orig_series_cb = graph._series_callback
+        graph.set_expand_callback(None)
+        graph.set_series_picker_callback(None)
         parent.remove_widget(graph)
         graph.size_hint = (1, 1)
-        graph.pos_hint = {"x": 0, "y": 0}  # fill the overlay, not just resize in place
-        overlay.add_widget(graph)
+        graph.pos_hint = {}
+        # graph + legend stacked, so the fullscreen view keeps its legend.
+        content = BoxLayout(orientation="vertical", spacing=dp(4))
+        content.add_widget(graph)
+        content.add_widget(self._build_fullscreen_legend(graph))
+        overlay.add_widget(content)
 
         close_btn = StyledButton(
             text="Close",
@@ -336,16 +344,31 @@ class EEGMeditationApp(App):
 
         def _restore(*_a):
             self._float_root.remove_widget(overlay)
-            overlay.remove_widget(graph)
+            if graph.parent is not None:
+                graph.parent.remove_widget(graph)
             graph.size_hint = orig_size_hint
             graph.pos_hint = orig_pos_hint
             graph.size = orig_size
             parent.add_widget(graph, index=index)
             graph.set_expand_callback(self._present_graph_fullscreen)
+            graph.set_series_picker_callback(orig_series_cb)
             graph._redraw()
             self._fullscreen_overlay = None
 
         close_btn.bind(on_release=_restore)
+
+    def _build_fullscreen_legend(self, graph):
+        """A compact legend (colored names) for the currently visible series."""
+        legend = BoxLayout(size_hint_y=None, height=dp(24), spacing=dp(12))
+        legend.add_widget(BoxLayout())  # left spacer → center the entries
+        for key in graph.visible_keys():
+            color = graph._colors.get(key, (1, 1, 1, 1))
+            name = key.replace("_score", "").replace("_", " ").title()
+            lbl = Label(text=name, color=color, font_size=F.TINY,
+                        size_hint_x=None, width=dp(90))
+            legend.add_widget(lbl)
+        legend.add_widget(BoxLayout())  # right spacer
+        return legend
 
     def _link_graph_zoom(self) -> None:
         """Link zoom across all graph widgets so they share the same time scale."""

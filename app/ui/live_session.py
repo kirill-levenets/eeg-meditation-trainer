@@ -872,11 +872,17 @@ class LiveSessionScreen(Screen):
             btn.bind(on_release=lambda b, k=key: self._toggle_series_row(k, b))
             body.add_widget(btn)
             self._series_rows[key] = btn
+        close_btn = StyledButton(
+            text="Close", height=dp(44),
+            bg_color=C.PRIMARY, bg_pressed=C.PRIMARY_DIM,
+        )
+        close_btn.bind(on_release=lambda *_a: self._series_popup.dismiss())
+        body.add_widget(close_btn)
         self._series_popup = Popup(
             title="Graph series",
             content=body,
             size_hint=(0.8, None),
-            height=dp(80 + 50 * len(METRICS_COLORS)),
+            height=dp(80 + 50 * (len(METRICS_COLORS) + 1)),
             auto_dismiss=True,
         )
         if self.on_series_picker_dismiss is not None:
