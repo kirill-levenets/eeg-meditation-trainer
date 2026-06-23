@@ -127,3 +127,35 @@ profile. Tap an existing profile to keep using it,
 or type a new name to start fresh. Names must be
 unique — if you type a name that exists, you'll be
 offered a "Use existing" / "Change name" choice.
+
+## Custom Formulas
+
+Settings → Custom Formula has three named slots.
+Each slot has a name field, an expression input,
+Apply (evaluate), and Save (to library).
+
+The expression is a Python-style formula. Available
+variables include band powers (alpha, beta, theta,
+delta, gamma), normalized bands (alpha_norm etc.),
+computed scores (shamatha_score, meditation_score,
+distraction, sinking), and windowed avg(expr, N).
+
+One slot drives the audio noise channel. Select it
+with the [1][2][3] buttons next to the
+"Custom Formula" option in Settings → Threshold.
+If that slot's formula is invalid, audio falls back
+to shamatha.
+
+All three formula series share one Y-axis (0–200,
+reference line at 100). Keep your formula output
+in a range comparable to the other metrics so the
+graph stays readable.
+
+To assign a saved formula to a slot without opening
+Settings, use the "Choose..." button on the matching
+custom-formula row in the on-graph series picker
+(the list icon in the top-left of the metrics graph).
+
+The diary replays the formulas from each session —
+opening a past session shows the names and series
+that were active at that time.

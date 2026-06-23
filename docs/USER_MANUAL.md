@@ -163,7 +163,7 @@ The Restore replaces your current database and cannot be undone. Use Backup firs
 
 - Slider (20-180) with presets: 50, 80, 100, 130, 160
 - Sets the dashed line on graphs, "time above threshold" stats, and audio feedback target
-- **Audio control metric** — choose which metric drives the audio: Shamatha, NS Meditation, NS Attention, or Custom Formula
+- **Audio control metric** — choose which metric drives the audio: Shamatha, NS Meditation, NS Attention, or Custom Formula (slot 1, 2, or 3 selected via the `[1][2][3]` buttons). If the selected custom slot has no valid formula the audio falls back to shamatha.
 
 ### Audio
 
@@ -183,7 +183,20 @@ Toggle which metrics are visible on the session graph.
 
 ### Custom Formula
 
-Enter a Python-style expression to track as an extra metric. See the reference section in-app for available variables and functions. Save/load formula library.
+Three independent named slots (Slot 1, 2, 3), each with:
+
+- **Name** — label shown on the graph series and in the diary
+- **Expression** — Python-style formula using band powers, normalized bands, computed metrics, math functions, and `avg(expr, N)` windowed averages; AST-parsed with whitelist validation
+- **Apply** — evaluates the expression; a status line shows the current value or error
+- **Save** — saves the formula to the per-user library under the slot's current name
+
+To assign a saved formula to a slot without opening Settings, use the **Choose…** button on the matching custom-formula row in the on-graph series picker (live metrics graph).
+
+The slot that drives the audio noise channel is selected via the `[1][2][3]` buttons under the "Custom Formula" audio-metric radio in Settings → Threshold. If the selected slot's formula is invalid, the audio falls back to shamatha.
+
+All three custom series share one Y-axis (scale 0–200, reference line at 100). For best results keep formula outputs in a comparable range to the other metrics.
+
+The diary **replays the formulas that were active during each session** — opening a session in History recomputes those series from the stored band powers, so you see the same names and values that were live at the time.
 
 ### Theme
 
