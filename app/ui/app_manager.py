@@ -51,7 +51,7 @@ from app.ui.widgets.user_picker import UserPickerForm
 from app.ui.wizard_screen import WizardScreen
 
 FORMULA_KEYS: tuple[str, ...] = ("custom_formula", "custom_formula_2", "custom_formula_3")
-_MAX_FORMULAS = 3
+_MAX_FORMULAS = len(FORMULA_KEYS)
 
 
 class EEGMeditationApp(App):
@@ -453,8 +453,9 @@ class EEGMeditationApp(App):
         # Keyboard hotkey for marker
         Window.bind(on_key_down=self._on_key_down)
 
-        # Hide custom formula on graph until enabled via picker
-        self._live_screen.graph.set_visible("custom_formula", False)
+        # Hide all custom-formula series until a formula is set + shown via picker
+        for _fk in FORMULA_KEYS:
+            self._live_screen.graph.set_visible(_fk, False)
         # Apply default metric visibility (Shamatha only for new users;
         # _load_user_settings will override for existing users)
         for key, active in self._settings_screen._graph_toggles.items():
@@ -2383,7 +2384,7 @@ class EEGMeditationApp(App):
         defaults = self._settings_screen._graph_toggles
         sel: set[str] = set()
         for key in self._live_screen.graph.series_keys():
-            if key == "custom_formula":
+            if key in FORMULA_KEYS:  # custom slots never had pre-F2 toggle_ rows
                 continue
             saved = self._db.get_user_setting(user_id, f"toggle_{key}")
             active = (saved == "True") if saved is not None else defaults.get(key, True)

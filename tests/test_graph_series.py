@@ -149,6 +149,15 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         self._toggle(diary_m, "custom_formula")
         self.assertTrue(diary_m.is_visible("custom_formula"))
 
+    def test_custom_formula_2_gated_on_its_own_slot(self):
+        # The per-slot gate must key off slot 1's evaluator, not slot 0's.
+        self.app._formula_slots[1] = types.SimpleNamespace(is_valid=False)
+        self._toggle(self.graph, "custom_formula_2")
+        self.assertFalse(self.graph.is_visible("custom_formula_2"))
+        self.app._formula_slots[1].is_valid = True
+        self._toggle(self.graph, "custom_formula_2")
+        self.assertTrue(self.graph.is_visible("custom_formula_2"))
+
     def test_custom_formula_hidden_choice_survives_reload(self):
         # Reload round-trip: a user who HID the live custom_formula line but kept a
         # valid saved formula must not have it force-shown on next launch. Mirrors
