@@ -302,8 +302,8 @@ class TestDatabaseExtensions(unittest.TestCase):
         ev_invalid = CustomFormulaEvaluator()
         # no set_formula call — is_valid is False
         series = self.db.recompute_formula_series(sid, {"good": ev_valid, "bad": ev_invalid})
-        self.assertIn("good", series)
         self.assertNotIn("bad", series)
+        self.assertEqual(series["good"], [10.0])  # alpha1_raw=10 → formula "alpha1"
 
 
 if __name__ == "__main__":

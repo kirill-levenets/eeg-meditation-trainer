@@ -5,10 +5,13 @@ import math
 import os
 import sqlite3
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from app.config import APP
 from app.logger import logger
+
+if TYPE_CHECKING:
+    from app.metrics.custom_formula import CustomFormulaEvaluator
 
 
 class UserExistsError(Exception):
@@ -475,7 +478,7 @@ class DatabaseManager:
 
     @staticmethod
     def formula_vars_from_row(row: dict) -> dict[str, float]:
-        """Build the formula variable namespace from one stored metrics row."""
+        """Shared var namespace so CSV export and diary recompute see identical inputs."""
         raw_bands = {
             "delta": row.get("delta_raw", 0),
             "theta": row.get("theta_raw", 0),
@@ -503,19 +506,19 @@ class DatabaseManager:
             fvars[f"s_{k}"] = math.sqrt(sqrt_vals[k] / total) if total >= 1.0 else 0.0
         return fvars
 
-    def recompute_formula_series(self, session_id: int, evaluators: dict) -> dict[str, list[float]]:
-        """Recompute each {series_key: CustomFormulaEvaluator} over a session's stored rows.
+    def recompute_formula_series(
+        self, session_id: int, evaluators: "dict[str, CustomFormulaEvaluator]"
+    ) -> dict[str, list[float]]:
+        """Recompute each {series_key: evaluator} over a session's stored rows.
 
         Skips invalid evaluators. Returns {series_key: [value per tick]}.
         """
         rows = self.get_session_metrics(session_id)
-        out: dict[str, list[float]] = {k: [] for k, e in evaluators.items()
-                                       if getattr(e, "is_valid", False)}
+        valid = {k: e for k, e in evaluators.items() if getattr(e, "is_valid", False)}
+        out: dict[str, list[float]] = {k: [] for k in valid}
         for row in rows:
             fvars = self.formula_vars_from_row(row)
-            for key, ev in evaluators.items():
-                if not getattr(ev, "is_valid", False):
-                    continue
+            for key, ev in valid.items():
                 ev.push_variables(fvars)
                 out[key].append(ev.evaluate(fvars))
         return out
