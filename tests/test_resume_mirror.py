@@ -144,6 +144,41 @@ def test_tick_band_record_aggregates_paired_bands():
     assert set(band) == set(BAND_KEYS)
 
 
+def test_tick_writes_three_distinct_custom_formula_series():
+    """The live tick evaluates each valid slot into its own metric key, with
+    distinct values, and skips invalid slots."""
+    app = _make_tick_app()
+    # Real dicts so formula_vars is a proper namespace (engine is a MagicMock).
+    app._metrics_engine.derive_bands.return_value = {
+        "alpha": 100.0, "beta": 20.0, "gamma": 5.0, "theta": 8.0, "delta": 11.0,
+    }
+    app._metrics_engine.compute_sqrt_relative_bands.return_value = dict.fromkeys(
+        ("alpha1", "alpha2", "beta1", "beta2", "theta", "delta"), 0.0
+    )
+    app._formula_slots[0].set_formula("alpha + beta")        # 120
+    app._formula_slots[1].set_formula("alpha / (beta + 1)")  # 100/21
+    # slot 2 left invalid → must not be written
+
+    metrics = _metrics()
+    app._eeg_stream.read_sample.return_value = _raw_sample()
+    app._metrics_engine.process_sample.return_value = metrics
+    EEGMeditationApp._update_tick(app, APP.UPDATE_FREQUENCY)
+
+    assert abs(metrics["custom_formula"] - 120.0) < 1e-6
+    assert abs(metrics["custom_formula_2"] - 100.0 / 21.0) < 1e-6
+    assert "custom_formula_3" not in metrics  # invalid slot not written
+
+
+def test_tick_skips_all_formula_work_when_no_slot_valid():
+    """No valid slot → no custom_formula keys and derive_bands not called for formulas."""
+    app = _make_tick_app()  # all slots invalid
+    metrics = _metrics()
+    app._eeg_stream.read_sample.return_value = _raw_sample()
+    app._metrics_engine.process_sample.return_value = metrics
+    EEGMeditationApp._update_tick(app, APP.UPDATE_FREQUENCY)
+    assert not any(k.startswith("custom_formula") for k in metrics)
+
+
 def test_tick_waveform_fallback_appends_band_sum():
     app = _make_tick_app()
     raw = _raw_sample(seed=2.0, with_waveform=False)
