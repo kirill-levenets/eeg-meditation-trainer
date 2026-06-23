@@ -30,7 +30,7 @@ METRICS_PREVIEW_COLORS = {
     "native_attention": (0.6, 0.3, 0.9, 1.0),
     "native_meditation": (0.3, 0.9, 0.9, 1.0),
     "custom_formula": (1.0, 0.4, 0.8, 1.0),
-    "custom_formula_2": (0.95, 0.60, 0.20, 1.0),
+    "custom_formula_2": (1.0, 0.50, 0.0, 1.0),
     "custom_formula_3": (0.40, 0.75, 0.95, 1.0),
 }
 
