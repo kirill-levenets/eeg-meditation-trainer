@@ -97,7 +97,7 @@ class SettingsScreen(Screen):
         self._timer_sound_test_playing: bool = False
         self._on_line_width_change: Optional[Callable] = None
         self._on_rotate_screen: Optional[Callable] = None
-        self._on_custom_formula_change: Optional[Callable] = None
+        self._on_formula_slot_change: Optional[Callable] = None
         self._on_save_formula: Optional[Callable] = None
         self._on_load_formula: Optional[Callable] = None
         self._on_delete_formula: Optional[Callable] = None
@@ -651,53 +651,91 @@ class SettingsScreen(Screen):
         formula_desc.bind(size=formula_desc.setter("text_size"))
         formula_section.add_widget(formula_desc)
 
-        self._formula_input = TextInput(
-            text="",
-            hint_text="e.g. (alpha1 + alpha2) / (beta1 + beta2 + 1)",
-            font_size=F.BODY,
-            size_hint_y=None,
-            height=dp(40),
-            multiline=False,
-            background_color=list(C.BG_INPUT),
-            foreground_color=C.TEXT,
-        )
-        self._formula_input.bind(on_text_validate=self._on_formula_submit)
-        formula_section.add_widget(self._formula_input)
+        # Three named formula slots, each with name + formula inputs,
+        # Apply/Save buttons, and a status label.
+        self._formula_inputs: list[TextInput] = []
+        self._formula_name_inputs: list[TextInput] = []
+        self._formula_statuses: list[Label] = []
+        for i in range(3):
+            slot_header = Label(
+                text=f"Formula {i + 1}",
+                font_size=F.SMALL,
+                bold=True,
+                size_hint_y=None,
+                height=dp(20),
+                color=C.TEXT_SECONDARY,
+                halign="left",
+            )
+            slot_header.bind(size=slot_header.setter("text_size"))
+            formula_section.add_widget(slot_header)
 
-        formula_btns = BoxLayout(
-            size_hint_y=None, height=dp(34), spacing=S.GAP_SM
-        )
-        formula_btn = StyledButton(
-            text="Apply",
-            font_size=F.BODY,
-            bg_color=C.PRIMARY,
-            size_hint_y=None,
-            height=dp(34),
-        )
-        formula_btn.bind(on_release=self._on_formula_submit)
-        formula_btns.add_widget(formula_btn)
+            name_input = TextInput(
+                text="",
+                hint_text=f"name (default Custom {i + 1})",
+                font_size=F.SMALL,
+                size_hint_y=None,
+                height=dp(36),
+                multiline=False,
+                background_color=list(C.BG_INPUT),
+                foreground_color=C.TEXT,
+            )
+            self._formula_name_inputs.append(name_input)
+            formula_section.add_widget(name_input)
 
-        save_btn = StyledButton(
-            text="Save",
-            font_size=F.BODY,
-            bg_color=C.ACCENT,
-            size_hint_y=None,
-            height=dp(34),
-        )
-        save_btn.bind(on_release=self._on_save_formula_pressed)
-        formula_btns.add_widget(save_btn)
-        formula_section.add_widget(formula_btns)
+            formula_input = TextInput(
+                text="",
+                hint_text="e.g. (alpha1 + alpha2) / (beta1 + beta2 + 1)",
+                font_size=F.BODY,
+                size_hint_y=None,
+                height=dp(40),
+                multiline=False,
+                background_color=list(C.BG_INPUT),
+                foreground_color=C.TEXT,
+            )
+            formula_input.slot_index = i
+            formula_input.bind(
+                on_text_validate=lambda _w, idx=i: self._submit_slot(idx)
+            )
+            self._formula_inputs.append(formula_input)
+            formula_section.add_widget(formula_input)
 
-        self._formula_status = Label(
-            text="",
-            font_size=F.SMALL,
-            size_hint_y=None,
-            height=dp(20),
-            color=C.ACCENT,
-            halign="left",
-        )
-        self._formula_status.bind(size=self._formula_status.setter("text_size"))
-        formula_section.add_widget(self._formula_status)
+            formula_btns = BoxLayout(
+                size_hint_y=None, height=dp(34), spacing=S.GAP_SM
+            )
+            apply_btn = StyledButton(
+                text="Apply",
+                font_size=F.BODY,
+                bg_color=C.PRIMARY,
+                size_hint_y=None,
+                height=dp(34),
+            )
+            apply_btn.slot_index = i
+            apply_btn.bind(on_release=lambda _w, idx=i: self._submit_slot(idx))
+            formula_btns.add_widget(apply_btn)
+
+            save_btn = StyledButton(
+                text="Save",
+                font_size=F.BODY,
+                bg_color=C.ACCENT,
+                size_hint_y=None,
+                height=dp(34),
+            )
+            save_btn.slot_index = i
+            save_btn.bind(on_release=lambda _w, idx=i: self._save_slot(idx))
+            formula_btns.add_widget(save_btn)
+            formula_section.add_widget(formula_btns)
+
+            status = Label(
+                text="",
+                font_size=F.SMALL,
+                size_hint_y=None,
+                height=dp(20),
+                color=C.ACCENT,
+                halign="left",
+            )
+            status.bind(size=status.setter("text_size"))
+            self._formula_statuses.append(status)
+            formula_section.add_widget(status)
 
         # Saved formulas header with export button
         saved_header = BoxLayout(size_hint_y=None, height=dp(26), spacing=S.GAP_SM)
@@ -944,17 +982,28 @@ class SettingsScreen(Screen):
         if self._on_line_width_change:
             self._on_line_width_change(val)
 
-    def _on_formula_submit(self, *args) -> None:
-        formula = self._formula_input.text.strip()
-        if self._on_custom_formula_change:
-            self._on_custom_formula_change(formula)
+    def _submit_slot(self, idx: int) -> None:
+        if self._on_formula_slot_change:
+            name = self._formula_name_inputs[idx].text.strip()
+            self._on_formula_slot_change(idx, name, self._formula_inputs[idx].text.strip())
 
-    def set_formula_status(self, text: str, is_error: bool = False) -> None:
-        self._formula_status.text = text
-        if is_error:
-            self._formula_status.color = C.DANGER
-        else:
-            self._formula_status.color = C.ACCENT
+    def _save_slot(self, idx: int) -> None:
+        """Save a slot's formula to the library, seeding the entry from its name."""
+        if self._on_save_formula:
+            self._on_save_formula(self._formula_name_inputs[idx].text.strip(),
+                                  self._formula_inputs[idx].text.strip())
+
+    def set_formula_slot_status(self, idx: int, text: str, is_error: bool = False) -> None:
+        self._formula_statuses[idx].text = text
+        self._formula_statuses[idx].color = C.DANGER if is_error else C.ACCENT
+
+    def set_formula_slot_callback(self, callback: Callable) -> None:
+        self._on_formula_slot_change = callback
+
+    def set_formula_slot(self, idx: int, name: str, formula: str) -> None:
+        """Reflect a programmatic slot change (load/restore) in the inputs."""
+        self._formula_name_inputs[idx].text = name
+        self._formula_inputs[idx].text = formula
 
     def _on_rotate_pressed(self, *args) -> None:
         self._current_rotation = (self._current_rotation + 90) % 360
@@ -1047,9 +1096,6 @@ class SettingsScreen(Screen):
     def set_rotate_screen_callback(self, callback: Callable) -> None:
         self._on_rotate_screen = callback
 
-    def set_custom_formula_callback(self, callback: Callable) -> None:
-        self._on_custom_formula_change = callback
-
     def set_save_formula_callback(self, callback: Callable) -> None:
         self._on_save_formula = callback
 
@@ -1065,14 +1111,6 @@ class SettingsScreen(Screen):
     def _on_export_formulas_pressed(self, *args) -> None:
         if self._on_export_formulas:
             self._on_export_formulas()
-
-    def _on_save_formula_pressed(self, *args) -> None:
-        formula = self._formula_input.text.strip()
-        if not formula:
-            self.set_formula_status("Nothing to save", is_error=True)
-            return
-        if self._on_save_formula:
-            self._on_save_formula(formula)
 
     def _on_load_formula_pressed(self, btn) -> None:
         idx = getattr(btn, "formula_index", -1)

@@ -471,7 +471,7 @@ class EEGMeditationApp(App):
         self._settings_screen.set_copy_diagnostics_callback(self._on_copy_diagnostics)
         self._settings_screen.set_line_width_callback(self._on_line_width_change)
         self._settings_screen.set_rotate_screen_callback(self._on_rotate_screen)
-        self._settings_screen.set_custom_formula_callback(self._on_custom_formula_change)
+        self._settings_screen.set_formula_slot_callback(self._on_formula_slot_change)
         self._settings_screen.set_save_formula_callback(self._on_save_formula)
         self._settings_screen.set_load_formula_callback(self._on_load_formula)
         self._settings_screen.set_delete_formula_callback(self._on_delete_formula)
@@ -1699,55 +1699,66 @@ class EEGMeditationApp(App):
         self._db.set_setting("theme", theme_name)
         logger.info(f"Theme changed to: {theme_name}")
 
-    def _on_custom_formula_change(self, formula: str, *, show: bool = True) -> None:
-        """Handle custom formula change from settings.
+    def _on_formula_slot_change(self, idx: int, name: str, formula: str, *, show: bool = True) -> None:
+        """Apply a slot's name+formula. show=True reveals the series (interactive).
 
         `show=True` (interactive apply) reveals the line on success — you typed a
         formula, you want to see it. `show=False` (restore) only sets eligibility;
         visibility is then decided by the persisted picker selection in
         _restore_graph_series, so a hidden-but-valid choice survives a reload.
         """
+        ev = self._formula_slots[idx]
+        key = FORMULA_KEYS[idx]
+        self._formula_names[idx] = name or f"Custom {idx + 1}"
+        self._live_screen.graph.set_series_name(key, self._formula_names[idx])
         if not formula:
-            self._formula_slots[0].set_formula("")
-            self._live_screen.graph.set_visible("custom_formula", False)
-            self._settings_screen.set_formula_status("Formula cleared")
-            logger.info("Custom formula cleared")
-            return
-        ok, err = self._formula_slots[0].set_formula(formula)
-        if ok:
-            # set_visible fires the graph's visibility callback → legend rebuilds.
-            if show:
-                self._live_screen.graph.set_visible("custom_formula", True)
-            self._settings_screen.set_formula_status("Formula active")
-            logger.info(f"Custom formula applied: {formula}")
+            ev.set_formula("")
+            self._live_screen.graph.set_visible(key, False)
+            self._settings_screen.set_formula_slot_status(idx, "Formula cleared")
+            logger.info(f"Custom formula slot {idx} cleared")
         else:
-            self._live_screen.graph.set_visible("custom_formula", False)
-            self._settings_screen.set_formula_status(f"Error: {err}", is_error=True)
+            ok, err = ev.set_formula(formula)
+            if ok:
+                # set_visible fires the graph's visibility callback → legend rebuilds.
+                if show:
+                    self._live_screen.graph.set_visible(key, True)
+                self._settings_screen.set_formula_slot_status(idx, "Formula active")
+                logger.info(f"Custom formula slot {idx} applied: {formula}")
+            else:
+                self._live_screen.graph.set_visible(key, False)
+                self._settings_screen.set_formula_slot_status(idx, f"Error: {err}", is_error=True)
+        if self._current_user_id:
+            self._persist_active_formulas(self._current_user_id)
 
-    def _on_save_formula(self, formula: str) -> None:
-        """Save the current formula to the user's saved list."""
+    def _on_save_formula(self, name: str, formula: str) -> None:
+        """Save a slot's formula to the user's saved library, named by the slot."""
         if not self._current_user_id:
-            self._settings_screen.set_formula_status("No user selected", is_error=True)
+            self._settings_screen.set_formula_slot_status(0, "No user selected", is_error=True)
             return
-        # Use a truncated version as the name
-        name = formula[:40] + ("..." if len(formula) > 40 else "")
-        ok = self._db.add_saved_formula(self._current_user_id, name, formula)
+        if not formula:
+            self._settings_screen.set_formula_slot_status(0, "Nothing to save", is_error=True)
+            return
+        # Fall back to a truncated formula as the display name when none is given.
+        label = name or (formula[:40] + ("..." if len(formula) > 40 else ""))
+        ok = self._db.add_saved_formula(self._current_user_id, label, formula)
         if ok:
-            self._settings_screen.set_formula_status("Formula saved")
+            self._settings_screen.set_formula_slot_status(0, "Formula saved")
             self._refresh_saved_formulas()
-            logger.info(f"Formula saved: {formula}")
+            logger.info(f"Formula saved: {label} = {formula}")
         else:
-            self._settings_screen.set_formula_status("Limit reached (50 max)", is_error=True)
+            self._settings_screen.set_formula_slot_status(0, "Limit reached (50 max)", is_error=True)
 
     def _on_load_formula(self, index: int) -> None:
-        """Load a saved formula into the input and apply it."""
+        """Load a saved formula into slot 0 and apply it (Task 8: first empty slot)."""
         if not self._current_user_id:
             return
         formulas = self._db.get_saved_formulas(self._current_user_id)
         if 0 <= index < len(formulas):
-            formula = formulas[index]["formula"]
-            self._settings_screen._formula_input.text = formula
-            self._on_custom_formula_change(formula)
+            entry = formulas[index]
+            formula = entry["formula"]
+            name = entry.get("name", "") or ""
+            self._settings_screen.set_formula_slot(0, name, formula)
+            self._on_formula_slot_change(0, name, formula)
 
     def _on_delete_formula(self, index: int) -> None:
         """Delete a saved formula."""
@@ -1755,24 +1766,24 @@ class EEGMeditationApp(App):
             return
         self._db.remove_saved_formula(self._current_user_id, index)
         self._refresh_saved_formulas()
-        self._settings_screen.set_formula_status("Formula deleted")
+        self._settings_screen.set_formula_slot_status(0, "Formula deleted")
         logger.info(f"Saved formula #{index} deleted")
 
     def _on_export_formulas(self) -> None:
         """Export saved formulas to a text file."""
         if not self._current_user_id:
-            self._settings_screen.set_formula_status("No user selected", is_error=True)
+            self._settings_screen.set_formula_slot_status(0, "No user selected", is_error=True)
             return
         formulas = self._db.get_saved_formulas(self._current_user_id)
         if not formulas:
-            self._settings_screen.set_formula_status("No formulas to export", is_error=True)
+            self._settings_screen.set_formula_slot_status(0, "No formulas to export", is_error=True)
             return
         export_dir = os.path.dirname(self._db._db_path)
         path = os.path.join(export_dir, f"formulas_user_{self._current_user_id}.txt")
         with open(path, "w") as f:
             for entry in formulas:
                 f.write(f"{entry['formula']}\n")
-        self._settings_screen.set_formula_status(f"Exported to {os.path.basename(path)}")
+        self._settings_screen.set_formula_slot_status(0, f"Exported to {os.path.basename(path)}")
         logger.info(f"Exported {len(formulas)} formulas to {path}")
 
     def _refresh_saved_formulas(self) -> None:
@@ -2484,8 +2495,9 @@ class EEGMeditationApp(App):
                 self._audio_formula_index = max(0, min(int(idx), _MAX_FORMULAS - 1))
             except (ValueError, TypeError):
                 pass
-        # Keep the Settings input in sync with slot 0 until multi-slot UI lands.
-        self._settings_screen._formula_input.text = self._formula_slots[0].formula
+        # Reflect every slot's name+formula into the Settings inputs.
+        for i in range(_MAX_FORMULAS):
+            self._settings_screen.set_formula_slot(i, self._formula_names[i], self._formula_slots[i].formula)
 
         self._restore_graph_series(user_id)
 

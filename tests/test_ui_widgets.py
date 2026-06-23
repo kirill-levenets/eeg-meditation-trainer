@@ -396,6 +396,45 @@ class TestSettingsTimerSoundRow(unittest.TestCase):
         self.assertFalse(self.screen._timer_sound_test_playing)
 
 
+class TestSettingsFormulaSlots(unittest.TestCase):
+    """Settings exposes three named formula slots, each with its own
+    name input, formula input, and status label."""
+
+    def setUp(self):
+        from app.ui.settings_screen import SettingsScreen
+        self.screen = SettingsScreen()
+
+    def test_settings_has_three_formula_slots(self):
+        self.assertEqual(len(self.screen._formula_inputs), 3)
+        self.assertEqual(len(self.screen._formula_name_inputs), 3)
+        self.assertEqual(len(self.screen._formula_statuses), 3)
+
+    def test_submit_slot_fires_callback_with_index_name_formula(self):
+        captured = []
+        self.screen.set_formula_slot_callback(
+            lambda idx, name, formula: captured.append((idx, name, formula))
+        )
+        self.screen._formula_name_inputs[1].text = "  Focus  "
+        self.screen._formula_inputs[1].text = "  alpha + beta  "
+        self.screen._submit_slot(1)
+        self.assertEqual(captured, [(1, "Focus", "alpha + beta")])
+
+    def test_save_slot_reuses_library_callback_with_name_and_formula(self):
+        captured = []
+        self.screen.set_save_formula_callback(
+            lambda name, formula: captured.append((name, formula))
+        )
+        self.screen._formula_name_inputs[2].text = "Calm"
+        self.screen._formula_inputs[2].text = "theta / (delta + 1)"
+        self.screen._save_slot(2)
+        self.assertEqual(captured, [("Calm", "theta / (delta + 1)")])
+
+    def test_set_formula_slot_reflects_into_inputs(self):
+        self.screen.set_formula_slot(0, "MyName", "alpha")
+        self.assertEqual(self.screen._formula_name_inputs[0].text, "MyName")
+        self.assertEqual(self.screen._formula_inputs[0].text, "alpha")
+
+
 class TestAccordionGrandchildGrowth(unittest.TestCase):
     """Regression: when content height grows AFTER the section was first
     opened (e.g. populate_bt_devices appending rows after the user opened

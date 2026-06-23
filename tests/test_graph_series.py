@@ -166,7 +166,7 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         from app.metrics.custom_formula import CustomFormulaEvaluator
 
         self.app._formula_slots[0] = CustomFormulaEvaluator()
-        self.app._settings_screen.set_formula_status = lambda *a, **k: None
+        self.app._settings_screen.set_formula_slot_status = lambda *a, **k: None
         formula = "alpha + beta"
 
         self.app._db.set_user_json_setting(
@@ -174,7 +174,7 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         )
         self.app._db.set_user_setting(self.uid, "custom_formula", formula)
 
-        self.app._on_custom_formula_change(formula, show=False)
+        self.app._on_formula_slot_change(0, "", formula, show=False)
         self.app._restore_graph_series(self.uid)
 
         self.assertTrue(self.app._formula_slots[0].is_valid)  # formula loaded
@@ -184,7 +184,7 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         from app.metrics.custom_formula import CustomFormulaEvaluator
 
         self.app._formula_slots[0] = CustomFormulaEvaluator()
-        self.app._settings_screen.set_formula_status = lambda *a, **k: None
+        self.app._settings_screen.set_formula_slot_status = lambda *a, **k: None
         formula = "alpha + beta"
 
         self.app._db.set_user_json_setting(
@@ -192,7 +192,7 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         )
         self.app._db.set_user_setting(self.uid, "custom_formula", formula)
 
-        self.app._on_custom_formula_change(formula, show=False)
+        self.app._on_formula_slot_change(0, "", formula, show=False)
         self.app._restore_graph_series(self.uid)
 
         self.assertTrue(self.graph.is_visible("custom_formula"))
