@@ -121,6 +121,35 @@ class EEGMeditationApp(App):
             return self._formula_slots[FORMULA_KEYS.index(key)]
         return None
 
+    def _apply_active_formulas(self, active: list[dict] | None) -> None:
+        """Load an active_formulas list into the slots (names + formulas)."""
+        active = active or []
+        for i in range(_MAX_FORMULAS):
+            entry = active[i] if i < len(active) and isinstance(active[i], dict) else {}
+            self._formula_names[i] = entry.get("name") or f"Custom {i + 1}"
+            self._formula_slots[i].set_formula(entry.get("formula", "") or "")
+
+    def _persist_active_formulas(self, user_id: int) -> None:
+        """Serialize all slots (names + formulas) to a single JSON key."""
+        active = [
+            {"name": self._formula_names[i], "formula": self._formula_slots[i].formula}
+            for i in range(_MAX_FORMULAS)
+        ]
+        self._db.set_user_json_setting(user_id, "active_formulas", active)
+
+    def _read_active_formulas_with_migration(self, user_id: int) -> list[dict]:
+        """Return active_formulas if present, else seed slot 1 from the legacy scalar."""
+        active = self._db.get_user_json_setting(user_id, "active_formulas")
+        if isinstance(active, list):
+            return active
+        legacy = self._db.get_user_setting(user_id, "custom_formula")
+        return [{"name": "Custom 1", "formula": legacy}] if legacy else []
+
+    def _push_formula_names_to_graph(self) -> None:
+        """Propagate slot display names to the live metrics graph's series labels."""
+        for key, name in zip(FORMULA_KEYS, self._formula_names):
+            self._live_screen.graph.set_series_name(key, name)
+
     def _acquire_wake_lock(self) -> None:
         """Keep CPU running + screen on during session (Android only)."""
         if not hasattr(sys, "getandroidapilevel"):
@@ -2335,9 +2364,8 @@ class EEGMeditationApp(App):
         self._db.set_user_setting(
             uid, "rotation", str(self._settings_screen._current_rotation)
         )
-        self._db.set_user_setting(
-            uid, "custom_formula", self._formula_slots[0].formula
-        )
+        self._persist_active_formulas(uid)
+        self._db.set_user_setting(uid, "audio_formula_index", str(self._audio_formula_index))
         # Save zoom level as viewport duration in seconds
         graph = self._live_screen.graph
         zoom_seconds = graph.viewport_points / graph._sample_rate
@@ -2446,16 +2474,15 @@ class EEGMeditationApp(App):
             except (ValueError, TypeError):
                 pass
 
-        # Load the formula BEFORE restoring graph series so _restore_graph_series'
-        # custom_formula validity gate sees the real is_valid. show=False so the
-        # persisted picker selection — not the formula-apply — decides visibility.
-        saved_formula = g(user_id, "custom_formula")
-        if saved_formula:
-            self._settings_screen._formula_input.text = saved_formula
-            self._on_custom_formula_change(saved_formula, show=False)
-        else:
-            self._settings_screen._formula_input.text = ""
-            self._on_custom_formula_change("", show=False)
+        # Load formulas BEFORE _restore_graph_series so the per-slot validity gate
+        # sees real is_valid; the picker selection (graph_series_*) decides visibility.
+        self._apply_active_formulas(self._read_active_formulas_with_migration(user_id))
+        self._push_formula_names_to_graph()
+        idx = g(user_id, "audio_formula_index")
+        if idx is not None and idx.isdigit() and 0 <= int(idx) < _MAX_FORMULAS:
+            self._audio_formula_index = int(idx)
+        # Keep the Settings input in sync with slot 0 until multi-slot UI lands.
+        self._settings_screen._formula_input.text = self._formula_slots[0].formula
 
         self._restore_graph_series(user_id)
 
