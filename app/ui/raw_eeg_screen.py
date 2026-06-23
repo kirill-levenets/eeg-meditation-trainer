@@ -78,6 +78,7 @@ class ScrollableGraphWidget(Widget):
         self._scroll_change_callback = None
         self._tap_callback = None
         self._expand_callback = None
+        self._series_callback = None
         self._touch_moved: bool = False
         self._gfx: InstructionGroup = InstructionGroup()
         self.canvas.add(self._gfx)
@@ -145,6 +146,16 @@ class ScrollableGraphWidget(Widget):
         if metric in self._visible:
             self._visible[metric] = visible
             self._redraw()
+
+    def is_visible(self, metric: str) -> bool:
+        return self._visible.get(metric, False)
+
+    def visible_keys(self) -> list[str]:
+        return [k for k, v in self._visible.items() if v]
+
+    def series_keys(self) -> list[str]:
+        """All series this graph can plot (the catalog set at construction)."""
+        return list(self._data.keys())
 
     def set_scroll_offset(self, offset: int) -> None:
         self._scroll_offset = max(0, min(offset, self.max_scroll))
@@ -325,6 +336,7 @@ class ScrollableGraphWidget(Widget):
             ))
 
         if end_idx <= start_idx:
+            self._draw_series_icon()
             self._draw_expand_icon()
             return
 
@@ -472,6 +484,7 @@ class ScrollableGraphWidget(Widget):
                         self._gfx.add(Color(*TC.THRESHOLD_LINE))
                         self._gfx.add(Line(points=[x_pos, graph_y, x_pos, graph_y + graph_h], width=1.5))
 
+        self._draw_series_icon()
         self._draw_expand_icon()
 
     @staticmethod
@@ -546,11 +559,15 @@ class ScrollableGraphWidget(Widget):
         if hasattr(touch, "button") and touch.button in ("scrollup", "scrolldown"):
             return True
 
-        # Expand-to-fullscreen icon: intercept before grab so a tap opens
-        # fullscreen instead of scrolling. Hit-test in WINDOW coordinates —
-        # the only unambiguous frame (GraphAwareScrollView forwards touches in
-        # a mid-chain frame matching neither the canvas rect nor to_widget).
-        if self._expand_callback is not None and self._touch_on_expand_icon(touch):
+        # On-graph glyphs (series picker, expand) — intercept before grab so a
+        # tap fires the affordance instead of scrolling. Hit-test in WINDOW
+        # coordinates, the only unambiguous frame (GraphAwareScrollView forwards
+        # touches in a mid-chain frame matching neither the canvas rect nor
+        # to_widget).
+        if self._series_callback is not None and self._touch_in_window_rect(touch, self._series_icon_rect()):
+            self._series_callback(self)
+            return True
+        if self._expand_callback is not None and self._touch_in_window_rect(touch, self._expand_icon_rect()):
             self._expand_callback(self)
             return True
 
@@ -618,59 +635,82 @@ class ScrollableGraphWidget(Widget):
         self._expand_callback = callback
         self._redraw()
 
+    def set_series_picker_callback(self, callback) -> None:
+        """Set callback invoked with `self` when the series-picker glyph is tapped.
+
+        Setting a callback reveals the glyph (top-left); pass None to hide it.
+        """
+        self._series_callback = callback
+        self._redraw()
+
+    def _icon_too_small(self) -> bool:
+        return self.width < dp(60) or self.height < dp(60)
+
     def _expand_icon_rect(self):
-        """Rect (x, y, w, h) for the expand icon, or None when hidden.
-
-        The drawn glyph and the touch hit area use this same rect, so the
-        visible box is exactly the tap target.
-        """
-        if self._expand_callback is None:
+        """Rect (x, y, w, h) for the expand glyph (top-right), or None when hidden."""
+        if self._expand_callback is None or self._icon_too_small():
             return None
-        if self.width < dp(60) or self.height < dp(60):
-            return None
-        size = dp(44)
-        margin = dp(6)
-        x = self.x + self.width - size - margin
-        y = self.y + self.height - size - margin
-        return (x, y, size, size)
+        size, margin = dp(44), dp(6)
+        return (self.x + self.width - size - margin, self.y + self.height - size - margin, size, size)
 
-    def _touch_on_expand_icon(self, touch) -> bool:
-        """True if `touch` falls on the expand glyph, compared in window coords.
+    def _series_icon_rect(self):
+        """Rect (x, y, w, h) for the series-picker glyph (top-left), or None.
 
-        The touch's canonical window position (sx/sy) is compared against the
-        glyph's rendered window rect — the one frame that isn't ambiguous under
-        the GraphAwareScrollView touch-forwarding transform.
+        Offset right of the Y-axis value-label gutter so it doesn't overlap them.
         """
-        r = self._expand_icon_rect()
-        if r is None:
+        if self._series_callback is None or self._icon_too_small():
+            return None
+        size, margin = dp(44), dp(6)
+        gutter = dp(48) if self._show_value_labels else dp(10)
+        return (self.x + gutter + margin, self.y + self.height - size - margin, size, size)
+
+    def _touch_in_window_rect(self, touch, rect) -> bool:
+        """True if `touch` falls in `rect`, compared in WINDOW coordinates.
+
+        The touch's canonical window position (sx/sy) vs the rect's rendered
+        window rect — the one frame that isn't ambiguous under the
+        GraphAwareScrollView touch-forwarding transform.
+        """
+        if rect is None:
             return False
-        wx0, wy0 = self.to_window(r[0], r[1])
-        wx1, wy1 = self.to_window(r[0] + r[2], r[1] + r[3])
+        wx0, wy0 = self.to_window(rect[0], rect[1])
+        wx1, wy1 = self.to_window(rect[0] + rect[2], rect[1] + rect[3])
         tx, ty = touch.sx * Window.width, touch.sy * Window.height
         win_rect = (min(wx0, wx1), min(wy0, wy1), abs(wx1 - wx0), abs(wy1 - wy0))
         return point_in_rect(tx, ty, win_rect)
 
+    def _draw_icon_backing(self, rect) -> None:
+        self._gfx.add(Color(0, 0, 0, 0.40))
+        self._gfx.add(Rectangle(pos=(rect[0], rect[1]), size=(rect[2], rect[3])))
+        self._gfx.add(Color(0.92, 0.92, 0.96, 0.95))
+
     def _draw_expand_icon(self) -> None:
-        """Draw the top-right fullscreen-expand glyph (four outward corner brackets)."""
+        """Top-right fullscreen-expand glyph (four outward corner brackets)."""
         rect = self._expand_icon_rect()
         if rect is None:
             return
+        self._draw_icon_backing(rect)
         ix, iy, iw, ih = rect
-        # Semi-opaque backing so the glyph reads over any line color / theme.
-        self._gfx.add(Color(0, 0, 0, 0.40))
-        self._gfx.add(Rectangle(pos=(ix, iy), size=(iw, ih)))
-        self._gfx.add(Color(0.92, 0.92, 0.96, 0.95))
-        pad = dp(11)
-        arm = dp(9)
-        left = ix + pad
-        right = ix + iw - pad
-        bottom = iy + pad
-        top = iy + ih - pad
-        lw = 1.6
+        pad, arm, lw = dp(11), dp(9), 1.6
+        left, right = ix + pad, ix + iw - pad
+        bottom, top = iy + pad, iy + ih - pad
         self._gfx.add(Line(points=[left, bottom + arm, left, bottom, left + arm, bottom], width=lw))
         self._gfx.add(Line(points=[right - arm, bottom, right, bottom, right, bottom + arm], width=lw))
         self._gfx.add(Line(points=[left, top - arm, left, top, left + arm, top], width=lw))
         self._gfx.add(Line(points=[right - arm, top, right, top, right, top - arm], width=lw))
+
+    def _draw_series_icon(self) -> None:
+        """Top-left series-picker glyph: three stacked lines (a list) + a chevron."""
+        rect = self._series_icon_rect()
+        if rect is None:
+            return
+        self._draw_icon_backing(rect)
+        ix, iy, iw, ih = rect
+        pad, lw = dp(12), 1.6
+        left, right = ix + pad, ix + iw - pad
+        for i in range(3):  # three horizontal "list" lines, top to bottom
+            ly = iy + ih - pad - i * dp(6)
+            self._gfx.add(Line(points=[left, ly, right, ly], width=lw))
 
     def add_marker(self, index: Optional[int] = None) -> None:
         """Add a marker at the given data point index (default: current end)."""

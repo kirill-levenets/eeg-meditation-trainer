@@ -411,13 +411,17 @@ class EEGMeditationApp(App):
         # Keyboard hotkey for marker
         Window.bind(on_key_down=self._on_key_down)
 
-        # Hide custom formula on graph until enabled via checkbox
+        # Hide custom formula on graph until enabled via picker
         self._live_screen.graph.set_visible("custom_formula", False)
         # Apply default metric visibility (Shamatha only for new users;
-        # _restore_user_settings will override for existing users)
+        # _load_user_settings will override for existing users)
         for key, active in self._settings_screen._graph_toggles.items():
             self._live_screen.graph.set_visible(key, active)
         self._audio_metric_key: str = "shamatha_score"
+
+        # On-graph series picker (combobox) — drives the same visibility state.
+        self._live_screen.on_series_toggle = self._on_series_toggle
+        self._live_screen.on_series_picker_dismiss = self._on_series_picker_dismiss
 
         self._diary_screen.set_session_select_callback(self._on_session_select)
         self._diary_screen.set_save_notes_callback(self._on_save_notes)
@@ -1543,9 +1547,28 @@ class EEGMeditationApp(App):
         if metric == "sinking":
             self._audio.sinking_alert_enabled = active
             self._settings_screen._sinking_alert_cb.active = active
-        enabled_keys = [k for k, v in self._settings_screen._graph_toggles.items() if v]
-        self._live_screen._rebuild_metric_legend(enabled_keys)
+        self._live_screen._rebuild_metric_legend(self._live_screen.graph.visible_keys())
         logger.debug(f"Graph toggle: {metric}={'on' if active else 'off'}")
+
+    def _on_series_toggle(self, key: str) -> None:
+        """On-graph series picker tapped a row — flip that series' visibility.
+
+        Routes through the existing checkbox state so the Settings UI stays in
+        sync; the checkbox's `active` bind drives set_visible + legend rebuild.
+        """
+        visible = self._live_screen.graph.is_visible(key)
+        if key == "custom_formula":
+            self._settings_screen._custom_formula_cb.active = not visible
+        elif key in self._settings_screen._checkboxes:
+            self._settings_screen._checkboxes[key].active = not visible
+
+    def _on_series_picker_dismiss(self) -> None:
+        """Persist the per-graph series selection when the picker closes."""
+        uid = self._current_user_id
+        if uid:
+            self._db.set_user_json_setting(
+                uid, "graph_series_live_metrics", self._live_screen.graph.visible_keys()
+            )
 
     def _on_test_audio(self) -> None:
         logger.debug("Test audio triggered")
@@ -1568,6 +1591,7 @@ class EEGMeditationApp(App):
         """Toggle custom formula line visibility on graph."""
         show = active and self._custom_formula.is_valid
         self._live_screen.graph.set_visible("custom_formula", show)
+        self._live_screen._rebuild_metric_legend(self._live_screen.graph.visible_keys())
         logger.debug(f"Custom formula visibility: {show}")
 
     def _on_audio_metric_change(self, key: str) -> None:
@@ -2252,12 +2276,37 @@ class EEGMeditationApp(App):
             uid, "custom_formula_visible",
             str(self._settings_screen.custom_formula_visible),
         )
+        # Per-graph series selection (the on-graph combobox source of truth).
+        self._db.set_user_json_setting(
+            uid, "graph_series_live_metrics", self._live_screen.graph.visible_keys()
+        )
         self._db.set_user_setting(uid, "audio_metric", self._audio_metric_key)
         self._db.set_user_setting(uid, "marker_hotkey", self._settings_screen.marker_hotkey)
         self._db.set_user_setting(
             uid, "stats_view_mode", getattr(self._live_screen, "_stats_mode", "live")
         )
         logger.debug(f"Saved settings for user {uid}")
+
+    def _restore_graph_series(self, user_id: int) -> None:
+        """Apply the per-graph series selection: prefer the new JSON key, else
+        migrate from the legacy per-metric toggle_<key> rows. custom_formula is
+        restored separately via custom_formula_visible."""
+        series = self._db.get_user_json_setting(user_id, "graph_series_live_metrics")
+        if series is not None:
+            sel = set(series)
+        else:
+            sel = set()
+            for key in self._settings_screen._checkboxes:
+                saved = self._db.get_user_setting(user_id, f"toggle_{key}")
+                active = (saved == "True") if saved is not None \
+                    else self._settings_screen._graph_toggles.get(key, True)
+                if active:
+                    sel.add(key)
+        for key, cb in self._settings_screen._checkboxes.items():
+            on = key in sel
+            cb.active = on
+            self._live_screen.graph.set_visible(key, on)
+        self._live_screen._rebuild_metric_legend(self._live_screen.graph.visible_keys())
 
     def _load_user_settings(self, user_id: int) -> None:
         """Restore persisted settings for a user."""
@@ -2311,19 +2360,7 @@ class EEGMeditationApp(App):
             except (ValueError, TypeError):
                 pass
 
-        for key, cb in self._settings_screen._checkboxes.items():
-            saved = g(user_id, f"toggle_{key}")
-            if saved is not None:
-                active = saved == "True"
-                cb.active = active
-                self._live_screen.graph.set_visible(key, active)
-            else:
-                # New user: apply the default from _graph_toggles
-                default = self._settings_screen._graph_toggles.get(key, True)
-                self._live_screen.graph.set_visible(key, default)
-        # Rebuild legend to reflect restored/default visibility
-        enabled_keys = [k for k, v in self._settings_screen._graph_toggles.items() if v]
-        self._live_screen._rebuild_metric_legend(enabled_keys)
+        self._restore_graph_series(user_id)
 
         # Skip BT/mock restore if --serial override is active
         if not self.serial_device_override:

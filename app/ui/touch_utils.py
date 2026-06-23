@@ -9,7 +9,7 @@ in a mid-chain frame that matches neither its canvas-drawn rect (`touch.x/y`)
 nor a `to_widget`/`to_local` conversion. The robust approach there is to compare
 in WINDOW coordinates — the touch's canonical window position
 (`touch.sx*Window.width, touch.sy*Window.height`) against the target's rendered
-window rect (`widget.to_window(...)`). See `ScrollableGraphWidget._touch_on_expand_icon`.
+window rect (`widget.to_window(...)`). See `ScrollableGraphWidget._touch_in_window_rect`.
 `point_in_rect` is the shared rect test used on both sides.
 """
 

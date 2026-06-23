@@ -72,6 +72,17 @@ METRICS_SCALES = {
     "custom_formula": 200.0,
 }
 
+# Friendly labels for the on-graph series picker (combobox).
+SERIES_NAMES = {
+    "shamatha_score": "Shamatha",
+    "distraction": "Distraction",
+    "sinking": "Sinking",
+    "subtle_distraction": "Subtle Distraction",
+    "native_attention": "NS Attention",
+    "native_meditation": "NS Meditation",
+    "custom_formula": "Custom Formula",
+}
+
 
 def _compute_graph_height(viewport_h: float, floor_dp: float) -> float:
     """Return the height the graph area should take: fill the viewport, floor at floor_dp."""
@@ -305,6 +316,10 @@ class LiveSessionScreen(Screen):
         # ── Metrics view (default) ──
         self._metrics_container = BoxLayout(orientation="vertical", spacing=S.GAP_SM)
 
+        # Series picker (on-graph combobox) + persist callbacks, set by app_manager.
+        self.on_series_toggle = None          # (key) -> None
+        self.on_series_picker_dismiss = None  # () -> None (persist on close)
+
         self._graph = ScrollableGraphWidget(
             colors=METRICS_COLORS,
             scales=METRICS_SCALES,
@@ -318,6 +333,10 @@ class LiveSessionScreen(Screen):
         # Heatmap-color the shamatha line: blue at 0 → red at 100+.
         # Colour tracks meditation depth visually instead of a flat hue.
         self._graph.set_heatmap_color("shamatha_score")
+        # On-graph series picker glyph (top-left), drawn into the canvas like the
+        # expand glyph and hit-tested the same way — so it can't be starved by
+        # the ScrollView the way an overlaid widget would.
+        self._graph.set_series_picker_callback(self._open_series_popup)
         self._metrics_container.add_widget(self._graph)
 
         self._legend = BoxLayout(size_hint_y=None, height=dp(18), spacing=S.GAP_SM)
@@ -838,6 +857,40 @@ class LiveSessionScreen(Screen):
 
     # ── Duration preset hooks ──
     on_duration_preset = None  # set by AppManager; called with value (int or None)
+
+    def _open_series_popup(self, *_args) -> None:
+        """Open a multi-select popup to choose which metrics the graph plots."""
+        body = BoxLayout(orientation="vertical", spacing=S.GAP_SM, padding=S.GAP)
+        self._series_rows = {}
+        for key in METRICS_COLORS:
+            vis = self._graph.is_visible(key)
+            btn = StyledButton(
+                text=SERIES_NAMES.get(key, key), height=dp(44),
+                bg_color=C.ACCENT if vis else C.BG_CARD,
+                text_color=C.TEXT if vis else C.TEXT_SECONDARY, bold=vis,
+            )
+            btn.bind(on_release=lambda b, k=key: self._toggle_series_row(k, b))
+            body.add_widget(btn)
+            self._series_rows[key] = btn
+        self._series_popup = Popup(
+            title="Graph series",
+            content=body,
+            size_hint=(0.8, None),
+            height=dp(80 + 50 * len(METRICS_COLORS)),
+            auto_dismiss=True,
+        )
+        if self.on_series_picker_dismiss is not None:
+            self._series_popup.bind(on_dismiss=lambda *_a: self.on_series_picker_dismiss())
+        self._series_popup.open()
+
+    def _toggle_series_row(self, key, btn) -> None:
+        """Toggle one series (stays in the popup for multi-select)."""
+        if self.on_series_toggle is not None:
+            self.on_series_toggle(key)
+        vis = self._graph.is_visible(key)
+        btn.bg_color = C.ACCENT if vis else C.BG_CARD
+        btn.text_color = C.TEXT if vis else C.TEXT_SECONDARY
+        btn.bold = vis
 
     def _open_duration_popup(self, *_args) -> None:
         """Open a modal Popup to pick a session duration preset."""
