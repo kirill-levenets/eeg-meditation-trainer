@@ -71,3 +71,23 @@ class TestFormulaPersistence(unittest.TestCase):
         active = self.app._read_active_formulas_with_migration(self.uid)
         self.assertEqual(active[0]["formula"], "alpha / (beta + 1)")
         self.assertEqual(active[0]["name"], "Custom 1")
+
+
+class TestAudioDriveKey(unittest.TestCase):
+    def _app(self):
+        app = EEGMeditationApp.__new__(EEGMeditationApp)
+        app._init_formula_slots()
+        return app
+
+    def test_audio_falls_back_to_shamatha_when_bound_slot_invalid(self):
+        app = self._app()
+        app._audio_metric_key = "custom_formula_2"   # slot 2 bound...
+        app._audio_formula_index = 1                  # ...but slot 2 has no formula
+        self.assertEqual(app._audio_drive_key(), "shamatha_score")
+        app._formula_slots[1].set_formula("alpha + beta")  # now valid
+        self.assertEqual(app._audio_drive_key(), "custom_formula_2")
+
+    def test_audio_drive_key_passthrough_for_non_formula(self):
+        app = self._app()
+        app._audio_metric_key = "shamatha_score"
+        self.assertEqual(app._audio_drive_key(), "shamatha_score")

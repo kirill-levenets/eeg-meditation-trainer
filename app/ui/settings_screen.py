@@ -436,6 +436,9 @@ class SettingsScreen(Screen):
         self._audio_metric_radios: dict[str, CheckBox] = {}
         self._audio_metric_selected: str = "shamatha_score"
         self._on_audio_metric_change: Optional[Callable] = None
+        self._on_audio_formula_index_cb: Optional[Callable] = None
+        self._audio_formula_index_selected: int = 0
+        self._audio_formula_index_buttons: list[StyledButton] = []
         audio_metric_options = {
             "shamatha_score": "Shamatha Score",
             "native_meditation": "NS Meditation",
@@ -464,6 +467,32 @@ class SettingsScreen(Screen):
             row.add_widget(lbl)
             threshold_section.add_widget(row)
             self._audio_metric_radios[key] = rb
+
+        # Formula slot index selector (shown below the custom-formula radio)
+        index_row = BoxLayout(size_hint_y=None, height=dp(32), spacing=S.GAP)
+        index_row.add_widget(Label(
+            text="    Slot:",
+            font_size=F.SMALL,
+            color=C.TEXT_SECONDARY,
+            size_hint_x=0.25,
+            halign="left", valign="middle",
+        ))
+        btn_box = BoxLayout(size_hint_x=0.75, spacing=S.GAP)
+        for slot_idx, slot_label in enumerate(("1", "2", "3")):
+            btn = StyledButton(
+                text=slot_label,
+                font_size=F.SMALL,
+                size_hint_y=None,
+                height=dp(28),
+                bg_color=C.ACCENT if slot_idx == 0 else C.BG_CARD,
+                text_color=C.TEXT,
+            )
+            btn._slot_idx = slot_idx
+            btn.bind(on_release=self._on_audio_formula_index_pressed)
+            btn_box.add_widget(btn)
+            self._audio_formula_index_buttons.append(btn)
+        index_row.add_widget(btn_box)
+        threshold_section.add_widget(index_row)
 
         # --- Audio section ---
         audio_section = accordion.add_section("Audio", collapsed=True)
@@ -1374,6 +1403,15 @@ class SettingsScreen(Screen):
     def set_audio_metric_callback(self, callback: Callable) -> None:
         self._on_audio_metric_change = callback
 
+    def set_audio_formula_index_callback(self, callback: Callable) -> None:
+        self._on_audio_formula_index_cb = callback
+
+    def _on_audio_formula_index_pressed(self, btn) -> None:
+        idx = getattr(btn, "_slot_idx", 0)
+        self.audio_formula_index = idx
+        if self._on_audio_formula_index_cb:
+            self._on_audio_formula_index_cb(idx)
+
     # --- Profile callbacks and methods ---
 
     def set_profile_callbacks(self, on_switch=None, on_create=None, on_delete=None):
@@ -1482,3 +1520,13 @@ class SettingsScreen(Screen):
         self._audio_metric_selected = key
         for k, rb in self._audio_metric_radios.items():
             rb.active = (k == key)
+
+    @property
+    def audio_formula_index(self) -> int:
+        return self._audio_formula_index_selected
+
+    @audio_formula_index.setter
+    def audio_formula_index(self, idx: int) -> None:
+        self._audio_formula_index_selected = idx
+        for i, btn in enumerate(self._audio_formula_index_buttons):
+            btn.bg_color = C.ACCENT if i == idx else C.BG_CARD

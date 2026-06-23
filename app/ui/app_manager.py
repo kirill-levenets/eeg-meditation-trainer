@@ -477,6 +477,7 @@ class EEGMeditationApp(App):
         self._settings_screen.set_delete_formula_callback(self._on_delete_formula)
         self._settings_screen.set_export_formulas_callback(self._on_export_formulas)
         self._settings_screen.set_audio_metric_callback(self._on_audio_metric_change)
+        self._settings_screen.set_audio_formula_index_callback(self._on_audio_formula_index)
         self._settings_screen.set_theme_callback(self._on_theme_change)
 
         # Keyboard hotkey for marker
@@ -1459,7 +1460,7 @@ class EEGMeditationApp(App):
         self._raw_buffer.append(raw_sample)
 
         # Audio is thread-safe — update directly
-        self._audio.update(metrics.get(self._audio_metric_key, 0))
+        self._audio.update(metrics.get(self._audio_drive_key(), 0))
         if self._tick_count > 10:
             self._audio.update_sinking(metrics.get("sinking", 0))
             self._audio.update_subtle_distraction(metrics.get("subtle_distraction", 0))
@@ -1689,10 +1690,26 @@ class EEGMeditationApp(App):
         Window.rotation = rotation
         logger.info(f"Screen rotation set to {rotation}")
 
+    def _audio_drive_key(self) -> str:
+        """Metric key feeding noise; falls back to shamatha if a bound formula slot
+        is invalid (a missing series reads 0 → would otherwise drive MAX noise)."""
+        ev = self._formula_for_key(self._audio_metric_key)
+        if ev is not None and not ev.is_valid:
+            return "shamatha_score"
+        return self._audio_metric_key
+
     def _on_audio_metric_change(self, key: str) -> None:
         """Switch which metric drives the audio threshold feedback."""
-        self._audio_metric_key = key
-        logger.info(f"Audio threshold metric changed to: {key}")
+        if key == "custom_formula":
+            self._audio_metric_key = FORMULA_KEYS[self._audio_formula_index]
+        else:
+            self._audio_metric_key = key
+        logger.info(f"Audio threshold metric changed to: {self._audio_metric_key}")
+
+    def _on_audio_formula_index(self, idx: int) -> None:
+        """Audio is bound to formula slot idx (when the custom-formula option is selected)."""
+        self._audio_formula_index = max(0, min(idx, _MAX_FORMULAS - 1))
+        self._audio_metric_key = FORMULA_KEYS[self._audio_formula_index]
 
     def _on_theme_change(self, theme_name: str) -> None:
         """Save selected theme."""
@@ -2557,8 +2574,13 @@ class EEGMeditationApp(App):
 
         audio_met = g(user_id, "audio_metric")
         if audio_met is not None:
-            self._settings_screen.audio_metric = audio_met
             self._audio_metric_key = audio_met
+            if audio_met in FORMULA_KEYS:
+                self._audio_formula_index = FORMULA_KEYS.index(audio_met)
+            # Reflect audio_metric: radios use "custom_formula" key for any formula slot
+            ui_key = "custom_formula" if audio_met in FORMULA_KEYS else audio_met
+            self._settings_screen.audio_metric = ui_key
+            self._settings_screen.audio_formula_index = self._audio_formula_index
 
         marker_hk = g(user_id, "marker_hotkey")
         if marker_hk is not None:
