@@ -1637,7 +1637,7 @@ class EEGMeditationApp(App):
                     bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY,
                 )
                 slot_idx = FORMULA_KEYS.index(key)
-                choose_btn.bind(on_release=lambda _b, k=key, si=slot_idx: self._open_saved_formula_chooser(graph, k, si))
+                choose_btn.bind(on_release=lambda _b, si=slot_idx, tb=btn: self._open_saved_formula_chooser(si, tb))
                 row.add_widget(btn)
                 row.add_widget(choose_btn)
                 body.add_widget(row)
@@ -1658,8 +1658,9 @@ class EEGMeditationApp(App):
         popup.bind(on_dismiss=lambda *_a: self._persist_graph_series(graph))
         popup.open()
 
-    def _open_saved_formula_chooser(self, graph, key: str, slot_idx: int) -> None:
-        """Open a second popup listing saved formulas; selecting one assigns it to slot_idx."""
+    def _open_saved_formula_chooser(self, slot_idx: int, toggle_btn) -> None:
+        """Open a second popup listing saved formulas; selecting one assigns it to
+        slot_idx and refreshes the picker's toggle button to its new visible state."""
         if not self._current_user_id:
             return
         formulas = self._db.get_saved_formulas(self._current_user_id)
@@ -1670,6 +1671,15 @@ class EEGMeditationApp(App):
             height=dp(80 + 50 * (max(len(formulas), 1) + 1)),
             auto_dismiss=True,
         )
+
+        def _choose(entry):
+            inner_popup.dismiss()
+            self._assign_saved_to_slot(slot_idx, entry)
+            vis = self._live_screen.graph.is_visible(FORMULA_KEYS[slot_idx])
+            toggle_btn.bg_color = C.ACCENT if vis else C.BG_CARD
+            toggle_btn.text_color = C.TEXT if vis else C.TEXT_SECONDARY
+            toggle_btn.bold = vis
+
         if not formulas:
             inner_body.add_widget(Label(
                 text="No saved formulas", color=C.TEXT_SECONDARY,
@@ -1682,10 +1692,7 @@ class EEGMeditationApp(App):
                     height=dp(44),
                     bg_color=C.BG_CARD, text_color=C.TEXT,
                 )
-                row_btn.bind(on_release=lambda _b, e=entry: (
-                    self._assign_saved_to_slot(slot_idx, e),
-                    inner_popup.dismiss(),
-                ))
+                row_btn.bind(on_release=lambda _b, e=entry: _choose(e))
                 inner_body.add_widget(row_btn)
         cancel_btn = StyledButton(
             text="Cancel", height=dp(44),
