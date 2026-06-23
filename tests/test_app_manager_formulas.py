@@ -1,5 +1,6 @@
 import os
 import tempfile
+import types
 import unittest
 
 from app.storage.database import DatabaseManager
@@ -100,3 +101,47 @@ class TestAudioDriveKey(unittest.TestCase):
         app._on_audio_formula_index(1)
         self.assertEqual(app._audio_metric_key, "shamatha_score")
         self.assertEqual(app._audio_formula_index, 1)
+
+
+class _FakeGraph:
+    def __init__(self):
+        self._vis = {}
+        self._names = {}
+
+    def set_visible(self, key, v):
+        self._vis[key] = v
+
+    def is_visible(self, key):
+        return self._vis.get(key, False)
+
+    def set_series_name(self, key, name):
+        self._names[key] = name
+
+
+class TestAssignSavedToSlot(unittest.TestCase):
+    def _app(self):
+        app = EEGMeditationApp.__new__(EEGMeditationApp)
+        app._init_formula_slots()
+        app._current_user_id = None
+        app._live_screen = types.SimpleNamespace(graph=_FakeGraph())
+        app._settings_screen = types.SimpleNamespace(
+            set_formula_slot=lambda *a, **k: None,
+            set_formula_slot_status=lambda *a, **k: None,
+        )
+        return app
+
+    def test_assign_saved_formula_to_slot(self):
+        app = self._app()
+        app._assign_saved_to_slot(0, {"name": "Ratio", "formula": "alpha + beta"})
+        self.assertTrue(app._formula_slots[0].is_valid)
+        self.assertEqual(app._formula_names[0], "Ratio")
+        self.assertTrue(app._live_screen.graph.is_visible("custom_formula"))
+
+    def test_first_empty_slot(self):
+        app = self._app()
+        self.assertEqual(app._first_empty_slot(), 0)
+        app._formula_slots[0].set_formula("alpha")
+        self.assertEqual(app._first_empty_slot(), 1)
+        for ev in app._formula_slots:
+            ev.set_formula("alpha")
+        self.assertEqual(app._first_empty_slot(), 0)  # all full → slot 0

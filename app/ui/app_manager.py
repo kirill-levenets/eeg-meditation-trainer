@@ -1616,7 +1616,10 @@ class EEGMeditationApp(App):
 
         Reads the graph's own catalog/labels/colors, so one presenter serves
         every graph. Wired to all multi-series graphs by _wire_graph_affordances.
+        For the live metrics graph, custom-formula rows also carry a Choose button
+        that assigns a saved formula to that slot without leaving the picker.
         """
+        is_live = graph is self._live_screen.graph
         body = BoxLayout(orientation="vertical", spacing=S.GAP_SM, padding=S.GAP)
         for key in graph.series_keys():
             vis = graph.is_visible(key)
@@ -1626,7 +1629,20 @@ class EEGMeditationApp(App):
                 text_color=C.TEXT if vis else C.TEXT_SECONDARY, bold=vis,
             )
             btn.bind(on_release=lambda b, k=key: self._toggle_series_row(graph, k, b))
-            body.add_widget(btn)
+            if is_live and key in FORMULA_KEYS:
+                row = BoxLayout(orientation="horizontal", spacing=S.GAP_SM, height=dp(44), size_hint_y=None)
+                btn.size_hint_x = 1
+                choose_btn = StyledButton(
+                    text="Choose…", height=dp(44), size_hint_x=None, width=dp(90),
+                    bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY,
+                )
+                slot_idx = FORMULA_KEYS.index(key)
+                choose_btn.bind(on_release=lambda _b, k=key, si=slot_idx: self._open_saved_formula_chooser(graph, k, si))
+                row.add_widget(btn)
+                row.add_widget(choose_btn)
+                body.add_widget(row)
+            else:
+                body.add_widget(btn)
         close_btn = StyledButton(
             text="Close", height=dp(44),
             bg_color=C.PRIMARY, bg_pressed=C.PRIMARY_DIM,
@@ -1641,6 +1657,43 @@ class EEGMeditationApp(App):
         body.add_widget(close_btn)
         popup.bind(on_dismiss=lambda *_a: self._persist_graph_series(graph))
         popup.open()
+
+    def _open_saved_formula_chooser(self, graph, key: str, slot_idx: int) -> None:
+        """Open a second popup listing saved formulas; selecting one assigns it to slot_idx."""
+        if not self._current_user_id:
+            return
+        formulas = self._db.get_saved_formulas(self._current_user_id)
+        inner_body = BoxLayout(orientation="vertical", spacing=S.GAP_SM, padding=S.GAP)
+        inner_popup = Popup(
+            title="Choose saved formula", content=inner_body,
+            size_hint=(0.75, None),
+            height=dp(80 + 50 * (max(len(formulas), 1) + 1)),
+            auto_dismiss=True,
+        )
+        if not formulas:
+            inner_body.add_widget(Label(
+                text="No saved formulas", color=C.TEXT_SECONDARY,
+                height=dp(44), size_hint_y=None,
+            ))
+        else:
+            for entry in formulas:
+                row_btn = StyledButton(
+                    text=entry.get("name", entry.get("formula", "")[:30]),
+                    height=dp(44),
+                    bg_color=C.BG_CARD, text_color=C.TEXT,
+                )
+                row_btn.bind(on_release=lambda _b, e=entry: (
+                    self._assign_saved_to_slot(slot_idx, e),
+                    inner_popup.dismiss(),
+                ))
+                inner_body.add_widget(row_btn)
+        cancel_btn = StyledButton(
+            text="Cancel", height=dp(44),
+            bg_color=C.PRIMARY, bg_pressed=C.PRIMARY_DIM,
+        )
+        cancel_btn.bind(on_release=lambda *_a: inner_popup.dismiss())
+        inner_body.add_widget(cancel_btn)
+        inner_popup.open()
 
     def _toggle_series_row(self, graph, key: str, btn) -> None:
         """Flip one series on `graph` (stays in the popup for multi-select)."""
@@ -1769,7 +1822,7 @@ class EEGMeditationApp(App):
             self._settings_screen.set_formula_slot_status(idx, "Limit reached (50 max)", is_error=True)
 
     def _on_load_formula(self, index: int) -> None:
-        """Load a saved formula into slot 0 and apply it (Task 8: first empty slot)."""
+        """Load a saved formula into the first empty slot and apply it."""
         if not self._current_user_id:
             return
         formulas = self._db.get_saved_formulas(self._current_user_id)
@@ -1777,8 +1830,20 @@ class EEGMeditationApp(App):
             entry = formulas[index]
             formula = entry["formula"]
             name = entry.get("name", "") or ""
-            self._settings_screen.set_formula_slot(0, name, formula)
-            self._on_formula_slot_change(0, name, formula)
+            slot = self._first_empty_slot()
+            self._settings_screen.set_formula_slot(slot, name, formula)
+            self._on_formula_slot_change(slot, name, formula)
+
+    def _first_empty_slot(self) -> int:
+        """First slot with no valid formula; slot 0 if all are full."""
+        return next((i for i in range(_MAX_FORMULAS) if not self._formula_slots[i].is_valid), 0)
+
+    def _assign_saved_to_slot(self, idx: int, entry: dict) -> None:
+        """Assign a saved {name, formula} entry to slot idx, show it, and persist."""
+        self._on_formula_slot_change(idx, entry.get("name", ""), entry.get("formula", ""), show=True)
+        self._settings_screen.set_formula_slot(
+            idx, self._formula_names[idx], self._formula_slots[idx].formula
+        )
 
     def _on_delete_formula(self, index: int) -> None:
         """Delete a saved formula."""
