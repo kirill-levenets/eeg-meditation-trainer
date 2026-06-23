@@ -32,6 +32,17 @@ class TestGraphFullscreen(unittest.TestCase):
         self.assertEqual(tuple(g.size_hint), (1, 1))       # fills the overlay slot
         self.assertEqual(g.pos_hint, {})                   # in a BoxLayout, not positioned
 
+    def test_series_picker_survives_fullscreen(self):
+        # The combobox (series picker) must keep working in fullscreen so custom
+        # formulas can be toggled/chosen there too — only the expand glyph is hidden.
+        app, parent, g = self._make()
+        g.set_series_picker_callback(lambda _g: None)
+        app._present_graph_fullscreen(g)
+        self.assertIsNotNone(g._series_callback)           # picker still wired in fullscreen
+        close = next(c for c in app._fullscreen_overlay.children if isinstance(c, StyledButton))
+        close.dispatch("on_release")
+        self.assertIsNotNone(g._series_callback)           # and after restore
+
     def test_close_restores(self):
         app, parent, g = self._make()
         orig_size_hint = tuple(g.size_hint)
