@@ -144,6 +144,7 @@ class DiaryScreen(Screen):
         self._on_back: Optional[Callable] = None
         self._selected_session_id: Optional[int] = None
         self._sessions_data: list[dict] = []
+        self._session_formula_series: dict[str, list[float]] = {}
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -552,7 +553,14 @@ class DiaryScreen(Screen):
         self._raw_eeg_graph.clear_data()
         self._freq_graph.clear_data()
         self._cached_metrics_rows = []
+        self._session_formula_series = {}
         self._switch_graph_tab("metrics")
+
+    def set_session_formulas(self, series: dict[str, list[float]], names: dict[str, str]) -> None:
+        """Inject recomputed per-session custom-formula series + names before display."""
+        self._session_formula_series = series
+        for key, name in names.items():
+            self._metrics_graph.set_series_name(key, name)
 
     def load_metrics_preview(self, metrics_rows: list[dict]) -> None:
         """Load session metrics into all three preview graphs."""
@@ -568,6 +576,10 @@ class DiaryScreen(Screen):
         for row in rows:
             for key in metrics_series:
                 metrics_series[key].append(row.get(key, 0.0))
+        # Replace the stored (live-computed / zero) custom-formula columns with
+        # the per-session recompute so the diary plots the formulas active then.
+        for key, vals in self._session_formula_series.items():
+            metrics_series[key] = vals
         self._metrics_graph.load_static_data(metrics_series)
 
         # Raw EEG synthesized waveform from band powers

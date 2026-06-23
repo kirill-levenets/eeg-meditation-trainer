@@ -118,6 +118,88 @@ class _FakeGraph:
         self._names[key] = name
 
 
+class _StubDiary:
+    def __init__(self):
+        self.series = None
+        self.names = None
+
+    def set_session_formulas(self, series, names):
+        self.series = series
+        self.names = names
+
+
+class TestSessionFormulaSaveAndReplay(unittest.TestCase):
+    def setUp(self):
+        self.path = os.path.join(tempfile.gettempdir(), "f4_replay.db")
+        if os.path.exists(self.path):
+            os.remove(self.path)
+        self.app = EEGMeditationApp.__new__(EEGMeditationApp)
+        self.app._init_formula_slots()
+        self.app._db = DatabaseManager(db_path=self.path)
+        self.app._current_user_id = self.app._db.create_user("A")
+        self.app._audio_metric_key = "shamatha_score"
+        self.app._live_screen = types.SimpleNamespace(graph=_FakeGraph())
+        self.app._diary_screen = _StubDiary()
+
+    def tearDown(self):
+        self.app._db.close()
+        if os.path.exists(self.path):
+            os.remove(self.path)
+
+    def _seed_session(self) -> int:
+        cf = self.app._session_custom_formulas_json()
+        sid = self.app._db.save_session(
+            {"duration": 1}, user_id=self.app._current_user_id, custom_formulas=cf
+        )
+        self.app._db.save_metrics_batch(sid, [{
+            "timestamp": 0.5, "alpha1": 100, "alpha2": 50, "beta1": 10, "beta2": 5,
+        }])
+        return sid
+
+    def test_record_includes_visible_and_drove_audio(self):
+        self.app._formula_slots[0].set_formula("alpha + beta")
+        self.app._formula_names[0] = "Ratio"
+        self.app._live_screen.graph.set_visible("custom_formula", True)
+        self.app._audio_metric_key = "custom_formula"
+        import json
+        rec = json.loads(self.app._session_custom_formulas_json())
+        self.assertEqual(rec[0]["name"], "Ratio")
+        self.assertEqual(rec[0]["formula"], "alpha + beta")
+        self.assertTrue(rec[0]["visible"])
+        self.assertTrue(rec[0]["drove_audio"])
+
+    def test_replay_recomputes_from_stored_defs(self):
+        self.app._formula_slots[0].set_formula("alpha + beta")
+        self.app._formula_names[0] = "Ratio"
+        sid = self._seed_session()
+        # Mutate today's slot — replay must ignore it and use the stored def.
+        self.app._formula_slots[0].set_formula("delta")
+        session = self.app._db.get_session(sid)
+        self.app._inject_session_formulas(sid, session)
+        injected = self.app._diary_screen.series[FORMULA_KEYS[0]]
+        from app.metrics.custom_formula import CustomFormulaEvaluator
+        ev = CustomFormulaEvaluator()
+        ev.set_formula("alpha + beta")
+        expected = self.app._db.recompute_formula_series(sid, {FORMULA_KEYS[0]: ev})
+        self.assertEqual(injected, expected[FORMULA_KEYS[0]])
+        self.assertAlmostEqual(injected[0], 165.0, places=3)
+        self.assertEqual(self.app._diary_screen.names[FORMULA_KEYS[0]], "Ratio")
+
+    def test_replay_no_formulas_is_empty(self):
+        sid = self._seed_session()  # no valid slots
+        session = self.app._db.get_session(sid)
+        self.app._inject_session_formulas(sid, session)
+        self.assertEqual(self.app._diary_screen.series, {})
+
+    def test_replay_tolerates_malformed_json(self):
+        sid = self.app._db.save_session(
+            {"duration": 1}, user_id=self.app._current_user_id, custom_formulas="{not json"
+        )
+        session = self.app._db.get_session(sid)
+        self.app._inject_session_formulas(sid, session)  # must not raise
+        self.assertEqual(self.app._diary_screen.series, {})
+
+
 class TestAssignSavedToSlot(unittest.TestCase):
     def _app(self):
         app = EEGMeditationApp.__new__(EEGMeditationApp)

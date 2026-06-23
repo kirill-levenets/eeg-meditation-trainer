@@ -158,15 +158,15 @@ class DatabaseManager:
         self._conn.commit()
 
     def save_session(self, stats: dict, user_id: Optional[int] = None,
-                     session_name: str = "") -> int:
-        """Insert a session record and return its ID."""
+                     session_name: str = "", custom_formulas: str = "") -> int:
+        """Insert a session record and return its ID. `custom_formulas` is a JSON string."""
         cursor = self._conn.execute(
             """
             INSERT INTO sessions
             (user_id, date_time, duration, threshold_used, avg_meditation, avg_shamatha,
              max_meditation, time_above_threshold, longest_streak, session_name,
-             time_shamatha_90)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             time_shamatha_90, custom_formulas)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -180,6 +180,7 @@ class DatabaseManager:
                 stats.get("longest_streak", 0),
                 session_name,
                 stats.get("time_shamatha_90", 0),
+                custom_formulas,
             ),
         )
         self._conn.commit()

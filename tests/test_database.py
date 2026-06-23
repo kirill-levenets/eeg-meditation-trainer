@@ -305,6 +305,15 @@ class TestDatabaseExtensions(unittest.TestCase):
         self.assertNotIn("bad", series)
         self.assertEqual(series["good"], [10.0])  # alpha1_raw=10 → formula "alpha1"
 
+    def test_save_session_stores_custom_formulas_json(self):
+        import json
+        cf = json.dumps([{"name": "R", "formula": "alpha + beta",
+                          "visible": True, "drove_audio": False}])
+        sid = self.db.save_session({"duration": 1}, custom_formulas=cf)
+        row = self.db.get_session(sid)
+        stored = json.loads(row["custom_formulas"]) if row["custom_formulas"] else []
+        self.assertEqual(stored[0]["formula"], "alpha + beta")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

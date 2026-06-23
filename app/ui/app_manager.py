@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import threading
@@ -149,6 +150,16 @@ class EEGMeditationApp(App):
         """Propagate slot display names to the live metrics graph's series labels."""
         for key, name in zip(FORMULA_KEYS, self._formula_names):
             self._live_screen.graph.set_series_name(key, name)
+
+    def _session_custom_formulas_json(self) -> str:
+        """JSON of the valid slots active this session, recorded at save for diary replay."""
+        return json.dumps([
+            {"name": self._formula_names[i],
+             "formula": self._formula_slots[i].formula,
+             "visible": self._live_screen.graph.is_visible(FORMULA_KEYS[i]),
+             "drove_audio": self._audio_metric_key == FORMULA_KEYS[i]}
+            for i in range(_MAX_FORMULAS) if self._formula_slots[i].is_valid
+        ])
 
     def _acquire_wake_lock(self) -> None:
         """Keep CPU running + screen on during session (Android only)."""
@@ -1069,6 +1080,7 @@ class EEGMeditationApp(App):
                 self._current_session_id = self._db.save_session(
                     stats, user_id=self._current_user_id,
                     session_name=self._make_session_name(),
+                    custom_formulas=self._session_custom_formulas_json(),
                 )
             if self._metrics_buffer:
                 self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
@@ -1159,6 +1171,7 @@ class EEGMeditationApp(App):
                 self._current_session_id = self._db.save_session(
                     stats, user_id=self._current_user_id,
                     session_name=self._make_session_name(),
+                    custom_formulas=self._session_custom_formulas_json(),
                 )
             if self._metrics_buffer:
                 self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
@@ -1567,6 +1580,7 @@ class EEGMeditationApp(App):
                 self._current_session_id = self._db.save_session(
                     stats_partial, user_id=self._current_user_id,
                     session_name=self._make_session_name(),
+                    custom_formulas=self._session_custom_formulas_json(),
                 )
             self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
             self._metrics_buffer = []
@@ -2027,11 +2041,38 @@ class EEGMeditationApp(App):
             self._diary_screen.show_session_detail(session)
             threshold_used = session.get("threshold_used", 50)
             self._diary_screen.set_metrics_threshold(float(threshold_used))
+            self._inject_session_formulas(session_id, session)
             metrics = self._db.get_session_metrics(session_id)
             self._diary_screen.load_metrics_preview(metrics)
             # Navigate to diary detail view; remember where we came from
             self._session_detail_back = self._sm.current
             self._sm.current = "diary"
+
+    def _inject_session_formulas(self, session_id: int, session: dict) -> None:
+        """Replay the session's OWN formulas: recompute their series from stored rows.
+
+        History must show the formulas active DURING the session (with their
+        names), not today's edits — so we rebuild evaluators from the recorded
+        defs and recompute over the session's band powers before the graph draws.
+        """
+        cf_raw = session.get("custom_formulas") or ""
+        evaluators: dict[str, CustomFormulaEvaluator] = {}
+        names: dict[str, str] = {}
+        if cf_raw:
+            try:
+                defs = json.loads(cf_raw)
+            except (ValueError, TypeError):
+                defs = []
+            for i, d in enumerate(defs):
+                if i >= _MAX_FORMULAS or not isinstance(d, dict):
+                    continue
+                ev = CustomFormulaEvaluator()
+                ev.set_formula(d.get("formula", "") or "")
+                if ev.is_valid:
+                    evaluators[FORMULA_KEYS[i]] = ev
+                    names[FORMULA_KEYS[i]] = d.get("name") or f"Custom {i + 1}"
+        series = self._db.recompute_formula_series(session_id, evaluators) if evaluators else {}
+        self._diary_screen.set_session_formulas(series, names)
 
     def _on_diary_back(self) -> None:
         """Return from diary detail to previous screen (usually history)."""
