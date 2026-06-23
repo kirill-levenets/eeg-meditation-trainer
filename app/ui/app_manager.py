@@ -318,18 +318,18 @@ class EEGMeditationApp(App):
             pos=lambda w, v: setattr(bg, "pos", v),
         )
 
-        # Hide the on-graph glyphs while fullscreen (restored on close); the
-        # series callback is owned by LiveSessionScreen, so capture it.
-        orig_series_cb = graph._series_callback
+        # Hide only the expand glyph while fullscreen (already fullscreen); keep
+        # the series picker so the user can change series here too.
         graph.set_expand_callback(None)
-        graph.set_series_picker_callback(None)
         parent.remove_widget(graph)
         graph.size_hint = (1, 1)
         graph.pos_hint = {}
         # graph + legend stacked, so the fullscreen view keeps its legend.
         content = BoxLayout(orientation="vertical", spacing=dp(4))
         content.add_widget(graph)
-        content.add_widget(self._build_fullscreen_legend(graph))
+        self._fullscreen_content = content
+        self._fullscreen_legend = self._build_fullscreen_legend(graph)
+        content.add_widget(self._fullscreen_legend)
         overlay.add_widget(content)
 
         close_btn = StyledButton(
@@ -351,9 +351,10 @@ class EEGMeditationApp(App):
             graph.size = orig_size
             parent.add_widget(graph, index=index)
             graph.set_expand_callback(self._present_graph_fullscreen)
-            graph.set_series_picker_callback(orig_series_cb)
             graph._redraw()
             self._fullscreen_overlay = None
+            self._fullscreen_content = None
+            self._fullscreen_legend = None
 
         close_btn.bind(on_release=_restore)
 
@@ -1584,6 +1585,15 @@ class EEGMeditationApp(App):
             self._settings_screen._custom_formula_cb.active = not visible
         elif key in self._settings_screen._checkboxes:
             self._settings_screen._checkboxes[key].active = not visible
+        self._refresh_fullscreen_legend()
+
+    def _refresh_fullscreen_legend(self) -> None:
+        """Rebuild the fullscreen legend after a series toggle (if fullscreen)."""
+        if getattr(self, "_fullscreen_overlay", None) is None:
+            return
+        self._fullscreen_content.remove_widget(self._fullscreen_legend)
+        self._fullscreen_legend = self._build_fullscreen_legend(self._live_screen.graph)
+        self._fullscreen_content.add_widget(self._fullscreen_legend)
 
     def _on_series_picker_dismiss(self) -> None:
         """Persist the per-graph series selection when the picker closes."""
