@@ -607,6 +607,7 @@ class _AccordionSection(BoxLayout):
         if collapsed:
             self._scroll.height = 0
             self._scroll.opacity = 0
+            self._scroll.remove_widget(self._content)
 
         self._scroll.bind(height=self._recalc_height)
         self._recalc_height()
@@ -637,11 +638,19 @@ class _AccordionSection(BoxLayout):
     def _set_collapsed(self, collapsed, notify=True):
         self._collapsed = collapsed
         if collapsed:
+            # Detach the content so a collapsed section has no geometry below its
+            # header. Otherwise its display-clipped widgets still overlap the
+            # sections beneath in the touch layer and, via the nested-ScrollView
+            # simulated click, steal taps aimed at those section headers.
+            if self._content.parent is self._scroll:
+                self._scroll.remove_widget(self._content)
             self._scroll.height = 0
             self._scroll.opacity = 0
             if not self._header_icon_text:
                 self._header._icon_label.text = Icons.CHEVRON_RIGHT
         else:
+            if self._content.parent is not self._scroll:
+                self._scroll.add_widget(self._content)
             self._scroll.opacity = 1
             self._update_height()
             if not self._header_icon_text:

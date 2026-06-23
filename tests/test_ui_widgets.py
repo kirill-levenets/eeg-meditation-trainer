@@ -487,6 +487,27 @@ class TestAccordionGrandchildGrowth(unittest.TestCase):
         self.assertFalse(s2._collapsed)
         self.assertTrue(s1._collapsed)
 
+    def test_collapsed_section_detaches_content_from_touch_layer(self):
+        # A collapsed section must remove its content from the ScrollView so the
+        # display-clipped content can't overlap sections below it in the touch
+        # layer and steal taps. Regression: the collapsed User Profile picker
+        # intercepted clicks aimed at the Threshold header (nested-ScrollView
+        # simulated click landed inside a hidden row's rect -> grabbed the tap).
+        from kivy.uix.label import Label
+        acc = ThemedAccordion()
+        section = acc.add_section("A", collapsed=False)
+        section.add_widget(Label())
+        self.assertIs(section._content.parent, section._scroll)
+        section._set_collapsed(True)
+        self.assertIsNone(section._content.parent)            # detached when collapsed
+        section._set_collapsed(False)
+        self.assertIs(section._content.parent, section._scroll)  # re-attached on expand
+
+    def test_section_collapsed_at_construction_detaches_content(self):
+        acc = ThemedAccordion()
+        section = acc.add_section("A", collapsed=True)
+        self.assertIsNone(section._content.parent)
+
 
 class TestSettingsDevicePicker(unittest.TestCase):
     """Multi-device routing surface on SettingsScreen."""
