@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Metrics/Raw EEG view toggle unresponsive when the session layout overflowed into scroll mode** (e.g. desktop/landscape): `GraphAwareScrollView` matched graphs by their *logical* bounds, which extend past the visible viewport, so it stole touches aimed at widgets sitting outside the ScrollView (the toggle above the graph). It now only intercepts touches within its own viewport (a `collide_point` guard on `on_touch_down`/`on_scroll_start`). Found via an automated button-by-button click pass.
 - **Session ended instantly when starting with a real device + timer**: on the BT-connect path `start_countdown()` was dispatched to the main thread while the tick thread proceeded to `tick()`; if the main thread stalled at connect, `remaining` was still 0 and the timer fired on the first tick (a 0-second "timer-ended" session). The countdown is now armed on the tick thread before the loop can read it.
 - **History duration showed 0**: `compute_statistics()` read the `_elapsed` field (0 until `stop()`), so the 60-second partial flush wrote a duration-0 row that persisted if the app was later killed. It now uses the live `elapsed_seconds`.
 - **Session lost / app frozen at timer end with the screen locked**: `_audio.stop()` ran on the daemon tick thread and called `MediaPlayer.release()`, which synchronizes with the player's event handler on the **main Looper** — paused during lock — and deadlocked the tick thread, so the session never saved and the noise never stopped. Timer-end now persists the session first on the tick thread, silences the noise with a non-blocking `mute()`, and defers the real teardown to the main thread.
@@ -19,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Fullscreen-expandable graphs** (issue #4, F1): every time-series graph shows a top-right expand glyph; tapping it opens the graph in a full-window overlay with a Close button. Implemented once in the shared `ScrollableGraphWidget` (`set_expand_callback`), wired to all live + diary graphs via one presenter. The graph is *reparented* (not cloned) into a root `FloatLayout` overlay, so a live session graph keeps updating in fullscreen; Close restores it to its original parent/size. A full-window overlay (not a `Popup`) is used so the graph reaches every edge.
+- **Graph UX infrastructure** (foundation for the rest of issue #4):
+  - `app/ui/touch_utils.py` — `point_in_rect(px, py, rect)`, the shared transform-safe sub-region hit-test primitive (touches arrive in widget-local space; the recurring bug was a responsive area not matching the visible one). Used by the expand glyph; the History/user-picker manual routers are candidates to migrate.
+  - `LoadingOverlay` widget (`app/ui/widgets/loading_overlay.py`) — reusable dimmed modal spinner (status + animated dots, theme-aware, collapses out of the touch chain when hidden). Mounted app-global by wrapping the root in a `FloatLayout`; driven via `EEGMeditationApp.show_loading(text)` / `hide_loading()`.
+  - `DatabaseManager.get_user_json_setting()` / `set_user_json_setting()` — JSON-encoded per-user settings over the existing flat KV store (basis for per-graph series selection and active-formula lists).
 - **History view toggle**: Calendar heatmap / 14-day bar chart segmented control on the History screen. Both views share day-tap-to-filter behavior. Selection persists per user as `history_view_mode`.
 - **`Last14DaysBars` widget** (`app/ui/history_screen.py`) — bar chart of the last 14 days' avg shamatha, mirroring `CalendarHeatmap`'s public API.
 - **Shared `UserPickerForm`** widget (`app/ui/widgets/user_picker.py`) used by the wizard, the first-run popup, and Settings → User Profile. Existing profiles are listed; typing a duplicate name surfaces an inline "Use existing 'X'" / "Change name" choice instead of failing silently.

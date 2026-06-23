@@ -14,6 +14,7 @@ from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.filechooser import FileChooserListView
+from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import ScreenManager, SlideTransition
@@ -45,6 +46,7 @@ from app.ui.profile_screen import ProfileScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
 from app.ui.theme import BottomNav, C, F, StyledButton
+from app.ui.widgets.loading_overlay import LoadingOverlay
 from app.ui.widgets.user_picker import UserPickerForm
 from app.ui.wizard_screen import WizardScreen
 
@@ -189,7 +191,7 @@ class EEGMeditationApp(App):
         "settings": "settings",
     }
 
-    def build(self) -> BoxLayout:
+    def build(self) -> FloatLayout:
         install_crash_handler(self)
 
         # Restore saved theme before building UI
@@ -244,6 +246,14 @@ class EEGMeditationApp(App):
         )
         root.add_widget(self._bottom_nav)
 
+        # Wrap in a FloatLayout so app-global overlays (loading spinner,
+        # fullscreen graph) can sit on top of every screen.
+        float_root = FloatLayout()
+        self._float_root = float_root
+        float_root.add_widget(root)
+        self._loading_overlay = LoadingOverlay()
+        float_root.add_widget(self._loading_overlay)
+
         self._bind_callbacks()
         self._link_graph_zoom()
         self._restore_last_user()
@@ -257,7 +267,85 @@ class EEGMeditationApp(App):
         else:
             self._auto_scan_bt()
 
-        return root
+        return float_root
+
+    def show_loading(self, text: str = "Loading…") -> None:
+        """Show the app-global loading overlay (no-op before build)."""
+        if getattr(self, "_loading_overlay", None) is not None:
+            self._loading_overlay.show(text)
+
+    def hide_loading(self) -> None:
+        """Hide the app-global loading overlay (no-op before build)."""
+        if getattr(self, "_loading_overlay", None) is not None:
+            self._loading_overlay.hide()
+
+    def _wire_graph_expand(self) -> None:
+        """Give every mounted graph a fullscreen-expand affordance (one presenter)."""
+        for g in (
+            self._live_screen.graph,
+            self._live_screen.raw_graph,
+            self._live_screen.band_graph,
+            self._diary_screen._metrics_graph,
+            self._diary_screen._raw_eeg_graph,
+            self._diary_screen._freq_graph,
+        ):
+            g.set_expand_callback(self._present_graph_fullscreen)
+
+    def _present_graph_fullscreen(self, graph) -> None:
+        """Reparent `graph` into a full-window overlay; restore it on close.
+
+        Reparenting (not cloning) keeps the widget's single Window bind and its
+        live add_point feed, so a live graph keeps updating in fullscreen. A
+        plain root overlay (not a Popup) is used so the graph reaches every
+        edge — a Popup insets its content with title/border chrome.
+        """
+        parent = graph.parent
+        if parent is None or getattr(self, "_fullscreen_overlay", None) is not None:
+            return
+        index = parent.children.index(graph)
+        # Copy these — size_hint/size are live ReferenceListProperties; a bare
+        # reference would track the (1,1) we set below and break restore.
+        orig_size_hint = list(graph.size_hint)
+        orig_pos_hint = dict(graph.pos_hint)
+        orig_size = list(graph.size)
+
+        overlay = FloatLayout(size_hint=(1, 1), pos_hint={"x": 0, "y": 0})
+        with overlay.canvas.before:
+            Color(*C.BG_DARK)
+            bg = Rectangle(size=overlay.size, pos=overlay.pos)
+        overlay.bind(
+            size=lambda w, v: setattr(bg, "size", v),
+            pos=lambda w, v: setattr(bg, "pos", v),
+        )
+
+        graph.set_expand_callback(None)  # hide the expand glyph while fullscreen
+        parent.remove_widget(graph)
+        graph.size_hint = (1, 1)
+        graph.pos_hint = {"x": 0, "y": 0}  # fill the overlay, not just resize in place
+        overlay.add_widget(graph)
+
+        close_btn = StyledButton(
+            text="Close",
+            size_hint=(None, None), size=(dp(110), dp(44)),
+            pos_hint={"right": 0.99, "top": 0.99},
+            bg_color=C.DANGER, bg_pressed=C.DANGER_DIM,
+        )
+        overlay.add_widget(close_btn)
+        self._float_root.add_widget(overlay)
+        self._fullscreen_overlay = overlay
+
+        def _restore(*_a):
+            self._float_root.remove_widget(overlay)
+            overlay.remove_widget(graph)
+            graph.size_hint = orig_size_hint
+            graph.pos_hint = orig_pos_hint
+            graph.size = orig_size
+            parent.add_widget(graph, index=index)
+            graph.set_expand_callback(self._present_graph_fullscreen)
+            graph._redraw()
+            self._fullscreen_overlay = None
+
+        close_btn.bind(on_release=_restore)
 
     def _link_graph_zoom(self) -> None:
         """Link zoom across all graph widgets so they share the same time scale."""
@@ -293,6 +381,9 @@ class EEGMeditationApp(App):
         # Tap on graph to set marker (Android — no keyboard available)
         if kivy_platform == "android":
             self._live_screen.graph.set_tap_callback(self._on_marker)
+
+        # Fullscreen-expand affordance on every graph (shared presenter)
+        self._wire_graph_expand()
 
         self._settings_screen.set_threshold_callback(self._on_threshold_change)
         self._settings_screen.set_toggle_callback(self._on_toggle_change)

@@ -203,6 +203,34 @@ class TestDatabaseExtensions(unittest.TestCase):
         uid = self.db.create_user("Alice")
         self.assertIsNone(self.db.get_user_setting(uid, "nonexistent"))
 
+    def test_user_json_setting_roundtrip_list(self):
+        uid = self.db.create_user("Alice")
+        self.db.set_user_json_setting(uid, "graph_series", ["a", "b", "c"])
+        self.assertEqual(self.db.get_user_json_setting(uid, "graph_series"), ["a", "b", "c"])
+
+    def test_user_json_setting_roundtrip_dict(self):
+        uid = self.db.create_user("Alice")
+        self.db.set_user_json_setting(uid, "cfg", {"x": 1, "y": [2, 3]})
+        self.assertEqual(self.db.get_user_json_setting(uid, "cfg"), {"x": 1, "y": [2, 3]})
+
+    def test_user_json_setting_missing_returns_default(self):
+        uid = self.db.create_user("Alice")
+        self.assertEqual(self.db.get_user_json_setting(uid, "absent", default=[]), [])
+        self.assertIsNone(self.db.get_user_json_setting(uid, "absent"))
+
+    def test_user_json_setting_corrupt_returns_default(self):
+        uid = self.db.create_user("Alice")
+        self.db.set_user_setting(uid, "broken", "{not json")
+        self.assertEqual(self.db.get_user_json_setting(uid, "broken", default=["fallback"]), ["fallback"])
+
+    def test_user_json_setting_isolated_per_user(self):
+        uid1 = self.db.create_user("Alice")
+        uid2 = self.db.create_user("Bob")
+        self.db.set_user_json_setting(uid1, "k", [1])
+        self.db.set_user_json_setting(uid2, "k", [2])
+        self.assertEqual(self.db.get_user_json_setting(uid1, "k"), [1])
+        self.assertEqual(self.db.get_user_json_setting(uid2, "k"), [2])
+
     def test_update_session_stats(self):
         sid = self.db.save_session({"duration": 0, "threshold_used": 50})
         session = self.db.get_session(sid)

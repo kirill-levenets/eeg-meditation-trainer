@@ -16,6 +16,7 @@ from kivy.uix.widget import Widget
 
 from app.config import APP
 from app.ui.theme import C as TC
+from app.ui.touch_utils import point_in_rect
 
 
 class ScrollableGraphWidget(Widget):
@@ -76,6 +77,7 @@ class ScrollableGraphWidget(Widget):
         self._start_wall_time: Optional[float] = None
         self._scroll_change_callback = None
         self._tap_callback = None
+        self._expand_callback = None
         self._touch_moved: bool = False
         self._gfx: InstructionGroup = InstructionGroup()
         self.canvas.add(self._gfx)
@@ -323,6 +325,7 @@ class ScrollableGraphWidget(Widget):
             ))
 
         if end_idx <= start_idx:
+            self._draw_expand_icon()
             return
 
         # X-axis timestamps + vertical grid lines at 10-second intervals
@@ -469,6 +472,8 @@ class ScrollableGraphWidget(Widget):
                         self._gfx.add(Color(*TC.THRESHOLD_LINE))
                         self._gfx.add(Line(points=[x_pos, graph_y, x_pos, graph_y + graph_h], width=1.5))
 
+        self._draw_expand_icon()
+
     @staticmethod
     def _compute_nice_step(max_val: float) -> float:
         """Compute a visually pleasing grid step for auto-scaled graphs."""
@@ -541,6 +546,14 @@ class ScrollableGraphWidget(Widget):
         if hasattr(touch, "button") and touch.button in ("scrollup", "scrolldown"):
             return True
 
+        # Expand-to-fullscreen icon: intercept before grab so a tap opens
+        # fullscreen instead of scrolling. Hit-test in WINDOW coordinates —
+        # the only unambiguous frame (GraphAwareScrollView forwards touches in
+        # a mid-chain frame matching neither the canvas rect nor to_widget).
+        if self._expand_callback is not None and self._touch_on_expand_icon(touch):
+            self._expand_callback(self)
+            return True
+
         touch.grab(self)
         self._grabbed_touches[touch.uid] = touch
         self._touch_start_x = touch.x
@@ -597,6 +610,68 @@ class ScrollableGraphWidget(Widget):
         """Set callback for single tap on the graph (used for marker on Android)."""
         self._tap_callback = callback
 
+    def set_expand_callback(self, callback) -> None:
+        """Set callback invoked with `self` when the fullscreen-expand icon is tapped.
+
+        Setting a callback also reveals the icon; pass None to hide it again.
+        """
+        self._expand_callback = callback
+        self._redraw()
+
+    def _expand_icon_rect(self):
+        """Rect (x, y, w, h) for the expand icon, or None when hidden.
+
+        The drawn glyph and the touch hit area use this same rect, so the
+        visible box is exactly the tap target.
+        """
+        if self._expand_callback is None:
+            return None
+        if self.width < dp(60) or self.height < dp(60):
+            return None
+        size = dp(44)
+        margin = dp(6)
+        x = self.x + self.width - size - margin
+        y = self.y + self.height - size - margin
+        return (x, y, size, size)
+
+    def _touch_on_expand_icon(self, touch) -> bool:
+        """True if `touch` falls on the expand glyph, compared in window coords.
+
+        The touch's canonical window position (sx/sy) is compared against the
+        glyph's rendered window rect — the one frame that isn't ambiguous under
+        the GraphAwareScrollView touch-forwarding transform.
+        """
+        r = self._expand_icon_rect()
+        if r is None:
+            return False
+        wx0, wy0 = self.to_window(r[0], r[1])
+        wx1, wy1 = self.to_window(r[0] + r[2], r[1] + r[3])
+        tx, ty = touch.sx * Window.width, touch.sy * Window.height
+        win_rect = (min(wx0, wx1), min(wy0, wy1), abs(wx1 - wx0), abs(wy1 - wy0))
+        return point_in_rect(tx, ty, win_rect)
+
+    def _draw_expand_icon(self) -> None:
+        """Draw the top-right fullscreen-expand glyph (four outward corner brackets)."""
+        rect = self._expand_icon_rect()
+        if rect is None:
+            return
+        ix, iy, iw, ih = rect
+        # Semi-opaque backing so the glyph reads over any line color / theme.
+        self._gfx.add(Color(0, 0, 0, 0.40))
+        self._gfx.add(Rectangle(pos=(ix, iy), size=(iw, ih)))
+        self._gfx.add(Color(0.92, 0.92, 0.96, 0.95))
+        pad = dp(11)
+        arm = dp(9)
+        left = ix + pad
+        right = ix + iw - pad
+        bottom = iy + pad
+        top = iy + ih - pad
+        lw = 1.6
+        self._gfx.add(Line(points=[left, bottom + arm, left, bottom, left + arm, bottom], width=lw))
+        self._gfx.add(Line(points=[right - arm, bottom, right, bottom, right, bottom + arm], width=lw))
+        self._gfx.add(Line(points=[left, top - arm, left, top, left + arm, top], width=lw))
+        self._gfx.add(Line(points=[right - arm, top, right, top, right, top - arm], width=lw))
+
     def add_marker(self, index: Optional[int] = None) -> None:
         """Add a marker at the given data point index (default: current end)."""
         idx = index if index is not None else max(0, self._total_points - 1)
@@ -643,7 +718,8 @@ class GraphAwareScrollView(ScrollView):
 
     def on_scroll_start(self, touch, check_children=True):
         if (
-            hasattr(touch, "button")
+            self.collide_point(*touch.pos)
+            and hasattr(touch, "button")
             and touch.button in ("scrollup", "scrolldown")
             and self._graph_under_touch(touch) is not None
         ):
@@ -651,9 +727,14 @@ class GraphAwareScrollView(ScrollView):
         return super().on_scroll_start(touch, check_children)
 
     def on_touch_down(self, touch):
-        graph = self._graph_under_touch(touch)
-        if graph is not None:
-            return graph.dispatch("on_touch_down", touch)
+        # Only intercept touches actually inside the viewport. A graph's logical
+        # bounds can extend above/below the visible scroll area (overflowing
+        # body), and without this guard those bounds would steal touches from
+        # widgets sitting outside the ScrollView (e.g. the Metrics/Raw toggle).
+        if self.collide_point(*touch.pos):
+            graph = self._graph_under_touch(touch)
+            if graph is not None:
+                return graph.dispatch("on_touch_down", touch)
         return super().on_touch_down(touch)
 
 

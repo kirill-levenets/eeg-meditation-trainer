@@ -6,6 +6,140 @@ from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.theme import ThemedAccordion
 
 
+class _FakeTouch:
+    """Minimal touch stand-in for on_touch_down hit-testing.
+
+    sx/sy are normalized window coords; for a parentless widget at the window
+    origin, window space == widget space, so they mirror x/y.
+    """
+
+    def __init__(self, x, y, button=None):
+        from kivy.core.window import Window
+        self.pos = (x, y)
+        self.x = x
+        self.y = y
+        self.sx = x / Window.width
+        self.sy = y / Window.height
+        self.uid = id(self)
+        self.ud = {}
+        self.grabbed = False
+        self.grab_current = None
+        if button is not None:
+            self.button = button
+
+    def grab(self, w):
+        self.grabbed = True
+
+    def ungrab(self, w):
+        self.grabbed = False
+
+    # no-ops so a touch can pass through ScrollView's transform machinery
+    def push(self, *a):
+        pass
+
+    def pop(self, *a):
+        pass
+
+    def apply_transform_2d(self, *a):
+        pass
+
+
+class TestGraphExpandAffordance(unittest.TestCase):
+    """Expand-to-fullscreen affordance on the shared graph widget."""
+
+    def _make_graph(self):
+        g = ScrollableGraphWidget(
+            colors={"a": (1, 0, 0, 1)}, scales={"a": 100.0}, viewport_seconds=10,
+        )
+        g.pos = (0, 0)
+        g.size = (400, 300)
+        return g
+
+    def test_no_icon_without_callback(self):
+        g = self._make_graph()
+        self.assertIsNone(g._expand_icon_rect())
+
+    def test_icon_rect_present_with_callback(self):
+        g = self._make_graph()
+        g.set_expand_callback(lambda src: None)
+        rect = g._expand_icon_rect()
+        self.assertIsNotNone(rect)
+        x, y, w, h = rect
+        # top-right, inside widget bounds
+        self.assertGreater(x, g.x + g.width / 2)
+        self.assertGreater(y, g.y + g.height / 2)
+        self.assertLessEqual(x + w, g.x + g.width)
+        self.assertLessEqual(y + h, g.y + g.height)
+
+    def test_icon_hidden_when_too_small(self):
+        g = self._make_graph()
+        g.set_expand_callback(lambda src: None)
+        g.size = (30, 30)
+        self.assertIsNone(g._expand_icon_rect())
+
+    def test_point_in_rect(self):
+        from app.ui.touch_utils import point_in_rect
+        self.assertFalse(point_in_rect(0, 0, None))
+        self.assertTrue(point_in_rect(5, 5, (0, 0, 10, 10)))
+        self.assertFalse(point_in_rect(20, 5, (0, 0, 10, 10)))
+
+    def test_tap_on_icon_fires_callback_without_grab(self):
+        g = self._make_graph()
+        fired = []
+        g.set_expand_callback(lambda src: fired.append(src))
+        x, y, w, h = g._expand_icon_rect()
+        touch = _FakeTouch(x + w / 2, y + h / 2)
+        result = g.on_touch_down(touch)
+        self.assertTrue(result)
+        self.assertEqual(fired, [g])
+        self.assertFalse(touch.grabbed)  # expand must not start a scroll/drag
+
+    def test_tap_off_icon_does_not_fire_callback(self):
+        g = self._make_graph()
+        fired = []
+        g.set_expand_callback(lambda src: fired.append(src))
+        touch = _FakeTouch(g.x + 20, g.y + 20)  # bottom-left, away from icon
+        g.on_touch_down(touch)
+        self.assertEqual(fired, [])
+        self.assertTrue(touch.grabbed)  # normal grab path
+
+    def test_no_callback_normal_grab(self):
+        g = self._make_graph()
+        touch = _FakeTouch(g.x + g.width / 2, g.y + g.height / 2)
+        result = g.on_touch_down(touch)
+        self.assertTrue(result)
+        self.assertTrue(touch.grabbed)
+
+
+class TestGraphAwareScrollViewGuard(unittest.TestCase):
+    """A graph whose logical bounds overflow the viewport must not steal touches
+    aimed at widgets sitting outside the ScrollView (e.g. the Metrics/Raw toggle)."""
+
+    def _make(self, viewport_h):
+        from app.ui.raw_eeg_screen import GraphAwareScrollView
+        sv = GraphAwareScrollView()
+        sv.pos = (0, 0)
+        sv.size = (400, viewport_h)
+        g = ScrollableGraphWidget(colors={"a": (1, 0, 0, 1)}, scales={"a": 100.0})
+        g.pos = (0, 0)
+        g.size = (400, 600)  # graph logical bounds always 600 tall
+        sv.add_widget(g)
+        return sv, g
+
+    def test_touch_above_viewport_not_stolen(self):
+        sv, g = self._make(viewport_h=200)
+        touch = _FakeTouch(200, 300)  # outside viewport (y>200) but inside graph (y<600)
+        self.assertIs(sv._graph_under_touch(touch), g)  # graph bounds DO cover it
+        sv.on_touch_down(touch)
+        self.assertEqual(len(g._grabbed_touches), 0)  # ...but the guard stops the graph grabbing it
+
+    def test_touch_inside_viewport_reaches_graph(self):
+        sv, g = self._make(viewport_h=600)
+        touch = _FakeTouch(200, 300)  # inside both
+        sv.on_touch_down(touch)
+        self.assertEqual(len(g._grabbed_touches), 1)  # graph received and grabbed it
+
+
 class TestScrollableGraphWidget(unittest.TestCase):
     """Test ScrollableGraphWidget data management (no rendering)."""
 

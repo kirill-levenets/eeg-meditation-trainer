@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 import os
 import sqlite3
 from datetime import datetime
@@ -397,13 +398,26 @@ class DatabaseManager:
         """Set a per-user setting value."""
         self.set_setting(f"user_{user_id}_{key}", value)
 
+    def get_user_json_setting(self, user_id: int, key: str, default=None):
+        """Get a per-user setting decoded from JSON, or `default` if absent/corrupt."""
+        raw = self.get_user_setting(user_id, key)
+        if not raw:
+            return default
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return default
+
+    def set_user_json_setting(self, user_id: int, key: str, value) -> None:
+        """Persist a per-user setting as a JSON string."""
+        self.set_user_setting(user_id, key, json.dumps(value))
+
     # ---- Saved formulas (per-user, max 50) ----
 
     _MAX_SAVED_FORMULAS = 50
 
     def get_saved_formulas(self, user_id: int) -> list[dict[str, str]]:
         """Return saved formulas for a user as [{name, formula}, ...]."""
-        import json
         raw = self.get_user_setting(user_id, "saved_formulas")
         if not raw:
             return []
@@ -414,7 +428,6 @@ class DatabaseManager:
             return []
 
     def _save_formulas_list(self, user_id: int, formulas: list[dict[str, str]]) -> None:
-        import json
         self.set_user_setting(user_id, "saved_formulas", json.dumps(formulas))
 
     def add_saved_formula(self, user_id: int, name: str, formula: str) -> bool:
