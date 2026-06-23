@@ -2479,8 +2479,11 @@ class EEGMeditationApp(App):
         self._apply_active_formulas(self._read_active_formulas_with_migration(user_id))
         self._push_formula_names_to_graph()
         idx = g(user_id, "audio_formula_index")
-        if idx is not None and idx.isdigit() and 0 <= int(idx) < _MAX_FORMULAS:
-            self._audio_formula_index = int(idx)
+        if idx is not None:
+            try:
+                self._audio_formula_index = max(0, min(int(idx), _MAX_FORMULAS - 1))
+            except (ValueError, TypeError):
+                pass
         # Keep the Settings input in sync with slot 0 until multi-slot UI lands.
         self._settings_screen._formula_input.text = self._formula_slots[0].formula
 
