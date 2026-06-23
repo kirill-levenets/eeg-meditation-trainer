@@ -50,6 +50,9 @@ from app.ui.widgets.loading_overlay import LoadingOverlay
 from app.ui.widgets.user_picker import UserPickerForm
 from app.ui.wizard_screen import WizardScreen
 
+FORMULA_KEYS: tuple[str, ...] = ("custom_formula", "custom_formula_2", "custom_formula_3")
+_MAX_FORMULAS = 3
+
 
 class EEGMeditationApp(App):
     """Main Kivy application for EEG Meditation Trainer."""
@@ -100,9 +103,23 @@ class EEGMeditationApp(App):
         self._flush_counter: int = 0
         self._current_session_id: Optional[int] = None
         self._current_user_id: Optional[int] = None
-        self._custom_formula: CustomFormulaEvaluator = CustomFormulaEvaluator()
+        self._init_formula_slots()
         self.serial_device_override: Optional[str] = None
         self._wake_lock = None
+
+    def _init_formula_slots(self) -> None:
+        """Three independent formula evaluators (one per slot) + their names."""
+        self._formula_slots: list[CustomFormulaEvaluator] = [
+            CustomFormulaEvaluator() for _ in range(_MAX_FORMULAS)
+        ]
+        self._formula_names: list[str] = [f"Custom {i + 1}" for i in range(_MAX_FORMULAS)]
+        self._audio_formula_index: int = 0
+
+    def _formula_for_key(self, key: str) -> CustomFormulaEvaluator | None:
+        """Map a series key to its slot evaluator, or None for non-formula keys."""
+        if key in FORMULA_KEYS:
+            return self._formula_slots[FORMULA_KEYS.index(key)]
+        return None
 
     def _acquire_wake_lock(self) -> None:
         """Keep CPU running + screen on during session (Android only)."""
@@ -1394,16 +1411,16 @@ class EEGMeditationApp(App):
                          f"dist={metrics.get('distraction', 0):.0f} "
                          f"native_med={native_med:.0f}{bat_str}")
 
-        # Evaluate custom formula if active
-        if self._custom_formula.is_valid:
+        # Evaluate custom formulas if any slot is active
+        if any(e.is_valid for e in self._formula_slots):
             formula_vars = {**raw_sample, **metrics}
-            bands = self._metrics_engine.derive_bands(raw_sample)
-            formula_vars.update(bands)
-            # Add sqrt-normalized relative bands (s_ prefix)
+            formula_vars.update(self._metrics_engine.derive_bands(raw_sample))
             sqrt_bands = self._metrics_engine.compute_sqrt_relative_bands(raw_sample)
             formula_vars.update({f"s_{k}": v for k, v in sqrt_bands.items()})
-            self._custom_formula.push_variables(formula_vars)
-            metrics["custom_formula"] = self._custom_formula.evaluate(formula_vars)
+            for key, ev in zip(FORMULA_KEYS, self._formula_slots):
+                if ev.is_valid:
+                    ev.push_variables(formula_vars)
+                    metrics[key] = ev.evaluate(formula_vars)
 
         self._session_manager.add_metric(metrics)
         # Merge raw + computed for full storage
@@ -1599,8 +1616,9 @@ class EEGMeditationApp(App):
         visible = not graph.is_visible(key)
         # The live formula must be valid to plot live custom_formula values;
         # diary custom_formula is recorded data and toggles freely.
-        if key == "custom_formula" and graph is self._live_screen.graph:
-            visible = visible and self._custom_formula.is_valid
+        ev = self._formula_for_key(key)
+        if ev is not None and graph is self._live_screen.graph:
+            visible = visible and ev.is_valid
         graph.set_visible(key, visible)  # fires the owning screen's legend refresh
         self._refresh_fullscreen_legend()
         vis = graph.is_visible(key)
@@ -1660,12 +1678,12 @@ class EEGMeditationApp(App):
         _restore_graph_series, so a hidden-but-valid choice survives a reload.
         """
         if not formula:
-            self._custom_formula.set_formula("")
+            self._formula_slots[0].set_formula("")
             self._live_screen.graph.set_visible("custom_formula", False)
             self._settings_screen.set_formula_status("Formula cleared")
             logger.info("Custom formula cleared")
             return
-        ok, err = self._custom_formula.set_formula(formula)
+        ok, err = self._formula_slots[0].set_formula(formula)
         if ok:
             # set_visible fires the graph's visibility callback → legend rebuilds.
             if show:
@@ -1911,7 +1929,7 @@ class EEGMeditationApp(App):
     def _on_export_csv(self, session_id: int, path: Optional[str] = None) -> Optional[str]:
         """Export session data as CSV file. Returns file path or None."""
         csv_data = self._db.export_session_csv(
-            session_id, custom_formula=self._custom_formula
+            session_id, custom_formula=self._formula_slots[0]
         )
         if not csv_data:
             return None
@@ -2317,7 +2335,7 @@ class EEGMeditationApp(App):
             uid, "rotation", str(self._settings_screen._current_rotation)
         )
         self._db.set_user_setting(
-            uid, "custom_formula", self._custom_formula.formula
+            uid, "custom_formula", self._formula_slots[0].formula
         )
         # Save zoom level as viewport duration in seconds
         graph = self._live_screen.graph
@@ -2354,8 +2372,9 @@ class EEGMeditationApp(App):
                 sel = set(graph.series_keys())
             for key in graph.series_keys():
                 on = key in sel
-                if key == "custom_formula" and graph is self._live_screen.graph:
-                    on = on and self._custom_formula.is_valid
+                ev = self._formula_for_key(key)
+                if ev is not None and graph is self._live_screen.graph:
+                    on = on and ev.is_valid
                 graph.set_visible(key, on)
 
     def _legacy_live_series(self, user_id: int) -> set[str]:

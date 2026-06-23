@@ -77,8 +77,8 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     app._eeg_stream = MagicMock()
     app._metrics_engine = MagicMock()
     app._noise_detector = None  # skip power-line feed branch
-    app._custom_formula = MagicMock()
-    app._custom_formula.is_valid = False  # MagicMock is truthy by default
+    app._init_formula_slots()
+    # All slots invalid by default (no formula set)
 
     app._audio = MagicMock()
     app._audio_metric_key = "shamatha_score"

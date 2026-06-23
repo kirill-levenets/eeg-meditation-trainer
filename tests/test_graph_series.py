@@ -58,7 +58,8 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         settings = types.SimpleNamespace()
         settings._graph_toggles = {k: (k == "shamatha_score") for k in metric_keys}
         self.app._settings_screen = settings
-        self.app._custom_formula = types.SimpleNamespace(is_valid=False)
+        self.app._init_formula_slots()
+        self.app._formula_slots[0] = types.SimpleNamespace(is_valid=False)
 
     def tearDown(self):
         self.app._db.close()
@@ -134,16 +135,16 @@ class TestGraphSeriesPersistence(unittest.TestCase):
 
     def test_custom_formula_gated_on_live_graph_only(self):
         # Live metrics: custom_formula stays hidden while the formula is invalid.
-        self.app._custom_formula.is_valid = False
+        self.app._formula_slots[0].is_valid = False
         self._toggle(self.graph, "custom_formula")
         self.assertFalse(self.graph.is_visible("custom_formula"))
-        self.app._custom_formula.is_valid = True
+        self.app._formula_slots[0].is_valid = True
         self._toggle(self.graph, "custom_formula")
         self.assertTrue(self.graph.is_visible("custom_formula"))
 
         # Diary metrics: custom_formula is recorded data → toggles freely.
         diary_m = self.app._diary_screen._metrics_graph
-        self.app._custom_formula.is_valid = False
+        self.app._formula_slots[0].is_valid = False
         diary_m.set_visible("custom_formula", False)
         self._toggle(diary_m, "custom_formula")
         self.assertTrue(diary_m.is_visible("custom_formula"))
@@ -155,7 +156,7 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         # then _restore_graph_series decides visibility).
         from app.metrics.custom_formula import CustomFormulaEvaluator
 
-        self.app._custom_formula = CustomFormulaEvaluator()
+        self.app._formula_slots[0] = CustomFormulaEvaluator()
         self.app._settings_screen.set_formula_status = lambda *a, **k: None
         formula = "alpha + beta"
 
@@ -167,13 +168,13 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         self.app._on_custom_formula_change(formula, show=False)
         self.app._restore_graph_series(self.uid)
 
-        self.assertTrue(self.app._custom_formula.is_valid)  # formula loaded
+        self.assertTrue(self.app._formula_slots[0].is_valid)  # formula loaded
         self.assertFalse(self.graph.is_visible("custom_formula"))  # hide survived
 
     def test_custom_formula_visible_choice_survives_reload(self):
         from app.metrics.custom_formula import CustomFormulaEvaluator
 
-        self.app._custom_formula = CustomFormulaEvaluator()
+        self.app._formula_slots[0] = CustomFormulaEvaluator()
         self.app._settings_screen.set_formula_status = lambda *a, **k: None
         formula = "alpha + beta"
 
