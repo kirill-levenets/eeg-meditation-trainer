@@ -147,6 +147,9 @@ class DatabaseManager:
         if "time_shamatha_90" not in sess_cols:
             self._conn.execute("ALTER TABLE sessions ADD COLUMN time_shamatha_90 INTEGER DEFAULT 0")
             logger.info("Migrated: added column sessions.time_shamatha_90")
+        if "custom_formulas" not in sess_cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN custom_formulas TEXT DEFAULT ''")
+            logger.info("Migrated: added column sessions.custom_formulas")
 
         self._conn.commit()
 

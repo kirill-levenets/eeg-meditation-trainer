@@ -269,6 +269,11 @@ class TestDatabaseExtensions(unittest.TestCase):
         self.db.create_user("Charlie")
         self.assertIsNone(self.db.find_user_by_name("charlie"))
 
+    def test_sessions_has_custom_formulas_column(self):
+        cur = self.db._conn.execute("PRAGMA table_info(sessions)")
+        cols = {row[1] for row in cur.fetchall()}
+        self.assertIn("custom_formulas", cols)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
