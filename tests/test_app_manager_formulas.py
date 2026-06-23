@@ -91,3 +91,12 @@ class TestAudioDriveKey(unittest.TestCase):
         app = self._app()
         app._audio_metric_key = "shamatha_score"
         self.assertEqual(app._audio_drive_key(), "shamatha_score")
+
+    def test_index_tap_does_not_rebind_when_non_formula_active(self):
+        # Tapping a slot button while a non-formula metric drives audio only
+        # remembers the slot; it must not silently switch the live key.
+        app = self._app()
+        app._audio_metric_key = "shamatha_score"
+        app._on_audio_formula_index(1)
+        self.assertEqual(app._audio_metric_key, "shamatha_score")
+        self.assertEqual(app._audio_formula_index, 1)

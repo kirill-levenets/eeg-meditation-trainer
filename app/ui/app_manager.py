@@ -1707,9 +1707,12 @@ class EEGMeditationApp(App):
         logger.info(f"Audio threshold metric changed to: {self._audio_metric_key}")
 
     def _on_audio_formula_index(self, idx: int) -> None:
-        """Audio is bound to formula slot idx (when the custom-formula option is selected)."""
+        """Pick which formula slot drives audio. Only rebinds the live key when a
+        custom-formula slot is the selected driver — tapping it while another metric
+        is selected just remembers the choice for when custom-formula is picked."""
         self._audio_formula_index = max(0, min(idx, _MAX_FORMULAS - 1))
-        self._audio_metric_key = FORMULA_KEYS[self._audio_formula_index]
+        if self._audio_metric_key in FORMULA_KEYS:
+            self._audio_metric_key = FORMULA_KEYS[self._audio_formula_index]
 
     def _on_theme_change(self, theme_name: str) -> None:
         """Save selected theme."""
