@@ -491,16 +491,24 @@ class DatabaseManager:
             "gamma1": row.get("gamma1_raw", 0),
             "gamma2": row.get("gamma2_raw", 0),
         }
+        alpha = raw_bands["alpha1"] + raw_bands["alpha2"]
+        beta = raw_bands["beta1"] + raw_bands["beta2"]
+        gamma = raw_bands["gamma1"] + raw_bands["gamma2"]
         fvars: dict[str, float] = {
             **raw_bands,
-            "alpha": raw_bands["alpha1"] + raw_bands["alpha2"],
-            "beta": raw_bands["beta1"] + raw_bands["beta2"],
-            "gamma": raw_bands["gamma1"] + raw_bands["gamma2"],
-            "meditation_score": row.get("meditation_score", 0),
-            "shamatha_score": row.get("shamatha_score", 0),
-            "native_attention": row.get("native_attention", 0),
-            "native_meditation": row.get("native_meditation", 0),
+            "alpha": alpha,
+            "beta": beta,
+            "gamma": gamma,
+            # Matches MetricsEngine.normalize_bands so total_power replays identically.
+            "total_power": alpha + beta + gamma + raw_bands["theta"] + raw_bands["delta"] + 1.0,
         }
+        # The stored columns for normalized bands + scores feed formulas directly,
+        # so diary replay sees the same namespace as the live tick (not silent zeros).
+        for k in ("alpha_norm", "beta_norm", "gamma_norm", "theta_norm", "delta_norm",
+                  "meditation_score", "shamatha_score", "distraction", "sinking",
+                  "subtle_distraction", "stability", "calmness",
+                  "native_attention", "native_meditation"):
+            fvars[k] = row.get(k, 0.0)
         sqrt_keys = ("delta", "theta", "alpha1", "alpha2", "beta1", "beta2")
         sqrt_vals = {k: max(raw_bands.get(k, 0.0), 0.0) for k in sqrt_keys}
         total = sum(sqrt_vals.values())

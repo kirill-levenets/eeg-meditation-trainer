@@ -301,6 +301,21 @@ class TestDatabaseExtensions(unittest.TestCase):
         self.assertEqual(len(series["custom_formula"]), 1)
         self.assertAlmostEqual(series["custom_formula"][0], 165.0, places=3)
 
+    def test_recompute_exposes_norm_and_metric_vars(self):
+        # Diary replay must see the same variable namespace as the live tick:
+        # stored norms + scores feed formulas, not silent zeros.
+        from app.metrics.custom_formula import CustomFormulaEvaluator
+        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
+        self.db.save_metrics_batch(sid, [{
+            "timestamp": 0.5, "alpha1": 100, "alpha2": 50, "beta1": 10, "beta2": 5,
+            "alpha_norm": 0.4, "distraction": 30, "sinking": 20, "calmness": 2.5,
+        }])
+        ev = CustomFormulaEvaluator()
+        ev.set_formula("alpha_norm * 100 + distraction - sinking")
+        series = self.db.recompute_formula_series(sid, {"custom_formula": ev})
+        # 0.4*100 + 30 - 20 = 50  (would be 30-20=10 if alpha_norm silently zeroed)
+        self.assertAlmostEqual(series["custom_formula"][0], 50.0, places=3)
+
     def test_recompute_formula_series_skips_invalid(self):
         from app.metrics.custom_formula import CustomFormulaEvaluator
         sid = self.db.save_session({"duration": 60, "threshold_used": 50})
