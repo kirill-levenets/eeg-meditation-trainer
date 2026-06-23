@@ -274,6 +274,37 @@ class TestDatabaseExtensions(unittest.TestCase):
         cols = {row[1] for row in cur.fetchall()}
         self.assertIn("custom_formulas", cols)
 
+    def test_recompute_formula_series_matches_direct_eval(self):
+        from app.metrics.custom_formula import CustomFormulaEvaluator
+        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
+        self.db.save_metrics_batch(sid, [{
+            "timestamp": 0.5,
+            "alpha1": 100, "alpha2": 50,
+            "beta1": 10, "beta2": 5,
+            "delta": 0, "theta": 0,
+            "gamma1": 0, "gamma2": 0,
+            "meditation_score": 0, "shamatha_score": 0,
+            "native_attention": 0, "native_meditation": 0,
+            "marker": 0,
+        }])
+        ev = CustomFormulaEvaluator()
+        ev.set_formula("alpha + beta")
+        series = self.db.recompute_formula_series(sid, {"custom_formula": ev})
+        self.assertEqual(len(series["custom_formula"]), 1)
+        self.assertAlmostEqual(series["custom_formula"][0], 165.0, places=3)
+
+    def test_recompute_formula_series_skips_invalid(self):
+        from app.metrics.custom_formula import CustomFormulaEvaluator
+        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
+        self.db.save_metrics_batch(sid, [{"timestamp": 0.5, "alpha1": 10}])
+        ev_valid = CustomFormulaEvaluator()
+        ev_valid.set_formula("alpha1")
+        ev_invalid = CustomFormulaEvaluator()
+        # no set_formula call — is_valid is False
+        series = self.db.recompute_formula_series(sid, {"good": ev_valid, "bad": ev_invalid})
+        self.assertIn("good", series)
+        self.assertNotIn("bad", series)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+import math
 import os
 import sqlite3
 from datetime import datetime
@@ -472,6 +473,53 @@ class DatabaseManager:
 
     # ---- CSV export ----
 
+    @staticmethod
+    def formula_vars_from_row(row: dict) -> dict[str, float]:
+        """Build the formula variable namespace from one stored metrics row."""
+        raw_bands = {
+            "delta": row.get("delta_raw", 0),
+            "theta": row.get("theta_raw", 0),
+            "alpha1": row.get("alpha1_raw", 0),
+            "alpha2": row.get("alpha2_raw", 0),
+            "beta1": row.get("beta1_raw", 0),
+            "beta2": row.get("beta2_raw", 0),
+            "gamma1": row.get("gamma1_raw", 0),
+            "gamma2": row.get("gamma2_raw", 0),
+        }
+        fvars: dict[str, float] = {
+            **raw_bands,
+            "alpha": raw_bands["alpha1"] + raw_bands["alpha2"],
+            "beta": raw_bands["beta1"] + raw_bands["beta2"],
+            "gamma": raw_bands["gamma1"] + raw_bands["gamma2"],
+            "meditation_score": row.get("meditation_score", 0),
+            "shamatha_score": row.get("shamatha_score", 0),
+            "native_attention": row.get("native_attention", 0),
+            "native_meditation": row.get("native_meditation", 0),
+        }
+        sqrt_keys = ("delta", "theta", "alpha1", "alpha2", "beta1", "beta2")
+        sqrt_vals = {k: max(raw_bands.get(k, 0.0), 0.0) for k in sqrt_keys}
+        total = sum(sqrt_vals.values())
+        for k in sqrt_keys:
+            fvars[f"s_{k}"] = math.sqrt(sqrt_vals[k] / total) if total >= 1.0 else 0.0
+        return fvars
+
+    def recompute_formula_series(self, session_id: int, evaluators: dict) -> dict[str, list[float]]:
+        """Recompute each {series_key: CustomFormulaEvaluator} over a session's stored rows.
+
+        Skips invalid evaluators. Returns {series_key: [value per tick]}.
+        """
+        rows = self.get_session_metrics(session_id)
+        out: dict[str, list[float]] = {k: [] for k, e in evaluators.items()
+                                       if getattr(e, "is_valid", False)}
+        for row in rows:
+            fvars = self.formula_vars_from_row(row)
+            for key, ev in evaluators.items():
+                if not getattr(ev, "is_valid", False):
+                    continue
+                ev.push_variables(fvars)
+                out[key].append(ev.evaluate(fvars))
+        return out
+
     def export_session_csv(self, session_id: int, custom_formula=None) -> str:
         """Export all metrics for a session as a CSV string.
 
@@ -484,39 +532,8 @@ class DatabaseManager:
             return ""
 
         if custom_formula and custom_formula.is_valid:
-            import math
             for row in metrics:
-                # Build variable dict matching what the formula expects
-                raw_bands = {
-                    "delta": row.get("delta_raw", 0),
-                    "theta": row.get("theta_raw", 0),
-                    "alpha1": row.get("alpha1_raw", 0),
-                    "alpha2": row.get("alpha2_raw", 0),
-                    "beta1": row.get("beta1_raw", 0),
-                    "beta2": row.get("beta2_raw", 0),
-                    "gamma1": row.get("gamma1_raw", 0),
-                    "gamma2": row.get("gamma2_raw", 0),
-                }
-                fvars = {
-                    **raw_bands,
-                    "alpha": raw_bands["alpha1"] + raw_bands["alpha2"],
-                    "beta": raw_bands["beta1"] + raw_bands["beta2"],
-                    "gamma": raw_bands["gamma1"] + raw_bands["gamma2"],
-                    "meditation_score": row.get("meditation_score", 0),
-                    "shamatha_score": row.get("shamatha_score", 0),
-                    "native_attention": row.get("native_attention", 0),
-                    "native_meditation": row.get("native_meditation", 0),
-                }
-                # Compute sqrt-normalized relative bands (s_ prefix)
-                sqrt_keys = ("delta", "theta", "alpha1", "alpha2", "beta1", "beta2")
-                sqrt_vals = {k: max(raw_bands.get(k, 0.0), 0.0) for k in sqrt_keys}
-                total = sum(sqrt_vals.values())
-                if total >= 1.0:
-                    for k, v in sqrt_vals.items():
-                        fvars[f"s_{k}"] = math.sqrt(v / total)
-                else:
-                    for k in sqrt_keys:
-                        fvars[f"s_{k}"] = 0.0
+                fvars = self.formula_vars_from_row(row)
                 custom_formula.push_variables(fvars)
                 row["custom_formula"] = custom_formula.evaluate(fvars)
 
