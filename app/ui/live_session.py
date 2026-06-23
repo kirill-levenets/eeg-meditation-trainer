@@ -316,15 +316,13 @@ class LiveSessionScreen(Screen):
         # ── Metrics view (default) ──
         self._metrics_container = BoxLayout(orientation="vertical", spacing=S.GAP_SM)
 
-        # Series picker (on-graph combobox) + persist callbacks, set by app_manager.
-        self.on_series_toggle = None          # (key) -> None
-        self.on_series_picker_dismiss = None  # () -> None (persist on close)
-
         self._graph = ScrollableGraphWidget(
             colors=METRICS_COLORS,
             scales=METRICS_SCALES,
             viewport_seconds=60,
             size_hint_y=1,
+            graph_id="live_metrics",
+            names=SERIES_NAMES,
         )
         # Reference line at the per-metric maximum so level 100 is
         # visually marked even when custom_formula (scale 200) widens
@@ -333,10 +331,12 @@ class LiveSessionScreen(Screen):
         # Heatmap-color the shamatha line: blue at 0 → red at 100+.
         # Colour tracks meditation depth visually instead of a flat hue.
         self._graph.set_heatmap_color("shamatha_score")
-        # On-graph series picker glyph (top-left), drawn into the canvas like the
-        # expand glyph and hit-tested the same way — so it can't be starved by
-        # the ScrollView the way an overlaid widget would.
-        self._graph.set_series_picker_callback(self._open_series_popup)
+        # The on-graph series-picker glyph is wired centrally for every graph by
+        # AppManager._wire_graph_affordances. The legend tracks the graph's own
+        # visible set: any change (picker toggle or restore) rebuilds it.
+        self._graph.set_visibility_callback(
+            lambda: self._rebuild_metric_legend(self._graph.visible_keys())
+        )
         self._metrics_container.add_widget(self._graph)
 
         self._legend = BoxLayout(size_hint_y=None, height=dp(18), spacing=S.GAP_SM)
@@ -357,6 +357,7 @@ class LiveSessionScreen(Screen):
             max_points=_RAW_WAVEFORM_MAX,
             bipolar=True,
             size_hint_y=0.5,
+            graph_id="live_raw",
         )
         self._raw_container.add_widget(self._raw_graph)
 
@@ -368,13 +369,14 @@ class LiveSessionScreen(Screen):
             show_timestamps=True,
             auto_scale=True,
             size_hint_y=0.5,
+            graph_id="live_band",
         )
         self._raw_container.add_widget(self._band_graph)
 
-        band_legend = BoxLayout(size_hint_y=None, height=dp(18), spacing=S.GAP_SM)
-        for band, color in _BAND_COLORS.items():
-            band_legend.add_widget(Label(text=band, font_size=F.TINY, color=color))
-        self._raw_container.add_widget(band_legend)
+        self._band_legend = BoxLayout(size_hint_y=None, height=dp(18), spacing=S.GAP_SM)
+        self._band_graph.set_visibility_callback(self._rebuild_band_legend)
+        self._rebuild_band_legend()
+        self._raw_container.add_widget(self._band_legend)
 
         # Graph area holder — swaps between metrics and raw views
         self._graph_area = BoxLayout(size_hint_y=None, height=dp(400))
@@ -722,11 +724,11 @@ class LiveSessionScreen(Screen):
     def _rebuild_metric_legend(self, enabled_keys: list) -> None:
         """Clear and re-populate the metrics legend with only the enabled metrics."""
         self._legend.clear_widgets()
-        for metric, color in METRICS_COLORS.items():
+        for metric in METRICS_COLORS:
             if metric not in enabled_keys:
                 continue
-            short = metric.replace("_score", "").replace("_", " ").title()
-            lbl = Label(text=short, font_size=F.TINY, color=color)
+            lbl = Label(text=self._graph.series_name(metric), font_size=F.TINY,
+                        color=self._graph.series_color(metric))
             self._legend.add_widget(lbl)
 
     @property
@@ -858,45 +860,14 @@ class LiveSessionScreen(Screen):
     # ── Duration preset hooks ──
     on_duration_preset = None  # set by AppManager; called with value (int or None)
 
-    def _open_series_popup(self, *_args) -> None:
-        """Open a multi-select popup to choose which metrics the graph plots."""
-        body = BoxLayout(orientation="vertical", spacing=S.GAP_SM, padding=S.GAP)
-        self._series_rows = {}
-        for key in METRICS_COLORS:
-            vis = self._graph.is_visible(key)
-            btn = StyledButton(
-                text=SERIES_NAMES.get(key, key), height=dp(44),
-                bg_color=C.ACCENT if vis else C.BG_CARD,
-                text_color=C.TEXT if vis else C.TEXT_SECONDARY, bold=vis,
+    def _rebuild_band_legend(self) -> None:
+        """Repopulate the band legend with only the band graph's visible series."""
+        self._band_legend.clear_widgets()
+        for key in self._band_graph.visible_keys():
+            self._band_legend.add_widget(
+                Label(text=self._band_graph.series_name(key), font_size=F.TINY,
+                      color=self._band_graph.series_color(key))
             )
-            btn.bind(on_release=lambda b, k=key: self._toggle_series_row(k, b))
-            body.add_widget(btn)
-            self._series_rows[key] = btn
-        close_btn = StyledButton(
-            text="Close", height=dp(44),
-            bg_color=C.PRIMARY, bg_pressed=C.PRIMARY_DIM,
-        )
-        close_btn.bind(on_release=lambda *_a: self._series_popup.dismiss())
-        body.add_widget(close_btn)
-        self._series_popup = Popup(
-            title="Graph series",
-            content=body,
-            size_hint=(0.8, None),
-            height=dp(80 + 50 * (len(METRICS_COLORS) + 1)),
-            auto_dismiss=True,
-        )
-        if self.on_series_picker_dismiss is not None:
-            self._series_popup.bind(on_dismiss=lambda *_a: self.on_series_picker_dismiss())
-        self._series_popup.open()
-
-    def _toggle_series_row(self, key, btn) -> None:
-        """Toggle one series (stays in the popup for multi-select)."""
-        if self.on_series_toggle is not None:
-            self.on_series_toggle(key)
-        vis = self._graph.is_visible(key)
-        btn.bg_color = C.ACCENT if vis else C.BG_CARD
-        btn.text_color = C.TEXT if vis else C.TEXT_SECONDARY
-        btn.bold = vis
 
     def _open_duration_popup(self, *_args) -> None:
         """Open a modal Popup to pick a session duration preset."""

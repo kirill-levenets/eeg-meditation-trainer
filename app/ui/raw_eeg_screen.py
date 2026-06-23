@@ -32,10 +32,15 @@ class ScrollableGraphWidget(Widget):
                  show_timestamps: bool = True, sample_rate: float = 0.0,
                  max_points: int = 0, bipolar: bool = False,
                  auto_scale: bool = False, grid_step: float = 20.0,
+                 graph_id: str = "", names: dict[str, str] | None = None,
                  **kwargs) -> None:
         super().__init__(**kwargs)
         self._colors: dict[str, tuple] = colors
         self._scales: dict[str, float] = scales
+        # Stable identity for per-graph persistence (graph_series_<graph_id>)
+        # and friendly labels for the series picker / legends.
+        self._graph_id: str = graph_id
+        self._names: dict[str, str] = names or {}
         self._bipolar: bool = bipolar
         self._auto_scale: bool = auto_scale
         self._grid_step: float = grid_step
@@ -79,6 +84,7 @@ class ScrollableGraphWidget(Widget):
         self._tap_callback = None
         self._expand_callback = None
         self._series_callback = None
+        self._visibility_callback = None
         self._touch_moved: bool = False
         self._gfx: InstructionGroup = InstructionGroup()
         self.canvas.add(self._gfx)
@@ -146,6 +152,8 @@ class ScrollableGraphWidget(Widget):
         if metric in self._visible:
             self._visible[metric] = visible
             self._redraw()
+            if self._visibility_callback is not None:
+                self._visibility_callback()
 
     def is_visible(self, metric: str) -> bool:
         return self._visible.get(metric, False)
@@ -156,6 +164,21 @@ class ScrollableGraphWidget(Widget):
     def series_keys(self) -> list[str]:
         """All series this graph can plot (the catalog set at construction)."""
         return list(self._data.keys())
+
+    @property
+    def graph_id(self) -> str:
+        return self._graph_id
+
+    def series_name(self, key: str) -> str:
+        """Friendly label for a series — explicit `names` map, else prettified key."""
+        return self._names.get(key) or key.replace("_score", "").replace("_", " ").title()
+
+    def series_color(self, key: str) -> tuple:
+        return self._colors.get(key, (1, 1, 1, 1))
+
+    def set_visibility_callback(self, callback) -> None:
+        """Invoked after any set_visible — lets the owning screen refresh its legend."""
+        self._visibility_callback = callback
 
     def set_scroll_offset(self, offset: int) -> None:
         self._scroll_offset = max(0, min(offset, self.max_scroll))

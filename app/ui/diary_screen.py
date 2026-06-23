@@ -391,6 +391,7 @@ class DiaryScreen(Screen):
             show_value_labels=True,
             show_timestamps=True,
             size_hint_y=1,
+            graph_id="diary_metrics",
         )
         self._raw_eeg_graph = ScrollableGraphWidget(
             colors=RAW_EEG_PREVIEW_COLORS,
@@ -402,6 +403,7 @@ class DiaryScreen(Screen):
             max_points=int(_SYNTH_RATE * 60),
             bipolar=True,
             size_hint_y=1,
+            graph_id="diary_raw",
         )
         self._freq_graph = ScrollableGraphWidget(
             colors=FREQ_PREVIEW_COLORS,
@@ -411,7 +413,12 @@ class DiaryScreen(Screen):
             show_timestamps=True,
             auto_scale=True,
             size_hint_y=1,
+            graph_id="diary_freq",
         )
+        # Legend tracks the active graph's visible set; a picker toggle (or a
+        # restore) on the displayed graph rebuilds it.
+        for g in (self._metrics_graph, self._raw_eeg_graph, self._freq_graph):
+            g.set_visibility_callback(lambda gr=g: self._on_graph_visibility(gr))
 
         # Legend container
         self._legend_container = BoxLayout(
@@ -619,18 +626,25 @@ class DiaryScreen(Screen):
             self._freq_graph._redraw()
         self._rebuild_legend(tab)
 
+    def _graph_for_tab(self, tab: str) -> ScrollableGraphWidget:
+        return {
+            "metrics": self._metrics_graph,
+            "raw": self._raw_eeg_graph,
+            "freq": self._freq_graph,
+        }[tab]
+
+    def _on_graph_visibility(self, graph: ScrollableGraphWidget) -> None:
+        """A series toggled on `graph` — refresh the legend if it's the shown tab."""
+        if graph is self._graph_for_tab(self._active_graph_tab):
+            self._rebuild_legend(self._active_graph_tab)
+
     def _rebuild_legend(self, tab: str) -> None:
-        """Rebuild legend labels for the active graph tab."""
+        """Rebuild legend labels for the active graph tab's visible series."""
         self._legend_container.clear_widgets()
-        if tab == "metrics":
-            colors = METRICS_PREVIEW_COLORS
-        elif tab == "raw":
-            colors = RAW_EEG_PREVIEW_COLORS
-        else:
-            colors = FREQ_PREVIEW_COLORS
-        for name, color in colors.items():
-            short = name.replace("_score", "").replace("_", " ").title()
-            lbl = Label(text=short, font_size=dp(9), color=color)
+        graph = self._graph_for_tab(tab)
+        for key in graph.visible_keys():
+            lbl = Label(text=graph.series_name(key), font_size=dp(9),
+                        color=graph.series_color(key))
             self._legend_container.add_widget(lbl)
 
     def _on_save_pressed(self, *args) -> None:
