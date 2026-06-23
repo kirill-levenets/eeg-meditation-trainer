@@ -419,20 +419,27 @@ class TestSettingsFormulaSlots(unittest.TestCase):
         self.screen._submit_slot(1)
         self.assertEqual(captured, [(1, "Focus", "alpha + beta")])
 
-    def test_save_slot_reuses_library_callback_with_name_and_formula(self):
+    def test_save_slot_reuses_library_callback_with_index_name_formula(self):
         captured = []
         self.screen.set_save_formula_callback(
-            lambda name, formula: captured.append((name, formula))
+            lambda idx, name, formula: captured.append((idx, name, formula))
         )
         self.screen._formula_name_inputs[2].text = "Calm"
         self.screen._formula_inputs[2].text = "theta / (delta + 1)"
         self.screen._save_slot(2)
-        self.assertEqual(captured, [("Calm", "theta / (delta + 1)")])
+        self.assertEqual(captured, [(2, "Calm", "theta / (delta + 1)")])
 
     def test_set_formula_slot_reflects_into_inputs(self):
         self.screen.set_formula_slot(0, "MyName", "alpha")
         self.assertEqual(self.screen._formula_name_inputs[0].text, "MyName")
         self.assertEqual(self.screen._formula_inputs[0].text, "alpha")
+
+    def test_set_formula_slot_status_routes_to_the_right_slot(self):
+        from app.ui.theme import C
+        self.screen.set_formula_slot_status(1, "boom", is_error=True)
+        self.assertEqual(self.screen._formula_statuses[1].text, "boom")
+        self.assertEqual(tuple(self.screen._formula_statuses[1].color), tuple(C.DANGER))
+        self.assertEqual(self.screen._formula_statuses[0].text, "")  # slot 0 untouched
 
 
 class TestAccordionGrandchildGrowth(unittest.TestCase):

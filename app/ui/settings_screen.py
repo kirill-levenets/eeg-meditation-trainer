@@ -679,6 +679,7 @@ class SettingsScreen(Screen):
                 background_color=list(C.BG_INPUT),
                 foreground_color=C.TEXT,
             )
+            name_input.bind(on_text_validate=lambda _w, idx=i: self._submit_slot(idx))
             self._formula_name_inputs.append(name_input)
             formula_section.add_widget(name_input)
 
@@ -692,7 +693,6 @@ class SettingsScreen(Screen):
                 background_color=list(C.BG_INPUT),
                 foreground_color=C.TEXT,
             )
-            formula_input.slot_index = i
             formula_input.bind(
                 on_text_validate=lambda _w, idx=i: self._submit_slot(idx)
             )
@@ -709,7 +709,6 @@ class SettingsScreen(Screen):
                 size_hint_y=None,
                 height=dp(34),
             )
-            apply_btn.slot_index = i
             apply_btn.bind(on_release=lambda _w, idx=i: self._submit_slot(idx))
             formula_btns.add_widget(apply_btn)
 
@@ -720,7 +719,6 @@ class SettingsScreen(Screen):
                 size_hint_y=None,
                 height=dp(34),
             )
-            save_btn.slot_index = i
             save_btn.bind(on_release=lambda _w, idx=i: self._save_slot(idx))
             formula_btns.add_widget(save_btn)
             formula_section.add_widget(formula_btns)
@@ -990,7 +988,7 @@ class SettingsScreen(Screen):
     def _save_slot(self, idx: int) -> None:
         """Save a slot's formula to the library, seeding the entry from its name."""
         if self._on_save_formula:
-            self._on_save_formula(self._formula_name_inputs[idx].text.strip(),
+            self._on_save_formula(idx, self._formula_name_inputs[idx].text.strip(),
                                   self._formula_inputs[idx].text.strip())
 
     def set_formula_slot_status(self, idx: int, text: str, is_error: bool = False) -> None:

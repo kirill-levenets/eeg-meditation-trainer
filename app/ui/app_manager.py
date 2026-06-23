@@ -1730,23 +1730,23 @@ class EEGMeditationApp(App):
         if self._current_user_id:
             self._persist_active_formulas(self._current_user_id)
 
-    def _on_save_formula(self, name: str, formula: str) -> None:
+    def _on_save_formula(self, idx: int, name: str, formula: str) -> None:
         """Save a slot's formula to the user's saved library, named by the slot."""
         if not self._current_user_id:
-            self._settings_screen.set_formula_slot_status(0, "No user selected", is_error=True)
+            self._settings_screen.set_formula_slot_status(idx, "No user selected", is_error=True)
             return
         if not formula:
-            self._settings_screen.set_formula_slot_status(0, "Nothing to save", is_error=True)
+            self._settings_screen.set_formula_slot_status(idx, "Nothing to save", is_error=True)
             return
         # Fall back to a truncated formula as the display name when none is given.
         label = name or (formula[:40] + ("..." if len(formula) > 40 else ""))
         ok = self._db.add_saved_formula(self._current_user_id, label, formula)
         if ok:
-            self._settings_screen.set_formula_slot_status(0, "Formula saved")
+            self._settings_screen.set_formula_slot_status(idx, "Formula saved")
             self._refresh_saved_formulas()
             logger.info(f"Formula saved: {label} = {formula}")
         else:
-            self._settings_screen.set_formula_slot_status(0, "Limit reached (50 max)", is_error=True)
+            self._settings_screen.set_formula_slot_status(idx, "Limit reached (50 max)", is_error=True)
 
     def _on_load_formula(self, index: int) -> None:
         """Load a saved formula into slot 0 and apply it (Task 8: first empty slot)."""
