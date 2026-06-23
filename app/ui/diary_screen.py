@@ -576,10 +576,12 @@ class DiaryScreen(Screen):
         for row in rows:
             for key in metrics_series:
                 metrics_series[key].append(row.get(key, 0.0))
-        # Replace the stored (live-computed / zero) custom-formula columns with
-        # the per-session recompute so the diary plots the formulas active then.
-        for key, vals in self._session_formula_series.items():
-            metrics_series[key] = vals
+        # Custom-formula columns aren't stored per tick — drive them entirely from
+        # the per-session recompute. A slot the session didn't record stays empty
+        # (no flat zero-line phantom); recorded slots get their replayed series.
+        for key in metrics_series:
+            if key.startswith("custom_formula"):
+                metrics_series[key] = self._session_formula_series.get(key, [])
         self._metrics_graph.load_static_data(metrics_series)
 
         # Raw EEG synthesized waveform from band powers
