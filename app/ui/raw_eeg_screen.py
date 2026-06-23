@@ -173,6 +173,13 @@ class ScrollableGraphWidget(Widget):
         """Friendly label for a series — explicit `names` map, else prettified key."""
         return self._names.get(key) or key.replace("_score", "").replace("_", " ").title()
 
+    def set_series_name(self, key: str, name: str) -> None:
+        """Override a series' friendly label at runtime (custom-formula renames)."""
+        self._names[key] = name
+        if self._visibility_callback is not None:
+            self._visibility_callback()
+        self._redraw()
+
     def series_color(self, key: str) -> tuple:
         return self._colors.get(key, (1, 1, 1, 1))
 

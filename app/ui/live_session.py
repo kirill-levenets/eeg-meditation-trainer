@@ -60,6 +60,8 @@ METRICS_COLORS = {
     "native_attention": C.ATTENTION,
     "native_meditation": C.MEDITATION,
     "custom_formula": C.CUSTOM,
+    "custom_formula_2": C.CUSTOM2,
+    "custom_formula_3": C.CUSTOM3,
 }
 
 METRICS_SCALES = {
@@ -70,6 +72,8 @@ METRICS_SCALES = {
     "native_attention": 100.0,
     "native_meditation": 100.0,
     "custom_formula": 200.0,
+    "custom_formula_2": 200.0,
+    "custom_formula_3": 200.0,
 }
 
 # Friendly labels for the on-graph series picker (combobox).
@@ -80,7 +84,9 @@ SERIES_NAMES = {
     "subtle_distraction": "Subtle Distraction",
     "native_attention": "NS Attention",
     "native_meditation": "NS Meditation",
-    "custom_formula": "Custom Formula",
+    "custom_formula": "Custom 1",
+    "custom_formula_2": "Custom 2",
+    "custom_formula_3": "Custom 3",
 }
 
 
