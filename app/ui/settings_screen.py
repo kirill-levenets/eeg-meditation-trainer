@@ -83,7 +83,6 @@ class SettingsScreen(Screen):
         self._on_backup_pressed: Optional[Callable] = None
         self._on_restore_pressed: Optional[Callable] = None
         self._on_threshold_change: Optional[Callable] = None
-        self._on_toggle_change: Optional[Callable] = None
         self._on_test_audio: Optional[Callable] = None
         self._on_sinking_alert_toggle: Optional[Callable] = None
         self._on_subtle_alert_toggle: Optional[Callable] = None
@@ -631,58 +630,9 @@ class SettingsScreen(Screen):
         self._marker_hotkey: str = "m"
         self._waiting_for_hotkey: bool = False
 
-        # --- Graph toggles ---
-        graph_section = accordion.add_section("Graph Metrics", collapsed=True)
-
-        toggle_names = {
-            "shamatha_score": "Shamatha Score",
-            "distraction": "Distraction",
-            "sinking": "Sinking",
-            "subtle_distraction": "Subtle Distraction",
-            "native_attention": "NS Attention",
-            "native_meditation": "NS Meditation",
-        }
-        self._checkboxes: dict[str, CheckBox] = {}
-        for key, display_name in toggle_names.items():
-            row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
-            cb = CheckBox(
-                active=self._graph_toggles.get(key, True), size_hint_x=0.15,
-                size_hint_y=None, height=dp(36),
-            )
-            cb.metric_key = key
-            cb.bind(active=self._on_toggle)
-            lbl = Label(
-                text=display_name,
-                font_size=F.H3,
-                color=C.TEXT,
-                size_hint_x=0.85,
-                halign="left", valign="middle",
-            )
-            lbl.bind(size=lbl.setter("text_size"))
-            row.add_widget(cb)
-            row.add_widget(lbl)
-            graph_section.add_widget(row)
-            self._checkboxes[key] = cb
-
-        # Custom formula visibility toggle
-        cf_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
-        self._custom_formula_cb = CheckBox(
-            active=False, size_hint_x=0.15,
-            size_hint_y=None, height=dp(36),
-        )
-        self._custom_formula_cb.bind(active=self._on_custom_formula_toggle)
-        self._on_custom_formula_visible_change: Optional[Callable] = None
-        cf_lbl = Label(
-            text="Show Custom Formula",
-            font_size=F.H3,
-            color=C.TEXT,
-            size_hint_x=0.85,
-            halign="left", valign="middle",
-        )
-        cf_lbl.bind(size=cf_lbl.setter("text_size"))
-        cf_row.add_widget(self._custom_formula_cb)
-        cf_row.add_widget(cf_lbl)
-        graph_section.add_widget(cf_row)
+        # Graph series are now chosen via the on-graph series picker (combobox);
+        # the former "Graph Metrics" checkbox section was removed (subsumed).
+        # _graph_toggles (above) remains as the first-run default selection.
 
         # --- Custom Formula section ---
         formula_section = accordion.add_section("Custom Formula", collapsed=True)
@@ -972,13 +922,6 @@ class SettingsScreen(Screen):
         if self._on_threshold_change:
             self._on_threshold_change(val)
 
-    def _on_toggle(self, checkbox, active) -> None:
-        key = getattr(checkbox, "metric_key", None)
-        if key:
-            self._graph_toggles[key] = active
-            if self._on_toggle_change:
-                self._on_toggle_change(key, active)
-
     def _on_test_audio_pressed(self, *args) -> None:
         if self._on_test_audio:
             self._on_test_audio()
@@ -1085,9 +1028,6 @@ class SettingsScreen(Screen):
 
     def set_threshold_callback(self, callback: Callable) -> None:
         self._on_threshold_change = callback
-
-    def set_toggle_callback(self, callback: Callable) -> None:
-        self._on_toggle_change = callback
 
     def set_test_audio_callback(self, callback: Callable) -> None:
         self._on_test_audio = callback
@@ -1358,27 +1298,6 @@ class SettingsScreen(Screen):
         # Defer to next frame so the section's expanded height is laid out
         # before we ask the ScrollView to bring it into view.
         Clock.schedule_once(_scroll, 0)
-
-    @property
-    def graph_toggles(self) -> dict[str, bool]:
-        return dict(self._graph_toggles)
-
-    # --- Custom formula visibility ---
-
-    def _on_custom_formula_toggle(self, checkbox, active) -> None:
-        if self._on_custom_formula_visible_change:
-            self._on_custom_formula_visible_change(active)
-
-    def set_custom_formula_visible_callback(self, callback: Callable) -> None:
-        self._on_custom_formula_visible_change = callback
-
-    @property
-    def custom_formula_visible(self) -> bool:
-        return self._custom_formula_cb.active
-
-    @custom_formula_visible.setter
-    def custom_formula_visible(self, value: bool) -> None:
-        self._custom_formula_cb.active = value
 
     # --- Audio threshold metric picker ---
 

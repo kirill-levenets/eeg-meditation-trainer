@@ -410,7 +410,6 @@ class EEGMeditationApp(App):
         self._wire_graph_expand()
 
         self._settings_screen.set_threshold_callback(self._on_threshold_change)
-        self._settings_screen.set_toggle_callback(self._on_toggle_change)
         self._settings_screen.set_test_audio_callback(self._on_test_audio)
         self._settings_screen.set_sinking_alert_callback(self._on_sinking_alert_toggle)
         self._settings_screen.set_subtle_alert_callback(self._on_subtle_alert_toggle)
@@ -426,9 +425,6 @@ class EEGMeditationApp(App):
         self._settings_screen.set_load_formula_callback(self._on_load_formula)
         self._settings_screen.set_delete_formula_callback(self._on_delete_formula)
         self._settings_screen.set_export_formulas_callback(self._on_export_formulas)
-        self._settings_screen.set_custom_formula_visible_callback(
-            self._on_custom_formula_visible_toggle
-        )
         self._settings_screen.set_audio_metric_callback(self._on_audio_metric_change)
         self._settings_screen.set_theme_callback(self._on_theme_change)
 
@@ -1566,14 +1562,6 @@ class EEGMeditationApp(App):
         self._live_screen.graph.set_threshold(float(value), "shamatha_score")
         logger.debug(f"Threshold changed to {value}")
 
-    def _on_toggle_change(self, metric: str, active: bool) -> None:
-        self._live_screen.graph.set_visible(metric, active)
-        if metric == "sinking":
-            self._audio.sinking_alert_enabled = active
-            self._settings_screen._sinking_alert_cb.active = active
-        self._live_screen._rebuild_metric_legend(self._live_screen.graph.visible_keys())
-        logger.debug(f"Graph toggle: {metric}={'on' if active else 'off'}")
-
     def _on_series_toggle(self, key: str) -> None:
         """On-graph series picker tapped a row — flip that series' visibility."""
         visible = not self._live_screen.graph.is_visible(key)
@@ -1616,13 +1604,6 @@ class EEGMeditationApp(App):
         Window.rotation = rotation
         logger.info(f"Screen rotation set to {rotation}")
 
-    def _on_custom_formula_visible_toggle(self, active: bool) -> None:
-        """Toggle custom formula line visibility on graph."""
-        show = active and self._custom_formula.is_valid
-        self._live_screen.graph.set_visible("custom_formula", show)
-        self._live_screen._rebuild_metric_legend(self._live_screen.graph.visible_keys())
-        logger.debug(f"Custom formula visibility: {show}")
-
     def _on_audio_metric_change(self, key: str) -> None:
         """Switch which metric drives the audio threshold feedback."""
         self._audio_metric_key = key
@@ -1643,8 +1624,9 @@ class EEGMeditationApp(App):
             return
         ok, err = self._custom_formula.set_formula(formula)
         if ok:
-            show = self._settings_screen.custom_formula_visible
-            self._live_screen.graph.set_visible("custom_formula", show)
+            # Applying a valid formula shows its line; hide it via the series picker.
+            self._live_screen.graph.set_visible("custom_formula", True)
+            self._live_screen._rebuild_metric_legend(self._live_screen.graph.visible_keys())
             self._settings_screen.set_formula_status("Formula active")
             logger.info(f"Custom formula applied: {formula}")
         else:
@@ -2298,13 +2280,6 @@ class EEGMeditationApp(App):
         graph = self._live_screen.graph
         zoom_seconds = graph.viewport_points / graph._sample_rate
         self._db.set_user_setting(uid, "graph_zoom_seconds", str(zoom_seconds))
-        toggles = self._settings_screen.graph_toggles
-        for key, active in toggles.items():
-            self._db.set_user_setting(uid, f"toggle_{key}", str(active))
-        self._db.set_user_setting(
-            uid, "custom_formula_visible",
-            str(self._settings_screen.custom_formula_visible),
-        )
         # Per-graph series selection (the on-graph combobox source of truth).
         self._db.set_user_json_setting(
             uid, "graph_series_live_metrics", self._live_screen.graph.visible_keys()
@@ -2456,11 +2431,6 @@ class EEGMeditationApp(App):
         else:
             self._settings_screen._formula_input.text = ""
             self._on_custom_formula_change("")
-
-        cf_vis = g(user_id, "custom_formula_visible")
-        if cf_vis is not None:
-            self._settings_screen.custom_formula_visible = cf_vis == "True"
-            self._on_custom_formula_visible_toggle(cf_vis == "True")
 
         audio_met = g(user_id, "audio_metric")
         if audio_met is not None:
