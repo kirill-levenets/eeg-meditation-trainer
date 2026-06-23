@@ -34,6 +34,7 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         settings._checkboxes = {k: _CB() for k in metric_keys}
         settings._graph_toggles = {k: (k == "shamatha_score") for k in metric_keys}
         self.app._settings_screen = settings
+        self.app._custom_formula = type("CF", (), {"is_valid": False})()
 
     def tearDown(self):
         self.app._db.close()
@@ -61,10 +62,10 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         self.assertTrue(self.graph.is_visible("shamatha_score"))  # the only default
         self.assertFalse(self.graph.is_visible("distraction"))
 
-    def test_checkboxes_synced_to_selection(self):
-        self.app._db.set_user_json_setting(
-            self.uid, "graph_series_live_metrics", ["distraction"]
-        )
-        self.app._restore_graph_series(self.uid)
-        self.assertTrue(self.app._settings_screen._checkboxes["distraction"].active)
-        self.assertFalse(self.app._settings_screen._checkboxes["shamatha_score"].active)
+    def test_toggle_flips_graph_visibility_directly(self):
+        self.app._restore_graph_series(self.uid)  # shamatha on by default
+        self.app._fullscreen_overlay = None  # _refresh_fullscreen_legend no-op
+        self.app._on_series_toggle("distraction")
+        self.assertTrue(self.graph.is_visible("distraction"))
+        self.app._on_series_toggle("shamatha_score")
+        self.assertFalse(self.graph.is_visible("shamatha_score"))

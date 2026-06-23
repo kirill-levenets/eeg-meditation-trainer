@@ -1575,16 +1575,12 @@ class EEGMeditationApp(App):
         logger.debug(f"Graph toggle: {metric}={'on' if active else 'off'}")
 
     def _on_series_toggle(self, key: str) -> None:
-        """On-graph series picker tapped a row — flip that series' visibility.
-
-        Routes through the existing checkbox state so the Settings UI stays in
-        sync; the checkbox's `active` bind drives set_visible + legend rebuild.
-        """
-        visible = self._live_screen.graph.is_visible(key)
+        """On-graph series picker tapped a row — flip that series' visibility."""
+        visible = not self._live_screen.graph.is_visible(key)
         if key == "custom_formula":
-            self._settings_screen._custom_formula_cb.active = not visible
-        elif key in self._settings_screen._checkboxes:
-            self._settings_screen._checkboxes[key].active = not visible
+            visible = visible and self._custom_formula.is_valid
+        self._live_screen.graph.set_visible(key, visible)
+        self._live_screen._rebuild_metric_legend(self._live_screen.graph.visible_keys())
         self._refresh_fullscreen_legend()
 
     def _refresh_fullscreen_legend(self) -> None:
@@ -2322,22 +2318,26 @@ class EEGMeditationApp(App):
 
     def _restore_graph_series(self, user_id: int) -> None:
         """Apply the per-graph series selection: prefer the new JSON key, else
-        migrate from the legacy per-metric toggle_<key> rows. custom_formula is
-        restored separately via custom_formula_visible."""
+        migrate from the legacy per-metric toggle_<key> rows + custom_formula_visible."""
+        catalog = self._live_screen.graph.series_keys()
+        metric_keys = [k for k in catalog if k != "custom_formula"]
         series = self._db.get_user_json_setting(user_id, "graph_series_live_metrics")
         if series is not None:
             sel = set(series)
         else:
+            defaults = self._settings_screen._graph_toggles
             sel = set()
-            for key in self._settings_screen._checkboxes:
+            for key in metric_keys:
                 saved = self._db.get_user_setting(user_id, f"toggle_{key}")
-                active = (saved == "True") if saved is not None \
-                    else self._settings_screen._graph_toggles.get(key, True)
+                active = (saved == "True") if saved is not None else defaults.get(key, True)
                 if active:
                     sel.add(key)
-        for key, cb in self._settings_screen._checkboxes.items():
+            if self._db.get_user_setting(user_id, "custom_formula_visible") == "True":
+                sel.add("custom_formula")
+        for key in catalog:
             on = key in sel
-            cb.active = on
+            if key == "custom_formula":
+                on = on and self._custom_formula.is_valid
             self._live_screen.graph.set_visible(key, on)
         self._live_screen._rebuild_metric_legend(self._live_screen.graph.visible_keys())
 
