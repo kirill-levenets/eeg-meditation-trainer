@@ -185,6 +185,28 @@ class TestSessionFormulaSaveAndReplay(unittest.TestCase):
         self.assertAlmostEqual(injected[0], 165.0, places=3)
         self.assertEqual(self.app._diary_screen.names[FORMULA_KEYS[0]], "Ratio")
 
+    def test_replay_sparse_slots_map_to_correct_keys(self):
+        # Slots 0 and 2 valid, slot 1 empty — replay must land on custom_formula
+        # and custom_formula_3, NOT pack densely onto custom_formula_2.
+        self.app._formula_slots[0].set_formula("alpha + beta")
+        self.app._formula_slots[2].set_formula("alpha1")
+        sid = self._seed_session()
+        session = self.app._db.get_session(sid)
+        self.app._inject_session_formulas(sid, session)
+        series = self.app._diary_screen.series
+        self.assertIn(FORMULA_KEYS[0], series)
+        self.assertIn(FORMULA_KEYS[2], series)
+        self.assertNotIn(FORMULA_KEYS[1], series)
+        self.assertAlmostEqual(series[FORMULA_KEYS[0]][0], 165.0, places=3)  # alpha+beta
+        self.assertAlmostEqual(series[FORMULA_KEYS[2]][0], 100.0, places=3)  # alpha1
+
+    def test_replay_resets_stale_names_for_empty_slots(self):
+        sid = self._seed_session()  # no valid slots
+        session = self.app._db.get_session(sid)
+        self.app._inject_session_formulas(sid, session)
+        # All custom keys reset to defaults so a prior session's name can't leak.
+        self.assertEqual(self.app._diary_screen.names[FORMULA_KEYS[1]], "Custom 2")
+
     def test_replay_no_formulas_is_empty(self):
         sid = self._seed_session()  # no valid slots
         session = self.app._db.get_session(sid)

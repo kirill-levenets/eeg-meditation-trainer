@@ -274,6 +274,14 @@ class TestDatabaseExtensions(unittest.TestCase):
         cols = {row[1] for row in cur.fetchall()}
         self.assertIn("custom_formulas", cols)
 
+    def test_update_session_writes_custom_formulas_when_given(self):
+        sid = self.db.save_session({"duration": 1}, custom_formulas='[{"slot": 0}]')
+        self.db.update_session(sid, {"duration": 2}, custom_formulas='[{"slot": 1}]')
+        self.assertEqual(self.db.get_session(sid)["custom_formulas"], '[{"slot": 1}]')
+        # Omitting it leaves the stored snapshot untouched.
+        self.db.update_session(sid, {"duration": 3})
+        self.assertEqual(self.db.get_session(sid)["custom_formulas"], '[{"slot": 1}]')
+
     def test_recompute_formula_series_matches_direct_eval(self):
         from app.metrics.custom_formula import CustomFormulaEvaluator
         sid = self.db.save_session({"duration": 60, "threshold_used": 50})

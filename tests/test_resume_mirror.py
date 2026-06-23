@@ -451,5 +451,7 @@ def test_timer_expiry_updates_existing_session_row():
 
     _drive_tick(app, _raw_sample(), _metrics())
 
-    app._db.update_session.assert_called_once_with(7, {"duration": 100})
+    app._db.update_session.assert_called_once_with(
+        7, {"duration": 100}, custom_formulas="[]"
+    )
     app._db.save_session.assert_not_called()

@@ -152,9 +152,14 @@ class EEGMeditationApp(App):
             self._live_screen.graph.set_series_name(key, name)
 
     def _session_custom_formulas_json(self) -> str:
-        """JSON of the valid slots active this session, recorded at save for diary replay."""
+        """JSON of the valid slots active this session, recorded at save for diary replay.
+
+        `slot` is stored explicitly so a sparse set (e.g. only slots 0 and 2) replays
+        onto the correct series keys instead of being packed densely and misaligned.
+        """
         return json.dumps([
-            {"name": self._formula_names[i],
+            {"slot": i,
+             "name": self._formula_names[i],
              "formula": self._formula_slots[i].formula,
              "visible": self._live_screen.graph.is_visible(FORMULA_KEYS[i]),
              "drove_audio": self._audio_metric_key == FORMULA_KEYS[i]}
@@ -1075,7 +1080,10 @@ class EEGMeditationApp(App):
 
         if stats:
             if self._current_session_id is not None:
-                self._db.update_session(self._current_session_id, stats)
+                self._db.update_session(
+                    self._current_session_id, stats,
+                    custom_formulas=self._session_custom_formulas_json(),
+                )
             else:
                 self._current_session_id = self._db.save_session(
                     stats, user_id=self._current_user_id,
@@ -1166,7 +1174,10 @@ class EEGMeditationApp(App):
 
         if save and stats:
             if self._current_session_id is not None:
-                self._db.update_session(self._current_session_id, stats)
+                self._db.update_session(
+                    self._current_session_id, stats,
+                    custom_formulas=self._session_custom_formulas_json(),
+                )
             else:
                 self._current_session_id = self._db.save_session(
                     stats, user_id=self._current_user_id,
@@ -2049,28 +2060,30 @@ class EEGMeditationApp(App):
             self._sm.current = "diary"
 
     def _inject_session_formulas(self, session_id: int, session: dict) -> None:
-        """Replay the session's OWN formulas: recompute their series from stored rows.
-
-        History must show the formulas active DURING the session (with their
-        names), not today's edits — so we rebuild evaluators from the recorded
-        defs and recompute over the session's band powers before the graph draws.
-        """
+        """Recompute the session's recorded formulas from its band powers so the diary
+        shows the snapshot active then (names included), not today's edits."""
         cf_raw = session.get("custom_formulas") or ""
         evaluators: dict[str, CustomFormulaEvaluator] = {}
-        names: dict[str, str] = {}
+        # Reset every custom key to its default name so a session without a given
+        # slot doesn't inherit the previous session's label.
+        names: dict[str, str] = {k: f"Custom {i + 1}" for i, k in enumerate(FORMULA_KEYS)}
         if cf_raw:
             try:
                 defs = json.loads(cf_raw)
             except (ValueError, TypeError):
                 defs = []
-            for i, d in enumerate(defs):
-                if i >= _MAX_FORMULAS or not isinstance(d, dict):
+            for pos, d in enumerate(defs):
+                if not isinstance(d, dict):
                     continue
+                slot = d.get("slot", pos)  # explicit slot; fall back to position for old records
+                if not isinstance(slot, int) or not 0 <= slot < _MAX_FORMULAS:
+                    continue
+                key = FORMULA_KEYS[slot]
                 ev = CustomFormulaEvaluator()
                 ev.set_formula(d.get("formula", "") or "")
                 if ev.is_valid:
-                    evaluators[FORMULA_KEYS[i]] = ev
-                    names[FORMULA_KEYS[i]] = d.get("name") or f"Custom {i + 1}"
+                    evaluators[key] = ev
+                    names[key] = d.get("name") or f"Custom {slot + 1}"
         series = self._db.recompute_formula_series(session_id, evaluators) if evaluators else {}
         self._diary_screen.set_session_formulas(series, names)
 

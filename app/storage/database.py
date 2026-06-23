@@ -337,27 +337,28 @@ class DatabaseManager:
 
     # ---- Session management ----
 
-    def update_session(self, session_id: int, stats: dict) -> None:
-        """Update an existing session's aggregate stats."""
+    def update_session(self, session_id: int, stats: dict,
+                       custom_formulas: str | None = None) -> None:
+        """Update an existing session's aggregate stats (+ formula snapshot if given)."""
+        cols = ["duration = ?", "threshold_used = ?", "avg_meditation = ?",
+                "avg_shamatha = ?", "max_meditation = ?", "time_above_threshold = ?",
+                "longest_streak = ?", "time_shamatha_90 = ?"]
+        vals: list = [
+            stats.get("duration", 0),
+            stats.get("threshold_used", 50),
+            stats.get("avg_meditation", 0),
+            stats.get("avg_shamatha", 0),
+            stats.get("max_meditation", 0),
+            stats.get("time_above_threshold", 0),
+            stats.get("longest_streak", 0),
+            stats.get("time_shamatha_90", 0),
+        ]
+        if custom_formulas is not None:
+            cols.append("custom_formulas = ?")
+            vals.append(custom_formulas)
+        vals.append(session_id)
         self._conn.execute(
-            """
-            UPDATE sessions
-            SET duration = ?, threshold_used = ?, avg_meditation = ?,
-                avg_shamatha = ?, max_meditation = ?, time_above_threshold = ?,
-                longest_streak = ?, time_shamatha_90 = ?
-            WHERE id = ?
-            """,
-            (
-                stats.get("duration", 0),
-                stats.get("threshold_used", 50),
-                stats.get("avg_meditation", 0),
-                stats.get("avg_shamatha", 0),
-                stats.get("max_meditation", 0),
-                stats.get("time_above_threshold", 0),
-                stats.get("longest_streak", 0),
-                stats.get("time_shamatha_90", 0),
-                session_id,
-            ),
+            f"UPDATE sessions SET {', '.join(cols)} WHERE id = ?", vals
         )
         self._conn.commit()
         logger.info(f"Session {session_id} updated with final stats")
