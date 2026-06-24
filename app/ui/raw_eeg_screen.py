@@ -710,9 +710,10 @@ class ScrollableGraphWidget(Widget):
         return point_in_rect(tx, ty, win_rect)
 
     def _draw_icon_backing(self, rect) -> None:
-        self._gfx.add(Color(0, 0, 0, 0.40))
-        self._gfx.add(Rectangle(pos=(rect[0], rect[1]), size=(rect[2], rect[3])))
-        self._gfx.add(Color(0.92, 0.92, 0.96, 0.95))
+        # Transparent background — the glyph sits directly on the graph. Set the
+        # glyph color (TEXT) here for the Line instructions that follow; TEXT
+        # contrasts with GRAPH_BG on every palette.
+        self._gfx.add(Color(*TC.TEXT))
 
     def _draw_expand_icon(self) -> None:
         """Top-right fullscreen-expand glyph (four outward corner brackets)."""

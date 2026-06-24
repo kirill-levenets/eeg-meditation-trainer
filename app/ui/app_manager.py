@@ -17,6 +17,7 @@ from kivy.uix.button import Button
 from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
+from kivy.uix.modalview import ModalView
 from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import ScreenManager, SlideTransition
 from kivy.uix.textinput import TextInput
@@ -46,7 +47,7 @@ from app.ui.live_session import METRICS_COLORS, LiveSessionScreen
 from app.ui.profile_screen import ProfileScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
-from app.ui.theme import BottomNav, C, F, S, StyledButton
+from app.ui.theme import BottomNav, C, F, Icons, S, StyledButton
 from app.ui.widgets.loading_overlay import LoadingOverlay
 from app.ui.widgets.user_picker import UserPickerForm
 from app.ui.wizard_screen import WizardScreen
@@ -314,6 +315,8 @@ class EEGMeditationApp(App):
         self._float_root = float_root
         self._fullscreen_overlay = None
         self._fullscreen_graph = None
+        self._fullscreen_close = None  # _restore closure, set while fullscreen
+        self._last_back_time = 0.0  # for double-back-to-exit on the root screen
         float_root.add_widget(root)
         self._loading_overlay = LoadingOverlay()
         float_root.add_widget(self._loading_overlay)
@@ -407,17 +410,22 @@ class EEGMeditationApp(App):
         overlay.add_widget(content)
 
         close_btn = StyledButton(
-            text="Close",
-            size_hint=(None, None), size=(dp(110), dp(44)),
+            icon=Icons.CLOSE_CIRCLE_OUTLINE, font_size=dp(30),
+            size_hint=(None, None), size=(dp(48), dp(48)),
             pos_hint={"right": 0.99, "top": 0.99},
-            bg_color=C.DANGER, bg_pressed=C.DANGER_DIM,
+            bg_color=[0, 0, 0, 0], bg_pressed=[0, 0, 0, 0],
+            text_color=list(C.TEXT),
         )
+        # StyledButton hard-sets horizontal padding (12dp) which would crop the
+        # circular glyph; the icon needs the button's full width.
+        close_btn.padding = [0, 0]
         overlay.add_widget(close_btn)
         self._float_root.add_widget(overlay)
         self._fullscreen_overlay = overlay
         self._fullscreen_graph = graph
 
         def _restore(*_a):
+            self._fullscreen_close = None
             self._float_root.remove_widget(overlay)
             if graph.parent is not None:
                 graph.parent.remove_widget(graph)
@@ -432,6 +440,7 @@ class EEGMeditationApp(App):
             self._fullscreen_legend = None
             self._fullscreen_graph = None
 
+        self._fullscreen_close = _restore
         close_btn.bind(on_release=_restore)
 
     def _build_fullscreen_legend(self, graph):
@@ -498,6 +507,9 @@ class EEGMeditationApp(App):
 
         # Keyboard hotkey for marker
         Window.bind(on_key_down=self._on_key_down)
+        # Android hardware back button (key 27) — consume it so Kivy's default
+        # exit-on-escape doesn't fire; navigate / double-tap-to-exit instead.
+        Window.bind(on_keyboard=self._on_keyboard)
 
         # Hide all custom-formula series until a formula is set + shown via picker
         for _fk in FORMULA_KEYS:
@@ -1610,6 +1622,56 @@ class EEGMeditationApp(App):
             self._on_marker()
             return True
         return False
+
+    def _on_keyboard(self, window, key, scancode=0, codepoint=None,
+                     modifiers=None) -> bool:
+        """Android hardware back / Esc (key 27): close overlays, navigate back to
+        Session, or double-tap to exit. Returns True to consume the key so Kivy's
+        default exit-on-escape never fires."""
+        if key != 27:
+            return False
+        # An open Popup/ModalView dismisses itself on escape — let it.
+        if any(isinstance(c, ModalView) for c in Window.children):
+            return False
+        # Fullscreen graph overlay → close it (it's not a ModalView).
+        if self._fullscreen_overlay is not None and self._fullscreen_close is not None:
+            self._fullscreen_close()
+            return True
+        current = self._sm.current
+        if current == "diary":
+            self._on_diary_back()
+            return True
+        if current != "live_session":
+            self._switch_screen("live_session")
+            return True
+        # Root (Session): require two presses within 2s to exit.
+        now = time.time()
+        if now - self._last_back_time < 2.0:
+            App.get_running_app().stop()
+            return True
+        self._last_back_time = now
+        self._android_toast("Press back again to exit")
+        return True
+
+    def _android_toast(self, message: str) -> None:
+        """Short Android toast; no-op (logged) off Android."""
+        if not hasattr(sys, "getandroidapilevel"):
+            logger.debug(f"toast: {message}")
+            return
+        try:
+            from android.runnable import run_on_ui_thread
+
+            @run_on_ui_thread
+            def _show():
+                from jnius import autoclass
+                PythonActivity = autoclass("org.kivy.android.PythonActivity")
+                Toast = autoclass("android.widget.Toast")
+                Toast.makeText(
+                    PythonActivity.mActivity, message, Toast.LENGTH_SHORT
+                ).show()
+            _show()
+        except Exception as e:
+            logger.warning(f"Toast failed: {e}")
 
     def _on_marker(self, *args) -> None:
         """Place a marker at the current position in the session."""
