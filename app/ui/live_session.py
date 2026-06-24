@@ -8,6 +8,7 @@ from kivy.graphics import Color, Rectangle, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
@@ -36,6 +37,10 @@ _DURATION_PRESETS = [
     ("10 min", 10),
     ("15 min", 15),
     ("20 min", 20),
+    ("30 min", 30),
+    ("1 h", 60),
+    ("1 h 30 min", 90),
+    ("2 h", 120),
     ("Free", None),
 ]
 
@@ -872,9 +877,12 @@ class LiveSessionScreen(Screen):
         ])
 
     def _open_duration_popup(self, *_args) -> None:
-        """Open a modal Popup to pick a session duration preset."""
-        body = BoxLayout(orientation="vertical", spacing=S.GAP_SM, padding=S.GAP)
-        for label, value in _DURATION_PRESETS:
+        """Open a modal Popup to pick a session duration preset.
+
+        Timed presets are laid out in a 2-column grid; "Free" (no timer) spans
+        the full width below so the list stays compact as presets grow.
+        """
+        def _make_btn(label, value):
             is_active = (
                 (value is None and not self._current_timer_enabled)
                 or (
@@ -888,15 +896,31 @@ class LiveSessionScreen(Screen):
                 bg_color=C.ACCENT if is_active else C.BG_CARD,
                 text_color=C.TEXT if is_active else C.TEXT_SECONDARY,
                 bold=is_active,
+                size_hint_y=None,
                 height=dp(44),
             )
             btn.bind(on_release=lambda b, v=value: self._pick_from_popup(v))
-            body.add_widget(btn)
+            return btn
+
+        timed = [(lbl, v) for lbl, v in _DURATION_PRESETS if v is not None]
+        free = [(lbl, v) for lbl, v in _DURATION_PRESETS if v is None]
+
+        body = BoxLayout(orientation="vertical", spacing=S.GAP_SM, padding=S.GAP)
+        grid = GridLayout(cols=2, spacing=S.GAP_SM, size_hint_y=None)
+        grid.bind(minimum_height=grid.setter("height"))
+        for lbl, v in timed:
+            grid.add_widget(_make_btn(lbl, v))
+        body.add_widget(grid)
+        for lbl, v in free:
+            body.add_widget(_make_btn(lbl, v))
+
+        rows = (len(timed) + 1) // 2 + len(free)
+        popup_h = rows * (dp(44) + S.GAP_SM) + dp(80)
         self._duration_popup = Popup(
             title="Session duration",
             content=body,
-            size_hint=(0.7, None),
-            height=dp(360),
+            size_hint=(0.8, None),
+            height=popup_h,
             auto_dismiss=True,
         )
         self._duration_popup.open()

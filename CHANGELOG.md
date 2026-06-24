@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Threshold ± steppers**: Settings → Threshold now has `−` / `+` buttons that nudge the value by 5 (clamped 20–180), alongside the slider and quick presets, for fine control.
+- **More timer presets**: Settings → Timer and the live-session duration picker gained 30 min, 1 h, 1 h 30 min and 2 h presets (slider already went to 120). The session-screen duration picker now lays its timed presets out in a 2-column grid with "Free" full-width below, so it stays compact.
 - **`[PERF]` timing harness** (`app/logger.py` `timed(label)` context manager): logs block wall-time when `EEG_PERF=1` (off by default). Used to instrument the History and diary load/render paths; grep logs for `[PERF]`.
 - **Loading spinner on slow loads**: the previously-unwired `LoadingOverlay` now backs the diary session-open (off-thread DB/compute, render dispatched to main) and the chunked History list build.
 - **Android back-button navigation** (issue #4, F3): the hardware back button is now handled with a precedence chain — close an open fullscreen graph → dismiss an open popup (let the `ModalView` self-dismiss) → Diary detail back to History → any non-root tab (History/Settings) back to Session → on the Session root, **double-tap within 2 s to exit** (first press shows a "Press back again to exit" Android toast). Bound via `Window.on_keyboard`, consuming key 27 so Kivy's default exit-on-escape never fires.

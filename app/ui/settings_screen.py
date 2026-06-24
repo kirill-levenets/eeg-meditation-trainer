@@ -194,9 +194,9 @@ class SettingsScreen(Screen):
         timer_section.add_widget(timer_dur_row)
 
         timer_presets = PresetRow(
-            values=[5, 10, 15, 20],
+            items=[("5m", 5), ("10m", 10), ("15m", 15), ("20m", 20),
+                   ("30m", 30), ("1h", 60), ("1h30", 90), ("2h", 120)],
             callback=lambda v: setattr(self._timer_duration_slider, "value", v),
-            fmt="{} min",
         )
         timer_section.add_widget(timer_presets)
 
@@ -395,24 +395,37 @@ class SettingsScreen(Screen):
         # --- Threshold section ---
         threshold_section = accordion.add_section("Threshold", collapsed=True)
 
-        slider_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=S.GAP)
+        slider_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=S.GAP_SM)
+        minus_btn = StyledButton(
+            text="−", font_size=F.H2, bg_color=C.BG_CARD,
+            size_hint_x=None, width=dp(48),
+        )
+        plus_btn = StyledButton(
+            text="+", font_size=F.H2, bg_color=C.BG_CARD,
+            size_hint_x=None, width=dp(48),
+        )
         self._threshold_slider = Slider(
             min=20,
             max=180,
             value=METRICS.MEDITATION_THRESHOLD_DEFAULT,
             step=1,
-            size_hint_x=0.8,
+            size_hint_x=1,
         )
         self._threshold_value_label = Label(
             text=str(METRICS.MEDITATION_THRESHOLD_DEFAULT),
             font_size=F.H2,
             bold=True,
             color=C.TEXT,
-            size_hint_x=0.2,
+            size_hint_x=None,
+            width=dp(48),
         )
         self._threshold_slider.bind(value=self._on_slider_value)
+        minus_btn.bind(on_release=lambda *a: self._step_threshold(-5))
+        plus_btn.bind(on_release=lambda *a: self._step_threshold(5))
+        slider_row.add_widget(minus_btn)
         slider_row.add_widget(self._threshold_slider)
         slider_row.add_widget(self._threshold_value_label)
+        slider_row.add_widget(plus_btn)
         threshold_section.add_widget(slider_row)
 
         threshold_presets = PresetRow(
@@ -986,6 +999,12 @@ class SettingsScreen(Screen):
         self._threshold_value_label.text = str(val)
         if self._on_threshold_change:
             self._on_threshold_change(val)
+
+    def _step_threshold(self, delta: int) -> None:
+        """Nudge the threshold by `delta`, clamped to the slider range. Setting
+        the slider value fires _on_slider_value (label + callback)."""
+        s = self._threshold_slider
+        s.value = max(s.min, min(s.max, int(s.value) + delta))
 
     def _on_test_audio_pressed(self, *args) -> None:
         if self._on_test_audio:
