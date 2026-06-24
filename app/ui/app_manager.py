@@ -32,7 +32,7 @@ from app.crash_handler import (
 )
 from app.eeg.mock_stream_v2 import MockEEGStream
 from app.eeg.neurosky_stream import NeuroSkyStream
-from app.logger import logger
+from app.logger import logger, timed
 from app.metrics.custom_formula import CustomFormulaEvaluator
 from app.metrics.engine import MetricsEngine
 from app.metrics.noise_detector import PowerLineDetector
@@ -48,6 +48,7 @@ from app.ui.profile_screen import ProfileScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
 from app.ui.theme import BottomNav, C, F, Icons, S, StyledButton
+from app.ui.widgets.legend import LegendBar
 from app.ui.widgets.loading_overlay import LoadingOverlay
 from app.ui.widgets.user_picker import UserPickerForm
 from app.ui.wizard_screen import WizardScreen
@@ -444,14 +445,12 @@ class EEGMeditationApp(App):
         close_btn.bind(on_release=_restore)
 
     def _build_fullscreen_legend(self, graph):
-        """A compact legend (colored names) for the currently visible series."""
-        legend = BoxLayout(size_hint_y=None, height=dp(24), spacing=dp(12))
-        legend.add_widget(BoxLayout())  # left spacer → center the entries
-        for key in graph.visible_keys():
-            lbl = Label(text=graph.series_name(key), color=graph.series_color(key),
-                        font_size=F.TINY, size_hint_x=None, width=dp(90))
-            legend.add_widget(lbl)
-        legend.add_widget(BoxLayout())  # right spacer
+        """A wrapping legend (colored names) for the currently visible series."""
+        legend = LegendBar()
+        legend.set_items([
+            (graph.series_name(key), graph.series_color(key))
+            for key in graph.visible_keys()
+        ])
         return legend
 
     def _link_graph_zoom(self) -> None:
@@ -2109,21 +2108,52 @@ class EEGMeditationApp(App):
         report_soft_error("user_diagnostics", detail, app=self, force=True)
 
     def _on_session_select(self, session_id: int) -> None:
-        session = self._db.get_session(session_id)
-        if session:
-            self._diary_screen.show_session_detail(session)
-            threshold_used = session.get("threshold_used", 50)
-            self._diary_screen.set_metrics_threshold(float(threshold_used))
-            self._inject_session_formulas(session_id, session)
-            metrics = self._db.get_session_metrics(session_id)
-            self._diary_screen.load_metrics_preview(metrics)
-            # Navigate to diary detail view; remember where we came from
-            self._session_detail_back = self._sm.current
-            self._sm.current = "diary"
+        """Load a session into the diary off the UI thread, behind a spinner.
 
-    def _inject_session_formulas(self, session_id: int, session: dict) -> None:
-        """Recompute the session's recorded formulas from its band powers so the diary
-        shows the snapshot active then (names included), not today's edits."""
+        The heavy work (metrics fetch + formula recompute) runs on a worker
+        thread; the Kivy render is dispatched back to the main thread. The
+        worker is deferred one frame so the loading overlay paints first.
+        """
+        self.show_loading("Loading session…")
+        Clock.schedule_once(lambda dt: self._load_session_async(session_id), 0)
+
+    def _load_session_async(self, session_id: int) -> None:
+        def _worker():
+            try:
+                with timed("diary.total"):
+                    with timed("diary.get_session"):
+                        session = self._db.get_session(session_id)
+                    if not session:
+                        self._on_main(self.hide_loading)
+                        return
+                    with timed("diary.compute_formulas"):
+                        series, names = self._compute_session_formulas(session_id, session)
+                    with timed("diary.get_metrics"):
+                        metrics = self._db.get_session_metrics(session_id)
+            except Exception:
+                logger.exception("Diary session load failed")
+                self._on_main(self.hide_loading)
+                return
+            self._on_main(lambda: self._render_session_detail(session, series, names, metrics))
+        threading.Thread(target=_worker, daemon=True, name="DiaryLoad").start()
+
+    def _render_session_detail(self, session, series, names, metrics) -> None:
+        """Main-thread render of a loaded session (Kivy mutations only)."""
+        try:
+            with timed("diary.render"):
+                self._diary_screen.show_session_detail(session)
+                self._diary_screen.set_metrics_threshold(float(session.get("threshold_used", 50)))
+                self._diary_screen.set_session_formulas(series, names)
+                self._diary_screen.load_metrics_preview(metrics)
+                self._session_detail_back = self._sm.current
+                self._sm.current = "diary"
+        finally:
+            self.hide_loading()
+
+    def _compute_session_formulas(self, session_id: int, session: dict) -> tuple[dict, dict]:
+        """Recompute the session's recorded formula series + names from its band
+        powers (the snapshot active then, not today's edits). Pure DB + compute,
+        no Kivy — safe to call off the main thread."""
         cf_raw = session.get("custom_formulas") or ""
         evaluators: dict[str, CustomFormulaEvaluator] = {}
         # Reset every custom key to its default name so a session without a given
@@ -2147,6 +2177,11 @@ class EEGMeditationApp(App):
                     evaluators[key] = ev
                     names[key] = d.get("name") or f"Custom {slot + 1}"
         series = self._db.recompute_formula_series(session_id, evaluators) if evaluators else {}
+        return series, names
+
+    def _inject_session_formulas(self, session_id: int, session: dict) -> None:
+        """Recompute + apply the session's recorded formulas (synchronous)."""
+        series, names = self._compute_session_formulas(session_id, session)
         self._diary_screen.set_session_formulas(series, names)
 
     def _on_diary_back(self) -> None:
@@ -2196,8 +2231,12 @@ class EEGMeditationApp(App):
     def _refresh_history(self, force: bool = False) -> None:
         if not force and not self._history_dirty:
             return
-        sessions = self._db.get_all_sessions(user_id=self._current_user_id)
-        self._history_screen.load_sessions(sessions)
+        with timed("history.get_all_sessions"):
+            sessions = self._db.get_all_sessions(user_id=self._current_user_id)
+        # Rows build in chunks (history_screen); spinner stays up until the last
+        # chunk lands so the UI isn't frozen during the ~0.9s widget build.
+        self.show_loading("Loading history…")
+        self._history_screen.load_sessions(sessions, on_complete=self.hide_loading)
         self._history_dirty = False
 
     def _mark_history_dirty(self) -> None:

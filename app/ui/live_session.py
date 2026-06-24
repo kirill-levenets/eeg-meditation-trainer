@@ -29,6 +29,7 @@ from app.ui.theme import (
     StyledButton,
     format_duration,
 )
+from app.ui.widgets.legend import LegendBar
 
 _DURATION_PRESETS = [
     ("5 min", 5),
@@ -345,7 +346,7 @@ class LiveSessionScreen(Screen):
         )
         self._metrics_container.add_widget(self._graph)
 
-        self._legend = BoxLayout(size_hint_y=None, height=dp(18), spacing=S.GAP_SM)
+        self._legend = LegendBar()
         self._metrics_container.add_widget(self._legend)
         # Legend is populated by _rebuild_metric_legend; start with Shamatha only
         self._rebuild_metric_legend(["shamatha_score"])
@@ -379,7 +380,7 @@ class LiveSessionScreen(Screen):
         )
         self._raw_container.add_widget(self._band_graph)
 
-        self._band_legend = BoxLayout(size_hint_y=None, height=dp(18), spacing=S.GAP_SM)
+        self._band_legend = LegendBar()
         self._band_graph.set_visibility_callback(self._rebuild_band_legend)
         self._rebuild_band_legend()
         self._raw_container.add_widget(self._band_legend)
@@ -729,13 +730,10 @@ class LiveSessionScreen(Screen):
 
     def _rebuild_metric_legend(self, enabled_keys: list) -> None:
         """Clear and re-populate the metrics legend with only the enabled metrics."""
-        self._legend.clear_widgets()
-        for metric in METRICS_COLORS:
-            if metric not in enabled_keys:
-                continue
-            lbl = Label(text=self._graph.series_name(metric), font_size=F.TINY,
-                        color=self._graph.series_color(metric))
-            self._legend.add_widget(lbl)
+        self._legend.set_items([
+            (self._graph.series_name(m), self._graph.series_color(m))
+            for m in METRICS_COLORS if m in enabled_keys
+        ])
 
     @property
     def graph(self) -> ScrollableGraphWidget:
@@ -868,12 +866,10 @@ class LiveSessionScreen(Screen):
 
     def _rebuild_band_legend(self) -> None:
         """Repopulate the band legend with only the band graph's visible series."""
-        self._band_legend.clear_widgets()
-        for key in self._band_graph.visible_keys():
-            self._band_legend.add_widget(
-                Label(text=self._band_graph.series_name(key), font_size=F.TINY,
-                      color=self._band_graph.series_color(key))
-            )
+        self._band_legend.set_items([
+            (self._band_graph.series_name(k), self._band_graph.series_color(k))
+            for k in self._band_graph.visible_keys()
+        ])
 
     def _open_duration_popup(self, *_args) -> None:
         """Open a modal Popup to pick a session duration preset."""
