@@ -607,6 +607,11 @@ class EEGMeditationApp(App):
         self._settings_screen.set_export_formulas_callback(self._on_export_formulas)
         self._settings_screen.set_audio_metric_callback(self._on_audio_metric_change)
         self._settings_screen.set_audio_formula_index_callback(self._on_audio_formula_index)
+        self._settings_screen.set_program_mode_callback(self._on_timer_mode_change)
+        self._settings_screen.set_program_changed_callback(self._on_program_changed)
+        self._settings_screen.set_program_save_callback(self._on_program_save)
+        self._settings_screen.set_program_load_callback(self._on_program_load)
+        self._settings_screen.set_program_delete_callback(self._on_program_delete)
         self._settings_screen.set_theme_callback(self._on_theme_change)
 
         # Keyboard hotkey for marker
@@ -2096,6 +2101,38 @@ class EEGMeditationApp(App):
         self._settings_screen.set_formula_slot_status(0, f"Exported to {os.path.basename(path)}")
         logger.info(f"Exported {len(formulas)} formulas to {path}")
 
+    def _on_timer_mode_change(self, mode: str) -> None:
+        self._timer_mode = mode
+        self._persist_session_program(self._current_user_id)
+
+    def _on_program_changed(self, segments: list) -> None:
+        self._session_program_segments = segments
+        self._persist_session_program(self._current_user_id)
+
+    def _on_program_save(self, name: str) -> None:
+        if name.strip() and self._current_user_id:
+            self._db.add_saved_program(self._current_user_id, name.strip(),
+                                       self._session_program_segments)
+            self._settings_screen.set_saved_programs(
+                self._db.get_saved_programs(self._current_user_id))
+
+    def _on_program_load(self, index: int) -> None:
+        if not self._current_user_id:
+            return
+        progs = self._db.get_saved_programs(self._current_user_id)
+        if 0 <= index < len(progs):
+            self._session_program_segments = progs[index]["segments"]
+            self._timer_mode = "program"
+            self._persist_session_program(self._current_user_id)
+            self._settings_screen.load_program(self._session_program_segments, "program")
+
+    def _on_program_delete(self, index: int) -> None:
+        if not self._current_user_id:
+            return
+        self._db.remove_saved_program(self._current_user_id, index)
+        self._settings_screen.set_saved_programs(
+            self._db.get_saved_programs(self._current_user_id))
+
     def _refresh_saved_formulas(self) -> None:
         """Refresh the saved formulas list in settings UI."""
         if not self._current_user_id:
@@ -2870,6 +2907,8 @@ class EEGMeditationApp(App):
         # sees real is_valid; the picker selection (graph_series_*) decides visibility.
         self._apply_active_formulas(self._read_active_formulas_with_migration(user_id))
         self._load_session_program(user_id)
+        self._settings_screen.load_program(self._session_program_segments, self._timer_mode)
+        self._settings_screen.set_saved_programs(self._db.get_saved_programs(user_id))
         self._push_formula_names_to_graph()
         idx = g(user_id, "audio_formula_index")
         if idx is not None:
