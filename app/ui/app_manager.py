@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import threading
@@ -14,7 +15,9 @@ from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.filechooser import FileChooserListView
+from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
+from kivy.uix.modalview import ModalView
 from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import ScreenManager, SlideTransition
 from kivy.uix.textinput import TextInput
@@ -29,7 +32,7 @@ from app.crash_handler import (
 )
 from app.eeg.mock_stream_v2 import MockEEGStream
 from app.eeg.neurosky_stream import NeuroSkyStream
-from app.logger import logger
+from app.logger import logger, timed
 from app.metrics.custom_formula import CustomFormulaEvaluator
 from app.metrics.engine import MetricsEngine
 from app.metrics.noise_detector import PowerLineDetector
@@ -44,9 +47,14 @@ from app.ui.live_session import METRICS_COLORS, LiveSessionScreen
 from app.ui.profile_screen import ProfileScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
-from app.ui.theme import BottomNav, C, F, StyledButton
+from app.ui.theme import BottomNav, C, F, Icons, S, StyledButton
+from app.ui.widgets.legend import LegendBar
+from app.ui.widgets.loading_overlay import LoadingOverlay
 from app.ui.widgets.user_picker import UserPickerForm
 from app.ui.wizard_screen import WizardScreen
+
+FORMULA_KEYS: tuple[str, ...] = ("custom_formula", "custom_formula_2", "custom_formula_3")
+_MAX_FORMULAS = len(FORMULA_KEYS)
 
 
 class EEGMeditationApp(App):
@@ -98,9 +106,67 @@ class EEGMeditationApp(App):
         self._flush_counter: int = 0
         self._current_session_id: Optional[int] = None
         self._current_user_id: Optional[int] = None
-        self._custom_formula: CustomFormulaEvaluator = CustomFormulaEvaluator()
+        self._init_formula_slots()
         self.serial_device_override: Optional[str] = None
         self._wake_lock = None
+
+    def _init_formula_slots(self) -> None:
+        """Three independent formula evaluators (one per slot) + their names."""
+        self._formula_slots: list[CustomFormulaEvaluator] = [
+            CustomFormulaEvaluator() for _ in range(_MAX_FORMULAS)
+        ]
+        self._formula_names: list[str] = [f"Custom {i + 1}" for i in range(_MAX_FORMULAS)]
+        self._audio_formula_index: int = 0
+
+    def _formula_for_key(self, key: str) -> CustomFormulaEvaluator | None:
+        """Map a series key to its slot evaluator, or None for non-formula keys."""
+        if key in FORMULA_KEYS:
+            return self._formula_slots[FORMULA_KEYS.index(key)]
+        return None
+
+    def _apply_active_formulas(self, active: list[dict] | None) -> None:
+        """Load an active_formulas list into the slots (names + formulas)."""
+        active = active or []
+        for i in range(_MAX_FORMULAS):
+            entry = active[i] if i < len(active) and isinstance(active[i], dict) else {}
+            self._formula_names[i] = entry.get("name") or f"Custom {i + 1}"
+            self._formula_slots[i].set_formula(entry.get("formula", "") or "")
+
+    def _persist_active_formulas(self, user_id: int) -> None:
+        """Serialize all slots (names + formulas) to a single JSON key."""
+        active = [
+            {"name": self._formula_names[i], "formula": self._formula_slots[i].formula}
+            for i in range(_MAX_FORMULAS)
+        ]
+        self._db.set_user_json_setting(user_id, "active_formulas", active)
+
+    def _read_active_formulas_with_migration(self, user_id: int) -> list[dict]:
+        """Return active_formulas if present, else seed slot 1 from the legacy scalar."""
+        active = self._db.get_user_json_setting(user_id, "active_formulas")
+        if isinstance(active, list):
+            return active
+        legacy = self._db.get_user_setting(user_id, "custom_formula")
+        return [{"name": "Custom 1", "formula": legacy}] if legacy else []
+
+    def _push_formula_names_to_graph(self) -> None:
+        """Propagate slot display names to the live metrics graph's series labels."""
+        for key, name in zip(FORMULA_KEYS, self._formula_names):
+            self._live_screen.graph.set_series_name(key, name)
+
+    def _session_custom_formulas_json(self) -> str:
+        """JSON of the valid slots active this session, recorded at save for diary replay.
+
+        `slot` is stored explicitly so a sparse set (e.g. only slots 0 and 2) replays
+        onto the correct series keys instead of being packed densely and misaligned.
+        """
+        return json.dumps([
+            {"slot": i,
+             "name": self._formula_names[i],
+             "formula": self._formula_slots[i].formula,
+             "visible": self._live_screen.graph.is_visible(FORMULA_KEYS[i]),
+             "drove_audio": self._audio_metric_key == FORMULA_KEYS[i]}
+            for i in range(_MAX_FORMULAS) if self._formula_slots[i].is_valid
+        ])
 
     def _acquire_wake_lock(self) -> None:
         """Keep CPU running + screen on during session (Android only)."""
@@ -189,7 +255,7 @@ class EEGMeditationApp(App):
         "settings": "settings",
     }
 
-    def build(self) -> BoxLayout:
+    def build(self) -> FloatLayout:
         install_crash_handler(self)
 
         # Restore saved theme before building UI
@@ -244,6 +310,18 @@ class EEGMeditationApp(App):
         )
         root.add_widget(self._bottom_nav)
 
+        # Wrap in a FloatLayout so app-global overlays (loading spinner,
+        # fullscreen graph) can sit on top of every screen.
+        float_root = FloatLayout()
+        self._float_root = float_root
+        self._fullscreen_overlay = None
+        self._fullscreen_graph = None
+        self._fullscreen_close = None  # _restore closure, set while fullscreen
+        self._last_back_time = 0.0  # for double-back-to-exit on the root screen
+        float_root.add_widget(root)
+        self._loading_overlay = LoadingOverlay()
+        float_root.add_widget(self._loading_overlay)
+
         self._bind_callbacks()
         self._link_graph_zoom()
         self._restore_last_user()
@@ -257,11 +335,22 @@ class EEGMeditationApp(App):
         else:
             self._auto_scan_bt()
 
-        return root
+        return float_root
 
-    def _link_graph_zoom(self) -> None:
-        """Link zoom across all graph widgets so they share the same time scale."""
-        ScrollableGraphWidget.link_zoom(
+    def show_loading(self, text: str = "Loading…") -> None:
+        """Show the app-global loading overlay (no-op before build)."""
+        if getattr(self, "_loading_overlay", None) is not None:
+            self._loading_overlay.show(text)
+
+    def hide_loading(self) -> None:
+        """Hide the app-global loading overlay (no-op before build)."""
+        if getattr(self, "_loading_overlay", None) is not None:
+            self._loading_overlay.hide()
+
+    def _all_graphs(self) -> tuple:
+        """Every mounted ScrollableGraphWidget — the single source of truth for
+        the cross-graph affordances (expand, series picker, zoom-link, restore)."""
+        return (
             self._live_screen.graph,
             self._live_screen.raw_graph,
             self._live_screen.band_graph,
@@ -269,6 +358,104 @@ class EEGMeditationApp(App):
             self._diary_screen._raw_eeg_graph,
             self._diary_screen._freq_graph,
         )
+
+    def _wire_graph_affordances(self) -> None:
+        """Give every mounted graph the shared fullscreen-expand and series-picker
+        glyphs, driven by one presenter each. The picker is wired only where there
+        is more than one series to choose from — a single-series graph's picker
+        could only blank the line."""
+        for g in self._all_graphs():
+            g.set_expand_callback(self._present_graph_fullscreen)
+            if len(g.series_keys()) > 1:
+                g.set_series_picker_callback(self._present_series_picker)
+
+    def _present_graph_fullscreen(self, graph) -> None:
+        """Reparent `graph` into a full-window overlay; restore it on close.
+
+        Reparenting (not cloning) keeps the widget's single Window bind and its
+        live add_point feed, so a live graph keeps updating in fullscreen. A
+        plain root overlay (not a Popup) is used so the graph reaches every
+        edge — a Popup insets its content with title/border chrome.
+        """
+        parent = graph.parent
+        if parent is None or getattr(self, "_fullscreen_overlay", None) is not None:
+            return
+        index = parent.children.index(graph)
+        # Copy these — size_hint/size are live ReferenceListProperties; a bare
+        # reference would track the (1,1) we set below and break restore.
+        orig_size_hint = list(graph.size_hint)
+        orig_pos_hint = dict(graph.pos_hint)
+        orig_size = list(graph.size)
+
+        overlay = FloatLayout(size_hint=(1, 1), pos_hint={"x": 0, "y": 0})
+        with overlay.canvas.before:
+            Color(*C.BG_DARK)
+            bg = Rectangle(size=overlay.size, pos=overlay.pos)
+        overlay.bind(
+            size=lambda w, v: setattr(bg, "size", v),
+            pos=lambda w, v: setattr(bg, "pos", v),
+        )
+
+        # Hide only the expand glyph while fullscreen (already fullscreen); keep
+        # the series picker so the user can change series here too.
+        graph.set_expand_callback(None)
+        parent.remove_widget(graph)
+        graph.size_hint = (1, 1)
+        graph.pos_hint = {}
+        # graph + legend stacked, so the fullscreen view keeps its legend.
+        content = BoxLayout(orientation="vertical", spacing=dp(4))
+        content.add_widget(graph)
+        self._fullscreen_content = content
+        self._fullscreen_legend = self._build_fullscreen_legend(graph)
+        content.add_widget(self._fullscreen_legend)
+        overlay.add_widget(content)
+
+        close_btn = StyledButton(
+            icon=Icons.CLOSE_CIRCLE_OUTLINE, font_size=dp(30),
+            size_hint=(None, None), size=(dp(48), dp(48)),
+            pos_hint={"right": 0.99, "top": 0.99},
+            bg_color=[0, 0, 0, 0], bg_pressed=[0, 0, 0, 0],
+            text_color=list(C.TEXT),
+        )
+        # StyledButton hard-sets horizontal padding (12dp) which would crop the
+        # circular glyph; the icon needs the button's full width.
+        close_btn.padding = [0, 0]
+        overlay.add_widget(close_btn)
+        self._float_root.add_widget(overlay)
+        self._fullscreen_overlay = overlay
+        self._fullscreen_graph = graph
+
+        def _restore(*_a):
+            self._fullscreen_close = None
+            self._float_root.remove_widget(overlay)
+            if graph.parent is not None:
+                graph.parent.remove_widget(graph)
+            graph.size_hint = orig_size_hint
+            graph.pos_hint = orig_pos_hint
+            graph.size = orig_size
+            parent.add_widget(graph, index=index)
+            graph.set_expand_callback(self._present_graph_fullscreen)
+            graph._redraw()
+            self._fullscreen_overlay = None
+            self._fullscreen_content = None
+            self._fullscreen_legend = None
+            self._fullscreen_graph = None
+
+        self._fullscreen_close = _restore
+        close_btn.bind(on_release=_restore)
+
+    def _build_fullscreen_legend(self, graph):
+        """A wrapping legend (colored names) for the currently visible series."""
+        legend = LegendBar()
+        legend.set_items([
+            (graph.series_name(key), graph.series_color(key))
+            for key in graph.visible_keys()
+        ])
+        return legend
+
+    def _link_graph_zoom(self) -> None:
+        """Link zoom across all graph widgets so they share the same time scale."""
+        ScrollableGraphWidget.link_zoom(*self._all_graphs())
 
     def _bind_callbacks(self) -> None:
         # Wizard
@@ -294,8 +481,10 @@ class EEGMeditationApp(App):
         if kivy_platform == "android":
             self._live_screen.graph.set_tap_callback(self._on_marker)
 
+        # Shared fullscreen-expand + series-picker glyphs on every graph
+        self._wire_graph_affordances()
+
         self._settings_screen.set_threshold_callback(self._on_threshold_change)
-        self._settings_screen.set_toggle_callback(self._on_toggle_change)
         self._settings_screen.set_test_audio_callback(self._on_test_audio)
         self._settings_screen.set_sinking_alert_callback(self._on_sinking_alert_toggle)
         self._settings_screen.set_subtle_alert_callback(self._on_subtle_alert_toggle)
@@ -306,24 +495,26 @@ class EEGMeditationApp(App):
         self._settings_screen.set_copy_diagnostics_callback(self._on_copy_diagnostics)
         self._settings_screen.set_line_width_callback(self._on_line_width_change)
         self._settings_screen.set_rotate_screen_callback(self._on_rotate_screen)
-        self._settings_screen.set_custom_formula_callback(self._on_custom_formula_change)
+        self._settings_screen.set_formula_slot_callback(self._on_formula_slot_change)
         self._settings_screen.set_save_formula_callback(self._on_save_formula)
         self._settings_screen.set_load_formula_callback(self._on_load_formula)
         self._settings_screen.set_delete_formula_callback(self._on_delete_formula)
         self._settings_screen.set_export_formulas_callback(self._on_export_formulas)
-        self._settings_screen.set_custom_formula_visible_callback(
-            self._on_custom_formula_visible_toggle
-        )
         self._settings_screen.set_audio_metric_callback(self._on_audio_metric_change)
+        self._settings_screen.set_audio_formula_index_callback(self._on_audio_formula_index)
         self._settings_screen.set_theme_callback(self._on_theme_change)
 
         # Keyboard hotkey for marker
         Window.bind(on_key_down=self._on_key_down)
+        # Android hardware back button (key 27) — consume it so Kivy's default
+        # exit-on-escape doesn't fire; navigate / double-tap-to-exit instead.
+        Window.bind(on_keyboard=self._on_keyboard)
 
-        # Hide custom formula on graph until enabled via checkbox
-        self._live_screen.graph.set_visible("custom_formula", False)
+        # Hide all custom-formula series until a formula is set + shown via picker
+        for _fk in FORMULA_KEYS:
+            self._live_screen.graph.set_visible(_fk, False)
         # Apply default metric visibility (Shamatha only for new users;
-        # _restore_user_settings will override for existing users)
+        # _load_user_settings will override for existing users)
         for key, active in self._settings_screen._graph_toggles.items():
             self._live_screen.graph.set_visible(key, active)
         self._audio_metric_key: str = "shamatha_score"
@@ -900,11 +1091,15 @@ class EEGMeditationApp(App):
 
         if stats:
             if self._current_session_id is not None:
-                self._db.update_session(self._current_session_id, stats)
+                self._db.update_session(
+                    self._current_session_id, stats,
+                    custom_formulas=self._session_custom_formulas_json(),
+                )
             else:
                 self._current_session_id = self._db.save_session(
                     stats, user_id=self._current_user_id,
                     session_name=self._make_session_name(),
+                    custom_formulas=self._session_custom_formulas_json(),
                 )
             if self._metrics_buffer:
                 self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
@@ -990,11 +1185,15 @@ class EEGMeditationApp(App):
 
         if save and stats:
             if self._current_session_id is not None:
-                self._db.update_session(self._current_session_id, stats)
+                self._db.update_session(
+                    self._current_session_id, stats,
+                    custom_formulas=self._session_custom_formulas_json(),
+                )
             else:
                 self._current_session_id = self._db.save_session(
                     stats, user_id=self._current_user_id,
                     session_name=self._make_session_name(),
+                    custom_formulas=self._session_custom_formulas_json(),
                 )
             if self._metrics_buffer:
                 self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
@@ -1278,16 +1477,16 @@ class EEGMeditationApp(App):
                          f"dist={metrics.get('distraction', 0):.0f} "
                          f"native_med={native_med:.0f}{bat_str}")
 
-        # Evaluate custom formula if active
-        if self._custom_formula.is_valid:
+        # Evaluate custom formulas if any slot is active
+        if any(e.is_valid for e in self._formula_slots):
             formula_vars = {**raw_sample, **metrics}
-            bands = self._metrics_engine.derive_bands(raw_sample)
-            formula_vars.update(bands)
-            # Add sqrt-normalized relative bands (s_ prefix)
+            formula_vars.update(self._metrics_engine.derive_bands(raw_sample))
             sqrt_bands = self._metrics_engine.compute_sqrt_relative_bands(raw_sample)
             formula_vars.update({f"s_{k}": v for k, v in sqrt_bands.items()})
-            self._custom_formula.push_variables(formula_vars)
-            metrics["custom_formula"] = self._custom_formula.evaluate(formula_vars)
+            for key, ev in zip(FORMULA_KEYS, self._formula_slots):
+                if ev.is_valid:
+                    ev.push_variables(formula_vars)
+                    metrics[key] = ev.evaluate(formula_vars)
 
         self._session_manager.add_metric(metrics)
         # Merge raw + computed for full storage
@@ -1296,7 +1495,7 @@ class EEGMeditationApp(App):
         self._raw_buffer.append(raw_sample)
 
         # Audio is thread-safe — update directly
-        self._audio.update(metrics.get(self._audio_metric_key, 0))
+        self._audio.update(metrics.get(self._audio_drive_key(), 0))
         if self._tick_count > 10:
             self._audio.update_sinking(metrics.get("sinking", 0))
             self._audio.update_subtle_distraction(metrics.get("subtle_distraction", 0))
@@ -1403,6 +1602,7 @@ class EEGMeditationApp(App):
                 self._current_session_id = self._db.save_session(
                     stats_partial, user_id=self._current_user_id,
                     session_name=self._make_session_name(),
+                    custom_formulas=self._session_custom_formulas_json(),
                 )
             self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
             self._metrics_buffer = []
@@ -1421,6 +1621,56 @@ class EEGMeditationApp(App):
             self._on_marker()
             return True
         return False
+
+    def _on_keyboard(self, window, key, scancode=0, codepoint=None,
+                     modifiers=None) -> bool:
+        """Android hardware back / Esc (key 27): close overlays, navigate back to
+        Session, or double-tap to exit. Returns True to consume the key so Kivy's
+        default exit-on-escape never fires."""
+        if key != 27:
+            return False
+        # An open Popup/ModalView dismisses itself on escape — let it.
+        if any(isinstance(c, ModalView) for c in Window.children):
+            return False
+        # Fullscreen graph overlay → close it (it's not a ModalView).
+        if self._fullscreen_overlay is not None and self._fullscreen_close is not None:
+            self._fullscreen_close()
+            return True
+        current = self._sm.current
+        if current == "diary":
+            self._on_diary_back()
+            return True
+        if current != "live_session":
+            self._switch_screen("live_session")
+            return True
+        # Root (Session): require two presses within 2s to exit.
+        now = time.time()
+        if now - self._last_back_time < 2.0:
+            App.get_running_app().stop()
+            return True
+        self._last_back_time = now
+        self._android_toast("Press back again to exit")
+        return True
+
+    def _android_toast(self, message: str) -> None:
+        """Short Android toast; no-op (logged) off Android."""
+        if not hasattr(sys, "getandroidapilevel"):
+            logger.debug(f"toast: {message}")
+            return
+        try:
+            from android.runnable import run_on_ui_thread
+
+            @run_on_ui_thread
+            def _show():
+                from jnius import autoclass
+                PythonActivity = autoclass("org.kivy.android.PythonActivity")
+                Toast = autoclass("android.widget.Toast")
+                Toast.makeText(
+                    PythonActivity.mActivity, message, Toast.LENGTH_SHORT
+                ).show()
+            _show()
+        except Exception as e:
+            logger.warning(f"Toast failed: {e}")
 
     def _on_marker(self, *args) -> None:
         """Place a marker at the current position in the session."""
@@ -1447,14 +1697,130 @@ class EEGMeditationApp(App):
         self._live_screen.graph.set_threshold(float(value), "shamatha_score")
         logger.debug(f"Threshold changed to {value}")
 
-    def _on_toggle_change(self, metric: str, active: bool) -> None:
-        self._live_screen.graph.set_visible(metric, active)
-        if metric == "sinking":
-            self._audio.sinking_alert_enabled = active
-            self._settings_screen._sinking_alert_cb.active = active
-        enabled_keys = [k for k, v in self._settings_screen._graph_toggles.items() if v]
-        self._live_screen._rebuild_metric_legend(enabled_keys)
-        logger.debug(f"Graph toggle: {metric}={'on' if active else 'off'}")
+    def _present_series_picker(self, graph) -> None:
+        """Open the shared multi-select series popup for `graph`.
+
+        Reads the graph's own catalog/labels/colors, so one presenter serves
+        every graph. Wired to all multi-series graphs by _wire_graph_affordances.
+        For the live metrics graph, custom-formula rows also carry a Choose button
+        that assigns a saved formula to that slot without leaving the picker.
+        """
+        is_live = graph is self._live_screen.graph
+        body = BoxLayout(orientation="vertical", spacing=S.GAP_SM, padding=S.GAP)
+        for key in graph.series_keys():
+            vis = graph.is_visible(key)
+            btn = StyledButton(
+                text=graph.series_name(key), height=dp(44),
+                bg_color=C.ACCENT if vis else C.BG_CARD,
+                text_color=C.TEXT if vis else C.TEXT_SECONDARY, bold=vis,
+            )
+            btn.bind(on_release=lambda b, k=key: self._toggle_series_row(graph, k, b))
+            if is_live and key in FORMULA_KEYS:
+                row = BoxLayout(orientation="horizontal", spacing=S.GAP_SM, height=dp(44), size_hint_y=None)
+                btn.size_hint_x = 1
+                choose_btn = StyledButton(
+                    text="Choose…", height=dp(44), size_hint_x=None, width=dp(90),
+                    bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY,
+                )
+                slot_idx = FORMULA_KEYS.index(key)
+                choose_btn.bind(on_release=lambda _b, si=slot_idx, tb=btn: self._open_saved_formula_chooser(si, tb))
+                row.add_widget(btn)
+                row.add_widget(choose_btn)
+                body.add_widget(row)
+            else:
+                body.add_widget(btn)
+        # Neutral outlined Close — a green fill (PRIMARY) collided with the
+        # green "selected" pills (ACCENT) on the green palettes.
+        close_btn = StyledButton(
+            text="Close", height=dp(44),
+            outline=True, bg_color=C.TEXT_SECONDARY,
+            text_color=C.TEXT, bg_pressed=C.BG_CARD,
+        )
+        popup = Popup(
+            title="Graph series", content=body,
+            size_hint=(0.8, None),
+            height=dp(80 + 50 * (len(graph.series_keys()) + 1)),
+            auto_dismiss=True,
+        )
+        close_btn.bind(on_release=lambda *_a: popup.dismiss())
+        body.add_widget(close_btn)
+        popup.bind(on_dismiss=lambda *_a: self._persist_graph_series(graph))
+        popup.open()
+
+    def _open_saved_formula_chooser(self, slot_idx: int, toggle_btn) -> None:
+        """Open a second popup listing saved formulas; selecting one assigns it to
+        slot_idx and refreshes the picker's toggle button to its new visible state."""
+        if not self._current_user_id:
+            return
+        formulas = self._db.get_saved_formulas(self._current_user_id)
+        inner_body = BoxLayout(orientation="vertical", spacing=S.GAP_SM, padding=S.GAP)
+        inner_popup = Popup(
+            title="Choose saved formula", content=inner_body,
+            size_hint=(0.75, None),
+            height=dp(80 + 50 * (max(len(formulas), 1) + 1)),
+            auto_dismiss=True,
+        )
+
+        def _choose(entry):
+            inner_popup.dismiss()
+            self._assign_saved_to_slot(slot_idx, entry)
+            vis = self._live_screen.graph.is_visible(FORMULA_KEYS[slot_idx])
+            toggle_btn.bg_color = C.ACCENT if vis else C.BG_CARD
+            toggle_btn.text_color = C.TEXT if vis else C.TEXT_SECONDARY
+            toggle_btn.bold = vis
+
+        if not formulas:
+            inner_body.add_widget(Label(
+                text="No saved formulas", color=C.TEXT_SECONDARY,
+                height=dp(44), size_hint_y=None,
+            ))
+        else:
+            for entry in formulas:
+                row_btn = StyledButton(
+                    text=entry.get("name", entry.get("formula", "")[:30]),
+                    height=dp(44),
+                    bg_color=C.BG_CARD, text_color=C.TEXT,
+                )
+                row_btn.bind(on_release=lambda _b, e=entry: _choose(e))
+                inner_body.add_widget(row_btn)
+        cancel_btn = StyledButton(
+            text="Cancel", height=dp(44),
+            bg_color=C.PRIMARY, bg_pressed=C.PRIMARY_DIM,
+        )
+        cancel_btn.bind(on_release=lambda *_a: inner_popup.dismiss())
+        inner_body.add_widget(cancel_btn)
+        inner_popup.open()
+
+    def _toggle_series_row(self, graph, key: str, btn) -> None:
+        """Flip one series on `graph` (stays in the popup for multi-select)."""
+        visible = not graph.is_visible(key)
+        # The live formula must be valid to plot live custom_formula values;
+        # diary custom_formula is recorded data and toggles freely.
+        ev = self._formula_for_key(key)
+        if ev is not None and graph is self._live_screen.graph:
+            visible = visible and ev.is_valid
+        graph.set_visible(key, visible)  # fires the owning screen's legend refresh
+        self._refresh_fullscreen_legend()
+        vis = graph.is_visible(key)
+        btn.bg_color = C.ACCENT if vis else C.BG_CARD
+        btn.text_color = C.TEXT if vis else C.TEXT_SECONDARY
+        btn.bold = vis
+
+    def _refresh_fullscreen_legend(self) -> None:
+        """Rebuild the fullscreen legend after a series toggle (if fullscreen)."""
+        if self._fullscreen_overlay is None or self._fullscreen_graph is None:
+            return
+        self._fullscreen_content.remove_widget(self._fullscreen_legend)
+        self._fullscreen_legend = self._build_fullscreen_legend(self._fullscreen_graph)
+        self._fullscreen_content.add_widget(self._fullscreen_legend)
+
+    def _persist_graph_series(self, graph) -> None:
+        """Persist `graph`'s visible series under its per-graph key on picker close."""
+        uid = self._current_user_id
+        if uid and graph.graph_id:
+            self._db.set_user_json_setting(
+                uid, f"graph_series_{graph.graph_id}", graph.visible_keys()
+            )
 
     def _on_test_audio(self) -> None:
         logger.debug("Test audio triggered")
@@ -1473,64 +1839,107 @@ class EEGMeditationApp(App):
         Window.rotation = rotation
         logger.info(f"Screen rotation set to {rotation}")
 
-    def _on_custom_formula_visible_toggle(self, active: bool) -> None:
-        """Toggle custom formula line visibility on graph."""
-        show = active and self._custom_formula.is_valid
-        self._live_screen.graph.set_visible("custom_formula", show)
-        logger.debug(f"Custom formula visibility: {show}")
+    def _audio_drive_key(self) -> str:
+        """Metric key feeding noise; falls back to shamatha if a bound formula slot
+        is invalid (a missing series reads 0 → would otherwise drive MAX noise)."""
+        ev = self._formula_for_key(self._audio_metric_key)
+        if ev is not None and not ev.is_valid:
+            return "shamatha_score"
+        return self._audio_metric_key
 
     def _on_audio_metric_change(self, key: str) -> None:
         """Switch which metric drives the audio threshold feedback."""
-        self._audio_metric_key = key
-        logger.info(f"Audio threshold metric changed to: {key}")
+        if key == "custom_formula":
+            self._audio_metric_key = FORMULA_KEYS[self._audio_formula_index]
+        else:
+            self._audio_metric_key = key
+        logger.info(f"Audio threshold metric changed to: {self._audio_metric_key}")
+
+    def _on_audio_formula_index(self, idx: int) -> None:
+        """Pick which formula slot drives audio. Only rebinds the live key when a
+        custom-formula slot is the selected driver — tapping it while another metric
+        is selected just remembers the choice for when custom-formula is picked."""
+        self._audio_formula_index = max(0, min(idx, _MAX_FORMULAS - 1))
+        if self._audio_metric_key in FORMULA_KEYS:
+            self._audio_metric_key = FORMULA_KEYS[self._audio_formula_index]
 
     def _on_theme_change(self, theme_name: str) -> None:
         """Save selected theme."""
         self._db.set_setting("theme", theme_name)
         logger.info(f"Theme changed to: {theme_name}")
 
-    def _on_custom_formula_change(self, formula: str) -> None:
-        """Handle custom formula change from settings."""
-        if not formula:
-            self._custom_formula.set_formula("")
-            self._live_screen.graph.set_visible("custom_formula", False)
-            self._settings_screen.set_formula_status("Formula cleared")
-            logger.info("Custom formula cleared")
-            return
-        ok, err = self._custom_formula.set_formula(formula)
-        if ok:
-            show = self._settings_screen.custom_formula_visible
-            self._live_screen.graph.set_visible("custom_formula", show)
-            self._settings_screen.set_formula_status("Formula active")
-            logger.info(f"Custom formula applied: {formula}")
-        else:
-            self._live_screen.graph.set_visible("custom_formula", False)
-            self._settings_screen.set_formula_status(f"Error: {err}", is_error=True)
+    def _on_formula_slot_change(self, idx: int, name: str, formula: str, *, show: bool = True) -> None:
+        """Apply a slot's name+formula. show=True reveals the series (interactive).
 
-    def _on_save_formula(self, formula: str) -> None:
-        """Save the current formula to the user's saved list."""
-        if not self._current_user_id:
-            self._settings_screen.set_formula_status("No user selected", is_error=True)
-            return
-        # Use a truncated version as the name
-        name = formula[:40] + ("..." if len(formula) > 40 else "")
-        ok = self._db.add_saved_formula(self._current_user_id, name, formula)
-        if ok:
-            self._settings_screen.set_formula_status("Formula saved")
-            self._refresh_saved_formulas()
-            logger.info(f"Formula saved: {formula}")
+        `show=True` (interactive apply) reveals the line on success — you typed a
+        formula, you want to see it. `show=False` (restore) only sets eligibility;
+        visibility is then decided by the persisted picker selection in
+        _restore_graph_series, so a hidden-but-valid choice survives a reload.
+        """
+        ev = self._formula_slots[idx]
+        key = FORMULA_KEYS[idx]
+        self._formula_names[idx] = name or f"Custom {idx + 1}"
+        self._live_screen.graph.set_series_name(key, self._formula_names[idx])
+        if not formula:
+            ev.set_formula("")
+            self._live_screen.graph.set_visible(key, False)
+            self._settings_screen.set_formula_slot_status(idx, "Formula cleared")
+            logger.info(f"Custom formula slot {idx} cleared")
         else:
-            self._settings_screen.set_formula_status("Limit reached (50 max)", is_error=True)
+            ok, err = ev.set_formula(formula)
+            if ok:
+                # set_visible fires the graph's visibility callback → legend rebuilds.
+                if show:
+                    self._live_screen.graph.set_visible(key, True)
+                self._settings_screen.set_formula_slot_status(idx, "Formula active")
+                logger.info(f"Custom formula slot {idx} applied: {formula}")
+            else:
+                self._live_screen.graph.set_visible(key, False)
+                self._settings_screen.set_formula_slot_status(idx, f"Error: {err}", is_error=True)
+        if self._current_user_id:
+            self._persist_active_formulas(self._current_user_id)
+
+    def _on_save_formula(self, idx: int, name: str, formula: str) -> None:
+        """Save a slot's formula to the user's saved library, named by the slot."""
+        if not self._current_user_id:
+            self._settings_screen.set_formula_slot_status(idx, "No user selected", is_error=True)
+            return
+        if not formula:
+            self._settings_screen.set_formula_slot_status(idx, "Nothing to save", is_error=True)
+            return
+        # Fall back to a truncated formula as the display name when none is given.
+        label = name or (formula[:40] + ("..." if len(formula) > 40 else ""))
+        ok = self._db.add_saved_formula(self._current_user_id, label, formula)
+        if ok:
+            self._settings_screen.set_formula_slot_status(idx, "Formula saved")
+            self._refresh_saved_formulas()
+            logger.info(f"Formula saved: {label} = {formula}")
+        else:
+            self._settings_screen.set_formula_slot_status(idx, "Limit reached (50 max)", is_error=True)
 
     def _on_load_formula(self, index: int) -> None:
-        """Load a saved formula into the input and apply it."""
+        """Load a saved formula into the first empty slot and apply it."""
         if not self._current_user_id:
             return
         formulas = self._db.get_saved_formulas(self._current_user_id)
         if 0 <= index < len(formulas):
-            formula = formulas[index]["formula"]
-            self._settings_screen._formula_input.text = formula
-            self._on_custom_formula_change(formula)
+            entry = formulas[index]
+            formula = entry["formula"]
+            name = entry.get("name", "") or ""
+            slot = self._first_empty_slot()
+            self._settings_screen.set_formula_slot(slot, name, formula)
+            self._on_formula_slot_change(slot, name, formula)
+
+    def _first_empty_slot(self) -> int:
+        """First slot with no valid formula; slot 0 if all are full."""
+        return next((i for i in range(_MAX_FORMULAS) if not self._formula_slots[i].is_valid), 0)
+
+    def _assign_saved_to_slot(self, idx: int, entry: dict) -> None:
+        """Assign a saved {name, formula} entry to slot idx, show it, and persist."""
+        self._on_formula_slot_change(idx, entry.get("name", ""), entry.get("formula", ""), show=True)
+        self._settings_screen.set_formula_slot(
+            idx, self._formula_names[idx], self._formula_slots[idx].formula
+        )
 
     def _on_delete_formula(self, index: int) -> None:
         """Delete a saved formula."""
@@ -1538,24 +1947,24 @@ class EEGMeditationApp(App):
             return
         self._db.remove_saved_formula(self._current_user_id, index)
         self._refresh_saved_formulas()
-        self._settings_screen.set_formula_status("Formula deleted")
+        self._settings_screen.set_formula_slot_status(0, "Formula deleted")
         logger.info(f"Saved formula #{index} deleted")
 
     def _on_export_formulas(self) -> None:
         """Export saved formulas to a text file."""
         if not self._current_user_id:
-            self._settings_screen.set_formula_status("No user selected", is_error=True)
+            self._settings_screen.set_formula_slot_status(0, "No user selected", is_error=True)
             return
         formulas = self._db.get_saved_formulas(self._current_user_id)
         if not formulas:
-            self._settings_screen.set_formula_status("No formulas to export", is_error=True)
+            self._settings_screen.set_formula_slot_status(0, "No formulas to export", is_error=True)
             return
         export_dir = os.path.dirname(self._db._db_path)
         path = os.path.join(export_dir, f"formulas_user_{self._current_user_id}.txt")
         with open(path, "w") as f:
             for entry in formulas:
                 f.write(f"{entry['formula']}\n")
-        self._settings_screen.set_formula_status(f"Exported to {os.path.basename(path)}")
+        self._settings_screen.set_formula_slot_status(0, f"Exported to {os.path.basename(path)}")
         logger.info(f"Exported {len(formulas)} formulas to {path}")
 
     def _refresh_saved_formulas(self) -> None:
@@ -1702,16 +2111,81 @@ class EEGMeditationApp(App):
         report_soft_error("user_diagnostics", detail, app=self, force=True)
 
     def _on_session_select(self, session_id: int) -> None:
-        session = self._db.get_session(session_id)
-        if session:
-            self._diary_screen.show_session_detail(session)
-            threshold_used = session.get("threshold_used", 50)
-            self._diary_screen.set_metrics_threshold(float(threshold_used))
-            metrics = self._db.get_session_metrics(session_id)
-            self._diary_screen.load_metrics_preview(metrics)
-            # Navigate to diary detail view; remember where we came from
-            self._session_detail_back = self._sm.current
-            self._sm.current = "diary"
+        """Load a session into the diary off the UI thread, behind a spinner.
+
+        The heavy work (metrics fetch + formula recompute) runs on a worker
+        thread; the Kivy render is dispatched back to the main thread. The
+        worker is deferred one frame so the loading overlay paints first.
+        """
+        self.show_loading("Loading session…")
+        Clock.schedule_once(lambda dt: self._load_session_async(session_id), 0)
+
+    def _load_session_async(self, session_id: int) -> None:
+        def _worker():
+            try:
+                with timed("diary.total"):
+                    with timed("diary.get_session"):
+                        session = self._db.get_session(session_id)
+                    if not session:
+                        self._on_main(self.hide_loading)
+                        return
+                    with timed("diary.compute_formulas"):
+                        series, names = self._compute_session_formulas(session_id, session)
+                    with timed("diary.get_metrics"):
+                        metrics = self._db.get_session_metrics(session_id)
+            except Exception:
+                logger.exception("Diary session load failed")
+                self._on_main(self.hide_loading)
+                return
+            self._on_main(lambda: self._render_session_detail(session, series, names, metrics))
+        threading.Thread(target=_worker, daemon=True, name="DiaryLoad").start()
+
+    def _render_session_detail(self, session, series, names, metrics) -> None:
+        """Main-thread render of a loaded session (Kivy mutations only)."""
+        try:
+            with timed("diary.render"):
+                self._diary_screen.show_session_detail(session)
+                self._diary_screen.set_metrics_threshold(float(session.get("threshold_used", 50)))
+                self._diary_screen.set_session_formulas(series, names)
+                self._diary_screen.load_metrics_preview(metrics)
+                self._session_detail_back = self._sm.current
+                self._sm.current = "diary"
+        finally:
+            self.hide_loading()
+
+    def _compute_session_formulas(self, session_id: int, session: dict) -> tuple[dict, dict]:
+        """Recompute the session's recorded formula series + names from its band
+        powers (the snapshot active then, not today's edits). Pure DB + compute,
+        no Kivy — safe to call off the main thread."""
+        cf_raw = session.get("custom_formulas") or ""
+        evaluators: dict[str, CustomFormulaEvaluator] = {}
+        # Reset every custom key to its default name so a session without a given
+        # slot doesn't inherit the previous session's label.
+        names: dict[str, str] = {k: f"Custom {i + 1}" for i, k in enumerate(FORMULA_KEYS)}
+        if cf_raw:
+            try:
+                defs = json.loads(cf_raw)
+            except (ValueError, TypeError):
+                defs = []
+            for pos, d in enumerate(defs):
+                if not isinstance(d, dict):
+                    continue
+                slot = d.get("slot", pos)  # explicit slot; fall back to position for old records
+                if not isinstance(slot, int) or not 0 <= slot < _MAX_FORMULAS:
+                    continue
+                key = FORMULA_KEYS[slot]
+                ev = CustomFormulaEvaluator()
+                ev.set_formula(d.get("formula", "") or "")
+                if ev.is_valid:
+                    evaluators[key] = ev
+                    names[key] = d.get("name") or f"Custom {slot + 1}"
+        series = self._db.recompute_formula_series(session_id, evaluators) if evaluators else {}
+        return series, names
+
+    def _inject_session_formulas(self, session_id: int, session: dict) -> None:
+        """Recompute + apply the session's recorded formulas (synchronous)."""
+        series, names = self._compute_session_formulas(session_id, session)
+        self._diary_screen.set_session_formulas(series, names)
 
     def _on_diary_back(self) -> None:
         """Return from diary detail to previous screen (usually history)."""
@@ -1742,7 +2216,7 @@ class EEGMeditationApp(App):
     def _on_export_csv(self, session_id: int, path: Optional[str] = None) -> Optional[str]:
         """Export session data as CSV file. Returns file path or None."""
         csv_data = self._db.export_session_csv(
-            session_id, custom_formula=self._custom_formula
+            session_id, custom_formula=self._formula_slots[0]
         )
         if not csv_data:
             return None
@@ -1760,8 +2234,12 @@ class EEGMeditationApp(App):
     def _refresh_history(self, force: bool = False) -> None:
         if not force and not self._history_dirty:
             return
-        sessions = self._db.get_all_sessions(user_id=self._current_user_id)
-        self._history_screen.load_sessions(sessions)
+        with timed("history.get_all_sessions"):
+            sessions = self._db.get_all_sessions(user_id=self._current_user_id)
+        # Rows build in chunks (history_screen); spinner stays up until the last
+        # chunk lands so the UI isn't frozen during the ~0.9s widget build.
+        self.show_loading("Loading history…")
+        self._history_screen.load_sessions(sessions, on_complete=self.hide_loading)
         self._history_dirty = False
 
     def _mark_history_dirty(self) -> None:
@@ -2147,26 +2625,63 @@ class EEGMeditationApp(App):
         self._db.set_user_setting(
             uid, "rotation", str(self._settings_screen._current_rotation)
         )
-        self._db.set_user_setting(
-            uid, "custom_formula", self._custom_formula.formula
-        )
+        self._persist_active_formulas(uid)
+        self._db.set_user_setting(uid, "audio_formula_index", str(self._audio_formula_index))
         # Save zoom level as viewport duration in seconds
         graph = self._live_screen.graph
         zoom_seconds = graph.viewport_points / graph._sample_rate
         self._db.set_user_setting(uid, "graph_zoom_seconds", str(zoom_seconds))
-        toggles = self._settings_screen.graph_toggles
-        for key, active in toggles.items():
-            self._db.set_user_setting(uid, f"toggle_{key}", str(active))
-        self._db.set_user_setting(
-            uid, "custom_formula_visible",
-            str(self._settings_screen.custom_formula_visible),
-        )
+        # Per-graph series selection (the on-graph picker is the source of truth).
+        for g in self._all_graphs():
+            if g.graph_id and len(g.series_keys()) > 1:
+                self._db.set_user_json_setting(
+                    uid, f"graph_series_{g.graph_id}", g.visible_keys()
+                )
         self._db.set_user_setting(uid, "audio_metric", self._audio_metric_key)
         self._db.set_user_setting(uid, "marker_hotkey", self._settings_screen.marker_hotkey)
         self._db.set_user_setting(
             uid, "stats_view_mode", getattr(self._live_screen, "_stats_mode", "live")
         )
         logger.debug(f"Saved settings for user {uid}")
+
+    def _restore_graph_series(self, user_id: int) -> None:
+        """Apply each graph's persisted series selection (graph_series_<id>).
+
+        set_visible drives each graph's own legend refresh. The live metrics graph
+        migrates the pre-F2 toggle_<key> rows when it has no JSON yet; other graphs
+        default to all-visible (their pre-picker behavior)."""
+        for graph in self._all_graphs():
+            if not graph.graph_id or len(graph.series_keys()) <= 1:
+                continue
+            series = self._db.get_user_json_setting(user_id, f"graph_series_{graph.graph_id}")
+            if series is not None:
+                sel = set(series)
+            elif graph is self._live_screen.graph:
+                sel = self._legacy_live_series(user_id)
+            else:
+                sel = set(graph.series_keys())
+            for key in graph.series_keys():
+                on = key in sel
+                ev = self._formula_for_key(key)
+                if ev is not None and graph is self._live_screen.graph:
+                    on = on and ev.is_valid
+                graph.set_visible(key, on)
+
+    def _legacy_live_series(self, user_id: int) -> set[str]:
+        """Pre-F2 fallback for the live metrics graph: per-metric toggle_<key> rows
+        + custom_formula_visible, defaulting to the first-run _graph_toggles set."""
+        defaults = self._settings_screen._graph_toggles
+        sel: set[str] = set()
+        for key in self._live_screen.graph.series_keys():
+            if key in FORMULA_KEYS:  # custom slots never had pre-F2 toggle_ rows
+                continue
+            saved = self._db.get_user_setting(user_id, f"toggle_{key}")
+            active = (saved == "True") if saved is not None else defaults.get(key, True)
+            if active:
+                sel.add(key)
+        if self._db.get_user_setting(user_id, "custom_formula_visible") == "True":
+            sel.add("custom_formula")
+        return sel
 
     def _load_user_settings(self, user_id: int) -> None:
         """Restore persisted settings for a user."""
@@ -2220,19 +2735,21 @@ class EEGMeditationApp(App):
             except (ValueError, TypeError):
                 pass
 
-        for key, cb in self._settings_screen._checkboxes.items():
-            saved = g(user_id, f"toggle_{key}")
-            if saved is not None:
-                active = saved == "True"
-                cb.active = active
-                self._live_screen.graph.set_visible(key, active)
-            else:
-                # New user: apply the default from _graph_toggles
-                default = self._settings_screen._graph_toggles.get(key, True)
-                self._live_screen.graph.set_visible(key, default)
-        # Rebuild legend to reflect restored/default visibility
-        enabled_keys = [k for k, v in self._settings_screen._graph_toggles.items() if v]
-        self._live_screen._rebuild_metric_legend(enabled_keys)
+        # Load formulas BEFORE _restore_graph_series so the per-slot validity gate
+        # sees real is_valid; the picker selection (graph_series_*) decides visibility.
+        self._apply_active_formulas(self._read_active_formulas_with_migration(user_id))
+        self._push_formula_names_to_graph()
+        idx = g(user_id, "audio_formula_index")
+        if idx is not None:
+            try:
+                self._audio_formula_index = max(0, min(int(idx), _MAX_FORMULAS - 1))
+            except (ValueError, TypeError):
+                pass
+        # Reflect every slot's name+formula into the Settings inputs.
+        for i in range(_MAX_FORMULAS):
+            self._settings_screen.set_formula_slot(i, self._formula_names[i], self._formula_slots[i].formula)
+
+        self._restore_graph_series(user_id)
 
         # Skip BT/mock restore if --serial override is active
         if not self.serial_device_override:
@@ -2288,23 +2805,15 @@ class EEGMeditationApp(App):
             except (ValueError, TypeError):
                 pass
 
-        saved_formula = g(user_id, "custom_formula")
-        if saved_formula:
-            self._settings_screen._formula_input.text = saved_formula
-            self._on_custom_formula_change(saved_formula)
-        else:
-            self._settings_screen._formula_input.text = ""
-            self._on_custom_formula_change("")
-
-        cf_vis = g(user_id, "custom_formula_visible")
-        if cf_vis is not None:
-            self._settings_screen.custom_formula_visible = cf_vis == "True"
-            self._on_custom_formula_visible_toggle(cf_vis == "True")
-
         audio_met = g(user_id, "audio_metric")
         if audio_met is not None:
-            self._settings_screen.audio_metric = audio_met
             self._audio_metric_key = audio_met
+            if audio_met in FORMULA_KEYS:
+                self._audio_formula_index = FORMULA_KEYS.index(audio_met)
+            # Reflect audio_metric: radios use "custom_formula" key for any formula slot
+            ui_key = "custom_formula" if audio_met in FORMULA_KEYS else audio_met
+            self._settings_screen.audio_metric = ui_key
+            self._settings_screen.audio_formula_index = self._audio_formula_index
 
         marker_hk = g(user_id, "marker_hotkey")
         if marker_hk is not None:

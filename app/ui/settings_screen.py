@@ -83,7 +83,6 @@ class SettingsScreen(Screen):
         self._on_backup_pressed: Optional[Callable] = None
         self._on_restore_pressed: Optional[Callable] = None
         self._on_threshold_change: Optional[Callable] = None
-        self._on_toggle_change: Optional[Callable] = None
         self._on_test_audio: Optional[Callable] = None
         self._on_sinking_alert_toggle: Optional[Callable] = None
         self._on_subtle_alert_toggle: Optional[Callable] = None
@@ -98,7 +97,7 @@ class SettingsScreen(Screen):
         self._timer_sound_test_playing: bool = False
         self._on_line_width_change: Optional[Callable] = None
         self._on_rotate_screen: Optional[Callable] = None
-        self._on_custom_formula_change: Optional[Callable] = None
+        self._on_formula_slot_change: Optional[Callable] = None
         self._on_save_formula: Optional[Callable] = None
         self._on_load_formula: Optional[Callable] = None
         self._on_delete_formula: Optional[Callable] = None
@@ -195,9 +194,9 @@ class SettingsScreen(Screen):
         timer_section.add_widget(timer_dur_row)
 
         timer_presets = PresetRow(
-            values=[5, 10, 15, 20],
+            items=[("5m", 5), ("10m", 10), ("15m", 15), ("20m", 20),
+                   ("30m", 30), ("1h", 60), ("1h30", 90), ("2h", 120)],
             callback=lambda v: setattr(self._timer_duration_slider, "value", v),
-            fmt="{} min",
         )
         timer_section.add_widget(timer_presets)
 
@@ -396,24 +395,37 @@ class SettingsScreen(Screen):
         # --- Threshold section ---
         threshold_section = accordion.add_section("Threshold", collapsed=True)
 
-        slider_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=S.GAP)
+        slider_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=S.GAP_SM)
+        minus_btn = StyledButton(
+            text="−", font_size=F.H2, bg_color=C.BG_CARD,
+            size_hint_x=None, width=dp(48),
+        )
+        plus_btn = StyledButton(
+            text="+", font_size=F.H2, bg_color=C.BG_CARD,
+            size_hint_x=None, width=dp(48),
+        )
         self._threshold_slider = Slider(
             min=20,
             max=180,
             value=METRICS.MEDITATION_THRESHOLD_DEFAULT,
             step=1,
-            size_hint_x=0.8,
+            size_hint_x=1,
         )
         self._threshold_value_label = Label(
             text=str(METRICS.MEDITATION_THRESHOLD_DEFAULT),
             font_size=F.H2,
             bold=True,
             color=C.TEXT,
-            size_hint_x=0.2,
+            size_hint_x=None,
+            width=dp(48),
         )
         self._threshold_slider.bind(value=self._on_slider_value)
+        minus_btn.bind(on_release=lambda *a: self._step_threshold(-5))
+        plus_btn.bind(on_release=lambda *a: self._step_threshold(5))
+        slider_row.add_widget(minus_btn)
         slider_row.add_widget(self._threshold_slider)
         slider_row.add_widget(self._threshold_value_label)
+        slider_row.add_widget(plus_btn)
         threshold_section.add_widget(slider_row)
 
         threshold_presets = PresetRow(
@@ -437,6 +449,9 @@ class SettingsScreen(Screen):
         self._audio_metric_radios: dict[str, CheckBox] = {}
         self._audio_metric_selected: str = "shamatha_score"
         self._on_audio_metric_change: Optional[Callable] = None
+        self._on_audio_formula_index_cb: Optional[Callable] = None
+        self._audio_formula_index_selected: int = 0
+        self._audio_formula_index_buttons: list[StyledButton] = []
         audio_metric_options = {
             "shamatha_score": "Shamatha Score",
             "native_meditation": "NS Meditation",
@@ -465,6 +480,32 @@ class SettingsScreen(Screen):
             row.add_widget(lbl)
             threshold_section.add_widget(row)
             self._audio_metric_radios[key] = rb
+
+        # Formula slot index selector (shown below the custom-formula radio)
+        index_row = BoxLayout(size_hint_y=None, height=dp(32), spacing=S.GAP)
+        index_row.add_widget(Label(
+            text="    Slot:",
+            font_size=F.SMALL,
+            color=C.TEXT_SECONDARY,
+            size_hint_x=0.25,
+            halign="left", valign="middle",
+        ))
+        btn_box = BoxLayout(size_hint_x=0.75, spacing=S.GAP)
+        for slot_idx, slot_label in enumerate(("1", "2", "3")):
+            btn = StyledButton(
+                text=slot_label,
+                font_size=F.SMALL,
+                size_hint_y=None,
+                height=dp(28),
+                bg_color=C.ACCENT if slot_idx == 0 else C.BG_CARD,
+                text_color=C.TEXT,
+            )
+            btn._slot_idx = slot_idx
+            btn.bind(on_release=self._on_audio_formula_index_pressed)
+            btn_box.add_widget(btn)
+            self._audio_formula_index_buttons.append(btn)
+        index_row.add_widget(btn_box)
+        threshold_section.add_widget(index_row)
 
         # --- Audio section ---
         audio_section = accordion.add_section("Audio", collapsed=True)
@@ -631,58 +672,9 @@ class SettingsScreen(Screen):
         self._marker_hotkey: str = "m"
         self._waiting_for_hotkey: bool = False
 
-        # --- Graph toggles ---
-        graph_section = accordion.add_section("Graph Metrics", collapsed=True)
-
-        toggle_names = {
-            "shamatha_score": "Shamatha Score",
-            "distraction": "Distraction",
-            "sinking": "Sinking",
-            "subtle_distraction": "Subtle Distraction",
-            "native_attention": "NS Attention",
-            "native_meditation": "NS Meditation",
-        }
-        self._checkboxes: dict[str, CheckBox] = {}
-        for key, display_name in toggle_names.items():
-            row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
-            cb = CheckBox(
-                active=self._graph_toggles.get(key, True), size_hint_x=0.15,
-                size_hint_y=None, height=dp(36),
-            )
-            cb.metric_key = key
-            cb.bind(active=self._on_toggle)
-            lbl = Label(
-                text=display_name,
-                font_size=F.H3,
-                color=C.TEXT,
-                size_hint_x=0.85,
-                halign="left", valign="middle",
-            )
-            lbl.bind(size=lbl.setter("text_size"))
-            row.add_widget(cb)
-            row.add_widget(lbl)
-            graph_section.add_widget(row)
-            self._checkboxes[key] = cb
-
-        # Custom formula visibility toggle
-        cf_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
-        self._custom_formula_cb = CheckBox(
-            active=False, size_hint_x=0.15,
-            size_hint_y=None, height=dp(36),
-        )
-        self._custom_formula_cb.bind(active=self._on_custom_formula_toggle)
-        self._on_custom_formula_visible_change: Optional[Callable] = None
-        cf_lbl = Label(
-            text="Show Custom Formula",
-            font_size=F.H3,
-            color=C.TEXT,
-            size_hint_x=0.85,
-            halign="left", valign="middle",
-        )
-        cf_lbl.bind(size=cf_lbl.setter("text_size"))
-        cf_row.add_widget(self._custom_formula_cb)
-        cf_row.add_widget(cf_lbl)
-        graph_section.add_widget(cf_row)
+        # Graph series are now chosen via the on-graph series picker (combobox);
+        # the former "Graph Metrics" checkbox section was removed (subsumed).
+        # _graph_toggles (above) remains as the first-run default selection.
 
         # --- Custom Formula section ---
         formula_section = accordion.add_section("Custom Formula", collapsed=True)
@@ -701,53 +693,89 @@ class SettingsScreen(Screen):
         formula_desc.bind(size=formula_desc.setter("text_size"))
         formula_section.add_widget(formula_desc)
 
-        self._formula_input = TextInput(
-            text="",
-            hint_text="e.g. (alpha1 + alpha2) / (beta1 + beta2 + 1)",
-            font_size=F.BODY,
-            size_hint_y=None,
-            height=dp(40),
-            multiline=False,
-            background_color=list(C.BG_INPUT),
-            foreground_color=C.TEXT,
-        )
-        self._formula_input.bind(on_text_validate=self._on_formula_submit)
-        formula_section.add_widget(self._formula_input)
+        # Three named formula slots, each with name + formula inputs,
+        # Apply/Save buttons, and a status label.
+        self._formula_inputs: list[TextInput] = []
+        self._formula_name_inputs: list[TextInput] = []
+        self._formula_statuses: list[Label] = []
+        for i in range(3):
+            slot_header = Label(
+                text=f"Formula {i + 1}",
+                font_size=F.SMALL,
+                bold=True,
+                size_hint_y=None,
+                height=dp(20),
+                color=C.TEXT_SECONDARY,
+                halign="left",
+            )
+            slot_header.bind(size=slot_header.setter("text_size"))
+            formula_section.add_widget(slot_header)
 
-        formula_btns = BoxLayout(
-            size_hint_y=None, height=dp(34), spacing=S.GAP_SM
-        )
-        formula_btn = StyledButton(
-            text="Apply",
-            font_size=F.BODY,
-            bg_color=C.PRIMARY,
-            size_hint_y=None,
-            height=dp(34),
-        )
-        formula_btn.bind(on_release=self._on_formula_submit)
-        formula_btns.add_widget(formula_btn)
+            name_input = TextInput(
+                text="",
+                hint_text=f"name (default Custom {i + 1})",
+                font_size=F.SMALL,
+                size_hint_y=None,
+                height=dp(36),
+                multiline=False,
+                background_color=list(C.BG_INPUT),
+                foreground_color=C.TEXT,
+            )
+            name_input.bind(on_text_validate=lambda _w, idx=i: self._submit_slot(idx))
+            self._formula_name_inputs.append(name_input)
+            formula_section.add_widget(name_input)
 
-        save_btn = StyledButton(
-            text="Save",
-            font_size=F.BODY,
-            bg_color=C.ACCENT,
-            size_hint_y=None,
-            height=dp(34),
-        )
-        save_btn.bind(on_release=self._on_save_formula_pressed)
-        formula_btns.add_widget(save_btn)
-        formula_section.add_widget(formula_btns)
+            formula_input = TextInput(
+                text="",
+                hint_text="e.g. (alpha1 + alpha2) / (beta1 + beta2 + 1)",
+                font_size=F.BODY,
+                size_hint_y=None,
+                height=dp(40),
+                multiline=False,
+                background_color=list(C.BG_INPUT),
+                foreground_color=C.TEXT,
+            )
+            formula_input.bind(
+                on_text_validate=lambda _w, idx=i: self._submit_slot(idx)
+            )
+            self._formula_inputs.append(formula_input)
+            formula_section.add_widget(formula_input)
 
-        self._formula_status = Label(
-            text="",
-            font_size=F.SMALL,
-            size_hint_y=None,
-            height=dp(20),
-            color=C.ACCENT,
-            halign="left",
-        )
-        self._formula_status.bind(size=self._formula_status.setter("text_size"))
-        formula_section.add_widget(self._formula_status)
+            formula_btns = BoxLayout(
+                size_hint_y=None, height=dp(34), spacing=S.GAP_SM
+            )
+            apply_btn = StyledButton(
+                text="Apply",
+                font_size=F.BODY,
+                bg_color=C.PRIMARY,
+                size_hint_y=None,
+                height=dp(34),
+            )
+            apply_btn.bind(on_release=lambda _w, idx=i: self._submit_slot(idx))
+            formula_btns.add_widget(apply_btn)
+
+            save_btn = StyledButton(
+                text="Save",
+                font_size=F.BODY,
+                bg_color=C.ACCENT,
+                size_hint_y=None,
+                height=dp(34),
+            )
+            save_btn.bind(on_release=lambda _w, idx=i: self._save_slot(idx))
+            formula_btns.add_widget(save_btn)
+            formula_section.add_widget(formula_btns)
+
+            status = Label(
+                text="",
+                font_size=F.SMALL,
+                size_hint_y=None,
+                height=dp(20),
+                color=C.ACCENT,
+                halign="left",
+            )
+            status.bind(size=status.setter("text_size"))
+            self._formula_statuses.append(status)
+            formula_section.add_widget(status)
 
         # Saved formulas header with export button
         saved_header = BoxLayout(size_hint_y=None, height=dp(26), spacing=S.GAP_SM)
@@ -972,12 +1000,11 @@ class SettingsScreen(Screen):
         if self._on_threshold_change:
             self._on_threshold_change(val)
 
-    def _on_toggle(self, checkbox, active) -> None:
-        key = getattr(checkbox, "metric_key", None)
-        if key:
-            self._graph_toggles[key] = active
-            if self._on_toggle_change:
-                self._on_toggle_change(key, active)
+    def _step_threshold(self, delta: int) -> None:
+        """Nudge the threshold by `delta`, clamped to the slider range. Setting
+        the slider value fires _on_slider_value (label + callback)."""
+        s = self._threshold_slider
+        s.value = max(s.min, min(s.max, int(s.value) + delta))
 
     def _on_test_audio_pressed(self, *args) -> None:
         if self._on_test_audio:
@@ -1001,17 +1028,28 @@ class SettingsScreen(Screen):
         if self._on_line_width_change:
             self._on_line_width_change(val)
 
-    def _on_formula_submit(self, *args) -> None:
-        formula = self._formula_input.text.strip()
-        if self._on_custom_formula_change:
-            self._on_custom_formula_change(formula)
+    def _submit_slot(self, idx: int) -> None:
+        if self._on_formula_slot_change:
+            name = self._formula_name_inputs[idx].text.strip()
+            self._on_formula_slot_change(idx, name, self._formula_inputs[idx].text.strip())
 
-    def set_formula_status(self, text: str, is_error: bool = False) -> None:
-        self._formula_status.text = text
-        if is_error:
-            self._formula_status.color = C.DANGER
-        else:
-            self._formula_status.color = C.ACCENT
+    def _save_slot(self, idx: int) -> None:
+        """Save a slot's formula to the library, seeding the entry from its name."""
+        if self._on_save_formula:
+            self._on_save_formula(idx, self._formula_name_inputs[idx].text.strip(),
+                                  self._formula_inputs[idx].text.strip())
+
+    def set_formula_slot_status(self, idx: int, text: str, is_error: bool = False) -> None:
+        self._formula_statuses[idx].text = text
+        self._formula_statuses[idx].color = C.DANGER if is_error else C.ACCENT
+
+    def set_formula_slot_callback(self, callback: Callable) -> None:
+        self._on_formula_slot_change = callback
+
+    def set_formula_slot(self, idx: int, name: str, formula: str) -> None:
+        """Reflect a programmatic slot change (load/restore) in the inputs."""
+        self._formula_name_inputs[idx].text = name
+        self._formula_inputs[idx].text = formula
 
     def _on_rotate_pressed(self, *args) -> None:
         self._current_rotation = (self._current_rotation + 90) % 360
@@ -1086,9 +1124,6 @@ class SettingsScreen(Screen):
     def set_threshold_callback(self, callback: Callable) -> None:
         self._on_threshold_change = callback
 
-    def set_toggle_callback(self, callback: Callable) -> None:
-        self._on_toggle_change = callback
-
     def set_test_audio_callback(self, callback: Callable) -> None:
         self._on_test_audio = callback
 
@@ -1107,9 +1142,6 @@ class SettingsScreen(Screen):
     def set_rotate_screen_callback(self, callback: Callable) -> None:
         self._on_rotate_screen = callback
 
-    def set_custom_formula_callback(self, callback: Callable) -> None:
-        self._on_custom_formula_change = callback
-
     def set_save_formula_callback(self, callback: Callable) -> None:
         self._on_save_formula = callback
 
@@ -1125,14 +1157,6 @@ class SettingsScreen(Screen):
     def _on_export_formulas_pressed(self, *args) -> None:
         if self._on_export_formulas:
             self._on_export_formulas()
-
-    def _on_save_formula_pressed(self, *args) -> None:
-        formula = self._formula_input.text.strip()
-        if not formula:
-            self.set_formula_status("Nothing to save", is_error=True)
-            return
-        if self._on_save_formula:
-            self._on_save_formula(formula)
 
     def _on_load_formula_pressed(self, btn) -> None:
         idx = getattr(btn, "formula_index", -1)
@@ -1359,27 +1383,6 @@ class SettingsScreen(Screen):
         # before we ask the ScrollView to bring it into view.
         Clock.schedule_once(_scroll, 0)
 
-    @property
-    def graph_toggles(self) -> dict[str, bool]:
-        return dict(self._graph_toggles)
-
-    # --- Custom formula visibility ---
-
-    def _on_custom_formula_toggle(self, checkbox, active) -> None:
-        if self._on_custom_formula_visible_change:
-            self._on_custom_formula_visible_change(active)
-
-    def set_custom_formula_visible_callback(self, callback: Callable) -> None:
-        self._on_custom_formula_visible_change = callback
-
-    @property
-    def custom_formula_visible(self) -> bool:
-        return self._custom_formula_cb.active
-
-    @custom_formula_visible.setter
-    def custom_formula_visible(self, value: bool) -> None:
-        self._custom_formula_cb.active = value
-
     # --- Audio threshold metric picker ---
 
     def _on_audio_metric_radio(self, checkbox, active) -> None:
@@ -1418,6 +1421,15 @@ class SettingsScreen(Screen):
 
     def set_audio_metric_callback(self, callback: Callable) -> None:
         self._on_audio_metric_change = callback
+
+    def set_audio_formula_index_callback(self, callback: Callable) -> None:
+        self._on_audio_formula_index_cb = callback
+
+    def _on_audio_formula_index_pressed(self, btn) -> None:
+        idx = getattr(btn, "_slot_idx", 0)
+        self.audio_formula_index = idx
+        if self._on_audio_formula_index_cb:
+            self._on_audio_formula_index_cb(idx)
 
     # --- Profile callbacks and methods ---
 
@@ -1527,3 +1539,13 @@ class SettingsScreen(Screen):
         self._audio_metric_selected = key
         for k, rb in self._audio_metric_radios.items():
             rb.active = (k == key)
+
+    @property
+    def audio_formula_index(self) -> int:
+        return self._audio_formula_index_selected
+
+    @audio_formula_index.setter
+    def audio_formula_index(self, idx: int) -> None:
+        self._audio_formula_index_selected = idx
+        for i, btn in enumerate(self._audio_formula_index_buttons):
+            btn.bg_color = C.ACCENT if i == idx else C.BG_CARD

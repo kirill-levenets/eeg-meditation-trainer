@@ -66,6 +66,8 @@ class Icons:
     DELETE = "\U000F01B4"
     CHECK = "\U000F012C"
     CLOSE = "\U000F0156"
+    CLOSE_CIRCLE = "\U000F0159"
+    CLOSE_CIRCLE_OUTLINE = "\U000F015A"
     CHEVRON_LEFT = "\U000F0141"
     CHEVRON_DOWN = "\U000F0140"
     CHEVRON_RIGHT = "\U000F0142"
@@ -149,6 +151,8 @@ _METRICS = {
     "ATTENTION": (0.55, 0.35, 0.85, 1.0),
     "MEDITATION": (0.35, 0.80, 0.85, 1.0),
     "CUSTOM": (0.90, 0.45, 0.75, 1.0),
+    "CUSTOM2": (1.0, 0.50, 0.0, 1.0),
+    "CUSTOM3": (0.40, 0.75, 0.95, 1.0),
     "MED_SCORE": (0.30, 0.60, 0.95, 1.0),
     "THRESHOLD_LINE": (0.90, 0.30, 0.90, 0.7),
     "STATE_FOCUS": (0.30, 0.85, 0.50, 1.0),
@@ -605,6 +609,7 @@ class _AccordionSection(BoxLayout):
         if collapsed:
             self._scroll.height = 0
             self._scroll.opacity = 0
+            self._scroll.remove_widget(self._content)
 
         self._scroll.bind(height=self._recalc_height)
         self._recalc_height()
@@ -635,11 +640,19 @@ class _AccordionSection(BoxLayout):
     def _set_collapsed(self, collapsed, notify=True):
         self._collapsed = collapsed
         if collapsed:
+            # Detach the content so a collapsed section has no geometry below its
+            # header. Otherwise its display-clipped widgets still overlap the
+            # sections beneath in the touch layer and, via the nested-ScrollView
+            # simulated click, steal taps aimed at those section headers.
+            if self._content.parent is self._scroll:
+                self._scroll.remove_widget(self._content)
             self._scroll.height = 0
             self._scroll.opacity = 0
             if not self._header_icon_text:
                 self._header._icon_label.text = Icons.CHEVRON_RIGHT
         else:
+            if self._content.parent is not self._scroll:
+                self._scroll.add_widget(self._content)
             self._scroll.opacity = 1
             self._update_height()
             if not self._header_icon_text:

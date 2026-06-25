@@ -16,6 +16,7 @@ from kivy.uix.widget import Widget
 
 from app.config import APP
 from app.ui.theme import C as TC
+from app.ui.touch_utils import point_in_rect
 
 
 class ScrollableGraphWidget(Widget):
@@ -31,10 +32,15 @@ class ScrollableGraphWidget(Widget):
                  show_timestamps: bool = True, sample_rate: float = 0.0,
                  max_points: int = 0, bipolar: bool = False,
                  auto_scale: bool = False, grid_step: float = 20.0,
+                 graph_id: str = "", names: dict[str, str] | None = None,
                  **kwargs) -> None:
         super().__init__(**kwargs)
         self._colors: dict[str, tuple] = colors
         self._scales: dict[str, float] = scales
+        # Stable identity for per-graph persistence (graph_series_<graph_id>)
+        # and friendly labels for the series picker / legends.
+        self._graph_id: str = graph_id
+        self._names: dict[str, str] = names or {}
         self._bipolar: bool = bipolar
         self._auto_scale: bool = auto_scale
         self._grid_step: float = grid_step
@@ -76,6 +82,9 @@ class ScrollableGraphWidget(Widget):
         self._start_wall_time: Optional[float] = None
         self._scroll_change_callback = None
         self._tap_callback = None
+        self._expand_callback = None
+        self._series_callback = None
+        self._visibility_callback = None
         self._touch_moved: bool = False
         self._gfx: InstructionGroup = InstructionGroup()
         self.canvas.add(self._gfx)
@@ -143,6 +152,40 @@ class ScrollableGraphWidget(Widget):
         if metric in self._visible:
             self._visible[metric] = visible
             self._redraw()
+            if self._visibility_callback is not None:
+                self._visibility_callback()
+
+    def is_visible(self, metric: str) -> bool:
+        return self._visible.get(metric, False)
+
+    def visible_keys(self) -> list[str]:
+        return [k for k, v in self._visible.items() if v]
+
+    def series_keys(self) -> list[str]:
+        """All series this graph can plot (the catalog set at construction)."""
+        return list(self._data.keys())
+
+    @property
+    def graph_id(self) -> str:
+        return self._graph_id
+
+    def series_name(self, key: str) -> str:
+        """Friendly label for a series — explicit `names` map, else prettified key."""
+        return self._names.get(key) or key.replace("_score", "").replace("_", " ").title()
+
+    def set_series_name(self, key: str, name: str) -> None:
+        """Override a series' friendly label at runtime (custom-formula renames)."""
+        self._names[key] = name
+        self._redraw()
+        if self._visibility_callback is not None:
+            self._visibility_callback()
+
+    def series_color(self, key: str) -> tuple:
+        return self._colors.get(key, (1, 1, 1, 1))
+
+    def set_visibility_callback(self, callback) -> None:
+        """Invoked after any set_visible — lets the owning screen refresh its legend."""
+        self._visibility_callback = callback
 
     def set_scroll_offset(self, offset: int) -> None:
         self._scroll_offset = max(0, min(offset, self.max_scroll))
@@ -323,6 +366,8 @@ class ScrollableGraphWidget(Widget):
             ))
 
         if end_idx <= start_idx:
+            self._draw_series_icon()
+            self._draw_expand_icon()
             return
 
         # X-axis timestamps + vertical grid lines at 10-second intervals
@@ -469,6 +514,9 @@ class ScrollableGraphWidget(Widget):
                         self._gfx.add(Color(*TC.THRESHOLD_LINE))
                         self._gfx.add(Line(points=[x_pos, graph_y, x_pos, graph_y + graph_h], width=1.5))
 
+        self._draw_series_icon()
+        self._draw_expand_icon()
+
     @staticmethod
     def _compute_nice_step(max_val: float) -> float:
         """Compute a visually pleasing grid step for auto-scaled graphs."""
@@ -541,6 +589,18 @@ class ScrollableGraphWidget(Widget):
         if hasattr(touch, "button") and touch.button in ("scrollup", "scrolldown"):
             return True
 
+        # On-graph glyphs (series picker, expand) — intercept before grab so a
+        # tap fires the affordance instead of scrolling. Hit-test in WINDOW
+        # coordinates, the only unambiguous frame (GraphAwareScrollView forwards
+        # touches in a mid-chain frame matching neither the canvas rect nor
+        # to_widget).
+        if self._series_callback is not None and self._touch_in_window_rect(touch, self._series_icon_rect()):
+            self._series_callback(self)
+            return True
+        if self._expand_callback is not None and self._touch_in_window_rect(touch, self._expand_icon_rect()):
+            self._expand_callback(self)
+            return True
+
         touch.grab(self)
         self._grabbed_touches[touch.uid] = touch
         self._touch_start_x = touch.x
@@ -597,6 +657,92 @@ class ScrollableGraphWidget(Widget):
         """Set callback for single tap on the graph (used for marker on Android)."""
         self._tap_callback = callback
 
+    def set_expand_callback(self, callback) -> None:
+        """Set callback invoked with `self` when the fullscreen-expand icon is tapped.
+
+        Setting a callback also reveals the icon; pass None to hide it again.
+        """
+        self._expand_callback = callback
+        self._redraw()
+
+    def set_series_picker_callback(self, callback) -> None:
+        """Set callback invoked with `self` when the series-picker glyph is tapped.
+
+        Setting a callback reveals the glyph (top-left); pass None to hide it.
+        """
+        self._series_callback = callback
+        self._redraw()
+
+    def _icon_too_small(self) -> bool:
+        return self.width < dp(60) or self.height < dp(60)
+
+    def _expand_icon_rect(self):
+        """Rect (x, y, w, h) for the expand glyph (top-right), or None when hidden."""
+        if self._expand_callback is None or self._icon_too_small():
+            return None
+        size, margin = dp(44), dp(6)
+        return (self.x + self.width - size - margin, self.y + self.height - size - margin, size, size)
+
+    def _series_icon_rect(self):
+        """Rect (x, y, w, h) for the series-picker glyph (top-left), or None.
+
+        Offset right of the Y-axis value-label gutter so it doesn't overlap them.
+        """
+        if self._series_callback is None or self._icon_too_small():
+            return None
+        size, margin = dp(44), dp(6)
+        gutter = dp(48) if self._show_value_labels else dp(10)
+        return (self.x + gutter + margin, self.y + self.height - size - margin, size, size)
+
+    def _touch_in_window_rect(self, touch, rect) -> bool:
+        """True if `touch` falls in `rect`, compared in WINDOW coordinates.
+
+        The touch's canonical window position (sx/sy) vs the rect's rendered
+        window rect — the one frame that isn't ambiguous under the
+        GraphAwareScrollView touch-forwarding transform.
+        """
+        if rect is None:
+            return False
+        wx0, wy0 = self.to_window(rect[0], rect[1])
+        wx1, wy1 = self.to_window(rect[0] + rect[2], rect[1] + rect[3])
+        tx, ty = touch.sx * Window.width, touch.sy * Window.height
+        win_rect = (min(wx0, wx1), min(wy0, wy1), abs(wx1 - wx0), abs(wy1 - wy0))
+        return point_in_rect(tx, ty, win_rect)
+
+    def _draw_icon_backing(self, rect) -> None:
+        # Transparent background — the glyph sits directly on the graph. Set the
+        # glyph color (TEXT) here for the Line instructions that follow; TEXT
+        # contrasts with GRAPH_BG on every palette.
+        self._gfx.add(Color(*TC.TEXT))
+
+    def _draw_expand_icon(self) -> None:
+        """Top-right fullscreen-expand glyph (four outward corner brackets)."""
+        rect = self._expand_icon_rect()
+        if rect is None:
+            return
+        self._draw_icon_backing(rect)
+        ix, iy, iw, ih = rect
+        pad, arm, lw = dp(11), dp(9), 1.6
+        left, right = ix + pad, ix + iw - pad
+        bottom, top = iy + pad, iy + ih - pad
+        self._gfx.add(Line(points=[left, bottom + arm, left, bottom, left + arm, bottom], width=lw))
+        self._gfx.add(Line(points=[right - arm, bottom, right, bottom, right, bottom + arm], width=lw))
+        self._gfx.add(Line(points=[left, top - arm, left, top, left + arm, top], width=lw))
+        self._gfx.add(Line(points=[right - arm, top, right, top, right, top - arm], width=lw))
+
+    def _draw_series_icon(self) -> None:
+        """Top-left series-picker glyph: three stacked lines (a list) + a chevron."""
+        rect = self._series_icon_rect()
+        if rect is None:
+            return
+        self._draw_icon_backing(rect)
+        ix, iy, iw, ih = rect
+        pad, lw = dp(12), 1.6
+        left, right = ix + pad, ix + iw - pad
+        for i in range(3):  # three horizontal "list" lines, top to bottom
+            ly = iy + ih - pad - i * dp(6)
+            self._gfx.add(Line(points=[left, ly, right, ly], width=lw))
+
     def add_marker(self, index: Optional[int] = None) -> None:
         """Add a marker at the given data point index (default: current end)."""
         idx = index if index is not None else max(0, self._total_points - 1)
@@ -643,7 +789,8 @@ class GraphAwareScrollView(ScrollView):
 
     def on_scroll_start(self, touch, check_children=True):
         if (
-            hasattr(touch, "button")
+            self.collide_point(*touch.pos)
+            and hasattr(touch, "button")
             and touch.button in ("scrollup", "scrolldown")
             and self._graph_under_touch(touch) is not None
         ):
@@ -651,9 +798,14 @@ class GraphAwareScrollView(ScrollView):
         return super().on_scroll_start(touch, check_children)
 
     def on_touch_down(self, touch):
-        graph = self._graph_under_touch(touch)
-        if graph is not None:
-            return graph.dispatch("on_touch_down", touch)
+        # Only intercept touches actually inside the viewport. A graph's logical
+        # bounds can extend above/below the visible scroll area (overflowing
+        # body), and without this guard those bounds would steal touches from
+        # widgets sitting outside the ScrollView (e.g. the Metrics/Raw toggle).
+        if self.collide_point(*touch.pos):
+            graph = self._graph_under_touch(touch)
+            if graph is not None:
+                return graph.dispatch("on_touch_down", touch)
         return super().on_touch_down(touch)
 
 

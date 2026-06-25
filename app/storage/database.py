@@ -1,12 +1,17 @@
 import csv
 import io
+import json
+import math
 import os
 import sqlite3
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from app.config import APP
 from app.logger import logger
+
+if TYPE_CHECKING:
+    from app.metrics.custom_formula import CustomFormulaEvaluator
 
 
 class UserExistsError(Exception):
@@ -146,19 +151,22 @@ class DatabaseManager:
         if "time_shamatha_90" not in sess_cols:
             self._conn.execute("ALTER TABLE sessions ADD COLUMN time_shamatha_90 INTEGER DEFAULT 0")
             logger.info("Migrated: added column sessions.time_shamatha_90")
+        if "custom_formulas" not in sess_cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN custom_formulas TEXT DEFAULT ''")
+            logger.info("Migrated: added column sessions.custom_formulas")
 
         self._conn.commit()
 
     def save_session(self, stats: dict, user_id: Optional[int] = None,
-                     session_name: str = "") -> int:
-        """Insert a session record and return its ID."""
+                     session_name: str = "", custom_formulas: str = "") -> int:
+        """Insert a session record and return its ID. `custom_formulas` is a JSON string."""
         cursor = self._conn.execute(
             """
             INSERT INTO sessions
             (user_id, date_time, duration, threshold_used, avg_meditation, avg_shamatha,
              max_meditation, time_above_threshold, longest_streak, session_name,
-             time_shamatha_90)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             time_shamatha_90, custom_formulas)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -172,6 +180,7 @@ class DatabaseManager:
                 stats.get("longest_streak", 0),
                 session_name,
                 stats.get("time_shamatha_90", 0),
+                custom_formulas,
             ),
         )
         self._conn.commit()
@@ -328,27 +337,28 @@ class DatabaseManager:
 
     # ---- Session management ----
 
-    def update_session(self, session_id: int, stats: dict) -> None:
-        """Update an existing session's aggregate stats."""
+    def update_session(self, session_id: int, stats: dict,
+                       custom_formulas: str | None = None) -> None:
+        """Update an existing session's aggregate stats (+ formula snapshot if given)."""
+        cols = ["duration = ?", "threshold_used = ?", "avg_meditation = ?",
+                "avg_shamatha = ?", "max_meditation = ?", "time_above_threshold = ?",
+                "longest_streak = ?", "time_shamatha_90 = ?"]
+        vals: list = [
+            stats.get("duration", 0),
+            stats.get("threshold_used", 50),
+            stats.get("avg_meditation", 0),
+            stats.get("avg_shamatha", 0),
+            stats.get("max_meditation", 0),
+            stats.get("time_above_threshold", 0),
+            stats.get("longest_streak", 0),
+            stats.get("time_shamatha_90", 0),
+        ]
+        if custom_formulas is not None:
+            cols.append("custom_formulas = ?")
+            vals.append(custom_formulas)
+        vals.append(session_id)
         self._conn.execute(
-            """
-            UPDATE sessions
-            SET duration = ?, threshold_used = ?, avg_meditation = ?,
-                avg_shamatha = ?, max_meditation = ?, time_above_threshold = ?,
-                longest_streak = ?, time_shamatha_90 = ?
-            WHERE id = ?
-            """,
-            (
-                stats.get("duration", 0),
-                stats.get("threshold_used", 50),
-                stats.get("avg_meditation", 0),
-                stats.get("avg_shamatha", 0),
-                stats.get("max_meditation", 0),
-                stats.get("time_above_threshold", 0),
-                stats.get("longest_streak", 0),
-                stats.get("time_shamatha_90", 0),
-                session_id,
-            ),
+            f"UPDATE sessions SET {', '.join(cols)} WHERE id = ?", vals
         )
         self._conn.commit()
         logger.info(f"Session {session_id} updated with final stats")
@@ -397,13 +407,26 @@ class DatabaseManager:
         """Set a per-user setting value."""
         self.set_setting(f"user_{user_id}_{key}", value)
 
+    def get_user_json_setting(self, user_id: int, key: str, default=None):
+        """Get a per-user setting decoded from JSON, or `default` if absent/corrupt."""
+        raw = self.get_user_setting(user_id, key)
+        if not raw:
+            return default
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return default
+
+    def set_user_json_setting(self, user_id: int, key: str, value) -> None:
+        """Persist a per-user setting as a JSON string."""
+        self.set_user_setting(user_id, key, json.dumps(value))
+
     # ---- Saved formulas (per-user, max 50) ----
 
     _MAX_SAVED_FORMULAS = 50
 
     def get_saved_formulas(self, user_id: int) -> list[dict[str, str]]:
         """Return saved formulas for a user as [{name, formula}, ...]."""
-        import json
         raw = self.get_user_setting(user_id, "saved_formulas")
         if not raw:
             return []
@@ -414,7 +437,6 @@ class DatabaseManager:
             return []
 
     def _save_formulas_list(self, user_id: int, formulas: list[dict[str, str]]) -> None:
-        import json
         self.set_user_setting(user_id, "saved_formulas", json.dumps(formulas))
 
     def add_saved_formula(self, user_id: int, name: str, formula: str) -> bool:
@@ -456,6 +478,61 @@ class DatabaseManager:
 
     # ---- CSV export ----
 
+    @staticmethod
+    def formula_vars_from_row(row: dict) -> dict[str, float]:
+        """Shared var namespace so CSV export and diary recompute see identical inputs."""
+        raw_bands = {
+            "delta": row.get("delta_raw", 0),
+            "theta": row.get("theta_raw", 0),
+            "alpha1": row.get("alpha1_raw", 0),
+            "alpha2": row.get("alpha2_raw", 0),
+            "beta1": row.get("beta1_raw", 0),
+            "beta2": row.get("beta2_raw", 0),
+            "gamma1": row.get("gamma1_raw", 0),
+            "gamma2": row.get("gamma2_raw", 0),
+        }
+        alpha = raw_bands["alpha1"] + raw_bands["alpha2"]
+        beta = raw_bands["beta1"] + raw_bands["beta2"]
+        gamma = raw_bands["gamma1"] + raw_bands["gamma2"]
+        fvars: dict[str, float] = {
+            **raw_bands,
+            "alpha": alpha,
+            "beta": beta,
+            "gamma": gamma,
+            # Matches MetricsEngine.normalize_bands so total_power replays identically.
+            "total_power": alpha + beta + gamma + raw_bands["theta"] + raw_bands["delta"] + 1.0,
+        }
+        # The stored columns for normalized bands + scores feed formulas directly,
+        # so diary replay sees the same namespace as the live tick (not silent zeros).
+        for k in ("alpha_norm", "beta_norm", "gamma_norm", "theta_norm", "delta_norm",
+                  "meditation_score", "shamatha_score", "distraction", "sinking",
+                  "subtle_distraction", "stability", "calmness",
+                  "native_attention", "native_meditation"):
+            fvars[k] = row.get(k, 0.0)
+        sqrt_keys = ("delta", "theta", "alpha1", "alpha2", "beta1", "beta2")
+        sqrt_vals = {k: max(raw_bands.get(k, 0.0), 0.0) for k in sqrt_keys}
+        total = sum(sqrt_vals.values())
+        for k in sqrt_keys:
+            fvars[f"s_{k}"] = math.sqrt(sqrt_vals[k] / total) if total >= 1.0 else 0.0
+        return fvars
+
+    def recompute_formula_series(
+        self, session_id: int, evaluators: "dict[str, CustomFormulaEvaluator]"
+    ) -> dict[str, list[float]]:
+        """Recompute each {series_key: evaluator} over a session's stored rows.
+
+        Skips invalid evaluators. Returns {series_key: [value per tick]}.
+        """
+        rows = self.get_session_metrics(session_id)
+        valid = {k: e for k, e in evaluators.items() if getattr(e, "is_valid", False)}
+        out: dict[str, list[float]] = {k: [] for k in valid}
+        for row in rows:
+            fvars = self.formula_vars_from_row(row)
+            for key, ev in valid.items():
+                ev.push_variables(fvars)
+                out[key].append(ev.evaluate(fvars))
+        return out
+
     def export_session_csv(self, session_id: int, custom_formula=None) -> str:
         """Export all metrics for a session as a CSV string.
 
@@ -468,39 +545,8 @@ class DatabaseManager:
             return ""
 
         if custom_formula and custom_formula.is_valid:
-            import math
             for row in metrics:
-                # Build variable dict matching what the formula expects
-                raw_bands = {
-                    "delta": row.get("delta_raw", 0),
-                    "theta": row.get("theta_raw", 0),
-                    "alpha1": row.get("alpha1_raw", 0),
-                    "alpha2": row.get("alpha2_raw", 0),
-                    "beta1": row.get("beta1_raw", 0),
-                    "beta2": row.get("beta2_raw", 0),
-                    "gamma1": row.get("gamma1_raw", 0),
-                    "gamma2": row.get("gamma2_raw", 0),
-                }
-                fvars = {
-                    **raw_bands,
-                    "alpha": raw_bands["alpha1"] + raw_bands["alpha2"],
-                    "beta": raw_bands["beta1"] + raw_bands["beta2"],
-                    "gamma": raw_bands["gamma1"] + raw_bands["gamma2"],
-                    "meditation_score": row.get("meditation_score", 0),
-                    "shamatha_score": row.get("shamatha_score", 0),
-                    "native_attention": row.get("native_attention", 0),
-                    "native_meditation": row.get("native_meditation", 0),
-                }
-                # Compute sqrt-normalized relative bands (s_ prefix)
-                sqrt_keys = ("delta", "theta", "alpha1", "alpha2", "beta1", "beta2")
-                sqrt_vals = {k: max(raw_bands.get(k, 0.0), 0.0) for k in sqrt_keys}
-                total = sum(sqrt_vals.values())
-                if total >= 1.0:
-                    for k, v in sqrt_vals.items():
-                        fvars[f"s_{k}"] = math.sqrt(v / total)
-                else:
-                    for k in sqrt_keys:
-                        fvars[f"s_{k}"] = 0.0
+                fvars = self.formula_vars_from_row(row)
                 custom_formula.push_variables(fvars)
                 row["custom_formula"] = custom_formula.evaluate(fvars)
 

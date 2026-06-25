@@ -98,7 +98,7 @@ ignore = [
 max-complexity = 30  # default 10; relaxed for parser/eval/tick loops
 
 [tool.ruff.lint.pylint]
-max-args = 10        # default 5; Kivy widgets take many kwargs
+max-args = 12        # default 5; Kivy widgets take many kwargs
 max-returns = 8      # default 6
 max-branches = 15    # default 12
 max-statements = 80  # default 50; _build_ui methods are long but flat

@@ -6,6 +6,140 @@ from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.theme import ThemedAccordion
 
 
+class _FakeTouch:
+    """Minimal touch stand-in for on_touch_down hit-testing.
+
+    sx/sy are normalized window coords; for a parentless widget at the window
+    origin, window space == widget space, so they mirror x/y.
+    """
+
+    def __init__(self, x, y, button=None):
+        from kivy.core.window import Window
+        self.pos = (x, y)
+        self.x = x
+        self.y = y
+        self.sx = x / Window.width
+        self.sy = y / Window.height
+        self.uid = id(self)
+        self.ud = {}
+        self.grabbed = False
+        self.grab_current = None
+        if button is not None:
+            self.button = button
+
+    def grab(self, w):
+        self.grabbed = True
+
+    def ungrab(self, w):
+        self.grabbed = False
+
+    # no-ops so a touch can pass through ScrollView's transform machinery
+    def push(self, *a):
+        pass
+
+    def pop(self, *a):
+        pass
+
+    def apply_transform_2d(self, *a):
+        pass
+
+
+class TestGraphExpandAffordance(unittest.TestCase):
+    """Expand-to-fullscreen affordance on the shared graph widget."""
+
+    def _make_graph(self):
+        g = ScrollableGraphWidget(
+            colors={"a": (1, 0, 0, 1)}, scales={"a": 100.0}, viewport_seconds=10,
+        )
+        g.pos = (0, 0)
+        g.size = (400, 300)
+        return g
+
+    def test_no_icon_without_callback(self):
+        g = self._make_graph()
+        self.assertIsNone(g._expand_icon_rect())
+
+    def test_icon_rect_present_with_callback(self):
+        g = self._make_graph()
+        g.set_expand_callback(lambda src: None)
+        rect = g._expand_icon_rect()
+        self.assertIsNotNone(rect)
+        x, y, w, h = rect
+        # top-right, inside widget bounds
+        self.assertGreater(x, g.x + g.width / 2)
+        self.assertGreater(y, g.y + g.height / 2)
+        self.assertLessEqual(x + w, g.x + g.width)
+        self.assertLessEqual(y + h, g.y + g.height)
+
+    def test_icon_hidden_when_too_small(self):
+        g = self._make_graph()
+        g.set_expand_callback(lambda src: None)
+        g.size = (30, 30)
+        self.assertIsNone(g._expand_icon_rect())
+
+    def test_point_in_rect(self):
+        from app.ui.touch_utils import point_in_rect
+        self.assertFalse(point_in_rect(0, 0, None))
+        self.assertTrue(point_in_rect(5, 5, (0, 0, 10, 10)))
+        self.assertFalse(point_in_rect(20, 5, (0, 0, 10, 10)))
+
+    def test_tap_on_icon_fires_callback_without_grab(self):
+        g = self._make_graph()
+        fired = []
+        g.set_expand_callback(lambda src: fired.append(src))
+        x, y, w, h = g._expand_icon_rect()
+        touch = _FakeTouch(x + w / 2, y + h / 2)
+        result = g.on_touch_down(touch)
+        self.assertTrue(result)
+        self.assertEqual(fired, [g])
+        self.assertFalse(touch.grabbed)  # expand must not start a scroll/drag
+
+    def test_tap_off_icon_does_not_fire_callback(self):
+        g = self._make_graph()
+        fired = []
+        g.set_expand_callback(lambda src: fired.append(src))
+        touch = _FakeTouch(g.x + 20, g.y + 20)  # bottom-left, away from icon
+        g.on_touch_down(touch)
+        self.assertEqual(fired, [])
+        self.assertTrue(touch.grabbed)  # normal grab path
+
+    def test_no_callback_normal_grab(self):
+        g = self._make_graph()
+        touch = _FakeTouch(g.x + g.width / 2, g.y + g.height / 2)
+        result = g.on_touch_down(touch)
+        self.assertTrue(result)
+        self.assertTrue(touch.grabbed)
+
+
+class TestGraphAwareScrollViewGuard(unittest.TestCase):
+    """A graph whose logical bounds overflow the viewport must not steal touches
+    aimed at widgets sitting outside the ScrollView (e.g. the Metrics/Raw toggle)."""
+
+    def _make(self, viewport_h):
+        from app.ui.raw_eeg_screen import GraphAwareScrollView
+        sv = GraphAwareScrollView()
+        sv.pos = (0, 0)
+        sv.size = (400, viewport_h)
+        g = ScrollableGraphWidget(colors={"a": (1, 0, 0, 1)}, scales={"a": 100.0})
+        g.pos = (0, 0)
+        g.size = (400, 600)  # graph logical bounds always 600 tall
+        sv.add_widget(g)
+        return sv, g
+
+    def test_touch_above_viewport_not_stolen(self):
+        sv, g = self._make(viewport_h=200)
+        touch = _FakeTouch(200, 300)  # outside viewport (y>200) but inside graph (y<600)
+        self.assertIs(sv._graph_under_touch(touch), g)  # graph bounds DO cover it
+        sv.on_touch_down(touch)
+        self.assertEqual(len(g._grabbed_touches), 0)  # ...but the guard stops the graph grabbing it
+
+    def test_touch_inside_viewport_reaches_graph(self):
+        sv, g = self._make(viewport_h=600)
+        touch = _FakeTouch(200, 300)  # inside both
+        sv.on_touch_down(touch)
+        self.assertEqual(len(g._grabbed_touches), 1)  # graph received and grabbed it
+
+
 class TestScrollableGraphWidget(unittest.TestCase):
     """Test ScrollableGraphWidget data management (no rendering)."""
 
@@ -190,6 +324,21 @@ class TestDiaryScreenUI(unittest.TestCase):
 
 
 
+class TestScrollableGraphSetSeriesName(unittest.TestCase):
+    """set_series_name updates the label and fires the visibility callback."""
+
+    def test_set_series_name_updates_label_and_fires_callback(self):
+        fired = []
+        g = ScrollableGraphWidget(
+            colors={"custom_formula": (1, 0, 0, 1)},
+            scales={"custom_formula": 200.0},
+        )
+        g.set_visibility_callback(lambda: fired.append(True))
+        g.set_series_name("custom_formula", "Alpha Ratio")
+        self.assertEqual(g.series_name("custom_formula"), "Alpha Ratio")
+        self.assertTrue(fired)
+
+
 class TestSettingsTimerSoundRow(unittest.TestCase):
     """Custom timer-sound row was moved from the orphan TimerScreen
     into the Settings → Timer accordion. It must round-trip through the
@@ -247,6 +396,52 @@ class TestSettingsTimerSoundRow(unittest.TestCase):
         self.assertFalse(self.screen._timer_sound_test_playing)
 
 
+class TestSettingsFormulaSlots(unittest.TestCase):
+    """Settings exposes three named formula slots, each with its own
+    name input, formula input, and status label."""
+
+    def setUp(self):
+        from app.ui.settings_screen import SettingsScreen
+        self.screen = SettingsScreen()
+
+    def test_settings_has_three_formula_slots(self):
+        self.assertEqual(len(self.screen._formula_inputs), 3)
+        self.assertEqual(len(self.screen._formula_name_inputs), 3)
+        self.assertEqual(len(self.screen._formula_statuses), 3)
+
+    def test_submit_slot_fires_callback_with_index_name_formula(self):
+        captured = []
+        self.screen.set_formula_slot_callback(
+            lambda idx, name, formula: captured.append((idx, name, formula))
+        )
+        self.screen._formula_name_inputs[1].text = "  Focus  "
+        self.screen._formula_inputs[1].text = "  alpha + beta  "
+        self.screen._submit_slot(1)
+        self.assertEqual(captured, [(1, "Focus", "alpha + beta")])
+
+    def test_save_slot_reuses_library_callback_with_index_name_formula(self):
+        captured = []
+        self.screen.set_save_formula_callback(
+            lambda idx, name, formula: captured.append((idx, name, formula))
+        )
+        self.screen._formula_name_inputs[2].text = "Calm"
+        self.screen._formula_inputs[2].text = "theta / (delta + 1)"
+        self.screen._save_slot(2)
+        self.assertEqual(captured, [(2, "Calm", "theta / (delta + 1)")])
+
+    def test_set_formula_slot_reflects_into_inputs(self):
+        self.screen.set_formula_slot(0, "MyName", "alpha")
+        self.assertEqual(self.screen._formula_name_inputs[0].text, "MyName")
+        self.assertEqual(self.screen._formula_inputs[0].text, "alpha")
+
+    def test_set_formula_slot_status_routes_to_the_right_slot(self):
+        from app.ui.theme import C
+        self.screen.set_formula_slot_status(1, "boom", is_error=True)
+        self.assertEqual(self.screen._formula_statuses[1].text, "boom")
+        self.assertEqual(tuple(self.screen._formula_statuses[1].color), tuple(C.DANGER))
+        self.assertEqual(self.screen._formula_statuses[0].text, "")  # slot 0 untouched
+
+
 class TestAccordionGrandchildGrowth(unittest.TestCase):
     """Regression: when content height grows AFTER the section was first
     opened (e.g. populate_bt_devices appending rows after the user opened
@@ -291,6 +486,27 @@ class TestAccordionGrandchildGrowth(unittest.TestCase):
         s2.open()
         self.assertFalse(s2._collapsed)
         self.assertTrue(s1._collapsed)
+
+    def test_collapsed_section_detaches_content_from_touch_layer(self):
+        # A collapsed section must remove its content from the ScrollView so the
+        # display-clipped content can't overlap sections below it in the touch
+        # layer and steal taps. Regression: the collapsed User Profile picker
+        # intercepted clicks aimed at the Threshold header (nested-ScrollView
+        # simulated click landed inside a hidden row's rect -> grabbed the tap).
+        from kivy.uix.label import Label
+        acc = ThemedAccordion()
+        section = acc.add_section("A", collapsed=False)
+        section.add_widget(Label())
+        self.assertIs(section._content.parent, section._scroll)
+        section._set_collapsed(True)
+        self.assertIsNone(section._content.parent)            # detached when collapsed
+        section._set_collapsed(False)
+        self.assertIs(section._content.parent, section._scroll)  # re-attached on expand
+
+    def test_section_collapsed_at_construction_detaches_content(self):
+        acc = ThemedAccordion()
+        section = acc.add_section("A", collapsed=True)
+        self.assertIsNone(section._content.parent)
 
 
 class TestSettingsDevicePicker(unittest.TestCase):

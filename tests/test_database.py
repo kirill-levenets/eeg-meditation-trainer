@@ -203,6 +203,34 @@ class TestDatabaseExtensions(unittest.TestCase):
         uid = self.db.create_user("Alice")
         self.assertIsNone(self.db.get_user_setting(uid, "nonexistent"))
 
+    def test_user_json_setting_roundtrip_list(self):
+        uid = self.db.create_user("Alice")
+        self.db.set_user_json_setting(uid, "graph_series", ["a", "b", "c"])
+        self.assertEqual(self.db.get_user_json_setting(uid, "graph_series"), ["a", "b", "c"])
+
+    def test_user_json_setting_roundtrip_dict(self):
+        uid = self.db.create_user("Alice")
+        self.db.set_user_json_setting(uid, "cfg", {"x": 1, "y": [2, 3]})
+        self.assertEqual(self.db.get_user_json_setting(uid, "cfg"), {"x": 1, "y": [2, 3]})
+
+    def test_user_json_setting_missing_returns_default(self):
+        uid = self.db.create_user("Alice")
+        self.assertEqual(self.db.get_user_json_setting(uid, "absent", default=[]), [])
+        self.assertIsNone(self.db.get_user_json_setting(uid, "absent"))
+
+    def test_user_json_setting_corrupt_returns_default(self):
+        uid = self.db.create_user("Alice")
+        self.db.set_user_setting(uid, "broken", "{not json")
+        self.assertEqual(self.db.get_user_json_setting(uid, "broken", default=["fallback"]), ["fallback"])
+
+    def test_user_json_setting_isolated_per_user(self):
+        uid1 = self.db.create_user("Alice")
+        uid2 = self.db.create_user("Bob")
+        self.db.set_user_json_setting(uid1, "k", [1])
+        self.db.set_user_json_setting(uid2, "k", [2])
+        self.assertEqual(self.db.get_user_json_setting(uid1, "k"), [1])
+        self.assertEqual(self.db.get_user_json_setting(uid2, "k"), [2])
+
     def test_update_session_stats(self):
         sid = self.db.save_session({"duration": 0, "threshold_used": 50})
         session = self.db.get_session(sid)
@@ -240,6 +268,74 @@ class TestDatabaseExtensions(unittest.TestCase):
     def test_find_user_by_name_case_sensitive(self):
         self.db.create_user("Charlie")
         self.assertIsNone(self.db.find_user_by_name("charlie"))
+
+    def test_sessions_has_custom_formulas_column(self):
+        cur = self.db._conn.execute("PRAGMA table_info(sessions)")
+        cols = {row[1] for row in cur.fetchall()}
+        self.assertIn("custom_formulas", cols)
+
+    def test_update_session_writes_custom_formulas_when_given(self):
+        sid = self.db.save_session({"duration": 1}, custom_formulas='[{"slot": 0}]')
+        self.db.update_session(sid, {"duration": 2}, custom_formulas='[{"slot": 1}]')
+        self.assertEqual(self.db.get_session(sid)["custom_formulas"], '[{"slot": 1}]')
+        # Omitting it leaves the stored snapshot untouched.
+        self.db.update_session(sid, {"duration": 3})
+        self.assertEqual(self.db.get_session(sid)["custom_formulas"], '[{"slot": 1}]')
+
+    def test_recompute_formula_series_matches_direct_eval(self):
+        from app.metrics.custom_formula import CustomFormulaEvaluator
+        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
+        self.db.save_metrics_batch(sid, [{
+            "timestamp": 0.5,
+            "alpha1": 100, "alpha2": 50,
+            "beta1": 10, "beta2": 5,
+            "delta": 0, "theta": 0,
+            "gamma1": 0, "gamma2": 0,
+            "meditation_score": 0, "shamatha_score": 0,
+            "native_attention": 0, "native_meditation": 0,
+            "marker": 0,
+        }])
+        ev = CustomFormulaEvaluator()
+        ev.set_formula("alpha + beta")
+        series = self.db.recompute_formula_series(sid, {"custom_formula": ev})
+        self.assertEqual(len(series["custom_formula"]), 1)
+        self.assertAlmostEqual(series["custom_formula"][0], 165.0, places=3)
+
+    def test_recompute_exposes_norm_and_metric_vars(self):
+        # Diary replay must see the same variable namespace as the live tick:
+        # stored norms + scores feed formulas, not silent zeros.
+        from app.metrics.custom_formula import CustomFormulaEvaluator
+        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
+        self.db.save_metrics_batch(sid, [{
+            "timestamp": 0.5, "alpha1": 100, "alpha2": 50, "beta1": 10, "beta2": 5,
+            "alpha_norm": 0.4, "distraction": 30, "sinking": 20, "calmness": 2.5,
+        }])
+        ev = CustomFormulaEvaluator()
+        ev.set_formula("alpha_norm * 100 + distraction - sinking")
+        series = self.db.recompute_formula_series(sid, {"custom_formula": ev})
+        # 0.4*100 + 30 - 20 = 50  (would be 30-20=10 if alpha_norm silently zeroed)
+        self.assertAlmostEqual(series["custom_formula"][0], 50.0, places=3)
+
+    def test_recompute_formula_series_skips_invalid(self):
+        from app.metrics.custom_formula import CustomFormulaEvaluator
+        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
+        self.db.save_metrics_batch(sid, [{"timestamp": 0.5, "alpha1": 10}])
+        ev_valid = CustomFormulaEvaluator()
+        ev_valid.set_formula("alpha1")
+        ev_invalid = CustomFormulaEvaluator()
+        # no set_formula call — is_valid is False
+        series = self.db.recompute_formula_series(sid, {"good": ev_valid, "bad": ev_invalid})
+        self.assertNotIn("bad", series)
+        self.assertEqual(series["good"], [10.0])  # alpha1_raw=10 → formula "alpha1"
+
+    def test_save_session_stores_custom_formulas_json(self):
+        import json
+        cf = json.dumps([{"name": "R", "formula": "alpha + beta",
+                          "visible": True, "drove_audio": False}])
+        sid = self.db.save_session({"duration": 1}, custom_formulas=cf)
+        row = self.db.get_session(sid)
+        stored = json.loads(row["custom_formulas"]) if row["custom_formulas"] else []
+        self.assertEqual(stored[0]["formula"], "alpha + beta")
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ from kivy.graphics import Color, Rectangle, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
@@ -29,12 +30,17 @@ from app.ui.theme import (
     StyledButton,
     format_duration,
 )
+from app.ui.widgets.legend import LegendBar
 
 _DURATION_PRESETS = [
     ("5 min", 5),
     ("10 min", 10),
     ("15 min", 15),
     ("20 min", 20),
+    ("30 min", 30),
+    ("1 h", 60),
+    ("1 h 30 min", 90),
+    ("2 h", 120),
     ("Free", None),
 ]
 
@@ -60,6 +66,8 @@ METRICS_COLORS = {
     "native_attention": C.ATTENTION,
     "native_meditation": C.MEDITATION,
     "custom_formula": C.CUSTOM,
+    "custom_formula_2": C.CUSTOM2,
+    "custom_formula_3": C.CUSTOM3,
 }
 
 METRICS_SCALES = {
@@ -70,6 +78,21 @@ METRICS_SCALES = {
     "native_attention": 100.0,
     "native_meditation": 100.0,
     "custom_formula": 200.0,
+    "custom_formula_2": 200.0,
+    "custom_formula_3": 200.0,
+}
+
+# Friendly labels for the on-graph series picker (combobox).
+SERIES_NAMES = {
+    "shamatha_score": "Shamatha",
+    "distraction": "Distraction",
+    "sinking": "Sinking",
+    "subtle_distraction": "Subtle Distraction",
+    "native_attention": "NS Attention",
+    "native_meditation": "NS Meditation",
+    "custom_formula": "Custom 1",
+    "custom_formula_2": "Custom 2",
+    "custom_formula_3": "Custom 3",
 }
 
 
@@ -310,6 +333,8 @@ class LiveSessionScreen(Screen):
             scales=METRICS_SCALES,
             viewport_seconds=60,
             size_hint_y=1,
+            graph_id="live_metrics",
+            names=SERIES_NAMES,
         )
         # Reference line at the per-metric maximum so level 100 is
         # visually marked even when custom_formula (scale 200) widens
@@ -318,9 +343,15 @@ class LiveSessionScreen(Screen):
         # Heatmap-color the shamatha line: blue at 0 → red at 100+.
         # Colour tracks meditation depth visually instead of a flat hue.
         self._graph.set_heatmap_color("shamatha_score")
+        # The on-graph series-picker glyph is wired centrally for every graph by
+        # AppManager._wire_graph_affordances. The legend tracks the graph's own
+        # visible set: any change (picker toggle or restore) rebuilds it.
+        self._graph.set_visibility_callback(
+            lambda: self._rebuild_metric_legend(self._graph.visible_keys())
+        )
         self._metrics_container.add_widget(self._graph)
 
-        self._legend = BoxLayout(size_hint_y=None, height=dp(18), spacing=S.GAP_SM)
+        self._legend = LegendBar()
         self._metrics_container.add_widget(self._legend)
         # Legend is populated by _rebuild_metric_legend; start with Shamatha only
         self._rebuild_metric_legend(["shamatha_score"])
@@ -338,6 +369,7 @@ class LiveSessionScreen(Screen):
             max_points=_RAW_WAVEFORM_MAX,
             bipolar=True,
             size_hint_y=0.5,
+            graph_id="live_raw",
         )
         self._raw_container.add_widget(self._raw_graph)
 
@@ -349,13 +381,14 @@ class LiveSessionScreen(Screen):
             show_timestamps=True,
             auto_scale=True,
             size_hint_y=0.5,
+            graph_id="live_band",
         )
         self._raw_container.add_widget(self._band_graph)
 
-        band_legend = BoxLayout(size_hint_y=None, height=dp(18), spacing=S.GAP_SM)
-        for band, color in _BAND_COLORS.items():
-            band_legend.add_widget(Label(text=band, font_size=F.TINY, color=color))
-        self._raw_container.add_widget(band_legend)
+        self._band_legend = LegendBar()
+        self._band_graph.set_visibility_callback(self._rebuild_band_legend)
+        self._rebuild_band_legend()
+        self._raw_container.add_widget(self._band_legend)
 
         # Graph area holder — swaps between metrics and raw views
         self._graph_area = BoxLayout(size_hint_y=None, height=dp(400))
@@ -702,13 +735,10 @@ class LiveSessionScreen(Screen):
 
     def _rebuild_metric_legend(self, enabled_keys: list) -> None:
         """Clear and re-populate the metrics legend with only the enabled metrics."""
-        self._legend.clear_widgets()
-        for metric, color in METRICS_COLORS.items():
-            if metric not in enabled_keys:
-                continue
-            short = metric.replace("_score", "").replace("_", " ").title()
-            lbl = Label(text=short, font_size=F.TINY, color=color)
-            self._legend.add_widget(lbl)
+        self._legend.set_items([
+            (self._graph.series_name(m), self._graph.series_color(m))
+            for m in METRICS_COLORS if m in enabled_keys
+        ])
 
     @property
     def graph(self) -> ScrollableGraphWidget:
@@ -839,10 +869,20 @@ class LiveSessionScreen(Screen):
     # ── Duration preset hooks ──
     on_duration_preset = None  # set by AppManager; called with value (int or None)
 
+    def _rebuild_band_legend(self) -> None:
+        """Repopulate the band legend with only the band graph's visible series."""
+        self._band_legend.set_items([
+            (self._band_graph.series_name(k), self._band_graph.series_color(k))
+            for k in self._band_graph.visible_keys()
+        ])
+
     def _open_duration_popup(self, *_args) -> None:
-        """Open a modal Popup to pick a session duration preset."""
-        body = BoxLayout(orientation="vertical", spacing=S.GAP_SM, padding=S.GAP)
-        for label, value in _DURATION_PRESETS:
+        """Open a modal Popup to pick a session duration preset.
+
+        Timed presets are laid out in a 2-column grid; "Free" (no timer) spans
+        the full width below so the list stays compact as presets grow.
+        """
+        def _make_btn(label, value):
             is_active = (
                 (value is None and not self._current_timer_enabled)
                 or (
@@ -856,15 +896,31 @@ class LiveSessionScreen(Screen):
                 bg_color=C.ACCENT if is_active else C.BG_CARD,
                 text_color=C.TEXT if is_active else C.TEXT_SECONDARY,
                 bold=is_active,
+                size_hint_y=None,
                 height=dp(44),
             )
             btn.bind(on_release=lambda b, v=value: self._pick_from_popup(v))
-            body.add_widget(btn)
+            return btn
+
+        timed = [(lbl, v) for lbl, v in _DURATION_PRESETS if v is not None]
+        free = [(lbl, v) for lbl, v in _DURATION_PRESETS if v is None]
+
+        body = BoxLayout(orientation="vertical", spacing=S.GAP_SM, padding=S.GAP)
+        grid = GridLayout(cols=2, spacing=S.GAP_SM, size_hint_y=None)
+        grid.bind(minimum_height=grid.setter("height"))
+        for lbl, v in timed:
+            grid.add_widget(_make_btn(lbl, v))
+        body.add_widget(grid)
+        for lbl, v in free:
+            body.add_widget(_make_btn(lbl, v))
+
+        rows = (len(timed) + 1) // 2 + len(free)
+        popup_h = rows * (dp(44) + S.GAP_SM) + dp(80)
         self._duration_popup = Popup(
             title="Session duration",
             content=body,
-            size_hint=(0.7, None),
-            height=dp(360),
+            size_hint=(0.8, None),
+            height=popup_h,
             auto_dismiss=True,
         )
         self._duration_popup.open()

@@ -9,6 +9,7 @@ import datetime
 from collections.abc import Callable
 from typing import Optional
 
+from kivy.clock import Clock
 from kivy.graphics import Color, Line, Rectangle, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
@@ -630,8 +631,9 @@ class HistoryScreen(Screen):
         if self._on_view_mode_change:
             self._on_view_mode_change(mode)
 
-    def load_sessions(self, sessions: list[dict]) -> None:
-        """Load all sessions and build heatmap data."""
+    def load_sessions(self, sessions: list[dict], on_complete: Optional[Callable] = None) -> None:
+        """Load all sessions and build heatmap data. `on_complete` fires once the
+        (chunked) row build finishes — used to hide the loading overlay."""
         self._sessions = sessions
         # Build day → avg shamatha mapping
         day_scores: dict[str, list[float]] = {}
@@ -649,7 +651,7 @@ class HistoryScreen(Screen):
         self._heatmap.set_data(day_avg)
         self._bars.set_data(day_avg)
         # Show all sessions initially
-        self._show_sessions(sessions, "All sessions")
+        self._show_sessions(sessions, "All sessions", on_complete=on_complete)
 
     def _on_day_tap(self, date_str: str) -> None:
         """Filter sessions to the tapped day. Tap again to reset."""
@@ -679,8 +681,19 @@ class HistoryScreen(Screen):
         self._btn_show_all.opacity = 0
         self._btn_show_all.disabled = True
 
-    def _show_sessions(self, sessions: list[dict], header: str) -> None:
-        """Populate the session list."""
+    _ROW_CHUNK = 8  # rows built per frame so a long list doesn't freeze the UI
+
+    def _cancel_row_build(self) -> None:
+        ev = getattr(self, "_row_build_ev", None)
+        if ev is not None:
+            ev.cancel()
+            self._row_build_ev = None
+
+    def _show_sessions(self, sessions: list[dict], header: str,
+                       on_complete: Optional[Callable] = None) -> None:
+        """Populate the session list, building rows in chunks across frames so a
+        long list (76+ sessions) doesn't block the UI thread for ~0.9s."""
+        self._cancel_row_build()
         self._session_list.clear_widgets()
         self._date_label.text = f"{header} ({len(sessions)} sessions)"
 
@@ -693,10 +706,28 @@ class HistoryScreen(Screen):
                 height=dp(40),
             )
             self._session_list.add_widget(lbl)
+            if on_complete:
+                on_complete()
             return
 
-        for s in sessions:
-            self._session_list.add_widget(self._make_session_row(s))
+        self._pending_rows = sessions
+        self._row_build_idx = 0
+        self._rows_on_complete = on_complete
+        self._row_build_ev = Clock.schedule_once(self._build_row_chunk, 0)
+
+    def _build_row_chunk(self, _dt) -> None:
+        rows = self._pending_rows
+        end = min(self._row_build_idx + self._ROW_CHUNK, len(rows))
+        for i in range(self._row_build_idx, end):
+            self._session_list.add_widget(self._make_session_row(rows[i]))
+        self._row_build_idx = end
+        if end < len(rows):
+            self._row_build_ev = Clock.schedule_once(self._build_row_chunk, 0)
+        else:
+            self._row_build_ev = None
+            cb, self._rows_on_complete = self._rows_on_complete, None
+            if cb:
+                cb()
 
     def _make_session_row(self, session: dict) -> BoxLayout:
         """Create a session row: tap to view, rename/delete buttons on right."""

@@ -17,9 +17,10 @@ from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
 
 from app.config import APP
-from app.logger import logger
+from app.logger import logger, timed
 from app.ui.raw_eeg_screen import GraphAwareScrollView, ScrollableGraphWidget
 from app.ui.theme import C, F, Icons, S, StyledButton, format_duration
+from app.ui.widgets.legend import LegendBar
 
 METRICS_PREVIEW_COLORS = {
     "meditation_score": (0.2, 0.6, 1.0, 1.0),
@@ -30,6 +31,8 @@ METRICS_PREVIEW_COLORS = {
     "native_attention": (0.6, 0.3, 0.9, 1.0),
     "native_meditation": (0.3, 0.9, 0.9, 1.0),
     "custom_formula": (1.0, 0.4, 0.8, 1.0),
+    "custom_formula_2": (1.0, 0.50, 0.0, 1.0),
+    "custom_formula_3": (0.40, 0.75, 0.95, 1.0),
 }
 
 METRICS_PREVIEW_SCALES = {
@@ -41,6 +44,8 @@ METRICS_PREVIEW_SCALES = {
     "native_attention": 100.0,
     "native_meditation": 100.0,
     "custom_formula": 200.0,
+    "custom_formula_2": 200.0,
+    "custom_formula_3": 200.0,
 }
 
 RAW_EEG_PREVIEW_COLORS = {
@@ -69,28 +74,40 @@ _BAND_FREQS = {
 _AMPLITUDE_SCALE: float = 0.0004
 
 
-def _synthesize_waveform(rows: list[dict]) -> list[float]:
-    """Synthesize an approximate EEG waveform from stored band powers.
+_RAW_KEYS = {
+    "delta": "delta_raw", "theta": "theta_raw",
+    "alpha1": "alpha1_raw", "alpha2": "alpha2_raw",
+    "beta1": "beta1_raw", "beta2": "beta2_raw",
+    "gamma1": "gamma1_raw", "gamma2": "gamma2_raw",
+}
+# The raw-EEG preview graph's deque is capped at sample_rate*60 (last 60s), so
+# synthesizing the whole session then discarding all but the tail cost ~3.6s on
+# a 47-min session. Synthesize only the retained tail.
+_RAW_MAX_SAMPLES: int = int(_SYNTH_RATE * 60)
 
-    For each 2Hz tick, generates ~256 samples (0.5s at 512Hz) by
-    combining sine waves at characteristic band frequencies with
-    amplitudes proportional to sqrt of the stored band power.
+
+def _synthesize_waveform(rows: list[dict]) -> tuple[list[float], int]:
+    """Synthesize the retained *tail* of an approximate EEG waveform from band powers.
+
+    For each 2Hz tick, generates ~256 samples (0.5s at 512Hz) by combining sine
+    waves at characteristic band frequencies with amplitudes proportional to the
+    sqrt of the stored band power. Only the last `_RAW_MAX_SAMPLES` samples (what
+    the graph keeps) are built; the global sample index is preserved so the tail
+    is bit-identical to a full synthesis. Returns (waveform, start_tick) so the
+    caller can map markers to the tail.
     """
+    spt = _SAMPLES_PER_TICK
+    keep_ticks = -(-_RAW_MAX_SAMPLES // spt)  # ceil
+    start = max(0, len(rows) - keep_ticks)
     waveform: list[float] = []
-    sample_idx = 0
-    for row in rows:
-        raw_keys = {
-            "delta": "delta_raw", "theta": "theta_raw",
-            "alpha1": "alpha1_raw", "alpha2": "alpha2_raw",
-            "beta1": "beta1_raw", "beta2": "beta2_raw",
-            "gamma1": "gamma1_raw", "gamma2": "gamma2_raw",
-        }
+    sample_idx = start * spt
+    for row in rows[start:]:
         amps = {}
-        for band, db_key in raw_keys.items():
+        for band, db_key in _RAW_KEYS.items():
             power = max(row.get(db_key, 0.0), 0.0)
             amps[band] = math.sqrt(power) * _AMPLITUDE_SCALE
 
-        for _i in range(_SAMPLES_PER_TICK):
+        for _i in range(spt):
             t = sample_idx / _SYNTH_RATE
             val = 0.0
             for band, freq in _BAND_FREQS.items():
@@ -99,11 +116,10 @@ def _synthesize_waveform(rows: list[dict]) -> list[float]:
             sample_idx += 1
 
     if not waveform:
-        return waveform
+        return waveform, start
     peak = max(abs(v) for v in waveform) or 1.0
-    target = 500.0 * 0.8
-    scale_factor = target / peak
-    return [v * scale_factor for v in waveform]
+    scale_factor = (500.0 * 0.8) / peak
+    return [v * scale_factor for v in waveform], start
 
 FREQ_PREVIEW_COLORS = {
     "alpha": (0.1, 0.8, 0.4, 1.0),
@@ -140,6 +156,7 @@ class DiaryScreen(Screen):
         self._on_back: Optional[Callable] = None
         self._selected_session_id: Optional[int] = None
         self._sessions_data: list[dict] = []
+        self._session_formula_series: dict[str, list[float]] = {}
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -391,6 +408,7 @@ class DiaryScreen(Screen):
             show_value_labels=True,
             show_timestamps=True,
             size_hint_y=1,
+            graph_id="diary_metrics",
         )
         self._raw_eeg_graph = ScrollableGraphWidget(
             colors=RAW_EEG_PREVIEW_COLORS,
@@ -402,6 +420,7 @@ class DiaryScreen(Screen):
             max_points=int(_SYNTH_RATE * 60),
             bipolar=True,
             size_hint_y=1,
+            graph_id="diary_raw",
         )
         self._freq_graph = ScrollableGraphWidget(
             colors=FREQ_PREVIEW_COLORS,
@@ -411,12 +430,15 @@ class DiaryScreen(Screen):
             show_timestamps=True,
             auto_scale=True,
             size_hint_y=1,
+            graph_id="diary_freq",
         )
+        # Legend tracks the active graph's visible set; a picker toggle (or a
+        # restore) on the displayed graph rebuilds it.
+        for g in (self._metrics_graph, self._raw_eeg_graph, self._freq_graph):
+            g.set_visibility_callback(lambda gr=g: self._on_graph_visibility(gr))
 
-        # Legend container
-        self._legend_container = BoxLayout(
-            size_hint_y=None, height=dp(18), spacing=dp(4),
-        )
+        # Legend container (wrapping flow layout — handles many series)
+        self._legend_container = LegendBar(font_size=dp(9))
         self._detail_layout.add_widget(self._legend_container)
 
         self._active_graph_tab: str = "metrics"
@@ -541,7 +563,14 @@ class DiaryScreen(Screen):
         self._raw_eeg_graph.clear_data()
         self._freq_graph.clear_data()
         self._cached_metrics_rows = []
+        self._session_formula_series = {}
         self._switch_graph_tab("metrics")
+
+    def set_session_formulas(self, series: dict[str, list[float]], names: dict[str, str]) -> None:
+        """Inject recomputed per-session custom-formula series + names before display."""
+        self._session_formula_series = series
+        for key, name in names.items():
+            self._metrics_graph.set_series_name(key, name)
 
     def load_metrics_preview(self, metrics_rows: list[dict]) -> None:
         """Load session metrics into all three preview graphs."""
@@ -557,12 +586,21 @@ class DiaryScreen(Screen):
         for row in rows:
             for key in metrics_series:
                 metrics_series[key].append(row.get(key, 0.0))
-        self._metrics_graph.load_static_data(metrics_series)
+        # Custom-formula columns aren't stored per tick — drive them entirely from
+        # the per-session recompute. A slot the session didn't record stays empty
+        # (no flat zero-line phantom); recorded slots get their replayed series.
+        for key in metrics_series:
+            if key.startswith("custom_formula"):
+                metrics_series[key] = self._session_formula_series.get(key, [])
+        with timed("diary.metrics_graph_load"):
+            self._metrics_graph.load_static_data(metrics_series)
 
-        # Raw EEG synthesized waveform from band powers
-        synth = _synthesize_waveform(rows)
+        # Raw EEG synthesized waveform from band powers (tail only — see fn)
+        with timed("diary.synth_waveform"):
+            synth, raw_start = _synthesize_waveform(rows)
         eeg_series: dict[str, list[float]] = {"eeg": synth}
-        self._raw_eeg_graph.load_static_data(eeg_series)
+        with timed("diary.raw_graph_load"):
+            self._raw_eeg_graph.load_static_data(eeg_series)
 
         # Frequency bands
         freq_series: dict[str, list[float]] = {k: [] for k in FREQ_PREVIEW_COLORS}
@@ -577,7 +615,10 @@ class DiaryScreen(Screen):
         # Load marker positions
         marker_indices = [i for i, row in enumerate(rows) if row.get("marker", 0)]
         self._metrics_graph.set_markers(marker_indices)
-        raw_marker_indices = [i * _SAMPLES_PER_TICK for i in marker_indices]
+        # Raw graph holds only the tail (from raw_start); offset markers to it.
+        raw_marker_indices = [
+            (i - raw_start) * _SAMPLES_PER_TICK for i in marker_indices if i >= raw_start
+        ]
         self._raw_eeg_graph.set_markers(raw_marker_indices)
         self._freq_graph.set_markers(marker_indices)
 
@@ -619,19 +660,25 @@ class DiaryScreen(Screen):
             self._freq_graph._redraw()
         self._rebuild_legend(tab)
 
+    def _graph_for_tab(self, tab: str) -> ScrollableGraphWidget:
+        return {
+            "metrics": self._metrics_graph,
+            "raw": self._raw_eeg_graph,
+            "freq": self._freq_graph,
+        }[tab]
+
+    def _on_graph_visibility(self, graph: ScrollableGraphWidget) -> None:
+        """A series toggled on `graph` — refresh the legend if it's the shown tab."""
+        if graph is self._graph_for_tab(self._active_graph_tab):
+            self._rebuild_legend(self._active_graph_tab)
+
     def _rebuild_legend(self, tab: str) -> None:
-        """Rebuild legend labels for the active graph tab."""
-        self._legend_container.clear_widgets()
-        if tab == "metrics":
-            colors = METRICS_PREVIEW_COLORS
-        elif tab == "raw":
-            colors = RAW_EEG_PREVIEW_COLORS
-        else:
-            colors = FREQ_PREVIEW_COLORS
-        for name, color in colors.items():
-            short = name.replace("_score", "").replace("_", " ").title()
-            lbl = Label(text=short, font_size=dp(9), color=color)
-            self._legend_container.add_widget(lbl)
+        """Rebuild legend labels for the active graph tab's visible series."""
+        graph = self._graph_for_tab(tab)
+        self._legend_container.set_items([
+            (graph.series_name(key), graph.series_color(key))
+            for key in graph.visible_keys()
+        ])
 
     def _on_save_pressed(self, *args) -> None:
         if self._selected_session_id and self._on_save_notes:
