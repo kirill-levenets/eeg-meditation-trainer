@@ -50,3 +50,16 @@ def test_empty_and_malformed():
 def test_truthiness():
     assert bool(_prog()) is True
     assert bool(SessionProgram(None)) is False
+
+
+def test_time_above_threshold_follows_active_goal():
+    from app.session.manager import SessionManager, SessionState
+    sm = SessionManager()
+    sm._state = SessionState.RUNNING
+    sm.set_active_goal("custom_formula", 60)
+    sm.add_metric({"meditation_score": 10, "shamatha_score": 10, "custom_formula": 80})
+    sm.add_metric({"meditation_score": 99, "shamatha_score": 99, "custom_formula": 20})
+    # only the first tick is above the *custom_formula* goal of 60
+    assert sm.compute_statistics()["time_above_threshold"] == 0  # 0.5s rounds to int 0
+    sm.add_metric({"meditation_score": 0, "shamatha_score": 0, "custom_formula": 90})
+    assert sm._time_above_threshold == 1.0  # two ticks @ 0.5s above goal
