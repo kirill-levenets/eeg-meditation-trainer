@@ -75,6 +75,7 @@ class ScrollableGraphWidget(Widget):
         self._sync_group: list["ScrollableGraphWidget"] = []
         self._threshold_value: Optional[float] = None
         self._threshold_scale_key: Optional[str] = None
+        self._threshold_steps: Optional[list[tuple[int, float]]] = None
         # Reference line: solid horizontal line at a fixed value, drawn
         # distinctly from the (dashed) threshold line. Used on the metrics
         # graph to mark level 100 — the per-metric maximum.
@@ -97,6 +98,26 @@ class ScrollableGraphWidget(Widget):
         self._threshold_value = value
         self._threshold_scale_key = scale_key
         self._redraw()
+
+    def set_threshold_steps(self, steps) -> None:
+        """Piecewise threshold [(start_tick, value), ...] (sorted by tick).
+
+        Pass None to clear and fall back to the single-value threshold.
+        """
+        self._threshold_steps = list(steps) if steps else None
+        self._redraw()
+
+    def threshold_value_at(self, tick: int):
+        """Active step value at a tick index, or None if no steps set."""
+        if not self._threshold_steps:
+            return None
+        value = self._threshold_steps[0][1]
+        for start_tick, v in self._threshold_steps:
+            if tick >= start_tick:
+                value = v
+            else:
+                break
+        return value
 
     def set_reference_line(self, value: Optional[float]) -> None:
         """Set a solid horizontal reference line at `value` (graph units).
@@ -331,8 +352,11 @@ class ScrollableGraphWidget(Widget):
         self._gfx.add(Color(*TC.GRAPH_BORDER))
         self._gfx.add(Line(rectangle=(graph_x, graph_y, graph_w, graph_h), width=1))
 
-        # Threshold line
-        if self._threshold_value is not None and not self._bipolar:
+        # Threshold line (piecewise steps take precedence over a single value)
+        if self._threshold_steps and not self._bipolar:
+            self._draw_threshold_steps(graph_x, graph_y, graph_w, graph_h,
+                                       max_scale, start_idx, end_idx)
+        elif self._threshold_value is not None and not self._bipolar:
             frac_t = min(self._threshold_value / max_scale, 1.0) if max_scale > 0 else 0.0
             y_thresh = graph_y + frac_t * graph_h
             self._gfx.add(Color(*TC.THRESHOLD_LINE))
@@ -534,6 +558,52 @@ class ScrollableGraphWidget(Widget):
         else:
             nice = 10
         return nice * magnitude
+
+    def _draw_threshold_steps(self, graph_x, graph_y, graph_w, graph_h,
+                              max_scale, start_idx, end_idx) -> None:
+        """Draw one dashed horizontal run per step over its visible tick range."""
+        steps = self._threshold_steps
+        if not steps or max_scale <= 0:
+            return
+        n = max(end_idx - start_idx, 0)
+        vp = max(self._viewport_points, n)
+        x_offset = vp - n
+
+        def tick_to_x(tick: float) -> float:
+            i = tick - start_idx
+            x = graph_x + ((x_offset + i) / max(vp - 1, 1)) * graph_w
+            return min(max(x, graph_x), graph_x + graph_w)
+
+        dash_w = dp(6)
+        gap_w = dp(4)
+        for k, (step_tick, value) in enumerate(steps):
+            next_tick = steps[k + 1][0] if k + 1 < len(steps) else float("inf")
+            seg_start = max(step_tick, start_idx)
+            seg_end = min(next_tick, end_idx)
+            if seg_end <= seg_start:
+                continue
+            x_left = tick_to_x(seg_start)
+            x_right = tick_to_x(seg_end)
+            if x_right <= x_left:
+                continue
+            frac = min(value / max_scale, 1.0)
+            y = graph_y + frac * graph_h
+            self._gfx.add(Color(*TC.THRESHOLD_LINE))
+            x_cur = x_left
+            while x_cur < x_right:
+                x_end = min(x_cur + dash_w, x_right)
+                self._gfx.add(Line(points=[x_cur, y, x_end, y], width=1))
+                x_cur = x_end + gap_w
+            if self._show_value_labels:
+                tex = self._make_text_texture(
+                    f"{value:.0f}", font_size=8, color=(1.0, 0.4, 0.2, 1),
+                )
+                self._gfx.add(Color(*TC.TEXT))
+                self._gfx.add(Rectangle(
+                    texture=tex,
+                    pos=(x_right - tex.width, y + dp(2)),
+                    size=tex.size,
+                ))
 
     @staticmethod
     def link_zoom(*graphs: "ScrollableGraphWidget") -> None:
