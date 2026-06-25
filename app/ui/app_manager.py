@@ -268,9 +268,13 @@ class EEGMeditationApp(App):
             logger.exception("Program segment end cue failed")
 
     def _session_program_json(self) -> str:
-        """JSON of the program that ran this session (empty for a simple session)."""
-        if self._session_program_active and self._session_program_segments:
-            return json.dumps(self._session_program_segments)
+        """JSON of the program that ran this session (empty for a simple session).
+
+        Serializes the snapshot captured at session start, not the live editor —
+        a mid-session edit in Settings must not rewrite what actually drove the run.
+        """
+        if self._session_program_active and self._active_program:
+            return json.dumps(self._active_program.segments)
         return ""
 
     def _acquire_wake_lock(self) -> None:
@@ -1012,6 +1016,11 @@ class EEGMeditationApp(App):
             threshold = int(prog.segments[0].get("target", threshold))
             self._timer_state.set_enabled(True)
             self._timer_state.set_duration(max(1, int(round(prog.total_seconds / 60))))
+        else:
+            # Session start is authoritative: re-sync the timer from Settings so a
+            # prior program session's enabled/duration can't leak into a simple one.
+            self._timer_state.set_enabled(self._settings_screen.timer_enabled)
+            self._timer_state.set_duration(self._settings_screen.timer_minutes)
         self._metrics_engine.meditation_threshold = threshold
         self._audio.set_threshold(threshold)
         self._metrics_engine.reset()

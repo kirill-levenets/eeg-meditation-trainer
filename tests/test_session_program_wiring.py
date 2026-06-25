@@ -40,6 +40,22 @@ def test_program_transition_fires_once_per_boundary():
     assert fn(1, 120.0, p) == (1, p.segments[1], False)   # past end, clamps, no re-cross
 
 
+def test_session_program_json_records_snapshot_not_live_editor():
+    import json
+
+    from app.session.session_program import SessionProgram
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    snapshot = [{"minutes": 10, "target": 50, "formula": "shamatha_score"}]
+    app._active_program = SessionProgram(snapshot)
+    app._session_program_active = True
+    # A mid-session edit to the live editor must NOT change what's recorded.
+    app._session_program_segments = [{"minutes": 99, "target": 1, "formula": "meditation_score"}]
+    assert json.loads(app._session_program_json()) == snapshot
+    # A simple session records nothing.
+    app._session_program_active = False
+    assert app._session_program_json() == ""
+
+
 def test_diary_rebuilds_stepped_threshold():
     import json
 
