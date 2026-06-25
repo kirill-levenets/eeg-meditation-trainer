@@ -304,8 +304,12 @@ class SettingsScreen(Screen):
         self._program_box = BoxLayout(
             orientation="vertical", size_hint_y=None, spacing=S.GAP_SM,
         )
-        self._program_box.bind(
-            minimum_height=self._program_box.setter("height")
+        # Keep the setter so _set_widget_visible can unbind it while hidden:
+        # otherwise a height=0 hide is fought by minimum_height re-firing on the
+        # next layout pass (rows added via load_program), leaving a ghost gap.
+        self._program_box._min_height_setter = self._program_box.setter("height")
+        self._program_box.fbind(
+            "minimum_height", self._program_box._min_height_setter
         )
 
         self._program_total_label = Label(
@@ -1377,10 +1381,15 @@ class SettingsScreen(Screen):
     @staticmethod
     def _set_widget_visible(widget, visible: bool) -> None:
         """Collapse a widget to zero footprint when hidden (accordion-safe)."""
+        setter = getattr(widget, "_min_height_setter", None)
         if visible:
             if getattr(widget, "_saved_size_hint_y", "absent") != "absent":
                 widget.size_hint_y = widget._saved_size_hint_y
-            if hasattr(widget, "_saved_height"):
+            if setter is not None:
+                # Rebind, then apply once — future minimum_height changes track.
+                widget.fbind("minimum_height", setter)
+                widget.height = widget.minimum_height
+            elif hasattr(widget, "_saved_height"):
                 widget.height = widget._saved_height
             widget.opacity = 1
             widget.disabled = False
@@ -1388,6 +1397,9 @@ class SettingsScreen(Screen):
             if not hasattr(widget, "_saved_height"):
                 widget._saved_height = widget.height
                 widget._saved_size_hint_y = widget.size_hint_y
+            if setter is not None:
+                # Stop minimum_height from re-inflating the hidden box.
+                widget.funbind("minimum_height", setter)
             widget.size_hint_y = None
             widget.height = 0
             widget.opacity = 0
