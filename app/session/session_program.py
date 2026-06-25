@@ -6,10 +6,10 @@ def _minutes(seg: dict) -> int:
     return max(1, int(seg.get("minutes", 0)))
 
 
+# Segment dict: {minutes:int, target:int, formula:str|{"name","formula"},
+# end_sound:str|None, feedback_sound:str|None}
 class SessionProgram:
-    """An ordered list of segments. A segment is a dict:
-    {minutes:int, target:int, formula:str|{"name","formula"},
-     end_sound:str|None, feedback_sound:str|None}."""
+    """An ordered list of timed segments driving per-segment target + formula."""
 
     def __init__(self, segments) -> None:
         self._segments = [
@@ -28,7 +28,7 @@ class SessionProgram:
     def total_seconds(self) -> float:
         return sum(_minutes(s) * 60 for s in self._segments)
 
-    def segment_at(self, elapsed_seconds: float):
+    def segment_at(self, elapsed_seconds: float) -> tuple[int, dict | None]:
         """(index, segment) active at elapsed; clamps to the last segment past total."""
         if not self._segments:
             return (-1, None)
