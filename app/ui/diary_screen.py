@@ -1,3 +1,4 @@
+import json
 import math
 import os
 import sys
@@ -18,6 +19,7 @@ from kivy.uix.textinput import TextInput
 
 from app.config import APP
 from app.logger import logger, timed
+from app.session.session_program import SessionProgram
 from app.ui.raw_eeg_screen import GraphAwareScrollView, ScrollableGraphWidget
 from app.ui.theme import C, F, Icons, S, StyledButton, format_duration
 from app.ui.widgets.legend import LegendBar
@@ -630,6 +632,24 @@ class DiaryScreen(Screen):
     def set_metrics_threshold(self, value: float) -> None:
         """Set threshold line on the metrics preview graph."""
         self._metrics_graph.set_threshold(value, "meditation_score")
+
+    def set_program(self, program_json: str) -> None:
+        """Draw the recorded program's stepped threshold on the metrics graph.
+
+        Empty/invalid JSON clears the steps so a non-program session falls back
+        to its single-value threshold.
+        """
+        try:
+            segs = json.loads(program_json) if program_json else []
+        except (ValueError, TypeError):
+            segs = []
+        prog = SessionProgram(segs)
+        if prog:
+            self._metrics_graph.set_threshold_steps(
+                prog.threshold_steps(self._metrics_graph._sample_rate)
+            )
+        else:
+            self._metrics_graph.set_threshold_steps(None)
 
     def _switch_graph_tab(self, tab: str) -> None:
         """Switch the visible graph in the preview area."""

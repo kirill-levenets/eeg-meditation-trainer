@@ -38,3 +38,17 @@ def test_program_transition_fires_once_per_boundary():
     assert fn(0, 10.0, p) == (0, p.segments[0], False)    # same segment, no cross
     assert fn(0, 60.0, p) == (1, p.segments[1], True)     # crossed into segment 1
     assert fn(1, 120.0, p) == (1, p.segments[1], False)   # past end, clamps, no re-cross
+
+
+def test_diary_rebuilds_stepped_threshold():
+    import json
+
+    from app.ui.diary_screen import DiaryScreen
+    screen = DiaryScreen()
+    segs = [{"minutes": 10, "target": 50, "formula": "shamatha_score"},
+            {"minutes": 10, "target": 70, "formula": "meditation_score"}]
+    screen.set_program(json.dumps(segs))   # parses + pushes steps to the metrics graph
+    assert screen._metrics_graph.threshold_value_at(0) == 50.0
+    assert screen._metrics_graph.threshold_value_at(2400) == 70.0
+    screen.set_program("")                  # clears the stepped line for non-program sessions
+    assert screen._metrics_graph.threshold_value_at(0) is None

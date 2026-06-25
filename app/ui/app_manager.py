@@ -1218,12 +1218,14 @@ class EEGMeditationApp(App):
                 self._db.update_session(
                     self._current_session_id, stats,
                     custom_formulas=self._session_custom_formulas_json(),
+                    session_program=self._session_program_json(),
                 )
             else:
                 self._current_session_id = self._db.save_session(
                     stats, user_id=self._current_user_id,
                     session_name=self._make_session_name(),
                     custom_formulas=self._session_custom_formulas_json(),
+                    session_program=self._session_program_json(),
                 )
             if self._metrics_buffer:
                 self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
@@ -1312,12 +1314,14 @@ class EEGMeditationApp(App):
                 self._db.update_session(
                     self._current_session_id, stats,
                     custom_formulas=self._session_custom_formulas_json(),
+                    session_program=self._session_program_json(),
                 )
             else:
                 self._current_session_id = self._db.save_session(
                     stats, user_id=self._current_user_id,
                     session_name=self._make_session_name(),
                     custom_formulas=self._session_custom_formulas_json(),
+                    session_program=self._session_program_json(),
                 )
             if self._metrics_buffer:
                 self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
@@ -1727,6 +1731,7 @@ class EEGMeditationApp(App):
                     stats_partial, user_id=self._current_user_id,
                     session_name=self._make_session_name(),
                     custom_formulas=self._session_custom_formulas_json(),
+                    session_program=self._session_program_json(),
                 )
             self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
             self._metrics_buffer = []
@@ -2272,6 +2277,7 @@ class EEGMeditationApp(App):
                 self._diary_screen.set_metrics_threshold(float(session.get("threshold_used", 50)))
                 self._diary_screen.set_session_formulas(series, names)
                 self._diary_screen.load_metrics_preview(metrics)
+                self._diary_screen.set_program(session.get("session_program", ""))
                 self._session_detail_back = self._sm.current
                 self._sm.current = "diary"
         finally:
