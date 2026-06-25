@@ -1729,9 +1729,12 @@ class EEGMeditationApp(App):
                 body.add_widget(row)
             else:
                 body.add_widget(btn)
+        # Neutral outlined Close — a green fill (PRIMARY) collided with the
+        # green "selected" pills (ACCENT) on the green palettes.
         close_btn = StyledButton(
             text="Close", height=dp(44),
-            bg_color=C.PRIMARY, bg_pressed=C.PRIMARY_DIM,
+            outline=True, bg_color=C.TEXT_SECONDARY,
+            text_color=C.TEXT, bg_pressed=C.BG_CARD,
         )
         popup = Popup(
             title="Graph series", content=body,
