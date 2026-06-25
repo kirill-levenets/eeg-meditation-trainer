@@ -338,5 +338,17 @@ class TestDatabaseExtensions(unittest.TestCase):
         self.assertEqual(stored[0]["formula"], "alpha + beta")
 
 
+def test_session_program_column_roundtrip(tmp_path):
+    from app.storage.database import DatabaseManager
+    db = DatabaseManager(db_path=str(tmp_path / "p.db"))
+    uid = db.create_user("u")
+    prog = '[{"minutes":10,"target":50,"formula":"shamatha_score"}]'
+    sid = db.save_session({"duration": 1}, user_id=uid, session_program=prog)
+    assert db.get_session(sid)["session_program"] == prog
+    db.update_session(sid, {"duration": 2}, session_program='[]')
+    assert db.get_session(sid)["session_program"] == "[]"
+    db.close()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

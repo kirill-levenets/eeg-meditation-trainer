@@ -154,19 +154,23 @@ class DatabaseManager:
         if "custom_formulas" not in sess_cols:
             self._conn.execute("ALTER TABLE sessions ADD COLUMN custom_formulas TEXT DEFAULT ''")
             logger.info("Migrated: added column sessions.custom_formulas")
+        if "session_program" not in sess_cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN session_program TEXT DEFAULT ''")
+            logger.info("Migrated: added column sessions.session_program")
 
         self._conn.commit()
 
     def save_session(self, stats: dict, user_id: Optional[int] = None,
-                     session_name: str = "", custom_formulas: str = "") -> int:
+                     session_name: str = "", custom_formulas: str = "",
+                     session_program: str = "") -> int:
         """Insert a session record and return its ID. `custom_formulas` is a JSON string."""
         cursor = self._conn.execute(
             """
             INSERT INTO sessions
             (user_id, date_time, duration, threshold_used, avg_meditation, avg_shamatha,
              max_meditation, time_above_threshold, longest_streak, session_name,
-             time_shamatha_90, custom_formulas)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             time_shamatha_90, custom_formulas, session_program)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -181,6 +185,7 @@ class DatabaseManager:
                 session_name,
                 stats.get("time_shamatha_90", 0),
                 custom_formulas,
+                session_program,
             ),
         )
         self._conn.commit()
@@ -338,7 +343,8 @@ class DatabaseManager:
     # ---- Session management ----
 
     def update_session(self, session_id: int, stats: dict,
-                       custom_formulas: str | None = None) -> None:
+                       custom_formulas: str | None = None,
+                       session_program: str | None = None) -> None:
         """Update an existing session's aggregate stats (+ formula snapshot if given)."""
         cols = ["duration = ?", "threshold_used = ?", "avg_meditation = ?",
                 "avg_shamatha = ?", "max_meditation = ?", "time_above_threshold = ?",
@@ -356,6 +362,9 @@ class DatabaseManager:
         if custom_formulas is not None:
             cols.append("custom_formulas = ?")
             vals.append(custom_formulas)
+        if session_program is not None:
+            cols.append("session_program = ?")
+            vals.append(session_program)
         vals.append(session_id)
         self._conn.execute(
             f"UPDATE sessions SET {', '.join(cols)} WHERE id = ?", vals
