@@ -471,6 +471,47 @@ class DatabaseManager:
             formulas.pop(index)
             self._save_formulas_list(user_id, formulas)
 
+    # ---- Saved programs (per-user, max 20) ----
+
+    _MAX_SAVED_PROGRAMS = 20
+
+    def get_saved_programs(self, user_id: int) -> list[dict]:
+        """Return saved programs for a user as [{name, segments}, ...]."""
+        raw = self.get_user_setting(user_id, "saved_programs")
+        if not raw:
+            return []
+        try:
+            data = json.loads(raw)
+            return data if isinstance(data, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    def _save_programs_list(self, user_id: int, programs: list[dict]) -> None:
+        self.set_user_setting(user_id, "saved_programs", json.dumps(programs))
+
+    def add_saved_program(self, user_id: int, name: str, segments: list[dict]) -> bool:
+        """Save a program. Returns False if the limit is reached."""
+        programs = self.get_saved_programs(user_id)
+        if len(programs) >= self._MAX_SAVED_PROGRAMS:
+            return False
+        programs.append({"name": name, "segments": segments})
+        self._save_programs_list(user_id, programs)
+        return True
+
+    def update_saved_program(self, user_id: int, index: int, name: str, segments: list[dict]) -> None:
+        """Update a saved program by index."""
+        programs = self.get_saved_programs(user_id)
+        if 0 <= index < len(programs):
+            programs[index] = {"name": name, "segments": segments}
+            self._save_programs_list(user_id, programs)
+
+    def remove_saved_program(self, user_id: int, index: int) -> None:
+        """Remove a saved program by index."""
+        programs = self.get_saved_programs(user_id)
+        if 0 <= index < len(programs):
+            programs.pop(index)
+            self._save_programs_list(user_id, programs)
+
     def get_db_size_bytes(self) -> int:
         """Return the database file size in bytes."""
         try:
