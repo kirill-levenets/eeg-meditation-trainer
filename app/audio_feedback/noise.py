@@ -677,6 +677,11 @@ class AudioEngine:
         self._play_chime()
         logger.info("Connect sound played")
 
+    def play_transition_cue(self) -> None:
+        """Play the chime as a program segment-transition cue."""
+        self._play_chime()
+        logger.info("Program transition cue played")
+
     def play_disconnect_alert(self) -> None:
         """Play a harsh warble when device disconnects."""
         if not self._disconnect_alert_enabled:

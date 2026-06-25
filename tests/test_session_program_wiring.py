@@ -27,3 +27,14 @@ def test_program_persist_roundtrip(tmp_path):
     assert fresh._session_program_segments == segs
     assert fresh._timer_mode == "program"
     db.close()
+
+
+def test_program_transition_fires_once_per_boundary():
+    from app.session.session_program import SessionProgram
+    p = SessionProgram([{"minutes": 1, "target": 50, "formula": "shamatha_score"},
+                        {"minutes": 1, "target": 70, "formula": "meditation_score"}])
+    fn = EEGMeditationApp._program_transition
+    assert fn(-1, 0.0, p) == (0, p.segments[0], True)     # initial entry
+    assert fn(0, 10.0, p) == (0, p.segments[0], False)    # same segment, no cross
+    assert fn(0, 60.0, p) == (1, p.segments[1], True)     # crossed into segment 1
+    assert fn(1, 120.0, p) == (1, p.segments[1], False)   # past end, clamps, no re-cross

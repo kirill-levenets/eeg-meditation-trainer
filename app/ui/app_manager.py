@@ -110,6 +110,10 @@ class EEGMeditationApp(App):
         self._init_formula_slots()
         self.serial_device_override: Optional[str] = None
         self._wake_lock = None
+        self._active_program = None
+        self._program_seg_idx: int = -1
+        self._program_formula_ev = None
+        self._session_program_active: bool = False
 
     def _init_formula_slots(self) -> None:
         """Three independent formula evaluators (one per slot) + their names."""
@@ -186,6 +190,88 @@ class EEGMeditationApp(App):
     def _build_session_program(self) -> SessionProgram:
         """Build a SessionProgram from the active editable segments."""
         return SessionProgram(self._session_program_segments)
+
+    @staticmethod
+    def _program_transition(prev_idx: int, elapsed: float, program):
+        """Pure: (new_idx, segment, crossed). crossed=True when new_idx != prev_idx."""
+        idx, seg = program.segment_at(elapsed)
+        return (idx, seg, idx != prev_idx)
+
+    def _eval_formula_vars(self, raw_sample: dict, metrics: dict) -> dict:
+        """Variable dict for custom-formula evaluation (raw + metrics + derived/sqrt bands)."""
+        fvars = {**raw_sample, **metrics}
+        fvars.update(self._metrics_engine.derive_bands(raw_sample))
+        sqrt_bands = self._metrics_engine.compute_sqrt_relative_bands(raw_sample)
+        fvars.update({f"s_{k}": v for k, v in sqrt_bands.items()})
+        return fvars
+
+    def _apply_program_tick(self, metrics: dict, raw_sample: dict) -> None:
+        """Per-tick program stepping: cross segments, fire cues, evaluate a custom segment formula.
+
+        Runs on the daemon tick thread — only thread-safe state here (audio
+        set_threshold/one-shot, SessionManager, pure evaluators). Kivy widget
+        mutations are dispatched via _on_main.
+        """
+        prog = self._active_program
+        if not prog:
+            return
+        elapsed = self._session_manager.elapsed_seconds
+        idx, seg, crossed = self._program_transition(self._program_seg_idx, elapsed, prog)
+        if seg is None:
+            return
+        if crossed:
+            self._apply_program_segment(self._program_seg_idx, idx, seg)
+            self._program_seg_idx = idx
+        # A custom-formula segment is evaluated every tick into metrics["program_formula"].
+        ev = self._program_formula_ev
+        if ev is not None and ev.is_valid:
+            fvars = self._eval_formula_vars(raw_sample, metrics)
+            ev.push_variables(fvars)
+            metrics["program_formula"] = ev.evaluate(fvars)
+
+    def _apply_program_segment(self, prev_idx: int, idx: int, seg: dict) -> None:
+        """On a boundary crossing: end-cue for the prior segment + repoint target/formula/audio."""
+        # End cue for the segment that just ended (skip on initial entry prev_idx == -1).
+        if prev_idx >= 0:
+            prev_seg = self._active_program.segments[prev_idx]
+            self._play_segment_end_sound(prev_seg.get("end_sound"))
+        # Resolve the driving formula -> a metrics key. Custom formula gets its own evaluator.
+        formula = seg.get("formula", "shamatha_score")
+        self._program_formula_ev = None
+        if isinstance(formula, dict):
+            ev = CustomFormulaEvaluator()
+            ok, err = ev.set_formula(formula.get("formula", "") or "")
+            if ok and ev.is_valid:
+                self._program_formula_ev = ev
+                metric_key = "program_formula"
+            else:
+                metric_key = "shamatha_score"  # spec: unparseable saved formula falls back
+                logger.warning(f"Program segment formula invalid, using shamatha: {err}")
+        else:
+            metric_key = formula or "shamatha_score"
+        target = int(seg.get("target", 50))
+        self._audio_metric_key = metric_key
+        self._session_manager.set_active_goal(metric_key, target)
+        self._audio.set_threshold(target)
+        self._on_main(lambda t=target, k=metric_key:
+                      self._live_screen.graph.set_threshold(float(t), k))
+        logger.info(f"Program segment {idx}: metric={metric_key} target={target}")
+
+    def _play_segment_end_sound(self, sound_id) -> None:
+        """Segment-end cue. v1: chime (default) or 'warble'; richer choices land with #10."""
+        try:
+            if sound_id == "warble":
+                self._audio.play_alert()
+            else:
+                self._audio.play_transition_cue()
+        except Exception:
+            logger.exception("Program segment end cue failed")
+
+    def _session_program_json(self) -> str:
+        """JSON of the program that ran this session (empty for a simple session)."""
+        if self._session_program_active and self._session_program_segments:
+            return json.dumps(self._session_program_segments)
+        return ""
 
     def _acquire_wake_lock(self) -> None:
         """Keep CPU running + screen on during session (Android only)."""
@@ -910,6 +996,17 @@ class EEGMeditationApp(App):
         # doesn't overlap with the new session's noise loop.
         self._audio.stop_timer_bell()
         threshold = self._settings_screen.threshold
+        prog = self._build_session_program()
+        self._program_seg_idx = -1
+        self._program_formula_ev = None
+        self._session_program_active = self._timer_mode == "program" and bool(prog)
+        self._active_program = prog if self._session_program_active else None
+        if self._session_program_active:
+            # Program total drives the timer so auto-stop reuses the proven
+            # timer-expiry path; the first segment's target seeds the threshold.
+            threshold = int(prog.segments[0].get("target", threshold))
+            self._timer_state.set_enabled(True)
+            self._timer_state.set_duration(max(1, int(round(prog.total_seconds / 60))))
         self._metrics_engine.meditation_threshold = threshold
         self._audio.set_threshold(threshold)
         self._metrics_engine.reset()
@@ -931,7 +1028,13 @@ class EEGMeditationApp(App):
         self._live_screen.graph.clear_data()
         self._live_screen.raw_graph.clear_data()
         self._live_screen.band_graph.clear_data()
-        self._live_screen.graph.set_threshold(float(threshold), "shamatha_score")
+        if self._session_program_active:
+            self._live_screen.graph.set_threshold_steps(
+                prog.threshold_steps(self._live_screen.graph._sample_rate)
+            )
+        else:
+            self._live_screen.graph.set_threshold_steps(None)
+            self._live_screen.graph.set_threshold(float(threshold), "shamatha_score")
         self._live_screen.hide_alert()
         self._live_screen.set_controls_running()
 
@@ -1500,14 +1603,14 @@ class EEGMeditationApp(App):
 
         # Evaluate custom formulas if any slot is active
         if any(e.is_valid for e in self._formula_slots):
-            formula_vars = {**raw_sample, **metrics}
-            formula_vars.update(self._metrics_engine.derive_bands(raw_sample))
-            sqrt_bands = self._metrics_engine.compute_sqrt_relative_bands(raw_sample)
-            formula_vars.update({f"s_{k}": v for k, v in sqrt_bands.items()})
+            formula_vars = self._eval_formula_vars(raw_sample, metrics)
             for key, ev in zip(FORMULA_KEYS, self._formula_slots):
                 if ev.is_valid:
                     ev.push_variables(formula_vars)
                     metrics[key] = ev.evaluate(formula_vars)
+
+        if getattr(self, "_timer_mode", "simple") == "program":
+            self._apply_program_tick(metrics, raw_sample)
 
         self._session_manager.add_metric(metrics)
         # Merge raw + computed for full storage
