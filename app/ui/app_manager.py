@@ -37,6 +37,7 @@ from app.metrics.custom_formula import CustomFormulaEvaluator
 from app.metrics.engine import MetricsEngine
 from app.metrics.noise_detector import PowerLineDetector
 from app.session.manager import SessionManager, SessionState
+from app.session.session_program import SessionProgram
 from app.session.timer_state import TimerState
 from app.storage import backup as _backup
 from app.storage.backup import restore_backup, validate_backup
@@ -167,6 +168,24 @@ class EEGMeditationApp(App):
              "drove_audio": self._audio_metric_key == FORMULA_KEYS[i]}
             for i in range(_MAX_FORMULAS) if self._formula_slots[i].is_valid
         ])
+
+    def _persist_session_program(self, uid: int) -> None:
+        """Persist the active editable program + timer mode for a user."""
+        if not uid:
+            return
+        self._db.set_user_json_setting(uid, "session_program", self._session_program_segments)
+        self._db.set_user_setting(uid, "timer_mode", self._timer_mode)
+
+    def _load_session_program(self, uid: int) -> None:
+        """Restore the active editable program + timer mode for a user."""
+        self._session_program_segments = self._db.get_user_json_setting(
+            uid, "session_program", default=[]
+        ) or []
+        self._timer_mode = self._db.get_user_setting(uid, "timer_mode") or "simple"
+
+    def _build_session_program(self) -> SessionProgram:
+        """Build a SessionProgram from the active editable segments."""
+        return SessionProgram(self._session_program_segments)
 
     def _acquire_wake_lock(self) -> None:
         """Keep CPU running + screen on during session (Android only)."""
@@ -518,6 +537,8 @@ class EEGMeditationApp(App):
         for key, active in self._settings_screen._graph_toggles.items():
             self._live_screen.graph.set_visible(key, active)
         self._audio_metric_key: str = "shamatha_score"
+        self._session_program_segments: list[dict] = []
+        self._timer_mode: str = "simple"
 
         self._diary_screen.set_session_select_callback(self._on_session_select)
         self._diary_screen.set_save_notes_callback(self._on_save_notes)
@@ -2626,6 +2647,7 @@ class EEGMeditationApp(App):
             uid, "rotation", str(self._settings_screen._current_rotation)
         )
         self._persist_active_formulas(uid)
+        self._persist_session_program(uid)
         self._db.set_user_setting(uid, "audio_formula_index", str(self._audio_formula_index))
         # Save zoom level as viewport duration in seconds
         graph = self._live_screen.graph
@@ -2738,6 +2760,7 @@ class EEGMeditationApp(App):
         # Load formulas BEFORE _restore_graph_series so the per-slot validity gate
         # sees real is_valid; the picker selection (graph_series_*) decides visibility.
         self._apply_active_formulas(self._read_active_formulas_with_migration(user_id))
+        self._load_session_program(user_id)
         self._push_formula_names_to_graph()
         idx = g(user_id, "audio_formula_index")
         if idx is not None:
