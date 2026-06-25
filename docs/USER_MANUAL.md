@@ -152,6 +152,31 @@ The Restore replaces your current database and cannot be undone. Use Backup firs
 - Duration slider with presets: 5, 10, 15, 20, 30 minutes
 - When enabled, auto-stops session at the end and plays bell sound
 
+#### Session Program
+
+A **Simple | Program** toggle at the top of the Timer section switches between the single-duration timer and a programmable multi-segment session.
+
+**Program mode** lets you define an ordered list of timed segments. Each segment row has:
+
+- **Duration** — length in minutes
+- **Formula** — the metric that drives audio feedback for this segment: Shamatha, Meditation, NS Attention, NS Meditation, or any formula saved in your custom-formula library
+- **Target** — the threshold level for this segment (sets the dashed line and "time above target" stat)
+- **End cue** — sound played when this segment ends: **Chime** (default) or **Warble**
+
+Use **+ Add Segment** to append a row; tap the delete icon on a row to remove it. The **total duration** readout at the bottom updates automatically.
+
+When a session runs under a Program:
+- The session timer is set to the program's total duration and auto-stops at the end (the timer-end gong plays).
+- At each segment boundary a transition chime plays and the active target and audio-driver formula update to the next segment's settings.
+- "Time above target" accrues against each segment's own target while that segment is active.
+- A **stepped threshold line** is drawn on the live session graph and on the diary graph, showing each segment's target over its time range.
+
+**Saving and loading programs:** Type a name into the name field and tap **Save** to store the current segment list in your library. Saved programs appear in a list below — tap one to load it into the editor, or tap the delete icon to remove it. The library is per-user.
+
+**Note:** Per-segment continuous feedback sound (replacing the white noise with a different sound for a segment) is shown as a disabled placeholder. That feature is planned for a future release.
+
+When Program mode is off, the Simple timer behaves exactly as before.
+
 ### Device
 
 - Device status and connection info

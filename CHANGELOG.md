@@ -27,6 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Session Program** (issue #6): programmable per-segment sessions as an alternative to a single fixed-duration timer.
+  - Settings → Timer now has a **Simple | Program** toggle. Simple = existing single-duration timer (unchanged). Program reveals a segment editor.
+  - Each segment row specifies: duration (minutes), a **formula** (Shamatha, Meditation, NS Attention, NS Meditation, or any saved custom formula), a **target** level, and an **end-cue** sound (Chime or Warble).
+  - **+ Add Segment**, per-row delete, total-duration readout. Named programs can be saved and reloaded; the saved-programs library is per-user.
+  - The program's total duration becomes the session timer; the session auto-stops at the last segment's end via the existing timer-end path (gong plays).
+  - At each segment boundary a transition chime plays; the active target, audio-driver formula, and "time above target" stat all follow the current segment.
+  - A **stepped threshold line** is drawn on both the live session metrics graph and the diary metrics graph (each segment's target over its time range).
+  - The program that ran is recorded per session (`sessions.session_program` column); the diary replays the stepped threshold line from that record.
+  - Per-segment continuous feedback sound (replacing white noise) is modeled in v1 but inert — lands with issue #10.
 - **Threshold ± steppers**: Settings → Threshold now has `−` / `+` buttons that nudge the value by 5 (clamped 20–180), alongside the slider and quick presets, for fine control.
 - **More timer presets**: Settings → Timer and the live-session duration picker gained 30 min, 1 h, 1 h 30 min and 2 h presets (slider already went to 120). The session-screen duration picker now lays its timed presets out in a 2-column grid with "Free" full-width below, so it stays compact.
 - **`[PERF]` timing harness** (`app/logger.py` `timed(label)` context manager): logs block wall-time when `EEG_PERF=1` (off by default). Used to instrument the History and diary load/render paths; grep logs for `[PERF]`.

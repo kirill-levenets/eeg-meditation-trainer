@@ -13,6 +13,7 @@ Inspired by the [EEG meditation research and Vernihor formula](https://scripture
 - **Session markers** — Place vertical markers on all graphs during a session to tag significant moments; markers stored in DB, displayed in diary previews, exported in CSV as a separate column
 - **Multi-channel audio engine** — Ch1: gapless white noise (volume scales with configurable metric); Ch2: tingsha bell for sinking alerts; Ch3: chime for subtle distraction; Ch4: warble for disconnect alert. Configurable audio control metric (Meditation, Shamatha, NS Meditation, NS Attention, Custom Formula slot 1/2/3; falls back to shamatha if the selected slot is invalid)
 - **Meditation timer** — Configurable duration (1-120 min) with presets, countdown display, auto-stop, custom end sound with file chooser and test button
+- **Session Program** — Settings → Timer **Simple | Program** toggle: Program mode lets you define an ordered list of timed segments, each with its own formula (Shamatha, Meditation, NS Attention, NS Meditation, or any saved custom formula), target level, and end-cue sound (Chime or Warble). The program's total duration drives the session timer; a transition chime plays at each segment boundary and the target/audio-driver update live. A stepped threshold line is drawn on both the live session graph and the diary graph. Programs can be saved by name and reloaded. The program that ran is recorded per session so the diary can replay the stepped threshold. Per-segment continuous feedback sound deferred to issue #10.
 - **Session duration picker on Live Session** — Dedicated duration button next to Start shows the active choice (`▼ 10 min` / `▼ Free`) and opens a modal preset picker (5 / 10 / 15 / 20 min / Free); current preset highlighted
 - **State classification** — Stable Focus, Subtle Distraction, Gross Distraction, Sinking, Neutral
 - **NeuroSky MindWave Mobile 2** — Bluetooth RFCOMM on Android (pyjnius) and Linux (Python socket); ThinkGear protocol parser; background reader thread; BT connection wait with status display; paired device scanning
@@ -77,7 +78,9 @@ app/
 ├── audio_feedback/
 │   └── noise.py                # 4-channel audio: white noise, bell, chime, warble
 ├── session/
-│   └── manager.py              # Start/Pause/Resume/Stop state machine
+│   ├── manager.py              # Start/Pause/Resume/Stop state machine
+│   ├── session_program.py      # SessionProgram headless model (segments, boundaries, threshold steps)
+│   └── timer_state.py          # Headless countdown timer
 ├── storage/
 │   ├── database.py             # SQLite: sessions, metrics, users, settings, CSV export
 │   └── backup.py               # make_backup / validate_backup / restore_backup
