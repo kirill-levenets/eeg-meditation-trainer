@@ -10,7 +10,6 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
-from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
@@ -29,6 +28,7 @@ from app.ui.theme import (
     S,
     StyledButton,
     format_duration,
+    make_scroll_popup,
 )
 from app.ui.widgets.legend import LegendBar
 
@@ -945,14 +945,13 @@ class LiveSessionScreen(Screen):
         timed = [(lbl, v) for lbl, v in _DURATION_PRESETS if v is not None]
         free = [(lbl, v) for lbl, v in _DURATION_PRESETS if v is None]
 
-        body = BoxLayout(orientation="vertical", spacing=S.GAP_SM, padding=S.GAP)
         grid = GridLayout(cols=2, spacing=S.GAP_SM, size_hint_y=None)
         grid.bind(minimum_height=grid.setter("height"))
         for lbl, v in timed:
             grid.add_widget(_make_btn(lbl, v))
-        body.add_widget(grid)
-        for lbl, v in free:
-            body.add_widget(_make_btn(lbl, v))
+
+        rows = [grid]
+        rows.extend(_make_btn(lbl, v) for lbl, v in free)
 
         # Programs picker: jump straight to a saved program from the session
         # screen. The button shows the loaded program's name when one is active.
@@ -964,17 +963,12 @@ class LiveSessionScreen(Screen):
             height=dp(44),
         )
         programs_btn.bind(on_release=lambda *_a: self._open_program_picker())
-        body.add_widget(programs_btn)
+        rows.append(programs_btn)
 
-        rows = (len(timed) + 1) // 2 + len(free) + 1
-        popup_h = rows * (dp(44) + S.GAP_SM) + dp(80)
-        self._duration_popup = Popup(
-            title="Session duration",
-            content=body,
-            size_hint=(0.8, None),
-            height=popup_h,
-            auto_dismiss=True,
-        )
+        # The grid is one row widget but spans ceil(timed/2) visual rows — count those
+        # so the popup sizes to the real content height.
+        est = (len(timed) + 1) // 2 + len(free) + 1
+        self._duration_popup = make_scroll_popup("Session duration", rows, est_rows=est)
         self._duration_popup.open()
 
     def set_session_programs(self, programs: list, current_name: str = "") -> None:
@@ -987,19 +981,16 @@ class LiveSessionScreen(Screen):
         if self._duration_popup is not None:
             self._duration_popup.dismiss()
             self._duration_popup = None
-        body = BoxLayout(orientation="vertical", spacing=S.GAP_SM, padding=S.GAP)
-        popup = Popup(title="Choose program", content=body,
-                      size_hint=(0.8, None),
-                      height=dp(80) + dp(48) * (max(len(self._session_programs), 1) + 1))
 
         def _pick(index):
             popup.dismiss()
             if self.on_program_pick is not None:
                 self.on_program_pick(index)
 
+        rows = []
         if not self._session_programs:
-            body.add_widget(Label(text="No saved programs", color=C.TEXT,
-                                  size_hint_y=None, height=dp(44)))
+            rows.append(Label(text="No saved programs", color=C.TEXT,
+                              size_hint_y=None, height=dp(44)))
         else:
             for i, entry in enumerate(self._session_programs):
                 name = entry.get("name", f"Program {i + 1}")
@@ -1012,11 +1003,11 @@ class LiveSessionScreen(Screen):
                     size_hint_y=None, height=dp(44),
                 )
                 btn.bind(on_release=lambda _b, idx=i: _pick(idx))
-                body.add_widget(btn)
+                rows.append(btn)
         cancel = StyledButton(text="Cancel", bg_color=C.PRIMARY,
                               size_hint_y=None, height=dp(44))
+        popup = make_scroll_popup("Choose program", rows, footer=cancel)
         cancel.bind(on_release=lambda *_a: popup.dismiss())
-        body.add_widget(cancel)
         popup.open()
 
     def _pick_from_popup(self, value) -> None:

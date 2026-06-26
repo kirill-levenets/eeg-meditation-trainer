@@ -56,6 +56,7 @@ from app.ui.theme import (
     Icons,
     S,
     StyledButton,
+    make_scroll_popup,
 )
 from app.ui.widgets.legend import LegendBar
 from app.ui.widgets.loading_overlay import LoadingOverlay
@@ -2023,10 +2024,10 @@ class EEGMeditationApp(App):
         that assigns a saved formula to that slot without leaving the picker.
         """
         is_live = graph is self._live_screen.graph
-        body = BoxLayout(orientation="vertical", spacing=S.GAP_SM, padding=S.GAP)
+        rows = []
         for key in graph.series_keys():
-            if key == "program_formula":
-                continue  # fully program-controlled: shown only during its custom segment
+            if key in PROGRAM_FORMULA_KEYS and not (is_live and self._session_program_active):
+                continue  # program-controlled: only listed while its program runs
             vis = graph.is_visible(key)
             btn = StyledButton(
                 text=graph.series_name(key), height=dp(44),
@@ -2045,9 +2046,9 @@ class EEGMeditationApp(App):
                 choose_btn.bind(on_release=lambda _b, si=slot_idx, tb=btn: self._open_saved_formula_chooser(si, tb))
                 row.add_widget(btn)
                 row.add_widget(choose_btn)
-                body.add_widget(row)
+                rows.append(row)
             else:
-                body.add_widget(btn)
+                rows.append(btn)
         # Neutral outlined Close — a green fill (PRIMARY) collided with the
         # green "selected" pills (ACCENT) on the green palettes.
         close_btn = StyledButton(
@@ -2055,14 +2056,8 @@ class EEGMeditationApp(App):
             outline=True, bg_color=C.TEXT_SECONDARY,
             text_color=C.TEXT, bg_pressed=C.BG_CARD,
         )
-        popup = Popup(
-            title="Graph series", content=body,
-            size_hint=(0.8, None),
-            height=dp(80 + 50 * (len(graph.series_keys()) + 1)),
-            auto_dismiss=True,
-        )
+        popup = make_scroll_popup("Graph series", rows, footer=close_btn)
         close_btn.bind(on_release=lambda *_a: popup.dismiss())
-        body.add_widget(close_btn)
         popup.bind(on_dismiss=lambda *_a: self._persist_graph_series(graph))
         popup.open()
 
@@ -2072,13 +2067,6 @@ class EEGMeditationApp(App):
         if not self._current_user_id:
             return
         formulas = self._db.get_saved_formulas(self._current_user_id)
-        inner_body = BoxLayout(orientation="vertical", spacing=S.GAP_SM, padding=S.GAP)
-        inner_popup = Popup(
-            title="Choose saved formula", content=inner_body,
-            size_hint=(0.75, None),
-            height=dp(80 + 50 * (max(len(formulas), 1) + 1)),
-            auto_dismiss=True,
-        )
 
         def _choose(entry):
             inner_popup.dismiss()
@@ -2088,8 +2076,9 @@ class EEGMeditationApp(App):
             toggle_btn.text_color = C.TEXT if vis else C.TEXT_SECONDARY
             toggle_btn.bold = vis
 
+        rows = []
         if not formulas:
-            inner_body.add_widget(Label(
+            rows.append(Label(
                 text="No saved formulas", color=C.TEXT_SECONDARY,
                 height=dp(44), size_hint_y=None,
             ))
@@ -2101,13 +2090,13 @@ class EEGMeditationApp(App):
                     bg_color=C.BG_CARD, text_color=C.TEXT,
                 )
                 row_btn.bind(on_release=lambda _b, e=entry: _choose(e))
-                inner_body.add_widget(row_btn)
+                rows.append(row_btn)
         cancel_btn = StyledButton(
             text="Cancel", height=dp(44),
             bg_color=C.PRIMARY, bg_pressed=C.PRIMARY_DIM,
         )
+        inner_popup = make_scroll_popup("Choose saved formula", rows, footer=cancel_btn, width_hint=0.8)
         cancel_btn.bind(on_release=lambda *_a: inner_popup.dismiss())
-        inner_body.add_widget(cancel_btn)
         inner_popup.open()
 
     def _toggle_series_row(self, graph, key: str, btn) -> None:

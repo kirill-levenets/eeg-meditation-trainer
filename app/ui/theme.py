@@ -9,6 +9,7 @@ import struct
 import zlib
 
 from kivy.core.text import LabelBase
+from kivy.core.window import Window
 from kivy.graphics import Color, Line, Rectangle, RoundedRectangle
 from kivy.metrics import dp
 from kivy.properties import (
@@ -20,6 +21,7 @@ from kivy.properties import (
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
+from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 
@@ -56,6 +58,37 @@ def format_duration(seconds: int) -> str:
     h, rem = divmod(seconds, 3600)
     m = rem // 60
     return f"{h}h {m:02d}m"
+
+
+def make_scroll_popup(title, rows, footer=None, *, width_hint=0.85, row_h=None,
+                      est_rows=None, max_height_hint=0.85, auto_dismiss=True):
+    """Popup with a vertically-scrolling list of fixed-height `rows` and an optional
+    pinned `footer`. Sizes to content but caps at `max_height_hint` of the window so
+    long lists scroll instead of overflowing the screen. `est_rows` overrides the
+    row-count used for the height estimate (for a row that is itself a multi-row grid).
+    Returns the Popup."""
+    row_h = row_h or dp(44)
+    inner = BoxLayout(orientation="vertical", spacing=S.GAP_SM, size_hint_y=None)
+    inner.bind(minimum_height=inner.setter("height"))
+    for w in rows:
+        w.size_hint_y = None
+        if not w.height:
+            w.height = row_h
+        inner.add_widget(w)
+    scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False)
+    scroll.add_widget(inner)
+    body = BoxLayout(orientation="vertical", spacing=S.GAP_SM, padding=S.GAP)
+    body.add_widget(scroll)
+    if footer is not None:
+        footer.size_hint_y = None
+        if not footer.height:
+            footer.height = row_h
+        body.add_widget(footer)
+    n = (est_rows if est_rows is not None else len(rows)) + (1 if footer is not None else 0)
+    content_h = n * (row_h + S.GAP_SM) + dp(90)  # rows + title bar + padding chrome
+    height = min(content_h, Window.height * max_height_hint)
+    return Popup(title=title, content=body, size_hint=(width_hint, None),
+                 height=height, auto_dismiss=auto_dismiss)
 
 
 class Icons:
