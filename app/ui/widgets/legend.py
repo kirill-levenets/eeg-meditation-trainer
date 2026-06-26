@@ -25,13 +25,20 @@ class LegendBar(StackLayout):
         self._font_size = font_size if font_size is not None else F.TINY
         self.bind(minimum_height=self.setter("height"))
 
-    def set_items(self, items: list[tuple[str, tuple]]) -> None:
+    def set_items(self, items: list[tuple[str, tuple]],
+                  active_text: str | None = None) -> None:
+        """Render the legend. `active_text` (matched against an item's text) is
+        the series currently driving the program target — shown bold with a »
+        marker so the user can see what's being trained right now. (» renders in
+        Roboto; the geometric ▸/▶ triangles render as tofu in this build.)"""
         self.clear_widgets()
         for text, color in items:
+            is_active = active_text is not None and text == active_text
             lbl = Label(
-                text=text,
+                text=f"» {text}" if is_active else text,
                 font_size=self._font_size,
                 color=color,
+                bold=is_active,
                 size_hint=(None, None),
                 height=dp(18),
             )

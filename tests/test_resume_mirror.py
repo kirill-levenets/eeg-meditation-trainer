@@ -102,6 +102,9 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     app._make_session_name = MagicMock(return_value="sess")
     app._tick_stop_event = MagicMock()
 
+    app._session_program_active = False
+    app._session_program_segments = []
+
     app._ui_metrics_history = deque(maxlen=APP.GRAPH_POINTS_MAX)
     app._ui_band_history = deque(maxlen=APP.GRAPH_POINTS_MAX)
     app._ui_raw_waveform = deque(maxlen=512 * 60)
@@ -487,6 +490,6 @@ def test_timer_expiry_updates_existing_session_row():
     _drive_tick(app, _raw_sample(), _metrics())
 
     app._db.update_session.assert_called_once_with(
-        7, {"duration": 100}, custom_formulas="[]"
+        7, {"duration": 100}, custom_formulas="[]", session_program=""
     )
     app._db.save_session.assert_not_called()

@@ -16,13 +16,14 @@ from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.slider import Slider
-from kivy.uix.textinput import TextInput
 
 from app.config import APP, METRICS
+from app.logger import logger
 from app.ui.theme import (
     POPUP_TEXT,
     THEMES,
     C,
+    CenteredTextInput,
     Divider,
     F,
     Icons,
@@ -32,6 +33,16 @@ from app.ui.theme import (
     ThemedAccordion,
 )
 from app.ui.widgets.user_picker import UserPickerForm
+
+# Built-in metric keys offered in the per-segment formula picker. These are the
+# REAL metric dict keys — native_attention/native_meditation, NOT ns_*.
+PROGRAM_BUILTIN_FORMULAS: list[tuple[str, str]] = [
+    ("shamatha_score", "Shamatha"),
+    ("meditation_score", "Meditation"),
+    ("native_attention", "NS Attention"),
+    ("native_meditation", "NS Meditation"),
+]
+_PROGRAM_BUILTIN_LABELS: dict[str, str] = dict(PROGRAM_BUILTIN_FORMULAS)
 
 
 def _load_help_topics(lang: str = "en") -> list[tuple[str, str]]:
@@ -103,8 +114,20 @@ class SettingsScreen(Screen):
         self._on_delete_formula: Optional[Callable] = None
         self._on_export_formulas: Optional[Callable] = None
         self._on_theme_change: Optional[Callable] = None
+        # --- Session program (Timer → Program mode) ---
+        self._on_program_mode_cb: Optional[Callable] = None
+        self._on_program_changed_cb: Optional[Callable] = None
+        self._on_program_save_cb: Optional[Callable] = None
+        self._on_program_load_cb: Optional[Callable] = None
+        self._on_program_delete_cb: Optional[Callable] = None
+        self._program_mode: str = "simple"
+        self._segment_rows: list = []
+        self._saved_formulas_cache: list = []
+        self._suppress_program_cb: bool = False
+        self._loading_program: bool = False
         self._graph_toggles: dict[str, bool] = {
             "shamatha_score": True,
+            "meditation_score": False,
             "distraction": False,
             "sinking": False,
             "subtle_distraction": False,
@@ -150,9 +173,11 @@ class SettingsScreen(Screen):
         )
         profile_section.add_widget(self._user_picker_form)
 
-        # --- Timer section ---
-        timer_section = accordion.add_section("Timer", collapsed=True)
+        # --- Timer / Program section ---
+        timer_section = accordion.add_section("Timer / Program", collapsed=True)
 
+        # "Enable Timer" is a simple-mode concept (program mode forces the timer
+        # on), so it lives inside _simple_box below and hides in program mode.
         timer_toggle_row = BoxLayout(size_hint_y=None, height=S.ROW_SM, spacing=S.GAP)
         self._timer_enable_cb = CheckBox(
             active=False, size_hint_x=0.15,
@@ -168,8 +193,50 @@ class SettingsScreen(Screen):
         timer_enable_lbl.bind(size=timer_enable_lbl.setter("text_size"))
         timer_toggle_row.add_widget(self._timer_enable_cb)
         timer_toggle_row.add_widget(timer_enable_lbl)
-        timer_section.add_widget(timer_toggle_row)
 
+        # Mode: Simple | Program segmented toggle (placed before the mode-specific
+        # content so the layout reads top-down: mode -> content -> sound).
+        mode_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
+        mode_row.add_widget(Label(
+            text="Mode:", font_size=F.BODY, color=C.TEXT_SECONDARY,
+            size_hint_x=0.25, halign="left", valign="middle",
+        ))
+        mode_btn_box = BoxLayout(size_hint_x=0.75, spacing=S.GAP)
+        self._program_mode_buttons: list[StyledButton] = []
+        for mode_key, mode_label in (("simple", "Simple"), ("program", "Program")):
+            btn = StyledButton(
+                text=mode_label,
+                font_size=F.SMALL,
+                size_hint_y=None,
+                height=dp(28),
+                bg_color=C.ACCENT if mode_key == "simple" else C.BG_CARD,
+                text_color=C.TEXT,
+            )
+            btn._mode_key = mode_key
+            btn.bind(on_release=self._on_program_mode_pressed)
+            mode_btn_box.add_widget(btn)
+            self._program_mode_buttons.append(btn)
+        mode_row.add_widget(mode_btn_box)
+        timer_section.add_widget(mode_row)
+
+        # Mode-content host: holds EITHER the simple box OR the program box. The
+        # inactive box is fully removed from the tree (not just hidden) — a
+        # zero-height-but-present container lets its children overflow and, when
+        # disabled, swallow taps aimed at the controls around it.
+        self._mode_content_box = BoxLayout(
+            orientation="vertical", size_hint_y=None, spacing=S.GAP_SM,
+        )
+        self._mode_content_box.bind(
+            minimum_height=self._mode_content_box.setter("height")
+        )
+        timer_section.add_widget(self._mode_content_box)
+
+        # --- Simple-mode controls: duration slider row + presets ---
+        self._simple_box = BoxLayout(
+            orientation="vertical", size_hint_y=None, spacing=S.GAP,
+        )
+        self._simple_box.bind(minimum_height=self._simple_box.setter("height"))
+        self._simple_box.add_widget(timer_toggle_row)  # Enable Timer (simple mode only)
         timer_dur_row = BoxLayout(size_hint_y=None, height=S.ROW_SM, spacing=S.GAP)
         timer_dur_lbl = Label(
             text="Duration:", font_size=F.BODY, color=C.TEXT_SECONDARY,
@@ -191,16 +258,139 @@ class SettingsScreen(Screen):
         timer_dur_row.add_widget(timer_dur_lbl)
         timer_dur_row.add_widget(self._timer_duration_slider)
         timer_dur_row.add_widget(self._timer_duration_label)
-        timer_section.add_widget(timer_dur_row)
+        self._simple_box.add_widget(timer_dur_row)
 
         timer_presets = PresetRow(
             items=[("5m", 5), ("10m", 10), ("15m", 15), ("20m", 20),
                    ("30m", 30), ("1h", 60), ("1h30", 90), ("2h", 120)],
             callback=lambda v: setattr(self._timer_duration_slider, "value", v),
         )
-        timer_section.add_widget(timer_presets)
+        self._simple_box.add_widget(timer_presets)
 
-        # Custom timer-end sound: path input + browse + test buttons.
+        # Program editor (dynamic vertical box; height tracks rows added after
+        # the section is opened — see _AccordionSection height note). Built once,
+        # swapped into _mode_content_box by set_program_mode.
+        self._program_box = BoxLayout(
+            orientation="vertical", size_hint_y=None, spacing=S.GAP_SM,
+        )
+        self._program_box.bind(
+            minimum_height=self._program_box.setter("height")
+        )
+
+        self._program_total_label = Label(
+            text="Total: 0 min",
+            font_size=F.SMALL, bold=True, color=C.TEXT,
+            size_hint_y=None, height=dp(22),
+            halign="left", valign="middle",
+        )
+        self._program_total_label.bind(
+            size=self._program_total_label.setter("text_size")
+        )
+
+        # At-a-glance "which program is loaded" indicator at the top of the editor.
+        self._program_loaded_label = Label(
+            text="Loaded: (unsaved)",
+            font_size=F.SMALL, bold=True, color=C.PRIMARY,
+            size_hint_y=None, height=dp(22),
+            halign="left", valign="middle",
+        )
+        self._program_loaded_label.bind(
+            size=self._program_loaded_label.setter("text_size")
+        )
+
+        self._add_segment_btn = StyledButton(
+            text="+ Add Segment",
+            font_size=F.SMALL,
+            bg_color=C.PRIMARY_DIM,
+            size_hint_y=None,
+            height=dp(34),
+        )
+        self._add_segment_btn.bind(
+            on_release=lambda *_a: self._add_segment_row()
+        )
+
+        program_save_row = BoxLayout(
+            size_hint_y=None, height=dp(36), spacing=S.GAP_SM,
+        )
+        self._program_name_input = CenteredTextInput(
+            text="",
+            hint_text="program name",
+            multiline=False,
+            font_size=F.SMALL,
+            foreground_color=C.TEXT,
+            background_color=list(C.BG_INPUT),
+            size_hint_x=0.7,
+        )
+        program_save_btn = StyledButton(
+            text="Save",
+            font_size=F.SMALL,
+            bg_color=C.ACCENT,
+            size_hint_x=0.3,
+            size_hint_y=None,
+            height=dp(36),
+        )
+        program_save_btn.bind(on_release=self._on_program_save_pressed)
+        program_save_row.add_widget(self._program_name_input)
+        program_save_row.add_widget(program_save_btn)
+
+        saved_programs_label = Label(
+            text="Saved Programs:",
+            font_size=F.SMALL, color=C.TEXT_SECONDARY,
+            size_hint_y=None, height=dp(22),
+            halign="left", valign="middle",
+        )
+        saved_programs_label.bind(
+            size=saved_programs_label.setter("text_size")
+        )
+        self._saved_programs_box = BoxLayout(
+            orientation="vertical", size_hint_y=None, height=dp(0), spacing=dp(2),
+        )
+
+        # Segment rows live in their own box at the top so they read in program
+        # order (segment 1 at the top) and new rows append at the bottom, above
+        # the fixed total/add/save/list block.
+        self._segments_box = BoxLayout(
+            orientation="vertical", size_hint_y=None, spacing=S.GAP_SM,
+        )
+        self._segments_box.bind(
+            minimum_height=self._segments_box.setter("height")
+        )
+        # What the editor is + what each cell means (the rows are otherwise cryptic).
+        program_intro = Label(
+            text=(
+                "A program runs timed stages in order (top to bottom). Each row:\n"
+                "Min = length in minutes   Metric = what to train   Target = goal value\n"
+                "End cue = sound when the stage ends   Feedback = per-stage sound (coming soon)"
+            ),
+            font_size=F.SMALL, color=C.TEXT_SECONDARY,
+            size_hint_y=None, height=dp(58),
+            halign="left", valign="top",
+        )
+        program_intro.bind(size=program_intro.setter("text_size"))
+
+        # Column header aligned to the segment-row cells (same size_hint_x ratios).
+        segments_header = BoxLayout(size_hint_y=None, height=dp(20), spacing=S.GAP_SM)
+        for _lbl, _w in (("Min", 0.16), ("Metric", 0.3), ("Target", 0.14),
+                         ("End cue", 0.16), ("Feedback", 0.16), ("", 0.1)):
+            col = Label(
+                text=_lbl, font_size=F.TINY, bold=True, color=C.TEXT_MUTED,
+                size_hint_x=_w, halign="center", valign="middle",
+            )
+            col.bind(size=col.setter("text_size"))
+            segments_header.add_widget(col)
+        self._segments_header = segments_header
+
+        self._program_box.add_widget(program_intro)
+        self._program_box.add_widget(self._program_loaded_label)
+        self._program_box.add_widget(segments_header)
+        self._program_box.add_widget(self._segments_box)
+        self._program_box.add_widget(self._program_total_label)
+        self._program_box.add_widget(self._add_segment_btn)
+        self._program_box.add_widget(program_save_row)
+        self._program_box.add_widget(saved_programs_label)
+        self._program_box.add_widget(self._saved_programs_box)
+
+        # Custom timer-end sound (shared by both modes): path + browse + test.
         # When empty, the synthesised tingsha bell is used.
         timer_sound_lbl = Label(
             text="Timer End Sound (optional)",
@@ -215,7 +405,7 @@ class SettingsScreen(Screen):
         timer_sound_row = BoxLayout(
             size_hint_y=None, height=dp(36), spacing=S.GAP_SM,
         )
-        self._timer_sound_input = TextInput(
+        self._timer_sound_input = CenteredTextInput(
             hint_text="Default bell",
             text="",
             multiline=False,
@@ -248,6 +438,9 @@ class SettingsScreen(Screen):
         timer_sound_row.add_widget(self._timer_sound_browse_btn)
         timer_sound_row.add_widget(self._timer_sound_test_btn)
         timer_section.add_widget(timer_sound_row)
+
+        # Start in Simple mode (simple controls swapped into the content host).
+        self.set_program_mode("simple")
 
         # --- Device Status section ---
         device_section = accordion.add_section("Device", collapsed=True)
@@ -695,8 +888,8 @@ class SettingsScreen(Screen):
 
         # Three named formula slots, each with name + formula inputs,
         # Apply/Save buttons, and a status label.
-        self._formula_inputs: list[TextInput] = []
-        self._formula_name_inputs: list[TextInput] = []
+        self._formula_inputs: list[CenteredTextInput] = []
+        self._formula_name_inputs: list[CenteredTextInput] = []
         self._formula_statuses: list[Label] = []
         for i in range(3):
             slot_header = Label(
@@ -711,7 +904,7 @@ class SettingsScreen(Screen):
             slot_header.bind(size=slot_header.setter("text_size"))
             formula_section.add_widget(slot_header)
 
-            name_input = TextInput(
+            name_input = CenteredTextInput(
                 text="",
                 hint_text=f"name (default Custom {i + 1})",
                 font_size=F.SMALL,
@@ -725,7 +918,7 @@ class SettingsScreen(Screen):
             self._formula_name_inputs.append(name_input)
             formula_section.add_widget(name_input)
 
-            formula_input = TextInput(
+            formula_input = CenteredTextInput(
                 text="",
                 hint_text="e.g. (alpha1 + alpha2) / (beta1 + beta2 + 1)",
                 font_size=F.BODY,
@@ -1170,6 +1363,8 @@ class SettingsScreen(Screen):
 
     def populate_saved_formulas(self, formulas) -> None:
         """Update the saved formulas list. formulas: [{name, formula}, ...]"""
+        # Cache for the program segment formula picker (no separate callback).
+        self._saved_formulas_cache = list(formulas)
         box = self._saved_formulas_box
         box.clear_widgets()
         row_height = dp(30)
@@ -1206,6 +1401,314 @@ class SettingsScreen(Screen):
             row.add_widget(del_btn)
 
             box.add_widget(row)
+
+    # --- Session program (Timer → Program mode) -------------------------
+
+    @property
+    def program_mode(self) -> str:
+        return self._program_mode
+
+    def set_program_mode_callback(self, cb: Callable) -> None:
+        self._on_program_mode_cb = cb
+
+    def set_program_changed_callback(self, cb: Callable) -> None:
+        self._on_program_changed_cb = cb
+
+    def set_program_save_callback(self, cb: Callable) -> None:
+        self._on_program_save_cb = cb
+
+    def set_program_load_callback(self, cb: Callable) -> None:
+        self._on_program_load_cb = cb
+
+    def set_program_delete_callback(self, cb: Callable) -> None:
+        self._on_program_delete_cb = cb
+
+    def set_program_mode(self, mode: str) -> None:
+        """Set toggle + show/hide widgets. Does NOT fire the mode callback."""
+        mode = "program" if mode == "program" else "simple"
+        self._program_mode = mode
+        for btn in self._program_mode_buttons:
+            btn.bg_color = C.ACCENT if btn._mode_key == mode else C.BG_CARD
+        # Swap the active box into the content host. The inactive box is fully
+        # detached (no geometry, no disabled-overlap that would eat taps).
+        self._mode_content_box.clear_widgets()
+        self._mode_content_box.add_widget(
+            self._program_box if mode == "program" else self._simple_box
+        )
+
+    def _on_program_mode_pressed(self, btn) -> None:
+        mode = getattr(btn, "_mode_key", "simple")
+        logger.info(f"Timer mode -> {mode}")
+        self.set_program_mode(mode)
+        if self._on_program_mode_cb:
+            self._on_program_mode_cb(mode)
+
+    def _on_program_save_pressed(self, *_args) -> None:
+        name = self._program_name_input.text.strip()
+        logger.info(f"Save program pressed: name={name!r}")
+        if self._on_program_save_cb:
+            self._on_program_save_cb(name)
+
+    def _on_program_load_pressed(self, btn) -> None:
+        idx = getattr(btn, "program_index", -1)
+        logger.info(f"Load saved program #{idx}")
+        if idx >= 0 and self._on_program_load_cb:
+            self._on_program_load_cb(idx)
+
+    def _on_program_delete_pressed(self, btn) -> None:
+        idx = getattr(btn, "program_index", -1)
+        logger.info(f"Delete saved program #{idx}")
+        if idx >= 0 and self._on_program_delete_cb:
+            self._on_program_delete_cb(idx)
+
+    def set_saved_programs(self, programs: list[dict]) -> None:
+        """Populate the Load list. programs: [{name, segments}, ...]."""
+        box = self._saved_programs_box
+        box.clear_widgets()
+        row_height = dp(30)
+        box.height = row_height * len(programs) if programs else dp(0)
+
+        for i, entry in enumerate(programs):
+            row = BoxLayout(size_hint_y=None, height=row_height, spacing=S.GAP_SM)
+
+            load_btn = StyledButton(
+                text=entry.get("name", f"Program {i + 1}"),
+                font_size=F.SMALL,
+                bg_color=C.BG_CARD,
+                text_color=C.TEXT,
+                size_hint_x=0.85,
+                size_hint_y=None,
+                height=row_height,
+                bold=False,
+            )
+            load_btn.program_index = i
+            load_btn.bind(on_release=self._on_program_load_pressed)
+            row.add_widget(load_btn)
+
+            del_btn = StyledButton(
+                text="X",
+                font_size=F.SMALL,
+                bg_color=C.BG_CARD,
+                text_color=C.DANGER,
+                size_hint_x=0.15,
+                size_hint_y=None,
+                height=row_height,
+            )
+            del_btn.program_index = i
+            del_btn.bind(on_release=self._on_program_delete_pressed)
+            row.add_widget(del_btn)
+
+            box.add_widget(row)
+
+    def _add_segment_row(self, segment: Optional[dict] = None) -> None:
+        """Append one editor row (used by Add button and load_program)."""
+        segment = segment or {}
+        minutes = segment.get("minutes", 10)
+        target = segment.get("target", 50)
+        formula = segment.get("formula", "shamatha_score")
+        end_sound = segment.get("end_sound")
+
+        row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP_SM)
+
+        duration_in = CenteredTextInput(
+            text=str(minutes), input_filter="int", multiline=False,
+            font_size=F.SMALL, foreground_color=C.TEXT,
+            background_color=list(C.BG_INPUT),
+            size_hint_x=0.16,
+        )
+        formula_btn = StyledButton(
+            text=self._formula_label(formula),
+            font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT,
+            size_hint_x=0.3, size_hint_y=None, height=dp(36),
+        )
+        target_in = CenteredTextInput(
+            text=str(target), input_filter="int", multiline=False,
+            font_size=F.SMALL, foreground_color=C.TEXT,
+            background_color=list(C.BG_INPUT),
+            size_hint_x=0.14,
+        )
+        end_sound_btn = StyledButton(
+            text="Warble" if end_sound == "warble" else "Chime",
+            font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT,
+            size_hint_x=0.16, size_hint_y=None, height=dp(36),
+        )
+        feedback_btn = StyledButton(
+            text="after #10", font_size=F.SMALL, bg_color=C.BG_CARD,
+            text_color=C.TEXT_MUTED, size_hint_x=0.16, size_hint_y=None,
+            height=dp(36), disabled=True,
+        )
+        delete_btn = StyledButton(
+            text="X", font_size=F.SMALL, bg_color=C.BG_CARD,
+            text_color=C.DANGER, size_hint_x=0.1, size_hint_y=None,
+            height=dp(36),
+        )
+
+        row._duration_in = duration_in
+        row._target_in = target_in
+        row._formula = formula
+        row._end_sound = end_sound
+        row._formula_btn = formula_btn
+
+        duration_in.bind(text=lambda *_a: self._on_segment_edited())
+        target_in.bind(text=lambda *_a: self._on_segment_edited())
+        formula_btn.bind(
+            on_release=lambda *_a, r=row: self._open_segment_formula_picker(r)
+        )
+        end_sound_btn.bind(
+            on_release=lambda *_a, r=row, b=end_sound_btn: self._cycle_end_sound(r, b)
+        )
+        delete_btn.bind(
+            on_release=lambda *_a, r=row: self._remove_segment_row(r)
+        )
+
+        row.add_widget(duration_in)
+        row.add_widget(formula_btn)
+        row.add_widget(target_in)
+        row.add_widget(end_sound_btn)
+        row.add_widget(feedback_btn)
+        row.add_widget(delete_btn)
+
+        self._segment_rows.append(row)
+        # Default add into the dedicated segments box: a vertical BoxLayout
+        # renders children in insertion order top→bottom, so segment 1 stays at
+        # the top and each new row appends at the bottom.
+        self._segments_box.add_widget(row)
+
+        if not self._loading_program:
+            logger.info(f"Add segment -> {len(self._segment_rows)} total")
+        self._update_program_total()
+        self._emit_program_changed()
+
+    def _remove_segment_row(self, row) -> None:
+        if row in self._segment_rows:
+            self._segment_rows.remove(row)
+        self._segments_box.remove_widget(row)
+        logger.info(f"Remove segment -> {len(self._segment_rows)} remaining")
+        self._update_program_total()
+        self._emit_program_changed()
+
+    def _cycle_end_sound(self, row, btn) -> None:
+        row._end_sound = "warble" if row._end_sound is None else None
+        btn.text = "Warble" if row._end_sound == "warble" else "Chime"
+        logger.info(f"Segment end-sound -> {row._end_sound or 'chime'}")
+        self._emit_program_changed()
+
+    def _formula_label(self, formula) -> str:
+        if isinstance(formula, dict):
+            return formula.get("name") or formula.get("formula", "Custom")
+        return _PROGRAM_BUILTIN_LABELS.get(formula, str(formula))
+
+    def _open_segment_formula_picker(self, row) -> None:
+        content = BoxLayout(
+            orientation="vertical", spacing=S.GAP_SM, padding=S.GAP_SM,
+        )
+        scroll = ScrollView()
+        listbox = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(2))
+        listbox.bind(minimum_height=listbox.setter("height"))
+
+        popup = Popup(
+            title="Choose metric / formula",
+            content=content,
+            size_hint=(0.9, 0.85),
+        )
+
+        def _choose(value):
+            row._formula = value
+            row._formula_btn.text = self._formula_label(value)
+            logger.info(f"Segment formula -> {self._formula_label(value)}")
+            self._emit_program_changed()
+            popup.dismiss()
+
+        for key, label in PROGRAM_BUILTIN_FORMULAS:
+            btn = StyledButton(
+                text=label, font_size=F.BODY, bg_color=C.BG_CARD,
+                text_color=C.TEXT, size_hint_y=None, height=dp(40),
+            )
+            btn.bind(on_release=lambda *_a, k=key: _choose(k))
+            listbox.add_widget(btn)
+
+        for entry in self._saved_formulas_cache:
+            name = entry.get("name") or entry.get("formula", "")[:30]
+            formula = entry.get("formula", "")
+            btn = StyledButton(
+                text=name, font_size=F.BODY, bg_color=C.PRIMARY_DIM,
+                text_color=C.TEXT, size_hint_y=None, height=dp(40),
+            )
+            btn.bind(
+                on_release=lambda *_a, n=name, f=formula: _choose(
+                    {"name": n, "formula": f}
+                )
+            )
+            listbox.add_widget(btn)
+
+        scroll.add_widget(listbox)
+        content.add_widget(scroll)
+        cancel_btn = StyledButton(
+            text="Cancel", font_size=F.BODY, bg_color=C.BG_CARD,
+            text_color=C.TEXT, size_hint_y=None, height=dp(40),
+        )
+        cancel_btn.bind(on_release=popup.dismiss)
+        content.add_widget(cancel_btn)
+        popup.open()
+
+    def _on_segment_edited(self, *_args) -> None:
+        self._update_program_total()
+        self._emit_program_changed()
+
+    def _update_program_total(self) -> None:
+        total = 0
+        for row in self._segment_rows:
+            try:
+                total += int(row._duration_in.text or 0)
+            except (ValueError, TypeError):
+                pass
+        self._program_total_label.text = f"Total: {total} min"
+
+    def get_program_segments(self) -> list[dict]:
+        """Serialize the editor rows to the program-segment dict format."""
+        segments: list[dict] = []
+        for row in self._segment_rows:
+            try:
+                minutes = int(row._duration_in.text or 0)
+            except (ValueError, TypeError):
+                minutes = 0
+            if minutes < 1:
+                minutes = 1
+            try:
+                target = int(row._target_in.text or 0)
+            except (ValueError, TypeError):
+                target = 0
+            seg: dict = {"minutes": minutes, "target": target, "formula": row._formula}
+            if row._end_sound is not None:
+                seg["end_sound"] = row._end_sound
+            segments.append(seg)
+        return segments
+
+    def _emit_program_changed(self) -> None:
+        if self._loading_program:
+            return
+        if self._on_program_changed_cb:
+            self._on_program_changed_cb(self.get_program_segments())
+
+    def load_program(self, segments: list[dict], mode: str) -> None:
+        """Clear + rebuild rows from segments; set mode. Does NOT fire changed."""
+        self._loading_program = True
+        try:
+            for row in list(self._segment_rows):
+                self._segments_box.remove_widget(row)
+            self._segment_rows.clear()
+            for seg in segments:
+                self._add_segment_row(seg)
+            self.set_program_mode(mode)
+            self._update_program_total()
+        finally:
+            self._loading_program = False
+
+    def set_program_name(self, name: str) -> None:
+        """Reflect the loaded program's name (top label + name field, so a
+        re-save overwrites it)."""
+        self._program_name_input.text = name or ""
+        self._program_loaded_label.text = f"Loaded: {name}" if name else "Loaded: (unsaved)"
 
     def set_device_mode_callback(self, callback: Callable) -> None:
         self._on_device_mode_toggle = callback

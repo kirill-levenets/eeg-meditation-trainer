@@ -128,6 +128,48 @@ or type a new name to start fresh. Names must be
 unique — if you type a name that exists, you'll be
 offered a "Use existing" / "Change name" choice.
 
+## Session Program
+
+Settings → Timer → Simple | Program toggle.
+"Enable Timer" is only shown in Simple mode.
+
+Program mode lets you build a sequence of timed
+segments, each with its own formula, target level,
+and end-cue sound. At each boundary a transition
+chime plays and the target and audio-driver update
+to the next segment's settings. The session
+auto-stops when the last segment ends.
+
+Each segment row: duration (minutes), formula
+(Shamatha / Meditation / NS Attention / NS
+Meditation / saved custom formula), target level,
+end cue (Chime or Warble).
+
+Add rows with "+ Add Segment". Save the whole
+program by name — re-saving under the same name
+overwrites it. Load and delete ask for confirmation.
+The editor shows the name of the currently
+loaded program. Saved programs appear in a list
+you can tap to reload.
+
+On the Session screen, the button next to Start
+shows "P" in program mode. Tap it → Programs…
+to quick-load a saved program; the list highlights
+the currently loaded one.
+
+During a program the graph shows each segment's
+metric. The legend marks the active segment with
+a bold "»"; a chime plays at each segment change
+and the gong sounds at the end.
+
+The live session graph and the diary graph both
+show a stepped threshold line that follows each
+segment's target.
+
+Per-segment continuous audio (replacing white noise
+per segment) is deferred — a placeholder labeled
+"after #10" is shown disabled.
+
 ## Custom Formulas
 
 Settings → Custom Formula has three named slots.

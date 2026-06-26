@@ -20,7 +20,6 @@ from kivy.uix.label import Label
 from kivy.uix.modalview import ModalView
 from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import ScreenManager, SlideTransition
-from kivy.uix.textinput import TextInput
 from kivy.utils import platform as kivy_platform
 
 from app.audio_feedback.noise import AudioEngine
@@ -37,23 +36,36 @@ from app.metrics.custom_formula import CustomFormulaEvaluator
 from app.metrics.engine import MetricsEngine
 from app.metrics.noise_detector import PowerLineDetector
 from app.session.manager import SessionManager, SessionState
+from app.session.session_program import SessionProgram
 from app.session.timer_state import TimerState
 from app.storage import backup as _backup
 from app.storage.backup import restore_backup, validate_backup
 from app.storage.database import DatabaseManager, UserExistsError
 from app.ui.diary_screen import DiaryScreen
 from app.ui.history_screen import HistoryScreen
-from app.ui.live_session import METRICS_COLORS, LiveSessionScreen
+from app.ui.live_session import METRICS_COLORS, SERIES_NAMES, LiveSessionScreen
 from app.ui.profile_screen import ProfileScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
-from app.ui.theme import BottomNav, C, F, Icons, S, StyledButton
+from app.ui.theme import (
+    POPUP_TEXT,
+    BottomNav,
+    C,
+    CenteredTextInput,
+    F,
+    Icons,
+    S,
+    StyledButton,
+    make_scroll_popup,
+)
 from app.ui.widgets.legend import LegendBar
 from app.ui.widgets.loading_overlay import LoadingOverlay
 from app.ui.widgets.user_picker import UserPickerForm
 from app.ui.wizard_screen import WizardScreen
 
 FORMULA_KEYS: tuple[str, ...] = ("custom_formula", "custom_formula_2", "custom_formula_3")
+# Program-driven custom-formula lines: one per distinct custom formula in a program.
+PROGRAM_FORMULA_KEYS: tuple[str, ...] = ("program_formula", "program_formula_2", "program_formula_3")
 _MAX_FORMULAS = len(FORMULA_KEYS)
 
 
@@ -109,6 +121,13 @@ class EEGMeditationApp(App):
         self._init_formula_slots()
         self.serial_device_override: Optional[str] = None
         self._wake_lock = None
+        self._active_program = None
+        self._program_seg_idx: int = -1
+        self._program_formula_evs: dict = {}  # slot_key -> evaluator, one per distinct custom
+        self._program_segment_keys: list[str] = []  # metric key driven by each segment
+        self._session_program_active: bool = False
+        self._program_hidden_slots: list[str] = []  # legacy; see _program_prev_visibility
+        self._program_prev_visibility: dict[str, bool] = {}  # live-graph visibility before a program
 
     def _init_formula_slots(self) -> None:
         """Three independent formula evaluators (one per slot) + their names."""
@@ -167,6 +186,239 @@ class EEGMeditationApp(App):
              "drove_audio": self._audio_metric_key == FORMULA_KEYS[i]}
             for i in range(_MAX_FORMULAS) if self._formula_slots[i].is_valid
         ])
+
+    def _persist_session_program(self, uid: int) -> None:
+        """Persist the active editable program + its name + timer mode for a user."""
+        if not uid:
+            return
+        self._db.set_user_json_setting(uid, "session_program", self._session_program_segments)
+        self._db.set_user_setting(uid, "timer_mode", self._timer_mode)
+        self._db.set_user_setting(uid, "session_program_name", self._session_program_name)
+
+    def _load_session_program(self, uid: int) -> None:
+        """Restore the active editable program + its name + timer mode for a user."""
+        self._session_program_segments = self._db.get_user_json_setting(
+            uid, "session_program", default=[]
+        ) or []
+        self._timer_mode = self._db.get_user_setting(uid, "timer_mode") or "simple"
+        self._session_program_name = self._db.get_user_setting(uid, "session_program_name") or ""
+
+    def _build_session_program(self) -> SessionProgram:
+        """Build a SessionProgram from the active editable segments."""
+        return SessionProgram(self._session_program_segments)
+
+    @staticmethod
+    def _program_plan(prog):
+        """Map a program to its live series. Returns (program_keys, custom_slots,
+        segment_keys): the set of series to show, an ordered list of (slot_key,
+        custom_dict) for each DISTINCT custom formula (capped at PROGRAM_FORMULA_KEYS),
+        and the metric key driven by each segment (built-in key or its custom's slot)."""
+        builtins: set[str] = set()
+        custom_slots: list[tuple] = []         # (slot_key, custom_dict)
+        ident_to_slot: dict[tuple, str] = {}   # (name, formula) -> slot_key
+        segment_keys: list[str] = []
+        for seg in prog.segments:
+            f = seg.get("formula")
+            if isinstance(f, dict):
+                ident = (f.get("name"), f.get("formula"))
+                if ident in ident_to_slot:
+                    segment_keys.append(ident_to_slot[ident])
+                elif len(custom_slots) < len(PROGRAM_FORMULA_KEYS):
+                    slot = PROGRAM_FORMULA_KEYS[len(custom_slots)]
+                    custom_slots.append((slot, f))
+                    ident_to_slot[ident] = slot
+                    segment_keys.append(slot)
+                else:  # > 3 distinct customs (implausible): reuse the last slot
+                    segment_keys.append(custom_slots[-1][0])
+            elif isinstance(f, str) and f:
+                builtins.add(f)
+                segment_keys.append(f)
+            else:
+                segment_keys.append("shamatha_score")
+        keys = set(builtins) | {s for s, _ in custom_slots}
+        return keys, custom_slots, segment_keys
+
+    def _apply_program_visibility(self, prog) -> list:
+        """Set the live graph to EXACTLY the program's metric set and label each program
+        custom line `Program: <name>`. Returns the (slot_key, custom_dict) list. Shared by
+        the running session (`_show_program_series`) and the idle preview."""
+        graph = self._live_screen.graph
+        keys, custom_slots, _ = self._program_plan(prog)
+        for slot, cust in custom_slots:
+            nm = cust.get("name")
+            graph.set_series_name(slot, f"Program: {nm}" if nm else "Program")
+        for k in graph.series_keys():
+            graph.set_visible(k, k in keys)
+        return custom_slots
+
+    def _show_program_series(self, prog) -> None:
+        """Session-start: snapshot prior visibility, show EXACTLY the program's metric
+        set for the whole session, and arm one persistent evaluator per distinct custom
+        formula. Each custom line is shown the whole program (not per-segment) and
+        evaluated every tick, so only the legend marker changes as segments cross."""
+        graph = self._live_screen.graph
+        # Snapshot every catalog key's visibility so stop restores exactly.
+        self._program_prev_visibility = {k: graph.is_visible(k) for k in graph.series_keys()}
+        custom_slots = self._apply_program_visibility(prog)
+        _, _, self._program_segment_keys = self._program_plan(prog)
+        self._program_formula_evs = {}
+        for slot, cust in custom_slots:
+            ev = CustomFormulaEvaluator()
+            ok, _ = ev.set_formula(cust.get("formula", "") or "")
+            if ok and ev.is_valid:
+                self._program_formula_evs[slot] = ev
+
+    def _program_governs_live_series(self) -> bool:
+        """True when the live metrics graph's visibility is program-driven (program mode
+        with a loaded program) — so it must not be persisted as the manual selection."""
+        return (getattr(self, "_timer_mode", "simple") == "program"
+                and bool(getattr(self, "_session_program_segments", None)))
+
+    def _refresh_live_program_series(self) -> None:
+        """Idle preview: in program mode with a loaded program, show the program's metric
+        set on the live graph (legend + lines) before Start; otherwise restore the user's
+        saved selection. No-op while a session runs (the session owns the graph then)."""
+        sm = getattr(self, "_session_manager", None)
+        if sm is not None and sm.state in (SessionState.RUNNING, SessionState.PAUSED):
+            return
+        if not self._current_user_id:
+            return
+        if self._program_governs_live_series():
+            self._apply_program_visibility(self._build_session_program())
+            self._live_screen.set_training_series(None)  # no active segment in idle
+        else:
+            self._apply_saved_series(self._live_screen.graph, self._current_user_id)
+
+    def _restore_program_series(self) -> None:
+        """Restore the live graph to its pre-program visibility and drop the program
+        custom-formula lines/labels/evaluators."""
+        graph = self._live_screen.graph
+        for slot in PROGRAM_FORMULA_KEYS:
+            graph.set_series_name(slot, SERIES_NAMES.get(slot, "Program"))  # drop stale labels
+        self._session_program_active = False
+        self._program_formula_evs = {}
+        self._program_segment_keys = []
+        prev = getattr(self, "_program_prev_visibility", None) or dict.fromkeys(PROGRAM_FORMULA_KEYS, False)
+        for k, on in prev.items():
+            graph.set_visible(k, on)
+        for slot in PROGRAM_FORMULA_KEYS:
+            graph.set_visible(slot, False)  # never linger as a user selection
+        self._program_prev_visibility = {}
+        self._program_hidden_slots = []
+
+    @staticmethod
+    def _program_transition(prev_idx: int, elapsed: float, program):
+        """Pure: (new_idx, segment, crossed). crossed=True when new_idx != prev_idx."""
+        idx, seg = program.segment_at(elapsed)
+        return (idx, seg, idx != prev_idx)
+
+    def _eval_formula_vars(self, raw_sample: dict, metrics: dict) -> dict:
+        """Variable dict for custom-formula evaluation (raw + metrics + derived/sqrt bands)."""
+        fvars = {**raw_sample, **metrics}
+        fvars.update(self._metrics_engine.derive_bands(raw_sample))
+        sqrt_bands = self._metrics_engine.compute_sqrt_relative_bands(raw_sample)
+        fvars.update({f"s_{k}": v for k, v in sqrt_bands.items()})
+        return fvars
+
+    def _apply_program_tick(self, metrics: dict, raw_sample: dict) -> None:
+        """Per-tick program stepping: cross segments, fire cues, evaluate a custom segment formula.
+
+        Runs on the daemon tick thread — only thread-safe state here (audio
+        set_threshold/one-shot, SessionManager, pure evaluators). Kivy widget
+        mutations are dispatched via _on_main.
+        """
+        prog = self._active_program
+        if not prog:
+            return
+        elapsed = self._session_manager.elapsed_seconds
+        idx, seg, crossed = self._program_transition(self._program_seg_idx, elapsed, prog)
+        if seg is None:
+            return
+        if crossed:
+            self._apply_program_segment(self._program_seg_idx, idx, seg)
+            self._program_seg_idx = idx
+        # Every program custom line is evaluated every tick (persistent, shown the whole
+        # program) into its own metrics[slot] — so all stages' lines stay live at once.
+        evs = self._program_formula_evs
+        if evs:
+            fvars = self._eval_formula_vars(raw_sample, metrics)
+            for slot, ev in evs.items():
+                if ev.is_valid:
+                    ev.push_variables(fvars)
+                    metrics[slot] = ev.evaluate(fvars)
+
+    def _resolve_segment_key(self, seg: dict) -> str:
+        """Metric key a segment drives, for callers without a precomputed plan (direct
+        unit tests). A custom segment registers its evaluator under program_formula."""
+        f = seg.get("formula", "shamatha_score")
+        if isinstance(f, dict):
+            ev = CustomFormulaEvaluator()
+            ok, err = ev.set_formula(f.get("formula", "") or "")
+            if ok and ev.is_valid:
+                self._program_formula_evs = getattr(self, "_program_formula_evs", None) or {}
+                self._program_formula_evs["program_formula"] = ev
+                return "program_formula"
+            logger.warning(f"Program segment formula invalid, using shamatha: {err}")
+            return "shamatha_score"
+        return f or "shamatha_score"
+
+    def _apply_program_segment(self, prev_idx: int, idx: int, seg: dict) -> None:
+        """On a boundary crossing: end-cue for the prior segment + repoint target/audio/marker
+        to this segment's metric (built-in key or its custom's persistent program line)."""
+        # End cue for the segment that just ended (skip on initial entry prev_idx == -1).
+        if prev_idx >= 0:
+            prev_seg = self._active_program.segments[prev_idx]
+            self._play_segment_end_sound(prev_seg.get("end_sound"))
+        seg_keys = getattr(self, "_program_segment_keys", None)
+        if seg_keys and 0 <= idx < len(seg_keys):
+            metric_key = seg_keys[idx]
+        else:
+            metric_key = self._resolve_segment_key(seg)
+        formula = seg.get("formula")
+        prog_name = None
+        if isinstance(formula, dict) and metric_key in PROGRAM_FORMULA_KEYS:
+            nm = formula.get("name")
+            prog_name = f"Program: {nm}" if nm else "Program"
+        target = int(seg.get("target", 50))
+        self._audio_metric_key = metric_key
+        self._session_manager.set_active_goal(metric_key, target)
+        self._audio.set_threshold(target)
+        self._on_main(lambda t=target, k=metric_key, nm=prog_name:
+                      self._apply_program_segment_ui(t, k, nm))
+        logger.info(f"Program segment {idx}: metric={metric_key} target={target}")
+
+    def _apply_program_segment_ui(self, target: int, metric_key: str, prog_name) -> None:
+        """Main-thread UI for a segment switch: ensure a custom segment's line is labelled
+        + visible, update the threshold, and move the legend marker. Program lines'
+        visibility is owned by `_show_program_series` (shown the whole program), so a
+        built-in segment no longer hides anything — only the » marker moves."""
+        graph = self._live_screen.graph
+        if prog_name is not None:
+            # Custom segment: label this segment's program line with the formula's name.
+            graph.set_series_name(metric_key, prog_name)
+            graph.set_visible(metric_key, True)
+        graph.set_threshold(float(target), metric_key)
+        self._live_screen.set_training_series(metric_key)  # bold + » on the trained series
+
+    def _play_segment_end_sound(self, sound_id) -> None:
+        """Segment-end cue. v1: chime (default) or 'warble'; richer choices land with #10."""
+        try:
+            if sound_id == "warble":
+                self._audio.play_alert()
+            else:
+                self._audio.play_transition_cue()
+        except Exception:
+            logger.exception("Program segment end cue failed")
+
+    def _session_program_json(self) -> str:
+        """JSON of the program that ran this session (empty for a simple session).
+
+        Serializes the snapshot captured at session start, not the live editor —
+        a mid-session edit in Settings must not rewrite what actually drove the run.
+        """
+        if self._session_program_active and self._active_program:
+            return json.dumps(self._active_program.segments)
+        return ""
 
     def _acquire_wake_lock(self) -> None:
         """Keep CPU running + screen on during session (Android only)."""
@@ -471,6 +723,7 @@ class EEGMeditationApp(App):
         self._live_screen.btn_stop.bind(on_release=self._on_stop)
         self._live_screen.btn_marker.bind(on_release=self._on_marker)
         self._live_screen.on_duration_preset = self._on_duration_preset
+        self._live_screen.on_program_pick = self._on_session_program_pick
         self._live_screen.overlay_cancel_btn.bind(on_release=self._on_connect_cancel)
         self._live_screen.overlay_retry_btn.bind(on_release=self._on_connect_retry)
         self._live_screen.summary_save_btn.bind(on_release=self._on_summary_save)
@@ -502,6 +755,11 @@ class EEGMeditationApp(App):
         self._settings_screen.set_export_formulas_callback(self._on_export_formulas)
         self._settings_screen.set_audio_metric_callback(self._on_audio_metric_change)
         self._settings_screen.set_audio_formula_index_callback(self._on_audio_formula_index)
+        self._settings_screen.set_program_mode_callback(self._on_timer_mode_change)
+        self._settings_screen.set_program_changed_callback(self._on_program_changed)
+        self._settings_screen.set_program_save_callback(self._on_program_save)
+        self._settings_screen.set_program_load_callback(self._on_program_load)
+        self._settings_screen.set_program_delete_callback(self._on_program_delete)
         self._settings_screen.set_theme_callback(self._on_theme_change)
 
         # Keyboard hotkey for marker
@@ -513,11 +771,18 @@ class EEGMeditationApp(App):
         # Hide all custom-formula series until a formula is set + shown via picker
         for _fk in FORMULA_KEYS:
             self._live_screen.graph.set_visible(_fk, False)
+        # The program-formula lines are shown only while a program with
+        # custom-formula segments runs.
+        for _pk in PROGRAM_FORMULA_KEYS:
+            self._live_screen.graph.set_visible(_pk, False)
         # Apply default metric visibility (Shamatha only for new users;
         # _load_user_settings will override for existing users)
         for key, active in self._settings_screen._graph_toggles.items():
             self._live_screen.graph.set_visible(key, active)
         self._audio_metric_key: str = "shamatha_score"
+        self._session_program_segments: list[dict] = []
+        self._session_program_name: str = ""  # name of the loaded/saved active program
+        self._timer_mode: str = "simple"
 
         self._diary_screen.set_session_select_callback(self._on_session_select)
         self._diary_screen.set_save_notes_callback(self._on_save_notes)
@@ -743,6 +1008,9 @@ class EEGMeditationApp(App):
             self._refresh_diary()
         elif name == "profile":
             self._refresh_profile()
+        elif name == "live_session":
+            # Reflect any Settings timer/mode change on the Start duration button.
+            self._sync_live_timer_picker()
         # Sync bottom nav highlight
         for tab_key, screen in self._TAB_SCREENS.items():
             if screen == name:
@@ -889,6 +1157,25 @@ class EEGMeditationApp(App):
         # doesn't overlap with the new session's noise loop.
         self._audio.stop_timer_bell()
         threshold = self._settings_screen.threshold
+        prog = self._build_session_program()
+        self._program_seg_idx = -1
+        self._program_formula_evs = {}
+        self._program_segment_keys = []
+        self._session_program_active = self._timer_mode == "program" and bool(prog)
+        self._active_program = prog if self._session_program_active else None
+        if self._session_program_active:
+            # Program total drives the timer so auto-stop reuses the proven
+            # timer-expiry path; the first segment's target seeds the threshold.
+            threshold = int(prog.segments[0].get("target", threshold))
+            self._timer_state.set_enabled(True)
+            self._timer_state.set_duration(max(1, int(round(prog.total_seconds / 60))))
+            logger.info(f"Program session: {len(prog.segments)} segments, "
+                        f"{prog.total_seconds:.0f}s total drives the end gong")
+        else:
+            # Session start is authoritative: re-sync the timer from Settings so a
+            # prior program session's enabled/duration can't leak into a simple one.
+            self._timer_state.set_enabled(self._settings_screen.timer_enabled)
+            self._timer_state.set_duration(self._settings_screen.timer_minutes)
         self._metrics_engine.meditation_threshold = threshold
         self._audio.set_threshold(threshold)
         self._metrics_engine.reset()
@@ -910,7 +1197,15 @@ class EEGMeditationApp(App):
         self._live_screen.graph.clear_data()
         self._live_screen.raw_graph.clear_data()
         self._live_screen.band_graph.clear_data()
-        self._live_screen.graph.set_threshold(float(threshold), "shamatha_score")
+        if self._session_program_active:
+            self._live_screen.graph.set_threshold_steps(
+                prog.threshold_steps(self._live_screen.graph._sample_rate)
+            )
+            self._show_program_series(prog)
+        else:
+            self._live_screen.graph.set_threshold_steps(None)
+            self._live_screen.graph.set_threshold(float(threshold), "shamatha_score")
+        self._live_screen.set_training_series(None)  # set on first segment crossing
         self._live_screen.hide_alert()
         self._live_screen.set_controls_running()
 
@@ -1094,12 +1389,14 @@ class EEGMeditationApp(App):
                 self._db.update_session(
                     self._current_session_id, stats,
                     custom_formulas=self._session_custom_formulas_json(),
+                    session_program=self._session_program_json(),
                 )
             else:
                 self._current_session_id = self._db.save_session(
                     stats, user_id=self._current_user_id,
                     session_name=self._make_session_name(),
                     custom_formulas=self._session_custom_formulas_json(),
+                    session_program=self._session_program_json(),
                 )
             if self._metrics_buffer:
                 self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
@@ -1142,6 +1439,8 @@ class EEGMeditationApp(App):
             self._reload_live_graphs_from_mirror()
         except Exception:
             logger.exception("graph reload on stop failed")
+        self._live_screen.set_training_series(None)  # clear the program "training now" marker
+        self._restore_program_series()
         self._live_screen.set_controls_idle()
         self._live_screen.update_device_status(False)
         self._live_screen.update_state("FINISHED")
@@ -1188,12 +1487,14 @@ class EEGMeditationApp(App):
                 self._db.update_session(
                     self._current_session_id, stats,
                     custom_formulas=self._session_custom_formulas_json(),
+                    session_program=self._session_program_json(),
                 )
             else:
                 self._current_session_id = self._db.save_session(
                     stats, user_id=self._current_user_id,
                     session_name=self._make_session_name(),
                     custom_formulas=self._session_custom_formulas_json(),
+                    session_program=self._session_program_json(),
                 )
             if self._metrics_buffer:
                 self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
@@ -1479,14 +1780,14 @@ class EEGMeditationApp(App):
 
         # Evaluate custom formulas if any slot is active
         if any(e.is_valid for e in self._formula_slots):
-            formula_vars = {**raw_sample, **metrics}
-            formula_vars.update(self._metrics_engine.derive_bands(raw_sample))
-            sqrt_bands = self._metrics_engine.compute_sqrt_relative_bands(raw_sample)
-            formula_vars.update({f"s_{k}": v for k, v in sqrt_bands.items()})
+            formula_vars = self._eval_formula_vars(raw_sample, metrics)
             for key, ev in zip(FORMULA_KEYS, self._formula_slots):
                 if ev.is_valid:
                     ev.push_variables(formula_vars)
                     metrics[key] = ev.evaluate(formula_vars)
+
+        if getattr(self, "_timer_mode", "simple") == "program":
+            self._apply_program_tick(metrics, raw_sample)
 
         self._session_manager.add_metric(metrics)
         # Merge raw + computed for full storage
@@ -1603,6 +1904,7 @@ class EEGMeditationApp(App):
                     stats_partial, user_id=self._current_user_id,
                     session_name=self._make_session_name(),
                     custom_formulas=self._session_custom_formulas_json(),
+                    session_program=self._session_program_json(),
                 )
             self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
             self._metrics_buffer = []
@@ -1679,17 +1981,33 @@ class EEGMeditationApp(App):
             logger.info("Marker placed")
 
     def _on_duration_preset(self, value) -> None:
-        """Handle Live Session preset tap: update timer settings + persist."""
+        """Handle Live Session duration tap: a fixed duration is a simple-timer
+        choice, so it also leaves program mode."""
         if value is None:
             self._settings_screen.timer_enabled = False
         else:
             self._settings_screen.timer_enabled = True
             self._settings_screen.timer_minutes = value
+        self._timer_mode = "simple"
+        self._settings_screen.set_program_mode("simple")
+        self._persist_session_program(self._current_user_id)
         self._save_user_settings()
+        self._sync_live_timer_picker()
+
+    def _on_session_program_pick(self, index: int) -> None:
+        """In-session 'Programs…' pick: load it (with confirm) and switch to program mode."""
+        self._on_program_load(index)
+
+    def _sync_live_timer_picker(self) -> None:
+        """Refresh the live duration picker: a large 'P' in program mode, else the duration."""
+        program_active = (self._timer_mode == "program"
+                          and bool(self._session_program_segments))
         self._live_screen.refresh_duration_preset(
             self._settings_screen.timer_enabled,
             self._settings_screen.timer_minutes,
+            program_active=program_active,
         )
+        self._refresh_live_program_series()  # idle preview of the program's metric set
 
     def _on_threshold_change(self, value: int) -> None:
         self._metrics_engine.meditation_threshold = value
@@ -1706,8 +2024,10 @@ class EEGMeditationApp(App):
         that assigns a saved formula to that slot without leaving the picker.
         """
         is_live = graph is self._live_screen.graph
-        body = BoxLayout(orientation="vertical", spacing=S.GAP_SM, padding=S.GAP)
+        rows = []
         for key in graph.series_keys():
+            if key in PROGRAM_FORMULA_KEYS and not (is_live and self._session_program_active):
+                continue  # program-controlled: only listed while its program runs
             vis = graph.is_visible(key)
             btn = StyledButton(
                 text=graph.series_name(key), height=dp(44),
@@ -1726,9 +2046,9 @@ class EEGMeditationApp(App):
                 choose_btn.bind(on_release=lambda _b, si=slot_idx, tb=btn: self._open_saved_formula_chooser(si, tb))
                 row.add_widget(btn)
                 row.add_widget(choose_btn)
-                body.add_widget(row)
+                rows.append(row)
             else:
-                body.add_widget(btn)
+                rows.append(btn)
         # Neutral outlined Close — a green fill (PRIMARY) collided with the
         # green "selected" pills (ACCENT) on the green palettes.
         close_btn = StyledButton(
@@ -1736,14 +2056,8 @@ class EEGMeditationApp(App):
             outline=True, bg_color=C.TEXT_SECONDARY,
             text_color=C.TEXT, bg_pressed=C.BG_CARD,
         )
-        popup = Popup(
-            title="Graph series", content=body,
-            size_hint=(0.8, None),
-            height=dp(80 + 50 * (len(graph.series_keys()) + 1)),
-            auto_dismiss=True,
-        )
+        popup = make_scroll_popup("Graph series", rows, footer=close_btn)
         close_btn.bind(on_release=lambda *_a: popup.dismiss())
-        body.add_widget(close_btn)
         popup.bind(on_dismiss=lambda *_a: self._persist_graph_series(graph))
         popup.open()
 
@@ -1753,13 +2067,6 @@ class EEGMeditationApp(App):
         if not self._current_user_id:
             return
         formulas = self._db.get_saved_formulas(self._current_user_id)
-        inner_body = BoxLayout(orientation="vertical", spacing=S.GAP_SM, padding=S.GAP)
-        inner_popup = Popup(
-            title="Choose saved formula", content=inner_body,
-            size_hint=(0.75, None),
-            height=dp(80 + 50 * (max(len(formulas), 1) + 1)),
-            auto_dismiss=True,
-        )
 
         def _choose(entry):
             inner_popup.dismiss()
@@ -1769,8 +2076,9 @@ class EEGMeditationApp(App):
             toggle_btn.text_color = C.TEXT if vis else C.TEXT_SECONDARY
             toggle_btn.bold = vis
 
+        rows = []
         if not formulas:
-            inner_body.add_widget(Label(
+            rows.append(Label(
                 text="No saved formulas", color=C.TEXT_SECONDARY,
                 height=dp(44), size_hint_y=None,
             ))
@@ -1782,13 +2090,13 @@ class EEGMeditationApp(App):
                     bg_color=C.BG_CARD, text_color=C.TEXT,
                 )
                 row_btn.bind(on_release=lambda _b, e=entry: _choose(e))
-                inner_body.add_widget(row_btn)
+                rows.append(row_btn)
         cancel_btn = StyledButton(
             text="Cancel", height=dp(44),
             bg_color=C.PRIMARY, bg_pressed=C.PRIMARY_DIM,
         )
+        inner_popup = make_scroll_popup("Choose saved formula", rows, footer=cancel_btn, width_hint=0.8)
         cancel_btn.bind(on_release=lambda *_a: inner_popup.dismiss())
-        inner_body.add_widget(cancel_btn)
         inner_popup.open()
 
     def _toggle_series_row(self, graph, key: str, btn) -> None:
@@ -1815,12 +2123,19 @@ class EEGMeditationApp(App):
         self._fullscreen_content.add_widget(self._fullscreen_legend)
 
     def _persist_graph_series(self, graph) -> None:
-        """Persist `graph`'s visible series under its per-graph key on picker close."""
+        """Persist `graph`'s visible series under its per-graph key on picker close.
+
+        Skips the live metrics graph while a program governs its visibility — the
+        program-driven set must not overwrite the user's saved manual selection."""
         uid = self._current_user_id
-        if uid and graph.graph_id:
-            self._db.set_user_json_setting(
-                uid, f"graph_series_{graph.graph_id}", graph.visible_keys()
-            )
+        if not (uid and graph.graph_id):
+            return
+        if graph is self._live_screen.graph and self._program_governs_live_series():
+            return
+        self._db.set_user_json_setting(
+            uid, f"graph_series_{graph.graph_id}",
+            [k for k in graph.visible_keys() if k not in PROGRAM_FORMULA_KEYS],
+        )
 
     def _on_test_audio(self) -> None:
         logger.debug("Test audio triggered")
@@ -1966,6 +2281,129 @@ class EEGMeditationApp(App):
                 f.write(f"{entry['formula']}\n")
         self._settings_screen.set_formula_slot_status(0, f"Exported to {os.path.basename(path)}")
         logger.info(f"Exported {len(formulas)} formulas to {path}")
+
+    def _on_timer_mode_change(self, mode: str) -> None:
+        self._timer_mode = mode
+        self._persist_session_program(self._current_user_id)
+        self._sync_live_timer_picker()
+
+    def _on_program_changed(self, segments: list) -> None:
+        self._session_program_segments = segments
+        self._persist_session_program(self._current_user_id)
+
+    def _on_program_save(self, name: str) -> None:
+        """Save the active program under `name`. Unique names: an existing name
+        overwrites (after confirm); a new name is added directly."""
+        name = name.strip()
+        if not name or not self._current_user_id:
+            return
+        progs = self._db.get_saved_programs(self._current_user_id)
+        existing = next((i for i, p in enumerate(progs) if p.get("name") == name), None)
+        if existing is not None:
+            self._confirm_program_action(
+                "Overwrite program",
+                f"A program named '{name}' already exists.\n"
+                f"Overwrite it with the current segments?",
+                "Overwrite",
+                lambda: self._save_program(existing, name),
+                ok_color=C.WARM,
+            )
+        else:
+            self._save_program(None, name)
+
+    def _save_program(self, index, name: str) -> None:
+        """Add (index=None) or overwrite (index set) a saved program by name."""
+        if index is None:
+            self._db.add_saved_program(self._current_user_id, name,
+                                       self._session_program_segments)
+            logger.info(f"Saved new program '{name}'")
+        else:
+            self._db.update_saved_program(self._current_user_id, index, name,
+                                          self._session_program_segments)
+            logger.info(f"Overwrote program '{name}'")
+        self._session_program_name = name  # the active program now carries this name
+        self._persist_session_program(self._current_user_id)
+        self._refresh_saved_programs()
+
+    def _on_program_load(self, index: int) -> None:
+        if not self._current_user_id:
+            return
+        progs = self._db.get_saved_programs(self._current_user_id)
+        if not (0 <= index < len(progs)):
+            return
+        name = progs[index].get("name", "")
+        self._confirm_program_action(
+            "Load program",
+            f"Load '{name}'?\nUnsaved changes to the current program will be lost.",
+            "Load",
+            lambda i=index, n=name: self._load_program(i, n),
+        )
+
+    def _load_program(self, index: int, name: str) -> None:
+        progs = self._db.get_saved_programs(self._current_user_id)
+        if not (0 <= index < len(progs)):
+            return
+        self._session_program_segments = progs[index]["segments"]
+        self._session_program_name = name
+        self._timer_mode = "program"
+        self._persist_session_program(self._current_user_id)
+        self._settings_screen.load_program(self._session_program_segments, "program")
+        self._settings_screen.set_program_name(name)
+        self._sync_live_timer_picker()
+        self._refresh_saved_programs()  # re-highlight the now-current program in the picker
+        logger.info(f"Loaded program '{name}'")
+
+    def _on_program_delete(self, index: int) -> None:
+        if not self._current_user_id:
+            return
+        progs = self._db.get_saved_programs(self._current_user_id)
+        if not (0 <= index < len(progs)):
+            return
+        name = progs[index].get("name", "")
+        self._confirm_program_action(
+            "Delete program",
+            f"Delete saved program '{name}'?",
+            "Delete",
+            lambda i=index: self._delete_program(i),
+            ok_color=C.DANGER,
+        )
+
+    def _delete_program(self, index: int) -> None:
+        self._db.remove_saved_program(self._current_user_id, index)
+        logger.info(f"Deleted saved program #{index}")
+        self._refresh_saved_programs()
+
+    def _refresh_saved_programs(self) -> None:
+        """Push the current saved-programs list to the settings + session UIs."""
+        progs = (self._db.get_saved_programs(self._current_user_id)
+                 if self._current_user_id else [])
+        self._settings_screen.set_saved_programs(progs)
+        self._live_screen.set_session_programs(progs, self._session_program_name)
+
+    def _confirm_program_action(self, title, message, ok_text, on_ok,
+                                ok_color=None) -> None:
+        """Modal confirm dialog (mirrors _confirm_restore); on_ok runs on confirm."""
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
+        content.add_widget(Label(
+            text=message, halign="center", valign="middle", color=POPUP_TEXT,
+        ))
+        btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+        ok_btn = StyledButton(text=ok_text, bg_color=ok_color or C.ACCENT)
+        cancel_btn = StyledButton(
+            text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_MUTED,
+        )
+        btn_row.add_widget(ok_btn)
+        btn_row.add_widget(cancel_btn)
+        content.add_widget(btn_row)
+        popup = Popup(title=title, content=content, size_hint=(0.85, 0.4))
+
+        def _do(*_a):
+            popup.dismiss()
+            on_ok()
+
+        ok_btn.bind(on_release=_do)
+        cancel_btn.bind(on_release=popup.dismiss)
+        popup.open()
 
     def _refresh_saved_formulas(self) -> None:
         """Refresh the saved formulas list in settings UI."""
@@ -2148,6 +2586,7 @@ class EEGMeditationApp(App):
                 self._diary_screen.set_metrics_threshold(float(session.get("threshold_used", 50)))
                 self._diary_screen.set_session_formulas(series, names)
                 self._diary_screen.load_metrics_preview(metrics)
+                self._diary_screen.set_program(session.get("session_program", ""))
                 self._session_detail_back = self._sm.current
                 self._sm.current = "diary"
         finally:
@@ -2508,7 +2947,7 @@ class EEGMeditationApp(App):
             filters=["*.db"],
             size_hint_y=0.7,
         )
-        name_input = TextInput(
+        name_input = CenteredTextInput(
             text=default_filename,
             multiline=False,
             size_hint_y=None,
@@ -2626,6 +3065,7 @@ class EEGMeditationApp(App):
             uid, "rotation", str(self._settings_screen._current_rotation)
         )
         self._persist_active_formulas(uid)
+        self._persist_session_program(uid)
         self._db.set_user_setting(uid, "audio_formula_index", str(self._audio_formula_index))
         # Save zoom level as viewport duration in seconds
         graph = self._live_screen.graph
@@ -2634,8 +3074,11 @@ class EEGMeditationApp(App):
         # Per-graph series selection (the on-graph picker is the source of truth).
         for g in self._all_graphs():
             if g.graph_id and len(g.series_keys()) > 1:
+                if g is self._live_screen.graph and self._program_governs_live_series():
+                    continue  # program-driven visibility; keep the saved manual selection
                 self._db.set_user_json_setting(
-                    uid, f"graph_series_{g.graph_id}", g.visible_keys()
+                    uid, f"graph_series_{g.graph_id}",
+                    [k for k in g.visible_keys() if k not in PROGRAM_FORMULA_KEYS],
                 )
         self._db.set_user_setting(uid, "audio_metric", self._audio_metric_key)
         self._db.set_user_setting(uid, "marker_hotkey", self._settings_screen.marker_hotkey)
@@ -2653,19 +3096,27 @@ class EEGMeditationApp(App):
         for graph in self._all_graphs():
             if not graph.graph_id or len(graph.series_keys()) <= 1:
                 continue
-            series = self._db.get_user_json_setting(user_id, f"graph_series_{graph.graph_id}")
-            if series is not None:
-                sel = set(series)
-            elif graph is self._live_screen.graph:
-                sel = self._legacy_live_series(user_id)
-            else:
-                sel = set(graph.series_keys())
-            for key in graph.series_keys():
-                on = key in sel
-                ev = self._formula_for_key(key)
-                if ev is not None and graph is self._live_screen.graph:
-                    on = on and ev.is_valid
-                graph.set_visible(key, on)
+            self._apply_saved_series(graph, user_id)
+
+    def _apply_saved_series(self, graph, user_id: int) -> None:
+        """Apply one graph's persisted series selection (graph_series_<id>). The live
+        metrics graph migrates the pre-F2 toggle_<key> rows when it has no JSON yet and
+        gates custom-formula slots on validity; other graphs default to all-visible."""
+        series = self._db.get_user_json_setting(user_id, f"graph_series_{graph.graph_id}")
+        if series is not None:
+            sel = set(series)
+        elif graph is self._live_screen.graph:
+            sel = self._legacy_live_series(user_id)
+        else:
+            sel = set(graph.series_keys())
+        for key in graph.series_keys():
+            on = key in sel
+            if key in PROGRAM_FORMULA_KEYS:
+                on = False  # program-controlled; never restored as a user selection
+            ev = self._formula_for_key(key)
+            if ev is not None and graph is self._live_screen.graph:
+                on = on and ev.is_valid
+            graph.set_visible(key, on)
 
     def _legacy_live_series(self, user_id: int) -> set[str]:
         """Pre-F2 fallback for the live metrics graph: per-metric toggle_<key> rows
@@ -2738,6 +3189,10 @@ class EEGMeditationApp(App):
         # Load formulas BEFORE _restore_graph_series so the per-slot validity gate
         # sees real is_valid; the picker selection (graph_series_*) decides visibility.
         self._apply_active_formulas(self._read_active_formulas_with_migration(user_id))
+        self._load_session_program(user_id)
+        self._settings_screen.load_program(self._session_program_segments, self._timer_mode)
+        self._settings_screen.set_program_name(self._session_program_name)  # show loaded name
+        # Saved-programs list pushed to both UIs at the end via _refresh_saved_programs.
         self._push_formula_names_to_graph()
         idx = g(user_id, "audio_formula_index")
         if idx is not None:
@@ -2830,12 +3285,10 @@ class EEGMeditationApp(App):
         history_mode = g(user_id, "history_view_mode") or "calendar"
         self._history_screen.set_view_mode(history_mode)
 
-        # Sync live-screen preset highlight with loaded timer state
-        self._live_screen.refresh_duration_preset(
-            self._settings_screen.timer_enabled,
-            self._settings_screen.timer_minutes,
-        )
+        # Sync live-screen preset highlight (incl. program "P") with loaded state
+        self._sync_live_timer_picker()
         self._refresh_saved_formulas()
+        self._refresh_saved_programs()
         logger.debug(f"Loaded settings for user {user_id}")
 
     def on_start(self) -> None:

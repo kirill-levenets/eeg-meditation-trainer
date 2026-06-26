@@ -154,19 +154,23 @@ class DatabaseManager:
         if "custom_formulas" not in sess_cols:
             self._conn.execute("ALTER TABLE sessions ADD COLUMN custom_formulas TEXT DEFAULT ''")
             logger.info("Migrated: added column sessions.custom_formulas")
+        if "session_program" not in sess_cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN session_program TEXT DEFAULT ''")
+            logger.info("Migrated: added column sessions.session_program")
 
         self._conn.commit()
 
     def save_session(self, stats: dict, user_id: Optional[int] = None,
-                     session_name: str = "", custom_formulas: str = "") -> int:
+                     session_name: str = "", custom_formulas: str = "",
+                     session_program: str = "") -> int:
         """Insert a session record and return its ID. `custom_formulas` is a JSON string."""
         cursor = self._conn.execute(
             """
             INSERT INTO sessions
             (user_id, date_time, duration, threshold_used, avg_meditation, avg_shamatha,
              max_meditation, time_above_threshold, longest_streak, session_name,
-             time_shamatha_90, custom_formulas)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             time_shamatha_90, custom_formulas, session_program)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -181,6 +185,7 @@ class DatabaseManager:
                 session_name,
                 stats.get("time_shamatha_90", 0),
                 custom_formulas,
+                session_program,
             ),
         )
         self._conn.commit()
@@ -338,7 +343,8 @@ class DatabaseManager:
     # ---- Session management ----
 
     def update_session(self, session_id: int, stats: dict,
-                       custom_formulas: str | None = None) -> None:
+                       custom_formulas: str | None = None,
+                       session_program: str | None = None) -> None:
         """Update an existing session's aggregate stats (+ formula snapshot if given)."""
         cols = ["duration = ?", "threshold_used = ?", "avg_meditation = ?",
                 "avg_shamatha = ?", "max_meditation = ?", "time_above_threshold = ?",
@@ -356,6 +362,9 @@ class DatabaseManager:
         if custom_formulas is not None:
             cols.append("custom_formulas = ?")
             vals.append(custom_formulas)
+        if session_program is not None:
+            cols.append("session_program = ?")
+            vals.append(session_program)
         vals.append(session_id)
         self._conn.execute(
             f"UPDATE sessions SET {', '.join(cols)} WHERE id = ?", vals
@@ -461,6 +470,47 @@ class DatabaseManager:
         if 0 <= index < len(formulas):
             formulas.pop(index)
             self._save_formulas_list(user_id, formulas)
+
+    # ---- Saved programs (per-user, max 20) ----
+
+    _MAX_SAVED_PROGRAMS = 20
+
+    def get_saved_programs(self, user_id: int) -> list[dict]:
+        """Return saved programs for a user as [{name, segments}, ...]."""
+        raw = self.get_user_setting(user_id, "saved_programs")
+        if not raw:
+            return []
+        try:
+            data = json.loads(raw)
+            return data if isinstance(data, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    def _save_programs_list(self, user_id: int, programs: list[dict]) -> None:
+        self.set_user_setting(user_id, "saved_programs", json.dumps(programs))
+
+    def add_saved_program(self, user_id: int, name: str, segments: list[dict]) -> bool:
+        """Save a program. Returns False if the limit is reached."""
+        programs = self.get_saved_programs(user_id)
+        if len(programs) >= self._MAX_SAVED_PROGRAMS:
+            return False
+        programs.append({"name": name, "segments": segments})
+        self._save_programs_list(user_id, programs)
+        return True
+
+    def update_saved_program(self, user_id: int, index: int, name: str, segments: list[dict]) -> None:
+        """Update a saved program by index."""
+        programs = self.get_saved_programs(user_id)
+        if 0 <= index < len(programs):
+            programs[index] = {"name": name, "segments": segments}
+            self._save_programs_list(user_id, programs)
+
+    def remove_saved_program(self, user_id: int, index: int) -> None:
+        """Remove a saved program by index."""
+        programs = self.get_saved_programs(user_id)
+        if 0 <= index < len(programs):
+            programs.pop(index)
+            self._save_programs_list(user_id, programs)
 
     def get_db_size_bytes(self) -> int:
         """Return the database file size in bytes."""

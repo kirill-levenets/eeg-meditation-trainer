@@ -7,7 +7,8 @@ from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
-from kivy.uix.textinput import TextInput
+
+from app.ui.theme import CenteredTextInput
 
 
 class ProfileScreen(Screen):
@@ -47,7 +48,7 @@ class ProfileScreen(Screen):
 
         # --- Create user row ---
         create_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
-        self._name_input = TextInput(
+        self._name_input = CenteredTextInput(
             hint_text="Enter user name...",
             multiline=False,
             font_size=dp(14),

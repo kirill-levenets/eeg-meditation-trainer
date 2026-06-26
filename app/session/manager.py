@@ -26,11 +26,18 @@ class SessionManager:
         self._current_streak: float = 0.0
         self._longest_streak: float = 0.0
         self._threshold_used: int = 50
+        self._active_metric: str = "meditation_score"
+        self._active_target: float | None = None
         self._audio = None
 
     def set_audio(self, audio) -> None:
         """Attach the audio engine so non-user stops can play the alert."""
         self._audio = audio
+
+    def set_active_goal(self, metric_key: str, target: float) -> None:
+        """Program mode: accrue 'time above threshold' against this metric/target per tick."""
+        self._active_metric = metric_key
+        self._active_target = target
 
     @property
     def state(self) -> SessionState:
@@ -65,6 +72,8 @@ class SessionManager:
             self._current_streak = 0.0
             self._longest_streak = 0.0
             self._threshold_used = threshold
+            self._active_metric = "meditation_score"
+            self._active_target = None
             logger.info("Session started")
 
     def pause(self) -> None:
@@ -103,7 +112,8 @@ class SessionManager:
         """Accumulate a processed metric tick for end-of-session stats."""
         if self._state == SessionState.RUNNING:
             self._metrics_accumulator.append(metric)
-            if metric.get("meditation_score", 0) >= self._threshold_used:
+            goal = self._active_target if self._active_target is not None else self._threshold_used
+            if metric.get(self._active_metric, 0) >= goal:
                 self._time_above_threshold += 0.5  # 2 Hz tick = 0.5s
                 self._current_streak += 0.5
                 if self._current_streak > self._longest_streak:
@@ -162,6 +172,8 @@ class SessionManager:
         self._current_streak = 0.0
         self._longest_streak = 0.0
         self._total_paused = 0.0
+        self._active_metric = "meditation_score"
+        self._active_target = None
 
 
 if __name__ == "__main__":

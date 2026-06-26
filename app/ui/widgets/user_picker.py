@@ -8,10 +8,9 @@ from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.scrollview import ScrollView
-from kivy.uix.textinput import TextInput
 
 from app.logger import logger
-from app.ui.theme import C, F, S, StyledButton
+from app.ui.theme import C, CenteredTextInput, F, S, StyledButton
 
 
 class UserPickerForm(BoxLayout):
@@ -84,7 +83,7 @@ class UserPickerForm(BoxLayout):
 
         # --- (2) Name input + Create ---
         input_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=S.GAP_SM)
-        self._name_input = TextInput(
+        self._name_input = CenteredTextInput(
             hint_text="New profile name…",
             multiline=False,
             font_size=F.BODY,

@@ -1,3 +1,4 @@
+import json
 import math
 import os
 import sys
@@ -18,8 +19,17 @@ from kivy.uix.textinput import TextInput
 
 from app.config import APP
 from app.logger import logger, timed
+from app.session.session_program import SessionProgram
 from app.ui.raw_eeg_screen import GraphAwareScrollView, ScrollableGraphWidget
-from app.ui.theme import C, F, Icons, S, StyledButton, format_duration
+from app.ui.theme import (
+    C,
+    CenteredTextInput,
+    F,
+    Icons,
+    S,
+    StyledButton,
+    format_duration,
+)
 from app.ui.widgets.legend import LegendBar
 
 METRICS_PREVIEW_COLORS = {
@@ -314,7 +324,7 @@ class DiaryScreen(Screen):
         tags_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
         self._detail_layout.add_widget(tags_label)
 
-        self._tags_input = TextInput(
+        self._tags_input = CenteredTextInput(
             hint_text="morning, calm, focused...",
             multiline=False,
             size_hint_y=None,
@@ -631,6 +641,24 @@ class DiaryScreen(Screen):
         """Set threshold line on the metrics preview graph."""
         self._metrics_graph.set_threshold(value, "meditation_score")
 
+    def set_program(self, program_json: str) -> None:
+        """Draw the recorded program's stepped threshold on the metrics graph.
+
+        Empty/invalid JSON clears the steps so a non-program session falls back
+        to its single-value threshold.
+        """
+        try:
+            segs = json.loads(program_json) if program_json else []
+        except (ValueError, TypeError):
+            segs = []
+        prog = SessionProgram(segs)
+        if prog:
+            self._metrics_graph.set_threshold_steps(
+                prog.threshold_steps(self._metrics_graph._sample_rate)
+            )
+        else:
+            self._metrics_graph.set_threshold_steps(None)
+
     def _switch_graph_tab(self, tab: str) -> None:
         """Switch the visible graph in the preview area."""
         self._active_graph_tab = tab
@@ -738,7 +766,7 @@ class DiaryScreen(Screen):
         name_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=S.GAP)
         name_label = Label(text="File name:", font_size=F.BODY, size_hint_x=0.25,
                            color=C.TEXT_SECONDARY)
-        self._export_filename = TextInput(
+        self._export_filename = CenteredTextInput(
             text=f"session_{self._selected_session_id}.csv",
             multiline=False,
             font_size=F.BODY,

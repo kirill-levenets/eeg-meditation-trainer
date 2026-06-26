@@ -338,5 +338,33 @@ class TestDatabaseExtensions(unittest.TestCase):
         self.assertEqual(stored[0]["formula"], "alpha + beta")
 
 
+def test_session_program_column_roundtrip(tmp_path):
+    from app.storage.database import DatabaseManager
+    db = DatabaseManager(db_path=str(tmp_path / "p.db"))
+    uid = db.create_user("u")
+    prog = '[{"minutes":10,"target":50,"formula":"shamatha_score"}]'
+    sid = db.save_session({"duration": 1}, user_id=uid, session_program=prog)
+    assert db.get_session(sid)["session_program"] == prog
+    db.update_session(sid, {"duration": 2}, session_program='[]')
+    assert db.get_session(sid)["session_program"] == "[]"
+    db.close()
+
+
+def test_saved_programs_roundtrip(tmp_path):
+    from app.storage.database import DatabaseManager
+    db = DatabaseManager(db_path=str(tmp_path / "sp.db"))
+    uid = db.create_user("u")
+    assert db.get_saved_programs(uid) == []
+    segs = [{"minutes": 10, "target": 50, "formula": "shamatha_score"}]
+    assert db.add_saved_program(uid, "Ramp", segs) is True
+    got = db.get_saved_programs(uid)
+    assert got == [{"name": "Ramp", "segments": segs}]
+    db.update_saved_program(uid, 0, "Ramp2", segs)
+    assert db.get_saved_programs(uid)[0]["name"] == "Ramp2"
+    db.remove_saved_program(uid, 0)
+    assert db.get_saved_programs(uid) == []
+    db.close()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

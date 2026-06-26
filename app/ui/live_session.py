@@ -10,7 +10,6 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
-from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
@@ -29,6 +28,7 @@ from app.ui.theme import (
     S,
     StyledButton,
     format_duration,
+    make_scroll_popup,
 )
 from app.ui.widgets.legend import LegendBar
 
@@ -60,6 +60,7 @@ _RAW_WAVEFORM_MAX = 512 * 60
 
 METRICS_COLORS = {
     "shamatha_score": C.SHAMATHA,
+    "meditation_score": C.MED_SCORE,
     "distraction": C.DISTRACTION,
     "sinking": C.SINKING,
     "subtle_distraction": C.SUBTLE,
@@ -68,10 +69,16 @@ METRICS_COLORS = {
     "custom_formula": C.CUSTOM,
     "custom_formula_2": C.CUSTOM2,
     "custom_formula_3": C.CUSTOM3,
+    # Live lines for a program's custom-formula segments (hidden until a program
+    # with custom segments runs); one per distinct custom formula, labels track them.
+    "program_formula": C.WARM,
+    "program_formula_2": C.WARM2,
+    "program_formula_3": C.WARM3,
 }
 
 METRICS_SCALES = {
     "shamatha_score": 100.0,
+    "meditation_score": 100.0,
     "distraction": 100.0,
     "sinking": 100.0,
     "subtle_distraction": 100.0,
@@ -80,11 +87,15 @@ METRICS_SCALES = {
     "custom_formula": 200.0,
     "custom_formula_2": 200.0,
     "custom_formula_3": 200.0,
+    "program_formula": 200.0,
+    "program_formula_2": 200.0,
+    "program_formula_3": 200.0,
 }
 
 # Friendly labels for the on-graph series picker (combobox).
 SERIES_NAMES = {
     "shamatha_score": "Shamatha",
+    "meditation_score": "Meditation",
     "distraction": "Distraction",
     "sinking": "Sinking",
     "subtle_distraction": "Subtle Distraction",
@@ -93,6 +104,9 @@ SERIES_NAMES = {
     "custom_formula": "Custom 1",
     "custom_formula_2": "Custom 2",
     "custom_formula_3": "Custom 3",
+    "program_formula": "Program",
+    "program_formula_2": "Program 2",
+    "program_formula_3": "Program 3",
 }
 
 
@@ -195,6 +209,11 @@ class _DurationPickerButton(BoxLayout):
     @text.setter
     def text(self, value: str) -> None:
         self._text_label.text = value
+
+    def set_label(self, text: str, large: bool = False) -> None:
+        """Set the button text; `large` bumps the font (used for the program 'P')."""
+        self._text_label.text = text
+        self._text_label.font_size = F.H3 if large else F.TINY
 
     def _refresh_theme(self) -> None:
         self._redraw()
@@ -353,6 +372,9 @@ class LiveSessionScreen(Screen):
 
         self._legend = LegendBar()
         self._metrics_container.add_widget(self._legend)
+        # Series the program is currently training (bold + » in the legend); None
+        # outside a program segment.
+        self._training_key = None
         # Legend is populated by _rebuild_metric_legend; start with Shamatha only
         self._rebuild_metric_legend(["shamatha_score"])
 
@@ -460,7 +482,12 @@ class LiveSessionScreen(Screen):
         # Current timer state cached for popup highlighting
         self._current_timer_enabled = False
         self._current_timer_minutes = 0
+        self._program_active = False
         self._duration_popup = None
+        # Saved programs offered by the in-session "Programs…" picker.
+        self._session_programs: list = []
+        self._session_program_current_name: str = ""  # loaded program (button + highlight)
+        self.on_program_pick = None  # set by AppManager; called with an index
 
         # ── Controls ──
         self._bottom_bar = BoxLayout(
@@ -734,11 +761,24 @@ class LiveSessionScreen(Screen):
         self._active_view = view
 
     def _rebuild_metric_legend(self, enabled_keys: list) -> None:
-        """Clear and re-populate the metrics legend with only the enabled metrics."""
-        self._legend.set_items([
-            (self._graph.series_name(m), self._graph.series_color(m))
-            for m in METRICS_COLORS if m in enabled_keys
-        ])
+        """Clear and re-populate the metrics legend with only the enabled metrics.
+
+        The program's currently-training series (if it's a plotted metric) is
+        bolded with a » marker via active_text.
+        """
+        active = (self._graph.series_name(self._training_key)
+                  if self._training_key in METRICS_COLORS else None)
+        self._legend.set_items(
+            [(self._graph.series_name(m), self._graph.series_color(m))
+             for m in METRICS_COLORS if m in enabled_keys],
+            active_text=active,
+        )
+
+    def set_training_series(self, key) -> None:
+        """Mark the series currently driving the program target (bold + »), or
+        pass None/a non-plotted key to clear the marker."""
+        self._training_key = key
+        self._rebuild_metric_legend(self._graph.visible_keys())
 
     @property
     def graph(self) -> ScrollableGraphWidget:
@@ -905,25 +945,70 @@ class LiveSessionScreen(Screen):
         timed = [(lbl, v) for lbl, v in _DURATION_PRESETS if v is not None]
         free = [(lbl, v) for lbl, v in _DURATION_PRESETS if v is None]
 
-        body = BoxLayout(orientation="vertical", spacing=S.GAP_SM, padding=S.GAP)
         grid = GridLayout(cols=2, spacing=S.GAP_SM, size_hint_y=None)
         grid.bind(minimum_height=grid.setter("height"))
         for lbl, v in timed:
             grid.add_widget(_make_btn(lbl, v))
-        body.add_widget(grid)
-        for lbl, v in free:
-            body.add_widget(_make_btn(lbl, v))
 
-        rows = (len(timed) + 1) // 2 + len(free)
-        popup_h = rows * (dp(44) + S.GAP_SM) + dp(80)
-        self._duration_popup = Popup(
-            title="Session duration",
-            content=body,
-            size_hint=(0.8, None),
-            height=popup_h,
-            auto_dismiss=True,
+        rows = [grid]
+        rows.extend(_make_btn(lbl, v) for lbl, v in free)
+
+        # Programs picker: jump straight to a saved program from the session
+        # screen. The button shows the loaded program's name when one is active.
+        programs_btn = StyledButton(
+            text=(f"Program: {self._session_program_current_name}"
+                  if self._session_program_current_name else "Programs…"),
+            bg_color=C.PRIMARY_DIM,
+            size_hint_y=None,
+            height=dp(44),
         )
+        programs_btn.bind(on_release=lambda *_a: self._open_program_picker())
+        rows.append(programs_btn)
+
+        # The grid is one row widget but spans ceil(timed/2) visual rows — count those
+        # so the popup sizes to the real content height.
+        est = (len(timed) + 1) // 2 + len(free) + 1
+        self._duration_popup = make_scroll_popup("Session duration", rows, est_rows=est)
         self._duration_popup.open()
+
+    def set_session_programs(self, programs: list, current_name: str = "") -> None:
+        """Cache the saved programs (+ the loaded one's name) for the picker."""
+        self._session_programs = programs or []
+        self._session_program_current_name = current_name or ""
+
+    def _open_program_picker(self) -> None:
+        """List saved programs; tapping one asks AppManager to load it."""
+        if self._duration_popup is not None:
+            self._duration_popup.dismiss()
+            self._duration_popup = None
+
+        def _pick(index):
+            popup.dismiss()
+            if self.on_program_pick is not None:
+                self.on_program_pick(index)
+
+        rows = []
+        if not self._session_programs:
+            rows.append(Label(text="No saved programs", color=C.TEXT,
+                              size_hint_y=None, height=dp(44)))
+        else:
+            for i, entry in enumerate(self._session_programs):
+                name = entry.get("name", f"Program {i + 1}")
+                is_current = name == self._session_program_current_name
+                btn = StyledButton(
+                    text=name,
+                    bg_color=C.ACCENT if is_current else C.BG_CARD,
+                    text_color=C.TEXT if is_current else C.TEXT_SECONDARY,
+                    bold=is_current,
+                    size_hint_y=None, height=dp(44),
+                )
+                btn.bind(on_release=lambda _b, idx=i: _pick(idx))
+                rows.append(btn)
+        cancel = StyledButton(text="Cancel", bg_color=C.PRIMARY,
+                              size_hint_y=None, height=dp(44))
+        popup = make_scroll_popup("Choose program", rows, footer=cancel)
+        cancel.bind(on_release=lambda *_a: popup.dismiss())
+        popup.open()
 
     def _pick_from_popup(self, value) -> None:
         if self.on_duration_preset is not None:
@@ -932,21 +1017,26 @@ class LiveSessionScreen(Screen):
             self._duration_popup.dismiss()
             self._duration_popup = None
 
-    def refresh_duration_preset(self, timer_enabled: bool, timer_minutes: int) -> None:
+    def refresh_duration_preset(self, timer_enabled: bool, timer_minutes: int,
+                                program_active: bool = False) -> None:
         """Cache timer state and update the duration-picker label."""
         self._current_timer_enabled = timer_enabled
         self._current_timer_minutes = timer_minutes
+        self._program_active = program_active
         self._apply_duration_picker_label()
 
     def _apply_duration_picker_label(self) -> None:
         """Update duration picker text. Width stays fixed at the compact size."""
-        # Always show the compact label; width is fixed at construction time.
-        if not self._current_timer_enabled:
-            self._btn_duration_expand.text = "∞"
+        # Program mode owns the timer (its total drives the countdown) — show a
+        # large "P" instead of a duration so the user sees a program will run.
+        if self._program_active:
+            self._btn_duration_expand.set_label("P", large=True)
+        elif not self._current_timer_enabled:
+            self._btn_duration_expand.set_label("∞")
         elif self._current_timer_minutes >= 60 and self._current_timer_minutes % 60 == 0:
-            self._btn_duration_expand.text = f"{self._current_timer_minutes // 60}h"
+            self._btn_duration_expand.set_label(f"{self._current_timer_minutes // 60}h")
         else:
-            self._btn_duration_expand.text = f"{self._current_timer_minutes}m"
+            self._btn_duration_expand.set_label(f"{self._current_timer_minutes}m")
 
     def show_overlay(self, text: str = "Connecting...") -> None:
         """Show semi-transparent connection overlay with animated dots."""

@@ -9,6 +9,7 @@ import struct
 import zlib
 
 from kivy.core.text import LabelBase
+from kivy.core.window import Window
 from kivy.graphics import Color, Line, Rectangle, RoundedRectangle
 from kivy.metrics import dp
 from kivy.properties import (
@@ -20,7 +21,9 @@ from kivy.properties import (
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
+from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.textinput import TextInput
 
 # ── Icon font ────────────────────────────────────────────────────────
 
@@ -55,6 +58,37 @@ def format_duration(seconds: int) -> str:
     h, rem = divmod(seconds, 3600)
     m = rem // 60
     return f"{h}h {m:02d}m"
+
+
+def make_scroll_popup(title, rows, footer=None, *, width_hint=0.85, row_h=None,
+                      est_rows=None, max_height_hint=0.85, auto_dismiss=True):
+    """Popup with a vertically-scrolling list of fixed-height `rows` and an optional
+    pinned `footer`. Sizes to content but caps at `max_height_hint` of the window so
+    long lists scroll instead of overflowing the screen. `est_rows` overrides the
+    row-count used for the height estimate (for a row that is itself a multi-row grid).
+    Returns the Popup."""
+    row_h = row_h or dp(44)
+    inner = BoxLayout(orientation="vertical", spacing=S.GAP_SM, size_hint_y=None)
+    inner.bind(minimum_height=inner.setter("height"))
+    for w in rows:
+        w.size_hint_y = None
+        if not w.height:
+            w.height = row_h
+        inner.add_widget(w)
+    scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False)
+    scroll.add_widget(inner)
+    body = BoxLayout(orientation="vertical", spacing=S.GAP_SM, padding=S.GAP)
+    body.add_widget(scroll)
+    if footer is not None:
+        footer.size_hint_y = None
+        if not footer.height:
+            footer.height = row_h
+        body.add_widget(footer)
+    n = (est_rows if est_rows is not None else len(rows)) + (1 if footer is not None else 0)
+    content_h = n * (row_h + S.GAP_SM) + dp(90)  # rows + title bar + padding chrome
+    height = min(content_h, Window.height * max_height_hint)
+    return Popup(title=title, content=body, size_hint=(width_hint, None),
+                 height=height, auto_dismiss=auto_dismiss)
 
 
 class Icons:
@@ -154,6 +188,8 @@ _METRICS = {
     "CUSTOM2": (1.0, 0.50, 0.0, 1.0),
     "CUSTOM3": (0.40, 0.75, 0.95, 1.0),
     "MED_SCORE": (0.30, 0.60, 0.95, 1.0),
+    "WARM2": (0.95, 0.50, 0.55, 1.0),
+    "WARM3": (0.75, 0.55, 0.90, 1.0),
     "THRESHOLD_LINE": (0.90, 0.30, 0.90, 0.7),
     "STATE_FOCUS": (0.30, 0.85, 0.50, 1.0),
     "STATE_SUBTLE": (0.85, 0.85, 0.30, 1.0),
@@ -345,6 +381,28 @@ class S:
 
 
 # ── Styled widgets ───────────────────────────────────────────────────
+
+class CenteredTextInput(TextInput):
+    """Single-line input with text centered horizontally and vertically.
+
+    Kivy's TextInput supports `halign` but has no `valign`, so the vertical
+    centering is done by padding the single line to the field's height.
+    """
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("halign", "center")
+        super().__init__(**kwargs)
+        self.bind(height=self._recenter, line_height=self._recenter,
+                  font_size=self._recenter)
+        self._recenter()
+
+    def _recenter(self, *_args):
+        pad = self.padding  # [left, top, right, bottom]
+        pad_v = max(0, (self.height - self.line_height) / 2.0)
+        new = [pad[0], pad_v, pad[2], pad_v]
+        if new != list(pad):
+            self.padding = new
+
 
 class StyledButton(ButtonBehavior, BoxLayout):
     """Rounded button with press color shift. Replaces default Kivy Button.

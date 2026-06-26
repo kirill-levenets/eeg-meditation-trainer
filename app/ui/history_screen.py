@@ -17,13 +17,13 @@ from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
-from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
 from app.ui.theme import (
     POPUP_TEXT,
     C,
     Card,
+    CenteredTextInput,
     Divider,
     F,
     Icons,
@@ -842,7 +842,7 @@ class HistoryScreen(Screen):
             opacity=0,
             disabled=True,
         )
-        rename_input = TextInput(
+        rename_input = CenteredTextInput(
             text=name,
             font_size=F.BODY,
             foreground_color=C.TEXT,

@@ -152,6 +152,47 @@ The Restore replaces your current database and cannot be undone. Use Backup firs
 - Duration slider with presets: 5, 10, 15, 20, 30 minutes
 - When enabled, auto-stops session at the end and plays bell sound
 
+#### Session Program
+
+The **Timer** section has a **Simple | Program** toggle at the top. In **Simple** mode the Enable-Timer checkbox and duration slider are available — this is the single-duration timer. In **Program** mode that checkbox is hidden (the program always runs its own timer) and a multi-segment editor appears instead.
+
+**Program mode** lets you define an ordered list of timed segments. Each segment row has:
+
+- **Duration** — length in minutes
+- **Formula** — the metric that drives audio feedback for this segment: Shamatha, Meditation, NS Attention, NS Meditation, or any formula saved in your custom-formula library
+- **Target** — the threshold level for this segment (sets the dashed line and "time above target" stat)
+- **End cue** — sound played when this segment ends: **Chime** (default) or **Warble**
+
+Use **+ Add Segment** to append a row; tap the delete icon on a row to remove it. The **total duration** readout at the bottom updates automatically.
+
+**Saving and loading programs:**
+
+Type a name and tap **Save** to store the current segment list in your library. Names are unique — if you save with a name that already exists, the app asks you to confirm the **overwrite** before replacing it.
+
+Saved programs appear in a list below the editor. Tap a program to **load** it; tap the delete icon to **delete** it. Both actions ask for confirmation first.
+
+When a program is loaded into the editor, the header shows **"Loaded: \<name\>"** so you always know which program is active. The name field is pre-filled with that name, so tapping **Save** again will re-save (overwrite) it without retyping.
+
+The library is per-user.
+
+**Quick-loading from the Session screen:**
+
+When Program mode is active, the small button next to **Start** shows a large **P** (indicating the program's total duration will run the timer). Tap that button to open a **Programs…** picker directly from the Session screen — without going to Settings. The picker shows the name of the currently loaded program and highlights it in the list.
+
+**During a session:**
+
+- The session timer is set to the program's total duration and auto-stops at the end (the timer-end gong plays).
+- The metrics graph automatically shows each segment's target metric or custom-formula line. The **legend marks the currently active metric in bold with a "»" indicator**, switching at each segment boundary.
+- At each segment boundary a **chime** plays and the active target and audio-driver formula switch to the next segment's settings. "Time above target" accrues against each segment's own target while that segment is active.
+- A **stepped dashed target line** tracks each segment's target over its time range on both the live session graph and the diary graph.
+- The **gong** plays at the end of the program.
+
+**Text fields** in the program editor (and elsewhere in the app) show their text centered.
+
+**Note:** Per-segment continuous feedback sound (replacing the white noise with a different sound for a segment) is shown as a disabled placeholder. That feature is planned for a future release.
+
+When Program mode is off, the Simple timer behaves exactly as before.
+
 ### Device
 
 - Device status and connection info
