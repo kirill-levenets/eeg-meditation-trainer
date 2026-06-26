@@ -7,6 +7,7 @@ def _app(db, uid):
     app._db = db
     app._current_user_id = uid
     app._session_program_segments = []
+    app._session_program_name = ""
     app._timer_mode = "simple"
     return app
 
@@ -18,13 +19,15 @@ def test_program_persist_roundtrip(tmp_path):
     app = _app(db, uid)
     segs = [{"minutes": 10, "target": 50, "formula": "shamatha_score"}]
     app._session_program_segments = segs
+    app._session_program_name = "Ramp"
     app._timer_mode = "program"
     app._persist_session_program(uid)
 
-    # A fresh AppManager on the same DB restores the persisted program + mode.
+    # A fresh AppManager on the same DB restores the persisted program + name + mode.
     fresh = _app(db, uid)
     fresh._load_session_program(uid)
     assert fresh._session_program_segments == segs
+    assert fresh._session_program_name == "Ramp"
     assert fresh._timer_mode == "program"
     db.close()
 
@@ -74,8 +77,9 @@ class _StubSettings:
 
 
 class _StubLive:
-    def set_session_programs(self, progs):
+    def set_session_programs(self, progs, current_name=""):
         self.programs = progs
+        self.current_name = current_name
 
     def refresh_duration_preset(self, enabled, minutes, program_active=False):
         self.preset = (enabled, minutes, program_active)
@@ -88,6 +92,7 @@ def test_saved_program_unique_upsert_load_delete(tmp_path):
     app._settings_screen = _StubSettings()
     app._live_screen = _StubLive()
     app._session_program_segments = [{"minutes": 10, "target": 50, "formula": "shamatha_score"}]
+    app._session_program_name = ""
     app._timer_mode = "program"
 
     # New name -> added directly (no confirm popup path).

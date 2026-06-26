@@ -477,6 +477,7 @@ class LiveSessionScreen(Screen):
         self._duration_popup = None
         # Saved programs offered by the in-session "Programs…" picker.
         self._session_programs: list = []
+        self._session_program_current_name: str = ""  # loaded program (button + highlight)
         self.on_program_pick = None  # set by AppManager; called with an index
 
         # ── Controls ──
@@ -944,9 +945,11 @@ class LiveSessionScreen(Screen):
         for lbl, v in free:
             body.add_widget(_make_btn(lbl, v))
 
-        # Programs picker: jump straight to a saved program from the session screen.
+        # Programs picker: jump straight to a saved program from the session
+        # screen. The button shows the loaded program's name when one is active.
         programs_btn = StyledButton(
-            text="Programs…",
+            text=(f"Program: {self._session_program_current_name}"
+                  if self._session_program_current_name else "Programs…"),
             bg_color=C.PRIMARY_DIM,
             size_hint_y=None,
             height=dp(44),
@@ -965,9 +968,10 @@ class LiveSessionScreen(Screen):
         )
         self._duration_popup.open()
 
-    def set_session_programs(self, programs: list) -> None:
-        """Cache the saved programs for the in-session Programs picker."""
+    def set_session_programs(self, programs: list, current_name: str = "") -> None:
+        """Cache the saved programs (+ the loaded one's name) for the picker."""
         self._session_programs = programs or []
+        self._session_program_current_name = current_name or ""
 
     def _open_program_picker(self) -> None:
         """List saved programs; tapping one asks AppManager to load it."""
@@ -989,9 +993,13 @@ class LiveSessionScreen(Screen):
                                   size_hint_y=None, height=dp(44)))
         else:
             for i, entry in enumerate(self._session_programs):
+                name = entry.get("name", f"Program {i + 1}")
+                is_current = name == self._session_program_current_name
                 btn = StyledButton(
-                    text=entry.get("name", f"Program {i + 1}"),
-                    bg_color=C.BG_CARD, text_color=C.TEXT,
+                    text=name,
+                    bg_color=C.ACCENT if is_current else C.BG_CARD,
+                    text_color=C.TEXT if is_current else C.TEXT_SECONDARY,
+                    bold=is_current,
                     size_hint_y=None, height=dp(44),
                 )
                 btn.bind(on_release=lambda _b, idx=i: _pick(idx))

@@ -182,18 +182,20 @@ class EEGMeditationApp(App):
         ])
 
     def _persist_session_program(self, uid: int) -> None:
-        """Persist the active editable program + timer mode for a user."""
+        """Persist the active editable program + its name + timer mode for a user."""
         if not uid:
             return
         self._db.set_user_json_setting(uid, "session_program", self._session_program_segments)
         self._db.set_user_setting(uid, "timer_mode", self._timer_mode)
+        self._db.set_user_setting(uid, "session_program_name", self._session_program_name)
 
     def _load_session_program(self, uid: int) -> None:
-        """Restore the active editable program + timer mode for a user."""
+        """Restore the active editable program + its name + timer mode for a user."""
         self._session_program_segments = self._db.get_user_json_setting(
             uid, "session_program", default=[]
         ) or []
         self._timer_mode = self._db.get_user_setting(uid, "timer_mode") or "simple"
+        self._session_program_name = self._db.get_user_setting(uid, "session_program_name") or ""
 
     def _build_session_program(self) -> SessionProgram:
         """Build a SessionProgram from the active editable segments."""
@@ -658,6 +660,7 @@ class EEGMeditationApp(App):
             self._live_screen.graph.set_visible(key, active)
         self._audio_metric_key: str = "shamatha_score"
         self._session_program_segments: list[dict] = []
+        self._session_program_name: str = ""  # name of the loaded/saved active program
         self._timer_mode: str = "simple"
 
         self._diary_screen.set_session_select_callback(self._on_session_select)
@@ -2206,6 +2209,8 @@ class EEGMeditationApp(App):
             self._db.update_saved_program(self._current_user_id, index, name,
                                           self._session_program_segments)
             logger.info(f"Overwrote program '{name}'")
+        self._session_program_name = name  # the active program now carries this name
+        self._persist_session_program(self._current_user_id)
         self._refresh_saved_programs()
 
     def _on_program_load(self, index: int) -> None:
@@ -2227,11 +2232,13 @@ class EEGMeditationApp(App):
         if not (0 <= index < len(progs)):
             return
         self._session_program_segments = progs[index]["segments"]
+        self._session_program_name = name
         self._timer_mode = "program"
         self._persist_session_program(self._current_user_id)
         self._settings_screen.load_program(self._session_program_segments, "program")
         self._settings_screen.set_program_name(name)
         self._sync_live_timer_picker()
+        self._refresh_saved_programs()  # re-highlight the now-current program in the picker
         logger.info(f"Loaded program '{name}'")
 
     def _on_program_delete(self, index: int) -> None:
@@ -2259,7 +2266,7 @@ class EEGMeditationApp(App):
         progs = (self._db.get_saved_programs(self._current_user_id)
                  if self._current_user_id else [])
         self._settings_screen.set_saved_programs(progs)
-        self._live_screen.set_session_programs(progs)
+        self._live_screen.set_session_programs(progs, self._session_program_name)
 
     def _confirm_program_action(self, title, message, ok_text, on_ok,
                                 ok_color=None) -> None:
@@ -3061,6 +3068,7 @@ class EEGMeditationApp(App):
         self._apply_active_formulas(self._read_active_formulas_with_migration(user_id))
         self._load_session_program(user_id)
         self._settings_screen.load_program(self._session_program_segments, self._timer_mode)
+        self._settings_screen.set_program_name(self._session_program_name)  # show loaded name
         # Saved-programs list pushed to both UIs at the end via _refresh_saved_programs.
         self._push_formula_names_to_graph()
         idx = g(user_id, "audio_formula_index")

@@ -286,6 +286,17 @@ class SettingsScreen(Screen):
             size=self._program_total_label.setter("text_size")
         )
 
+        # At-a-glance "which program is loaded" indicator at the top of the editor.
+        self._program_loaded_label = Label(
+            text="Loaded: (unsaved)",
+            font_size=F.SMALL, bold=True, color=C.PRIMARY,
+            size_hint_y=None, height=dp(22),
+            halign="left", valign="middle",
+        )
+        self._program_loaded_label.bind(
+            size=self._program_loaded_label.setter("text_size")
+        )
+
         self._add_segment_btn = StyledButton(
             text="+ Add Segment",
             font_size=F.SMALL,
@@ -343,6 +354,7 @@ class SettingsScreen(Screen):
         self._segments_box.bind(
             minimum_height=self._segments_box.setter("height")
         )
+        self._program_box.add_widget(self._program_loaded_label)
         self._program_box.add_widget(self._segments_box)
         self._program_box.add_widget(self._program_total_label)
         self._program_box.add_widget(self._add_segment_btn)
@@ -1665,8 +1677,10 @@ class SettingsScreen(Screen):
             self._loading_program = False
 
     def set_program_name(self, name: str) -> None:
-        """Reflect the loaded program's name so a re-save overwrites it."""
+        """Reflect the loaded program's name (top label + name field, so a
+        re-save overwrites it)."""
         self._program_name_input.text = name or ""
+        self._program_loaded_label.text = f"Loaded: {name}" if name else "Loaded: (unsaved)"
 
     def set_device_mode_callback(self, callback: Callable) -> None:
         self._on_device_mode_toggle = callback
