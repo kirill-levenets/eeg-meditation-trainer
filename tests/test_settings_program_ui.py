@@ -48,3 +48,13 @@ def test_custom_formula_segment_roundtrips():
     seg = {"minutes": 8, "target": 120, "formula": {"name": "Foo", "formula": "alpha1"}}
     s.load_program([seg], "program")
     assert s.get_program_segments() == [seg]
+
+
+def test_set_feedback_source_does_not_fire_callback():
+    s = _screen()
+    fired = []
+    s.set_feedback_source_callback(lambda src, path: fired.append((src, path)))
+    s.set_feedback_source("custom", "/tmp/x.wav")  # restore -> silent
+    assert fired == []
+    s._on_feedback_source_pressed(s._feedback_source_buttons["tone"])  # user action -> fires
+    assert fired == [("tone", "/tmp/x.wav")]

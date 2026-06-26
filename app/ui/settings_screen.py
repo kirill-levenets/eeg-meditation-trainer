@@ -156,6 +156,7 @@ class SettingsScreen(Screen):
         self._feedback_source: str = "noise"
         self._feedback_sound_path: str = ""
         self._feedback_source_buttons: dict[str, StyledButton] = {}
+        self._suppress_feedback_cb: bool = False
         self._graph_toggles: dict[str, bool] = {
             "shamatha_score": True,
             "meditation_score": False,
@@ -1396,10 +1397,14 @@ class SettingsScreen(Screen):
 
     def set_feedback_source(self, source: str, path: str = "") -> None:
         """Reflect a restored/loaded feedback selection in the UI without firing the callback."""
-        self._feedback_source = source or "noise"
-        self._feedback_sound_path = path or ""
-        self._feedback_custom_input.text = self._feedback_sound_path
-        self._sync_feedback_source_ui()
+        self._suppress_feedback_cb = True
+        try:
+            self._feedback_source = source or "noise"
+            self._feedback_sound_path = path or ""
+            self._feedback_custom_input.text = self._feedback_sound_path
+            self._sync_feedback_source_ui()
+        finally:
+            self._suppress_feedback_cb = False
 
     def _sync_feedback_source_ui(self) -> None:
         """Highlight the active source button and show the custom row only for the custom source."""
@@ -1423,6 +1428,8 @@ class SettingsScreen(Screen):
         open_audio_file_chooser(lambda p: setattr(self._feedback_custom_input, "text", p))
 
     def _emit_feedback_source(self) -> None:
+        if self._suppress_feedback_cb:
+            return
         if self._on_feedback_source_change:
             self._on_feedback_source_change(self._feedback_source, self._feedback_sound_path)
 
