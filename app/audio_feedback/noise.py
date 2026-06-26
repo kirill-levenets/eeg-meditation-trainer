@@ -408,19 +408,64 @@ class AudioEngine:
             return custom_path
         return self._noise_path
 
+    def prepare_feedback(self, sources: dict, active_id: str) -> None:
+        """Instantiate one looping player per distinct feedback source at volume 0 (main thread)."""
+        self._teardown_feedback_players()
+        players: dict[str, object] = {}
+        for sid, (kind, path) in sources.items():
+            resolved = self._feedback_path_for(kind, path)
+            try:
+                p = _make_noise_player(resolved)
+                p.loop = True
+                p.volume = 0.0
+                players[sid] = p
+            except Exception as e:
+                logger.warning(f"Feedback source {sid!r} failed to load ({resolved!r}): {e}")
+        self._feedback_players = players
+        self._active_feedback = active_id if active_id in players else next(iter(players), "")
+        self._noise_sound = self._feedback_players.get(self._active_feedback)
+
+    def set_active_feedback(self, source_id: str) -> None:
+        """Make source_id the modulated player and zero the old; setVolume-only so it's tick/lock-safe."""
+        if source_id == self._active_feedback:
+            return
+        player = self._feedback_players.get(source_id)
+        if player is None:
+            logger.warning(f"set_active_feedback: unknown source {source_id!r}")
+            return
+        old = self._feedback_players.get(self._active_feedback)
+        if old is not None:
+            try:
+                old.volume = 0.0
+            except Exception:
+                logger.exception("set_active_feedback: zeroing old player failed")
+        self._active_feedback = source_id
+        self._noise_sound = player
+
+    def _teardown_feedback_players(self) -> None:
+        """Stop + unload every feedback player; main thread only (release())."""
+        for sid, p in list(self._feedback_players.items()):
+            try:
+                p.stop()
+                p.unload()
+            except Exception:
+                logger.exception(f"Failed to stop/unload feedback player {sid!r}")
+        self._feedback_players = {}
+        self._active_feedback = ""
+        self._noise_sound = None
+
     def _start_noise_loop(self) -> None:
-        """Load and start the pre-generated noise WAV in a loop."""
-        try:
-            if self._noise_sound:
-                self._noise_sound.stop()
-                self._noise_sound.unload()
-            snd = _make_noise_player(self._noise_path)
-            snd.loop = True
-            snd.volume = self._volume
-            snd.play()
-            self._noise_sound = snd
-        except Exception as e:
-            logger.warning(f"Failed to load noise: {e}")
+        """Play all prepared feedback players looping (active at current volume, rest silent)."""
+        if not self._feedback_players:
+            self.prepare_feedback({"noise": ("noise", "")}, "noise")
+        for sid, player in self._feedback_players.items():
+            try:
+                player.loop = True
+                player.volume = self._volume if sid == self._active_feedback else 0.0
+                player.play()
+            except Exception as e:
+                logger.warning(f"Failed to start feedback player {sid!r}: {e}")
+        self._noise_sound = self._feedback_players.get(self._active_feedback)
 
     def _set_noise_volume(self, volume: float) -> None:
         """Set target volume — the ramp thread interpolates smoothly toward it."""
@@ -562,24 +607,15 @@ class AudioEngine:
         logger.info("Audio engine started")
 
     def mute(self) -> None:
-        """Silence the noise immediately without tearing down the player.
-
-        Tick-thread-safe: only touches volume (MediaPlayer.setVolume is a
-        direct native call with no main-Looper sync, so it works even while
-        the screen is locked — unlike stop()/release(), which deadlock the
-        tick thread against the paused main Looper). Use this at timer expiry
-        on the tick thread; do the full stop()/release() teardown later on
-        the main thread.
-        """
-        self._ramp_running = False  # stop the ramp from re-raising volume
+        """Silence all feedback players immediately via setVolume only (tick/lock-safe; no teardown)."""
+        self._ramp_running = False
         self._volume = 0.0
         self._target_volume = 0.0
-        snd = getattr(self, "_noise_sound", None)
-        if snd is not None:
+        for sid, p in self._feedback_players.items():
             try:
-                snd.volume = 0.0
+                p.volume = 0.0
             except Exception:
-                logger.exception("mute: setting noise volume failed")
+                logger.exception(f"mute: zeroing feedback player {sid!r} failed")
 
     def stop(self) -> None:
         """Stop all audio playback."""
@@ -593,7 +629,8 @@ class AudioEngine:
         # frame after starting the gong, so unloading it here cut the gong off
         # (desktop only; Android's gong uses the separate _timer_bell_player).
         # The gong is owned by play_timer_sound / stop_timer_bell instead.
-        for snd_attr in ("_noise_sound", "_chime_sound", "_disconnect_sound"):
+        self._teardown_feedback_players()
+        for snd_attr in ("_chime_sound", "_disconnect_sound"):
             snd = getattr(self, snd_attr, None)
             if snd:
                 try:

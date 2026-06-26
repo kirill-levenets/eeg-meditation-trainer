@@ -278,5 +278,85 @@ class TestTimerBellLifecycle(unittest.TestCase):
         self.assertGreater(APP.TIMER_BELL_DURATION, APP.BELL_DURATION)
 
 
+class _FakePlayer:
+    def __init__(self, path):
+        self.path = path
+        self.volume = 0.0
+        self.loop = False
+        self.played = False
+        self.stopped = False
+        self.unloaded = False
+
+    def play(self):
+        self.played = True
+
+    def stop(self):
+        self.stopped = True
+
+    def unload(self):
+        self.unloaded = True
+
+
+class TestFeedbackChannel(unittest.TestCase):
+    """Multi-player feedback channel: one active (modulated), the rest at 0."""
+
+    def setUp(self):
+        import app.audio_feedback.noise as noise_mod
+        self._noise_mod = noise_mod
+        self._orig_factory = noise_mod._make_noise_player
+        noise_mod._make_noise_player = lambda path: _FakePlayer(path)
+        self.gen = AudioEngine()
+
+    def tearDown(self):
+        self._noise_mod._make_noise_player = self._orig_factory
+        self.gen.cleanup()
+
+    def test_prepare_creates_one_player_per_source(self):
+        self.gen.prepare_feedback({"noise": ("noise", ""), "tone": ("tone", "")}, "noise")
+        self.assertEqual(set(self.gen._feedback_players), {"noise", "tone"})
+        self.assertEqual(self.gen._active_feedback, "noise")
+        self.assertIs(self.gen._noise_sound, self.gen._feedback_players["noise"])
+
+    def test_prepare_active_falls_back_when_id_absent(self):
+        self.gen.prepare_feedback({"noise": ("noise", "")}, "tone")
+        self.assertEqual(self.gen._active_feedback, "noise")
+
+    def test_set_active_zeroes_old_and_repoints(self):
+        self.gen.prepare_feedback({"noise": ("noise", ""), "tone": ("tone", "")}, "noise")
+        self.gen._feedback_players["noise"].volume = 0.25
+        self.gen.set_active_feedback("tone")
+        self.assertEqual(self.gen._active_feedback, "tone")
+        self.assertEqual(self.gen._feedback_players["noise"].volume, 0.0)
+        self.assertIs(self.gen._noise_sound, self.gen._feedback_players["tone"])
+
+    def test_set_active_unknown_is_noop(self):
+        self.gen.prepare_feedback({"noise": ("noise", "")}, "noise")
+        self.gen.set_active_feedback("nope")
+        self.assertEqual(self.gen._active_feedback, "noise")
+
+    def test_mute_zeroes_all_players(self):
+        self.gen.prepare_feedback({"noise": ("noise", ""), "tone": ("tone", "")}, "noise")
+        for p in self.gen._feedback_players.values():
+            p.volume = 0.3
+        self.gen.mute()
+        self.assertTrue(all(p.volume == 0.0 for p in self.gen._feedback_players.values()))
+
+    def test_stop_tears_down_all_players(self):
+        self.gen.prepare_feedback({"noise": ("noise", ""), "tone": ("tone", "")}, "noise")
+        players = list(self.gen._feedback_players.values())
+        self.gen.stop()
+        self.assertTrue(all(p.unloaded for p in players))
+        self.assertEqual(self.gen._feedback_players, {})
+        self.assertIsNone(self.gen._noise_sound)
+
+    def test_start_plays_all_active_loud_rest_silent(self):
+        self.gen.prepare_feedback({"noise": ("noise", ""), "tone": ("tone", "")}, "tone")
+        self.gen.start()
+        self.assertTrue(all(p.played for p in self.gen._feedback_players.values()))
+        self.assertEqual(self.gen._feedback_players["noise"].volume, 0.0)
+        self.assertGreater(self.gen._feedback_players["tone"].volume, 0.0)
+        self.gen.stop()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
