@@ -224,10 +224,12 @@ class EEGMeditationApp(App):
                     graph.set_visible(fk, False)
 
     def _restore_program_series(self) -> None:
-        """Hide the transient program_formula line and restore the user's custom
-        slots hidden for the program's duration."""
+        """Hide the transient program_formula line, reset its label, and restore
+        the user's custom slots hidden for the program's duration."""
         graph = self._live_screen.graph
         graph.set_visible("program_formula", False)
+        graph.set_series_name("program_formula", "Program")  # drop the stale formula name
+        self._session_program_active = False
         for fk in getattr(self, "_program_hidden_slots", []):
             graph.set_visible(fk, True)
         self._program_hidden_slots = []
@@ -286,7 +288,8 @@ class EEGMeditationApp(App):
             if ok and ev.is_valid:
                 self._program_formula_ev = ev
                 metric_key = "program_formula"
-                prog_name = formula.get("name") or "Program"
+                nm = formula.get("name")
+                prog_name = f"Program: {nm}" if nm else "Program"
             else:
                 metric_key = "shamatha_score"  # spec: unparseable saved formula falls back
                 logger.warning(f"Program segment formula invalid, using shamatha: {err}")
@@ -1934,8 +1937,8 @@ class EEGMeditationApp(App):
         is_live = graph is self._live_screen.graph
         body = BoxLayout(orientation="vertical", spacing=S.GAP_SM, padding=S.GAP)
         for key in graph.series_keys():
-            if key == "program_formula":
-                continue  # program-controlled line, not a user-toggleable metric
+            if key == "program_formula" and not self._session_program_active:
+                continue  # program-controlled line; only selectable during a program
             vis = graph.is_visible(key)
             btn = StyledButton(
                 text=graph.series_name(key), height=dp(44),

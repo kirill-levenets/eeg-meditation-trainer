@@ -146,7 +146,7 @@ def test_program_custom_formula_plots_and_marks():
 
     assert metrics["program_formula"] == 80.0          # custom formula evaluated + plotted
     assert app._audio_metric_key == "program_formula"  # drives audio/goal
-    graph.set_series_name.assert_any_call("program_formula", "AlphaPwr")  # named after formula
+    graph.set_series_name.assert_any_call("program_formula", "Program: AlphaPwr")  # "Program: <formula>"
     graph.set_visible.assert_any_call("program_formula", True)            # shown on graph
     app._live_screen.set_training_series.assert_called_with("program_formula")  # legend-marked
 
