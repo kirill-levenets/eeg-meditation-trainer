@@ -238,6 +238,29 @@ class EEGMeditationApp(App):
         keys = set(builtins) | {s for s, _ in custom_slots}
         return keys, custom_slots, segment_keys
 
+    @staticmethod
+    def _source_spec(source_id: str) -> tuple[str, str]:
+        """Map a feedback source id to (kind, custom_path); non-builtin ids are custom file paths."""
+        if source_id in ("noise", "tone"):
+            return (source_id, "")
+        return ("custom", source_id)
+
+    @staticmethod
+    def _feedback_source_id(value: str, global_id: str) -> str:
+        """A segment's feedback_sound value as a source id; blank inherits the global source."""
+        return value if value else global_id
+
+    @staticmethod
+    def _feedback_plan(prog, global_id: str) -> tuple[dict, list, str]:
+        """(distinct sources, per-segment ids, initial id) for a program; blanks inherit the global."""
+        seg_ids = [
+            EEGMeditationApp._feedback_source_id(s.get("feedback_sound", "") or "", global_id)
+            for s in prog.segments
+        ]
+        sources = {sid: EEGMeditationApp._source_spec(sid) for sid in [global_id, *seg_ids]}
+        initial = seg_ids[0] if seg_ids else global_id
+        return sources, seg_ids, initial
+
     def _apply_program_visibility(self, prog) -> list:
         """Set the live graph to EXACTLY the program's metric set and label each program
         custom line `Program: <name>`. Returns the (slot_key, custom_dict) list. Shared by
