@@ -48,7 +48,7 @@ from app.ui.live_session import METRICS_COLORS, LiveSessionScreen
 from app.ui.profile_screen import ProfileScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
-from app.ui.theme import BottomNav, C, F, Icons, S, StyledButton
+from app.ui.theme import POPUP_TEXT, BottomNav, C, F, Icons, S, StyledButton
 from app.ui.widgets.legend import LegendBar
 from app.ui.widgets.loading_overlay import LoadingOverlay
 from app.ui.widgets.user_picker import UserPickerForm
@@ -2119,28 +2119,112 @@ class EEGMeditationApp(App):
         self._persist_session_program(self._current_user_id)
 
     def _on_program_save(self, name: str) -> None:
-        if name.strip() and self._current_user_id:
-            self._db.add_saved_program(self._current_user_id, name.strip(),
+        """Save the active program under `name`. Unique names: an existing name
+        overwrites (after confirm); a new name is added directly."""
+        name = name.strip()
+        if not name or not self._current_user_id:
+            return
+        progs = self._db.get_saved_programs(self._current_user_id)
+        existing = next((i for i, p in enumerate(progs) if p.get("name") == name), None)
+        if existing is not None:
+            self._confirm_program_action(
+                "Overwrite program",
+                f"A program named '{name}' already exists.\n"
+                f"Overwrite it with the current segments?",
+                "Overwrite",
+                lambda: self._save_program(existing, name),
+                ok_color=C.WARM,
+            )
+        else:
+            self._save_program(None, name)
+
+    def _save_program(self, index, name: str) -> None:
+        """Add (index=None) or overwrite (index set) a saved program by name."""
+        if index is None:
+            self._db.add_saved_program(self._current_user_id, name,
                                        self._session_program_segments)
-            self._settings_screen.set_saved_programs(
-                self._db.get_saved_programs(self._current_user_id))
+            logger.info(f"Saved new program '{name}'")
+        else:
+            self._db.update_saved_program(self._current_user_id, index, name,
+                                          self._session_program_segments)
+            logger.info(f"Overwrote program '{name}'")
+        self._refresh_saved_programs()
 
     def _on_program_load(self, index: int) -> None:
         if not self._current_user_id:
             return
         progs = self._db.get_saved_programs(self._current_user_id)
-        if 0 <= index < len(progs):
-            self._session_program_segments = progs[index]["segments"]
-            self._timer_mode = "program"
-            self._persist_session_program(self._current_user_id)
-            self._settings_screen.load_program(self._session_program_segments, "program")
+        if not (0 <= index < len(progs)):
+            return
+        name = progs[index].get("name", "")
+        self._confirm_program_action(
+            "Load program",
+            f"Load '{name}'?\nUnsaved changes to the current program will be lost.",
+            "Load",
+            lambda i=index, n=name: self._load_program(i, n),
+        )
+
+    def _load_program(self, index: int, name: str) -> None:
+        progs = self._db.get_saved_programs(self._current_user_id)
+        if not (0 <= index < len(progs)):
+            return
+        self._session_program_segments = progs[index]["segments"]
+        self._timer_mode = "program"
+        self._persist_session_program(self._current_user_id)
+        self._settings_screen.load_program(self._session_program_segments, "program")
+        self._settings_screen.set_program_name(name)
+        logger.info(f"Loaded program '{name}'")
 
     def _on_program_delete(self, index: int) -> None:
         if not self._current_user_id:
             return
+        progs = self._db.get_saved_programs(self._current_user_id)
+        if not (0 <= index < len(progs)):
+            return
+        name = progs[index].get("name", "")
+        self._confirm_program_action(
+            "Delete program",
+            f"Delete saved program '{name}'?",
+            "Delete",
+            lambda i=index: self._delete_program(i),
+            ok_color=C.DANGER,
+        )
+
+    def _delete_program(self, index: int) -> None:
         self._db.remove_saved_program(self._current_user_id, index)
-        self._settings_screen.set_saved_programs(
-            self._db.get_saved_programs(self._current_user_id))
+        logger.info(f"Deleted saved program #{index}")
+        self._refresh_saved_programs()
+
+    def _refresh_saved_programs(self) -> None:
+        """Push the current saved-programs list to the settings + session UIs."""
+        progs = (self._db.get_saved_programs(self._current_user_id)
+                 if self._current_user_id else [])
+        self._settings_screen.set_saved_programs(progs)
+
+    def _confirm_program_action(self, title, message, ok_text, on_ok,
+                                ok_color=None) -> None:
+        """Modal confirm dialog (mirrors _confirm_restore); on_ok runs on confirm."""
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
+        content.add_widget(Label(
+            text=message, halign="center", valign="middle", color=POPUP_TEXT,
+        ))
+        btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+        ok_btn = StyledButton(text=ok_text, bg_color=ok_color or C.ACCENT)
+        cancel_btn = StyledButton(
+            text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_MUTED,
+        )
+        btn_row.add_widget(ok_btn)
+        btn_row.add_widget(cancel_btn)
+        content.add_widget(btn_row)
+        popup = Popup(title=title, content=content, size_hint=(0.85, 0.4))
+
+        def _do(*_a):
+            popup.dismiss()
+            on_ok()
+
+        ok_btn.bind(on_release=_do)
+        cancel_btn.bind(on_release=popup.dismiss)
+        popup.open()
 
     def _refresh_saved_formulas(self) -> None:
         """Refresh the saved formulas list in settings UI."""

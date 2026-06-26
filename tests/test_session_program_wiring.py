@@ -56,6 +56,49 @@ def test_session_program_json_records_snapshot_not_live_editor():
     assert app._session_program_json() == ""
 
 
+class _StubSettings:
+    def set_saved_programs(self, progs):
+        self.saved = progs
+
+    def load_program(self, segs, mode):
+        self.loaded = (segs, mode)
+
+    def set_program_name(self, name):
+        self.name = name
+
+
+def test_saved_program_unique_upsert_load_delete(tmp_path):
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._db = DatabaseManager(db_path=str(tmp_path / "u.db"))
+    app._current_user_id = app._db.create_user("u")
+    app._settings_screen = _StubSettings()
+    app._session_program_segments = [{"minutes": 10, "target": 50, "formula": "shamatha_score"}]
+    app._timer_mode = "program"
+
+    # New name -> added directly (no confirm popup path).
+    app._on_program_save("Ramp")
+    progs = app._db.get_saved_programs(app._current_user_id)
+    assert [p["name"] for p in progs] == ["Ramp"]
+
+    # Same name, edited segments -> overwrite (simulate the confirmed action).
+    app._session_program_segments = [{"minutes": 5, "target": 90, "formula": "meditation_score"}]
+    app._save_program(0, "Ramp")
+    progs = app._db.get_saved_programs(app._current_user_id)
+    assert len(progs) == 1 and progs[0]["segments"][0]["target"] == 90  # no duplicate
+
+    # Load -> sets segments + mode + reflects the name back into the editor.
+    app._timer_mode = "simple"
+    app._load_program(0, "Ramp")
+    assert app._timer_mode == "program"
+    assert app._session_program_segments[0]["target"] == 90
+    assert app._settings_screen.name == "Ramp"
+
+    # Delete -> removed.
+    app._delete_program(0)
+    assert app._db.get_saved_programs(app._current_user_id) == []
+    app._db.close()
+
+
 def test_diary_rebuilds_stepped_threshold():
     import json
 

@@ -1662,6 +1662,10 @@ class SettingsScreen(Screen):
         finally:
             self._loading_program = False
 
+    def set_program_name(self, name: str) -> None:
+        """Reflect the loaded program's name so a re-save overwrites it."""
+        self._program_name_input.text = name or ""
+
     def set_device_mode_callback(self, callback: Callable) -> None:
         self._on_device_mode_toggle = callback
 
