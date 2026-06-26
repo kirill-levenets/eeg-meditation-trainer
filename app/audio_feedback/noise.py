@@ -245,7 +245,7 @@ def _generate_tone_wav(rate: int, freq: float, duration: float) -> bytes:
         raw.append(lp)
 
     peak = max(abs(s) for s in raw) or 1.0
-    raw = [int((s / peak) * 0.9 * 32767) for s in raw]
+    raw = [int((s / peak) * 0.9 * 32767) for s in raw]  # 10% headroom below the 16-bit ceiling
 
     for i in range(_FADE_SAMPLES):
         t = i / _FADE_SAMPLES
