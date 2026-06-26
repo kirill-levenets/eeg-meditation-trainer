@@ -39,3 +39,15 @@ def test_feedback_plan_global_tone_default_segments():
     assert seg_ids == ["tone", "tone"]
     assert initial == "tone"
     assert sources == {"tone": ("tone", "")}
+
+
+def test_global_feedback_id_resolves_source():
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._feedback_source, app._feedback_sound_path = "noise", ""
+    assert app._global_feedback_id() == "noise"
+    app._feedback_source = "tone"
+    assert app._global_feedback_id() == "tone"
+    app._feedback_source, app._feedback_sound_path = "custom", "/my.wav"
+    assert app._global_feedback_id() == "/my.wav"
+    app._feedback_sound_path = ""                       # custom selected but no file
+    assert app._global_feedback_id() == "noise"         # falls back to rain
