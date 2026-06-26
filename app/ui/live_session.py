@@ -353,6 +353,9 @@ class LiveSessionScreen(Screen):
 
         self._legend = LegendBar()
         self._metrics_container.add_widget(self._legend)
+        # Series the program is currently training (bold + » in the legend); None
+        # outside a program segment.
+        self._training_key = None
         # Legend is populated by _rebuild_metric_legend; start with Shamatha only
         self._rebuild_metric_legend(["shamatha_score"])
 
@@ -734,11 +737,24 @@ class LiveSessionScreen(Screen):
         self._active_view = view
 
     def _rebuild_metric_legend(self, enabled_keys: list) -> None:
-        """Clear and re-populate the metrics legend with only the enabled metrics."""
-        self._legend.set_items([
-            (self._graph.series_name(m), self._graph.series_color(m))
-            for m in METRICS_COLORS if m in enabled_keys
-        ])
+        """Clear and re-populate the metrics legend with only the enabled metrics.
+
+        The program's currently-training series (if it's a plotted metric) is
+        bolded with a » marker via active_text.
+        """
+        active = (self._graph.series_name(self._training_key)
+                  if self._training_key in METRICS_COLORS else None)
+        self._legend.set_items(
+            [(self._graph.series_name(m), self._graph.series_color(m))
+             for m in METRICS_COLORS if m in enabled_keys],
+            active_text=active,
+        )
+
+    def set_training_series(self, key) -> None:
+        """Mark the series currently driving the program target (bold + »), or
+        pass None/a non-plotted key to clear the marker."""
+        self._training_key = key
+        self._rebuild_metric_legend(self._graph.visible_keys())
 
     @property
     def graph(self) -> ScrollableGraphWidget:

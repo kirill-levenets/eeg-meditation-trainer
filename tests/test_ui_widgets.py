@@ -324,6 +324,26 @@ class TestDiaryScreenUI(unittest.TestCase):
 
 
 
+class TestLegendBarActiveMarker(unittest.TestCase):
+    """The 'training now' series is bolded with a marker; others are plain."""
+
+    def test_active_item_is_bold_and_marked(self):
+        from app.ui.widgets.legend import LegendBar
+        bar = LegendBar()
+        bar.set_items(
+            [("Shamatha", (1, 1, 1, 1)), ("NS Meditation", (0, 1, 0, 1))],
+            active_text="NS Meditation",
+        )
+        labels = {c.text: c.bold for c in bar.children}
+        self.assertIn("» NS Meditation", labels)
+        self.assertTrue(labels["» NS Meditation"])      # active is bold
+        self.assertIn("Shamatha", labels)
+        self.assertFalse(labels["Shamatha"])            # inactive is plain
+        # No active_text -> nothing marked.
+        bar.set_items([("Shamatha", (1, 1, 1, 1))])
+        self.assertEqual([c.text for c in bar.children], ["Shamatha"])
+
+
 class TestScrollableGraphSetSeriesName(unittest.TestCase):
     """set_series_name updates the label and fires the visibility callback."""
 

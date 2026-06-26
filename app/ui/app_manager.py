@@ -253,8 +253,10 @@ class EEGMeditationApp(App):
         self._audio_metric_key = metric_key
         self._session_manager.set_active_goal(metric_key, target)
         self._audio.set_threshold(target)
-        self._on_main(lambda t=target, k=metric_key:
-                      self._live_screen.graph.set_threshold(float(t), k))
+        self._on_main(lambda t=target, k=metric_key: (
+            self._live_screen.graph.set_threshold(float(t), k),
+            self._live_screen.set_training_series(k),  # bold + » on the trained series
+        ))
         logger.info(f"Program segment {idx}: metric={metric_key} target={target}")
 
     def _play_segment_end_sound(self, sound_id) -> None:
@@ -1049,6 +1051,7 @@ class EEGMeditationApp(App):
         else:
             self._live_screen.graph.set_threshold_steps(None)
             self._live_screen.graph.set_threshold(float(threshold), "shamatha_score")
+        self._live_screen.set_training_series(None)  # set on first segment crossing
         self._live_screen.hide_alert()
         self._live_screen.set_controls_running()
 
@@ -1282,6 +1285,7 @@ class EEGMeditationApp(App):
             self._reload_live_graphs_from_mirror()
         except Exception:
             logger.exception("graph reload on stop failed")
+        self._live_screen.set_training_series(None)  # clear the program "training now" marker
         self._live_screen.set_controls_idle()
         self._live_screen.update_device_status(False)
         self._live_screen.update_state("FINISHED")
