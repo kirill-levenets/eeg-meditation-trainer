@@ -263,20 +263,24 @@ class EEGMeditationApp(App):
         return sources, seg_ids, initial
 
     def _global_feedback_id(self) -> str:
-        """The active global feedback source id; a custom selection with no file falls back to rain."""
-        if getattr(self, "_feedback_source", "noise") == "custom":
+        """The active global feedback source id; a custom selection with no file falls back to noise."""
+        src = getattr(self, "_feedback_source", "noise")
+        if src == "custom":
             return getattr(self, "_feedback_sound_path", "") or "noise"
-        return getattr(self, "_feedback_source", "noise")
+        return src
 
     def _warn_missing_feedback_files(self, sources: dict) -> None:
-        """Surface (never swallow) a custom feedback file that doesn't exist; the engine uses rain."""
-        for _sid, (kind, path) in sources.items():
-            if kind == "custom" and not (path and os.path.isfile(path)):
-                report_soft_error(
-                    "feedback_sound_missing",
-                    f"Custom feedback file not found: {path!r} - using rain noise instead.",
-                    app=self,
-                )
+        """Surface (never swallow) custom feedback files that don't exist; the engine uses rain."""
+        missing = [path for kind, path in sources.values()
+                   if kind == "custom" and not (path and os.path.isfile(path))]
+        if missing:
+            report_soft_error(
+                "feedback_sound_missing",
+                "Custom feedback file(s) not found: "
+                + ", ".join(repr(p) for p in missing)
+                + " - using rain noise instead.",
+                app=self,
+            )
 
     def _apply_program_visibility(self, prog) -> list:
         """Set the live graph to EXACTLY the program's metric set and label each program
