@@ -1419,6 +1419,10 @@ class SettingsScreen(Screen):
         self._feedback_source = btn._feedback_key
         self._sync_feedback_source_ui()
         self._emit_feedback_source()
+        # Custom with no file yet: open the picker directly — users expect the
+        # selector to ask for a file, not just reveal an empty path row.
+        if self._feedback_source == "custom" and not self._feedback_sound_path:
+            self._on_feedback_custom_browse()
 
     def _on_feedback_custom_path_change(self, _instance, value: str) -> None:
         self._feedback_sound_path = value.strip()
