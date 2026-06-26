@@ -19,6 +19,7 @@ from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
 
 from app.config import APP, METRICS
+from app.logger import logger
 from app.ui.theme import (
     POPUP_TEXT,
     THEMES,
@@ -191,91 +192,8 @@ class SettingsScreen(Screen):
         timer_toggle_row.add_widget(timer_enable_lbl)
         timer_section.add_widget(timer_toggle_row)
 
-        timer_dur_row = BoxLayout(size_hint_y=None, height=S.ROW_SM, spacing=S.GAP)
-        timer_dur_lbl = Label(
-            text="Duration:", font_size=F.BODY, color=C.TEXT_SECONDARY,
-            size_hint_x=0.25, halign="left",
-        )
-        timer_dur_lbl.bind(size=timer_dur_lbl.setter("text_size"))
-        self._timer_duration_slider = Slider(
-            min=1, max=120, value=20, step=1, size_hint_x=0.55,
-        )
-        self._timer_duration_label = Label(
-            text="20 min", font_size=F.BODY, bold=True, color=C.TEXT,
-            size_hint_x=0.2,
-        )
-        self._timer_duration_slider.bind(
-            value=lambda inst, val: setattr(
-                self._timer_duration_label, "text", f"{int(val)} min"
-            )
-        )
-        timer_dur_row.add_widget(timer_dur_lbl)
-        timer_dur_row.add_widget(self._timer_duration_slider)
-        timer_dur_row.add_widget(self._timer_duration_label)
-        timer_section.add_widget(timer_dur_row)
-
-        timer_presets = PresetRow(
-            items=[("5m", 5), ("10m", 10), ("15m", 15), ("20m", 20),
-                   ("30m", 30), ("1h", 60), ("1h30", 90), ("2h", 120)],
-            callback=lambda v: setattr(self._timer_duration_slider, "value", v),
-        )
-        timer_section.add_widget(timer_presets)
-
-        # Custom timer-end sound: path input + browse + test buttons.
-        # When empty, the synthesised tingsha bell is used.
-        timer_sound_lbl = Label(
-            text="Timer End Sound (optional)",
-            font_size=F.SMALL,
-            color=C.TEXT_SECONDARY,
-            size_hint_y=None, height=dp(20),
-            halign="left",
-        )
-        timer_sound_lbl.bind(size=timer_sound_lbl.setter("text_size"))
-        timer_section.add_widget(timer_sound_lbl)
-
-        timer_sound_row = BoxLayout(
-            size_hint_y=None, height=dp(36), spacing=S.GAP_SM,
-        )
-        self._timer_sound_input = TextInput(
-            hint_text="Default bell",
-            text="",
-            multiline=False,
-            font_size=F.SMALL,
-            foreground_color=C.TEXT,
-            background_color=list(C.BG_INPUT),
-            size_hint_x=0.5,
-        )
-        self._timer_sound_input.bind(text=self._on_timer_sound_path_change)
-        self._timer_sound_browse_btn = StyledButton(
-            text="Browse",
-            font_size=F.SMALL,
-            bg_color=C.BG_CARD,
-            text_color=C.TEXT,
-            size_hint_x=0.25,
-            size_hint_y=None,
-            height=dp(36),
-        )
-        self._timer_sound_browse_btn.bind(on_release=self._on_timer_sound_browse)
-        self._timer_sound_test_btn = StyledButton(
-            text="Test",
-            font_size=F.SMALL,
-            bg_color=C.PRIMARY_DIM,
-            size_hint_x=0.25,
-            size_hint_y=None,
-            height=dp(36),
-        )
-        self._timer_sound_test_btn.bind(on_release=self._on_timer_sound_test)
-        timer_sound_row.add_widget(self._timer_sound_input)
-        timer_sound_row.add_widget(self._timer_sound_browse_btn)
-        timer_sound_row.add_widget(self._timer_sound_test_btn)
-        timer_section.add_widget(timer_sound_row)
-
-        # The simple-mode controls (duration slider row + presets) hide as a
-        # group when Program mode is active. Keep a reference list so the
-        # mode toggle can flip height/opacity/disabled/size_hint_y together.
-        self._simple_timer_widgets = [timer_dur_row, timer_presets]
-
-        # Mode: Simple | Program segmented toggle
+        # Mode: Simple | Program segmented toggle (placed before the mode-specific
+        # content so the layout reads top-down: enable -> mode -> content -> sound).
         mode_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
         mode_row.add_widget(Label(
             text="Mode:", font_size=F.BODY, color=C.TEXT_SECONDARY,
@@ -299,17 +217,61 @@ class SettingsScreen(Screen):
         mode_row.add_widget(mode_btn_box)
         timer_section.add_widget(mode_row)
 
-        # Program editor (dynamic vertical box; height tracks rows added
-        # after the section is opened — see _AccordionSection height note).
+        # Mode-content host: holds EITHER the simple box OR the program box. The
+        # inactive box is fully removed from the tree (not just hidden) — a
+        # zero-height-but-present container lets its children overflow and, when
+        # disabled, swallow taps aimed at the controls around it.
+        self._mode_content_box = BoxLayout(
+            orientation="vertical", size_hint_y=None, spacing=S.GAP_SM,
+        )
+        self._mode_content_box.bind(
+            minimum_height=self._mode_content_box.setter("height")
+        )
+        timer_section.add_widget(self._mode_content_box)
+
+        # --- Simple-mode controls: duration slider row + presets ---
+        self._simple_box = BoxLayout(
+            orientation="vertical", size_hint_y=None, spacing=S.GAP,
+        )
+        self._simple_box.bind(minimum_height=self._simple_box.setter("height"))
+        timer_dur_row = BoxLayout(size_hint_y=None, height=S.ROW_SM, spacing=S.GAP)
+        timer_dur_lbl = Label(
+            text="Duration:", font_size=F.BODY, color=C.TEXT_SECONDARY,
+            size_hint_x=0.25, halign="left",
+        )
+        timer_dur_lbl.bind(size=timer_dur_lbl.setter("text_size"))
+        self._timer_duration_slider = Slider(
+            min=1, max=120, value=20, step=1, size_hint_x=0.55,
+        )
+        self._timer_duration_label = Label(
+            text="20 min", font_size=F.BODY, bold=True, color=C.TEXT,
+            size_hint_x=0.2,
+        )
+        self._timer_duration_slider.bind(
+            value=lambda inst, val: setattr(
+                self._timer_duration_label, "text", f"{int(val)} min"
+            )
+        )
+        timer_dur_row.add_widget(timer_dur_lbl)
+        timer_dur_row.add_widget(self._timer_duration_slider)
+        timer_dur_row.add_widget(self._timer_duration_label)
+        self._simple_box.add_widget(timer_dur_row)
+
+        timer_presets = PresetRow(
+            items=[("5m", 5), ("10m", 10), ("15m", 15), ("20m", 20),
+                   ("30m", 30), ("1h", 60), ("1h30", 90), ("2h", 120)],
+            callback=lambda v: setattr(self._timer_duration_slider, "value", v),
+        )
+        self._simple_box.add_widget(timer_presets)
+
+        # Program editor (dynamic vertical box; height tracks rows added after
+        # the section is opened — see _AccordionSection height note). Built once,
+        # swapped into _mode_content_box by set_program_mode.
         self._program_box = BoxLayout(
             orientation="vertical", size_hint_y=None, spacing=S.GAP_SM,
         )
-        # Keep the setter so _set_widget_visible can unbind it while hidden:
-        # otherwise a height=0 hide is fought by minimum_height re-firing on the
-        # next layout pass (rows added via load_program), leaving a ghost gap.
-        self._program_box._min_height_setter = self._program_box.setter("height")
-        self._program_box.fbind(
-            "minimum_height", self._program_box._min_height_setter
+        self._program_box.bind(
+            minimum_height=self._program_box.setter("height")
         )
 
         self._program_total_label = Label(
@@ -370,14 +332,72 @@ class SettingsScreen(Screen):
             orientation="vertical", size_hint_y=None, height=dp(0), spacing=dp(2),
         )
 
+        # Segment rows live in their own box at the top so they read in program
+        # order (segment 1 at the top) and new rows append at the bottom, above
+        # the fixed total/add/save/list block.
+        self._segments_box = BoxLayout(
+            orientation="vertical", size_hint_y=None, spacing=S.GAP_SM,
+        )
+        self._segments_box.bind(
+            minimum_height=self._segments_box.setter("height")
+        )
+        self._program_box.add_widget(self._segments_box)
         self._program_box.add_widget(self._program_total_label)
         self._program_box.add_widget(self._add_segment_btn)
         self._program_box.add_widget(program_save_row)
         self._program_box.add_widget(saved_programs_label)
         self._program_box.add_widget(self._saved_programs_box)
-        timer_section.add_widget(self._program_box)
 
-        # Start in Simple mode (program editor hidden).
+        # Custom timer-end sound (shared by both modes): path + browse + test.
+        # When empty, the synthesised tingsha bell is used.
+        timer_sound_lbl = Label(
+            text="Timer End Sound (optional)",
+            font_size=F.SMALL,
+            color=C.TEXT_SECONDARY,
+            size_hint_y=None, height=dp(20),
+            halign="left",
+        )
+        timer_sound_lbl.bind(size=timer_sound_lbl.setter("text_size"))
+        timer_section.add_widget(timer_sound_lbl)
+
+        timer_sound_row = BoxLayout(
+            size_hint_y=None, height=dp(36), spacing=S.GAP_SM,
+        )
+        self._timer_sound_input = TextInput(
+            hint_text="Default bell",
+            text="",
+            multiline=False,
+            font_size=F.SMALL,
+            foreground_color=C.TEXT,
+            background_color=list(C.BG_INPUT),
+            size_hint_x=0.5,
+        )
+        self._timer_sound_input.bind(text=self._on_timer_sound_path_change)
+        self._timer_sound_browse_btn = StyledButton(
+            text="Browse",
+            font_size=F.SMALL,
+            bg_color=C.BG_CARD,
+            text_color=C.TEXT,
+            size_hint_x=0.25,
+            size_hint_y=None,
+            height=dp(36),
+        )
+        self._timer_sound_browse_btn.bind(on_release=self._on_timer_sound_browse)
+        self._timer_sound_test_btn = StyledButton(
+            text="Test",
+            font_size=F.SMALL,
+            bg_color=C.PRIMARY_DIM,
+            size_hint_x=0.25,
+            size_hint_y=None,
+            height=dp(36),
+        )
+        self._timer_sound_test_btn.bind(on_release=self._on_timer_sound_test)
+        timer_sound_row.add_widget(self._timer_sound_input)
+        timer_sound_row.add_widget(self._timer_sound_browse_btn)
+        timer_sound_row.add_widget(self._timer_sound_test_btn)
+        timer_section.add_widget(timer_sound_row)
+
+        # Start in Simple mode (simple controls swapped into the content host).
         self.set_program_mode("simple")
 
         # --- Device Status section ---
@@ -1367,55 +1387,35 @@ class SettingsScreen(Screen):
         self._program_mode = mode
         for btn in self._program_mode_buttons:
             btn.bg_color = C.ACCENT if btn._mode_key == mode else C.BG_CARD
-        program = mode == "program"
-        for w in self._simple_timer_widgets:
-            self._set_widget_visible(w, not program)
-        self._set_widget_visible(self._program_box, program)
+        # Swap the active box into the content host. The inactive box is fully
+        # detached (no geometry, no disabled-overlap that would eat taps).
+        self._mode_content_box.clear_widgets()
+        self._mode_content_box.add_widget(
+            self._program_box if mode == "program" else self._simple_box
+        )
 
     def _on_program_mode_pressed(self, btn) -> None:
         mode = getattr(btn, "_mode_key", "simple")
+        logger.info(f"Timer mode -> {mode}")
         self.set_program_mode(mode)
         if self._on_program_mode_cb:
             self._on_program_mode_cb(mode)
 
-    @staticmethod
-    def _set_widget_visible(widget, visible: bool) -> None:
-        """Collapse a widget to zero footprint when hidden (accordion-safe)."""
-        setter = getattr(widget, "_min_height_setter", None)
-        if visible:
-            if getattr(widget, "_saved_size_hint_y", "absent") != "absent":
-                widget.size_hint_y = widget._saved_size_hint_y
-            if setter is not None:
-                # Rebind, then apply once — future minimum_height changes track.
-                widget.fbind("minimum_height", setter)
-                widget.height = widget.minimum_height
-            elif hasattr(widget, "_saved_height"):
-                widget.height = widget._saved_height
-            widget.opacity = 1
-            widget.disabled = False
-        else:
-            if not hasattr(widget, "_saved_height"):
-                widget._saved_height = widget.height
-                widget._saved_size_hint_y = widget.size_hint_y
-            if setter is not None:
-                # Stop minimum_height from re-inflating the hidden box.
-                widget.funbind("minimum_height", setter)
-            widget.size_hint_y = None
-            widget.height = 0
-            widget.opacity = 0
-            widget.disabled = True
-
     def _on_program_save_pressed(self, *_args) -> None:
+        name = self._program_name_input.text.strip()
+        logger.info(f"Save program pressed: name={name!r}")
         if self._on_program_save_cb:
-            self._on_program_save_cb(self._program_name_input.text.strip())
+            self._on_program_save_cb(name)
 
     def _on_program_load_pressed(self, btn) -> None:
         idx = getattr(btn, "program_index", -1)
+        logger.info(f"Load saved program #{idx}")
         if idx >= 0 and self._on_program_load_cb:
             self._on_program_load_cb(idx)
 
     def _on_program_delete_pressed(self, btn) -> None:
         idx = getattr(btn, "program_index", -1)
+        logger.info(f"Delete saved program #{idx}")
         if idx >= 0 and self._on_program_delete_cb:
             self._on_program_delete_cb(idx)
 
@@ -1527,25 +1527,28 @@ class SettingsScreen(Screen):
         row.add_widget(delete_btn)
 
         self._segment_rows.append(row)
-        # Segment rows render above the total/add/save/list block. In Kivy a
-        # vertical BoxLayout draws children[-1] at the top, so inserting at the
-        # highest index keeps newly-added rows at the bottom of the row group,
-        # directly above the fixed total label.
-        self._program_box.add_widget(row, index=len(self._program_box.children))
+        # Default add into the dedicated segments box: a vertical BoxLayout
+        # renders children in insertion order top→bottom, so segment 1 stays at
+        # the top and each new row appends at the bottom.
+        self._segments_box.add_widget(row)
 
+        if not self._loading_program:
+            logger.info(f"Add segment -> {len(self._segment_rows)} total")
         self._update_program_total()
         self._emit_program_changed()
 
     def _remove_segment_row(self, row) -> None:
         if row in self._segment_rows:
             self._segment_rows.remove(row)
-        self._program_box.remove_widget(row)
+        self._segments_box.remove_widget(row)
+        logger.info(f"Remove segment -> {len(self._segment_rows)} remaining")
         self._update_program_total()
         self._emit_program_changed()
 
     def _cycle_end_sound(self, row, btn) -> None:
         row._end_sound = "warble" if row._end_sound is None else None
         btn.text = "Warble" if row._end_sound == "warble" else "Chime"
+        logger.info(f"Segment end-sound -> {row._end_sound or 'chime'}")
         self._emit_program_changed()
 
     def _formula_label(self, formula) -> str:
@@ -1570,6 +1573,7 @@ class SettingsScreen(Screen):
         def _choose(value):
             row._formula = value
             row._formula_btn.text = self._formula_label(value)
+            logger.info(f"Segment formula -> {self._formula_label(value)}")
             self._emit_program_changed()
             popup.dismiss()
 
@@ -1649,7 +1653,7 @@ class SettingsScreen(Screen):
         self._loading_program = True
         try:
             for row in list(self._segment_rows):
-                self._program_box.remove_widget(row)
+                self._segments_box.remove_widget(row)
             self._segment_rows.clear()
             for seg in segments:
                 self._add_segment_row(seg)
