@@ -334,6 +334,13 @@ class TestFeedbackChannel(unittest.TestCase):
         self.gen.set_active_feedback("nope")
         self.assertEqual(self.gen._active_feedback, "noise")
 
+    def test_set_active_same_is_noop(self):
+        self.gen.prepare_feedback({"noise": ("noise", ""), "tone": ("tone", "")}, "noise")
+        self.gen._feedback_players["noise"].volume = 0.25
+        self.gen.set_active_feedback("noise")
+        self.assertEqual(self.gen._active_feedback, "noise")
+        self.assertEqual(self.gen._feedback_players["noise"].volume, 0.25)  # untouched
+
     def test_mute_zeroes_all_players(self):
         self.gen.prepare_feedback({"noise": ("noise", ""), "tone": ("tone", "")}, "noise")
         for p in self.gen._feedback_players.values():

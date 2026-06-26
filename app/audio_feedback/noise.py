@@ -408,7 +408,7 @@ class AudioEngine:
             return custom_path
         return self._noise_path
 
-    def prepare_feedback(self, sources: dict, active_id: str) -> None:
+    def prepare_feedback(self, sources: dict[str, tuple[str, str]], active_id: str) -> None:
         """Instantiate one looping player per distinct feedback source at volume 0 (main thread)."""
         self._teardown_feedback_players()
         players: dict[str, object] = {}
@@ -611,6 +611,7 @@ class AudioEngine:
         self._ramp_running = False
         self._volume = 0.0
         self._target_volume = 0.0
+        # setVolume-only: stop()/release() deadlock the tick thread vs the paused main Looper under lock
         for sid, p in self._feedback_players.items():
             try:
                 p.volume = 0.0
