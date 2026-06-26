@@ -166,8 +166,17 @@ def test_program_hides_user_custom_slots_for_uniqueness():
     prog = SessionProgram([{"minutes": 1, "target": 80,
                             "formula": {"name": "Alpha", "formula": "alpha1"}}])
     app._show_program_series(prog)
-    assert graph.is_visible("program_formula") is True   # program's custom line shown
     assert graph.is_visible("custom_formula") is False    # user slot hidden (no duplicate)
+    assert graph.is_visible("program_formula") is False   # NOT shown until its segment is active
+
+    # The custom segment activating reveals the program line (named "Program: …").
+    app._apply_program_segment_ui(80, "program_formula", "Program: Alpha")
+    assert graph.is_visible("program_formula") is True
+    assert graph.series_name("program_formula") == "Program: Alpha"
+
+    # A built-in segment hides the program line again (it's not the active one).
+    app._apply_program_segment_ui(50, "shamatha_score", None)
+    assert graph.is_visible("program_formula") is False
 
     app._restore_program_series()
     assert graph.is_visible("program_formula") is False   # transient line cleared

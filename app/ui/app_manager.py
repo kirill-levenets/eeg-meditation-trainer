@@ -203,10 +203,12 @@ class EEGMeditationApp(App):
         return SessionProgram(self._session_program_segments)
 
     def _show_program_series(self, prog) -> None:
-        """Auto-show the program's trained series on the live graph. Built-in keys
-        show their own series; a custom-formula segment uses the dedicated
-        program_formula line. For uniqueness, the user's custom-formula slots are
-        hidden while the program drives its own custom line (restored on stop)."""
+        """Auto-show the program's built-in trained series on the live graph. The
+        custom-formula line (`program_formula`) is NOT shown here — it's revealed
+        only while its custom segment is active (see `_apply_program_segment_ui`),
+        so it never appears as an empty "Program" line during built-in segments.
+        For uniqueness, the user's custom-formula slots are hidden whenever the
+        program has a custom segment (restored on stop)."""
         graph = self._live_screen.graph
         has_custom = False
         for seg in prog.segments:
@@ -214,7 +216,6 @@ class EEGMeditationApp(App):
             if isinstance(f, str):
                 graph.set_visible(f, True)
             elif isinstance(f, dict):
-                graph.set_visible("program_formula", True)
                 has_custom = True
         self._program_hidden_slots = []
         if has_custom:
@@ -307,10 +308,13 @@ class EEGMeditationApp(App):
         """Main-thread UI for a segment switch: name + show the program-formula
         line (custom segments), update the threshold, and mark the trained series."""
         if prog_name is not None:
-            # Label the shared program-formula line with the active formula's name
-            # and reveal it so the custom formula is plotted + markable.
+            # Custom segment: label the program-formula line with the formula's
+            # name and reveal it so it's plotted + markable.
             self._live_screen.graph.set_series_name("program_formula", prog_name)
             self._live_screen.graph.set_visible("program_formula", True)
+        else:
+            # Built-in segment: the program-formula line isn't the active one.
+            self._live_screen.graph.set_visible("program_formula", False)
         self._live_screen.graph.set_threshold(float(target), metric_key)
         self._live_screen.set_training_series(metric_key)  # bold + » on the trained series
 
@@ -1937,8 +1941,8 @@ class EEGMeditationApp(App):
         is_live = graph is self._live_screen.graph
         body = BoxLayout(orientation="vertical", spacing=S.GAP_SM, padding=S.GAP)
         for key in graph.series_keys():
-            if key == "program_formula" and not self._session_program_active:
-                continue  # program-controlled line; only selectable during a program
+            if key == "program_formula":
+                continue  # fully program-controlled: shown only during its custom segment
             vis = graph.is_visible(key)
             btn = StyledButton(
                 text=graph.series_name(key), height=dp(44),
@@ -2050,7 +2054,8 @@ class EEGMeditationApp(App):
         uid = self._current_user_id
         if uid and graph.graph_id:
             self._db.set_user_json_setting(
-                uid, f"graph_series_{graph.graph_id}", graph.visible_keys()
+                uid, f"graph_series_{graph.graph_id}",
+                [k for k in graph.visible_keys() if k != "program_formula"],
             )
 
     def _on_test_audio(self) -> None:
@@ -2991,7 +2996,8 @@ class EEGMeditationApp(App):
         for g in self._all_graphs():
             if g.graph_id and len(g.series_keys()) > 1:
                 self._db.set_user_json_setting(
-                    uid, f"graph_series_{g.graph_id}", g.visible_keys()
+                    uid, f"graph_series_{g.graph_id}",
+                    [k for k in g.visible_keys() if k != "program_formula"],
                 )
         self._db.set_user_setting(uid, "audio_metric", self._audio_metric_key)
         self._db.set_user_setting(uid, "marker_hotkey", self._settings_screen.marker_hotkey)
@@ -3018,6 +3024,8 @@ class EEGMeditationApp(App):
                 sel = set(graph.series_keys())
             for key in graph.series_keys():
                 on = key in sel
+                if key == "program_formula":
+                    on = False  # program-controlled; never restored as a user selection
                 ev = self._formula_for_key(key)
                 if ev is not None and graph is self._live_screen.graph:
                     on = on and ev.is_valid
