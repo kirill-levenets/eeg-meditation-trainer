@@ -2396,6 +2396,21 @@ class EEGMeditationApp(App):
         self._persist_session_program(self._current_user_id)
         self._refresh_saved_programs()
 
+    def _program_has_unsaved_changes(self) -> bool:
+        """True when the active program differs from its saved namesake (or is unnamed but
+        non-empty) — i.e. loading another program would actually discard edits."""
+        segs = self._session_program_segments
+        if not segs:
+            return False
+        name = self._session_program_name
+        if not name:
+            return True
+        saved = next((p for p in self._db.get_saved_programs(self._current_user_id)
+                      if p.get("name") == name), None)
+        if saved is None:
+            return True
+        return saved.get("segments") != segs
+
     def _on_program_load(self, index: int) -> None:
         if not self._current_user_id:
             return
@@ -2403,6 +2418,10 @@ class EEGMeditationApp(App):
         if not (0 <= index < len(progs)):
             return
         name = progs[index].get("name", "")
+        # Only warn when there's something to lose; otherwise load straight away.
+        if not self._program_has_unsaved_changes():
+            self._load_program(index, name)
+            return
         self._confirm_program_action(
             "Load program",
             f"Load '{name}'?\nUnsaved changes to the current program will be lost.",

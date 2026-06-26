@@ -303,3 +303,26 @@ def test_diary_rebuilds_stepped_threshold():
     assert screen._metrics_graph.threshold_value_at(2400) == 70.0
     screen.set_program("")                  # clears the stepped line for non-program sessions
     assert screen._metrics_graph.threshold_value_at(0) is None
+
+
+def test_program_unsaved_changes_detection(tmp_path):
+    from app.storage.database import DatabaseManager
+    db = DatabaseManager(db_path=str(tmp_path / "unsaved.db"))
+    uid = db.create_user("u")
+    db.add_saved_program(uid, "Ramp", [{"minutes": 10, "target": 50, "formula": "shamatha_score"}])
+    app = _app(db, uid)
+
+    app._session_program_segments = []           # nothing loaded
+    app._session_program_name = ""
+    assert app._program_has_unsaved_changes() is False
+
+    app._session_program_segments = [{"minutes": 10, "target": 50, "formula": "shamatha_score"}]
+    app._session_program_name = "Ramp"           # clean load, matches saved
+    assert app._program_has_unsaved_changes() is False
+
+    app._session_program_segments = [{"minutes": 20, "target": 50, "formula": "shamatha_score"}]
+    assert app._program_has_unsaved_changes() is True   # edited
+
+    app._session_program_name = ""               # unnamed but non-empty
+    assert app._program_has_unsaved_changes() is True
+    db.close()
