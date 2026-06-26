@@ -226,12 +226,7 @@ def _generate_noise_wav(volume: float, rate: int, duration: float) -> bytes:
 
 
 def _generate_tone_wav(rate: int, freq: float, duration: float) -> bytes:
-    """Harmonic-pad drone: fundamental + a fifth, slow amplitude shimmer,
-    one-pole low-pass, crossfaded at the boundary for a seamless loop.
-
-    Used as the built-in "monotone / standard" feedback source (issue #10).
-    Looped continuously; volume is modulated by the score like the rain noise.
-    """
+    """Harmonic-pad drone (fundamental + a fifth), low-passed and crossfaded for a seamless loop."""
     n_samples = int(rate * duration)
     fifth = freq * 1.5
     lp = 0.0
