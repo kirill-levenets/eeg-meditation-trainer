@@ -172,9 +172,11 @@ class SettingsScreen(Screen):
         )
         profile_section.add_widget(self._user_picker_form)
 
-        # --- Timer section ---
-        timer_section = accordion.add_section("Timer", collapsed=True)
+        # --- Timer / Program section ---
+        timer_section = accordion.add_section("Timer / Program", collapsed=True)
 
+        # "Enable Timer" is a simple-mode concept (program mode forces the timer
+        # on), so it lives inside _simple_box below and hides in program mode.
         timer_toggle_row = BoxLayout(size_hint_y=None, height=S.ROW_SM, spacing=S.GAP)
         self._timer_enable_cb = CheckBox(
             active=False, size_hint_x=0.15,
@@ -190,10 +192,9 @@ class SettingsScreen(Screen):
         timer_enable_lbl.bind(size=timer_enable_lbl.setter("text_size"))
         timer_toggle_row.add_widget(self._timer_enable_cb)
         timer_toggle_row.add_widget(timer_enable_lbl)
-        timer_section.add_widget(timer_toggle_row)
 
         # Mode: Simple | Program segmented toggle (placed before the mode-specific
-        # content so the layout reads top-down: enable -> mode -> content -> sound).
+        # content so the layout reads top-down: mode -> content -> sound).
         mode_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
         mode_row.add_widget(Label(
             text="Mode:", font_size=F.BODY, color=C.TEXT_SECONDARY,
@@ -234,6 +235,7 @@ class SettingsScreen(Screen):
             orientation="vertical", size_hint_y=None, spacing=S.GAP,
         )
         self._simple_box.bind(minimum_height=self._simple_box.setter("height"))
+        self._simple_box.add_widget(timer_toggle_row)  # Enable Timer (simple mode only)
         timer_dur_row = BoxLayout(size_hint_y=None, height=S.ROW_SM, spacing=S.GAP)
         timer_dur_lbl = Label(
             text="Duration:", font_size=F.BODY, color=C.TEXT_SECONDARY,

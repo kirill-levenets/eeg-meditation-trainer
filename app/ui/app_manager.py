@@ -862,6 +862,9 @@ class EEGMeditationApp(App):
             self._refresh_diary()
         elif name == "profile":
             self._refresh_profile()
+        elif name == "live_session":
+            # Reflect any Settings timer/mode change on the Start duration button.
+            self._sync_live_timer_picker()
         # Sync bottom nav highlight
         for tab_key, screen in self._TAB_SCREENS.items():
             if screen == name:
@@ -1019,6 +1022,8 @@ class EEGMeditationApp(App):
             threshold = int(prog.segments[0].get("target", threshold))
             self._timer_state.set_enabled(True)
             self._timer_state.set_duration(max(1, int(round(prog.total_seconds / 60))))
+            logger.info(f"Program session: {len(prog.segments)} segments, "
+                        f"{prog.total_seconds:.0f}s total drives the end gong")
         else:
             # Session start is authoritative: re-sync the timer from Settings so a
             # prior program session's enabled/duration can't leak into a simple one.
@@ -1049,6 +1054,12 @@ class EEGMeditationApp(App):
             self._live_screen.graph.set_threshold_steps(
                 prog.threshold_steps(self._live_screen.graph._sample_rate)
             )
+            # Auto-show every built-in metric the program trains, so each
+            # segment's target series is plotted and the legend can mark it.
+            for seg in prog.segments:
+                f = seg.get("formula")
+                if isinstance(f, str):
+                    self._live_screen.graph.set_visible(f, True)
         else:
             self._live_screen.graph.set_threshold_steps(None)
             self._live_screen.graph.set_threshold(float(threshold), "shamatha_score")
