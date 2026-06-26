@@ -127,6 +127,7 @@ class SettingsScreen(Screen):
         self._loading_program: bool = False
         self._graph_toggles: dict[str, bool] = {
             "shamatha_score": True,
+            "meditation_score": False,
             "distraction": False,
             "sinking": False,
             "subtle_distraction": False,

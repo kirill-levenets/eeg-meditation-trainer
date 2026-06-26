@@ -43,7 +43,7 @@ from app.storage.backup import restore_backup, validate_backup
 from app.storage.database import DatabaseManager, UserExistsError
 from app.ui.diary_screen import DiaryScreen
 from app.ui.history_screen import HistoryScreen
-from app.ui.live_session import METRICS_COLORS, LiveSessionScreen
+from app.ui.live_session import METRICS_COLORS, SERIES_NAMES, LiveSessionScreen
 from app.ui.profile_screen import ProfileScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
@@ -63,6 +63,8 @@ from app.ui.widgets.user_picker import UserPickerForm
 from app.ui.wizard_screen import WizardScreen
 
 FORMULA_KEYS: tuple[str, ...] = ("custom_formula", "custom_formula_2", "custom_formula_3")
+# Program-driven custom-formula lines: one per distinct custom formula in a program.
+PROGRAM_FORMULA_KEYS: tuple[str, ...] = ("program_formula", "program_formula_2", "program_formula_3")
 _MAX_FORMULAS = len(FORMULA_KEYS)
 
 
@@ -120,9 +122,11 @@ class EEGMeditationApp(App):
         self._wake_lock = None
         self._active_program = None
         self._program_seg_idx: int = -1
-        self._program_formula_ev = None
+        self._program_formula_evs: dict = {}  # slot_key -> evaluator, one per distinct custom
+        self._program_segment_keys: list[str] = []  # metric key driven by each segment
         self._session_program_active: bool = False
-        self._program_hidden_slots: list[str] = []  # custom slots hidden during a program
+        self._program_hidden_slots: list[str] = []  # legacy; see _program_prev_visibility
+        self._program_prev_visibility: dict[str, bool] = {}  # live-graph visibility before a program
 
     def _init_formula_slots(self) -> None:
         """Three independent formula evaluators (one per slot) + their names."""
@@ -202,37 +206,103 @@ class EEGMeditationApp(App):
         """Build a SessionProgram from the active editable segments."""
         return SessionProgram(self._session_program_segments)
 
-    def _show_program_series(self, prog) -> None:
-        """Auto-show the program's built-in trained series on the live graph. The
-        custom-formula line (`program_formula`) is NOT shown here — it's revealed
-        only while its custom segment is active (see `_apply_program_segment_ui`),
-        so it never appears as an empty "Program" line during built-in segments.
-        For uniqueness, the user's custom-formula slots are hidden whenever the
-        program has a custom segment (restored on stop)."""
-        graph = self._live_screen.graph
-        has_custom = False
+    @staticmethod
+    def _program_plan(prog):
+        """Map a program to its live series. Returns (program_keys, custom_slots,
+        segment_keys): the set of series to show, an ordered list of (slot_key,
+        custom_dict) for each DISTINCT custom formula (capped at PROGRAM_FORMULA_KEYS),
+        and the metric key driven by each segment (built-in key or its custom's slot)."""
+        builtins: set[str] = set()
+        custom_slots: list[tuple] = []         # (slot_key, custom_dict)
+        ident_to_slot: dict[tuple, str] = {}   # (name, formula) -> slot_key
+        segment_keys: list[str] = []
         for seg in prog.segments:
             f = seg.get("formula")
-            if isinstance(f, str):
-                graph.set_visible(f, True)
-            elif isinstance(f, dict):
-                has_custom = True
-        self._program_hidden_slots = []
-        if has_custom:
-            for fk in FORMULA_KEYS:
-                if graph.is_visible(fk):
-                    self._program_hidden_slots.append(fk)
-                    graph.set_visible(fk, False)
+            if isinstance(f, dict):
+                ident = (f.get("name"), f.get("formula"))
+                if ident in ident_to_slot:
+                    segment_keys.append(ident_to_slot[ident])
+                elif len(custom_slots) < len(PROGRAM_FORMULA_KEYS):
+                    slot = PROGRAM_FORMULA_KEYS[len(custom_slots)]
+                    custom_slots.append((slot, f))
+                    ident_to_slot[ident] = slot
+                    segment_keys.append(slot)
+                else:  # > 3 distinct customs (implausible): reuse the last slot
+                    segment_keys.append(custom_slots[-1][0])
+            elif isinstance(f, str) and f:
+                builtins.add(f)
+                segment_keys.append(f)
+            else:
+                segment_keys.append("shamatha_score")
+        keys = set(builtins) | {s for s, _ in custom_slots}
+        return keys, custom_slots, segment_keys
+
+    def _apply_program_visibility(self, prog) -> list:
+        """Set the live graph to EXACTLY the program's metric set and label each program
+        custom line `Program: <name>`. Returns the (slot_key, custom_dict) list. Shared by
+        the running session (`_show_program_series`) and the idle preview."""
+        graph = self._live_screen.graph
+        keys, custom_slots, _ = self._program_plan(prog)
+        for slot, cust in custom_slots:
+            nm = cust.get("name")
+            graph.set_series_name(slot, f"Program: {nm}" if nm else "Program")
+        for k in graph.series_keys():
+            graph.set_visible(k, k in keys)
+        return custom_slots
+
+    def _show_program_series(self, prog) -> None:
+        """Session-start: snapshot prior visibility, show EXACTLY the program's metric
+        set for the whole session, and arm one persistent evaluator per distinct custom
+        formula. Each custom line is shown the whole program (not per-segment) and
+        evaluated every tick, so only the legend marker changes as segments cross."""
+        graph = self._live_screen.graph
+        # Snapshot every catalog key's visibility so stop restores exactly.
+        self._program_prev_visibility = {k: graph.is_visible(k) for k in graph.series_keys()}
+        custom_slots = self._apply_program_visibility(prog)
+        _, _, self._program_segment_keys = self._program_plan(prog)
+        self._program_formula_evs = {}
+        for slot, cust in custom_slots:
+            ev = CustomFormulaEvaluator()
+            ok, _ = ev.set_formula(cust.get("formula", "") or "")
+            if ok and ev.is_valid:
+                self._program_formula_evs[slot] = ev
+
+    def _program_governs_live_series(self) -> bool:
+        """True when the live metrics graph's visibility is program-driven (program mode
+        with a loaded program) — so it must not be persisted as the manual selection."""
+        return (getattr(self, "_timer_mode", "simple") == "program"
+                and bool(getattr(self, "_session_program_segments", None)))
+
+    def _refresh_live_program_series(self) -> None:
+        """Idle preview: in program mode with a loaded program, show the program's metric
+        set on the live graph (legend + lines) before Start; otherwise restore the user's
+        saved selection. No-op while a session runs (the session owns the graph then)."""
+        sm = getattr(self, "_session_manager", None)
+        if sm is not None and sm.state in (SessionState.RUNNING, SessionState.PAUSED):
+            return
+        if not self._current_user_id:
+            return
+        if self._program_governs_live_series():
+            self._apply_program_visibility(self._build_session_program())
+            self._live_screen.set_training_series(None)  # no active segment in idle
+        else:
+            self._apply_saved_series(self._live_screen.graph, self._current_user_id)
 
     def _restore_program_series(self) -> None:
-        """Hide the transient program_formula line, reset its label, and restore
-        the user's custom slots hidden for the program's duration."""
+        """Restore the live graph to its pre-program visibility and drop the program
+        custom-formula lines/labels/evaluators."""
         graph = self._live_screen.graph
-        graph.set_visible("program_formula", False)
-        graph.set_series_name("program_formula", "Program")  # drop the stale formula name
+        for slot in PROGRAM_FORMULA_KEYS:
+            graph.set_series_name(slot, SERIES_NAMES.get(slot, "Program"))  # drop stale labels
         self._session_program_active = False
-        for fk in getattr(self, "_program_hidden_slots", []):
-            graph.set_visible(fk, True)
+        self._program_formula_evs = {}
+        self._program_segment_keys = []
+        prev = getattr(self, "_program_prev_visibility", None) or dict.fromkeys(PROGRAM_FORMULA_KEYS, False)
+        for k, on in prev.items():
+            graph.set_visible(k, on)
+        for slot in PROGRAM_FORMULA_KEYS:
+            graph.set_visible(slot, False)  # never linger as a user selection
+        self._program_prev_visibility = {}
         self._program_hidden_slots = []
 
     @staticmethod
@@ -266,36 +336,48 @@ class EEGMeditationApp(App):
         if crossed:
             self._apply_program_segment(self._program_seg_idx, idx, seg)
             self._program_seg_idx = idx
-        # A custom-formula segment is evaluated every tick into metrics["program_formula"].
-        ev = self._program_formula_ev
-        if ev is not None and ev.is_valid:
+        # Every program custom line is evaluated every tick (persistent, shown the whole
+        # program) into its own metrics[slot] — so all stages' lines stay live at once.
+        evs = self._program_formula_evs
+        if evs:
             fvars = self._eval_formula_vars(raw_sample, metrics)
-            ev.push_variables(fvars)
-            metrics["program_formula"] = ev.evaluate(fvars)
+            for slot, ev in evs.items():
+                if ev.is_valid:
+                    ev.push_variables(fvars)
+                    metrics[slot] = ev.evaluate(fvars)
+
+    def _resolve_segment_key(self, seg: dict) -> str:
+        """Metric key a segment drives, for callers without a precomputed plan (direct
+        unit tests). A custom segment registers its evaluator under program_formula."""
+        f = seg.get("formula", "shamatha_score")
+        if isinstance(f, dict):
+            ev = CustomFormulaEvaluator()
+            ok, err = ev.set_formula(f.get("formula", "") or "")
+            if ok and ev.is_valid:
+                self._program_formula_evs = getattr(self, "_program_formula_evs", None) or {}
+                self._program_formula_evs["program_formula"] = ev
+                return "program_formula"
+            logger.warning(f"Program segment formula invalid, using shamatha: {err}")
+            return "shamatha_score"
+        return f or "shamatha_score"
 
     def _apply_program_segment(self, prev_idx: int, idx: int, seg: dict) -> None:
-        """On a boundary crossing: end-cue for the prior segment + repoint target/formula/audio."""
+        """On a boundary crossing: end-cue for the prior segment + repoint target/audio/marker
+        to this segment's metric (built-in key or its custom's persistent program line)."""
         # End cue for the segment that just ended (skip on initial entry prev_idx == -1).
         if prev_idx >= 0:
             prev_seg = self._active_program.segments[prev_idx]
             self._play_segment_end_sound(prev_seg.get("end_sound"))
-        # Resolve the driving formula -> a metrics key. Custom formula gets its own evaluator.
-        formula = seg.get("formula", "shamatha_score")
-        self._program_formula_ev = None
-        prog_name = None
-        if isinstance(formula, dict):
-            ev = CustomFormulaEvaluator()
-            ok, err = ev.set_formula(formula.get("formula", "") or "")
-            if ok and ev.is_valid:
-                self._program_formula_ev = ev
-                metric_key = "program_formula"
-                nm = formula.get("name")
-                prog_name = f"Program: {nm}" if nm else "Program"
-            else:
-                metric_key = "shamatha_score"  # spec: unparseable saved formula falls back
-                logger.warning(f"Program segment formula invalid, using shamatha: {err}")
+        seg_keys = getattr(self, "_program_segment_keys", None)
+        if seg_keys and 0 <= idx < len(seg_keys):
+            metric_key = seg_keys[idx]
         else:
-            metric_key = formula or "shamatha_score"
+            metric_key = self._resolve_segment_key(seg)
+        formula = seg.get("formula")
+        prog_name = None
+        if isinstance(formula, dict) and metric_key in PROGRAM_FORMULA_KEYS:
+            nm = formula.get("name")
+            prog_name = f"Program: {nm}" if nm else "Program"
         target = int(seg.get("target", 50))
         self._audio_metric_key = metric_key
         self._session_manager.set_active_goal(metric_key, target)
@@ -305,17 +387,16 @@ class EEGMeditationApp(App):
         logger.info(f"Program segment {idx}: metric={metric_key} target={target}")
 
     def _apply_program_segment_ui(self, target: int, metric_key: str, prog_name) -> None:
-        """Main-thread UI for a segment switch: name + show the program-formula
-        line (custom segments), update the threshold, and mark the trained series."""
+        """Main-thread UI for a segment switch: ensure a custom segment's line is labelled
+        + visible, update the threshold, and move the legend marker. Program lines'
+        visibility is owned by `_show_program_series` (shown the whole program), so a
+        built-in segment no longer hides anything — only the » marker moves."""
+        graph = self._live_screen.graph
         if prog_name is not None:
-            # Custom segment: label the program-formula line with the formula's
-            # name and reveal it so it's plotted + markable.
-            self._live_screen.graph.set_series_name("program_formula", prog_name)
-            self._live_screen.graph.set_visible("program_formula", True)
-        else:
-            # Built-in segment: the program-formula line isn't the active one.
-            self._live_screen.graph.set_visible("program_formula", False)
-        self._live_screen.graph.set_threshold(float(target), metric_key)
+            # Custom segment: label this segment's program line with the formula's name.
+            graph.set_series_name(metric_key, prog_name)
+            graph.set_visible(metric_key, True)
+        graph.set_threshold(float(target), metric_key)
         self._live_screen.set_training_series(metric_key)  # bold + » on the trained series
 
     def _play_segment_end_sound(self, sound_id) -> None:
@@ -689,9 +770,10 @@ class EEGMeditationApp(App):
         # Hide all custom-formula series until a formula is set + shown via picker
         for _fk in FORMULA_KEYS:
             self._live_screen.graph.set_visible(_fk, False)
-        # The program-formula line is shown only while a program with a
-        # custom-formula segment runs.
-        self._live_screen.graph.set_visible("program_formula", False)
+        # The program-formula lines are shown only while a program with
+        # custom-formula segments runs.
+        for _pk in PROGRAM_FORMULA_KEYS:
+            self._live_screen.graph.set_visible(_pk, False)
         # Apply default metric visibility (Shamatha only for new users;
         # _load_user_settings will override for existing users)
         for key, active in self._settings_screen._graph_toggles.items():
@@ -1076,7 +1158,8 @@ class EEGMeditationApp(App):
         threshold = self._settings_screen.threshold
         prog = self._build_session_program()
         self._program_seg_idx = -1
-        self._program_formula_ev = None
+        self._program_formula_evs = {}
+        self._program_segment_keys = []
         self._session_program_active = self._timer_mode == "program" and bool(prog)
         self._active_program = prog if self._session_program_active else None
         if self._session_program_active:
@@ -1923,6 +2006,7 @@ class EEGMeditationApp(App):
             self._settings_screen.timer_minutes,
             program_active=program_active,
         )
+        self._refresh_live_program_series()  # idle preview of the program's metric set
 
     def _on_threshold_change(self, value: int) -> None:
         self._metrics_engine.meditation_threshold = value
@@ -2050,13 +2134,19 @@ class EEGMeditationApp(App):
         self._fullscreen_content.add_widget(self._fullscreen_legend)
 
     def _persist_graph_series(self, graph) -> None:
-        """Persist `graph`'s visible series under its per-graph key on picker close."""
+        """Persist `graph`'s visible series under its per-graph key on picker close.
+
+        Skips the live metrics graph while a program governs its visibility — the
+        program-driven set must not overwrite the user's saved manual selection."""
         uid = self._current_user_id
-        if uid and graph.graph_id:
-            self._db.set_user_json_setting(
-                uid, f"graph_series_{graph.graph_id}",
-                [k for k in graph.visible_keys() if k != "program_formula"],
-            )
+        if not (uid and graph.graph_id):
+            return
+        if graph is self._live_screen.graph and self._program_governs_live_series():
+            return
+        self._db.set_user_json_setting(
+            uid, f"graph_series_{graph.graph_id}",
+            [k for k in graph.visible_keys() if k not in PROGRAM_FORMULA_KEYS],
+        )
 
     def _on_test_audio(self) -> None:
         logger.debug("Test audio triggered")
@@ -2995,9 +3085,11 @@ class EEGMeditationApp(App):
         # Per-graph series selection (the on-graph picker is the source of truth).
         for g in self._all_graphs():
             if g.graph_id and len(g.series_keys()) > 1:
+                if g is self._live_screen.graph and self._program_governs_live_series():
+                    continue  # program-driven visibility; keep the saved manual selection
                 self._db.set_user_json_setting(
                     uid, f"graph_series_{g.graph_id}",
-                    [k for k in g.visible_keys() if k != "program_formula"],
+                    [k for k in g.visible_keys() if k not in PROGRAM_FORMULA_KEYS],
                 )
         self._db.set_user_setting(uid, "audio_metric", self._audio_metric_key)
         self._db.set_user_setting(uid, "marker_hotkey", self._settings_screen.marker_hotkey)
@@ -3015,21 +3107,27 @@ class EEGMeditationApp(App):
         for graph in self._all_graphs():
             if not graph.graph_id or len(graph.series_keys()) <= 1:
                 continue
-            series = self._db.get_user_json_setting(user_id, f"graph_series_{graph.graph_id}")
-            if series is not None:
-                sel = set(series)
-            elif graph is self._live_screen.graph:
-                sel = self._legacy_live_series(user_id)
-            else:
-                sel = set(graph.series_keys())
-            for key in graph.series_keys():
-                on = key in sel
-                if key == "program_formula":
-                    on = False  # program-controlled; never restored as a user selection
-                ev = self._formula_for_key(key)
-                if ev is not None and graph is self._live_screen.graph:
-                    on = on and ev.is_valid
-                graph.set_visible(key, on)
+            self._apply_saved_series(graph, user_id)
+
+    def _apply_saved_series(self, graph, user_id: int) -> None:
+        """Apply one graph's persisted series selection (graph_series_<id>). The live
+        metrics graph migrates the pre-F2 toggle_<key> rows when it has no JSON yet and
+        gates custom-formula slots on validity; other graphs default to all-visible."""
+        series = self._db.get_user_json_setting(user_id, f"graph_series_{graph.graph_id}")
+        if series is not None:
+            sel = set(series)
+        elif graph is self._live_screen.graph:
+            sel = self._legacy_live_series(user_id)
+        else:
+            sel = set(graph.series_keys())
+        for key in graph.series_keys():
+            on = key in sel
+            if key in PROGRAM_FORMULA_KEYS:
+                on = False  # program-controlled; never restored as a user selection
+            ev = self._formula_for_key(key)
+            if ev is not None and graph is self._live_screen.graph:
+                on = on and ev.is_valid
+            graph.set_visible(key, on)
 
     def _legacy_live_series(self, user_id: int) -> set[str]:
         """Pre-F2 fallback for the live metrics graph: per-metric toggle_<key> rows

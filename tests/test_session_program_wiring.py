@@ -77,12 +77,21 @@ class _StubSettings:
 
 
 class _StubLive:
+    def __init__(self):
+        from unittest.mock import MagicMock
+        self.graph = MagicMock()
+        self.graph.series_keys.return_value = []  # empty catalog -> preview is a no-op
+        self.graph.is_visible.return_value = False
+
     def set_session_programs(self, progs, current_name=""):
         self.programs = progs
         self.current_name = current_name
 
     def refresh_duration_preset(self, enabled, minutes, program_active=False):
         self.preset = (enabled, minutes, program_active)
+
+    def set_training_series(self, key):
+        self.training = key
 
 
 def test_saved_program_unique_upsert_load_delete(tmp_path):
@@ -138,7 +147,8 @@ def test_program_custom_formula_plots_and_marks():
     app._active_program = SessionProgram(
         [{"minutes": 1, "target": 120, "formula": {"name": "AlphaPwr", "formula": "alpha1"}}])
     app._program_seg_idx = -1
-    app._program_formula_ev = None
+    app._program_formula_evs = {}
+    app._program_segment_keys = []
     app._audio_metric_key = "shamatha_score"
 
     metrics = {"shamatha_score": 50}
@@ -151,36 +161,134 @@ def test_program_custom_formula_plots_and_marks():
     app._live_screen.set_training_series.assert_called_with("program_formula")  # legend-marked
 
 
-def test_program_hides_user_custom_slots_for_uniqueness():
-    """A custom-formula program hides the user's custom slots (so the same kind
-    of line isn't shown twice) and restores them on stop."""
+def test_program_shows_exactly_its_metric_set_whole_session():
+    """A program shows EXACTLY its metric set for the whole session — built-in
+    series + one program-formula line for its custom formula, shown throughout (not
+    per-segment). Unrelated user selections are hidden during the program and
+    restored on stop; only the legend marker moves as segments cross."""
     from app.session.session_program import SessionProgram
     from app.ui.live_session import LiveSessionScreen
     app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._program_prev_visibility = {}
+    app._program_formula_evs = {}
+    app._program_segment_keys = []
+    app._session_program_active = True
     app._live_screen = LiveSessionScreen()
     graph = app._live_screen.graph
-    # User has a custom slot visible (via the picker/combobox).
+    # User had a custom slot + shamatha on; an unrelated metric off.
     graph.set_visible("custom_formula", True)
+    graph.set_visible("shamatha_score", True)
     graph.set_visible("program_formula", False)
 
-    prog = SessionProgram([{"minutes": 1, "target": 80,
-                            "formula": {"name": "Alpha", "formula": "alpha1"}}])
+    prog = SessionProgram([
+        {"minutes": 1, "target": 50, "formula": "shamatha_score"},
+        {"minutes": 1, "target": 80, "formula": {"name": "Alpha", "formula": "alpha1"}},
+    ])
     app._show_program_series(prog)
-    assert graph.is_visible("custom_formula") is False    # user slot hidden (no duplicate)
-    assert graph.is_visible("program_formula") is False   # NOT shown until its segment is active
+    # Exactly the program's set, shown the whole program:
+    assert graph.is_visible("shamatha_score") is True      # built-in program metric
+    assert graph.is_visible("program_formula") is True     # custom line shown all program
+    assert graph.is_visible("custom_formula") is False     # user slot hidden (not in program)
+    assert graph.series_name("program_formula") == "Program: Alpha"
 
-    # The custom segment activating reveals the program line (named "Program: …").
+    # A built-in segment KEEPS the program line visible — only the marker moves.
+    app._apply_program_segment_ui(50, "shamatha_score", None)
+    assert graph.is_visible("program_formula") is True
+    # The custom segment relabels and keeps it visible.
     app._apply_program_segment_ui(80, "program_formula", "Program: Alpha")
     assert graph.is_visible("program_formula") is True
     assert graph.series_name("program_formula") == "Program: Alpha"
 
-    # A built-in segment hides the program line again (it's not the active one).
-    app._apply_program_segment_ui(50, "shamatha_score", None)
-    assert graph.is_visible("program_formula") is False
-
     app._restore_program_series()
-    assert graph.is_visible("program_formula") is False   # transient line cleared
-    assert graph.is_visible("custom_formula") is True      # user slot restored
+    assert graph.is_visible("program_formula") is False    # not lingering as a user selection
+    assert graph.is_visible("custom_formula") is True       # user slot restored
+
+
+def test_program_with_two_distinct_customs_shows_three_lines():
+    """A program with two DIFFERENT custom formulas plots each on its own line
+    (program_formula + program_formula_2), so a 3-distinct-metric program shows 3
+    lines — not one shared 'Program' line. The per-tick eval fills each line."""
+    from unittest.mock import MagicMock
+
+    from app.session.session_program import SessionProgram
+    from app.ui.live_session import LiveSessionScreen
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._on_main = lambda fn, *a: fn()
+    app._audio = MagicMock()
+    app._session_manager = MagicMock()
+    app._session_manager.elapsed_seconds = 0
+    app._metrics_engine = MagicMock()
+    app._metrics_engine.derive_bands.return_value = {}
+    app._metrics_engine.compute_sqrt_relative_bands.return_value = {}
+    app._program_prev_visibility = {}
+    app._program_formula_evs = {}
+    app._program_segment_keys = []
+    app._session_program_active = True
+    app._audio_metric_key = "shamatha_score"
+    app._live_screen = LiveSessionScreen()
+    g = app._live_screen.graph
+
+    prog = SessionProgram([
+        {"minutes": 1, "target": 50, "formula": "shamatha_score"},
+        {"minutes": 1, "target": 75, "formula": {"name": "A", "formula": "alpha1"}},
+        {"minutes": 1, "target": 90, "formula": {"name": "B", "formula": "beta1"}},
+    ])
+    app._active_program = prog
+    app._show_program_series(prog)
+
+    # Three distinct lines, all visible the whole program.
+    assert set(g.visible_keys()) == {"shamatha_score", "program_formula", "program_formula_2"}
+    assert g.series_name("program_formula") == "Program: A"
+    assert g.series_name("program_formula_2") == "Program: B"
+
+    # Both custom lines are evaluated every tick into their own series.
+    app._program_seg_idx = -1
+    metrics = {"shamatha_score": 50}
+    app._apply_program_tick(metrics, {"alpha1": 11.0, "beta1": 22.0})
+    assert metrics["program_formula"] == 11.0
+    assert metrics["program_formula_2"] == 22.0
+
+
+def test_idle_program_preview_shows_program_set(tmp_path):
+    """In program mode with a loaded program, the live graph previews EXACTLY the
+    program's metric set before any session starts; switching to simple mode restores
+    the user's saved selection (and a program's visible set is never persisted over it)."""
+    from unittest.mock import MagicMock
+
+    from app.metrics.custom_formula import CustomFormulaEvaluator
+    from app.session.manager import SessionState
+    from app.ui.live_session import LiveSessionScreen
+    db = DatabaseManager(db_path=str(tmp_path / "preview.db"))
+    uid = db.create_user("u")
+    db.set_user_json_setting(uid, "graph_series_live_metrics", ["shamatha_score"])
+
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._db = db
+    app._current_user_id = uid
+    app._live_screen = LiveSessionScreen()
+    app._session_manager = MagicMock()
+    app._session_manager.state = SessionState.IDLE  # not running
+    app._formula_slots = [CustomFormulaEvaluator() for _ in range(3)]
+    app._timer_mode = "program"
+    app._session_program_segments = [
+        {"minutes": 1, "target": 50, "formula": "shamatha_score"},
+        {"minutes": 1, "target": 80, "formula": {"name": "Alpha", "formula": "alpha1"}},
+    ]
+    g = app._live_screen.graph
+
+    app._refresh_live_program_series()  # idle preview
+    assert set(g.visible_keys()) == {"shamatha_score", "program_formula"}
+    assert g.series_name("program_formula") == "Program: Alpha"
+
+    # A program governs the live graph -> its set must not be persisted as the manual one.
+    app._persist_graph_series(g)
+    assert db.get_user_json_setting(uid, "graph_series_live_metrics") == ["shamatha_score"]
+
+    # Back to simple mode -> the saved selection (shamatha only) is restored.
+    app._timer_mode = "simple"
+    app._refresh_live_program_series()
+    assert set(g.visible_keys()) == {"shamatha_score"}
+    db.close()
 
 
 def test_diary_rebuilds_stepped_threshold():

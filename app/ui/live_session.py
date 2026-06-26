@@ -60,6 +60,7 @@ _RAW_WAVEFORM_MAX = 512 * 60
 
 METRICS_COLORS = {
     "shamatha_score": C.SHAMATHA,
+    "meditation_score": C.MED_SCORE,
     "distraction": C.DISTRACTION,
     "sinking": C.SINKING,
     "subtle_distraction": C.SUBTLE,
@@ -68,13 +69,16 @@ METRICS_COLORS = {
     "custom_formula": C.CUSTOM,
     "custom_formula_2": C.CUSTOM2,
     "custom_formula_3": C.CUSTOM3,
-    # Live line for a program segment's custom formula (hidden until a program
-    # with a custom-formula segment runs); its label tracks the active formula.
+    # Live lines for a program's custom-formula segments (hidden until a program
+    # with custom segments runs); one per distinct custom formula, labels track them.
     "program_formula": C.WARM,
+    "program_formula_2": C.WARM2,
+    "program_formula_3": C.WARM3,
 }
 
 METRICS_SCALES = {
     "shamatha_score": 100.0,
+    "meditation_score": 100.0,
     "distraction": 100.0,
     "sinking": 100.0,
     "subtle_distraction": 100.0,
@@ -84,11 +88,14 @@ METRICS_SCALES = {
     "custom_formula_2": 200.0,
     "custom_formula_3": 200.0,
     "program_formula": 200.0,
+    "program_formula_2": 200.0,
+    "program_formula_3": 200.0,
 }
 
 # Friendly labels for the on-graph series picker (combobox).
 SERIES_NAMES = {
     "shamatha_score": "Shamatha",
+    "meditation_score": "Meditation",
     "distraction": "Distraction",
     "sinking": "Sinking",
     "subtle_distraction": "Subtle Distraction",
@@ -98,6 +105,8 @@ SERIES_NAMES = {
     "custom_formula_2": "Custom 2",
     "custom_formula_3": "Custom 3",
     "program_formula": "Program",
+    "program_formula_2": "Program 2",
+    "program_formula_3": "Program 3",
 }
 
 
