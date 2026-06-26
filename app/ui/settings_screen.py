@@ -28,6 +28,7 @@ from app.ui.theme import (
     F,
     Icons,
     PresetRow,
+    RevealBox,
     S,
     StyledButton,
     ThemedAccordion,
@@ -781,9 +782,9 @@ class SettingsScreen(Screen):
             fb_row.add_widget(btn)
         audio_section.add_widget(fb_row)
 
-        self._feedback_custom_row = BoxLayout(
-            size_hint_y=None, height=0, opacity=0, disabled=True, spacing=S.GAP_SM,
-        )
+        # Detach-when-hidden (RevealBox): a collapse-in-place disabled row would eat
+        # taps on the Custom button above it (Kivy on_touch_down consumes disabled hits).
+        self._feedback_custom_row = RevealBox(dp(40), spacing=S.GAP_SM)
         self._feedback_custom_input = CenteredTextInput(
             hint_text="custom audio file", font_size=F.SMALL, multiline=False,
             foreground_color=C.TEXT, background_color=list(C.BG_INPUT), size_hint_x=0.7,
@@ -794,8 +795,7 @@ class SettingsScreen(Screen):
             size_hint_x=0.3,
         )
         fb_browse.bind(on_release=self._on_feedback_custom_browse)
-        self._feedback_custom_row.add_widget(self._feedback_custom_input)
-        self._feedback_custom_row.add_widget(fb_browse)
+        self._feedback_custom_row.set_content(self._feedback_custom_input, fb_browse)
         audio_section.add_widget(self._feedback_custom_row)
 
         # Sinking alert toggle
@@ -1410,10 +1410,7 @@ class SettingsScreen(Screen):
         """Highlight the active source button and show the custom row only for the custom source."""
         for key, btn in self._feedback_source_buttons.items():
             btn.bg_color = C.ACCENT if key == self._feedback_source else C.BG_CARD
-        is_custom = self._feedback_source == "custom"
-        self._feedback_custom_row.height = dp(40) if is_custom else 0
-        self._feedback_custom_row.opacity = 1 if is_custom else 0
-        self._feedback_custom_row.disabled = not is_custom
+        self._feedback_custom_row.reveal(self._feedback_source == "custom")
 
     def _on_feedback_source_pressed(self, btn) -> None:
         self._feedback_source = btn._feedback_key

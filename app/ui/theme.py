@@ -732,6 +732,46 @@ class _AccordionSection(BoxLayout):
         self._header.text_color = C.TEXT_SECONDARY
 
 
+class RevealBox(BoxLayout):
+    """Touch-safe conditional row: shows/hides its content by DETACHING the children,
+    never collapse-in-place. Hidden = height 0 and no attached children, so it can't
+    overflow or eat a neighbour's taps. (Kivy's Widget.on_touch_down consumes a tap on
+    any colliding `disabled` widget, so the height=0/opacity=0/disabled idiom turns a
+    hidden row into an invisible tap-eater — use this instead.)"""
+
+    def __init__(self, content_height, **kwargs):
+        kwargs.setdefault("size_hint_y", None)
+        super().__init__(**kwargs)
+        self._content_height = content_height
+        self._content_widgets: list = []
+        self._revealed = False
+        self.height = 0
+
+    def set_content(self, *widgets) -> None:
+        """Register the row's widgets; the row starts hidden (children detached)."""
+        self._content_widgets = list(widgets)
+        self._refresh()
+
+    def reveal(self, show: bool) -> None:
+        if bool(show) == self._revealed:
+            return
+        self._revealed = bool(show)
+        self._refresh()
+
+    @property
+    def revealed(self) -> bool:
+        return self._revealed
+
+    def _refresh(self) -> None:
+        self.clear_widgets()
+        if self._revealed:
+            for w in self._content_widgets:
+                self.add_widget(w)
+            self.height = self._content_height
+        else:
+            self.height = 0
+
+
 class PresetRow(BoxLayout):
     """Row of quick-pick value buttons for a slider or action.
 
