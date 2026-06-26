@@ -397,6 +397,8 @@ class AudioEngine:
 
     def _feedback_path_for(self, kind: str, custom_path: str = "") -> str:
         """Resolve a feedback source kind to a playable file; tone is generated on first use."""
+        if kind == "noise":
+            return self._noise_path
         if kind == "tone":
             if not os.path.exists(self._tone_path):
                 pcm = _generate_tone_wav(self._rate, APP.TONE_FREQUENCY, _NOISE_BUFFER_SECONDS)
