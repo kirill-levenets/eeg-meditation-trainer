@@ -20,7 +20,6 @@ from kivy.uix.label import Label
 from kivy.uix.modalview import ModalView
 from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import ScreenManager, SlideTransition
-from kivy.uix.textinput import TextInput
 from kivy.utils import platform as kivy_platform
 
 from app.audio_feedback.noise import AudioEngine
@@ -48,7 +47,16 @@ from app.ui.live_session import METRICS_COLORS, LiveSessionScreen
 from app.ui.profile_screen import ProfileScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
-from app.ui.theme import POPUP_TEXT, BottomNav, C, F, Icons, S, StyledButton
+from app.ui.theme import (
+    POPUP_TEXT,
+    BottomNav,
+    C,
+    CenteredTextInput,
+    F,
+    Icons,
+    S,
+    StyledButton,
+)
 from app.ui.widgets.legend import LegendBar
 from app.ui.widgets.loading_overlay import LoadingOverlay
 from app.ui.widgets.user_picker import UserPickerForm
@@ -2820,7 +2828,7 @@ class EEGMeditationApp(App):
             filters=["*.db"],
             size_hint_y=0.7,
         )
-        name_input = TextInput(
+        name_input = CenteredTextInput(
             text=default_filename,
             multiline=False,
             size_hint_y=None,

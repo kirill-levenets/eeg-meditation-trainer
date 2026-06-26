@@ -16,7 +16,6 @@ from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.slider import Slider
-from kivy.uix.textinput import TextInput
 
 from app.config import APP, METRICS
 from app.logger import logger
@@ -24,6 +23,7 @@ from app.ui.theme import (
     POPUP_TEXT,
     THEMES,
     C,
+    CenteredTextInput,
     Divider,
     F,
     Icons,
@@ -300,7 +300,7 @@ class SettingsScreen(Screen):
         program_save_row = BoxLayout(
             size_hint_y=None, height=dp(36), spacing=S.GAP_SM,
         )
-        self._program_name_input = TextInput(
+        self._program_name_input = CenteredTextInput(
             text="",
             hint_text="program name",
             multiline=False,
@@ -365,7 +365,7 @@ class SettingsScreen(Screen):
         timer_sound_row = BoxLayout(
             size_hint_y=None, height=dp(36), spacing=S.GAP_SM,
         )
-        self._timer_sound_input = TextInput(
+        self._timer_sound_input = CenteredTextInput(
             hint_text="Default bell",
             text="",
             multiline=False,
@@ -848,8 +848,8 @@ class SettingsScreen(Screen):
 
         # Three named formula slots, each with name + formula inputs,
         # Apply/Save buttons, and a status label.
-        self._formula_inputs: list[TextInput] = []
-        self._formula_name_inputs: list[TextInput] = []
+        self._formula_inputs: list[CenteredTextInput] = []
+        self._formula_name_inputs: list[CenteredTextInput] = []
         self._formula_statuses: list[Label] = []
         for i in range(3):
             slot_header = Label(
@@ -864,7 +864,7 @@ class SettingsScreen(Screen):
             slot_header.bind(size=slot_header.setter("text_size"))
             formula_section.add_widget(slot_header)
 
-            name_input = TextInput(
+            name_input = CenteredTextInput(
                 text="",
                 hint_text=f"name (default Custom {i + 1})",
                 font_size=F.SMALL,
@@ -878,7 +878,7 @@ class SettingsScreen(Screen):
             self._formula_name_inputs.append(name_input)
             formula_section.add_widget(name_input)
 
-            formula_input = TextInput(
+            formula_input = CenteredTextInput(
                 text="",
                 hint_text="e.g. (alpha1 + alpha2) / (beta1 + beta2 + 1)",
                 font_size=F.BODY,
@@ -1470,7 +1470,7 @@ class SettingsScreen(Screen):
 
         row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP_SM)
 
-        duration_in = TextInput(
+        duration_in = CenteredTextInput(
             text=str(minutes), input_filter="int", multiline=False,
             font_size=F.SMALL, foreground_color=C.TEXT,
             background_color=list(C.BG_INPUT),
@@ -1481,7 +1481,7 @@ class SettingsScreen(Screen):
             font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT,
             size_hint_x=0.3, size_hint_y=None, height=dp(36),
         )
-        target_in = TextInput(
+        target_in = CenteredTextInput(
             text=str(target), input_filter="int", multiline=False,
             font_size=F.SMALL, foreground_color=C.TEXT,
             background_color=list(C.BG_INPUT),

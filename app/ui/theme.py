@@ -21,6 +21,7 @@ from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.textinput import TextInput
 
 # ── Icon font ────────────────────────────────────────────────────────
 
@@ -345,6 +346,28 @@ class S:
 
 
 # ── Styled widgets ───────────────────────────────────────────────────
+
+class CenteredTextInput(TextInput):
+    """Single-line input with text centered horizontally and vertically.
+
+    Kivy's TextInput supports `halign` but has no `valign`, so the vertical
+    centering is done by padding the single line to the field's height.
+    """
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("halign", "center")
+        super().__init__(**kwargs)
+        self.bind(height=self._recenter, line_height=self._recenter,
+                  font_size=self._recenter)
+        self._recenter()
+
+    def _recenter(self, *_args):
+        pad = self.padding  # [left, top, right, bottom]
+        pad_v = max(0, (self.height - self.line_height) / 2.0)
+        new = [pad[0], pad_v, pad[2], pad_v]
+        if new != list(pad):
+            self.padding = new
+
 
 class StyledButton(ButtonBehavior, BoxLayout):
     """Rounded button with press color shift. Replaces default Kivy Button.

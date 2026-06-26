@@ -10,9 +10,16 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
-from kivy.uix.textinput import TextInput
 
-from app.ui.theme import ICONS_AVAILABLE, C, F, Icons, S, StyledButton
+from app.ui.theme import (
+    ICONS_AVAILABLE,
+    C,
+    CenteredTextInput,
+    F,
+    Icons,
+    S,
+    StyledButton,
+)
 from app.ui.widgets.user_picker import UserPickerForm
 
 _IS_ANDROID = hasattr(sys, "getandroidapilevel")
@@ -233,7 +240,7 @@ class WizardScreen(Screen):
 
     def _open_name_popup_for_form(self, target_input) -> None:
         content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
-        text_input = TextInput(
+        text_input = CenteredTextInput(
             hint_text="Enter your name...",
             text=target_input.text,
             multiline=False,

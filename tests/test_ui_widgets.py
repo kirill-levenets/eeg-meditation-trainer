@@ -324,6 +324,19 @@ class TestDiaryScreenUI(unittest.TestCase):
 
 
 
+class TestCenteredTextInput(unittest.TestCase):
+    """Text is centered horizontally (halign) and vertically (symmetric padding)."""
+
+    def test_centered_alignment(self):
+        from app.ui.theme import CenteredTextInput
+        ti = CenteredTextInput(size_hint=(None, None), size=(120, 40))
+        ti._recenter()
+        self.assertEqual(ti.halign, "center")          # horizontal
+        pad = ti.padding
+        self.assertEqual(pad[1], pad[3])               # vertical: top == bottom
+        self.assertGreaterEqual(pad[1], 0)
+
+
 class TestLegendBarActiveMarker(unittest.TestCase):
     """The 'training now' series is bolded with a marker; others are plain."""
 

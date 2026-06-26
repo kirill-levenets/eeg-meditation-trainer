@@ -21,7 +21,15 @@ from app.config import APP
 from app.logger import logger, timed
 from app.session.session_program import SessionProgram
 from app.ui.raw_eeg_screen import GraphAwareScrollView, ScrollableGraphWidget
-from app.ui.theme import C, F, Icons, S, StyledButton, format_duration
+from app.ui.theme import (
+    C,
+    CenteredTextInput,
+    F,
+    Icons,
+    S,
+    StyledButton,
+    format_duration,
+)
 from app.ui.widgets.legend import LegendBar
 
 METRICS_PREVIEW_COLORS = {
@@ -316,7 +324,7 @@ class DiaryScreen(Screen):
         tags_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
         self._detail_layout.add_widget(tags_label)
 
-        self._tags_input = TextInput(
+        self._tags_input = CenteredTextInput(
             hint_text="morning, calm, focused...",
             multiline=False,
             size_hint_y=None,
@@ -758,7 +766,7 @@ class DiaryScreen(Screen):
         name_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=S.GAP)
         name_label = Label(text="File name:", font_size=F.BODY, size_hint_x=0.25,
                            color=C.TEXT_SECONDARY)
-        self._export_filename = TextInput(
+        self._export_filename = CenteredTextInput(
             text=f"session_{self._selected_session_id}.csv",
             multiline=False,
             font_size=F.BODY,
