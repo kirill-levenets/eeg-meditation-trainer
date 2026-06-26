@@ -2199,7 +2199,11 @@ class EEGMeditationApp(App):
         )
 
     def _on_test_audio(self) -> None:
-        logger.debug("Test audio triggered")
+        """Sweep the currently-selected feedback source, then the alert channels."""
+        gid = self._global_feedback_id()
+        sources = {gid: self._source_spec(gid)}
+        self._warn_missing_feedback_files(sources)
+        self._audio.prepare_feedback(sources, gid)
         self._audio.test_audio()
 
     def _on_line_width_change(self, width: float) -> None:

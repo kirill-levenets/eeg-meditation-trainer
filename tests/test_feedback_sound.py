@@ -51,3 +51,13 @@ def test_global_feedback_id_resolves_source():
     assert app._global_feedback_id() == "/my.wav"
     app._feedback_sound_path = ""                       # custom selected but no file
     assert app._global_feedback_id() == "noise"         # falls back to rain
+
+
+def test_on_test_audio_prepares_selected_source():
+    from unittest.mock import MagicMock
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._feedback_source, app._feedback_sound_path = "tone", ""
+    app._audio = MagicMock()
+    app._on_test_audio()
+    app._audio.prepare_feedback.assert_called_once_with({"tone": ("tone", "")}, "tone")
+    app._audio.test_audio.assert_called_once()
