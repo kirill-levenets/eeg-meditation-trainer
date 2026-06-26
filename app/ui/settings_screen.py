@@ -1620,6 +1620,7 @@ class SettingsScreen(Screen):
         target = segment.get("target", 50)
         formula = segment.get("formula", "shamatha_score")
         end_sound = segment.get("end_sound")
+        feedback_sound = segment.get("feedback_sound") or ""
 
         row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP_SM)
 
@@ -1646,9 +1647,9 @@ class SettingsScreen(Screen):
             size_hint_x=0.16, size_hint_y=None, height=dp(36),
         )
         feedback_btn = StyledButton(
-            text="after #10", font_size=F.SMALL, bg_color=C.BG_CARD,
-            text_color=C.TEXT_MUTED, size_hint_x=0.16, size_hint_y=None,
-            height=dp(36), disabled=True,
+            text=self._feedback_seg_label(feedback_sound), font_size=F.SMALL,
+            bg_color=C.BG_CARD, text_color=C.TEXT, size_hint_x=0.16,
+            size_hint_y=None, height=dp(36),
         )
         delete_btn = StyledButton(
             text="X", font_size=F.SMALL, bg_color=C.BG_CARD,
@@ -1660,6 +1661,8 @@ class SettingsScreen(Screen):
         row._target_in = target_in
         row._formula = formula
         row._end_sound = end_sound
+        row._feedback_sound = feedback_sound
+        row._feedback_btn = feedback_btn
         row._formula_btn = formula_btn
 
         duration_in.bind(text=lambda *_a: self._on_segment_edited())
@@ -1669,6 +1672,9 @@ class SettingsScreen(Screen):
         )
         end_sound_btn.bind(
             on_release=lambda *_a, r=row, b=end_sound_btn: self._cycle_end_sound(r, b)
+        )
+        feedback_btn.bind(
+            on_release=lambda *_a, r=row, b=feedback_btn: self._open_segment_feedback_picker(r, b)
         )
         delete_btn.bind(
             on_release=lambda *_a, r=row: self._remove_segment_row(r)
@@ -1705,6 +1711,40 @@ class SettingsScreen(Screen):
         btn.text = "Warble" if row._end_sound == "warble" else "Chime"
         logger.info(f"Segment end-sound -> {row._end_sound or 'chime'}")
         self._emit_program_changed()
+
+    def _feedback_seg_label(self, value) -> str:
+        if not value:
+            return "Default"
+        if value == "noise":
+            return "Rain"
+        if value == "tone":
+            return "Tone"
+        return os.path.basename(value)
+
+    def _set_segment_feedback(self, row, btn, value: str) -> None:
+        row._feedback_sound = value
+        btn.text = self._feedback_seg_label(value)
+        self._on_segment_edited()
+
+    def _open_segment_feedback_picker(self, row, btn) -> None:
+        """Pick a segment's feedback source: Default (inherit global), Rain, Tone, or a custom file."""
+        box = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
+        popup = Popup(title="Segment feedback sound", content=box, size_hint=(0.8, 0.6))
+        for label, value in (("Default (use global)", ""), ("Rain", "noise"), ("Tone", "tone")):
+            b = StyledButton(text=label, font_size=F.SMALL, size_hint_y=None, height=dp(44),
+                             bg_color=C.BG_CARD, text_color=C.TEXT)
+            b.bind(on_release=lambda *_a, v=value: (
+                self._set_segment_feedback(row, btn, v), popup.dismiss()))
+            box.add_widget(b)
+        custom = StyledButton(text="Custom file...", font_size=F.SMALL, size_hint_y=None,
+                              height=dp(44), bg_color=C.BG_CARD, text_color=C.TEXT)
+        custom.bind(on_release=lambda *_a: (
+            popup.dismiss(),
+            open_audio_file_chooser(
+                lambda p: self._set_segment_feedback(row, btn, p),
+                title="Segment feedback sound file")))
+        box.add_widget(custom)
+        popup.open()
 
     def _formula_label(self, formula) -> str:
         if isinstance(formula, dict):
@@ -1794,6 +1834,8 @@ class SettingsScreen(Screen):
             seg: dict = {"minutes": minutes, "target": target, "formula": row._formula}
             if row._end_sound is not None:
                 seg["end_sound"] = row._end_sound
+            if getattr(row, "_feedback_sound", ""):
+                seg["feedback_sound"] = row._feedback_sound
             segments.append(seg)
         return segments
 

@@ -58,3 +58,15 @@ def test_set_feedback_source_does_not_fire_callback():
     assert fired == []
     s._on_feedback_source_pressed(s._feedback_source_buttons["tone"])  # user action -> fires
     assert fired == [("tone", "/tmp/x.wav")]
+
+
+def test_segment_feedback_sound_roundtrips():
+    s = _screen()
+    segs = [
+        {"minutes": 10, "target": 50, "formula": "shamatha_score", "feedback_sound": "tone"},
+        {"minutes": 5, "target": 70, "formula": "meditation_score"},   # default -> omitted
+    ]
+    s.load_program(segs, "program")
+    out = s.get_program_segments()
+    assert out[0].get("feedback_sound") == "tone"
+    assert "feedback_sound" not in out[1]   # Default is not serialized
