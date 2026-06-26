@@ -196,6 +196,11 @@ class _DurationPickerButton(BoxLayout):
     def text(self, value: str) -> None:
         self._text_label.text = value
 
+    def set_label(self, text: str, large: bool = False) -> None:
+        """Set the button text; `large` bumps the font (used for the program 'P')."""
+        self._text_label.text = text
+        self._text_label.font_size = F.H3 if large else F.TINY
+
     def _refresh_theme(self) -> None:
         self._redraw()
 
@@ -463,7 +468,11 @@ class LiveSessionScreen(Screen):
         # Current timer state cached for popup highlighting
         self._current_timer_enabled = False
         self._current_timer_minutes = 0
+        self._program_active = False
         self._duration_popup = None
+        # Saved programs offered by the in-session "Programs…" picker.
+        self._session_programs: list = []
+        self.on_program_pick = None  # set by AppManager; called with an index
 
         # ── Controls ──
         self._bottom_bar = BoxLayout(
@@ -930,7 +939,17 @@ class LiveSessionScreen(Screen):
         for lbl, v in free:
             body.add_widget(_make_btn(lbl, v))
 
-        rows = (len(timed) + 1) // 2 + len(free)
+        # Programs picker: jump straight to a saved program from the session screen.
+        programs_btn = StyledButton(
+            text="Programs…",
+            bg_color=C.PRIMARY_DIM,
+            size_hint_y=None,
+            height=dp(44),
+        )
+        programs_btn.bind(on_release=lambda *_a: self._open_program_picker())
+        body.add_widget(programs_btn)
+
+        rows = (len(timed) + 1) // 2 + len(free) + 1
         popup_h = rows * (dp(44) + S.GAP_SM) + dp(80)
         self._duration_popup = Popup(
             title="Session duration",
@@ -941,6 +960,43 @@ class LiveSessionScreen(Screen):
         )
         self._duration_popup.open()
 
+    def set_session_programs(self, programs: list) -> None:
+        """Cache the saved programs for the in-session Programs picker."""
+        self._session_programs = programs or []
+
+    def _open_program_picker(self) -> None:
+        """List saved programs; tapping one asks AppManager to load it."""
+        if self._duration_popup is not None:
+            self._duration_popup.dismiss()
+            self._duration_popup = None
+        body = BoxLayout(orientation="vertical", spacing=S.GAP_SM, padding=S.GAP)
+        popup = Popup(title="Choose program", content=body,
+                      size_hint=(0.8, None),
+                      height=dp(80) + dp(48) * (max(len(self._session_programs), 1) + 1))
+
+        def _pick(index):
+            popup.dismiss()
+            if self.on_program_pick is not None:
+                self.on_program_pick(index)
+
+        if not self._session_programs:
+            body.add_widget(Label(text="No saved programs", color=C.TEXT,
+                                  size_hint_y=None, height=dp(44)))
+        else:
+            for i, entry in enumerate(self._session_programs):
+                btn = StyledButton(
+                    text=entry.get("name", f"Program {i + 1}"),
+                    bg_color=C.BG_CARD, text_color=C.TEXT,
+                    size_hint_y=None, height=dp(44),
+                )
+                btn.bind(on_release=lambda _b, idx=i: _pick(idx))
+                body.add_widget(btn)
+        cancel = StyledButton(text="Cancel", bg_color=C.PRIMARY,
+                              size_hint_y=None, height=dp(44))
+        cancel.bind(on_release=lambda *_a: popup.dismiss())
+        body.add_widget(cancel)
+        popup.open()
+
     def _pick_from_popup(self, value) -> None:
         if self.on_duration_preset is not None:
             self.on_duration_preset(value)
@@ -948,21 +1004,26 @@ class LiveSessionScreen(Screen):
             self._duration_popup.dismiss()
             self._duration_popup = None
 
-    def refresh_duration_preset(self, timer_enabled: bool, timer_minutes: int) -> None:
+    def refresh_duration_preset(self, timer_enabled: bool, timer_minutes: int,
+                                program_active: bool = False) -> None:
         """Cache timer state and update the duration-picker label."""
         self._current_timer_enabled = timer_enabled
         self._current_timer_minutes = timer_minutes
+        self._program_active = program_active
         self._apply_duration_picker_label()
 
     def _apply_duration_picker_label(self) -> None:
         """Update duration picker text. Width stays fixed at the compact size."""
-        # Always show the compact label; width is fixed at construction time.
-        if not self._current_timer_enabled:
-            self._btn_duration_expand.text = "∞"
+        # Program mode owns the timer (its total drives the countdown) — show a
+        # large "P" instead of a duration so the user sees a program will run.
+        if self._program_active:
+            self._btn_duration_expand.set_label("P", large=True)
+        elif not self._current_timer_enabled:
+            self._btn_duration_expand.set_label("∞")
         elif self._current_timer_minutes >= 60 and self._current_timer_minutes % 60 == 0:
-            self._btn_duration_expand.text = f"{self._current_timer_minutes // 60}h"
+            self._btn_duration_expand.set_label(f"{self._current_timer_minutes // 60}h")
         else:
-            self._btn_duration_expand.text = f"{self._current_timer_minutes}m"
+            self._btn_duration_expand.set_label(f"{self._current_timer_minutes}m")
 
     def show_overlay(self, text: str = "Connecting...") -> None:
         """Show semi-transparent connection overlay with animated dots."""

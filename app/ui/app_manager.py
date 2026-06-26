@@ -582,6 +582,7 @@ class EEGMeditationApp(App):
         self._live_screen.btn_stop.bind(on_release=self._on_stop)
         self._live_screen.btn_marker.bind(on_release=self._on_marker)
         self._live_screen.on_duration_preset = self._on_duration_preset
+        self._live_screen.on_program_pick = self._on_session_program_pick
         self._live_screen.overlay_cancel_btn.bind(on_release=self._on_connect_cancel)
         self._live_screen.overlay_retry_btn.bind(on_release=self._on_connect_retry)
         self._live_screen.summary_save_btn.bind(on_release=self._on_summary_save)
@@ -1826,16 +1827,31 @@ class EEGMeditationApp(App):
             logger.info("Marker placed")
 
     def _on_duration_preset(self, value) -> None:
-        """Handle Live Session preset tap: update timer settings + persist."""
+        """Handle Live Session duration tap: a fixed duration is a simple-timer
+        choice, so it also leaves program mode."""
         if value is None:
             self._settings_screen.timer_enabled = False
         else:
             self._settings_screen.timer_enabled = True
             self._settings_screen.timer_minutes = value
+        self._timer_mode = "simple"
+        self._settings_screen.set_program_mode("simple")
+        self._persist_session_program(self._current_user_id)
         self._save_user_settings()
+        self._sync_live_timer_picker()
+
+    def _on_session_program_pick(self, index: int) -> None:
+        """In-session 'Programs…' pick: load it (with confirm) and switch to program mode."""
+        self._on_program_load(index)
+
+    def _sync_live_timer_picker(self) -> None:
+        """Refresh the live duration picker: a large 'P' in program mode, else the duration."""
+        program_active = (self._timer_mode == "program"
+                          and bool(self._session_program_segments))
         self._live_screen.refresh_duration_preset(
             self._settings_screen.timer_enabled,
             self._settings_screen.timer_minutes,
+            program_active=program_active,
         )
 
     def _on_threshold_change(self, value: int) -> None:
@@ -2117,6 +2133,7 @@ class EEGMeditationApp(App):
     def _on_timer_mode_change(self, mode: str) -> None:
         self._timer_mode = mode
         self._persist_session_program(self._current_user_id)
+        self._sync_live_timer_picker()
 
     def _on_program_changed(self, segments: list) -> None:
         self._session_program_segments = segments
@@ -2177,6 +2194,7 @@ class EEGMeditationApp(App):
         self._persist_session_program(self._current_user_id)
         self._settings_screen.load_program(self._session_program_segments, "program")
         self._settings_screen.set_program_name(name)
+        self._sync_live_timer_picker()
         logger.info(f"Loaded program '{name}'")
 
     def _on_program_delete(self, index: int) -> None:
@@ -2204,6 +2222,7 @@ class EEGMeditationApp(App):
         progs = (self._db.get_saved_programs(self._current_user_id)
                  if self._current_user_id else [])
         self._settings_screen.set_saved_programs(progs)
+        self._live_screen.set_session_programs(progs)
 
     def _confirm_program_action(self, title, message, ok_text, on_ok,
                                 ok_color=None) -> None:
@@ -3005,7 +3024,7 @@ class EEGMeditationApp(App):
         self._apply_active_formulas(self._read_active_formulas_with_migration(user_id))
         self._load_session_program(user_id)
         self._settings_screen.load_program(self._session_program_segments, self._timer_mode)
-        self._settings_screen.set_saved_programs(self._db.get_saved_programs(user_id))
+        # Saved-programs list pushed to both UIs at the end via _refresh_saved_programs.
         self._push_formula_names_to_graph()
         idx = g(user_id, "audio_formula_index")
         if idx is not None:
@@ -3098,12 +3117,10 @@ class EEGMeditationApp(App):
         history_mode = g(user_id, "history_view_mode") or "calendar"
         self._history_screen.set_view_mode(history_mode)
 
-        # Sync live-screen preset highlight with loaded timer state
-        self._live_screen.refresh_duration_preset(
-            self._settings_screen.timer_enabled,
-            self._settings_screen.timer_minutes,
-        )
+        # Sync live-screen preset highlight (incl. program "P") with loaded state
+        self._sync_live_timer_picker()
         self._refresh_saved_formulas()
+        self._refresh_saved_programs()
         logger.debug(f"Loaded settings for user {user_id}")
 
     def on_start(self) -> None:

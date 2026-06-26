@@ -57,6 +57,9 @@ def test_session_program_json_records_snapshot_not_live_editor():
 
 
 class _StubSettings:
+    timer_enabled = False
+    timer_minutes = 20
+
     def set_saved_programs(self, progs):
         self.saved = progs
 
@@ -66,12 +69,24 @@ class _StubSettings:
     def set_program_name(self, name):
         self.name = name
 
+    def set_program_mode(self, mode):
+        self.mode = mode
+
+
+class _StubLive:
+    def set_session_programs(self, progs):
+        self.programs = progs
+
+    def refresh_duration_preset(self, enabled, minutes, program_active=False):
+        self.preset = (enabled, minutes, program_active)
+
 
 def test_saved_program_unique_upsert_load_delete(tmp_path):
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._db = DatabaseManager(db_path=str(tmp_path / "u.db"))
     app._current_user_id = app._db.create_user("u")
     app._settings_screen = _StubSettings()
+    app._live_screen = _StubLive()
     app._session_program_segments = [{"minutes": 10, "target": 50, "formula": "shamatha_score"}]
     app._timer_mode = "program"
 
