@@ -122,6 +122,7 @@ class EEGMeditationApp(App):
         self._program_seg_idx: int = -1
         self._program_formula_ev = None
         self._session_program_active: bool = False
+        self._program_hidden_slots: list[str] = []  # custom slots hidden during a program
 
     def _init_formula_slots(self) -> None:
         """Three independent formula evaluators (one per slot) + their names."""
@@ -200,6 +201,36 @@ class EEGMeditationApp(App):
     def _build_session_program(self) -> SessionProgram:
         """Build a SessionProgram from the active editable segments."""
         return SessionProgram(self._session_program_segments)
+
+    def _show_program_series(self, prog) -> None:
+        """Auto-show the program's trained series on the live graph. Built-in keys
+        show their own series; a custom-formula segment uses the dedicated
+        program_formula line. For uniqueness, the user's custom-formula slots are
+        hidden while the program drives its own custom line (restored on stop)."""
+        graph = self._live_screen.graph
+        has_custom = False
+        for seg in prog.segments:
+            f = seg.get("formula")
+            if isinstance(f, str):
+                graph.set_visible(f, True)
+            elif isinstance(f, dict):
+                graph.set_visible("program_formula", True)
+                has_custom = True
+        self._program_hidden_slots = []
+        if has_custom:
+            for fk in FORMULA_KEYS:
+                if graph.is_visible(fk):
+                    self._program_hidden_slots.append(fk)
+                    graph.set_visible(fk, False)
+
+    def _restore_program_series(self) -> None:
+        """Hide the transient program_formula line and restore the user's custom
+        slots hidden for the program's duration."""
+        graph = self._live_screen.graph
+        graph.set_visible("program_formula", False)
+        for fk in getattr(self, "_program_hidden_slots", []):
+            graph.set_visible(fk, True)
+        self._program_hidden_slots = []
 
     @staticmethod
     def _program_transition(prev_idx: int, elapsed: float, program):
@@ -1079,16 +1110,7 @@ class EEGMeditationApp(App):
             self._live_screen.graph.set_threshold_steps(
                 prog.threshold_steps(self._live_screen.graph._sample_rate)
             )
-            # Auto-show every series the program trains, so each segment's
-            # target series is plotted and the legend can mark it. Built-in keys
-            # show their own series; custom-formula segments share the dedicated
-            # "program_formula" line.
-            for seg in prog.segments:
-                f = seg.get("formula")
-                if isinstance(f, str):
-                    self._live_screen.graph.set_visible(f, True)
-                elif isinstance(f, dict):
-                    self._live_screen.graph.set_visible("program_formula", True)
+            self._show_program_series(prog)
         else:
             self._live_screen.graph.set_threshold_steps(None)
             self._live_screen.graph.set_threshold(float(threshold), "shamatha_score")
@@ -1327,6 +1349,7 @@ class EEGMeditationApp(App):
         except Exception:
             logger.exception("graph reload on stop failed")
         self._live_screen.set_training_series(None)  # clear the program "training now" marker
+        self._restore_program_series()
         self._live_screen.set_controls_idle()
         self._live_screen.update_device_status(False)
         self._live_screen.update_state("FINISHED")
@@ -1911,6 +1934,8 @@ class EEGMeditationApp(App):
         is_live = graph is self._live_screen.graph
         body = BoxLayout(orientation="vertical", spacing=S.GAP_SM, padding=S.GAP)
         for key in graph.series_keys():
+            if key == "program_formula":
+                continue  # program-controlled line, not a user-toggleable metric
             vis = graph.is_visible(key)
             btn = StyledButton(
                 text=graph.series_name(key), height=dp(44),

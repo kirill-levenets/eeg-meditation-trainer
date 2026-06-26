@@ -151,6 +151,29 @@ def test_program_custom_formula_plots_and_marks():
     app._live_screen.set_training_series.assert_called_with("program_formula")  # legend-marked
 
 
+def test_program_hides_user_custom_slots_for_uniqueness():
+    """A custom-formula program hides the user's custom slots (so the same kind
+    of line isn't shown twice) and restores them on stop."""
+    from app.session.session_program import SessionProgram
+    from app.ui.live_session import LiveSessionScreen
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._live_screen = LiveSessionScreen()
+    graph = app._live_screen.graph
+    # User has a custom slot visible (via the picker/combobox).
+    graph.set_visible("custom_formula", True)
+    graph.set_visible("program_formula", False)
+
+    prog = SessionProgram([{"minutes": 1, "target": 80,
+                            "formula": {"name": "Alpha", "formula": "alpha1"}}])
+    app._show_program_series(prog)
+    assert graph.is_visible("program_formula") is True   # program's custom line shown
+    assert graph.is_visible("custom_formula") is False    # user slot hidden (no duplicate)
+
+    app._restore_program_series()
+    assert graph.is_visible("program_formula") is False   # transient line cleared
+    assert graph.is_visible("custom_formula") is True      # user slot restored
+
+
 def test_diary_rebuilds_stepped_threshold():
     import json
 
