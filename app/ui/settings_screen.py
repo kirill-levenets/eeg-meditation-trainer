@@ -355,7 +355,34 @@ class SettingsScreen(Screen):
         self._segments_box.bind(
             minimum_height=self._segments_box.setter("height")
         )
+        # What the editor is + what each cell means (the rows are otherwise cryptic).
+        program_intro = Label(
+            text=(
+                "A program runs timed stages in order (top to bottom). Each row:\n"
+                "Min = length in minutes   Metric = what to train   Target = goal value\n"
+                "End cue = sound when the stage ends   Feedback = per-stage sound (coming soon)"
+            ),
+            font_size=F.SMALL, color=C.TEXT_SECONDARY,
+            size_hint_y=None, height=dp(58),
+            halign="left", valign="top",
+        )
+        program_intro.bind(size=program_intro.setter("text_size"))
+
+        # Column header aligned to the segment-row cells (same size_hint_x ratios).
+        segments_header = BoxLayout(size_hint_y=None, height=dp(20), spacing=S.GAP_SM)
+        for _lbl, _w in (("Min", 0.16), ("Metric", 0.3), ("Target", 0.14),
+                         ("End cue", 0.16), ("Feedback", 0.16), ("", 0.1)):
+            col = Label(
+                text=_lbl, font_size=F.TINY, bold=True, color=C.TEXT_MUTED,
+                size_hint_x=_w, halign="center", valign="middle",
+            )
+            col.bind(size=col.setter("text_size"))
+            segments_header.add_widget(col)
+        self._segments_header = segments_header
+
+        self._program_box.add_widget(program_intro)
         self._program_box.add_widget(self._program_loaded_label)
+        self._program_box.add_widget(segments_header)
         self._program_box.add_widget(self._segments_box)
         self._program_box.add_widget(self._program_total_label)
         self._program_box.add_widget(self._add_segment_btn)
