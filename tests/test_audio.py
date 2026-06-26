@@ -191,6 +191,27 @@ class TestAudioFeedback(unittest.TestCase):
             self.assertGreaterEqual(v, 0.0)
             self.assertLessEqual(v, 1.0)
 
+    def test_feedback_path_noise_is_rain(self):
+        self.assertEqual(self.gen._feedback_path_for("noise"), self.gen._noise_path)
+
+    def test_feedback_path_tone_lazy_generates(self):
+        self.assertFalse(os.path.exists(self.gen._tone_path))
+        path = self.gen._feedback_path_for("tone")
+        self.assertEqual(path, self.gen._tone_path)
+        self.assertTrue(os.path.exists(self.gen._tone_path))
+
+    def test_feedback_path_custom_existing(self):
+        self.assertEqual(
+            self.gen._feedback_path_for("custom", self.gen._noise_path),
+            self.gen._noise_path,
+        )
+
+    def test_feedback_path_custom_missing_falls_back_to_rain(self):
+        self.assertEqual(
+            self.gen._feedback_path_for("custom", "/no/such/file.wav"),
+            self.gen._noise_path,
+        )
+
 
 class TestTimerBellLifecycle(unittest.TestCase):
     """Regression: timer-end gong used to be killed by _audio.stop(). The

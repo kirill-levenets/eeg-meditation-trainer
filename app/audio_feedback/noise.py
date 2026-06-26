@@ -339,6 +339,8 @@ class AudioEngine:
         self._threshold: int = METRICS_THRESHOLD_FALLBACK
         self._is_playing: bool = False
         self._noise_sound: object = None
+        self._feedback_players: dict[str, object] = {}  # source_id -> looping player
+        self._active_feedback: str = ""                 # source_id receiving modulated volume
         self._bell_sound: object = None
         self._timer_bell_player: object = None  # Android MediaPlayer gong (lock-through)
         self._noise_path: str = ""
@@ -353,6 +355,7 @@ class AudioEngine:
         self._noise_path = os.path.join(self._tmpdir, "noise.wav")
         self._bell_path = os.path.join(self._tmpdir, "bell.wav")
         self._timer_bell_path = os.path.join(self._tmpdir, "timer_bell.wav")
+        self._tone_path = os.path.join(self._tmpdir, "tone.wav")
         self._chime_path = os.path.join(self._tmpdir, "chime.wav")
         self._disconnect_path = os.path.join(self._tmpdir, "disconnect.wav")
         self._chime_sound: object = None
@@ -391,6 +394,17 @@ class AudioEngine:
             APP.DISCONNECT_CYCLES,
         )
         _write_wav(self._disconnect_path, pcm, self._rate)
+
+    def _feedback_path_for(self, kind: str, custom_path: str = "") -> str:
+        """Resolve a feedback source kind to a playable file; tone is generated on first use."""
+        if kind == "tone":
+            if not os.path.exists(self._tone_path):
+                pcm = _generate_tone_wav(self._rate, APP.TONE_FREQUENCY, _NOISE_BUFFER_SECONDS)
+                _write_wav(self._tone_path, pcm, self._rate)
+            return self._tone_path
+        if kind == "custom" and custom_path and os.path.isfile(custom_path):
+            return custom_path
+        return self._noise_path
 
     def _start_noise_loop(self) -> None:
         """Load and start the pre-generated noise WAV in a loop."""
@@ -774,6 +788,7 @@ class AudioEngine:
             self._noise_path,
             self._bell_path,
             self._timer_bell_path,
+            self._tone_path,
             self._chime_path,
             self._disconnect_path,
         ):
