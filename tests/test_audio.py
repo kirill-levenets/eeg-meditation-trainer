@@ -184,18 +184,26 @@ class TestAudioFeedback(unittest.TestCase):
 
 
 class TestTimerBellLifecycle(unittest.TestCase):
-    """Regression: timer-end bell used to be killed by _audio.stop() the
-    moment after starting, because both calls landed on the same
-    `_bell_sound` slot and the session-stop path stopped+unloaded it.
-    The fix relies on (a) play_timer_sound being called *after*
-    _stop_and_save runs, and (b) summary buttons calling
-    stop_timer_bell explicitly. This test pins those guarantees."""
+    """Regression: timer-end gong used to be killed by _audio.stop(). The
+    timer-expiry path DEFERS _audio.stop() to a frame AFTER play_timer_sound
+    starts the gong, and stop() stopped+unloaded the shared `_bell_sound` slot
+    — so on desktop (SoundLoader gong) the gong was silenced ~1 frame in. Fix:
+    stop() no longer touches _bell_sound; the gong is owned solely by
+    play_timer_sound / stop_timer_bell (summary buttons + new-session start)."""
 
     def setUp(self):
         self.engine = AudioEngine()
 
     def tearDown(self):
         self.engine.cleanup()
+
+    def test_stop_does_not_kill_timer_gong(self):
+        from unittest.mock import MagicMock
+        gong = MagicMock()
+        self.engine._bell_sound = gong
+        self.engine.stop()
+        gong.unload.assert_not_called()       # gong must keep ringing past stop()
+        self.assertIs(self.engine._bell_sound, gong)  # slot preserved for stop_timer_bell
 
     def test_stop_timer_bell_clears_reference(self):
         from unittest.mock import MagicMock

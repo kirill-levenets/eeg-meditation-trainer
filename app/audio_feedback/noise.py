@@ -538,7 +538,13 @@ class AudioEngine:
         if self._ramp_thread:
             self._ramp_thread.join(timeout=0.5)
             self._ramp_thread = None
-        for snd_attr in ("_noise_sound", "_bell_sound", "_chime_sound", "_disconnect_sound"):
+        # NOTE: _bell_sound is deliberately excluded. It holds the timer-end gong
+        # (SoundLoader fallback on desktop), which must keep ringing AFTER the
+        # session stops — the timer-expiry path calls stop() (noise teardown) one
+        # frame after starting the gong, so unloading it here cut the gong off
+        # (desktop only; Android's gong uses the separate _timer_bell_player).
+        # The gong is owned by play_timer_sound / stop_timer_bell instead.
+        for snd_attr in ("_noise_sound", "_chime_sound", "_disconnect_sound"):
             snd = getattr(self, snd_attr, None)
             if snd:
                 try:
