@@ -225,6 +225,44 @@ def _generate_noise_wav(volume: float, rate: int, duration: float) -> bytes:
     return struct.pack(f"<{n_samples}h", *raw)
 
 
+def _generate_tone_wav(rate: int, freq: float, duration: float) -> bytes:
+    """Harmonic-pad drone: fundamental + a fifth, slow amplitude shimmer,
+    one-pole low-pass, crossfaded at the boundary for a seamless loop.
+
+    Used as the built-in "monotone / standard" feedback source (issue #10).
+    Looped continuously; volume is modulated by the score like the rain noise.
+    """
+    n_samples = int(rate * duration)
+    fifth = freq * 1.5
+    lp = 0.0
+    cutoff = 3000.0
+    rc = 1.0 / (2.0 * math.pi * cutoff)
+    dt = 1.0 / rate
+    alpha = dt / (rc + dt)
+
+    raw = []
+    for i in range(n_samples):
+        shimmer = 1.0 + 0.08 * math.sin(2 * math.pi * 0.2 * i / rate)
+        value = 0.6 * math.sin(2 * math.pi * freq * i / rate)
+        value += 0.4 * math.sin(2 * math.pi * fifth * i / rate)
+        value *= shimmer
+        lp += alpha * (value - lp)
+        raw.append(lp)
+
+    peak = max(abs(s) for s in raw) or 1.0
+    raw = [int((s / peak) * 0.9 * 32767) for s in raw]
+
+    for i in range(_FADE_SAMPLES):
+        t = i / _FADE_SAMPLES
+        head = raw[i]
+        tail = raw[n_samples - _FADE_SAMPLES + i]
+        raw[i] = int(head * t + tail * (1 - t))
+        raw[n_samples - _FADE_SAMPLES + i] = int(tail * t + head * (1 - t))
+
+    raw = [max(-32767, min(32767, s)) for s in raw]
+    return struct.pack(f"<{n_samples}h", *raw)
+
+
 def _generate_bell_wav(rate: int, freq: float, duration: float) -> bytes:
     """Synthesize a decaying sine wave with harmonics (tingsha bell)."""
     n_samples = int(rate * duration)

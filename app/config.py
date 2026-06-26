@@ -169,6 +169,9 @@ class AppConfig:
     # mid-session attention pings remain crisp.
     TIMER_BELL_FREQUENCY: float = 220.0
     TIMER_BELL_DURATION: float = 4.0
+    # Built-in "monotone / standard" feedback tone (issue #10): a harmonic pad
+    # (fundamental + a fifth) looped continuously as an alternative to the rain.
+    TONE_FREQUENCY: float = 220.0
 
     SUBTLE_ALERT_THRESHOLD: float = 30.0
     SUBTLE_ALERT_COOLDOWN: float = 20.0

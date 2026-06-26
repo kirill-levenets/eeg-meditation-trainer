@@ -6,6 +6,7 @@ from app.audio_feedback.noise import (
     AudioEngine,
     _generate_bell_wav,
     _generate_noise_wav,
+    _generate_tone_wav,
 )
 from app.config import APP
 
@@ -154,6 +155,14 @@ class TestAudioFeedback(unittest.TestCase):
         pcm = _generate_bell_wav(22050, 800.0, 0.6)
         expected_len = int(22050 * 0.6) * 2
         self.assertEqual(len(pcm), expected_len)
+
+    def test_generate_tone_wav_length(self):
+        pcm = _generate_tone_wav(22050, 220.0, 1.0)
+        self.assertEqual(len(pcm), 22050 * 2)
+
+    def test_generate_tone_wav_nonzero(self):
+        pcm = _generate_tone_wav(22050, 220.0, 1.0)
+        self.assertNotEqual(pcm, b"\x00" * (22050 * 2))
 
     def test_update_sinking_no_trigger_when_disabled(self):
         self.gen.sinking_alert_enabled = False
