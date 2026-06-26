@@ -238,12 +238,14 @@ class EEGMeditationApp(App):
         # Resolve the driving formula -> a metrics key. Custom formula gets its own evaluator.
         formula = seg.get("formula", "shamatha_score")
         self._program_formula_ev = None
+        prog_name = None
         if isinstance(formula, dict):
             ev = CustomFormulaEvaluator()
             ok, err = ev.set_formula(formula.get("formula", "") or "")
             if ok and ev.is_valid:
                 self._program_formula_ev = ev
                 metric_key = "program_formula"
+                prog_name = formula.get("name") or "Program"
             else:
                 metric_key = "shamatha_score"  # spec: unparseable saved formula falls back
                 logger.warning(f"Program segment formula invalid, using shamatha: {err}")
@@ -253,11 +255,20 @@ class EEGMeditationApp(App):
         self._audio_metric_key = metric_key
         self._session_manager.set_active_goal(metric_key, target)
         self._audio.set_threshold(target)
-        self._on_main(lambda t=target, k=metric_key: (
-            self._live_screen.graph.set_threshold(float(t), k),
-            self._live_screen.set_training_series(k),  # bold + » on the trained series
-        ))
+        self._on_main(lambda t=target, k=metric_key, nm=prog_name:
+                      self._apply_program_segment_ui(t, k, nm))
         logger.info(f"Program segment {idx}: metric={metric_key} target={target}")
+
+    def _apply_program_segment_ui(self, target: int, metric_key: str, prog_name) -> None:
+        """Main-thread UI for a segment switch: name + show the program-formula
+        line (custom segments), update the threshold, and mark the trained series."""
+        if prog_name is not None:
+            # Label the shared program-formula line with the active formula's name
+            # and reveal it so the custom formula is plotted + markable.
+            self._live_screen.graph.set_series_name("program_formula", prog_name)
+            self._live_screen.graph.set_visible("program_formula", True)
+        self._live_screen.graph.set_threshold(float(target), metric_key)
+        self._live_screen.set_training_series(metric_key)  # bold + » on the trained series
 
     def _play_segment_end_sound(self, sound_id) -> None:
         """Segment-end cue. v1: chime (default) or 'warble'; richer choices land with #10."""
@@ -630,6 +641,9 @@ class EEGMeditationApp(App):
         # Hide all custom-formula series until a formula is set + shown via picker
         for _fk in FORMULA_KEYS:
             self._live_screen.graph.set_visible(_fk, False)
+        # The program-formula line is shown only while a program with a
+        # custom-formula segment runs.
+        self._live_screen.graph.set_visible("program_formula", False)
         # Apply default metric visibility (Shamatha only for new users;
         # _load_user_settings will override for existing users)
         for key, active in self._settings_screen._graph_toggles.items():
@@ -1054,12 +1068,16 @@ class EEGMeditationApp(App):
             self._live_screen.graph.set_threshold_steps(
                 prog.threshold_steps(self._live_screen.graph._sample_rate)
             )
-            # Auto-show every built-in metric the program trains, so each
-            # segment's target series is plotted and the legend can mark it.
+            # Auto-show every series the program trains, so each segment's
+            # target series is plotted and the legend can mark it. Built-in keys
+            # show their own series; custom-formula segments share the dedicated
+            # "program_formula" line.
             for seg in prog.segments:
                 f = seg.get("formula")
                 if isinstance(f, str):
                     self._live_screen.graph.set_visible(f, True)
+                elif isinstance(f, dict):
+                    self._live_screen.graph.set_visible("program_formula", True)
         else:
             self._live_screen.graph.set_threshold_steps(None)
             self._live_screen.graph.set_threshold(float(threshold), "shamatha_score")

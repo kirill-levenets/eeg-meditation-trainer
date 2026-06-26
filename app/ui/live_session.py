@@ -68,6 +68,9 @@ METRICS_COLORS = {
     "custom_formula": C.CUSTOM,
     "custom_formula_2": C.CUSTOM2,
     "custom_formula_3": C.CUSTOM3,
+    # Live line for a program segment's custom formula (hidden until a program
+    # with a custom-formula segment runs); its label tracks the active formula.
+    "program_formula": C.WARM,
 }
 
 METRICS_SCALES = {
@@ -80,6 +83,7 @@ METRICS_SCALES = {
     "custom_formula": 200.0,
     "custom_formula_2": 200.0,
     "custom_formula_3": 200.0,
+    "program_formula": 200.0,
 }
 
 # Friendly labels for the on-graph series picker (combobox).
@@ -93,6 +97,7 @@ SERIES_NAMES = {
     "custom_formula": "Custom 1",
     "custom_formula_2": "Custom 2",
     "custom_formula_3": "Custom 3",
+    "program_formula": "Program",
 }
 
 

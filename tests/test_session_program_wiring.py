@@ -114,6 +114,38 @@ def test_saved_program_unique_upsert_load_delete(tmp_path):
     app._db.close()
 
 
+def test_program_custom_formula_plots_and_marks():
+    from unittest.mock import MagicMock
+
+    from app.session.session_program import SessionProgram
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._on_main = lambda fn, *a: fn()  # run UI updates synchronously
+    app._audio = MagicMock()
+    app._session_manager = MagicMock()
+    app._session_manager.elapsed_seconds = 0
+    app._metrics_engine = MagicMock()
+    app._metrics_engine.derive_bands.return_value = {}
+    app._metrics_engine.compute_sqrt_relative_bands.return_value = {}
+    graph = MagicMock()
+    app._live_screen = MagicMock()
+    app._live_screen.graph = graph
+    app._timer_mode = "program"
+    app._active_program = SessionProgram(
+        [{"minutes": 1, "target": 120, "formula": {"name": "AlphaPwr", "formula": "alpha1"}}])
+    app._program_seg_idx = -1
+    app._program_formula_ev = None
+    app._audio_metric_key = "shamatha_score"
+
+    metrics = {"shamatha_score": 50}
+    app._apply_program_tick(metrics, {"alpha1": 80.0})
+
+    assert metrics["program_formula"] == 80.0          # custom formula evaluated + plotted
+    assert app._audio_metric_key == "program_formula"  # drives audio/goal
+    graph.set_series_name.assert_any_call("program_formula", "AlphaPwr")  # named after formula
+    graph.set_visible.assert_any_call("program_formula", True)            # shown on graph
+    app._live_screen.set_training_series.assert_called_with("program_formula")  # legend-marked
+
+
 def test_diary_rebuilds_stepped_threshold():
     import json
 
