@@ -343,6 +343,7 @@ class EEGMeditationApp(App):
         self._program_formula_evs = {}
         self._program_segment_keys = []
         self._program_segment_feedback_ids = []
+        self._program_audio_key = ""
         prev = getattr(self, "_program_prev_visibility", None) or dict.fromkeys(PROGRAM_FORMULA_KEYS, False)
         for k, on in prev.items():
             graph.set_visible(k, on)
@@ -425,7 +426,7 @@ class EEGMeditationApp(App):
             nm = formula.get("name")
             prog_name = f"Program: {nm}" if nm else "Program"
         target = int(seg.get("target", 50))
-        self._audio_metric_key = metric_key
+        self._program_audio_key = metric_key  # transient; never clobber the user's baseline
         self._session_manager.set_active_goal(metric_key, target)
         self._audio.set_threshold(target)
         fb_ids = getattr(self, "_program_segment_feedback_ids", None)
@@ -829,6 +830,7 @@ class EEGMeditationApp(App):
         for key, active in self._settings_screen._graph_toggles.items():
             self._live_screen.graph.set_visible(key, active)
         self._audio_metric_key: str = "shamatha_score"
+        self._program_audio_key: str = ""  # transient program-segment audio metric
         self._feedback_source: str = "noise"
         self._feedback_sound_path: str = ""
         self._session_program_segments: list[dict] = []
@@ -1213,6 +1215,7 @@ class EEGMeditationApp(App):
         self._program_formula_evs = {}
         self._program_segment_keys = []
         self._program_segment_feedback_ids = []
+        self._program_audio_key = ""
         self._session_program_active = self._timer_mode == "program" and bool(prog)
         self._active_program = prog if self._session_program_active else None
         if self._session_program_active:
@@ -2219,13 +2222,24 @@ class EEGMeditationApp(App):
         Window.rotation = rotation
         logger.info(f"Screen rotation set to {rotation}")
 
+    @staticmethod
+    def _baseline_audio_metric(key: str) -> str:
+        """The user's persisted audio metric; program-formula slots are program-only
+        and must never persist as a baseline (outside a program they read 0 -> max noise)."""
+        return "shamatha_score" if (not key or key in PROGRAM_FORMULA_KEYS) else key
+
     def _audio_drive_key(self) -> str:
-        """Metric key feeding noise; falls back to shamatha if a bound formula slot
-        is invalid (a missing series reads 0 → would otherwise drive MAX noise)."""
-        ev = self._formula_for_key(self._audio_metric_key)
+        """Metric key feeding noise. A running program drives it from the active segment's
+        slot; otherwise the user's baseline. Falls back to shamatha when the key would read
+        0 (invalid formula slot, or a program slot outside a program)."""
+        if getattr(self, "_session_program_active", False) and getattr(self, "_program_audio_key", ""):
+            key = self._program_audio_key
+        else:
+            key = self._baseline_audio_metric(self._audio_metric_key)
+        ev = self._formula_for_key(key)
         if ev is not None and not ev.is_valid:
             return "shamatha_score"
-        return self._audio_metric_key
+        return key
 
     def _on_audio_metric_change(self, key: str) -> None:
         """Switch which metric drives the audio threshold feedback."""
@@ -3170,7 +3184,9 @@ class EEGMeditationApp(App):
                     uid, f"graph_series_{g.graph_id}",
                     [k for k in g.visible_keys() if k not in PROGRAM_FORMULA_KEYS],
                 )
-        self._db.set_user_setting(uid, "audio_metric", self._audio_metric_key)
+        self._db.set_user_setting(
+            uid, "audio_metric", self._baseline_audio_metric(self._audio_metric_key)
+        )
         self._db.set_user_setting(uid, "feedback_source", self._feedback_source)
         self._db.set_user_setting(uid, "feedback_sound_path", self._feedback_sound_path)
         self._db.set_user_setting(uid, "marker_hotkey", self._settings_screen.marker_hotkey)
@@ -3358,6 +3374,7 @@ class EEGMeditationApp(App):
 
         audio_met = g(user_id, "audio_metric")
         if audio_met is not None:
+            audio_met = self._baseline_audio_metric(audio_met)  # heal a leaked program slot
             self._audio_metric_key = audio_met
             if audio_met in FORMULA_KEYS:
                 self._audio_formula_index = FORMULA_KEYS.index(audio_met)

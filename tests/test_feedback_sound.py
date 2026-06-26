@@ -61,3 +61,36 @@ def test_on_test_audio_prepares_selected_source():
     app._on_test_audio()
     app._audio.prepare_feedback.assert_called_once_with({"tone": ("tone", "")}, "tone")
     app._audio.test_audio.assert_called_once()
+
+
+# --- Bug: program-formula key leaked into the persisted audio metric, driving
+#     simple-session volume from a key that's 0 (missing) -> constant max volume.
+def test_baseline_audio_metric_rejects_program_keys():
+    assert EEGMeditationApp._baseline_audio_metric("program_formula_2") == "shamatha_score"
+    assert EEGMeditationApp._baseline_audio_metric("") == "shamatha_score"
+    assert EEGMeditationApp._baseline_audio_metric("native_attention") == "native_attention"
+    assert EEGMeditationApp._baseline_audio_metric("custom_formula") == "custom_formula"
+
+
+def _drive_app(metric_key, program_active=False, program_key=""):
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._audio_metric_key = metric_key
+    app._session_program_active = program_active
+    app._program_audio_key = program_key
+    app._formula_slots = []
+    return app
+
+
+def test_drive_key_program_slot_outside_program_falls_back():
+    # The leaked saved value: simple session must not drive audio from a 0/missing program key.
+    assert _drive_app("program_formula_2").  _audio_drive_key() == "shamatha_score"
+
+
+def test_drive_key_uses_program_key_during_program():
+    app = _drive_app("shamatha_score", program_active=True, program_key="program_formula_2")
+    assert app._audio_drive_key() == "program_formula_2"
+
+
+def test_drive_key_normal_metric_passthrough():
+    assert _drive_app("native_attention")._audio_drive_key() == "native_attention"
+    assert _drive_app("shamatha_score")._audio_drive_key() == "shamatha_score"

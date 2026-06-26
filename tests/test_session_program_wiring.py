@@ -155,7 +155,8 @@ def test_program_custom_formula_plots_and_marks():
     app._apply_program_tick(metrics, {"alpha1": 80.0})
 
     assert metrics["program_formula"] == 80.0          # custom formula evaluated + plotted
-    assert app._audio_metric_key == "program_formula"  # drives audio/goal
+    assert app._program_audio_key == "program_formula"   # transient program drive
+    assert app._audio_metric_key == "shamatha_score"     # user's baseline left untouched
     graph.set_series_name.assert_any_call("program_formula", "Program: AlphaPwr")  # "Program: <formula>"
     graph.set_visible.assert_any_call("program_formula", True)            # shown on graph
     app._live_screen.set_training_series.assert_called_with("program_formula")  # legend-marked
