@@ -392,7 +392,7 @@ class SettingsScreen(Screen):
             text=(
                 "A program runs timed stages in order (top to bottom). Each row:\n"
                 "Min = length in minutes   Metric = what to train   Target = goal value\n"
-                "End cue = sound when the stage ends   Feedback = per-stage sound (coming soon)"
+                "End cue = sound when the stage ends   Feedback = per-stage sound"
             ),
             font_size=F.SMALL, color=C.TEXT_SECONDARY,
             size_hint_y=None, height=dp(58),
@@ -1724,7 +1724,8 @@ class SettingsScreen(Screen):
     def _set_segment_feedback(self, row, btn, value: str) -> None:
         row._feedback_sound = value
         btn.text = self._feedback_seg_label(value)
-        self._on_segment_edited()
+        logger.info(f"Segment feedback -> {value or 'default'}")
+        self._emit_program_changed()
 
     def _open_segment_feedback_picker(self, row, btn) -> None:
         """Pick a segment's feedback source: Default (inherit global), Rain, Tone, or a custom file."""
