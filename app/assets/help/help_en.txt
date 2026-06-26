@@ -131,6 +131,7 @@ offered a "Use existing" / "Change name" choice.
 ## Session Program
 
 Settings → Timer → Simple | Program toggle.
+"Enable Timer" is only shown in Simple mode.
 
 Program mode lets you build a sequence of timed
 segments, each with its own formula, target level,
@@ -145,8 +146,21 @@ Meditation / saved custom formula), target level,
 end cue (Chime or Warble).
 
 Add rows with "+ Add Segment". Save the whole
-program by name — saved programs appear in a list
+program by name — re-saving under the same name
+overwrites it. Load and delete ask for confirmation.
+The editor shows the name of the currently
+loaded program. Saved programs appear in a list
 you can tap to reload.
+
+On the Session screen, the button next to Start
+shows "P" in program mode. Tap it → Programs…
+to quick-load a saved program; the list highlights
+the currently loaded one.
+
+During a program the graph shows each segment's
+metric. The legend marks the active segment with
+a bold "»"; a chime plays at each segment change
+and the gong sounds at the end.
 
 The live session graph and the diary graph both
 show a stepped threshold line that follows each
