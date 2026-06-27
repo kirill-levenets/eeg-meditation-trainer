@@ -74,7 +74,10 @@ android.archs = arm64-v8a
 android.enable_androidx = True
 
 # (str) python-for-android branch to use
-p4a.branch = master
+# Pinned: p4a master now builds each recipe in an isolated venv with Cython<3.2
+# (pulls 3.1.x), whose generated C fails to compile kivy 2.3.0. v2024.01.21 builds
+# in-place with the host Cython 3.0.10 and is the version that builds locally.
+p4a.branch = v2024.01.21
 
 # (str) Bootstrap to use for android builds
 p4a.bootstrap = sdl2
