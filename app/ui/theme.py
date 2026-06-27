@@ -404,6 +404,27 @@ class CenteredTextInput(TextInput):
             self.padding = new
 
 
+_FG_LIGHT = [0.96, 0.96, 0.98, 1]   # near-white glyph for dark backgrounds
+_FG_DARK = [0.13, 0.13, 0.16, 1]    # near-black glyph for light backgrounds
+
+
+def _rel_luminance(rgba):
+    def _ch(c):
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = rgba[:3]
+    return 0.2126 * _ch(r) + 0.7152 * _ch(g) + 0.0722 * _ch(b)
+
+
+def _contrast(a, b):
+    la, lb = _rel_luminance(a), _rel_luminance(b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+
+def readable_fg(bg):
+    """Light or dark glyph colour, whichever has the higher WCAG contrast with bg."""
+    return _FG_DARK if _contrast(_FG_DARK, bg) >= _contrast(_FG_LIGHT, bg) else _FG_LIGHT
+
+
 class StyledButton(ButtonBehavior, BoxLayout):
     """Rounded button with press color shift. Replaces default Kivy Button.
 
@@ -424,7 +445,22 @@ class StyledButton(ButtonBehavior, BoxLayout):
         kwargs.setdefault("size_hint_y", None)
         kwargs.setdefault("height", S.BTN_H)
         vertical = kwargs.pop("vertical", False)
+        # Glyph colour role (re-applied on bg/theme change so it never keeps a stale snapshot;
+        # the class default is a frozen import-time ~white that rendered icons invisible on
+        # light themes). AUTO (no text_color) = pick light/dark for the highest contrast with
+        # THIS button's bg — fixes both light-icon-on-light-fill and dark-on-saturated cases.
+        # Explicit C.TEXT / C.TEXT_SECONDARY follow that theme role; any other colour is fixed.
+        passed = kwargs.get("text_color")
         super().__init__(**kwargs)
+        if passed is None:
+            self._text_role = "AUTO"
+        elif list(passed) == list(C.TEXT):
+            self._text_role = "TEXT"
+        elif list(passed) == list(C.TEXT_SECONDARY):
+            self._text_role = "TEXT_SECONDARY"
+        else:
+            self._text_role = None
+        self._apply_role_text()
         self.orientation = "vertical" if vertical else "horizontal"
         self.padding = [dp(2), dp(2)] if vertical else [dp(12), 0]
 
@@ -486,21 +522,42 @@ class StyledButton(ButtonBehavior, BoxLayout):
         self.bind(
             text=self._update_label,
             text_color=self._update_colors,
-            bg_color=self._redraw,
+            bg_color=self._on_bg_change,
             size=self._redraw,
             pos=self._redraw,
             disabled=self._redraw,
         )
         self._redraw()
-        C.add_listener(self._redraw)
+        C.add_listener(self._on_theme_change)
+
+    def _on_theme_change(self, *args):
+        """Re-apply the glyph colour role, then repaint."""
+        self._apply_role_text()
+        self._redraw()
+
+    def _on_bg_change(self, *args):
+        """Background changed — AUTO contrast depends on it; re-resolve then repaint."""
+        self._apply_role_text()
+        self._redraw()
+
+    def _apply_role_text(self):
+        """Resolve the glyph colour role into text_color (-> _update_colors via binding)."""
+        if self._text_role == "AUTO":
+            self.text_color = readable_fg(self.bg_color)
+        elif self._text_role == "TEXT":
+            self.text_color = list(C.TEXT)
+        elif self._text_role == "TEXT_SECONDARY":
+            self.text_color = list(C.TEXT_SECONDARY)
 
     def _update_label(self, *args):
         self._label.text = self.text
 
     def _update_colors(self, *args):
         self._label.color = self.text_color
+        self._label.disabled_color = self.text_color
         if self._icon_label:
             self._icon_label.color = self.text_color
+            self._icon_label.disabled_color = self.text_color
 
     def _get_bg(self):
         if self.disabled:
@@ -529,10 +586,23 @@ class StyledButton(ButtonBehavior, BoxLayout):
             else:
                 Color(*bg)
                 RoundedRectangle(pos=self.pos, size=self.size, radius=[S.RADIUS])
+        # Disabled: dim BOTH label and icon to 60% of the max-contrast glyph for the
+        # (greyed) disabled bg. The greyed background already signals 'disabled', so the
+        # glyph stays legible (~4:1) instead of washing into a light card the way the
+        # theme's light TEXT_MUTED did. Enabled restores the live text colour; pressed
+        # leaves the glyph alone (only the background dims). Kivy's Label draws
+        # `disabled_color` (default white@.3 -> invisible on light cards) when disabled,
+        # so set it too, not just `color`.
         if self.disabled:
-            self._label.color = list(C.TEXT_MUTED)
+            tgt = readable_fg(bg)
+            fg = [tgt[i] * 0.6 + bg[i] * 0.4 for i in range(3)] + [1]
         else:
-            self._label.color = list(self.text_color)
+            fg = list(self.text_color)
+        self._label.color = fg
+        self._label.disabled_color = fg
+        if self._icon_label:
+            self._icon_label.color = fg
+            self._icon_label.disabled_color = fg
 
     def on_state(self, *args):
         self._redraw()
@@ -730,6 +800,46 @@ class _AccordionSection(BoxLayout):
     def _refresh_theme(self):
         self._header.bg_color = C.BG_CARD
         self._header.text_color = C.TEXT_SECONDARY
+
+
+class RevealBox(BoxLayout):
+    """Touch-safe conditional row: shows/hides its content by DETACHING the children,
+    never collapse-in-place. Hidden = height 0 and no attached children, so it can't
+    overflow or eat a neighbour's taps. (Kivy's Widget.on_touch_down consumes a tap on
+    any colliding `disabled` widget, so the height=0/opacity=0/disabled idiom turns a
+    hidden row into an invisible tap-eater — use this instead.)"""
+
+    def __init__(self, content_height, **kwargs):
+        kwargs.setdefault("size_hint_y", None)
+        super().__init__(**kwargs)
+        self._content_height = content_height
+        self._content_widgets: list = []
+        self._revealed = False
+        self.height = 0
+
+    def set_content(self, *widgets) -> None:
+        """Register the row's widgets; the row starts hidden (children detached)."""
+        self._content_widgets = list(widgets)
+        self._refresh()
+
+    def reveal(self, show: bool) -> None:
+        if bool(show) == self._revealed:
+            return
+        self._revealed = bool(show)
+        self._refresh()
+
+    @property
+    def revealed(self) -> bool:
+        return self._revealed
+
+    def _refresh(self) -> None:
+        self.clear_widgets()
+        if self._revealed:
+            for w in self._content_widgets:
+                self.add_widget(w)
+            self.height = self._content_height
+        else:
+            self.height = 0
 
 
 class PresetRow(BoxLayout):

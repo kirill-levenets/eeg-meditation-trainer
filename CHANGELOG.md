@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Selectable feedback sound** (issue #10): choose Rain (original), a built-in Tone drone, or a custom audio file (wav/mp3/ogg/flac/m4a) in Settings → Audio as the continuous feedback channel. The volume modulation is unchanged — it still tracks the active metric. Each program segment also has a **Feedback** picker (Default / Rain / Tone / Custom); "Default" inherits the global selection, and the source switches at each segment boundary lock-safely via `set_active_feedback` (setVolume-only, no mid-session teardown).
 - **Session Program** (issue #6): programmable per-segment sessions as an alternative to a single fixed-duration timer.
   - Settings → Timer now has a **Simple | Program** toggle. Simple = existing single-duration timer (unchanged). Program reveals a segment editor.
   - Each segment row specifies: duration (minutes), a **formula** (Shamatha, Meditation, NS Attention, NS Meditation, or any saved custom formula), a **target** level, and an **end-cue** sound (Chime or Warble).
@@ -40,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - At each segment boundary a transition chime plays; the active target, audio-driver formula, and "time above target" stat all follow the current segment.
   - A **stepped threshold line** is drawn on both the live session metrics graph and the diary metrics graph (each segment's target over its time range).
   - The program that ran is recorded per session (`sessions.session_program` column); the diary replays the stepped threshold line from that record.
-  - Per-segment continuous feedback sound (replacing white noise) is modeled in v1 but inert — lands with issue #10.
+  - Per-segment feedback sound picker shipped in issue #10 (see Selectable feedback sound entry above).
 - **Saved-program overwrite confirmation**: saving a program whose name already exists prompts an "Overwrite?" confirmation and replaces the existing entry instead of creating a duplicate. Loading and deleting saved programs also show a confirmation prompt. After loading a program, its name is pre-filled in the name field so a subsequent save overwrites it in place.
 - **"Loaded:" program label in the segment editor**: the editor header shows `Loaded: <name>` (or `Loaded: (unsaved)`) and pre-fills the name field, so it is always clear which saved program is currently loaded.
 - **Program indicator on the Session duration button**: when Program mode is active the duration button on the Session screen shows a large **P** instead of a duration. Switching timer mode in Settings and returning to the Session tab updates the button immediately. The duration popup gained a **Programs…** quick-picker that loads a saved program directly from the session screen, shows the loaded program's name on the button, and highlights the currently loaded program in the list.

@@ -56,10 +56,13 @@ For good EEG signal:
 
 ## Audio Feedback
 
-Rain noise volume = meditation quality:
-- Quieter = deeper meditation
-- Volume rises slowly (log curve)
-- Max volume capped at 0.3
+Choose the feedback sound in Settings → Audio:
+- Rain (default white-noise rain sound)
+- Tone (built-in harmonic pad drone)
+- Custom (your own audio file: wav/mp3/ogg/flac/m4a)
+
+Volume = meditation quality: quieter = deeper.
+Volume rises slowly (log curve), max 0.3.
 
 Alert sounds:
 - Bell = sinking/dullness detected
@@ -166,9 +169,10 @@ The live session graph and the diary graph both
 show a stepped threshold line that follows each
 segment's target.
 
-Per-segment continuous audio (replacing white noise
-per segment) is deferred — a placeholder labeled
-"after #10" is shown disabled.
+Each segment row has a Feedback picker
+(Default / Rain / Tone / Custom) — "Default"
+uses the global Audio setting. The source
+switches at each segment boundary.
 
 ## Custom Formulas
 

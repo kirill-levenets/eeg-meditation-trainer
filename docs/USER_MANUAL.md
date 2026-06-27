@@ -162,6 +162,7 @@ The **Timer** section has a **Simple | Program** toggle at the top. In **Simple*
 - **Formula** — the metric that drives audio feedback for this segment: Shamatha, Meditation, NS Attention, NS Meditation, or any formula saved in your custom-formula library
 - **Target** — the threshold level for this segment (sets the dashed line and "time above target" stat)
 - **End cue** — sound played when this segment ends: **Chime** (default) or **Warble**
+- **Feedback** — the continuous feedback sound for this segment: **Default** (inherits the global Audio setting), **Rain**, **Tone** (built-in harmonic pad), or a **Custom** file set in Settings → Audio. The source switches at each segment boundary.
 
 Use **+ Add Segment** to append a row; tap the delete icon on a row to remove it. The **total duration** readout at the bottom updates automatically.
 
@@ -189,7 +190,7 @@ When Program mode is active, the small button next to **Start** shows a large **
 
 **Text fields** in the program editor (and elsewhere in the app) show their text centered.
 
-**Note:** Per-segment continuous feedback sound (replacing the white noise with a different sound for a segment) is shown as a disabled placeholder. That feature is planned for a future release.
+The **Feedback** picker on each segment row lets you use a different sound per segment (see the Feedback row in the segment fields list above).
 
 When Program mode is off, the Simple timer behaves exactly as before.
 
@@ -208,7 +209,11 @@ When Program mode is off, the Simple timer behaves exactly as before.
 
 ### Audio
 
-- **Test Audio** — plays noise sweep + bell + chime + warble
+- **Feedback sound** — `[Rain] [Tone] [Custom]` selector chooses the continuous feedback channel:
+  - **Rain** — the original rain/white-noise sound
+  - **Tone** — a built-in harmonic pad drone (fundamental + a fifth); no file needed
+  - **Custom** — plays a user-supplied audio file (wav, mp3, ogg, flac, m4a). A path row and **Browse** button appear to select the file. The sound loops continuously; its volume is still modulated by the active metric exactly as Rain is.
+- **Test Audio** — plays feedback sweep + bell + chime + warble
 - Toggle sinking alert bell, distraction chime, disconnect warble
 - Volume uses log scaling — rises quickly at first, then flattens (max 0.3)
 

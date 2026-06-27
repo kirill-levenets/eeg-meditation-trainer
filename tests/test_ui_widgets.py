@@ -596,3 +596,62 @@ class TestFilterMindwave(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestStyledButtonThemeText(unittest.TestCase):
+    """Default (no text_color) StyledButton must follow the live theme text colour,
+    not the frozen import-time snapshot (regression: white icons invisible on light themes)."""
+
+    def setUp(self):
+        from app.ui.theme import C
+        self._C = C
+        self._orig = C.current_theme if hasattr(C, "current_theme") else "Dark Blue"
+
+    def tearDown(self):
+        self._C.set_theme(self._orig if isinstance(self._orig, str) else "Dark Blue")
+
+    def test_default_glyph_auto_contrasts_with_bg(self):
+        from app.ui.theme import C, StyledButton
+        C.set_theme("Dark Blue")
+        on_light = StyledButton(text="X", bg_color=[0.95, 0.95, 0.95, 1])  # no text_color -> AUTO
+        self.assertLess(on_light.text_color[0], 0.5)            # dark glyph on a light fill
+        on_dark = StyledButton(text="Y", bg_color=[0.10, 0.10, 0.12, 1])
+        self.assertGreater(on_dark.text_color[0], 0.5)          # light glyph on a dark fill
+        # changing the bg re-resolves the glyph
+        on_light.bg_color = [0.08, 0.08, 0.10, 1]
+        self.assertGreater(on_light.text_color[0], 0.5)
+
+    def test_explicit_text_color_preserved(self):
+        from app.ui.theme import C, StyledButton
+        C.set_theme("Light Cream")
+        b = StyledButton(text="Y", text_color=[0.9, 0.1, 0.1, 1])
+        C.set_theme("Dark Blue")
+        self.assertEqual(list(b.text_color), [0.9, 0.1, 0.1, 1])  # explicit colour untouched
+
+    def test_explicit_theme_role_tracks(self):
+        from app.ui.theme import C, StyledButton
+        C.set_theme("Dark Blue")
+        b = StyledButton(text="Z", text_color=C.TEXT)            # explicit theme role
+        self.assertGreater(b.text_color[0], 0.5)                 # light on dark
+        C.set_theme("Light Cream")
+        self.assertLess(b.text_color[0], 0.5)                    # tracks -> dark on light
+        sec = StyledButton(text="S", text_color=C.TEXT_SECONDARY)
+        sec_dark = list(sec.text_color)
+        C.set_theme("Dark Blue")
+        self.assertNotEqual(list(sec.text_color), sec_dark)      # secondary role tracks too
+
+    def test_disabled_dims_but_stays_legible(self):
+        # Kivy's Label draws `disabled_color` (default white@.3 -> invisible on light cards),
+        # NOT `color`, while disabled — so assert the property that actually renders.
+        from app.ui.theme import C, Icons, StyledButton, _contrast
+        for theme in ("Dark Blue", "Light Green"):
+            C.set_theme(theme)
+            b = StyledButton(text="Stop", icon=Icons.STOP, bg_color=list(C.BG_CARD), disabled=True)
+            bg = b._get_bg()
+            self.assertNotEqual(list(b._label.disabled_color), [1, 1, 1, 0.3])     # not the Kivy default
+            self.assertNotEqual(list(b._label.disabled_color), list(bg))           # not washed into the bg
+            self.assertGreaterEqual(_contrast(b._label.disabled_color, bg), 3.0)   # legible while dimmed
+            if b._icon_label is not None:
+                self.assertEqual(list(b._icon_label.disabled_color), list(b._label.disabled_color))
+            b.disabled = False
+            self.assertEqual(list(b._label.color), list(b.text_color))   # restored on enable

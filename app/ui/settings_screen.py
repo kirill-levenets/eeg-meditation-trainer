@@ -28,6 +28,7 @@ from app.ui.theme import (
     F,
     Icons,
     PresetRow,
+    RevealBox,
     S,
     StyledButton,
     ThemedAccordion,
@@ -43,6 +44,33 @@ PROGRAM_BUILTIN_FORMULAS: list[tuple[str, str]] = [
     ("native_meditation", "NS Meditation"),
 ]
 _PROGRAM_BUILTIN_LABELS: dict[str, str] = dict(PROGRAM_BUILTIN_FORMULAS)
+
+
+def open_audio_file_chooser(on_select: Callable[[str], None], title: str = "Choose audio file") -> None:
+    """Shared audio-file picker popup for the timer sound, global feedback, and per-segment feedback."""
+    chooser = FileChooserListView(
+        path=os.path.expanduser("~"),
+        filters=["*.wav", "*.mp3", "*.ogg", "*.flac", "*.m4a"],
+    )
+    content = BoxLayout(orientation="vertical", spacing=dp(8))
+    content.add_widget(chooser)
+    btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
+    btn_cancel = Button(text="Cancel", font_size=F.SMALL)
+    btn_select = Button(text="Select", font_size=F.SMALL, background_color=(0.2, 0.6, 0.3, 1.0))
+    btn_row.add_widget(btn_cancel)
+    btn_row.add_widget(btn_select)
+    content.add_widget(btn_row)
+    popup = Popup(title=title, content=content, size_hint=(0.9, 0.85))
+
+    def _on_select(*_):
+        sel = chooser.selection
+        if sel:
+            on_select(sel[0])
+        popup.dismiss()
+
+    btn_cancel.bind(on_release=popup.dismiss)
+    btn_select.bind(on_release=_on_select)
+    popup.open()
 
 
 def _load_help_topics(lang: str = "en") -> list[tuple[str, str]]:
@@ -125,6 +153,11 @@ class SettingsScreen(Screen):
         self._saved_formulas_cache: list = []
         self._suppress_program_cb: bool = False
         self._loading_program: bool = False
+        self._on_feedback_source_change: Optional[Callable] = None
+        self._feedback_source: str = "noise"
+        self._feedback_sound_path: str = ""
+        self._feedback_source_buttons: dict[str, StyledButton] = {}
+        self._suppress_feedback_cb: bool = False
         self._graph_toggles: dict[str, bool] = {
             "shamatha_score": True,
             "meditation_score": False,
@@ -360,7 +393,7 @@ class SettingsScreen(Screen):
             text=(
                 "A program runs timed stages in order (top to bottom). Each row:\n"
                 "Min = length in minutes   Metric = what to train   Target = goal value\n"
-                "End cue = sound when the stage ends   Feedback = per-stage sound (coming soon)"
+                "End cue = sound when the stage ends   Feedback = per-stage sound"
             ),
             font_size=F.SMALL, color=C.TEXT_SECONDARY,
             size_hint_y=None, height=dp(58),
@@ -729,6 +762,41 @@ class SettingsScreen(Screen):
         )
         self._test_audio_btn.bind(on_release=self._on_test_audio_pressed)
         audio_section.add_widget(self._test_audio_btn)
+
+        fb_label = Label(
+            text="Feedback sound:", font_size=F.SMALL, color=C.TEXT_SECONDARY,
+            size_hint_y=None, height=dp(24), halign="left", valign="middle",
+        )
+        fb_label.bind(size=fb_label.setter("text_size"))
+        audio_section.add_widget(fb_label)
+
+        fb_row = BoxLayout(size_hint_y=None, height=dp(32), spacing=S.GAP)
+        for key, lbl in (("noise", "Rain"), ("tone", "Tone"), ("custom", "Custom")):
+            btn = StyledButton(
+                text=lbl, font_size=F.SMALL, size_hint_y=None, height=dp(28),
+                bg_color=C.ACCENT if key == "noise" else C.BG_CARD, text_color=C.TEXT,
+            )
+            btn._feedback_key = key
+            btn.bind(on_release=self._on_feedback_source_pressed)
+            self._feedback_source_buttons[key] = btn
+            fb_row.add_widget(btn)
+        audio_section.add_widget(fb_row)
+
+        # Detach-when-hidden (RevealBox): a collapse-in-place disabled row would eat
+        # taps on the Custom button above it (Kivy on_touch_down consumes disabled hits).
+        self._feedback_custom_row = RevealBox(dp(40), spacing=S.GAP_SM)
+        self._feedback_custom_input = CenteredTextInput(
+            hint_text="custom audio file", font_size=F.SMALL, multiline=False,
+            foreground_color=C.TEXT, background_color=list(C.BG_INPUT), size_hint_x=0.7,
+        )
+        self._feedback_custom_input.bind(text=self._on_feedback_custom_path_change)
+        fb_browse = StyledButton(
+            text="Browse", font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT,
+            size_hint_x=0.3,
+        )
+        fb_browse.bind(on_release=self._on_feedback_custom_browse)
+        self._feedback_custom_row.set_content(self._feedback_custom_input, fb_browse)
+        audio_section.add_widget(self._feedback_custom_row)
 
         # Sinking alert toggle
         sinking_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
@@ -1320,6 +1388,52 @@ class SettingsScreen(Screen):
     def set_test_audio_callback(self, callback: Callable) -> None:
         self._on_test_audio = callback
 
+    def set_feedback_source_callback(self, callback: Callable) -> None:
+        self._on_feedback_source_change = callback
+
+    @property
+    def feedback_source(self) -> str:
+        return self._feedback_source
+
+    def set_feedback_source(self, source: str, path: str = "") -> None:
+        """Reflect a restored/loaded feedback selection in the UI without firing the callback."""
+        self._suppress_feedback_cb = True
+        try:
+            self._feedback_source = source or "noise"
+            self._feedback_sound_path = path or ""
+            self._feedback_custom_input.text = self._feedback_sound_path
+            self._sync_feedback_source_ui()
+        finally:
+            self._suppress_feedback_cb = False
+
+    def _sync_feedback_source_ui(self) -> None:
+        """Highlight the active source button and show the custom row only for the custom source."""
+        for key, btn in self._feedback_source_buttons.items():
+            btn.bg_color = C.ACCENT if key == self._feedback_source else C.BG_CARD
+        self._feedback_custom_row.reveal(self._feedback_source == "custom")
+
+    def _on_feedback_source_pressed(self, btn) -> None:
+        self._feedback_source = btn._feedback_key
+        self._sync_feedback_source_ui()
+        self._emit_feedback_source()
+        # Custom with no file yet: open the picker directly — users expect the
+        # selector to ask for a file, not just reveal an empty path row.
+        if self._feedback_source == "custom" and not self._feedback_sound_path:
+            self._on_feedback_custom_browse()
+
+    def _on_feedback_custom_path_change(self, _instance, value: str) -> None:
+        self._feedback_sound_path = value.strip()
+        self._emit_feedback_source()
+
+    def _on_feedback_custom_browse(self, *_args) -> None:
+        open_audio_file_chooser(lambda p: setattr(self._feedback_custom_input, "text", p))
+
+    def _emit_feedback_source(self) -> None:
+        if self._suppress_feedback_cb:
+            return
+        if self._on_feedback_source_change:
+            self._on_feedback_source_change(self._feedback_source, self._feedback_sound_path)
+
     def set_sinking_alert_callback(self, callback: Callable) -> None:
         self._on_sinking_alert_toggle = callback
 
@@ -1507,6 +1621,7 @@ class SettingsScreen(Screen):
         target = segment.get("target", 50)
         formula = segment.get("formula", "shamatha_score")
         end_sound = segment.get("end_sound")
+        feedback_sound = segment.get("feedback_sound") or ""
 
         row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP_SM)
 
@@ -1533,9 +1648,9 @@ class SettingsScreen(Screen):
             size_hint_x=0.16, size_hint_y=None, height=dp(36),
         )
         feedback_btn = StyledButton(
-            text="after #10", font_size=F.SMALL, bg_color=C.BG_CARD,
-            text_color=C.TEXT_MUTED, size_hint_x=0.16, size_hint_y=None,
-            height=dp(36), disabled=True,
+            text=self._feedback_seg_label(feedback_sound), font_size=F.SMALL,
+            bg_color=C.BG_CARD, text_color=C.TEXT, size_hint_x=0.16,
+            size_hint_y=None, height=dp(36),
         )
         delete_btn = StyledButton(
             text="X", font_size=F.SMALL, bg_color=C.BG_CARD,
@@ -1547,6 +1662,8 @@ class SettingsScreen(Screen):
         row._target_in = target_in
         row._formula = formula
         row._end_sound = end_sound
+        row._feedback_sound = feedback_sound
+        row._feedback_btn = feedback_btn
         row._formula_btn = formula_btn
 
         duration_in.bind(text=lambda *_a: self._on_segment_edited())
@@ -1555,7 +1672,10 @@ class SettingsScreen(Screen):
             on_release=lambda *_a, r=row: self._open_segment_formula_picker(r)
         )
         end_sound_btn.bind(
-            on_release=lambda *_a, r=row, b=end_sound_btn: self._cycle_end_sound(r, b)
+            on_release=lambda *_a, r=row, b=end_sound_btn: self._open_segment_end_sound_picker(r, b)
+        )
+        feedback_btn.bind(
+            on_release=lambda *_a, r=row, b=feedback_btn: self._open_segment_feedback_picker(r, b)
         )
         delete_btn.bind(
             on_release=lambda *_a, r=row: self._remove_segment_row(r)
@@ -1587,11 +1707,58 @@ class SettingsScreen(Screen):
         self._update_program_total()
         self._emit_program_changed()
 
-    def _cycle_end_sound(self, row, btn) -> None:
-        row._end_sound = "warble" if row._end_sound is None else None
-        btn.text = "Warble" if row._end_sound == "warble" else "Chime"
-        logger.info(f"Segment end-sound -> {row._end_sound or 'chime'}")
+    def _set_segment_end_sound(self, row, btn, value) -> None:
+        row._end_sound = value
+        btn.text = "Warble" if value == "warble" else "Chime"
+        logger.info(f"Segment end-sound -> {value or 'chime'}")
         self._emit_program_changed()
+
+    def _open_segment_end_sound_picker(self, row, btn) -> None:
+        """Pick a segment's end cue: Chime (default) or Warble."""
+        box = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
+        popup = Popup(title="Segment end cue", content=box, size_hint=(0.8, 0.4))
+        for label, value in (("Chime", None), ("Warble", "warble")):
+            b = StyledButton(text=label, font_size=F.SMALL, size_hint_y=None, height=dp(44),
+                             bg_color=C.BG_CARD, text_color=C.TEXT)
+            b.bind(on_release=lambda *_a, v=value: (
+                self._set_segment_end_sound(row, btn, v), popup.dismiss()))
+            box.add_widget(b)
+        popup.open()
+
+    def _feedback_seg_label(self, value) -> str:
+        if not value:
+            return "Default"
+        if value == "noise":
+            return "Rain"
+        if value == "tone":
+            return "Tone"
+        return os.path.basename(value)
+
+    def _set_segment_feedback(self, row, btn, value: str) -> None:
+        row._feedback_sound = value
+        btn.text = self._feedback_seg_label(value)
+        logger.info(f"Segment feedback -> {value or 'default'}")
+        self._emit_program_changed()
+
+    def _open_segment_feedback_picker(self, row, btn) -> None:
+        """Pick a segment's feedback source: Default (inherit global), Rain, Tone, or a custom file."""
+        box = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
+        popup = Popup(title="Segment feedback sound", content=box, size_hint=(0.8, 0.6))
+        for label, value in (("Default (use global)", ""), ("Rain", "noise"), ("Tone", "tone")):
+            b = StyledButton(text=label, font_size=F.SMALL, size_hint_y=None, height=dp(44),
+                             bg_color=C.BG_CARD, text_color=C.TEXT)
+            b.bind(on_release=lambda *_a, v=value: (
+                self._set_segment_feedback(row, btn, v), popup.dismiss()))
+            box.add_widget(b)
+        custom = StyledButton(text="Custom file...", font_size=F.SMALL, size_hint_y=None,
+                              height=dp(44), bg_color=C.BG_CARD, text_color=C.TEXT)
+        custom.bind(on_release=lambda *_a: (
+            popup.dismiss(),
+            open_audio_file_chooser(
+                lambda p: self._set_segment_feedback(row, btn, p),
+                title="Segment feedback sound file")))
+        box.add_widget(custom)
+        popup.open()
 
     def _formula_label(self, formula) -> str:
         if isinstance(formula, dict):
@@ -1681,6 +1848,8 @@ class SettingsScreen(Screen):
             seg: dict = {"minutes": minutes, "target": target, "formula": row._formula}
             if row._end_sound is not None:
                 seg["end_sound"] = row._end_sound
+            if getattr(row, "_feedback_sound", ""):
+                seg["feedback_sound"] = row._feedback_sound
             segments.append(seg)
         return segments
 
@@ -1769,38 +1938,7 @@ class SettingsScreen(Screen):
         self._timer_sound_test_btn.text = "Test"
 
     def _on_timer_sound_browse(self, *_args) -> None:
-        """Open a file chooser popup for audio files."""
-        start_path = os.path.expanduser("~")
-        chooser = FileChooserListView(
-            path=start_path,
-            filters=["*.wav", "*.mp3", "*.ogg", "*.flac", "*.m4a"],
-        )
-        content = BoxLayout(orientation="vertical", spacing=dp(8))
-        content.add_widget(chooser)
-        btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
-        btn_cancel = Button(text="Cancel", font_size=F.SMALL)
-        btn_select = Button(
-            text="Select", font_size=F.SMALL,
-            background_color=(0.2, 0.6, 0.3, 1.0),
-        )
-        btn_row.add_widget(btn_cancel)
-        btn_row.add_widget(btn_select)
-        content.add_widget(btn_row)
-        popup = Popup(
-            title="Choose audio file",
-            content=content,
-            size_hint=(0.9, 0.85),
-        )
-
-        def _on_select(*_):
-            sel = chooser.selection
-            if sel:
-                self._timer_sound_input.text = sel[0]
-            popup.dismiss()
-
-        btn_cancel.bind(on_release=popup.dismiss)
-        btn_select.bind(on_release=_on_select)
-        popup.open()
+        open_audio_file_chooser(lambda p: setattr(self._timer_sound_input, "text", p))
 
     def populate_bt_devices(self, devices: list) -> None:
         """Populate the BT device list with scan results."""
