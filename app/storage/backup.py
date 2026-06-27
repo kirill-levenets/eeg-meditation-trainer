@@ -3,12 +3,39 @@
 import os
 import shutil
 import sqlite3
+import tempfile
 
 from app.logger import logger
 
 
 class BackupValidationError(Exception):
     """Raised when a candidate backup file fails schema validation."""
+
+
+def online_backup_to_tempfile(db) -> str:
+    """Run SQLite's online backup into a temp .db beside the live DB; caller deletes it.
+
+    SQLite can't open/lock a DB on Android FUSE storage (/sdcard) — it returns
+    SQLITE_CANTOPEN. The temp file lives in internal storage (where the live DB is,
+    which supports the locks SQLite needs); callers byte-copy or stream it to the
+    final destination, which works on /sdcard and content:// URIs.
+    """
+    live_dir = os.path.dirname(db._db_path) or "."
+    fd, tmp_path = tempfile.mkstemp(suffix=".db", dir=live_dir)
+    os.close(fd)
+    try:
+        target_conn = sqlite3.connect(tmp_path)
+        try:
+            db._conn.backup(target_conn)
+        finally:
+            target_conn.close()
+    except BaseException:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            logger.warning(f"Could not remove temp backup {tmp_path}")
+        raise
+    return tmp_path
 
 
 def make_backup(db, target_path: str) -> None:
@@ -18,11 +45,14 @@ def make_backup(db, target_path: str) -> None:
     DB don't corrupt the result.
     """
     os.makedirs(os.path.dirname(target_path) or ".", exist_ok=True)
-    target_conn = sqlite3.connect(target_path)
+    tmp_path = online_backup_to_tempfile(db)
     try:
-        db._conn.backup(target_conn)
+        shutil.copy2(tmp_path, target_path)
     finally:
-        target_conn.close()
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            logger.warning(f"Could not remove temp backup {tmp_path}")
     logger.info(f"Backup written: {target_path}")
 
 
