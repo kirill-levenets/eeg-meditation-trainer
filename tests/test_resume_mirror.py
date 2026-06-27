@@ -105,6 +105,10 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     app._session_program_active = False
     app._session_program_segments = []
 
+    app._shamatha_active = False
+    app._shamatha_streak = 0
+    app._shamatha_threshold = 50
+
     app._ui_metrics_history = deque(maxlen=APP.GRAPH_POINTS_MAX)
     app._ui_band_history = deque(maxlen=APP.GRAPH_POINTS_MAX)
     app._ui_raw_waveform = deque(maxlen=512 * 60)
