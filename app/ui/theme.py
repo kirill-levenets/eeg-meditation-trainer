@@ -424,7 +424,22 @@ class StyledButton(ButtonBehavior, BoxLayout):
         kwargs.setdefault("size_hint_y", None)
         kwargs.setdefault("height", S.BTN_H)
         vertical = kwargs.pop("vertical", False)
+        # Theme-track the text/icon colour when it's a theme text role — no kwarg, or an
+        # explicit C.TEXT / C.TEXT_SECONDARY (both mean "the theme's text colour"). It's
+        # re-applied on every theme change so it never keeps a stale snapshot. The class
+        # default is a frozen import-time ~white that rendered icons invisible on light
+        # themes, and the theme switch is a pure live-refresh (no screen rebuild), so even
+        # explicit =C.TEXT callers would otherwise stay near-white on a light background.
+        # A non-role colour (e.g. C.DANGER, a fixed RGBA) is left fixed.
+        passed = kwargs.get("text_color")
         super().__init__(**kwargs)
+        if passed is None or list(passed) == list(C.TEXT):
+            self._text_role = "TEXT"
+        elif list(passed) == list(C.TEXT_SECONDARY):
+            self._text_role = "TEXT_SECONDARY"
+        else:
+            self._text_role = None
+        self._apply_role_text()
         self.orientation = "vertical" if vertical else "horizontal"
         self.padding = [dp(2), dp(2)] if vertical else [dp(12), 0]
 
@@ -492,7 +507,19 @@ class StyledButton(ButtonBehavior, BoxLayout):
             disabled=self._redraw,
         )
         self._redraw()
-        C.add_listener(self._redraw)
+        C.add_listener(self._on_theme_change)
+
+    def _on_theme_change(self, *args):
+        """Re-apply theme-tracked text/icon colour, then repaint."""
+        self._apply_role_text()
+        self._redraw()
+
+    def _apply_role_text(self):
+        """Re-read the tracked theme text role (if any) into text_color -> _update_colors."""
+        if self._text_role == "TEXT":
+            self.text_color = list(C.TEXT)
+        elif self._text_role == "TEXT_SECONDARY":
+            self.text_color = list(C.TEXT_SECONDARY)
 
     def _update_label(self, *args):
         self._label.text = self.text
@@ -529,10 +556,13 @@ class StyledButton(ButtonBehavior, BoxLayout):
             else:
                 Color(*bg)
                 RoundedRectangle(pos=self.pos, size=self.size, radius=[S.RADIUS])
-        if self.disabled:
-            self._label.color = list(C.TEXT_MUTED)
-        else:
-            self._label.color = list(self.text_color)
+        # Disabled dims both label AND icon to the muted role (theme-tracked); enabled
+        # restores the live text colour. Pressed state leaves the glyph colour alone
+        # (only the background dims).
+        fg = list(C.TEXT_MUTED) if self.disabled else list(self.text_color)
+        self._label.color = fg
+        if self._icon_label:
+            self._icon_label.color = fg
 
     def on_state(self, *args):
         self._redraw()

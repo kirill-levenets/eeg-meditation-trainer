@@ -596,3 +596,54 @@ class TestFilterMindwave(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestStyledButtonThemeText(unittest.TestCase):
+    """Default (no text_color) StyledButton must follow the live theme text colour,
+    not the frozen import-time snapshot (regression: white icons invisible on light themes)."""
+
+    def setUp(self):
+        from app.ui.theme import C
+        self._C = C
+        self._orig = C.current_theme if hasattr(C, "current_theme") else "Dark Blue"
+
+    def tearDown(self):
+        self._C.set_theme(self._orig if isinstance(self._orig, str) else "Dark Blue")
+
+    def test_default_text_follows_theme(self):
+        from app.ui.theme import C, StyledButton
+        C.set_theme("Light Cream")
+        b = StyledButton(text="X", bg_color=list(C.BG_CARD))   # no text_color
+        self.assertLess(b.text_color[0], 0.5)                  # dark text on a light theme
+        C.set_theme("Dark Blue")
+        self.assertGreater(b.text_color[0], 0.5)               # tracks -> light text on dark theme
+
+    def test_explicit_text_color_preserved(self):
+        from app.ui.theme import C, StyledButton
+        C.set_theme("Light Cream")
+        b = StyledButton(text="Y", text_color=[0.9, 0.1, 0.1, 1])
+        C.set_theme("Dark Blue")
+        self.assertEqual(list(b.text_color), [0.9, 0.1, 0.1, 1])  # explicit colour untouched
+
+    def test_explicit_theme_role_tracks(self):
+        from app.ui.theme import C, StyledButton
+        C.set_theme("Dark Blue")
+        b = StyledButton(text="Z", text_color=C.TEXT)            # explicit theme role
+        self.assertGreater(b.text_color[0], 0.5)                 # light on dark
+        C.set_theme("Light Cream")
+        self.assertLess(b.text_color[0], 0.5)                    # tracks -> dark on light
+        sec = StyledButton(text="S", text_color=C.TEXT_SECONDARY)
+        sec_dark = list(sec.text_color)
+        C.set_theme("Dark Blue")
+        self.assertNotEqual(list(sec.text_color), sec_dark)      # secondary role tracks too
+
+    def test_disabled_dims_label_and_icon(self):
+        from app.ui.theme import C, Icons, StyledButton
+        C.set_theme("Dark Blue")
+        b = StyledButton(text="Stop", icon=Icons.STOP, disabled=True)
+        self.assertEqual(list(b._label.color), list(C.TEXT_MUTED))
+        if b._icon_label is None:
+            self.skipTest("MDI font unavailable in this env")
+        self.assertEqual(list(b._icon_label.color), list(C.TEXT_MUTED))  # icon dimmed, not full
+        b.disabled = False
+        self.assertEqual(list(b._icon_label.color), list(b.text_color))  # restored on enable
