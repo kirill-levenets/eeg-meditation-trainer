@@ -353,12 +353,31 @@ class EEGMeditationApp(App):
             graph.set_visible(slot, False)  # never linger as a user selection
         self._program_prev_visibility = {}
         self._program_hidden_slots = []
+        # Debounced "in shamatha" zone state (drives the live status chip).
+        self._shamatha_active = False
+        self._shamatha_streak = 0
+        self._shamatha_threshold = 50
 
     @staticmethod
     def _program_transition(prev_idx: int, elapsed: float, program):
         """Pure: (new_idx, segment, crossed). crossed=True when new_idx != prev_idx."""
         idx, seg = program.segment_at(elapsed)
         return (idx, seg, idx != prev_idx)
+
+    @staticmethod
+    def _shamatha_transition(
+        active: bool, above: bool, streak: int, enter_ticks: int = 3, exit_ticks: int = 3
+    ) -> tuple[bool, int]:
+        """Pure debounced shamatha-zone crossing -> (new_active, new_streak).
+
+        Hysteresis against 2Hz noise: a partial streak resets the moment the score
+        crosses back, so the chip can't strobe on a single noisy sample.
+        """
+        if not active:
+            streak = streak + 1 if above else 0
+            return (True, 0) if streak >= enter_ticks else (False, streak)
+        streak = streak + 1 if not above else 0
+        return (False, 0) if streak >= exit_ticks else (True, streak)
 
     def _eval_formula_vars(self, raw_sample: dict, metrics: dict) -> dict:
         """Variable dict for custom-formula evaluation (raw + metrics + derived/sqrt bands)."""
@@ -1272,6 +1291,10 @@ class EEGMeditationApp(App):
         self._warn_missing_feedback_files(fb_sources)
         self._audio.prepare_feedback(fb_sources, fb_initial)
         self._live_screen.set_training_series(None)  # set on first segment crossing
+        self._shamatha_active = False
+        self._shamatha_streak = 0
+        self._shamatha_threshold = threshold
+        self._live_screen.set_shamatha(False)
         self._live_screen.hide_alert()
         self._live_screen.set_controls_running()
 
@@ -1509,6 +1532,9 @@ class EEGMeditationApp(App):
         self._restore_program_series()
         self._live_screen.set_controls_idle()
         self._live_screen.update_device_status(False)
+        self._shamatha_active = False
+        self._shamatha_streak = 0
+        self._live_screen.set_shamatha(False)
         self._live_screen.update_state("FINISHED")
         # Sync the header timer to the final duration (it froze at lock time).
         if stats:
@@ -1576,6 +1602,9 @@ class EEGMeditationApp(App):
 
         self._live_screen.set_controls_idle()
         self._live_screen.update_device_status(False)
+        self._shamatha_active = False
+        self._shamatha_streak = 0
+        self._live_screen.set_shamatha(False)
         self._live_screen.update_state("FINISHED")
         self._timer_state.reset()
         self._session_manager.reset()
@@ -1897,12 +1926,25 @@ class EEGMeditationApp(App):
             self._pending_marker = False
             full_record["marker"] = 1
 
+        # Debounced shamatha-zone crossing (tick thread) — only the change is
+        # dispatched, so the chip can't restyle every tick.
+        _sham_prev = self._shamatha_active
+        self._shamatha_active, self._shamatha_streak = self._shamatha_transition(
+            _sham_prev,
+            metrics.get("shamatha_score", 0.0) >= self._shamatha_threshold,
+            self._shamatha_streak,
+        )
+        _sham_changed = self._shamatha_active != _sham_prev
+
         def _ui_update(
-            m=metrics, rs=raw_sample, ef=_elapsed_fmt, mp=_marker_pending
+            m=metrics, rs=raw_sample, ef=_elapsed_fmt, mp=_marker_pending,
+            sa=self._shamatha_active, sc=_sham_changed,
         ) -> None:
             self._live_screen.graph.add_point(m)
             self._live_screen.update_stats(m)
             self._live_screen.update_state(m.get("state", "Neutral"))
+            if sc:
+                self._live_screen.set_shamatha(sa)
             self._live_screen.update_timer(ef)
             self._live_screen.add_raw_sample(rs)
             if mp:
@@ -3483,6 +3525,7 @@ class EEGMeditationApp(App):
             if self._ui_last_metrics:
                 self._live_screen.update_stats(self._ui_last_metrics)
                 self._live_screen.update_state(self._ui_last_state)
+                self._live_screen.set_shamatha(self._shamatha_active)
         except Exception:
             logger.exception("graph reload on resume failed")
         try:

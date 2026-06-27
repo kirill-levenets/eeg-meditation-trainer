@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Shamatha reached is now obvious on the session screen** (issue #13): when your shamatha score holds at or above your meditation threshold, the status text turns into a bold `SHAMATHA` label on a green pill, then reverts when you drop back below. A short debounce (1.5 s above to enter, 1.5 s below to exit) keeps it from flickering on the 2 Hz signal.
+
 ## [1.3.0] - 2026-06-27
 
 ### Fixed

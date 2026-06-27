@@ -29,6 +29,7 @@ from app.ui.theme import (
     StyledButton,
     format_duration,
     make_scroll_popup,
+    readable_fg,
 )
 from app.ui.widgets.legend import LegendBar
 
@@ -310,6 +311,18 @@ class LiveSessionScreen(Screen):
             size_hint_x=1 / 3,
             font_size=F.BODY,
             color=C.TEXT_SECONDARY,
+        )
+        # "In shamatha" chip — a rounded pill drawn behind the status text, sized to
+        # the text and toggled via set_shamatha(). Alpha 0 = hidden.
+        self._shamatha_active = False
+        self._last_state = "IDLE"
+        with self._state_label.canvas.before:
+            self._shamatha_bg = Color(*C.SHAMATHA[:3], 0)
+            self._shamatha_rect = RoundedRectangle(radius=[dp(9)])
+        self._state_label.bind(
+            pos=self._position_shamatha_chip,
+            size=self._position_shamatha_chip,
+            texture_size=self._position_shamatha_chip,
         )
         header.add_widget(self._device_label)
         header.add_widget(self._timer_label)
@@ -844,8 +857,9 @@ class LiveSessionScreen(Screen):
         self._start_time_str = f"{lt.tm_hour:02d}:{lt.tm_min:02d}"
         self._graph.set_start_wall_time(epoch)
 
-    def update_state(self, state: str) -> None:
+    def _apply_state_style(self, state: str) -> None:
         self._state_label.text = state
+        self._state_label.bold = False
         color_map = {
             "Stable Focus": C.STATE_FOCUS,
             "Subtle Distraction": C.STATE_SUBTLE,
@@ -854,6 +868,36 @@ class LiveSessionScreen(Screen):
             "Neutral": C.STATE_NEUTRAL,
         }
         self._state_label.color = color_map.get(state, C.STATE_NEUTRAL)
+
+    def update_state(self, state: str) -> None:
+        self._last_state = state
+        # While in the shamatha zone the chip owns the label; classified-state
+        # ticks are remembered but must not overwrite it.
+        if not self._shamatha_active:
+            self._apply_state_style(state)
+
+    def set_shamatha(self, active: bool) -> None:
+        """Toggle the 'in shamatha' emphasis on the status label (main thread)."""
+        self._shamatha_active = active
+        if active:
+            self._state_label.text = "SHAMATHA"
+            self._state_label.bold = True
+            self._state_label.color = readable_fg(C.SHAMATHA)
+            self._shamatha_bg.rgb = C.SHAMATHA[:3]
+            self._shamatha_bg.a = 1
+        else:
+            self._shamatha_bg.a = 0
+            self._apply_state_style(self._last_state)
+
+    def _position_shamatha_chip(self, *_args) -> None:
+        lbl = self._state_label
+        tw, th = lbl.texture_size
+        w = tw + dp(16)
+        h = th + dp(6)
+        cx = lbl.x + lbl.width / 2
+        cy = lbl.y + lbl.height / 2
+        self._shamatha_rect.pos = (cx - w / 2, cy - h / 2)
+        self._shamatha_rect.size = (w, h)
 
     def update_stats(self, metrics: dict[str, float]) -> None:
         self._last_metrics = metrics
@@ -1200,7 +1244,11 @@ class LiveSessionScreen(Screen):
         # Update label colors
         self._device_label.color = C.DEVICE_IDLE
         self._timer_label.color = C.TEXT
-        self._state_label.color = C.STATE_NEUTRAL
+        if self._shamatha_active:
+            self._state_label.color = readable_fg(C.SHAMATHA)
+            self._shamatha_bg.rgb = C.SHAMATHA[:3]
+        else:
+            self._apply_state_style(self._last_state)
         self._alert_label.color = C.WARM
         self._overlay_status.color = C.TEXT
         self._overlay_dots.color = C.PRIMARY

@@ -48,7 +48,7 @@ If no device is selected, the app auto-scans for paired MindWave devices. If non
 - **Metrics view** — real-time scoring graph (Shamatha, Distraction, Sinking, etc.)
 - **Raw EEG view** — oscilloscope waveform (512Hz) + frequency band chart
 
-The header shows device status, elapsed time, and current state (color-coded: green=Stable Focus, yellow=Subtle Distraction, red=Gross Distraction, orange=Sinking).
+The header shows device status, elapsed time, and current state (color-coded: green=Stable Focus, yellow=Subtle Distraction, red=Gross Distraction, orange=Sinking). When your shamatha score holds at or above your meditation threshold, the state turns into a bold **SHAMATHA** badge on a green pill, and reverts when you drop back below (with a brief debounce so it doesn't flicker).
 
 **Stats row** below the graph: Shamatha, Distraction, Sinking, NS Attn, NS Med.
 

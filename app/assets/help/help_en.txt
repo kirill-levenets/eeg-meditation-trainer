@@ -8,6 +8,9 @@
    or Free), then press Start
 5. The app auto-detects and connects
 6. Meditate! Audio feedback guides you
+7. When your shamatha score holds at or above
+   your threshold, the status (top right) lights
+   up as a green "SHAMATHA" badge
 
 ## Connection Troubleshooting
 
