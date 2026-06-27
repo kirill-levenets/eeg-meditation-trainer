@@ -3,6 +3,7 @@
 import os
 import shutil
 import sqlite3
+import tempfile
 
 from app.logger import logger
 
@@ -18,11 +19,24 @@ def make_backup(db, target_path: str) -> None:
     DB don't corrupt the result.
     """
     os.makedirs(os.path.dirname(target_path) or ".", exist_ok=True)
-    target_conn = sqlite3.connect(target_path)
+    # SQLite can't open/lock a DB on Android FUSE storage (/sdcard) — it returns
+    # SQLITE_CANTOPEN. Back up into a temp file beside the live DB (internal storage,
+    # supports the locks SQLite needs), then byte-copy it out (a plain copy works on /sdcard).
+    live_dir = os.path.dirname(db._db_path) or "."
+    fd, tmp_path = tempfile.mkstemp(suffix=".db", dir=live_dir)
+    os.close(fd)
     try:
-        db._conn.backup(target_conn)
+        target_conn = sqlite3.connect(tmp_path)
+        try:
+            db._conn.backup(target_conn)
+        finally:
+            target_conn.close()
+        shutil.copy2(tmp_path, target_path)
     finally:
-        target_conn.close()
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            logger.warning(f"Could not remove temp backup {tmp_path}")
     logger.info(f"Backup written: {target_path}")
 
 

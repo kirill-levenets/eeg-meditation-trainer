@@ -1,5 +1,6 @@
 import json
 import os
+import sqlite3
 import sys
 import threading
 import time
@@ -2852,7 +2853,7 @@ class EEGMeditationApp(App):
         def _worker():
             try:
                 _backup.make_backup(self._db, target_path)
-            except (PermissionError, OSError) as exc:
+            except (OSError, sqlite3.Error) as exc:
                 err_msg = f"Backup to {target_path} failed: {exc}"
                 Clock.schedule_once(
                     lambda dt, _msg=err_msg: report_soft_error("backup_failed", _msg),

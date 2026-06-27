@@ -38,6 +38,28 @@ def test_make_backup_creates_valid_sqlite(db, tmp_path):
     conn.close()
 
 
+def test_make_backup_uses_temp_beside_live_then_copies(tmp_path):
+    # SQLite can't open a DB on Android FUSE storage, so make_backup writes a temp
+    # copy beside the live DB and byte-copies it out. Guard: target lands in its own
+    # dir and no temp .db residue is left beside the live DB.
+    live_dir = tmp_path / "internal"
+    live_dir.mkdir()
+    live = live_dir / "live.db"
+    db = DatabaseManager(db_path=str(live))
+    db.create_user("Bob")
+    try:
+        target = tmp_path / "sdcard" / "out.db"
+        make_backup(db, str(target))
+        assert target.exists()
+        ok, msg = validate_backup(str(target))
+        assert ok, msg
+        stray = [p.name for p in live_dir.iterdir()
+                 if p.suffix == ".db" and p.name != "live.db"]
+        assert stray == [], f"temp residue left beside live DB: {stray}"
+    finally:
+        db.close()
+
+
 def test_validate_backup_accepts_valid_db(db, tmp_path):
     target = tmp_path / "out.db"
     make_backup(db, str(target))
