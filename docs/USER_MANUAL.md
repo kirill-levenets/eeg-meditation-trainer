@@ -116,10 +116,12 @@ Tap a session row to view full details (graphs, notes, tags, mood).
 
 ### Session Detail
 
-Shows full statistics, notes/tags/mood editor, and three graph tabs:
+Shows full statistics, a **Band Power (whole session)** breakdown, notes/tags/mood editor, and three graph tabs:
 - **Metrics** — all computed metrics
 - **Raw EEG** — synthesized waveform from stored band powers
 - **Frequencies** — band power chart
+
+**Band Power (whole session)** lists total power per frequency band (delta / theta / alpha1 / alpha2 / beta1 / beta2 / gamma1 / gamma2) as colored bars scaled by each band's share of the session's total, labeled with the absolute total and its percentage — a quick read of where your brainwave energy was concentrated across the whole sitting.
 
 Tap **Export CSV** to save session data. On Android, saves to `/sdcard/EEGMeditation/exports/`. On desktop, a file chooser opens.
 

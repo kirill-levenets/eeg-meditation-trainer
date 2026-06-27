@@ -2719,14 +2719,17 @@ class EEGMeditationApp(App):
                         series, names = self._compute_session_formulas(session_id, session)
                     with timed("diary.get_metrics"):
                         metrics = self._db.get_session_metrics(session_id)
+                    band_totals = self._db.get_session_band_totals(session_id)
             except Exception:
                 logger.exception("Diary session load failed")
                 self._on_main(self.hide_loading)
                 return
-            self._on_main(lambda: self._render_session_detail(session, series, names, metrics))
+            self._on_main(
+                lambda: self._render_session_detail(session, series, names, metrics, band_totals)
+            )
         threading.Thread(target=_worker, daemon=True, name="DiaryLoad").start()
 
-    def _render_session_detail(self, session, series, names, metrics) -> None:
+    def _render_session_detail(self, session, series, names, metrics, band_totals=None) -> None:
         """Main-thread render of a loaded session (Kivy mutations only)."""
         try:
             with timed("diary.render"):
@@ -2734,6 +2737,7 @@ class EEGMeditationApp(App):
                 self._diary_screen.set_metrics_threshold(float(session.get("threshold_used", 50)))
                 self._diary_screen.set_session_formulas(series, names)
                 self._diary_screen.load_metrics_preview(metrics)
+                self._diary_screen.set_band_totals(band_totals or {})
                 self._diary_screen.set_program(session.get("session_program", ""))
                 self._session_detail_back = self._sm.current
                 self._sm.current = "diary"

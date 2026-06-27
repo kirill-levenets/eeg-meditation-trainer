@@ -30,6 +30,7 @@ from app.ui.theme import (
     StyledButton,
     format_duration,
 )
+from app.ui.widgets.band_totals import BandTotalsView
 from app.ui.widgets.legend import LegendBar
 
 METRICS_PREVIEW_COLORS = {
@@ -283,6 +284,20 @@ class DiaryScreen(Screen):
             self._stats_grid.add_widget(lbl_value)
             self._detail_stats[key] = lbl_value
         self._detail_layout.add_widget(self._stats_grid)
+
+        # Per-band total power over the whole session
+        band_header = Label(
+            text="Band Power (whole session)",
+            font_size=F.SMALL,
+            color=C.TEXT_SECONDARY,
+            halign="left",
+            size_hint_y=None,
+            height=dp(22),
+        )
+        band_header.bind(size=band_header.setter("text_size"))
+        self._detail_layout.add_widget(band_header)
+        self._band_totals = BandTotalsView()
+        self._detail_layout.add_widget(self._band_totals)
 
         # Notes
         notes_label = Label(
@@ -543,6 +558,10 @@ class DiaryScreen(Screen):
             btn.bg_color = C.PRIMARY_DIM
             btn.text_color = C.TEXT
             self._on_session_select(sid)
+
+    def set_band_totals(self, totals: dict[str, float]) -> None:
+        """Populate the per-band session power breakdown."""
+        self._band_totals.set_totals(totals)
 
     def show_session_detail(self, session: dict, from_history: bool = True) -> None:
         """Display detail for a selected session."""
