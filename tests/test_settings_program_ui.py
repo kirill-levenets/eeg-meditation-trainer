@@ -99,3 +99,17 @@ def test_rain_press_does_not_open_chooser(monkeypatch):
     s = _screen()
     s._on_feedback_source_pressed(s._feedback_source_buttons["noise"])
     assert calls == []
+
+
+def test_segment_end_sound_picker_sets_value():
+    s = _screen()
+    s.load_program([{"minutes": 10, "target": 50, "formula": "shamatha_score"}], "program")
+    row = s._segment_rows[0]
+    btn = row._end_sound_btn if hasattr(row, "_end_sound_btn") else None
+    # the picker calls _set_segment_end_sound; exercise it directly
+    s._set_segment_end_sound(row, row._formula_btn, "warble")  # any label-bearing btn
+    assert row._end_sound == "warble"
+    assert s.get_program_segments()[0].get("end_sound") == "warble"
+    s._set_segment_end_sound(row, row._formula_btn, None)      # back to default (Chime)
+    assert row._end_sound is None
+    assert "end_sound" not in s.get_program_segments()[0]

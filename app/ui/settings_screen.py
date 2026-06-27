@@ -1672,7 +1672,7 @@ class SettingsScreen(Screen):
             on_release=lambda *_a, r=row: self._open_segment_formula_picker(r)
         )
         end_sound_btn.bind(
-            on_release=lambda *_a, r=row, b=end_sound_btn: self._cycle_end_sound(r, b)
+            on_release=lambda *_a, r=row, b=end_sound_btn: self._open_segment_end_sound_picker(r, b)
         )
         feedback_btn.bind(
             on_release=lambda *_a, r=row, b=feedback_btn: self._open_segment_feedback_picker(r, b)
@@ -1707,11 +1707,23 @@ class SettingsScreen(Screen):
         self._update_program_total()
         self._emit_program_changed()
 
-    def _cycle_end_sound(self, row, btn) -> None:
-        row._end_sound = "warble" if row._end_sound is None else None
-        btn.text = "Warble" if row._end_sound == "warble" else "Chime"
-        logger.info(f"Segment end-sound -> {row._end_sound or 'chime'}")
+    def _set_segment_end_sound(self, row, btn, value) -> None:
+        row._end_sound = value
+        btn.text = "Warble" if value == "warble" else "Chime"
+        logger.info(f"Segment end-sound -> {value or 'chime'}")
         self._emit_program_changed()
+
+    def _open_segment_end_sound_picker(self, row, btn) -> None:
+        """Pick a segment's end cue: Chime (default) or Warble."""
+        box = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
+        popup = Popup(title="Segment end cue", content=box, size_hint=(0.8, 0.4))
+        for label, value in (("Chime", None), ("Warble", "warble")):
+            b = StyledButton(text=label, font_size=F.SMALL, size_hint_y=None, height=dp(44),
+                             bg_color=C.BG_CARD, text_color=C.TEXT)
+            b.bind(on_release=lambda *_a, v=value: (
+                self._set_segment_end_sound(row, btn, v), popup.dismiss()))
+            box.add_widget(b)
+        popup.open()
 
     def _feedback_seg_label(self, value) -> str:
         if not value:
