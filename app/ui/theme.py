@@ -584,10 +584,16 @@ class StyledButton(ButtonBehavior, BoxLayout):
             else:
                 Color(*bg)
                 RoundedRectangle(pos=self.pos, size=self.size, radius=[S.RADIUS])
-        # Disabled dims both label AND icon to the muted role (theme-tracked); enabled
-        # restores the live text colour. Pressed state leaves the glyph colour alone
-        # (only the background dims).
-        fg = list(C.TEXT_MUTED) if self.disabled else list(self.text_color)
+        # Disabled: dim BOTH label and icon to 60% of the max-contrast glyph for the
+        # (greyed) disabled bg. The greyed background already signals 'disabled', so the
+        # glyph stays legible (~4:1) instead of washing into a light card the way the
+        # theme's light TEXT_MUTED did. Enabled restores the live text colour; pressed
+        # leaves the glyph alone (only the background dims).
+        if self.disabled:
+            tgt = readable_fg(bg)
+            fg = [tgt[i] * 0.6 + bg[i] * 0.4 for i in range(3)] + [1]
+        else:
+            fg = list(self.text_color)
         self._label.color = fg
         if self._icon_label:
             self._icon_label.color = fg

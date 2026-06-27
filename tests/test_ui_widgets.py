@@ -640,13 +640,15 @@ class TestStyledButtonThemeText(unittest.TestCase):
         C.set_theme("Dark Blue")
         self.assertNotEqual(list(sec.text_color), sec_dark)      # secondary role tracks too
 
-    def test_disabled_dims_label_and_icon(self):
-        from app.ui.theme import C, Icons, StyledButton
-        C.set_theme("Dark Blue")
-        b = StyledButton(text="Stop", icon=Icons.STOP, disabled=True)
-        self.assertEqual(list(b._label.color), list(C.TEXT_MUTED))
-        if b._icon_label is None:
-            self.skipTest("MDI font unavailable in this env")
-        self.assertEqual(list(b._icon_label.color), list(C.TEXT_MUTED))  # icon dimmed, not full
-        b.disabled = False
-        self.assertEqual(list(b._icon_label.color), list(b.text_color))  # restored on enable
+    def test_disabled_dims_but_stays_legible(self):
+        from app.ui.theme import C, Icons, StyledButton, _contrast
+        for theme in ("Dark Blue", "Light Green"):
+            C.set_theme(theme)
+            b = StyledButton(text="Stop", icon=Icons.STOP, bg_color=list(C.BG_CARD), disabled=True)
+            bg = b._get_bg()
+            self.assertNotEqual(list(b._label.color), list(bg))          # not washed into the bg
+            self.assertGreaterEqual(_contrast(b._label.color, bg), 3.0)  # legible while dimmed
+            if b._icon_label is not None:
+                self.assertEqual(list(b._icon_label.color), list(b._label.color))  # icon == label
+            b.disabled = False
+            self.assertEqual(list(b._label.color), list(b.text_color))   # restored on enable
