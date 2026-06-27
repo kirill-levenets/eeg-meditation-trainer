@@ -641,14 +641,17 @@ class TestStyledButtonThemeText(unittest.TestCase):
         self.assertNotEqual(list(sec.text_color), sec_dark)      # secondary role tracks too
 
     def test_disabled_dims_but_stays_legible(self):
+        # Kivy's Label draws `disabled_color` (default white@.3 -> invisible on light cards),
+        # NOT `color`, while disabled — so assert the property that actually renders.
         from app.ui.theme import C, Icons, StyledButton, _contrast
         for theme in ("Dark Blue", "Light Green"):
             C.set_theme(theme)
             b = StyledButton(text="Stop", icon=Icons.STOP, bg_color=list(C.BG_CARD), disabled=True)
             bg = b._get_bg()
-            self.assertNotEqual(list(b._label.color), list(bg))          # not washed into the bg
-            self.assertGreaterEqual(_contrast(b._label.color, bg), 3.0)  # legible while dimmed
+            self.assertNotEqual(list(b._label.disabled_color), [1, 1, 1, 0.3])     # not the Kivy default
+            self.assertNotEqual(list(b._label.disabled_color), list(bg))           # not washed into the bg
+            self.assertGreaterEqual(_contrast(b._label.disabled_color, bg), 3.0)   # legible while dimmed
             if b._icon_label is not None:
-                self.assertEqual(list(b._icon_label.color), list(b._label.color))  # icon == label
+                self.assertEqual(list(b._icon_label.disabled_color), list(b._label.disabled_color))
             b.disabled = False
             self.assertEqual(list(b._label.color), list(b.text_color))   # restored on enable

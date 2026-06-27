@@ -554,8 +554,10 @@ class StyledButton(ButtonBehavior, BoxLayout):
 
     def _update_colors(self, *args):
         self._label.color = self.text_color
+        self._label.disabled_color = self.text_color
         if self._icon_label:
             self._icon_label.color = self.text_color
+            self._icon_label.disabled_color = self.text_color
 
     def _get_bg(self):
         if self.disabled:
@@ -588,15 +590,19 @@ class StyledButton(ButtonBehavior, BoxLayout):
         # (greyed) disabled bg. The greyed background already signals 'disabled', so the
         # glyph stays legible (~4:1) instead of washing into a light card the way the
         # theme's light TEXT_MUTED did. Enabled restores the live text colour; pressed
-        # leaves the glyph alone (only the background dims).
+        # leaves the glyph alone (only the background dims). Kivy's Label draws
+        # `disabled_color` (default white@.3 -> invisible on light cards) when disabled,
+        # so set it too, not just `color`.
         if self.disabled:
             tgt = readable_fg(bg)
             fg = [tgt[i] * 0.6 + bg[i] * 0.4 for i in range(3)] + [1]
         else:
             fg = list(self.text_color)
         self._label.color = fg
+        self._label.disabled_color = fg
         if self._icon_label:
             self._icon_label.color = fg
+            self._icon_label.disabled_color = fg
 
     def on_state(self, *args):
         self._redraw()
