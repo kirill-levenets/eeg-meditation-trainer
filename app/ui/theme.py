@@ -404,6 +404,27 @@ class CenteredTextInput(TextInput):
             self.padding = new
 
 
+_FG_LIGHT = [0.96, 0.96, 0.98, 1]   # near-white glyph for dark backgrounds
+_FG_DARK = [0.13, 0.13, 0.16, 1]    # near-black glyph for light backgrounds
+
+
+def _rel_luminance(rgba):
+    def _ch(c):
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = rgba[:3]
+    return 0.2126 * _ch(r) + 0.7152 * _ch(g) + 0.0722 * _ch(b)
+
+
+def _contrast(a, b):
+    la, lb = _rel_luminance(a), _rel_luminance(b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+
+def readable_fg(bg):
+    """Light or dark glyph colour, whichever has the higher WCAG contrast with bg."""
+    return _FG_DARK if _contrast(_FG_DARK, bg) >= _contrast(_FG_LIGHT, bg) else _FG_LIGHT
+
+
 class StyledButton(ButtonBehavior, BoxLayout):
     """Rounded button with press color shift. Replaces default Kivy Button.
 
@@ -424,16 +445,16 @@ class StyledButton(ButtonBehavior, BoxLayout):
         kwargs.setdefault("size_hint_y", None)
         kwargs.setdefault("height", S.BTN_H)
         vertical = kwargs.pop("vertical", False)
-        # Theme-track the text/icon colour when it's a theme text role — no kwarg, or an
-        # explicit C.TEXT / C.TEXT_SECONDARY (both mean "the theme's text colour"). It's
-        # re-applied on every theme change so it never keeps a stale snapshot. The class
-        # default is a frozen import-time ~white that rendered icons invisible on light
-        # themes, and the theme switch is a pure live-refresh (no screen rebuild), so even
-        # explicit =C.TEXT callers would otherwise stay near-white on a light background.
-        # A non-role colour (e.g. C.DANGER, a fixed RGBA) is left fixed.
+        # Glyph colour role (re-applied on bg/theme change so it never keeps a stale snapshot;
+        # the class default is a frozen import-time ~white that rendered icons invisible on
+        # light themes). AUTO (no text_color) = pick light/dark for the highest contrast with
+        # THIS button's bg — fixes both light-icon-on-light-fill and dark-on-saturated cases.
+        # Explicit C.TEXT / C.TEXT_SECONDARY follow that theme role; any other colour is fixed.
         passed = kwargs.get("text_color")
         super().__init__(**kwargs)
-        if passed is None or list(passed) == list(C.TEXT):
+        if passed is None:
+            self._text_role = "AUTO"
+        elif list(passed) == list(C.TEXT):
             self._text_role = "TEXT"
         elif list(passed) == list(C.TEXT_SECONDARY):
             self._text_role = "TEXT_SECONDARY"
@@ -501,7 +522,7 @@ class StyledButton(ButtonBehavior, BoxLayout):
         self.bind(
             text=self._update_label,
             text_color=self._update_colors,
-            bg_color=self._redraw,
+            bg_color=self._on_bg_change,
             size=self._redraw,
             pos=self._redraw,
             disabled=self._redraw,
@@ -510,13 +531,20 @@ class StyledButton(ButtonBehavior, BoxLayout):
         C.add_listener(self._on_theme_change)
 
     def _on_theme_change(self, *args):
-        """Re-apply theme-tracked text/icon colour, then repaint."""
+        """Re-apply the glyph colour role, then repaint."""
+        self._apply_role_text()
+        self._redraw()
+
+    def _on_bg_change(self, *args):
+        """Background changed — AUTO contrast depends on it; re-resolve then repaint."""
         self._apply_role_text()
         self._redraw()
 
     def _apply_role_text(self):
-        """Re-read the tracked theme text role (if any) into text_color -> _update_colors."""
-        if self._text_role == "TEXT":
+        """Resolve the glyph colour role into text_color (-> _update_colors via binding)."""
+        if self._text_role == "AUTO":
+            self.text_color = readable_fg(self.bg_color)
+        elif self._text_role == "TEXT":
             self.text_color = list(C.TEXT)
         elif self._text_role == "TEXT_SECONDARY":
             self.text_color = list(C.TEXT_SECONDARY)

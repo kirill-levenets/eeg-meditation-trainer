@@ -610,13 +610,16 @@ class TestStyledButtonThemeText(unittest.TestCase):
     def tearDown(self):
         self._C.set_theme(self._orig if isinstance(self._orig, str) else "Dark Blue")
 
-    def test_default_text_follows_theme(self):
+    def test_default_glyph_auto_contrasts_with_bg(self):
         from app.ui.theme import C, StyledButton
-        C.set_theme("Light Cream")
-        b = StyledButton(text="X", bg_color=list(C.BG_CARD))   # no text_color
-        self.assertLess(b.text_color[0], 0.5)                  # dark text on a light theme
         C.set_theme("Dark Blue")
-        self.assertGreater(b.text_color[0], 0.5)               # tracks -> light text on dark theme
+        on_light = StyledButton(text="X", bg_color=[0.95, 0.95, 0.95, 1])  # no text_color -> AUTO
+        self.assertLess(on_light.text_color[0], 0.5)            # dark glyph on a light fill
+        on_dark = StyledButton(text="Y", bg_color=[0.10, 0.10, 0.12, 1])
+        self.assertGreater(on_dark.text_color[0], 0.5)          # light glyph on a dark fill
+        # changing the bg re-resolves the glyph
+        on_light.bg_color = [0.08, 0.08, 0.10, 1]
+        self.assertGreater(on_light.text_color[0], 0.5)
 
     def test_explicit_text_color_preserved(self):
         from app.ui.theme import C, StyledButton
