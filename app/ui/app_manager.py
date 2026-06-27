@@ -864,6 +864,7 @@ class EEGMeditationApp(App):
         self._diary_screen.set_delete_session_callback(self._on_delete_session)
         self._diary_screen.set_rename_session_callback(self._on_rename_session)
         self._diary_screen.set_back_callback(self._on_diary_back)
+        self._diary_screen.band_view_persist_cb = self._persist_band_view
 
         self._history_screen.set_callbacks(
             on_session_select=self._on_session_select,
@@ -2719,14 +2720,17 @@ class EEGMeditationApp(App):
                         series, names = self._compute_session_formulas(session_id, session)
                     with timed("diary.get_metrics"):
                         metrics = self._db.get_session_metrics(session_id)
+                    band_totals = self._db.get_session_band_totals(session_id)
             except Exception:
                 logger.exception("Diary session load failed")
                 self._on_main(self.hide_loading)
                 return
-            self._on_main(lambda: self._render_session_detail(session, series, names, metrics))
+            self._on_main(
+                lambda: self._render_session_detail(session, series, names, metrics, band_totals)
+            )
         threading.Thread(target=_worker, daemon=True, name="DiaryLoad").start()
 
-    def _render_session_detail(self, session, series, names, metrics) -> None:
+    def _render_session_detail(self, session, series, names, metrics, band_totals=None) -> None:
         """Main-thread render of a loaded session (Kivy mutations only)."""
         try:
             with timed("diary.render"):
@@ -2734,11 +2738,30 @@ class EEGMeditationApp(App):
                 self._diary_screen.set_metrics_threshold(float(session.get("threshold_used", 50)))
                 self._diary_screen.set_session_formulas(series, names)
                 self._diary_screen.load_metrics_preview(metrics)
+                bv = {}
+                if self._current_user_id:
+                    bv = self._db.get_user_json_setting(
+                        self._current_user_id, "band_breakdown_view", {}
+                    ) or {}
+                self._diary_screen.set_band_view_state(
+                    bv.get("mode", "detailed"), bv.get("sort", "band"),
+                    bool(bv.get("desc", False)),
+                )
+                self._diary_screen.set_band_totals(band_totals or {})
                 self._diary_screen.set_program(session.get("session_program", ""))
                 self._session_detail_back = self._sm.current
                 self._sm.current = "diary"
         finally:
             self.hide_loading()
+
+    def _persist_band_view(self, mode: str, sort_by: str, descending: bool) -> None:
+        """Persist the diary band-table view (mode/sort) per user."""
+        if not self._current_user_id:
+            return
+        self._db.set_user_json_setting(
+            self._current_user_id, "band_breakdown_view",
+            {"mode": mode, "sort": sort_by, "desc": descending},
+        )
 
     def _compute_session_formulas(self, session_id: int, session: dict) -> tuple[dict, dict]:
         """Recompute the session's recorded formula series + names from its band

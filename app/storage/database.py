@@ -271,6 +271,15 @@ class DatabaseManager:
         )
         return [dict(row) for row in cursor.fetchall()]
 
+    def get_session_band_totals(self, session_id: int) -> dict[str, float]:
+        """Summed raw power per frequency band over the whole session (0.0 if no rows)."""
+        bands = ["delta", "theta", "alpha1", "alpha2", "beta1", "beta2", "gamma1", "gamma2"]
+        cols = ", ".join(f"SUM({b}_raw)" for b in bands)
+        row = self._conn.execute(
+            f"SELECT {cols} FROM metrics WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        return {b: float(row[i] or 0.0) for i, b in enumerate(bands)}
+
     def update_session_notes(
         self, session_id: int, notes: str = "", tags: str = "", mood_rating: int = 0
     ) -> None:

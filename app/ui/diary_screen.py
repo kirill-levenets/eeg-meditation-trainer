@@ -30,6 +30,7 @@ from app.ui.theme import (
     StyledButton,
     format_duration,
 )
+from app.ui.widgets.band_totals import BandTotalsView
 from app.ui.widgets.legend import LegendBar
 
 METRICS_PREVIEW_COLORS = {
@@ -283,6 +284,21 @@ class DiaryScreen(Screen):
             self._stats_grid.add_widget(lbl_value)
             self._detail_stats[key] = lbl_value
         self._detail_layout.add_widget(self._stats_grid)
+
+        # Per-band total power over the whole session
+        band_header = Label(
+            text="Band Power (whole session)",
+            font_size=F.SMALL,
+            color=C.TEXT_SECONDARY,
+            halign="left",
+            size_hint_y=None,
+            height=dp(22),
+        )
+        band_header.bind(size=band_header.setter("text_size"))
+        self._detail_layout.add_widget(band_header)
+        self.band_view_persist_cb = None  # set by AppManager to persist per-user
+        self._band_totals = BandTotalsView(on_change=self._on_band_view_change)
+        self._detail_layout.add_widget(self._band_totals)
 
         # Notes
         notes_label = Label(
@@ -543,6 +559,18 @@ class DiaryScreen(Screen):
             btn.bg_color = C.PRIMARY_DIM
             btn.text_color = C.TEXT
             self._on_session_select(sid)
+
+    def set_band_totals(self, totals: dict[str, float]) -> None:
+        """Populate the per-band session power breakdown."""
+        self._band_totals.set_totals(totals)
+
+    def set_band_view_state(self, mode: str, sort_by: str, descending: bool) -> None:
+        """Restore the persisted band-table view (mode / sort) before populating."""
+        self._band_totals.set_view_state(mode, sort_by, descending)
+
+    def _on_band_view_change(self, mode: str, sort_by: str, descending: bool) -> None:
+        if self.band_view_persist_cb:
+            self.band_view_persist_cb(mode, sort_by, descending)
 
     def show_session_detail(self, session: dict, from_history: bool = True) -> None:
         """Display detail for a selected session."""
