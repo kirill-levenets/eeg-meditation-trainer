@@ -296,7 +296,8 @@ class DiaryScreen(Screen):
         )
         band_header.bind(size=band_header.setter("text_size"))
         self._detail_layout.add_widget(band_header)
-        self._band_totals = BandTotalsView()
+        self.band_view_persist_cb = None  # set by AppManager to persist per-user
+        self._band_totals = BandTotalsView(on_change=self._on_band_view_change)
         self._detail_layout.add_widget(self._band_totals)
 
         # Notes
@@ -562,6 +563,14 @@ class DiaryScreen(Screen):
     def set_band_totals(self, totals: dict[str, float]) -> None:
         """Populate the per-band session power breakdown."""
         self._band_totals.set_totals(totals)
+
+    def set_band_view_state(self, mode: str, sort_by: str, descending: bool) -> None:
+        """Restore the persisted band-table view (mode / sort) before populating."""
+        self._band_totals.set_view_state(mode, sort_by, descending)
+
+    def _on_band_view_change(self, mode: str, sort_by: str, descending: bool) -> None:
+        if self.band_view_persist_cb:
+            self.band_view_persist_cb(mode, sort_by, descending)
 
     def show_session_detail(self, session: dict, from_history: bool = True) -> None:
         """Display detail for a selected session."""
