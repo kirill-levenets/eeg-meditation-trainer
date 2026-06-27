@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-06-27
+
 ### Fixed
 
+- **Android database backup crashed, then couldn't reach /sdcard**: `make_backup` opened SQLite directly on `/sdcard` (FUSE storage can't provide the locks SQLite needs → `SQLITE_CANTOPEN`), and even after staging the backup in internal storage, scoped storage (targetSdk 33) blocked the copy with `EACCES` regardless of `WRITE_EXTERNAL_STORAGE` (and `MANAGE_EXTERNAL_STORAGE` doesn't exist on Android 10 / API 29). Android backup/restore now use the Storage Access Framework: a system "Save as" / "Open" dialog lets you choose the location, and bytes stream through the returned `content://` URI. No storage permission needed, the backup survives uninstall, and it mirrors the desktop file picker.
+- **Disabled session buttons were invisible on light themes**: Kivy's `Label` draws `disabled_color` (default white at 30 % alpha → invisible on light cards), not `color`, while disabled — so the dimmed grey computed for the disabled Start/Pause/Stop/Mark glyphs was never used. `StyledButton` now sets `disabled_color` too, so disabled glyphs stay a legible dimmed grey on every theme.
+- **Android release build failed in CI**: python-for-android `master` now builds each recipe in an isolated venv that pulls Cython 3.1.x, whose generated C fails to compile Kivy 2.3.0. Pinned `p4a.branch` to the known-good `v2024.01.21`.
 - **Timer-end gong was silent on desktop**: `AudioEngine.stop()` unloaded the gong's `SoundLoader` sound one frame after it started — the timer-expiry path defers `stop()` to the main thread, after the gong is already playing. `stop()` no longer touches the gong; it now rings at program and timer end on desktop (Android was already handled via a separate `MediaPlayer`).
 - **Program editor controls were unresponsive**: the hidden mode container's `disabled` children extended beyond their zero height and swallowed taps across the entire Timer / Program section. The active controls are now swapped into and out of the widget tree instead of merely hidden, so collapsed controls have no geometry on the touch layer.
 - **Segment rows displayed in reverse order**: new segments were prepended to the editor list. They now append at the bottom, matching program execution order.
@@ -329,6 +334,8 @@ Initial public release.
 - Power line noise detection at 50/60 Hz.
 - Multi-platform builds (PyInstaller for desktop, Buildozer for Android).
 
+[1.3.0]: https://github.com/kirill-levenets/eeg-meditation-trainer/releases/tag/v1.3.0
+[1.2.0]: https://github.com/kirill-levenets/eeg-meditation-trainer/releases/tag/v1.2.0
 [1.1.1]: https://github.com/kirill-levenets/eeg-meditation-trainer/releases/tag/v1.1.1
 [1.1.0]: https://github.com/kirill-levenets/eeg-meditation-trainer/releases/tag/v1.1.0
 [1.0.3]: https://github.com/kirill-levenets/eeg-meditation-trainer/releases/tag/v1.0.3
