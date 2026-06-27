@@ -12,16 +12,14 @@ class BackupValidationError(Exception):
     """Raised when a candidate backup file fails schema validation."""
 
 
-def make_backup(db, target_path: str) -> None:
-    """Write a transaction-safe copy of the live DB to `target_path`.
+def online_backup_to_tempfile(db) -> str:
+    """Run SQLite's online backup into a temp .db beside the live DB; caller deletes it.
 
-    Uses SQLite's online backup API so concurrent writes from the live
-    DB don't corrupt the result.
+    SQLite can't open/lock a DB on Android FUSE storage (/sdcard) — it returns
+    SQLITE_CANTOPEN. The temp file lives in internal storage (where the live DB is,
+    which supports the locks SQLite needs); callers byte-copy or stream it to the
+    final destination, which works on /sdcard and content:// URIs.
     """
-    os.makedirs(os.path.dirname(target_path) or ".", exist_ok=True)
-    # SQLite can't open/lock a DB on Android FUSE storage (/sdcard) — it returns
-    # SQLITE_CANTOPEN. Back up into a temp file beside the live DB (internal storage,
-    # supports the locks SQLite needs), then byte-copy it out (a plain copy works on /sdcard).
     live_dir = os.path.dirname(db._db_path) or "."
     fd, tmp_path = tempfile.mkstemp(suffix=".db", dir=live_dir)
     os.close(fd)
@@ -31,6 +29,24 @@ def make_backup(db, target_path: str) -> None:
             db._conn.backup(target_conn)
         finally:
             target_conn.close()
+    except BaseException:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            logger.warning(f"Could not remove temp backup {tmp_path}")
+        raise
+    return tmp_path
+
+
+def make_backup(db, target_path: str) -> None:
+    """Write a transaction-safe copy of the live DB to `target_path`.
+
+    Uses SQLite's online backup API so concurrent writes from the live
+    DB don't corrupt the result.
+    """
+    os.makedirs(os.path.dirname(target_path) or ".", exist_ok=True)
+    tmp_path = online_backup_to_tempfile(db)
+    try:
         shutil.copy2(tmp_path, target_path)
     finally:
         try:

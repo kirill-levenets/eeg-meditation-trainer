@@ -39,6 +39,7 @@ from app.metrics.noise_detector import PowerLineDetector
 from app.session.manager import SessionManager, SessionState
 from app.session.session_program import SessionProgram
 from app.session.timer_state import TimerState
+from app.storage import android_saf as _saf
 from app.storage import backup as _backup
 from app.storage.backup import restore_backup, validate_backup
 from app.storage.database import DatabaseManager, UserExistsError
@@ -2831,18 +2832,50 @@ class EEGMeditationApp(App):
         filename = f"meditation_backup_{ts}.db"
 
         if self._is_android():
-            target_dir = "/sdcard/Documents/EEGMeditation"
-            try:
-                os.makedirs(target_dir, exist_ok=True)
-            except (PermissionError, OSError) as e:
-                report_soft_error(
-                    "backup_failed", f"Could not create {target_dir}: {e}",
-                )
-                return
-            target_path = os.path.join(target_dir, filename)
-            self._run_backup_async(target_path)
+            self._run_backup_saf(filename)
         else:
             self._open_backup_save_picker(filename)
+
+    def _run_backup_saf(self, filename: str) -> None:
+        """Android: let the user pick the destination via the SAF save dialog.
+
+        Scoped storage forbids direct /sdcard writes, so the bytes go through the
+        content:// URI the picker returns.
+        """
+        def _on_uri(uri_str):
+            if not uri_str:
+                Clock.schedule_once(lambda dt: self._settings_screen.show_backup_status(
+                    "Backup canceled"))
+                return
+            Clock.schedule_once(lambda dt: self._settings_screen.show_backup_status(
+                "Backing up…"))
+            threading.Thread(
+                target=self._backup_to_uri_worker, args=(uri_str,), daemon=True,
+            ).start()
+
+        _saf.create_document(filename, _on_uri)
+
+    def _backup_to_uri_worker(self, uri_str: str) -> None:
+        tmp_path = None
+        try:
+            tmp_path = _backup.online_backup_to_tempfile(self._db)
+            ok = _saf.write_file_to_uri(uri_str, tmp_path)
+            msg = "Backup saved" if ok else "Could not write backup to that location"
+            if ok:
+                Clock.schedule_once(lambda dt: self._settings_screen.show_backup_status(msg))
+            else:
+                Clock.schedule_once(lambda dt: report_soft_error("backup_failed", msg))
+        except Exception as exc:
+            logger.exception("SAF backup failed")
+            Clock.schedule_once(
+                lambda dt, _m=str(exc): report_soft_error("backup_failed", f"Backup failed: {_m}"),
+            )
+        finally:
+            if tmp_path:
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    logger.warning(f"Could not remove temp backup {tmp_path}")
 
     def _run_backup_async(self, target_path: str) -> None:
 
@@ -2868,63 +2901,36 @@ class EEGMeditationApp(App):
     def _on_restore_pressed(self) -> None:
         """Pick a backup file and restore it."""
         if self._is_android():
-            self._open_restore_picker_android()
+            self._run_restore_saf()
         else:
             self._open_restore_picker_desktop()
 
-    def _open_restore_picker_android(self) -> None:
+    def _run_restore_saf(self) -> None:
+        """Android: pick a backup via the SAF open dialog, stream it to an internal
+        temp file (SQLite can't open a content:// URI), then run the normal restore."""
+        def _on_uri(uri_str):
+            if not uri_str:
+                return
+            threading.Thread(
+                target=self._restore_from_uri_worker, args=(uri_str,), daemon=True,
+            ).start()
 
+        _saf.open_document(_on_uri)
 
-        target_dir = "/sdcard/Documents/EEGMeditation"
+    def _restore_from_uri_worker(self, uri_str: str) -> None:
+        candidate = os.path.join(os.path.dirname(APP.DB_PATH), "_restore_candidate.db")
         try:
-            files = sorted(
-                f for f in os.listdir(target_dir) if f.endswith(".db")
-            )
-        except FileNotFoundError:
-            files = []
-        except (PermissionError, OSError) as e:
-            report_soft_error(
-                "restore_failed", f"Could not list {target_dir}: {e}",
+            ok = _saf.read_uri_to_file(uri_str, candidate)
+        except Exception:
+            logger.exception("SAF restore read failed")
+            ok = False
+        if not ok:
+            Clock.schedule_once(
+                lambda dt: report_soft_error(
+                    "restore_failed", "Could not read the selected file", force=True),
             )
             return
-
-        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
-        popup = Popup(title="Pick a backup", content=content, size_hint=(0.9, 0.7))
-
-        if not files:
-            content.add_widget(Label(
-                text="No backup files found in\nDocuments/EEGMeditation/",
-                halign="center", valign="middle", color=C.TEXT_MUTED,
-            ))
-        else:
-            for fname in files:
-                full = os.path.join(target_dir, fname)
-                btn = StyledButton(
-                    text=fname,
-                    bg_color=C.BG_CARD,
-                    text_color=C.TEXT,
-                    font_size=F.BODY,
-                    bold=False,
-                    size_hint_y=None,
-                    height=dp(44),
-                )
-
-                def _make_handler(_full, _popup):
-                    def _on_release(*_a):
-                        _popup.dismiss()
-                        self._confirm_restore(_full)
-                    return _on_release
-
-                btn.bind(on_release=_make_handler(full, popup))
-                content.add_widget(btn)
-
-        cancel = StyledButton(
-            text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_MUTED,
-            size_hint_y=None, height=dp(40),
-        )
-        cancel.bind(on_release=popup.dismiss)
-        content.add_widget(cancel)
-        popup.open()
+        Clock.schedule_once(lambda dt: self._confirm_restore(candidate))
 
     def _open_restore_picker_desktop(self) -> None:
 
