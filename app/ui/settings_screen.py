@@ -158,6 +158,11 @@ class SettingsScreen(Screen):
         self._feedback_sound_path: str = ""
         self._feedback_source_buttons: dict[str, StyledButton] = {}
         self._suppress_feedback_cb: bool = False
+        self._on_reward_source_change: Optional[Callable] = None
+        self._reward_source: str = "none"   # above-threshold reward (off by default)
+        self._reward_sound_path: str = ""
+        self._reward_source_buttons: dict[str, StyledButton] = {}
+        self._suppress_reward_cb: bool = False
         self._graph_toggles: dict[str, bool] = {
             "shamatha_score": True,
             "meditation_score": False,
@@ -771,7 +776,7 @@ class SettingsScreen(Screen):
         audio_section.add_widget(fb_label)
 
         fb_row = BoxLayout(size_hint_y=None, height=dp(32), spacing=S.GAP)
-        for key, lbl in (("noise", "Rain"), ("tone", "Tone"), ("custom", "Custom")):
+        for key, lbl in (("none", "Off"), ("noise", "Rain"), ("tone", "Tone"), ("custom", "Custom")):
             btn = StyledButton(
                 text=lbl, font_size=F.SMALL, size_hint_y=None, height=dp(28),
                 bg_color=C.ACCENT if key == "noise" else C.BG_CARD, text_color=C.TEXT,
@@ -797,6 +802,41 @@ class SettingsScreen(Screen):
         fb_browse.bind(on_release=self._on_feedback_custom_browse)
         self._feedback_custom_row.set_content(self._feedback_custom_input, fb_browse)
         audio_section.add_widget(self._feedback_custom_row)
+
+        # Above-threshold reward channel (issue #12): a second sound that rises as the
+        # score climbs above the threshold. Off by default.
+        rw_label = Label(
+            text="Reward sound (above threshold):", font_size=F.SMALL, color=C.TEXT_SECONDARY,
+            size_hint_y=None, height=dp(24), halign="left", valign="middle",
+        )
+        rw_label.bind(size=rw_label.setter("text_size"))
+        audio_section.add_widget(rw_label)
+
+        rw_row = BoxLayout(size_hint_y=None, height=dp(32), spacing=S.GAP)
+        for key, lbl in (("none", "Off"), ("noise", "Rain"), ("tone", "Tone"), ("custom", "Custom")):
+            btn = StyledButton(
+                text=lbl, font_size=F.SMALL, size_hint_y=None, height=dp(28),
+                bg_color=C.ACCENT if key == "none" else C.BG_CARD, text_color=C.TEXT,
+            )
+            btn._reward_key = key
+            btn.bind(on_release=self._on_reward_source_pressed)
+            self._reward_source_buttons[key] = btn
+            rw_row.add_widget(btn)
+        audio_section.add_widget(rw_row)
+
+        self._reward_custom_row = RevealBox(dp(40), spacing=S.GAP_SM)
+        self._reward_custom_input = CenteredTextInput(
+            hint_text="custom reward audio file", font_size=F.SMALL, multiline=False,
+            foreground_color=C.TEXT, background_color=list(C.BG_INPUT), size_hint_x=0.7,
+        )
+        self._reward_custom_input.bind(text=self._on_reward_custom_path_change)
+        rw_browse = StyledButton(
+            text="Browse", font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT,
+            size_hint_x=0.3,
+        )
+        rw_browse.bind(on_release=self._on_reward_custom_browse)
+        self._reward_custom_row.set_content(self._reward_custom_input, rw_browse)
+        audio_section.add_widget(self._reward_custom_row)
 
         # Sinking alert toggle
         sinking_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
@@ -1433,6 +1473,45 @@ class SettingsScreen(Screen):
             return
         if self._on_feedback_source_change:
             self._on_feedback_source_change(self._feedback_source, self._feedback_sound_path)
+
+    def set_reward_source_callback(self, callback: Callable) -> None:
+        self._on_reward_source_change = callback
+
+    def set_reward_source(self, source: str, path: str = "") -> None:
+        """Reflect a restored/loaded reward selection in the UI without firing the callback."""
+        self._suppress_reward_cb = True
+        try:
+            self._reward_source = source or "none"
+            self._reward_sound_path = path or ""
+            self._reward_custom_input.text = self._reward_sound_path
+            self._sync_reward_source_ui()
+        finally:
+            self._suppress_reward_cb = False
+
+    def _sync_reward_source_ui(self) -> None:
+        for key, btn in self._reward_source_buttons.items():
+            btn.bg_color = C.ACCENT if key == self._reward_source else C.BG_CARD
+        self._reward_custom_row.reveal(self._reward_source == "custom")
+
+    def _on_reward_source_pressed(self, btn) -> None:
+        self._reward_source = btn._reward_key
+        self._sync_reward_source_ui()
+        self._emit_reward_source()
+        if self._reward_source == "custom" and not self._reward_sound_path:
+            self._on_reward_custom_browse()
+
+    def _on_reward_custom_path_change(self, _instance, value: str) -> None:
+        self._reward_sound_path = value.strip()
+        self._emit_reward_source()
+
+    def _on_reward_custom_browse(self, *_args) -> None:
+        open_audio_file_chooser(lambda p: setattr(self._reward_custom_input, "text", p))
+
+    def _emit_reward_source(self) -> None:
+        if self._suppress_reward_cb:
+            return
+        if self._on_reward_source_change:
+            self._on_reward_source_change(self._reward_source, self._reward_sound_path)
 
     def set_sinking_alert_callback(self, callback: Callable) -> None:
         self._on_sinking_alert_toggle = callback

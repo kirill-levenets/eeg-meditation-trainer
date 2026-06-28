@@ -340,7 +340,9 @@ class AudioEngine:
         self._is_playing: bool = False
         self._noise_sound: object = None
         self._feedback_players: dict[str, object] = {}  # source_id -> looping player
-        self._active_feedback: str = ""                 # source_id receiving modulated volume
+        self._active_feedback: str = ""                 # below-threshold (noise) player id
+        self._reward_feedback: str = ""                 # above-threshold reward player id ("" = none)
+        self._reward_target_volume: float = 0.0
         self._bell_sound: object = None
         self._timer_bell_player: object = None  # Android MediaPlayer gong (lock-through)
         self._noise_path: str = ""
@@ -413,6 +415,8 @@ class AudioEngine:
         self._teardown_feedback_players()
         players: dict[str, object] = {}
         for sid, (kind, path) in sources.items():
+            if kind == "none":
+                continue  # silent channel: no player instantiated
             resolved = self._feedback_path_for(kind, path)
             try:
                 p = _make_noise_player(resolved)
@@ -422,8 +426,19 @@ class AudioEngine:
             except Exception as e:
                 logger.warning(f"Feedback source {sid!r} failed to load ({resolved!r}): {e}")
         self._feedback_players = players
-        self._active_feedback = active_id if active_id in players else next(iter(players), "")
+        self._active_feedback = self._resolve_active(active_id, list(players))
         self._noise_sound = self._feedback_players.get(self._active_feedback)
+
+    @staticmethod
+    def _resolve_active(active_id: str, player_ids: list[str]) -> str:
+        """Resolve the below/active player id. An empty active_id means 'no below
+        channel' (None) and must NOT fall back to another player (e.g. the reward
+        one); a non-empty-but-missing id falls back defensively to the first player."""
+        if active_id in ("", "none"):
+            return ""
+        if active_id in player_ids:
+            return active_id
+        return player_ids[0] if player_ids else ""
 
     def set_active_feedback(self, source_id: str) -> None:
         """Make source_id the modulated player and zero the old; setVolume-only so it's tick/lock-safe."""
@@ -442,6 +457,15 @@ class AudioEngine:
         self._active_feedback = source_id
         self._noise_sound = player
 
+    def set_reward(self, source_id: str) -> None:
+        """Designate the above-threshold reward player ("" = none). setVolume-only path;
+        the ramp loop drives it toward _reward_target_volume and zeros non-role players."""
+        if source_id and source_id in self._feedback_players:
+            self._reward_feedback = source_id
+        else:
+            self._reward_feedback = ""
+            self._reward_target_volume = 0.0
+
     def _teardown_feedback_players(self) -> None:
         """Stop + unload every feedback player; main thread only (release())."""
         for sid, p in list(self._feedback_players.items()):
@@ -452,6 +476,8 @@ class AudioEngine:
                 logger.exception(f"Failed to stop/unload feedback player {sid!r}")
         self._feedback_players = {}
         self._active_feedback = ""
+        self._reward_feedback = ""
+        self._reward_target_volume = 0.0
         self._noise_sound = None
 
     def _start_noise_loop(self) -> None:
@@ -482,19 +508,25 @@ class AudioEngine:
         self._ramp_thread.start()
 
     def _ramp_loop(self) -> None:
-        """Background loop: smoothly interpolate sound.volume toward target."""
+        """Background loop: smoothly interpolate every feedback player toward its role
+        target — the below/active player toward _target_volume, the reward player toward
+        _reward_target_volume, all others toward 0. Volume-only, so tick/lock-safe."""
         max_step = self._RAMP_SPEED * self._RAMP_INTERVAL
         while self._ramp_running and self._is_playing:
-            target = self._target_volume
-            if self._noise_sound:
+            for sid, player in list(self._feedback_players.items()):
+                if sid == self._active_feedback:
+                    target = self._target_volume
+                elif sid == self._reward_feedback:
+                    target = self._reward_target_volume
+                else:
+                    target = 0.0
                 try:
-                    current = self._noise_sound.volume
+                    current = player.volume
                     diff = target - current
                     if abs(diff) < 0.001:
-                        self._noise_sound.volume = target
+                        player.volume = target
                     else:
-                        step = max(-max_step, min(max_step, diff))
-                        self._noise_sound.volume = current + step
+                        player.volume = current + max(-max_step, min(max_step, diff))
                 except Exception:
                     pass
             time.sleep(self._RAMP_INTERVAL)
@@ -517,13 +549,30 @@ class AudioEngine:
         scaled = math.log(1.0 + t * k) / math.log(1.0 + k)  # 0..1 log-curved
         return min(scaled * self._max_volume, self._max_volume)
 
+    def compute_reward_volume(self, meditation_score: float) -> float:
+        """Above-threshold reward volume: silent at/below threshold, log-rising to
+        max over [threshold, threshold + REWARD_SPAN]. Mirror of compute_volume so
+        the two zones cross-fade cleanly (both 0 exactly at the threshold)."""
+        if meditation_score <= self._threshold:
+            return 0.0
+        span = max(1, APP.REWARD_SPAN)
+        t = min(1.0, (meditation_score - self._threshold) / span)  # 0..1 linear
+        k = 9.0
+        scaled = math.log(1.0 + t * k) / math.log(1.0 + k)  # 0..1 log-curved
+        return min(scaled * self._max_volume, self._max_volume)
+
     def update(self, meditation_score: float) -> None:
-        """Update noise volume smoothly via sound.volume property."""
-        new_vol = self.compute_volume(meditation_score)
+        """Drive both feedback zones from one score: the below/noise channel falls as
+        you approach threshold, the reward channel (if armed) rises above it. The ramp
+        thread interpolates each player toward its target."""
+        below_vol = self.compute_volume(meditation_score)
+        self._reward_target_volume = (
+            self.compute_reward_volume(meditation_score) if self._reward_feedback else 0.0
+        )
         if not self._is_playing or self._test_active:
-            self._volume = new_vol
+            self._volume = below_vol
             return
-        self._set_noise_volume(new_vol)
+        self._set_noise_volume(below_vol)
 
     def update_sinking(self, sinking_score: float) -> None:
         """Check sinking score and trigger bell alert if needed."""
