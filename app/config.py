@@ -156,6 +156,7 @@ class AppConfig:
     DB_PATH: str = os.path.join(_BASE_DIR, DB_NAME)
 
     MAX_VOLUME: float = 0.3
+    REWARD_SPAN: int = 30  # points above threshold over which the reward sound ramps to full
     WHITE_NOISE_SAMPLE_RATE: int = 22050
     WHITE_NOISE_DURATION: float = 2.0
     AUDIO_TEST_DURATION: float = 2.0

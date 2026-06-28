@@ -211,10 +211,14 @@ When Program mode is off, the Simple timer behaves exactly as before.
 
 ### Audio
 
-- **Feedback sound** — `[Rain] [Tone] [Custom]` selector chooses the continuous feedback channel:
+- **Feedback sound (below threshold)** — `[Off] [Rain] [Tone] [Custom]` selector chooses the below-threshold channel:
+  - **Off** — no sound below the threshold
   - **Rain** — the original rain/white-noise sound
   - **Tone** — a built-in harmonic pad drone (fundamental + a fifth); no file needed
   - **Custom** — plays a user-supplied audio file (wav, mp3, ogg, flac, m4a). A path row and **Browse** button appear to select the file. The sound loops continuously; its volume is still modulated by the active metric exactly as Rain is.
+
+  This sound is loudest when you are far below your threshold and fades to silence as you reach it.
+- **Reward sound (above threshold)** — `[Off] [Rain] [Tone] [Custom]` selector chooses a second channel that is **silent until you cross the threshold**, then fades in and grows the further above it you go (full at +30 points). Default **Off**. Use it for a positive "you've reached shamatha" cue that builds as you deepen. The two channels cross-fade cleanly at the threshold; set either to **Off** for silence on that side.
 - **Test Audio** — plays feedback sweep + bell + chime + warble
 - Toggle sinking alert bell, distraction chime, disconnect warble
 - Volume uses log scaling — rises quickly at first, then flattens (max 0.3)
