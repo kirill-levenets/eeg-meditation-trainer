@@ -243,10 +243,23 @@ class EEGMeditationApp(App):
 
     @staticmethod
     def _source_spec(source_id: str) -> tuple[str, str]:
-        """Map a feedback source id to (kind, custom_path); non-builtin ids are custom file paths."""
+        """Map a feedback source id to (kind, custom_path); non-builtin ids are custom file paths.
+        "" / "none" -> the silent sentinel (no player is instantiated for it)."""
+        if source_id in ("", "none"):
+            return ("none", "")
         if source_id in ("noise", "tone"):
             return (source_id, "")
         return ("custom", source_id)
+
+    def _reward_id(self) -> str:
+        """The above-threshold reward source id ("" = none). A custom selection with
+        no file resolves to silent (unlike the noise channel, which falls back to rain)."""
+        src = getattr(self, "_reward_source", "none")
+        if src in ("", "none"):
+            return ""
+        if src == "custom":
+            return getattr(self, "_reward_sound_path", "") or ""
+        return src
 
     @staticmethod
     def _feedback_source_id(value: str, global_id: str) -> str:
@@ -267,6 +280,8 @@ class EEGMeditationApp(App):
     def _global_feedback_id(self) -> str:
         """The active global feedback source id; a custom selection with no file falls back to noise."""
         src = getattr(self, "_feedback_source", "noise")
+        if src in ("", "none"):
+            return "none"
         if src == "custom":
             return getattr(self, "_feedback_sound_path", "") or "noise"
         return src
@@ -826,6 +841,7 @@ class EEGMeditationApp(App):
         self._settings_screen.set_audio_metric_callback(self._on_audio_metric_change)
         self._settings_screen.set_audio_formula_index_callback(self._on_audio_formula_index)
         self._settings_screen.set_feedback_source_callback(self._on_feedback_source_change)
+        self._settings_screen.set_reward_source_callback(self._on_reward_source_change)
         self._settings_screen.set_program_mode_callback(self._on_timer_mode_change)
         self._settings_screen.set_program_changed_callback(self._on_program_changed)
         self._settings_screen.set_program_save_callback(self._on_program_save)
@@ -854,6 +870,8 @@ class EEGMeditationApp(App):
         self._program_audio_key: str = ""  # transient program-segment audio metric
         self._feedback_source: str = "noise"
         self._feedback_sound_path: str = ""
+        self._reward_source: str = "none"   # above-threshold reward channel (off by default)
+        self._reward_sound_path: str = ""
         self._session_program_segments: list[dict] = []
         self._session_program_name: str = ""  # name of the loaded/saved active program
         self._timer_mode: str = "simple"
@@ -1289,8 +1307,13 @@ class EEGMeditationApp(App):
         else:
             fb_sources, fb_initial = {gid: self._source_spec(gid)}, gid
             self._program_segment_feedback_ids = []
+        # Above-threshold reward channel (global; "" = none). Add its player to the set.
+        reward_id = self._reward_id()
+        if reward_id:
+            fb_sources[reward_id] = self._source_spec(reward_id)
         self._warn_missing_feedback_files(fb_sources)
         self._audio.prepare_feedback(fb_sources, fb_initial)
+        self._audio.set_reward(reward_id)
         self._live_screen.set_training_series(None)  # set on first segment crossing
         self._shamatha_active = False
         self._shamatha_streak = 0
@@ -2295,10 +2318,16 @@ class EEGMeditationApp(App):
         logger.info(f"Audio threshold metric changed to: {self._audio_metric_key}")
 
     def _on_feedback_source_change(self, source: str, path: str) -> None:
-        """Apply the global feedback source chosen in Settings."""
+        """Apply the global (below-threshold) feedback source chosen in Settings."""
         self._feedback_source = source
         self._feedback_sound_path = (path or "").strip()
         logger.info(f"Feedback source -> {self._feedback_source} {self._feedback_sound_path!r}")
+
+    def _on_reward_source_change(self, source: str, path: str) -> None:
+        """Apply the above-threshold reward source chosen in Settings."""
+        self._reward_source = source
+        self._reward_sound_path = (path or "").strip()
+        logger.info(f"Reward source -> {self._reward_source} {self._reward_sound_path!r}")
 
     def _on_audio_formula_index(self, idx: int) -> None:
         """Pick which formula slot drives audio. Only rebinds the live key when a
@@ -3261,6 +3290,8 @@ class EEGMeditationApp(App):
         )
         self._db.set_user_setting(uid, "feedback_source", self._feedback_source)
         self._db.set_user_setting(uid, "feedback_sound_path", self._feedback_sound_path)
+        self._db.set_user_setting(uid, "reward_source", self._reward_source)
+        self._db.set_user_setting(uid, "reward_sound_path", self._reward_sound_path)
         self._db.set_user_setting(uid, "marker_hotkey", self._settings_screen.marker_hotkey)
         self._db.set_user_setting(
             uid, "stats_view_mode", getattr(self._live_screen, "_stats_mode", "live")
@@ -3341,6 +3372,9 @@ class EEGMeditationApp(App):
         self._feedback_source = g(user_id, "feedback_source") or self._feedback_source
         self._feedback_sound_path = g(user_id, "feedback_sound_path") or self._feedback_sound_path
         self._settings_screen.set_feedback_source(self._feedback_source, self._feedback_sound_path)
+        self._reward_source = g(user_id, "reward_source") or self._reward_source
+        self._reward_sound_path = g(user_id, "reward_sound_path") or self._reward_sound_path
+        self._settings_screen.set_reward_source(self._reward_source, self._reward_sound_path)
 
         sink = g(user_id, "sinking_alert")
         if sink is not None:
