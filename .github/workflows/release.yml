@@ -280,17 +280,41 @@ jobs:
           pip install --upgrade pip
           pip install buildozer==1.5.0 cython==3.0.10
 
-      - name: Build Android APK
+      - name: Decode release keystore
+        id: keystore
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
-          yes | buildozer android debug
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::ANDROID_KEYSTORE_BASE64 secret not set — building a DEBUG APK. Debug builds are signed with an ephemeral key, so users CANNOT update in place and will lose their data. Set the signing secrets for an update-safe release build."
+          fi
+
+      - name: Build Android APK
         timeout-minutes: 45
         env:
           JAVA_HOME: ${{ env.JAVA_HOME_17_X64 }}
+          P4A_RELEASE_KEYSTORE: ${{ runner.temp }}/release.keystore
+          P4A_RELEASE_KEYSTORE_PASSWD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          P4A_RELEASE_KEYALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          P4A_RELEASE_KEYALIAS_PASSWD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ "${{ steps.keystore.outputs.present }}" = "true" ]; then
+            echo "Building SIGNED RELEASE APK (consistent key -> in-place updates preserve user data)"
+            yes | buildozer android release
+          else
+            yes | buildozer android debug
+          fi
 
       - name: Find APK
         id: apk
         run: |
-          APK=$(find bin -name "*.apk" -type f 2>/dev/null | head -1)
+          # Prefer a signed release APK; fall back to whatever was produced.
+          APK=$(find bin -name "*-release*.apk" -type f 2>/dev/null | head -1)
+          [ -z "$APK" ] && APK=$(find bin -name "*.apk" -type f 2>/dev/null | head -1)
           if [ -z "$APK" ]; then
             echo "ERROR: No APK found in bin/"
             ls -la bin/ 2>/dev/null || echo "bin/ directory does not exist"

@@ -70,6 +70,11 @@ android.ndk_api = 21
 # armeabi-v7a is for old 32-bit devices (pre-2017); remove if not needed
 android.archs = arm64-v8a
 
+# (str) Release artifact for `buildozer android release`.
+# apk = a single signed APK for GitHub/sideload distribution (buildozer default is aab).
+# Switch to aab when building for the Google Play upload.
+android.release_artifact = apk
+
 # (bool) Enable AndroidX support
 android.enable_androidx = True
 
