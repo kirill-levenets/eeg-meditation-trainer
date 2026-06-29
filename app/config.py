@@ -108,12 +108,6 @@ def _resolve_desktop_base_dir_with_migration() -> str:
 class SigmoidConfig:
     """Sigmoid normalization parameters for easy calibration."""
 
-    SINKING_K: float = 4.0
-    SINKING_MIDPOINT: float = 1.0
-
-    DISTRACTION_K: float = 4.0
-    DISTRACTION_MIDPOINT: float = 1.0
-
     SUBTLE_K: float = 2.0
     SUBTLE_MIDPOINT: float = 0.5
 
