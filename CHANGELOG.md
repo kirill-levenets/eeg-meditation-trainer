@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Per-band power breakdown in the diary** (issue #8): each session's detail now shows total power per frequency band as a **sortable table** — colored share bars with Power and % columns. A **Detailed / Grouped** toggle switches between the 8 sub-bands (delta / theta / alpha1 / alpha2 / beta1 / beta2 / gamma1 / gamma2) and the 5 collapsed bands (alpha = alpha1+alpha2, etc.). Tap a column header to sort (tap again to reverse); the view mode and sort persist per user. Computed on read by summing the already-recorded per-tick band powers — no schema change.
 - **Shamatha reached is now obvious on the session screen** (issue #13): when your shamatha score holds at or above your meditation threshold, the status text turns into a bold `SHAMATHA` label on a green pill, then reverts when you drop back below. A short debounce (1.5 s above to enter, 1.5 s below to exit) keeps it from flickering on the 2 Hz signal.
 
+### Changed
+
+- **Android releases are now signed with a fixed release key** (CI). GitHub release APKs were debug-signed with an ephemeral per-build key, so users could not install a new APK over an old one (signature mismatch) and were forced to uninstall — wiping their local database. The release workflow now signs with a consistent keystore (from GitHub secrets), so **future updates install in place and keep all sessions/settings**. Setup: `docs/ANDROID_SIGNING.md`. (Note: the first signed build is still a signature change vs. already-installed debug builds, so that one update still requires a reinstall.)
+
 ## [1.3.0] - 2026-06-27
 
 ### Fixed
