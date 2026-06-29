@@ -1,7 +1,7 @@
 import os
 import sys
 
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 
 
 def _resolve_android_base_dir() -> str:
