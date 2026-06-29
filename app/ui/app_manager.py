@@ -42,6 +42,7 @@ from app.session.timer_state import TimerState
 from app.storage import android_saf as _saf
 from app.storage import backup as _backup
 from app.storage.backup import restore_backup, validate_backup
+from app.storage.csv_export import build_sessions_zip
 from app.storage.database import DatabaseManager, UserExistsError
 from app.ui.diary_screen import DiaryScreen
 from app.ui.history_screen import HistoryScreen
@@ -894,6 +895,7 @@ class EEGMeditationApp(App):
         self._history_screen.set_view_mode_callback(
             self._on_history_view_mode_change,
         )
+        self._history_screen.set_export_sessions_callback(self._on_export_sessions_csv)
 
         self._settings_screen.set_test_timer_sound_callback(self._on_test_timer_sound)
         self._settings_screen.set_stop_timer_sound_callback(self._on_stop_test_timer_sound)
@@ -2867,6 +2869,65 @@ class EEGMeditationApp(App):
             f.write(csv_data)
         logger.info(f"Session {session_id} exported to {path}")
         return path
+
+    def _on_export_sessions_csv(self, session_ids: list) -> None:
+        """Bulk-export selected sessions as one ZIP of per-session CSVs (issue #7).
+        Runs off the main thread behind the loading spinner; delivers via the shared
+        copy_to_documents path (Documents on Android, a Documents folder on desktop)."""
+        if not session_ids:
+            return
+        self.show_loading(f"Exporting {len(session_ids)} sessions…")
+
+        def _worker():
+            try:
+                mapping = {}
+                for sid in session_ids:
+                    csv = self._db.export_session_csv(sid, custom_formula=self._formula_slots[0])
+                    if csv:
+                        mapping[sid] = csv
+                ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+                fname = f"sessions_{ts}.zip"
+                tmp_zip = os.path.join(os.path.dirname(self._db._db_path), fname)
+                n = build_sessions_zip(tmp_zip, mapping)
+                if n == 0:
+                    self._on_main(lambda: (self.hide_loading(), report_soft_error(
+                        "export_empty", "No data to export in the selected sessions.", app=self)))
+                    return
+                dest = tmp_zip
+                try:
+                    from app.storage.android_share import copy_to_documents
+                    shared = copy_to_documents(tmp_zip, display_name=fname)
+                    if shared:
+                        dest = shared
+                except Exception:
+                    logger.exception("copy_to_documents failed for bulk export")
+                self._on_main(lambda: self._finish_bulk_export(n, dest))
+            except Exception:
+                logger.exception("Bulk CSV export failed")
+                self._on_main(lambda: (self.hide_loading(), report_soft_error(
+                    "export_failed", "Bulk CSV export failed — see logs.", app=self)))
+
+        threading.Thread(target=_worker, daemon=True, name="BulkCSVExport").start()
+
+    def _finish_bulk_export(self, count: int, dest: str) -> None:
+        self.hide_loading()
+        self._history_screen.set_select_mode(False)
+        self._info_popup("Export complete", f"Exported {count} session(s) to:\n{dest}")
+
+    def _info_popup(self, title: str, message: str) -> None:
+        from kivy.uix.boxlayout import BoxLayout as _Box
+        from kivy.uix.label import Label as _Lbl
+        from kivy.uix.popup import Popup as _Popup
+        body = _Box(orientation="vertical", spacing=S.GAP, padding=S.GAP)
+        lbl = _Lbl(text=message, font_size=F.BODY, color=POPUP_TEXT, halign="center",
+                   valign="middle")
+        lbl.bind(size=lbl.setter("text_size"))
+        body.add_widget(lbl)
+        btn = StyledButton(text="OK", bg_color=C.ACCENT, size_hint_y=None, height=dp(40))
+        body.add_widget(btn)
+        popup = _Popup(title=title, content=body, size_hint=(0.9, 0.4))
+        btn.bind(on_release=popup.dismiss)
+        popup.open()
 
     _history_dirty: bool = True
 

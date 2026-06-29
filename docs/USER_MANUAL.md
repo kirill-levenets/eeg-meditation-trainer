@@ -114,6 +114,8 @@ Each session row shows:
 
 Tap a session row to view full details (graphs, notes, tags, mood).
 
+**Export multiple sessions:** tap **Select** (top right of the list) to enter selection mode — checkboxes appear, tap rows to select them (or **Select all**), then **Export N** bundles the chosen sessions into one **ZIP** containing one CSV per session. On Android the ZIP is saved to `Documents/EEGMeditation/`; on desktop to a Documents folder. **Cancel** leaves selection mode.
+
 ### Session Detail
 
 Shows full statistics, a **Band Power (whole session)** breakdown, notes/tags/mood editor, and three graph tabs:

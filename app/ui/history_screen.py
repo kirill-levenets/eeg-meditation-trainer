@@ -20,6 +20,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
 from app.ui.theme import (
+    ICONS_AVAILABLE,
     POPUP_TEXT,
     C,
     Card,
@@ -27,6 +28,7 @@ from app.ui.theme import (
     Divider,
     F,
     Icons,
+    RevealBox,
     S,
     StyledButton,
     format_duration,
@@ -401,6 +403,12 @@ class HistoryScreen(Screen):
         self._filtered_date: Optional[str] = None
         self._view_mode: str = "calendar"
         self._on_view_mode_change: Optional[Callable] = None
+        # Multi-select CSV export (issue #7)
+        self._pending_rows: list[dict] = []
+        self._current_header: str = "All sessions"
+        self._select_mode: bool = False
+        self._selected_ids: set[int] = set()
+        self._on_export_sessions: Optional[Callable] = None
         self._build_ui()
         C.add_listener(self._refresh_theme)
 
@@ -513,7 +521,34 @@ class HistoryScreen(Screen):
         self._btn_show_all.opacity = 0
         self._btn_show_all.disabled = True
         date_row.add_widget(self._btn_show_all)
+        self._btn_select = StyledButton(
+            text="Select", bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY,
+            font_size=F.SMALL, size_hint_x=None, width=dp(72), height=dp(28), bold=False,
+        )
+        self._btn_select.bind(on_release=lambda *a: self.set_select_mode(True))
+        date_row.add_widget(self._btn_select)
         root.add_widget(date_row)
+
+        # Multi-select export action bar (issue #7) — RevealBox detaches its
+        # children when hidden, so it can't eat taps while inactive.
+        self._select_bar = RevealBox(dp(40), spacing=S.GAP_SM)
+        self._btn_export = StyledButton(
+            text="Export 0", bg_color=C.ACCENT, font_size=F.SMALL, height=dp(40),
+        )
+        self._btn_export.disabled = True
+        self._btn_export.bind(on_release=lambda *a: self.export_selected())
+        self._btn_select_all = StyledButton(
+            text="Select all", bg_color=C.BG_CARD, text_color=C.TEXT,
+            font_size=F.SMALL, height=dp(40),
+        )
+        self._btn_select_all.bind(on_release=lambda *a: self.select_all_shown())
+        self._btn_cancel = StyledButton(
+            text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY,
+            font_size=F.SMALL, height=dp(40),
+        )
+        self._btn_cancel.bind(on_release=lambda *a: self.set_select_mode(False))
+        self._select_bar.set_content(self._btn_export, self._btn_select_all, self._btn_cancel)
+        root.add_widget(self._select_bar)
 
         root.add_widget(Divider())
 
@@ -548,6 +583,56 @@ class HistoryScreen(Screen):
         self._on_delete_session = on_delete_session
         self._on_export_csv = on_export_csv
         self._on_rename_session = on_rename_session
+
+    def set_export_sessions_callback(self, callback) -> None:
+        self._on_export_sessions = callback
+
+    # ── Multi-select CSV export (issue #7) ──
+    @property
+    def selected_ids(self) -> set:
+        return self._selected_ids
+
+    def _shown_sids(self) -> list:
+        return [s.get("id") for s in self._pending_rows]
+
+    def set_select_mode(self, on: bool) -> None:
+        """Enter/leave multi-select mode; leaving drops the selection. Rebuilds the
+        list so rows gain/lose their checkbox (rebuild, not in-place hide, keeps the
+        touch layer clean)."""
+        self._select_mode = bool(on)
+        if not on:
+            self._selected_ids = set()
+        self._btn_select.opacity = 0 if on else 1
+        self._btn_select.disabled = on
+        self._select_bar.reveal(on)
+        self._update_export_button()
+        self._rebuild_visible()
+
+    def toggle_session_selection(self, sid) -> None:
+        if sid in self._selected_ids:
+            self._selected_ids.discard(sid)
+        else:
+            self._selected_ids.add(sid)
+        self._update_export_button()
+
+    def select_all_shown(self) -> None:
+        self._selected_ids = {s for s in self._shown_sids() if s is not None}
+        self._update_export_button()
+        self._rebuild_visible()
+
+    def export_selected(self) -> None:
+        if not self._selected_ids or not self._on_export_sessions:
+            return
+        self._on_export_sessions(sorted(self._selected_ids))
+
+    def _update_export_button(self) -> None:
+        n = len(self._selected_ids)
+        self._btn_export.text = f"Export {n}"
+        self._btn_export.disabled = n == 0
+
+    def _rebuild_visible(self) -> None:
+        if self._pending_rows:
+            self._show_sessions(self._pending_rows, self._current_header)
 
     def _on_active_widget_height(self, instance, value):
         """Track the active widget's height onto graph_row.
@@ -694,6 +779,7 @@ class HistoryScreen(Screen):
         """Populate the session list, building rows in chunks across frames so a
         long list (76+ sessions) doesn't block the UI thread for ~0.9s."""
         self._cancel_row_build()
+        self._current_header = header
         self._session_list.clear_widgets()
         self._date_label.text = f"{header} ({len(sessions)} sessions)"
 
@@ -758,6 +844,17 @@ class HistoryScreen(Screen):
             padding=0,
         )
 
+        # Multi-select checkbox (only in select mode); tapping the row toggles it.
+        checkbox = None
+        if self._select_mode:
+            checkbox = Label(
+                font_name="Icons" if ICONS_AVAILABLE else "Roboto",
+                font_size=F.H2, size_hint_x=None, width=dp(36),
+                halign="center", valign="middle",
+            )
+            self._apply_checkbox(checkbox, sid)
+            row.add_widget(checkbox)
+
         # Score indicator (colored bar)
         score_color = _lerp_color(avg_sh)
         score_bar = Widget(size_hint_x=None, width=dp(4))
@@ -799,7 +896,7 @@ class HistoryScreen(Screen):
         # Row/button actions are routed manually via _list_touch_down
         # at the session-list level. See _list_touch_down for details.
 
-        # Right side: rename + delete buttons (visual only)
+        # Right side: rename + delete buttons (visual only) — omitted in select mode.
         actions = BoxLayout(
             orientation="horizontal",
             size_hint_x=None,
@@ -826,7 +923,8 @@ class HistoryScreen(Screen):
         )
         actions.add_widget(btn_rename)
         actions.add_widget(btn_del)
-        row.add_widget(actions)
+        if not self._select_mode:
+            row.add_widget(actions)
 
         wrapper.add_widget(row)
 
@@ -897,9 +995,19 @@ class HistoryScreen(Screen):
             "name": name,
             "rename_row": rename_row,
             "toggle_rename": _toggle_rename,
+            "checkbox": checkbox,
         }
 
         return wrapper
+
+    def _apply_checkbox(self, checkbox, sid) -> None:
+        """Reflect a row's selection state on its checkbox glyph."""
+        selected = sid in self._selected_ids
+        if ICONS_AVAILABLE:
+            checkbox.text = Icons.CHECKBOX_MARKED if selected else Icons.CHECKBOX_BLANK
+        else:
+            checkbox.text = "[x]" if selected else "[ ]"
+        checkbox.color = C.ACCENT if selected else C.TEXT_SECONDARY
 
     def _confirm_delete(self, session_id: int, name: str) -> None:
         """Show a delete confirmation popup."""
@@ -967,6 +1075,12 @@ class HistoryScreen(Screen):
                 continue
             if not wrapper.collide_point(*touch.pos):
                 continue
+            # Select mode: any tap on the row toggles its selection.
+            if self._select_mode:
+                self.toggle_session_selection(opts["sid"])
+                if opts.get("checkbox") is not None:
+                    self._apply_checkbox(opts["checkbox"], opts["sid"])
+                return True
             rename_row = opts["rename_row"]
             # If rename editor is open and touch is in it, let Kivy dispatch
             # normally so the TextInput + Save button work.
