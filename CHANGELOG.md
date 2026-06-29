@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-06-29
+
 ### Added
 
 - **Multi-select CSV export from History** (issue #7): a **Select** button on the History list enters selection mode — tap rows to check them, **Select all** / **Cancel**, then **Export N** bundles the chosen sessions into one **ZIP of per-session CSVs** (each `session_<id>.csv`, the existing format). Export runs off the UI thread behind the spinner and lands in `Documents/EEGMeditation/` (Android) / a Documents folder (desktop).
@@ -347,6 +349,7 @@ Initial public release.
 - Power line noise detection at 50/60 Hz.
 - Multi-platform builds (PyInstaller for desktop, Buildozer for Android).
 
+[1.4.0]: https://github.com/kirill-levenets/eeg-meditation-trainer/releases/tag/v1.4.0
 [1.3.0]: https://github.com/kirill-levenets/eeg-meditation-trainer/releases/tag/v1.3.0
 [1.2.0]: https://github.com/kirill-levenets/eeg-meditation-trainer/releases/tag/v1.2.0
 [1.1.1]: https://github.com/kirill-levenets/eeg-meditation-trainer/releases/tag/v1.1.1

@@ -25,7 +25,7 @@ source.exclude_dirs = tests,venv,.git,__pycache__,.buildozer,docs,tools,.claude,
 source.exclude_patterns = *.db,*.db-shm,*.db-wal,*.csv,*.pyc,*.eeg,*.ods,*.md,*.sh,*.bat,*.spec
 
 # (str) Application versioning
-version = 1.3.0
+version = 1.4.0
 
 # (str) Presplash of the application
 presplash.filename = app/assets/icons/presplash.png
