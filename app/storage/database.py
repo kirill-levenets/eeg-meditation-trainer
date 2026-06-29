@@ -63,6 +63,7 @@ class DatabaseManager:
                 notes TEXT DEFAULT '',
                 tags TEXT DEFAULT '',
                 mood_rating INTEGER DEFAULT 0,
+                engine_version TEXT DEFAULT '',
                 FOREIGN KEY (user_id) REFERENCES users(id)
             );
 
@@ -157,20 +158,26 @@ class DatabaseManager:
         if "session_program" not in sess_cols:
             self._conn.execute("ALTER TABLE sessions ADD COLUMN session_program TEXT DEFAULT ''")
             logger.info("Migrated: added column sessions.session_program")
+        if "engine_version" not in sess_cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN engine_version TEXT DEFAULT ''")
+            logger.info("Migrated: added column sessions.engine_version")
 
         self._conn.commit()
 
     def save_session(self, stats: dict, user_id: Optional[int] = None,
                      session_name: str = "", custom_formulas: str = "",
-                     session_program: str = "") -> int:
-        """Insert a session record and return its ID. `custom_formulas` is a JSON string."""
+                     session_program: str = "", engine_version: str = "") -> int:
+        """Insert a session record and return its ID. `custom_formulas` is a JSON string.
+
+        `engine_version` stamps which metric-formula version produced the stored values.
+        """
         cursor = self._conn.execute(
             """
             INSERT INTO sessions
             (user_id, date_time, duration, threshold_used, avg_meditation, avg_shamatha,
              max_meditation, time_above_threshold, longest_streak, session_name,
-             time_shamatha_90, custom_formulas, session_program)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             time_shamatha_90, custom_formulas, session_program, engine_version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -186,6 +193,7 @@ class DatabaseManager:
                 stats.get("time_shamatha_90", 0),
                 custom_formulas,
                 session_program,
+                engine_version,
             ),
         )
         self._conn.commit()
@@ -353,7 +361,8 @@ class DatabaseManager:
 
     def update_session(self, session_id: int, stats: dict,
                        custom_formulas: str | None = None,
-                       session_program: str | None = None) -> None:
+                       session_program: str | None = None,
+                       engine_version: str | None = None) -> None:
         """Update an existing session's aggregate stats (+ formula snapshot if given)."""
         cols = ["duration = ?", "threshold_used = ?", "avg_meditation = ?",
                 "avg_shamatha = ?", "max_meditation = ?", "time_above_threshold = ?",
@@ -374,6 +383,9 @@ class DatabaseManager:
         if session_program is not None:
             cols.append("session_program = ?")
             vals.append(session_program)
+        if engine_version is not None:
+            cols.append("engine_version = ?")
+            vals.append(engine_version)
         vals.append(session_id)
         self._conn.execute(
             f"UPDATE sessions SET {', '.join(cols)} WHERE id = ?", vals

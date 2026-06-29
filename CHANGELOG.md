@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Distraction and Sinking now match the original Vernihor app.** These two metrics were a clean-room sigmoid redesign in the rewrite; they are now ported term-for-term from the original. Distraction is the raw `(beta1+beta2)/alpha1` ratio modulated by `(140 − shamatha)` and zeroed when alpha dominates; Sinking is alpha2-deficit driven, gamma-damped, and similarly gated. The shamatha/meditation score is unchanged (it was already a faithful port). Live and newly-recorded sessions use the new formulas; **existing sessions are unaffected** — the diary reads each session's stored values rather than recomputing them. Every session now records an `engine_version` so stored metric values stay attributable to the formula set that produced them.
 - **Android releases are now signed with a fixed release key** (CI). GitHub release APKs were debug-signed with an ephemeral per-build key, so users could not install a new APK over an old one (signature mismatch) and were forced to uninstall — wiping their local database. The release workflow now signs with a consistent keystore (from GitHub secrets), so **future updates install in place and keep all sessions/settings**. Setup: `docs/ANDROID_SIGNING.md`. (Note: the first signed build is still a signature change vs. already-installed debug builds, so that one update still requires a reinstall.)
 
 ## [1.3.0] - 2026-06-27
