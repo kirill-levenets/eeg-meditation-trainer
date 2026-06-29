@@ -21,6 +21,7 @@ from collections import deque
 from unittest.mock import MagicMock
 
 from app.config import APP
+from app.metrics.engine import MetricsEngine
 from app.session.manager import SessionState
 from app.session.timer_state import TimerState
 from app.ui.app_manager import EEGMeditationApp
@@ -494,6 +495,7 @@ def test_timer_expiry_updates_existing_session_row():
     _drive_tick(app, _raw_sample(), _metrics())
 
     app._db.update_session.assert_called_once_with(
-        7, {"duration": 100}, custom_formulas="[]", session_program=""
+        7, {"duration": 100}, custom_formulas="[]", session_program="",
+        engine_version=MetricsEngine.ENGINE_VERSION,
     )
     app._db.save_session.assert_not_called()

@@ -1505,6 +1505,7 @@ class EEGMeditationApp(App):
                     self._current_session_id, stats,
                     custom_formulas=self._session_custom_formulas_json(),
                     session_program=self._session_program_json(),
+                    engine_version=MetricsEngine.ENGINE_VERSION,
                 )
             else:
                 self._current_session_id = self._db.save_session(
@@ -1512,6 +1513,7 @@ class EEGMeditationApp(App):
                     session_name=self._make_session_name(),
                     custom_formulas=self._session_custom_formulas_json(),
                     session_program=self._session_program_json(),
+                    engine_version=MetricsEngine.ENGINE_VERSION,
                 )
             if self._metrics_buffer:
                 self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
@@ -1606,6 +1608,7 @@ class EEGMeditationApp(App):
                     self._current_session_id, stats,
                     custom_formulas=self._session_custom_formulas_json(),
                     session_program=self._session_program_json(),
+                    engine_version=MetricsEngine.ENGINE_VERSION,
                 )
             else:
                 self._current_session_id = self._db.save_session(
@@ -1613,6 +1616,7 @@ class EEGMeditationApp(App):
                     session_name=self._make_session_name(),
                     custom_formulas=self._session_custom_formulas_json(),
                     session_program=self._session_program_json(),
+                    engine_version=MetricsEngine.ENGINE_VERSION,
                 )
             if self._metrics_buffer:
                 self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
@@ -2039,6 +2043,7 @@ class EEGMeditationApp(App):
                     session_name=self._make_session_name(),
                     custom_formulas=self._session_custom_formulas_json(),
                     session_program=self._session_program_json(),
+                    engine_version=MetricsEngine.ENGINE_VERSION,
                 )
             self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
             self._metrics_buffer = []

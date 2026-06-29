@@ -8,6 +8,11 @@ from app.eeg.buffer import RollingBuffer, VarianceBuffer
 class MetricsEngine:
     """Computes all EEG meditation metrics from smoothed band data."""
 
+    # Stamped on each saved session so stored values stay attributable to the formula set
+    # that produced them. 1 = sigmoid distraction/sinking (initial rewrite); 2 = ported
+    # original Vernihor distraction/sinking. Bump when a built-in formula changes.
+    ENGINE_VERSION: str = "2"
+
     # Vernihor shamatha formula coefficients (Windows variant)
     # Source: scriptures.ru/yoga/eeg_voprosy_i_otvety.htm#formula2
     # 100 * (avg((a1 + 0.8*a2) / (b2 + b1 + 0.4*t + 0.08*d), 4) * 0.75 - 0.3)

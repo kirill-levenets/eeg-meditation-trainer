@@ -31,6 +31,22 @@ class TestStorageIntegration(unittest.TestCase):
         self.assertEqual(session["duration"], 300)
         self.assertAlmostEqual(session["avg_meditation"], 65.0)
 
+    def test_save_session_stamps_engine_version(self):
+        sid = self.db.save_session({"duration": 60, "threshold_used": 50}, engine_version="2")
+        session = self.db.get_session(sid)
+        self.assertEqual(session["engine_version"], "2")
+
+    def test_engine_version_defaults_empty(self):
+        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
+        session = self.db.get_session(sid)
+        self.assertEqual(session["engine_version"], "")
+
+    def test_update_session_stamps_engine_version(self):
+        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
+        self.db.update_session(sid, {"duration": 120, "threshold_used": 50}, engine_version="2")
+        session = self.db.get_session(sid)
+        self.assertEqual(session["engine_version"], "2")
+
     def test_save_and_retrieve_metrics(self):
         sid = self.db.save_session({"duration": 60, "threshold_used": 50})
         self.db.save_metrics_batch(sid, [
