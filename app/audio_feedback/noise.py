@@ -481,9 +481,9 @@ class AudioEngine:
         self._noise_sound = None
 
     def _start_noise_loop(self) -> None:
-        """Play all prepared feedback players looping (active at current volume, rest silent)."""
-        if not self._feedback_players:
-            self.prepare_feedback({"noise": ("noise", "")}, "noise")
+        """Play the prepared feedback players looping (active at current volume, rest
+        silent). Plays ONLY what prepare_feedback set up — an empty set means every
+        channel is Off and must stay silent (no forced rain)."""
         for sid, player in self._feedback_players.items():
             try:
                 player.loop = True
@@ -705,6 +705,10 @@ class AudioEngine:
         if not was_playing:
             self._is_playing = True
         self._test_active = True
+        # The Test button demos the rain sweep; prepare a player if a session
+        # hasn't (a real session prepares from the user's config, respecting Off).
+        if not self._feedback_players:
+            self.prepare_feedback({"noise": ("noise", "")}, "noise")
         self._set_noise_volume(0.0)
         with self._lock:
             self._start_noise_loop()
