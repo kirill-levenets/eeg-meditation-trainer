@@ -377,7 +377,7 @@ class EEGMeditationApp(App):
         if sm is not None and sm.state in (SessionState.RUNNING, SessionState.PAUSED):
             return
         if not self._current_user_id:
-            return
+            return  # silent-ok: idle live-graph preview; nothing to show without a user
         if self._program_governs_live_series():
             self._apply_program_visibility(self._build_session_program())
             self._live_screen.set_training_series(None)  # no active segment in idle
@@ -707,8 +707,7 @@ class EEGMeditationApp(App):
         # uses a Popup, not the wizard Screen, because a TextInput inside a
         # Screen doesn't get keyboard focus on some platforms.
         if resolved_user is None:
-            self._bottom_nav.disabled = True
-            Clock.schedule_once(self._show_first_run_popup, 0.5)
+            self._open_user_gate(0.5)
         else:
             self._auto_scan_bt()
 
@@ -970,6 +969,13 @@ class EEGMeditationApp(App):
         logger.info(f"Restored last user id={uid}")
         return uid
 
+    def _open_user_gate(self, delay: float = 0.0) -> None:
+        """Enter the hard user gate: disable the bottom nav and open the blocking
+        selection modal. Single source for build() / on_resume / self-delete so
+        the 'app unusable without a user' enforcement can't drift between them."""
+        self._bottom_nav.disabled = True
+        Clock.schedule_once(self._show_first_run_popup, delay)
+
     def _show_first_run_popup(self, dt) -> None:
         """Show a name-entry popup on first run (no users in DB).
 
@@ -1135,7 +1141,9 @@ class EEGMeditationApp(App):
         self._switch_screen(screen_name)
 
     def _switch_screen(self, name: str) -> None:
-        if name == "diary" and not self._current_user_id:
+        if name == "diary" and not self._current_user_id and not self._view_all_users:
+            # silent-ok: unreachable post-gate; All-Users browse and any
+            # concrete user pass. Defensive block against a should-not-happen unset.
             logger.debug("Diary switch blocked: no user selected")
             return
         logger.debug(f"Screen switch: {name}")
@@ -2659,7 +2667,7 @@ class EEGMeditationApp(App):
         """Refresh the saved formulas list in settings UI."""
         if not self._current_user_id:
             self._settings_screen.populate_saved_formulas([])
-            return
+            return  # silent-ok: renders empty library; no per-user formulas without a user
         formulas = self._db.get_saved_formulas(self._current_user_id)
         self._settings_screen.populate_saved_formulas(formulas)
 
@@ -2858,7 +2866,7 @@ class EEGMeditationApp(App):
     def _persist_band_view(self, mode: str, sort_by: str, descending: bool) -> None:
         """Persist the diary band-table view (mode/sort) per user."""
         if not self._current_user_id:
-            return
+            return  # silent-ok: view-pref persistence; no concrete user (All-Users) = nothing to save
         self._db.set_user_json_setting(
             self._current_user_id, "band_breakdown_view",
             {"mode": mode, "sort": sort_by, "desc": descending},
@@ -3039,7 +3047,7 @@ class EEGMeditationApp(App):
     def _on_history_view_mode_change(self, mode: str) -> None:
         """Persist the user's preferred History view layout."""
         if not self._current_user_id:
-            return
+            return  # silent-ok: pref persistence; view already changed, no user to save to
         self._db.set_user_setting(self._current_user_id, "history_view_mode", mode)
 
     def _count_sessions_for_user(self, user_id: int) -> int:
@@ -3376,8 +3384,7 @@ class EEGMeditationApp(App):
         self._db.delete_user(user_id)
         self._refresh_profile()
         if deleted_active:
-            self._bottom_nav.disabled = True
-            Clock.schedule_once(self._show_first_run_popup, 0)
+            self._open_user_gate(0)
 
     def _refresh_profile(self) -> None:
         users = self._db.get_all_users()
@@ -3698,8 +3705,7 @@ class EEGMeditationApp(App):
                 and getattr(self, "_current_user_id", None) is None
                 and not getattr(self, "_view_all_users", False)
                 and getattr(self, "_gate_popup", None) is None):
-            self._bottom_nav.disabled = True
-            Clock.schedule_once(self._show_first_run_popup, 0)
+            self._open_user_gate(0)
             return
         try:
             Clock.schedule_once(lambda dt: self._refresh_ui_after_resume(), 0)

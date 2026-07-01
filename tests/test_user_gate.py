@@ -9,9 +9,10 @@ slip through into a usable-but-unset state.
 """
 import os
 import tempfile
+from unittest.mock import MagicMock
 
 from app.storage.database import DatabaseManager
-from app.ui.app_manager import resolve_startup_user, sessions_for_view
+from app.ui.app_manager import EEGMeditationApp, resolve_startup_user, sessions_for_view
 
 
 def _fresh() -> DatabaseManager:
@@ -80,3 +81,21 @@ def test_unset_user_shows_nothing_never_leaks_all_profiles():
     db = _fresh()
     _two_users_with_sessions(db)
     assert sessions_for_view(db, None, show_all=False) == []
+
+
+# --- gate enforcement: an unresolved user disables the app until selection ---
+
+def test_open_user_gate_disables_bottom_nav_and_opens_modal():
+    app = EEGMeditationApp.__new__(EEGMeditationApp)  # bypass heavy __init__/build
+    app._bottom_nav = MagicMock()
+    app._show_first_run_popup = MagicMock()
+    EEGMeditationApp._open_user_gate(app, 0)
+    assert app._bottom_nav.disabled is True  # app not usable until a user is chosen
+
+
+def test_unresolvable_last_user_routes_to_the_gate():
+    # The startup decision that build() acts on: an unresolved user -> gate (None).
+    db = _fresh()
+    db.create_user("Kirill")
+    db.set_setting("last_user_id", "999")  # reinstall / restored-DB shape
+    assert resolve_startup_user(db) is None
