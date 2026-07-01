@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **"Off" audio feedback still played rain below threshold**: with the below-threshold sound set to Off (dual-zone feedback, v1.4.0), a session prepared no players, but the start path treated the empty set as "not yet configured" and fell back to a rain loop — so noise played anyway (most visible in program mode). The start path now plays only the configured channels (empty = silent); the Settings "Test" button still previews the rain sweep explicitly.
+
 ## [1.4.0] - 2026-06-29
 
 ### Added
