@@ -253,6 +253,8 @@ class DatabaseManager:
 
     def get_all_sessions(self, user_id: Optional[int] = None) -> list[dict]:
         """Return sessions ordered by date descending, optionally filtered by user."""
+        if not self._ensure_conn():
+            return []
         if user_id is not None:
             cursor = self._conn.execute(
                 "SELECT * FROM sessions WHERE user_id = ? ORDER BY date_time DESC",
@@ -266,6 +268,8 @@ class DatabaseManager:
 
     def get_session(self, session_id: int) -> Optional[dict]:
         """Return a single session by ID."""
+        if not self._ensure_conn():
+            return None
         cursor = self._conn.execute(
             "SELECT * FROM sessions WHERE id = ?", (session_id,)
         )
@@ -274,6 +278,8 @@ class DatabaseManager:
 
     def get_session_metrics(self, session_id: int) -> list[dict]:
         """Return all metric rows for a session."""
+        if not self._ensure_conn():
+            return []
         cursor = self._conn.execute(
             "SELECT * FROM metrics WHERE session_id = ? ORDER BY timestamp",
             (session_id,),
@@ -283,6 +289,8 @@ class DatabaseManager:
     def get_session_band_totals(self, session_id: int) -> dict[str, float]:
         """Summed raw power per frequency band over the whole session (0.0 if no rows)."""
         bands = ["delta", "theta", "alpha1", "alpha2", "beta1", "beta2", "gamma1", "gamma2"]
+        if not self._ensure_conn():
+            return dict.fromkeys(bands, 0.0)
         cols = ", ".join(f"SUM({b}_raw)" for b in bands)
         row = self._conn.execute(
             f"SELECT {cols} FROM metrics WHERE session_id = ?", (session_id,)
@@ -344,11 +352,15 @@ class DatabaseManager:
 
     def get_all_users(self) -> list[dict]:
         """Return all user profiles."""
+        if not self._ensure_conn():
+            return []
         cursor = self._conn.execute("SELECT * FROM users ORDER BY name")
         return [dict(row) for row in cursor.fetchall()]
 
     def get_user(self, user_id: int) -> Optional[dict]:
         """Return a single user by ID."""
+        if not self._ensure_conn():
+            return None
         cursor = self._conn.execute("SELECT * FROM users WHERE id = ?", (user_id,))
         row = cursor.fetchone()
         return dict(row) if row else None
@@ -406,7 +418,8 @@ class DatabaseManager:
 
     def get_setting(self, key: str) -> Optional[str]:
         """Get a persisted setting value (reconnects if the conn was closed while alive)."""
-        self._ensure_conn()
+        if not self._ensure_conn():
+            return None
         cursor = self._conn.execute(
             "SELECT value FROM app_settings WHERE key = ?", (key,)
         )
@@ -414,13 +427,15 @@ class DatabaseManager:
         return row[0] if row else None
 
     def set_setting(self, key: str, value: str) -> None:
-        """Set a persisted setting value (upsert). No-op if DB is closed.
+        """Set a persisted setting value (upsert).
 
         A connection closed while the app is still running self-heals via
-        `_ensure_conn`; a write during deliberate shutdown raises rather than
-        silently vanishing.
+        `_ensure_conn`; a write during deliberate shutdown is a benign no-op
+        (never resurrects/clobbers the DB — see the restore relaunch window).
         """
-        self._ensure_conn()
+        if not self._ensure_conn():
+            logger.debug(f"set_setting({key!r}) skipped — DB shutting down")
+            return
         self._conn.execute(
             "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
             (key, value),
@@ -631,21 +646,24 @@ class DatabaseManager:
             self._conn = None
 
     def mark_shutting_down(self) -> None:
-        """Mark the DB as deliberately closing (app exit) so post-close access
-        raises instead of silently reconnecting to an abandoned process."""
+        """Mark the DB as deliberately closing (app exit / restore relaunch) so
+        post-close access is a benign no-op instead of reconnecting to an
+        abandoned process (which would resurrect or clobber the DB file)."""
         self._shutting_down = True
 
-    def _ensure_conn(self) -> None:
-        """Guarantee an open connection before a query. A connection closed
-        while the app is still running (e.g. after a Restore that did not fully
-        relaunch) self-heals by reopening the DB file; a closed connection during
-        deliberate shutdown, or a reopen that fails, raises — never a silent no-op."""
+    def _ensure_conn(self) -> bool:
+        """True if a usable connection is available. A connection closed while the
+        app is still running (e.g. a Restore that did not fully relaunch) self-heals
+        by reopening the DB file. A connection closed for deliberate shutdown returns
+        False (no reconnect) so late access degrades to a benign no-op — never a
+        crash, never a resurrection. A reopen that genuinely fails propagates."""
         if self._conn is not None:
-            return
+            return True
         if self._shutting_down:
-            raise RuntimeError(f"Database accessed after shutdown: {self._db_path}")
+            return False
         logger.warning(f"DB connection was closed unexpectedly — reconnecting to {self._db_path}")
         self._init_db()
+        return True
 
 
 if __name__ == "__main__":

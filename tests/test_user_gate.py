@@ -8,15 +8,29 @@ resolve" (reinstall / restored DB / deleted active profile / corrupt setting)
 slip through into a usable-but-unset state.
 """
 import os
+import shutil
 import tempfile
 from unittest.mock import MagicMock
+
+import pytest
 
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp, resolve_startup_user, sessions_for_view
 
+_TMP_DIRS: list[str] = []
+
 
 def _fresh() -> DatabaseManager:
-    return DatabaseManager(db_path=os.path.join(tempfile.mkdtemp(), "t.db"))
+    d = tempfile.mkdtemp()
+    _TMP_DIRS.append(d)
+    return DatabaseManager(db_path=os.path.join(d, "t.db"))
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_tmp_dirs():
+    yield
+    while _TMP_DIRS:
+        shutil.rmtree(_TMP_DIRS.pop(), ignore_errors=True)
 
 
 def test_resolves_uid_when_last_user_is_valid():
@@ -84,6 +98,62 @@ def test_unset_user_shows_nothing_never_leaks_all_profiles():
 
 
 # --- gate enforcement: an unresolved user disables the app until selection ---
+
+def test_on_pause_skips_settings_flush_during_restore():
+    # #1: flushing in-memory settings during the restore relaunch window would
+    # clobber the freshly-restored DB.
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._restoring = True
+    app._save_user_settings = MagicMock()
+    assert EEGMeditationApp.on_pause(app) is True
+    app._save_user_settings.assert_not_called()
+
+
+def test_on_pause_flushes_settings_normally():
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._restoring = False
+    app._save_user_settings = MagicMock()
+    EEGMeditationApp.on_pause(app)
+    app._save_user_settings.assert_called_once()
+
+
+def test_deleting_active_profile_mid_session_stops_it_before_delete():
+    # #2: otherwise the tick thread keeps running and saves with user_id=None.
+    from app.session.manager import SessionState
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._current_user_id = 5
+    app._view_all_users = False
+    app._session_manager = MagicMock()
+    app._session_manager.state = SessionState.RUNNING
+    app._stop_and_save = MagicMock()
+    app._db = MagicMock()
+    app._refresh_profile = MagicMock()
+    app._open_user_gate = MagicMock()
+    EEGMeditationApp._on_user_delete(app, 5)
+    app._stop_and_save.assert_called_once()      # session stopped before removal
+    assert app._current_user_id is None
+    app._open_user_gate.assert_called_once()      # re-gate
+
+
+def test_reopen_gate_when_selection_left_no_user():
+    # #5: a failed pick/create at the gate must not strand the app (nav disabled, no popup).
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._current_user_id = None
+    app._view_all_users = False
+    app._refresh_profile = MagicMock()
+    app._open_user_gate = MagicMock()
+    EEGMeditationApp._reopen_gate_if_unresolved(app)
+    app._open_user_gate.assert_called_once()
+
+
+def test_reopen_gate_noop_when_user_resolved():
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._current_user_id = 3
+    app._view_all_users = False
+    app._open_user_gate = MagicMock()
+    EEGMeditationApp._reopen_gate_if_unresolved(app)
+    app._open_user_gate.assert_not_called()
+
 
 def test_open_user_gate_disables_bottom_nav_and_opens_modal():
     app = EEGMeditationApp.__new__(EEGMeditationApp)  # bypass heavy __init__/build

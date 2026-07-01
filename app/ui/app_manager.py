@@ -227,7 +227,7 @@ class EEGMeditationApp(App):
     def _persist_session_program(self, uid: int) -> None:
         """Persist the active editable program + its name + timer mode for a user."""
         if not uid:
-            return
+            return  # silent-ok: persistence helper; no active user = nothing to persist
         self._db.set_user_json_setting(uid, "session_program", self._session_program_segments)
         self._db.set_user_setting(uid, "timer_mode", self._timer_mode)
         self._db.set_user_setting(uid, "session_program_name", self._session_program_name)
@@ -965,6 +965,7 @@ class EEGMeditationApp(App):
         if uid is None:
             return None
         self._current_user_id = uid
+        self._view_all_users = False  # a concrete user is active, not the All-Users view
         self._load_user_settings(uid)
         logger.info(f"Restored last user id={uid}")
         return uid
@@ -975,6 +976,14 @@ class EEGMeditationApp(App):
         the 'app unusable without a user' enforcement can't drift between them."""
         self._bottom_nav.disabled = True
         Clock.schedule_once(self._show_first_run_popup, delay)
+
+    def _reopen_gate_if_unresolved(self) -> None:
+        """After a gate create/pick attempt, re-open the gate if no concrete user
+        ended up set (invalid name, or a stale/deleted profile row) — otherwise the
+        popup is gone, nav stays disabled, and the app is stranded with no user."""
+        if not self._current_user_id and not self._view_all_users:
+            self._refresh_profile()  # drop any stale row from the picker list
+            self._open_user_gate(0)
 
     def _show_first_run_popup(self, dt) -> None:
         """Show a name-entry popup on first run (no users in DB).
@@ -1009,11 +1018,13 @@ class EEGMeditationApp(App):
             self._gate_popup = None
             popup.dismiss()
             self._on_wizard_complete(name, None, None)
+            self._reopen_gate_if_unresolved()
 
         def _on_pick(user_id: int) -> None:
             self._gate_popup = None
             popup.dismiss()
             self._on_pick_existing_user(user_id, source="first_run")
+            self._reopen_gate_if_unresolved()
 
         form = UserPickerForm(
             on_create=_on_create,
@@ -3347,6 +3358,7 @@ class EEGMeditationApp(App):
 
         if source == "wizard":
             self._current_user_id = user_id
+            self._view_all_users = False
             self._db.set_setting("last_user_id", str(user_id))
             self._wizard_screen._user_name = name
             self._wizard_screen._advance_to_step2()
@@ -3379,8 +3391,16 @@ class EEGMeditationApp(App):
         the no-user state, so re-enter the hard gate instead of leaving the app
         usable with nothing selected."""
         deleted_active = self._current_user_id == user_id
+        if deleted_active and self._session_manager.state in (
+            SessionState.RUNNING, SessionState.PAUSED
+        ):
+            # Stop + persist the running session under this user BEFORE removing
+            # the profile — otherwise the tick thread keeps running and saves it
+            # with user_id=None (an orphaned, unattributable session).
+            self._stop_and_save("user")
         if deleted_active:
             self._current_user_id = None
+            self._view_all_users = False
         self._db.delete_user(user_id)
         self._refresh_profile()
         if deleted_active:
@@ -3395,7 +3415,7 @@ class EEGMeditationApp(App):
         """Persist current UI settings for the active user."""
         uid = self._current_user_id
         if not uid:
-            return
+            return  # silent-ok: batch persistence; no active user = nothing to save
         # Sync timer settings from the UI into the headless model.
         self._timer_state.set_enabled(self._settings_screen.timer_enabled)
         self._timer_state.set_duration(self._settings_screen.timer_minutes)
@@ -3683,7 +3703,11 @@ class EEGMeditationApp(App):
         """
         self._is_paused = True
         logger.info("on_pause fired — _is_paused=True")
-        self._save_user_settings()
+        # Skip the settings flush during a restore's relaunch window (mirrors
+        # on_stop): the DB was just replaced with the imported file, so writing
+        # the old in-memory settings back would clobber the freshly-restored data.
+        if not getattr(self, "_restoring", False):
+            self._save_user_settings()
         return True
 
     def on_resume(self) -> None:

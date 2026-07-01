@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **App could run with no active user, silently dropping per-user actions** (issue #29): after a reinstall, a restored/edited database, deleting the active profile, or a corrupt `last_user_id`, the app started usable but with no user selected — so saving a Session Program (and other per-user actions) silently did nothing, and History/Diary could show every profile's sessions commingled. The app now hard-gates on a resolved user (a blocking, un-escapable profile picker; the bottom nav stays disabled until you choose or create one), re-gates when you delete the active profile, and never falls through to all-profiles data for an unset user. Per-user actions now explain "select a profile" instead of failing silently; and a database connection closed while the app is still running (e.g. after a restore) self-heals instead of dropping writes.
+
 ## [1.4.0] - 2026-06-29
 
 ### Added

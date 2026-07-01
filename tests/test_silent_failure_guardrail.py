@@ -39,10 +39,24 @@ def _marked(lines: list[str], node: ast.AST) -> bool:
     return any(MARKER.search(lines[i]) for i in range(node.lineno - 1, min(end, len(lines))))
 
 
-def _is_absence_check(test_src: str) -> bool:
-    return ("not self._current_user_id" in test_src
+def _aliases_of_current_user(fn: ast.AST) -> set[str]:
+    """Locals assigned directly from self._current_user_id inside fn — so an
+    aliased gate check (`uid = self._current_user_id; if not uid: return`) is
+    caught, not just the literal attribute."""
+    aliases = set()
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Assign) and ast.unparse(node.value).strip() == "self._current_user_id":
+            aliases.update(t.id for t in node.targets if isinstance(t, ast.Name))
+    return aliases
+
+
+def _is_absence_check(test_src: str, aliases: set[str] = frozenset()) -> bool:
+    if ("not self._current_user_id" in test_src
             or "self._current_user_id is None" in test_src
-            or "self._current_user_id == None" in test_src)
+            or "self._current_user_id == None" in test_src):
+        return True
+    return any(f"not {a}" in test_src or f"{a} is None" in test_src
+               or f"{a} == None" in test_src for a in aliases)
 
 
 def find_silent_gate_returns(src: str, filename: str = "<t>") -> list[tuple]:
@@ -52,8 +66,9 @@ def find_silent_gate_returns(src: str, filename: str = "<t>") -> list[tuple]:
     for fn in ast.walk(tree):
         if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
+        aliases = _aliases_of_current_user(fn)
         for node in ast.walk(fn):
-            if not (isinstance(node, ast.If) and _is_absence_check(ast.unparse(node.test))):
+            if not (isinstance(node, ast.If) and _is_absence_check(ast.unparse(node.test), aliases)):
                 continue
             body_src = " ".join(ast.unparse(s) for s in node.body)
             silent = any(isinstance(s, (ast.Return, ast.Pass)) for s in node.body)
@@ -105,6 +120,13 @@ def test_respects_silent_ok_marker():
     src = ("class A:\n    def h(self):\n        if not self._current_user_id:\n"
            "            return  # silent-ok: batch save, nothing to persist\n")
     assert not find_silent_gate_returns(src)
+
+
+def test_flags_aliased_gate_return():
+    # #4: `uid = self._current_user_id; if not uid: return` must be caught too.
+    src = ("class A:\n    def h(self):\n        uid = self._current_user_id\n"
+           "        if not uid:\n            return\n")
+    assert find_silent_gate_returns(src)
 
 
 def test_ignores_positive_user_check():
