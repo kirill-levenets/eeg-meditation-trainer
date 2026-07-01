@@ -117,22 +117,39 @@ def test_on_pause_flushes_settings_normally():
     app._save_user_settings.assert_called_once()
 
 
-def test_deleting_active_profile_mid_session_stops_it_before_delete():
-    # #2: otherwise the tick thread keeps running and saves with user_id=None.
+def test_deleting_active_profile_mid_session_discards_it_and_regates():
+    # #2/#3: the running session is discarded (not saved as an orphan), and the
+    # app re-enters the gate instead of running with no user.
     from app.session.manager import SessionState
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._current_user_id = 5
     app._view_all_users = False
     app._session_manager = MagicMock()
     app._session_manager.state = SessionState.RUNNING
-    app._stop_and_save = MagicMock()
+    app._discard_running_session = MagicMock()
     app._db = MagicMock()
+    app._db.get_all_users.return_value = []       # last profile removed
     app._refresh_profile = MagicMock()
     app._open_user_gate = MagicMock()
     EEGMeditationApp._on_user_delete(app, 5)
-    app._stop_and_save.assert_called_once()      # session stopped before removal
+    app._discard_running_session.assert_called_once()  # discarded, not saved-then-orphaned
     assert app._current_user_id is None
-    app._open_user_gate.assert_called_once()      # re-gate
+    app._open_user_gate.assert_called_once()            # re-gate
+
+
+def test_deleting_last_profile_in_all_users_view_regates():
+    # #4: current is None (All-Users), deleting the last profile must still gate.
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._current_user_id = None
+    app._view_all_users = True
+    app._session_manager = MagicMock()
+    app._db = MagicMock()
+    app._db.get_all_users.return_value = []
+    app._refresh_profile = MagicMock()
+    app._open_user_gate = MagicMock()
+    EEGMeditationApp._on_user_delete(app, 9)
+    app._open_user_gate.assert_called_once()
+    assert app._view_all_users is False
 
 
 def test_reopen_gate_when_selection_left_no_user():
@@ -153,6 +170,25 @@ def test_reopen_gate_noop_when_user_resolved():
     app._open_user_gate = MagicMock()
     EEGMeditationApp._reopen_gate_if_unresolved(app)
     app._open_user_gate.assert_not_called()
+
+
+def test_gate_active_during_schedule_window_before_popup_exists():
+    # #5: un-escapable even before the popup is created (nav disabled, no user).
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._bottom_nav = MagicMock()
+    app._bottom_nav.disabled = True
+    app._current_user_id = None
+    app._view_all_users = False
+    assert EEGMeditationApp._gate_active(app) is True
+
+
+def test_gate_not_active_when_user_resolved():
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._bottom_nav = MagicMock()
+    app._bottom_nav.disabled = False
+    app._current_user_id = 3
+    app._view_all_users = False
+    assert EEGMeditationApp._gate_active(app) is False
 
 
 def test_open_user_gate_disables_bottom_nav_and_opens_modal():

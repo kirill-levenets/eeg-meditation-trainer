@@ -31,6 +31,7 @@ def _bool_db_methods() -> set[str]:
         n.name for n in ast.walk(tree)
         if isinstance(n, ast.FunctionDef)
         and isinstance(n.returns, ast.Name) and n.returns.id == "bool"
+        and not n.name.startswith("_")  # public mutators only, not private predicates
     }
 
 

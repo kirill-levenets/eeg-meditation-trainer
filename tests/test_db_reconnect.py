@@ -61,6 +61,21 @@ def test_direct_table_read_self_heals_after_close_while_alive():
     assert db.get_all_users()[0]["name"] == "Kirill"
 
 
+def test_write_path_self_heals_after_close_while_alive():
+    # #1: reconnect must cover writes too (tick-thread save_session/save_metrics_batch),
+    # not just reads/settings — otherwise a post-restore flush crashes and loses the session.
+    db = _fresh()
+    uid = db.create_user("Kirill")
+    db.close()  # closed while alive (e.g. restore that didn't relaunch)
+    sid = db.save_session(
+        {"duration": 60, "threshold_used": 50, "avg_meditation": 0, "avg_shamatha": 0,
+         "max_meditation": 0, "time_above_threshold": 0, "longest_streak": 0},
+        user_id=uid,
+    )
+    assert sid and sid > 0
+    assert len(db.get_all_sessions(user_id=uid)) == 1
+
+
 def test_use_after_shutdown_is_a_benign_noop_not_a_crash():
     # #6: once shutting down, access degrades to a no-op — never a crash dialog,
     # and never a reconnect that would resurrect / clobber the DB.

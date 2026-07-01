@@ -974,8 +974,19 @@ class EEGMeditationApp(App):
         """Enter the hard user gate: disable the bottom nav and open the blocking
         selection modal. Single source for build() / on_resume / self-delete so
         the 'app unusable without a user' enforcement can't drift between them."""
+        if getattr(self, "_gate_popup", None) is not None:
+            return  # a gate popup is already open — don't stack another
         self._bottom_nav.disabled = True
         Clock.schedule_once(self._show_first_run_popup, delay)
+
+    def _gate_active(self) -> bool:
+        """True while the app is gated on user selection — nav disabled, no concrete
+        user, not the deliberate All-Users view. Covers both the popup-open state and
+        the schedule window before the popup exists, so the gate is un-escapable throughout."""
+        nav = getattr(self, "_bottom_nav", None)
+        return bool(nav is not None and nav.disabled
+                    and not getattr(self, "_current_user_id", None)
+                    and not getattr(self, "_view_all_users", False))
 
     def _reopen_gate_if_unresolved(self) -> None:
         """After a gate create/pick attempt, re-open the gate if no concrete user
@@ -1638,6 +1649,17 @@ class EEGMeditationApp(App):
         if stats and session_id:
             self._live_screen.show_summary(session_id, stats)
 
+    def _discard_running_session(self) -> None:
+        """Halt a running session WITHOUT persisting it — used when its owning
+        profile is deleted, so no orphaned (user-less) session is written."""
+        self._stop_tick_thread()
+        self._session_manager.stop(reason="user")
+        self._audio.stop()
+        self._session_manager.reset()
+        self._timer_state.reset()
+        self._release_wake_lock()
+        self._stop_session_keep_alive_service()
+
     def _stop_and_save(self, reason: str = "user") -> None:
         """Stop session and save data immediately (no dialog). Main-thread path."""
         t_start = time.monotonic()
@@ -2132,9 +2154,10 @@ class EEGMeditationApp(App):
         default exit-on-escape never fires."""
         if key != 27:
             return False
-        # The mandatory user-selection gate must not be escapable: consume
-        # back/Esc so it can't be dismissed or exit the app with no user set.
-        if getattr(self, "_gate_popup", None) is not None:
+        # The mandatory user-selection gate must not be escapable: consume back/Esc
+        # whenever it is active — including the brief window after nav is disabled
+        # but before the popup is created (else Esc falls through to exit-the-app).
+        if self._gate_active():
             return True
         # An open Popup/ModalView dismisses itself on escape — let it.
         if any(isinstance(c, ModalView) for c in Window.children):
@@ -3252,6 +3275,10 @@ class EEGMeditationApp(App):
 
 
         try:
+            # No-op every DB access during the restore + relaunch window so nothing
+            # reopens the connection and clobbers the freshly-imported file. Error
+            # paths below replace self._db with a fresh (live) manager.
+            self._db.mark_shutting_down()
             self._db.close()
         except Exception:
             logger.exception("DB close before restore failed")
@@ -3394,17 +3421,22 @@ class EEGMeditationApp(App):
         if deleted_active and self._session_manager.state in (
             SessionState.RUNNING, SessionState.PAUSED
         ):
-            # Stop + persist the running session under this user BEFORE removing
-            # the profile — otherwise the tick thread keeps running and saves it
-            # with user_id=None (an orphaned, unattributable session).
-            self._stop_and_save("user")
-        if deleted_active:
+            # Discard the running session (don't persist) — otherwise the tick
+            # thread keeps running and writes an orphaned session, and saving it
+            # under a profile that's about to be deleted just orphans it anyway.
+            self._discard_running_session()
+        self._db.delete_user(user_id)
+        remaining = self._db.get_all_users()
+        # Re-enter the gate when no usable active user is left: the active profile
+        # was deleted, OR the last profile was removed while in the All-Users view
+        # (which would otherwise leave the app usable with zero users, no gate).
+        if deleted_active or not remaining:
             self._current_user_id = None
             self._view_all_users = False
-        self._db.delete_user(user_id)
-        self._refresh_profile()
-        if deleted_active:
+            self._refresh_profile()
             self._open_user_gate(0)
+        else:
+            self._refresh_profile()
 
     def _refresh_profile(self) -> None:
         users = self._db.get_all_users()
