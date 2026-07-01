@@ -11,7 +11,7 @@ import os
 import tempfile
 
 from app.storage.database import DatabaseManager
-from app.ui.app_manager import resolve_startup_user
+from app.ui.app_manager import resolve_startup_user, sessions_for_view
 
 
 def _fresh() -> DatabaseManager:
@@ -47,3 +47,36 @@ def test_none_when_last_user_setting_is_corrupt():
     db.create_user("Kirill")
     db.set_setting("last_user_id", "not-an-int")
     assert resolve_startup_user(db) is None
+
+
+# --- history view scoping: no cross-profile leak when the user is unset ---
+
+def _two_users_with_sessions(db) -> tuple[int, int]:
+    a = db.create_user("A")
+    b = db.create_user("B")
+    for uid in (a, a, b):
+        db._conn.execute(
+            "INSERT INTO sessions (user_id, date_time, duration) VALUES (?, '2026-07-01', 60)",
+            (uid,),
+        )
+    db._conn.commit()
+    return a, b
+
+
+def test_view_shows_only_the_current_users_sessions():
+    db = _fresh()
+    a, _b = _two_users_with_sessions(db)
+    rows = sessions_for_view(db, a, show_all=False)
+    assert len(rows) == 2 and all(r["user_id"] == a for r in rows)
+
+
+def test_all_users_view_shows_every_session():
+    db = _fresh()
+    _two_users_with_sessions(db)
+    assert len(sessions_for_view(db, None, show_all=True)) == 3
+
+
+def test_unset_user_shows_nothing_never_leaks_all_profiles():
+    db = _fresh()
+    _two_users_with_sessions(db)
+    assert sessions_for_view(db, None, show_all=False) == []

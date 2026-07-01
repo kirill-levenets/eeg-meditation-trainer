@@ -89,6 +89,18 @@ def resolve_startup_user(db) -> Optional[int]:
     return uid if db.get_user(uid) else None
 
 
+def sessions_for_view(db, current_uid: Optional[int], show_all: bool) -> list:
+    """Sessions to display: every user's when the deliberate All-Users view is
+    on, the current user's when a concrete user is active, and NONE when unset —
+    an unset user must never fall through to `get_all_sessions(None)` and leak
+    every profile's sessions."""
+    if show_all:
+        return db.get_all_sessions(user_id=None)
+    if current_uid:
+        return db.get_all_sessions(user_id=current_uid)
+    return []
+
+
 class EEGMeditationApp(App):
     """Main Kivy application for EEG Meditation Trainer."""
 
@@ -138,6 +150,10 @@ class EEGMeditationApp(App):
         self._flush_counter: int = 0
         self._current_session_id: Optional[int] = None
         self._current_user_id: Optional[int] = None
+        # True only for the deliberate "Show All Users" aggregate history view,
+        # distinct from _current_user_id=None (unset). Keeps the unset state from
+        # ever querying all profiles' sessions (cross-profile leak).
+        self._view_all_users: bool = False
         self._init_formula_slots()
         self.serial_device_override: Optional[str] = None
         self._wake_lock = None
@@ -1020,6 +1036,7 @@ class EEGMeditationApp(App):
             self._current_user_id = e.user_id
             self._db.set_setting("last_user_id", str(e.user_id))
             logger.info(f"Wizard: adopting existing user {e.name} (id={e.user_id})")
+        self._view_all_users = False  # a concrete user is now active
 
         # Set device
         if device_addr:
@@ -2233,7 +2250,7 @@ class EEGMeditationApp(App):
     def _open_saved_formula_chooser(self, slot_idx: int, toggle_btn) -> None:
         """Open a second popup listing saved formulas; selecting one assigns it to
         slot_idx and refreshes the picker's toggle button to its new visible state."""
-        if not self._current_user_id:
+        if self._require_user("choose a saved formula") is None:
             return
         formulas = self._db.get_saved_formulas(self._current_user_id)
 
@@ -2430,7 +2447,7 @@ class EEGMeditationApp(App):
 
     def _on_load_formula(self, index: int) -> None:
         """Load a saved formula into the first empty slot and apply it."""
-        if not self._current_user_id:
+        if self._require_user("load a formula") is None:
             return
         formulas = self._db.get_saved_formulas(self._current_user_id)
         if 0 <= index < len(formulas):
@@ -2454,7 +2471,7 @@ class EEGMeditationApp(App):
 
     def _on_delete_formula(self, index: int) -> None:
         """Delete a saved formula."""
-        if not self._current_user_id:
+        if self._require_user("delete a formula") is None:
             return
         self._db.remove_saved_formula(self._current_user_id, index)
         self._refresh_saved_formulas()
@@ -2555,7 +2572,7 @@ class EEGMeditationApp(App):
         return saved.get("segments") != segs
 
     def _on_program_load(self, index: int) -> None:
-        if not self._current_user_id:
+        if self._require_user("load a program") is None:
             return
         progs = self._db.get_saved_programs(self._current_user_id)
         if not (0 <= index < len(progs)):
@@ -2587,7 +2604,7 @@ class EEGMeditationApp(App):
         logger.info(f"Loaded program '{name}'")
 
     def _on_program_delete(self, index: int) -> None:
-        if not self._current_user_id:
+        if self._require_user("delete a program") is None:
             return
         progs = self._db.get_saved_programs(self._current_user_id)
         if not (0 <= index < len(progs)):
@@ -2988,7 +3005,7 @@ class EEGMeditationApp(App):
         if not force and not self._history_dirty:
             return
         with timed("history.get_all_sessions"):
-            sessions = self._db.get_all_sessions(user_id=self._current_user_id)
+            sessions = sessions_for_view(self._db, self._current_user_id, self._view_all_users)
         # Rows build in chunks (history_screen); spinner stays up until the last
         # chunk lands so the UI isn't frozen during the ~0.9s widget build.
         self.show_loading("Loading history…")
@@ -2999,7 +3016,7 @@ class EEGMeditationApp(App):
         self._history_dirty = True
 
     def _refresh_diary(self) -> None:
-        sessions = self._db.get_all_sessions(user_id=self._current_user_id)
+        sessions = sessions_for_view(self._db, self._current_user_id, self._view_all_users)
         self._diary_screen.populate_sessions(sessions)
 
     def _on_user_switch(self, user_id: Optional[int]) -> None:
@@ -3007,6 +3024,7 @@ class EEGMeditationApp(App):
         # Save current user's settings before switching
         self._save_user_settings()
         self._current_user_id = user_id
+        self._view_all_users = user_id is None  # None here = deliberate All-Users view
         if user_id:
             user = self._db.get_user(user_id)
             name = user["name"] if user else "Unknown"
@@ -3672,6 +3690,17 @@ class EEGMeditationApp(App):
         """
         self._is_paused = False
         logger.info("on_resume fired — _is_paused=False")
+        # Re-validate the user gate: if the process survived a background/kill
+        # in an unset state (not the deliberate All-Users view) and no gate is
+        # already up, re-enter it rather than resume usable with no user.
+        # getattr guards keep this safe if on_resume fires before build() runs.
+        if (getattr(self, "_bottom_nav", None) is not None
+                and getattr(self, "_current_user_id", None) is None
+                and not getattr(self, "_view_all_users", False)
+                and getattr(self, "_gate_popup", None) is None):
+            self._bottom_nav.disabled = True
+            Clock.schedule_once(self._show_first_run_popup, 0)
+            return
         try:
             Clock.schedule_once(lambda dt: self._refresh_ui_after_resume(), 0)
         except Exception:
