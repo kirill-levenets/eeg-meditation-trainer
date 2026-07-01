@@ -29,6 +29,7 @@ class DatabaseManager:
     def __init__(self, db_path: Optional[str] = None) -> None:
         self._db_path: str = db_path or APP.DB_PATH
         self._conn: Optional[sqlite3.Connection] = None
+        self._shutting_down: bool = False
         self._init_db()
 
     def _init_db(self) -> None:
@@ -404,9 +405,8 @@ class DatabaseManager:
     # ---- Settings persistence ----
 
     def get_setting(self, key: str) -> Optional[str]:
-        """Get a persisted setting value, or None if the DB is closed."""
-        if self._conn is None:
-            return None
+        """Get a persisted setting value (reconnects if the conn was closed while alive)."""
+        self._ensure_conn()
         cursor = self._conn.execute(
             "SELECT value FROM app_settings WHERE key = ?", (key,)
         )
@@ -416,13 +416,11 @@ class DatabaseManager:
     def set_setting(self, key: str, value: str) -> None:
         """Set a persisted setting value (upsert). No-op if DB is closed.
 
-        Defended against post-close writes so a Restore→Stop path that
-        runs `_save_user_settings` after the DB conn was already torn down
-        doesn't crash on AttributeError.
+        A connection closed while the app is still running self-heals via
+        `_ensure_conn`; a write during deliberate shutdown raises rather than
+        silently vanishing.
         """
-        if self._conn is None:
-            logger.debug(f"set_setting({key!r}) skipped — DB is closed")
-            return
+        self._ensure_conn()
         self._conn.execute(
             "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
             (key, value),
@@ -631,6 +629,23 @@ class DatabaseManager:
         if self._conn:
             self._conn.close()
             self._conn = None
+
+    def mark_shutting_down(self) -> None:
+        """Mark the DB as deliberately closing (app exit) so post-close access
+        raises instead of silently reconnecting to an abandoned process."""
+        self._shutting_down = True
+
+    def _ensure_conn(self) -> None:
+        """Guarantee an open connection before a query. A connection closed
+        while the app is still running (e.g. after a Restore that did not fully
+        relaunch) self-heals by reopening the DB file; a closed connection during
+        deliberate shutdown, or a reopen that fails, raises — never a silent no-op."""
+        if self._conn is not None:
+            return
+        if self._shutting_down:
+            raise RuntimeError(f"Database accessed after shutdown: {self._db_path}")
+        logger.warning(f"DB connection was closed unexpectedly — reconnecting to {self._db_path}")
+        self._init_db()
 
 
 if __name__ == "__main__":

@@ -72,6 +72,23 @@ PROGRAM_FORMULA_KEYS: tuple[str, ...] = ("program_formula", "program_formula_2",
 _MAX_FORMULAS = len(FORMULA_KEYS)
 
 
+def resolve_startup_user(db) -> Optional[int]:
+    """The uid to restore at startup, or None if the user must be prompted.
+
+    None covers no `last_user_id`, a corrupt value, and a stale id whose user was
+    deleted — every case must open the blocking user-select gate rather than let
+    the app run usable with no active user (issue #29 root cause)."""
+    saved = db.get_setting("last_user_id")
+    if not saved:
+        return None
+    try:
+        uid = int(saved)
+    except (ValueError, TypeError):
+        logger.warning(f"Corrupt last_user_id setting {saved!r} — prompting for user")
+        return None
+    return uid if db.get_user(uid) else None
+
+
 class EEGMeditationApp(App):
     """Main Kivy application for EEG Meditation Trainer."""
 
@@ -662,13 +679,19 @@ class EEGMeditationApp(App):
 
         self._bind_callbacks()
         self._link_graph_zoom()
-        self._restore_last_user()
+        resolved_user = self._restore_last_user()
         self._refresh_profile()
 
-        # First-run: show name entry popup if no users exist.
-        # Uses a Popup instead of the wizard Screen because TextInput
-        # inside a Screen doesn't get keyboard focus on some platforms.
-        if not self._db.get_all_users():
+        # Hard user gate: the app is never usable without a resolved concrete
+        # user. Gate on "did we resolve a user", NOT on whether the users table
+        # is non-empty — reinstall / restored DB / deleted-active-profile /
+        # corrupt last_user_id all leave users present but none current. Disable
+        # nav synchronously so there is no cold-start window where the app is
+        # tappable with no user; the selection modal re-enables it. The modal
+        # uses a Popup, not the wizard Screen, because a TextInput inside a
+        # Screen doesn't get keyboard focus on some platforms.
+        if resolved_user is None:
+            self._bottom_nav.disabled = True
             Clock.schedule_once(self._show_first_run_popup, 0.5)
         else:
             self._auto_scan_bt()
@@ -919,19 +942,17 @@ class EEGMeditationApp(App):
         self._settings_screen.set_backup_callback(self._on_backup_pressed)
         self._settings_screen.set_restore_callback(self._on_restore_pressed)
 
-    def _restore_last_user(self) -> None:
-        """Restore last selected user from DB settings on startup."""
-        saved = self._db.get_setting("last_user_id")
-        if saved:
-            try:
-                uid = int(saved)
-                user = self._db.get_user(uid)
-                if user:
-                    self._current_user_id = uid
-                    self._load_user_settings(uid)
-                    logger.info(f"Restored last user: {user['name']} (id={uid})")
-            except (ValueError, TypeError):
-                pass
+    def _restore_last_user(self) -> Optional[int]:
+        """Restore the last selected user; return the resolved uid, or None when
+        the app must prompt (no/stale/corrupt last_user_id). build() opens the
+        blocking user gate on None — the app is never left usable with no user."""
+        uid = resolve_startup_user(self._db)
+        if uid is None:
+            return None
+        self._current_user_id = uid
+        self._load_user_settings(uid)
+        logger.info(f"Restored last user id={uid}")
+        return uid
 
     def _show_first_run_popup(self, dt) -> None:
         """Show a name-entry popup on first run (no users in DB).
@@ -953,17 +974,22 @@ class EEGMeditationApp(App):
         content.add_widget(welcome)
 
         popup = Popup(
-            title="First-time Setup",
+            title="Select Profile",
             content=content,
             size_hint=(0.9, 0.7),
             auto_dismiss=False,
         )
+        # Tracked so _on_keyboard can make the gate un-escapable (back/Esc must
+        # not dismiss it or exit the app out from under an unresolved user).
+        self._gate_popup = popup
 
         def _on_create(name: str) -> None:
+            self._gate_popup = None
             popup.dismiss()
             self._on_wizard_complete(name, None, None)
 
         def _on_pick(user_id: int) -> None:
+            self._gate_popup = None
             popup.dismiss()
             self._on_pick_existing_user(user_id, source="first_run")
 
@@ -2070,6 +2096,10 @@ class EEGMeditationApp(App):
         default exit-on-escape never fires."""
         if key != 27:
             return False
+        # The mandatory user-selection gate must not be escapable: consume
+        # back/Esc so it can't be dismissed or exit the app with no user set.
+        if getattr(self, "_gate_popup", None) is not None:
+            return True
         # An open Popup/ModalView dismisses itself on escape — let it.
         if any(isinstance(c, ModalView) for c in Window.children):
             return False
@@ -2457,11 +2487,23 @@ class EEGMeditationApp(App):
         self._session_program_segments = segments
         self._persist_session_program(self._current_user_id)
 
+    def _require_user(self, action: str) -> Optional[int]:
+        """Return the active uid, or explain why the action can't run and return
+        None. Per-user handlers call this instead of a bare silent `return` — the
+        hard gate should make None unreachable, this is the defense-in-depth."""
+        if self._current_user_id:
+            return self._current_user_id
+        self._info_popup("No profile selected", f"Select a profile before you can {action}.")
+        return None
+
     def _on_program_save(self, name: str) -> None:
         """Save the active program under `name`. Unique names: an existing name
         overwrites (after confirm); a new name is added directly."""
         name = name.strip()
-        if not name or not self._current_user_id:
+        if not name:
+            self._info_popup("Name required", "Enter a name for the program before saving.")
+            return
+        if self._require_user("save a program") is None:
             return
         progs = self._db.get_saved_programs(self._current_user_id)
         existing = next((i for i, p in enumerate(progs) if p.get("name") == name), None)
@@ -2480,8 +2522,14 @@ class EEGMeditationApp(App):
     def _save_program(self, index, name: str) -> None:
         """Add (index=None) or overwrite (index set) a saved program by name."""
         if index is None:
-            self._db.add_saved_program(self._current_user_id, name,
-                                       self._session_program_segments)
+            if not self._db.add_saved_program(self._current_user_id, name,
+                                              self._session_program_segments):
+                self._info_popup(
+                    "Program library full",
+                    f"You can keep up to {self._db._MAX_SAVED_PROGRAMS} saved "
+                    f"programs. Delete one before saving another.",
+                )
+                return
             logger.info(f"Saved new program '{name}'")
         else:
             self._db.update_saved_program(self._current_user_id, index, name,
@@ -3301,11 +3349,17 @@ class EEGMeditationApp(App):
         self._refresh_profile()
 
     def _on_user_delete(self, user_id: int) -> None:
-        """Delete a user profile."""
-        if self._current_user_id == user_id:
+        """Delete a user profile. Deleting the ACTIVE profile drops the app into
+        the no-user state, so re-enter the hard gate instead of leaving the app
+        usable with nothing selected."""
+        deleted_active = self._current_user_id == user_id
+        if deleted_active:
             self._current_user_id = None
         self._db.delete_user(user_id)
         self._refresh_profile()
+        if deleted_active:
+            self._bottom_nav.disabled = True
+            Clock.schedule_once(self._show_first_run_popup, 0)
 
     def _refresh_profile(self) -> None:
         users = self._db.get_all_users()
@@ -3678,5 +3732,6 @@ class EEGMeditationApp(App):
         if self._session_manager.state in (SessionState.RUNNING, SessionState.PAUSED):
             self._stop_and_save()
         self._audio.cleanup()
+        self._db.mark_shutting_down()
         self._db.close()
         logger.info("Application closed")
