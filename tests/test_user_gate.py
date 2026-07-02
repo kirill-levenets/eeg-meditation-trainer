@@ -64,6 +64,15 @@ def test_none_when_last_user_setting_is_corrupt():
     assert resolve_startup_user(db) is None
 
 
+def test_none_when_last_user_is_zero_or_negative():
+    # '0'/'-1' are not valid uids — reject explicitly, don't rely on get_user(0).
+    db = _fresh()
+    db.create_user("Kirill")
+    for bad in ("0", "-1"):
+        db.set_setting("last_user_id", bad)
+        assert resolve_startup_user(db) is None
+
+
 # --- history view scoping: no cross-profile leak when the user is unset ---
 
 def _two_users_with_sessions(db) -> tuple[int, int]:
@@ -172,6 +181,52 @@ def test_reopen_gate_noop_when_user_resolved():
     app._open_user_gate.assert_not_called()
 
 
+def test_discard_running_session_deletes_partial_row_and_resets_ui():
+    # #1/#5/#12: the 60s flush may already have written a session row under the
+    # doomed profile — discard must delete it and reuse the shared UI teardown.
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._stop_tick_thread = MagicMock()
+    app._session_manager = MagicMock()
+    app._eeg_stream = MagicMock()
+    app._audio = MagicMock()
+    app._db = MagicMock()
+    app._current_session_id = 42     # partial flush happened
+    app._metrics_buffer = [{"t": 1}]
+    app._finalize_stop_ui = MagicMock()
+    EEGMeditationApp._discard_running_session(app)
+    app._db.delete_session.assert_called_once_with(42)   # orphan removed
+    assert app._current_session_id is None
+    assert app._metrics_buffer == []
+    app._finalize_stop_ui.assert_called_once_with(None, None)  # shared teardown
+
+
+def test_restore_refused_while_session_running():
+    # #3: a restore closes the DB and relaunches — a running session would be
+    # silently dropped. The entry point must refuse with an explanation.
+    from app.session.manager import SessionState
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._session_manager = MagicMock()
+    app._session_manager.state = SessionState.RUNNING
+    app._info_popup = MagicMock()
+    app._is_android = MagicMock()
+    EEGMeditationApp._on_restore_pressed(app)
+    app._info_popup.assert_called_once()      # explained, not silent
+    app._is_android.assert_not_called()        # restore flow never started
+
+
+def test_on_resume_during_restore_reshows_relaunch_popup():
+    # #9: if Android resumed the process post-restore, the DB is shut down —
+    # block behind the relaunch popup instead of running on a no-op DB.
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._is_paused = True
+    app._restoring = True
+    app._show_relaunch_popup = MagicMock()
+    app._open_user_gate = MagicMock()
+    EEGMeditationApp.on_resume(app)
+    app._show_relaunch_popup.assert_called_once()
+    app._open_user_gate.assert_not_called()
+
+
 def test_gate_active_during_schedule_window_before_popup_exists():
     # #5: un-escapable even before the popup is created (nav disabled, no user).
     app = EEGMeditationApp.__new__(EEGMeditationApp)
@@ -189,6 +244,40 @@ def test_gate_not_active_when_user_resolved():
     app._current_user_id = 3
     app._view_all_users = False
     assert EEGMeditationApp._gate_active(app) is False
+
+
+def test_gate_back_first_press_warns_second_exits(monkeypatch):
+    # #4: a gate with no exit traps a fresh-install user. Double-back must quit.
+    import app.ui.app_manager as am
+    fake_app_cls = MagicMock()
+    monkeypatch.setattr(am, "App", fake_app_cls)
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._last_back_time = 0.0
+    app._android_toast = MagicMock()
+    assert EEGMeditationApp._handle_gate_back(app) is True   # consumed
+    app._android_toast.assert_called_once()                   # warned
+    fake_app_cls.get_running_app.return_value.stop.assert_not_called()
+    assert EEGMeditationApp._handle_gate_back(app) is True   # second press < 2s
+    fake_app_cls.get_running_app.return_value.stop.assert_called_once()  # exits
+
+
+def test_open_user_gate_dedupes_but_always_disables_nav(monkeypatch):
+    # #7/#8: never stack two gate popups; nav must be disabled even when deduped.
+    import app.ui.app_manager as am
+    fake_clock = MagicMock()
+    monkeypatch.setattr(am, "Clock", fake_clock)
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._bottom_nav = MagicMock()
+    app._bottom_nav.disabled = False
+    app._gate_popup = MagicMock()   # a gate popup is already open
+    app._gate_event = None
+    EEGMeditationApp._open_user_gate(app, 0)
+    assert app._bottom_nav.disabled is True          # enforced despite dedupe
+    fake_clock.schedule_once.assert_not_called()      # no second popup
+    app._gate_popup = None
+    app._gate_event = MagicMock()   # one already scheduled (pre-popup window)
+    EEGMeditationApp._open_user_gate(app, 0)
+    fake_clock.schedule_once.assert_not_called()      # still no stacking
 
 
 def test_open_user_gate_disables_bottom_nav_and_opens_modal():

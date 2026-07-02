@@ -51,6 +51,12 @@ class _NullConnection:
     def close(self):
         pass
 
+    def backup(self, *_a, **_k):
+        # A silent no-op here would produce an EMPTY backup file that a user
+        # later restores over their data. Raise so the backup workers surface
+        # a "Backup failed" diagnostic instead.
+        raise sqlite3.OperationalError("database connection is closed (shutting down)")
+
 
 _NULL_CONN = _NullConnection()
 
@@ -89,6 +95,9 @@ class DatabaseManager:
         with self._reconnect_lock:
             if self._conn_obj is None:
                 logger.warning(f"DB connection was closed unexpectedly — reconnecting to {self._db_path}")
+                # Full _init_db (not a bare connect) on purpose: the file on disk
+                # may be an older-schema DB (e.g. a restored backup), so the
+                # idempotent create/migrate pass must run before queries hit it.
                 self._init_db()
             return self._conn_obj if self._conn_obj is not None else _NULL_CONN
 
@@ -231,10 +240,11 @@ class DatabaseManager:
 
     def save_session(self, stats: dict, user_id: Optional[int] = None,
                      session_name: str = "", custom_formulas: str = "",
-                     session_program: str = "", engine_version: str = "") -> int:
-        """Insert a session record and return its ID. `custom_formulas` is a JSON string.
-
-        `engine_version` stamps which metric-formula version produced the stored values.
+                     session_program: str = "", engine_version: str = "") -> Optional[int]:
+        """Insert a session record and return its ID — or None if the write was
+        no-oped by the null connection (shutting down); callers must treat None
+        as "not persisted". `custom_formulas` is a JSON string. `engine_version`
+        stamps which metric-formula version produced the stored values.
         """
         cursor = self._conn.execute(
             """
@@ -263,6 +273,9 @@ class DatabaseManager:
         )
         self._conn.commit()
         session_id = cursor.lastrowid
+        if session_id is None:
+            logger.error("save_session no-oped — DB is shutting down; session NOT persisted")
+            return None
         logger.info(f"Session {session_id} saved")
         return session_id
 
@@ -399,6 +412,10 @@ class DatabaseManager:
                 raise UserExistsError(user_id=existing["id"], name=name) from None
             raise
         uid = cursor.lastrowid
+        if uid is None:
+            # Null connection (shutting down): a fake None id would be persisted
+            # as last_user_id. Fail loudly — callers report_soft_error it.
+            raise sqlite3.OperationalError("database connection is closed (shutting down)")
         logger.info(f"User '{name}' created with id {uid}")
         return uid
 

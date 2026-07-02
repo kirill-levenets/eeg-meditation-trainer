@@ -85,3 +85,34 @@ def test_use_after_shutdown_is_a_benign_noop_not_a_crash():
     db.set_setting("theme", "Dark Green")     # must not raise
     assert db.get_setting("theme") is None    # no reconnect while shutting down
     assert db.get_all_sessions() == []
+
+
+def test_backup_during_shutdown_raises_not_silent_empty_file():
+    # A no-op backup would write an EMPTY backup the user later restores = data
+    # loss. It must raise sqlite3.Error so the workers surface "Backup failed".
+    import sqlite3
+    db = _fresh()
+    db.mark_shutting_down()
+    db.close()
+    with pytest.raises(sqlite3.Error):
+        db._conn.backup(sqlite3.connect(":memory:"))
+
+
+def test_create_user_during_shutdown_raises_not_fake_id():
+    # create_user is typed -> int; the null connection would return a None id
+    # that callers persist as last_user_id. Raise instead — callers report it.
+    import sqlite3
+    db = _fresh()
+    db.mark_shutting_down()
+    db.close()
+    with pytest.raises(sqlite3.Error):
+        db.create_user("Ghost")
+
+
+def test_save_session_during_shutdown_returns_none_not_fake_id():
+    db = _fresh()
+    uid = db.create_user("Kirill")
+    db.mark_shutting_down()
+    db.close()
+    sid = db.save_session({"duration": 60}, user_id=uid)
+    assert sid is None  # callers must treat None as "not persisted"

@@ -24,13 +24,21 @@ FEEDBACK_FNS = {
 MARKER = re.compile(r"#\s*silent-ok:\s*\S")
 
 
+def _returns_boolish(fn: ast.FunctionDef) -> bool:
+    """True for `-> bool`, `-> bool | None`, and `-> Optional[bool]` annotations —
+    all shapes a failure-signalling write can take."""
+    if fn.returns is None:
+        return False
+    src = ast.unparse(fn.returns).replace(" ", "")
+    return src in ("bool", "bool|None", "None|bool", "Optional[bool]")
+
+
 def _bool_db_methods() -> set[str]:
-    """DatabaseManager methods annotated `-> bool` (failure-signalling writes)."""
+    """DatabaseManager methods with a boolish return (failure-signalling writes)."""
     tree = ast.parse((APP / "storage" / "database.py").read_text())
     return {
         n.name for n in ast.walk(tree)
-        if isinstance(n, ast.FunctionDef)
-        and isinstance(n.returns, ast.Name) and n.returns.id == "bool"
+        if isinstance(n, ast.FunctionDef) and _returns_boolish(n)
         and not n.name.startswith("_")  # public mutators only, not private predicates
     }
 
@@ -139,6 +147,19 @@ def test_ignores_positive_user_check():
 def test_flags_ignored_bool_db_call():
     src = "class A:\n    def h(self):\n        self._db.add_saved_program(1, 'n', [])\n"
     assert find_ignored_bool_db_calls(src, methods={"add_saved_program"})
+
+
+def test_boolish_annotations_are_matched():
+    # #11: `-> bool | None` / `-> Optional[bool]` are failure-signalling too.
+    src = ("class D:\n"
+           "    def add_x(self) -> bool | None: ...\n"
+           "    def add_y(self) -> 'Optional[bool]': ...\n"
+           "    def add_z(self) -> bool: ...\n"
+           "    def get_rows(self) -> list[bool]: ...\n")
+    fns = [n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef)]
+    matched = {f.name for f in fns if _returns_boolish(f)}
+    assert "add_x" in matched and "add_z" in matched
+    assert "get_rows" not in matched  # list[bool] is data, not a failure signal
 
 
 def test_passes_checked_bool_db_call():
