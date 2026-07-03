@@ -1675,12 +1675,22 @@ class EEGMeditationApp(App):
         if stats and session_id:
             self._live_screen.show_summary(session_id, stats)
 
+    def _session_pipeline_live(self) -> bool:
+        """True if a session is RUNNING/PAUSED *or* still in the BT-connect wait
+        (tick thread started, state still IDLE). This is the full window in which a
+        restore or active-profile delete would drop/orphan an in-flight session —
+        the state-only check misses the connecting phase (mirrors _on_connect_cancel)."""
+        return (self._session_manager.state in (SessionState.RUNNING, SessionState.PAUSED)
+                or getattr(self, "_waiting_for_bt", False)
+                or getattr(self, "_tick_thread", None) is not None)
+
     def _discard_running_session(self) -> None:
         """Halt a running session and DELETE its data — used when its owning
         profile is deleted. The 60s partial flush may already have written a
         session row under the doomed profile; without the delete it survives as
         an orphan. Mirrors _finish_stop's discard branch, then reuses the shared
         _finalize_stop_ui teardown so the Session screen returns to idle."""
+        self._waiting_for_bt = False  # also halt a session still in the BT-connect wait
         self._stop_tick_thread()
         self._session_manager.stop(reason="user")
         if APP.USE_MOCK_DEVICE:
@@ -3203,9 +3213,10 @@ class EEGMeditationApp(App):
 
     def _on_restore_pressed(self) -> None:
         """Pick a backup file and restore it."""
-        if self._session_manager.state in (SessionState.RUNNING, SessionState.PAUSED):
-            # A restore closes the DB and force-relaunches — a running session
-            # would be silently dropped. Refuse with an explanation instead.
+        if self._session_pipeline_live():
+            # A restore closes the DB and force-relaunches — a running (or
+            # connecting) session would be silently dropped. Refuse with an
+            # explanation instead.
             self._info_popup(
                 "Session in progress",
                 "Stop the current session before restoring a backup.",
@@ -3317,9 +3328,9 @@ class EEGMeditationApp(App):
     def _do_restore_and_restart(self, source_path: str) -> None:
 
 
-        if self._session_manager.state in (SessionState.RUNNING, SessionState.PAUSED):
-            # Defense for the async picker flow (a session may have started since
-            # _on_restore_pressed's check) — never silently drop a running session.
+        if self._session_pipeline_live():
+            # Defense for the async picker flow (a session may have started — or
+            # begun connecting — since _on_restore_pressed's check).
             self._info_popup(
                 "Session in progress",
                 "Stop the current session before restoring a backup.",
@@ -3331,8 +3342,13 @@ class EEGMeditationApp(App):
             # paths below replace self._db with a fresh (live) manager.
             self._db.mark_shutting_down()
             self._db.close()
-        except Exception:
+        except Exception as e:
+            # Surface it (not a silent abort) AND un-latch: mark_shutting_down()
+            # already ran, so without a fresh manager every later write would
+            # no-op into the null connection forever.
             logger.exception("DB close before restore failed")
+            report_soft_error("restore_failed", f"Could not close the database to restore: {e}")
+            self._db = DatabaseManager(db_path=APP.DB_PATH)
             return
 
         try:
@@ -3477,10 +3493,8 @@ class EEGMeditationApp(App):
         the no-user state, so re-enter the hard gate instead of leaving the app
         usable with nothing selected."""
         deleted_active = self._current_user_id == user_id
-        if deleted_active and self._session_manager.state in (
-            SessionState.RUNNING, SessionState.PAUSED
-        ):
-            # Discard the running session (don't persist) — otherwise the tick
+        if deleted_active and self._session_pipeline_live():
+            # Discard the running (or connecting) session — otherwise the tick
             # thread keeps running and writes an orphaned session, and saving it
             # under a profile that's about to be deleted just orphans it anyway.
             self._discard_running_session()

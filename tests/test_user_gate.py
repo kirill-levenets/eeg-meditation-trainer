@@ -214,6 +214,41 @@ def test_restore_refused_while_session_running():
     app._is_android.assert_not_called()        # restore flow never started
 
 
+def test_restore_refused_during_bt_connect_window():
+    # round-4: state is IDLE while connecting, but the tick thread is live and
+    # the session auto-starts on connect — must still refuse.
+    from app.session.manager import SessionState
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._session_manager = MagicMock()
+    app._session_manager.state = SessionState.IDLE
+    app._waiting_for_bt = True          # connecting
+    app._tick_thread = MagicMock()
+    app._info_popup = MagicMock()
+    app._is_android = MagicMock()
+    EEGMeditationApp._on_restore_pressed(app)
+    app._info_popup.assert_called_once()
+    app._is_android.assert_not_called()
+
+
+def test_delete_active_profile_discards_during_bt_connect():
+    # round-4: same connecting-window gap for the profile-delete discard guard.
+    from app.session.manager import SessionState
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._current_user_id = 5
+    app._view_all_users = False
+    app._session_manager = MagicMock()
+    app._session_manager.state = SessionState.IDLE
+    app._waiting_for_bt = True
+    app._tick_thread = MagicMock()
+    app._discard_running_session = MagicMock()
+    app._db = MagicMock()
+    app._db.get_all_users.return_value = []
+    app._refresh_profile = MagicMock()
+    app._open_user_gate = MagicMock()
+    EEGMeditationApp._on_user_delete(app, 5)
+    app._discard_running_session.assert_called_once()   # connecting session halted
+
+
 def test_on_resume_during_restore_reshows_relaunch_popup():
     # #9: if Android resumed the process post-restore, the DB is shut down —
     # block behind the relaunch popup instead of running on a no-op DB.
