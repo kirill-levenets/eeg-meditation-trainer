@@ -655,3 +655,91 @@ class TestStyledButtonThemeText(unittest.TestCase):
                 self.assertEqual(list(b._icon_label.disabled_color), list(b._label.disabled_color))
             b.disabled = False
             self.assertEqual(list(b._label.color), list(b.text_color))   # restored on enable
+
+
+class TestStyledButtonPressRing(unittest.TestCase):
+    """Issue #33 Layer 1 (B): press shows an edge-visible ring that contrasts with the
+    SURROUNDING surface (light on dark themes, dark on light) — not the button fill."""
+
+    def setUp(self):
+        from app.ui.theme import C
+        self._C = C
+        self._orig = C.current_theme if hasattr(C, "current_theme") else "Dark Blue"
+
+    def tearDown(self):
+        self._C.set_theme(self._orig if isinstance(self._orig, str) else "Dark Blue")
+
+    def test_press_raises_ring(self):
+        from app.ui.theme import C, StyledButton
+        C.set_theme("Dark Blue")
+        b = StyledButton(text="Save", bg_color=C.ACCENT)
+        self.assertEqual(b._ring_alpha, 0.0)          # idle: no ring
+        b.state = "down"
+        self.assertEqual(b._ring_alpha, StyledButton._RING_MAX)   # pressed: ring on, immediately
+
+    def test_ring_color_contrasts_surface_not_fill(self):
+        # A bright accent fill would give a DARK readable_fg; the ring must instead be light
+        # on dark themes so its glow is visible against the card/app bg it's drawn onto.
+        from app.ui.theme import C, StyledButton
+        C.set_theme("Dark Blue")
+        b = StyledButton(text="Save", bg_color=C.ACCENT)   # bright fill
+        self.assertGreater(b._ring_rgb()[0], 0.5)          # light ring on a dark theme
+        C.set_theme("Light Cream")
+        self.assertLess(b._ring_rgb()[0], 0.5)             # dark ring on a light theme
+
+
+class TestStyledButtonFlashConfirm(unittest.TestCase):
+    """Issue #33 Layer 2 (E): flash_confirm briefly morphs the label/icon to a success
+    cue, then reverts to the true original (reentrancy-safe)."""
+
+    def test_swaps_label_then_reverts(self):
+        from app.ui.theme import C, StyledButton
+        b = StyledButton(text="Save", bg_color=C.ACCENT)
+        b.flash_confirm("Saved")
+        self.assertTrue(b._confirming)
+        self.assertEqual(b._label.text, "Saved")
+        b._end_confirm()
+        self.assertFalse(b._confirming)
+        self.assertEqual(b._label.text, "Save")
+
+    def test_reentrant_keeps_true_original(self):
+        from app.ui.theme import C, StyledButton
+        b = StyledButton(text="Save", bg_color=C.ACCENT)
+        b.flash_confirm("Saved")
+        b.flash_confirm("Saved")            # tapped again mid-flash
+        self.assertEqual(b._confirm_orig[0], "Save")   # not the intermediate "Saved"
+        b._end_confirm()
+        self.assertEqual(b._label.text, "Save")
+
+    def test_morphs_and_restores_icon(self):
+        from app.ui.theme import C, Icons, StyledButton
+        b = StyledButton(text="Save", icon=Icons.PENCIL, bg_color=C.ACCENT)
+        b.flash_confirm("Saved", icon=Icons.CHECK)
+        self.assertEqual(b._icon_label.text, Icons.CHECK)
+        b._end_confirm()
+        self.assertEqual(b._icon_label.text, Icons.PENCIL)
+
+    def test_text_only_button_renders_icon_inline(self):
+        # No _icon_label to morph, so the glyph is drawn inline via Icons-font markup
+        # (a bare MDI codepoint would be tofu in the label's Roboto font).
+        from app.ui.theme import C, Icons, StyledButton
+        b = StyledButton(text="Save", bg_color=C.ACCENT)
+        self.assertIsNone(b._icon_label)
+        b.flash_confirm("Saved", icon=Icons.CHECK)
+        self.assertTrue(b._label.markup)
+        self.assertIn(Icons.CHECK, b._label.text)
+        self.assertIn("Saved", b._label.text)
+        b._end_confirm()
+        self.assertFalse(b._label.markup)
+        self.assertEqual(b._label.text, "Save")
+
+    def test_tints_bg_then_restores(self):
+        # Text-only buttons need a colour pop to read the confirm; MDI check glyph would
+        # be tofu in the label's Roboto font, so bg tint is the font-safe cue.
+        from app.ui.theme import C, StyledButton
+        b = StyledButton(text="Save", bg_color=C.ACCENT)
+        orig = list(b.bg_color)
+        b.flash_confirm("Saved", confirm_color=C.SHAMATHA)
+        self.assertEqual(list(b.bg_color), list(C.SHAMATHA))
+        b._end_confirm()
+        self.assertEqual(list(b.bg_color), orig)

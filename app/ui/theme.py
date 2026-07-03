@@ -8,6 +8,8 @@ import os
 import struct
 import zlib
 
+from kivy.animation import Animation
+from kivy.clock import Clock
 from kivy.core.text import LabelBase
 from kivy.core.window import Window
 from kivy.graphics import Color, Line, Rectangle, RoundedRectangle
@@ -442,6 +444,10 @@ class StyledButton(ButtonBehavior, BoxLayout):
     bold = BooleanProperty(True)
     icon = StringProperty("")  # optional left-side icon text
     outline = BooleanProperty(False)  # draw border instead of fill
+    _ring_alpha = NumericProperty(0.0)  # press-ring opacity: snaps on at press, fades on release
+
+    _RING_MAX = 0.9
+    _RING_FADE = 0.28  # seconds
 
     def __init__(self, **kwargs):
         kwargs.setdefault("size_hint_y", None)
@@ -521,6 +527,10 @@ class StyledButton(ButtonBehavior, BoxLayout):
         else:
             self.add_widget(self._label)
 
+        self._confirming = False
+        self._confirm_orig = None
+        self._confirm_ev = None
+
         self.bind(
             text=self._update_label,
             text_color=self._update_colors,
@@ -528,9 +538,50 @@ class StyledButton(ButtonBehavior, BoxLayout):
             size=self._redraw,
             pos=self._redraw,
             disabled=self._redraw,
+            _ring_alpha=self._redraw,
         )
         self._redraw()
         C.add_listener(self._on_theme_change)
+
+    def _ring_rgb(self):
+        """Press-ring colour: derived from the SURROUNDING surface (C.TEXT tracks the theme —
+        light on dark, dark on light), NOT the button fill, so the ring stays visible on the
+        card/app bg it's drawn onto. Same rule as the graph expand glyph."""
+        return list(C.TEXT)[:3]
+
+    def flash_confirm(self, text="Saved", icon=None, confirm_color=None, duration=1.1):
+        """Briefly morph the label/icon (and optionally the fill) to a success cue, then
+        revert. Main-thread only. Reentrant: a repeat tap restarts the timer but keeps the
+        true original."""
+        if self._confirming:
+            Clock.unschedule(self._confirm_ev)
+        else:
+            orig_icon = self._icon_label.text if self._icon_label else None
+            self._confirm_orig = (self.text, orig_icon, list(self.bg_color))
+            self._confirming = True
+        self.text = text
+        if icon is not None and self._icon_label is not None:
+            self._icon_label.text = icon
+        elif icon is not None:
+            # text-only button: render the glyph inline via Icons-font markup — a bare MDI
+            # codepoint is tofu in the label's Roboto font (same trick as the band-totals arrow).
+            self._label.markup = True
+            self.text = f"[font=Icons]{icon}[/font] {text}"
+        if confirm_color is not None:
+            self.bg_color = list(confirm_color)
+        self._confirm_ev = Clock.schedule_once(self._end_confirm, duration)
+
+    def _end_confirm(self, *_args):
+        if not self._confirming:
+            return
+        text, icon, bg = self._confirm_orig
+        self._label.markup = False
+        self.text = text
+        if icon is not None and self._icon_label is not None:
+            self._icon_label.text = icon
+        self.bg_color = bg
+        self._confirming = False
+        self._confirm_ev = None
 
     def _on_theme_change(self, *args):
         """Re-apply the glyph colour role, then repaint."""
@@ -588,6 +639,14 @@ class StyledButton(ButtonBehavior, BoxLayout):
             else:
                 Color(*bg)
                 RoundedRectangle(pos=self.pos, size=self.size, radius=[S.RADIUS])
+            # Press ring (issue #33): edge-visible cue that lingers on release. Colour
+            # contrasts with the surrounding surface, not the fill (see _ring_rgb).
+            if self._ring_alpha > 0 and not self.disabled:
+                Color(*self._ring_rgb(), self._ring_alpha)
+                Line(
+                    rounded_rectangle=[self.x, self.y, self.width, self.height, S.RADIUS],
+                    width=dp(2),
+                )
         # Disabled: dim BOTH label and icon to 60% of the max-contrast glyph for the
         # (greyed) disabled bg. The greyed background already signals 'disabled', so the
         # glyph stays legible (~4:1) instead of washing into a light card the way the
@@ -607,6 +666,11 @@ class StyledButton(ButtonBehavior, BoxLayout):
             self._icon_label.disabled_color = fg
 
     def on_state(self, *args):
+        if self.state == "down":
+            Animation.cancel_all(self, "_ring_alpha")
+            self._ring_alpha = self._RING_MAX  # snap on: visible before the fade
+        else:
+            Animation(_ring_alpha=0.0, duration=self._RING_FADE, t="out_quad").start(self)
         self._redraw()
 
 
