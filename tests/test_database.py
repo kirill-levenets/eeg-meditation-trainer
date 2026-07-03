@@ -375,7 +375,9 @@ def test_saved_programs_roundtrip(tmp_path):
     assert db.add_saved_program(uid, "Ramp", segs) is True
     got = db.get_saved_programs(uid)
     assert got == [{"name": "Ramp", "segments": segs}]
-    db.update_saved_program(uid, 0, "Ramp2", segs)
+    assert db.update_saved_program(uid, 0, "Ramp2", segs) is True
+    assert db.get_saved_programs(uid)[0]["name"] == "Ramp2"
+    assert db.update_saved_program(uid, 5, "Nope", segs) is False   # out of range → no write
     assert db.get_saved_programs(uid)[0]["name"] == "Ramp2"
     db.remove_saved_program(uid, 0)
     assert db.get_saved_programs(uid) == []

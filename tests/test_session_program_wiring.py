@@ -75,6 +75,9 @@ class _StubSettings:
     def set_program_mode(self, mode):
         self.mode = mode
 
+    def confirm_program_saved(self):
+        self.confirmed = True
+
 
 class _StubLive:
     def __init__(self):

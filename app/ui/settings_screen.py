@@ -359,7 +359,7 @@ class SettingsScreen(Screen):
             background_color=list(C.BG_INPUT),
             size_hint_x=0.7,
         )
-        program_save_btn = StyledButton(
+        self._program_save_btn = StyledButton(
             text="Save",
             font_size=F.SMALL,
             bg_color=C.ACCENT,
@@ -367,9 +367,9 @@ class SettingsScreen(Screen):
             size_hint_y=None,
             height=dp(36),
         )
-        program_save_btn.bind(on_release=self._on_program_save_pressed)
+        self._program_save_btn.bind(on_release=self._on_program_save_pressed)
         program_save_row.add_widget(self._program_name_input)
-        program_save_row.add_widget(program_save_btn)
+        program_save_row.add_widget(self._program_save_btn)
 
         saved_programs_label = Label(
             text="Saved Programs:",
@@ -1641,6 +1641,12 @@ class SettingsScreen(Screen):
         logger.info(f"Save program pressed: name={name!r}")
         if self._on_program_save_cb:
             self._on_program_save_cb(name)
+
+    def confirm_program_saved(self) -> None:
+        """Flash a success cue on the program Save button (issue #33 E). Main-thread only."""
+        btn = getattr(self, "_program_save_btn", None)
+        if btn is not None:
+            btn.flash_confirm("Saved", icon=Icons.CHECK, confirm_color=C.SHAMATHA)
 
     def _on_program_load_pressed(self, btn) -> None:
         idx = getattr(btn, "program_index", -1)
