@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **App could run with no active user, silently dropping per-user actions** (issue #29): after a reinstall, a restored/edited database, deleting the active profile, or a corrupt `last_user_id`, the app started usable but with no user selected — so saving a Session Program (and other per-user actions) silently did nothing, and History/Diary could show every profile's sessions commingled. The app now hard-gates on a resolved user (a blocking, un-escapable profile picker; the bottom nav stays disabled until you choose or create one), re-gates when you delete the active profile, and never falls through to all-profiles data for an unset user. Per-user actions now explain "select a profile" instead of failing silently; and a database connection closed while the app is still running (e.g. after a restore) self-heals instead of dropping writes.
+- **"Off" audio feedback still played rain below threshold**: with the below-threshold sound set to Off (dual-zone feedback, v1.4.0), a session prepared no players, but the start path treated the empty set as "not yet configured" and fell back to a rain loop — so noise played anyway (most visible in program mode). The start path now plays only the configured channels (empty = silent); the Settings "Test" button still previews the rain sweep explicitly.
 
 ## [1.4.0] - 2026-06-29
 
