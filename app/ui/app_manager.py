@@ -283,7 +283,7 @@ class EEGMeditationApp(App):
         "" / "none" -> the silent sentinel (no player is instantiated for it)."""
         if source_id in ("", "none"):
             return ("none", "")
-        if source_id in ("noise", "tone"):
+        if source_id in ("noise", "tone", "heartbeat"):
             return (source_id, "")
         return ("custom", source_id)
 
@@ -2415,13 +2415,22 @@ class EEGMeditationApp(App):
             [k for k in graph.visible_keys() if k not in PROGRAM_FORMULA_KEYS],
         )
 
-    def _on_test_audio(self) -> None:
-        """Sweep the currently-selected feedback source, then the alert channels."""
+    def _test_audio_sources(self) -> tuple[dict, str, str]:
+        """(prepared sources, below id, reward id) for the Test button — both the
+        selected below feedback source and the reward source (so Crickets etc. preview)."""
         gid = self._global_feedback_id()
         sources = {gid: self._source_spec(gid)}
+        reward_id = self._reward_id()
+        if reward_id:
+            sources[reward_id] = self._source_spec(reward_id)
+        return sources, gid, reward_id
+
+    def _on_test_audio(self) -> None:
+        """Sample the selected feedback + reward sources, then the alert channels."""
+        sources, gid, reward_id = self._test_audio_sources()
         self._warn_missing_feedback_files(sources)
         self._audio.prepare_feedback(sources, gid)
-        self._audio.test_audio()
+        self._audio.test_audio(reward_id)
 
     def _on_line_width_change(self, width: float) -> None:
         self._live_screen.graph.set_line_width(width)

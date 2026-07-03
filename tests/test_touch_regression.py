@@ -95,26 +95,18 @@ def _settings_audio_open():
     return s
 
 
-def test_audio_custom_hidden_no_dead_zones():
+def test_audio_source_pickers_no_dead_zones():
+    # Feedback/reward source selection is a picker button (opens a popup), not a
+    # conditional custom RevealBox row, so there is no collapse-in-place anti-pattern.
     s = _settings_audio_open()
     try:
-        s.set_feedback_source("noise", "")   # custom row hidden
-        _pump()
-        assert not find_dead_zones(s), _describe(find_dead_zones(s))
+        for src, path in (("noise", ""), ("custom", "/tmp/x.wav"), ("heartbeat", "")):
+            s.set_reward_source(src, path)
+            _pump()
+            assert not find_dead_zones(s), _describe(find_dead_zones(s))
         bad = find_collapsed_disabled_with_children(s)
         assert not bad, ("hidden-by-collapse disabled widgets still holding interactive "
                          "children (detach them instead): "
                          + ", ".join(type(w).__name__ for w in bad))
-    finally:
-        _unmount(s)
-
-
-def test_audio_custom_shown_no_dead_zones():
-    s = _settings_audio_open()
-    try:
-        s.set_feedback_source("custom", "/tmp/x.wav")   # custom row shown
-        _pump()
-        dead = find_dead_zones(s)
-        assert not dead, _describe(dead)
     finally:
         _unmount(s)

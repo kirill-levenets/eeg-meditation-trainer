@@ -1,3 +1,5 @@
+import os
+
 from app.audio_feedback.noise import AudioEngine
 from app.config import APP
 from app.ui.app_manager import EEGMeditationApp
@@ -81,6 +83,45 @@ def test_source_spec_none_is_silent_sentinel():
     assert EEGMeditationApp._source_spec("") == ("none", "")
     assert EEGMeditationApp._source_spec("noise") == ("noise", "")
     assert EEGMeditationApp._source_spec("/x.wav") == ("custom", "/x.wav")
+
+
+def test_source_spec_heartbeat_is_builtin_not_custom():
+    assert EEGMeditationApp._source_spec("heartbeat") == ("heartbeat", "")
+
+
+def test_reward_id_resolves_heartbeat_builtin():
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._reward_source = "heartbeat"
+    assert app._reward_id() == "heartbeat"
+
+
+def test_test_audio_sources_include_below_and_reward():
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._feedback_source, app._feedback_sound_path = "tone", ""
+    app._reward_source, app._reward_sound_path = "heartbeat", ""
+    sources, gid, reward_id = app._test_audio_sources()
+    assert gid == "tone"
+    assert reward_id == "heartbeat"
+    assert sources == {"tone": ("tone", ""), "heartbeat": ("heartbeat", "")}
+
+
+def test_test_audio_sources_omit_reward_when_off():
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._feedback_source, app._feedback_sound_path = "noise", ""
+    app._reward_source, app._reward_sound_path = "none", ""
+    sources, gid, reward_id = app._test_audio_sources()
+    assert reward_id == ""
+    assert sources == {"noise": ("noise", "")}
+
+
+def test_heartbeat_resolves_to_a_generated_playable_file():
+    e = AudioEngine()
+    try:
+        path = e._feedback_path_for("heartbeat")
+        assert path.endswith("heartbeat.wav")
+        assert os.path.isfile(path)
+    finally:
+        e.cleanup()
 
 
 def test_reward_id_resolves_none_builtin_and_missing_custom():

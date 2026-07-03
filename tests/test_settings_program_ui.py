@@ -56,8 +56,23 @@ def test_set_feedback_source_does_not_fire_callback():
     s.set_feedback_source_callback(lambda src, path: fired.append((src, path)))
     s.set_feedback_source("custom", "/tmp/x.wav")  # restore -> silent
     assert fired == []
-    s._on_feedback_source_pressed(s._feedback_source_buttons["tone"])  # user action -> fires
-    assert fired == [("tone", "/tmp/x.wav")]
+    s._choose_feedback_source("tone")  # user action -> fires, clears stale custom path
+    assert fired == [("tone", "")]
+
+
+def test_choose_feedback_source_updates_button_label():
+    s = _screen()
+    s._choose_feedback_source("tone")
+    assert s._feedback_source_btn.text == "Tone"
+
+
+def test_choose_reward_crickets_fires_and_labels():
+    s = _screen()
+    fired = []
+    s.set_reward_source_callback(lambda src, path: fired.append((src, path)))
+    s._choose_reward_source("heartbeat")
+    assert fired == [("heartbeat", "")]
+    assert s._reward_source_btn.text == "Crickets"
 
 
 def test_segment_feedback_sound_roundtrips():
@@ -72,32 +87,21 @@ def test_segment_feedback_sound_roundtrips():
     assert "feedback_sound" not in out[1]   # Default is not serialized
 
 
-def test_custom_press_opens_chooser_when_no_path(monkeypatch):
+def test_custom_choice_opens_chooser(monkeypatch):
     import app.ui.settings_screen as ss
     calls = []
     monkeypatch.setattr(ss, "open_audio_file_chooser", lambda *a, **k: calls.append(a))
     s = _screen()
-    s.set_feedback_source("noise", "")
-    s._on_feedback_source_pressed(s._feedback_source_buttons["custom"])
-    assert len(calls) == 1, "tapping Custom with no file should open the chooser"
+    s._choose_feedback_source("custom")
+    assert len(calls) == 1, "choosing Custom file... should open the chooser"
 
 
-def test_custom_press_no_chooser_when_path_set(monkeypatch):
+def test_rain_choice_does_not_open_chooser(monkeypatch):
     import app.ui.settings_screen as ss
     calls = []
     monkeypatch.setattr(ss, "open_audio_file_chooser", lambda *a, **k: calls.append(a))
     s = _screen()
-    s.set_feedback_source("custom", "/tmp/x.wav")     # already configured
-    s._on_feedback_source_pressed(s._feedback_source_buttons["custom"])
-    assert calls == [], "re-tapping Custom with a file already set must not reopen the chooser"
-
-
-def test_rain_press_does_not_open_chooser(monkeypatch):
-    import app.ui.settings_screen as ss
-    calls = []
-    monkeypatch.setattr(ss, "open_audio_file_chooser", lambda *a, **k: calls.append(a))
-    s = _screen()
-    s._on_feedback_source_pressed(s._feedback_source_buttons["noise"])
+    s._choose_feedback_source("noise")
     assert calls == []
 
 

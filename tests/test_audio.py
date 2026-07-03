@@ -1,14 +1,20 @@
 import os
+import struct
 import threading
 import unittest
 
 from app.audio_feedback.noise import (
     AudioEngine,
     _generate_bell_wav,
+    _generate_heartbeat_wav,
     _generate_noise_wav,
     _generate_tone_wav,
 )
 from app.config import APP
+
+
+def _pcm_samples(pcm: bytes) -> tuple[int, ...]:
+    return struct.unpack(f"<{len(pcm) // 2}h", pcm)
 
 
 class TestAudioFeedback(unittest.TestCase):
@@ -163,6 +169,22 @@ class TestAudioFeedback(unittest.TestCase):
     def test_generate_tone_wav_nonzero(self):
         pcm = _generate_tone_wav(22050, 220.0, 1.0)
         self.assertNotEqual(pcm, b"\x00" * (22050 * 2))
+
+    def test_generate_heartbeat_wav_length(self):
+        pcm = _generate_heartbeat_wav(22050, 10.0, 0.8)
+        self.assertEqual(len(pcm), int(22050 * 10.0) * 2)
+
+    def test_generate_heartbeat_wav_one_short_burst_on_silent_bed(self):
+        rate = 22050
+        pcm = _generate_heartbeat_wav(rate, 10.0, 0.8)
+        s = _pcm_samples(pcm)
+        nz = [i for i, v in enumerate(s) if v != 0]
+        self.assertTrue(nz, "expected a non-silent pulse")
+        span = nz[-1] - nz[0] + 1
+        self.assertLess(span, rate)                 # pulse is shorter than 1 second
+        self.assertGreater(nz[0], 0)                # silent loop head -> gapless
+        self.assertLess(nz[-1], len(s) - 1)         # silent loop tail -> gapless
+        self.assertGreater(len(s) - len(nz), 8 * rate)  # >8s of the 10s buffer is silence
 
     def test_update_sinking_no_trigger_when_disabled(self):
         self.gen.sinking_alert_enabled = False
