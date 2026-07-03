@@ -2174,9 +2174,14 @@ class EEGMeditationApp(App):
                     session_program=self._session_program_json(),
                     engine_version=MetricsEngine.ENGINE_VERSION,
                 )
-            self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
-            self._metrics_buffer = []
-            self._flush_counter = 0
+            if self._current_session_id is None:
+                # save_session no-oped (DB shutting down) — don't batch metrics
+                # under a None id (would insert orphaned session_id=NULL rows).
+                logger.error("Partial flush skipped — no session id (DB shutting down)")
+            else:
+                self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
+                self._metrics_buffer = []
+                self._flush_counter = 0
 
     def _on_key_down(self, window, key, scancode, codepoint, modifiers) -> bool:
         """Handle keyboard hotkey for marker."""
