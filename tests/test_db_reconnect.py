@@ -1,0 +1,118 @@
+"""A closed DB connection during app actions must NOT silently no-op.
+
+Repro of the field bug: after a restore (or an Android stop/resume that closed
+the DB) the app keeps running with _conn=None, so writes silently dropped and
+reads crashed. The DB must self-heal (reconnect) while the app is alive — for
+writes, reads AND settings — and, once deliberately shutting down, degrade to a
+benign no-op (not a crash), so teardown / the post-restore relaunch window can't
+resurrect or clobber the DB.
+"""
+import os
+import shutil
+import tempfile
+
+import pytest
+
+from app.storage.database import DatabaseManager
+
+_TMP_DIRS: list[str] = []
+
+
+def _fresh() -> DatabaseManager:
+    d = tempfile.mkdtemp()
+    _TMP_DIRS.append(d)
+    return DatabaseManager(db_path=os.path.join(d, "t.db"))
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_tmp_dirs():
+    yield
+    while _TMP_DIRS:
+        shutil.rmtree(_TMP_DIRS.pop(), ignore_errors=True)
+
+
+def test_global_setting_survives_a_closed_connection():
+    db = _fresh()
+    db.close()  # _conn = None while the app is still running
+    db.set_setting("theme", "Dark Green")
+    assert db.get_setting("theme") == "Dark Green"
+
+
+def test_user_setting_survives_a_closed_connection():
+    db = _fresh()
+    uid = db.create_user("Kirill")
+    db.close()
+    db.set_user_setting(uid, "threshold", "70")
+    assert db.get_user_setting(uid, "threshold") == "70"
+
+
+def test_direct_table_read_self_heals_after_close_while_alive():
+    # #3: reconnect must cover direct-table reads, not just get/set_setting.
+    db = _fresh()
+    uid = db.create_user("Kirill")
+    db._conn.execute(
+        "INSERT INTO sessions (user_id, date_time, duration) VALUES (?, '2026-07-01', 60)",
+        (uid,),
+    )
+    db._conn.commit()
+    db.close()  # closed while alive (not shutting down)
+    rows = db.get_all_sessions(user_id=uid)  # must reconnect, not AttributeError
+    assert len(rows) == 1
+    assert db.get_all_users()[0]["name"] == "Kirill"
+
+
+def test_write_path_self_heals_after_close_while_alive():
+    # #1: reconnect must cover writes too (tick-thread save_session/save_metrics_batch),
+    # not just reads/settings — otherwise a post-restore flush crashes and loses the session.
+    db = _fresh()
+    uid = db.create_user("Kirill")
+    db.close()  # closed while alive (e.g. restore that didn't relaunch)
+    sid = db.save_session(
+        {"duration": 60, "threshold_used": 50, "avg_meditation": 0, "avg_shamatha": 0,
+         "max_meditation": 0, "time_above_threshold": 0, "longest_streak": 0},
+        user_id=uid,
+    )
+    assert sid and sid > 0
+    assert len(db.get_all_sessions(user_id=uid)) == 1
+
+
+def test_use_after_shutdown_is_a_benign_noop_not_a_crash():
+    # #6: once shutting down, access degrades to a no-op — never a crash dialog,
+    # and never a reconnect that would resurrect / clobber the DB.
+    db = _fresh()
+    db.mark_shutting_down()
+    db.close()
+    db.set_setting("theme", "Dark Green")     # must not raise
+    assert db.get_setting("theme") is None    # no reconnect while shutting down
+    assert db.get_all_sessions() == []
+
+
+def test_backup_during_shutdown_raises_not_silent_empty_file():
+    # A no-op backup would write an EMPTY backup the user later restores = data
+    # loss. It must raise sqlite3.Error so the workers surface "Backup failed".
+    import sqlite3
+    db = _fresh()
+    db.mark_shutting_down()
+    db.close()
+    with pytest.raises(sqlite3.Error):
+        db._conn.backup(sqlite3.connect(":memory:"))
+
+
+def test_create_user_during_shutdown_raises_not_fake_id():
+    # create_user is typed -> int; the null connection would return a None id
+    # that callers persist as last_user_id. Raise instead — callers report it.
+    import sqlite3
+    db = _fresh()
+    db.mark_shutting_down()
+    db.close()
+    with pytest.raises(sqlite3.Error):
+        db.create_user("Ghost")
+
+
+def test_save_session_during_shutdown_returns_none_not_fake_id():
+    db = _fresh()
+    uid = db.create_user("Kirill")
+    db.mark_shutting_down()
+    db.close()
+    sid = db.save_session({"duration": 60}, user_id=uid)
+    assert sid is None  # callers must treat None as "not persisted"

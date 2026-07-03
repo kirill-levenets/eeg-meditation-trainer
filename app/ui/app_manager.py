@@ -72,6 +72,37 @@ PROGRAM_FORMULA_KEYS: tuple[str, ...] = ("program_formula", "program_formula_2",
 _MAX_FORMULAS = len(FORMULA_KEYS)
 
 
+def resolve_startup_user(db) -> Optional[int]:
+    """The uid to restore at startup, or None if the user must be prompted.
+
+    None covers no `last_user_id`, a corrupt value, and a stale id whose user was
+    deleted — every case must open the blocking user-select gate rather than let
+    the app run usable with no active user (issue #29 root cause)."""
+    saved = db.get_setting("last_user_id")
+    if not saved:
+        return None
+    try:
+        uid = int(saved)
+    except (ValueError, TypeError):
+        logger.warning(f"Corrupt last_user_id setting {saved!r} — prompting for user")
+        return None
+    if uid <= 0:  # not a valid AUTOINCREMENT id — don't rely on get_user(0) missing
+        return None
+    return uid if db.get_user(uid) else None
+
+
+def sessions_for_view(db, current_uid: Optional[int], show_all: bool) -> list:
+    """Sessions to display: every user's when the deliberate All-Users view is
+    on, the current user's when a concrete user is active, and NONE when unset —
+    an unset user must never fall through to `get_all_sessions(None)` and leak
+    every profile's sessions."""
+    if show_all:
+        return db.get_all_sessions(user_id=None)
+    if current_uid:
+        return db.get_all_sessions(user_id=current_uid)
+    return []
+
+
 class EEGMeditationApp(App):
     """Main Kivy application for EEG Meditation Trainer."""
 
@@ -121,6 +152,10 @@ class EEGMeditationApp(App):
         self._flush_counter: int = 0
         self._current_session_id: Optional[int] = None
         self._current_user_id: Optional[int] = None
+        # True only for the deliberate "Show All Users" aggregate history view,
+        # distinct from _current_user_id=None (unset). Keeps the unset state from
+        # ever querying all profiles' sessions (cross-profile leak).
+        self._view_all_users: bool = False
         self._init_formula_slots()
         self.serial_device_override: Optional[str] = None
         self._wake_lock = None
@@ -194,7 +229,7 @@ class EEGMeditationApp(App):
     def _persist_session_program(self, uid: int) -> None:
         """Persist the active editable program + its name + timer mode for a user."""
         if not uid:
-            return
+            return  # silent-ok: persistence helper; no active user = nothing to persist
         self._db.set_user_json_setting(uid, "session_program", self._session_program_segments)
         self._db.set_user_setting(uid, "timer_mode", self._timer_mode)
         self._db.set_user_setting(uid, "session_program_name", self._session_program_name)
@@ -344,7 +379,7 @@ class EEGMeditationApp(App):
         if sm is not None and sm.state in (SessionState.RUNNING, SessionState.PAUSED):
             return
         if not self._current_user_id:
-            return
+            return  # silent-ok: idle live-graph preview; nothing to show without a user
         if self._program_governs_live_series():
             self._apply_program_visibility(self._build_session_program())
             self._live_screen.set_training_series(None)  # no active segment in idle
@@ -662,14 +697,19 @@ class EEGMeditationApp(App):
 
         self._bind_callbacks()
         self._link_graph_zoom()
-        self._restore_last_user()
+        resolved_user = self._restore_last_user()
         self._refresh_profile()
 
-        # First-run: show name entry popup if no users exist.
-        # Uses a Popup instead of the wizard Screen because TextInput
-        # inside a Screen doesn't get keyboard focus on some platforms.
-        if not self._db.get_all_users():
-            Clock.schedule_once(self._show_first_run_popup, 0.5)
+        # Hard user gate: the app is never usable without a resolved concrete
+        # user. Gate on "did we resolve a user", NOT on whether the users table
+        # is non-empty — reinstall / restored DB / deleted-active-profile /
+        # corrupt last_user_id all leave users present but none current. Disable
+        # nav synchronously so there is no cold-start window where the app is
+        # tappable with no user; the selection modal re-enables it. The modal
+        # uses a Popup, not the wizard Screen, because a TextInput inside a
+        # Screen doesn't get keyboard focus on some platforms.
+        if resolved_user is None:
+            self._open_user_gate(0.5)
         else:
             self._auto_scan_bt()
 
@@ -919,19 +959,60 @@ class EEGMeditationApp(App):
         self._settings_screen.set_backup_callback(self._on_backup_pressed)
         self._settings_screen.set_restore_callback(self._on_restore_pressed)
 
-    def _restore_last_user(self) -> None:
-        """Restore last selected user from DB settings on startup."""
-        saved = self._db.get_setting("last_user_id")
-        if saved:
-            try:
-                uid = int(saved)
-                user = self._db.get_user(uid)
-                if user:
-                    self._current_user_id = uid
-                    self._load_user_settings(uid)
-                    logger.info(f"Restored last user: {user['name']} (id={uid})")
-            except (ValueError, TypeError):
-                pass
+    def _restore_last_user(self) -> Optional[int]:
+        """Restore the last selected user; return the resolved uid, or None when
+        the app must prompt (no/stale/corrupt last_user_id). build() opens the
+        blocking user gate on None — the app is never left usable with no user."""
+        uid = resolve_startup_user(self._db)
+        if uid is None:
+            return None
+        self._current_user_id = uid
+        self._view_all_users = False  # a concrete user is active, not the All-Users view
+        self._load_user_settings(uid)
+        logger.info(f"Restored last user id={uid}")
+        return uid
+
+    def _open_user_gate(self, delay: float = 0.0) -> None:
+        """Enter the hard user gate: disable the bottom nav and open the blocking
+        selection modal. Single source for build() / on_resume / self-delete so
+        the 'app unusable without a user' enforcement can't drift between them."""
+        # Disable nav BEFORE any dedupe return — the gate state must be enforced
+        # even when a popup is already open/scheduled.
+        self._bottom_nav.disabled = True
+        if getattr(self, "_gate_popup", None) is not None:
+            return  # a gate popup is already open — don't stack another
+        if getattr(self, "_gate_event", None) is not None:
+            return  # one is already scheduled (pre-popup window) — don't stack
+        self._gate_event = Clock.schedule_once(self._show_first_run_popup, delay)
+
+    def _handle_gate_back(self) -> bool:
+        """Back/Esc while gated: never fall through into the app, but the user must
+        still be able to LEAVE — double-press exits the app (a gate with no exit
+        traps a fresh-install user who declines to create a profile)."""
+        now = time.time()
+        if now - self._last_back_time < 2.0:
+            App.get_running_app().stop()
+            return True
+        self._last_back_time = now
+        self._android_toast("Press back again to exit")
+        return True
+
+    def _gate_active(self) -> bool:
+        """True while the app is gated on user selection — nav disabled, no concrete
+        user, not the deliberate All-Users view. Covers both the popup-open state and
+        the schedule window before the popup exists, so the gate is un-escapable throughout."""
+        nav = getattr(self, "_bottom_nav", None)
+        return bool(nav is not None and nav.disabled
+                    and not getattr(self, "_current_user_id", None)
+                    and not getattr(self, "_view_all_users", False))
+
+    def _reopen_gate_if_unresolved(self) -> None:
+        """After a gate create/pick attempt, re-open the gate if no concrete user
+        ended up set (invalid name, or a stale/deleted profile row) — otherwise the
+        popup is gone, nav stays disabled, and the app is stranded with no user."""
+        if not self._current_user_id and not self._view_all_users:
+            self._refresh_profile()  # drop any stale row from the picker list
+            self._open_user_gate(0)
 
     def _show_first_run_popup(self, dt) -> None:
         """Show a name-entry popup on first run (no users in DB).
@@ -940,6 +1021,9 @@ class EEGMeditationApp(App):
         existing profiles — UserPickerForm surfaces them so the user can
         adopt instead of creating a duplicate name.
         """
+        self._gate_event = None  # the scheduled open is now firing
+        if getattr(self, "_gate_popup", None) is not None:
+            return  # a gate popup is already open — never stack a second modal
 
         content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
 
@@ -953,19 +1037,29 @@ class EEGMeditationApp(App):
         content.add_widget(welcome)
 
         popup = Popup(
-            title="First-time Setup",
+            title="Select Profile",
             content=content,
             size_hint=(0.9, 0.7),
             auto_dismiss=False,
         )
+        # Tracked so _on_keyboard can make the gate un-escapable (back/Esc must
+        # not dismiss it or exit the app out from under an unresolved user).
+        self._gate_popup = popup
+        # A dismissal from ANY path clears the handle, so a stale non-None
+        # _gate_popup can never block re-gating forever.
+        popup.bind(on_dismiss=lambda *_a: setattr(self, "_gate_popup", None))
 
         def _on_create(name: str) -> None:
+            self._gate_popup = None
             popup.dismiss()
             self._on_wizard_complete(name, None, None)
+            self._reopen_gate_if_unresolved()
 
         def _on_pick(user_id: int) -> None:
+            self._gate_popup = None
             popup.dismiss()
             self._on_pick_existing_user(user_id, source="first_run")
+            self._reopen_gate_if_unresolved()
 
         form = UserPickerForm(
             on_create=_on_create,
@@ -994,6 +1088,7 @@ class EEGMeditationApp(App):
             self._current_user_id = e.user_id
             self._db.set_setting("last_user_id", str(e.user_id))
             logger.info(f"Wizard: adopting existing user {e.name} (id={e.user_id})")
+        self._view_all_users = False  # a concrete user is now active
 
         # Set device
         if device_addr:
@@ -1092,7 +1187,9 @@ class EEGMeditationApp(App):
         self._switch_screen(screen_name)
 
     def _switch_screen(self, name: str) -> None:
-        if name == "diary" and not self._current_user_id:
+        if name == "diary" and not self._current_user_id and not self._view_all_users:
+            # silent-ok: unreachable post-gate; All-Users browse and any
+            # concrete user pass. Defensive block against a should-not-happen unset.
             logger.debug("Diary switch blocked: no user selected")
             return
         logger.debug(f"Screen switch: {name}")
@@ -1515,7 +1612,9 @@ class EEGMeditationApp(App):
                     session_program=self._session_program_json(),
                     engine_version=MetricsEngine.ENGINE_VERSION,
                 )
-            if self._metrics_buffer:
+            if self._current_session_id is None:
+                logger.error("No session id (DB shutting down) — metrics NOT persisted")
+            elif self._metrics_buffer:
                 self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
                 self._metrics_buffer = []
         return stats
@@ -1576,6 +1675,34 @@ class EEGMeditationApp(App):
         if stats and session_id:
             self._live_screen.show_summary(session_id, stats)
 
+    def _session_pipeline_live(self) -> bool:
+        """True if a session is RUNNING/PAUSED *or* still in the BT-connect wait
+        (tick thread started, state still IDLE). This is the full window in which a
+        restore or active-profile delete would drop/orphan an in-flight session —
+        the state-only check misses the connecting phase (mirrors _on_connect_cancel)."""
+        return (self._session_manager.state in (SessionState.RUNNING, SessionState.PAUSED)
+                or getattr(self, "_waiting_for_bt", False)
+                or getattr(self, "_tick_thread", None) is not None)
+
+    def _discard_running_session(self) -> None:
+        """Halt a running session and DELETE its data — used when its owning
+        profile is deleted. The 60s partial flush may already have written a
+        session row under the doomed profile; without the delete it survives as
+        an orphan. Mirrors _finish_stop's discard branch, then reuses the shared
+        _finalize_stop_ui teardown so the Session screen returns to idle."""
+        self._waiting_for_bt = False  # also halt a session still in the BT-connect wait
+        self._stop_tick_thread()
+        self._session_manager.stop(reason="user")
+        if APP.USE_MOCK_DEVICE:
+            self._eeg_stream.stop()
+        self._audio.stop()
+        if self._current_session_id is not None:
+            self._db.delete_session(self._current_session_id)
+            logger.info(f"Session {self._current_session_id} discarded (profile deleted)")
+            self._current_session_id = None
+        self._metrics_buffer = []
+        self._finalize_stop_ui(None, None)
+
     def _stop_and_save(self, reason: str = "user") -> None:
         """Stop session and save data immediately (no dialog). Main-thread path."""
         t_start = time.monotonic()
@@ -1618,7 +1745,9 @@ class EEGMeditationApp(App):
                     session_program=self._session_program_json(),
                     engine_version=MetricsEngine.ENGINE_VERSION,
                 )
-            if self._metrics_buffer:
+            if self._current_session_id is None:
+                logger.error("No session id (DB shutting down) — metrics NOT persisted")
+            elif self._metrics_buffer:
                 self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
                 self._metrics_buffer = []
             logger.info("Session stopped and saved")
@@ -2045,9 +2174,14 @@ class EEGMeditationApp(App):
                     session_program=self._session_program_json(),
                     engine_version=MetricsEngine.ENGINE_VERSION,
                 )
-            self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
-            self._metrics_buffer = []
-            self._flush_counter = 0
+            if self._current_session_id is None:
+                # save_session no-oped (DB shutting down) — don't batch metrics
+                # under a None id (would insert orphaned session_id=NULL rows).
+                logger.error("Partial flush skipped — no session id (DB shutting down)")
+            else:
+                self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
+                self._metrics_buffer = []
+                self._flush_counter = 0
 
     def _on_key_down(self, window, key, scancode, codepoint, modifiers) -> bool:
         """Handle keyboard hotkey for marker."""
@@ -2070,6 +2204,11 @@ class EEGMeditationApp(App):
         default exit-on-escape never fires."""
         if key != 27:
             return False
+        # The mandatory user-selection gate: back/Esc never falls through INTO the
+        # app (covers the pre-popup schedule window too), but double-press exits —
+        # a fresh-install user who declines to create a profile must be able to leave.
+        if self._gate_active():
+            return self._handle_gate_back()
         # An open Popup/ModalView dismisses itself on escape — let it.
         if any(isinstance(c, ModalView) for c in Window.children):
             return False
@@ -2203,7 +2342,7 @@ class EEGMeditationApp(App):
     def _open_saved_formula_chooser(self, slot_idx: int, toggle_btn) -> None:
         """Open a second popup listing saved formulas; selecting one assigns it to
         slot_idx and refreshes the picker's toggle button to its new visible state."""
-        if not self._current_user_id:
+        if self._require_user("choose a saved formula") is None:
             return
         formulas = self._db.get_saved_formulas(self._current_user_id)
 
@@ -2400,7 +2539,7 @@ class EEGMeditationApp(App):
 
     def _on_load_formula(self, index: int) -> None:
         """Load a saved formula into the first empty slot and apply it."""
-        if not self._current_user_id:
+        if self._require_user("load a formula") is None:
             return
         formulas = self._db.get_saved_formulas(self._current_user_id)
         if 0 <= index < len(formulas):
@@ -2424,7 +2563,7 @@ class EEGMeditationApp(App):
 
     def _on_delete_formula(self, index: int) -> None:
         """Delete a saved formula."""
-        if not self._current_user_id:
+        if self._require_user("delete a formula") is None:
             return
         self._db.remove_saved_formula(self._current_user_id, index)
         self._refresh_saved_formulas()
@@ -2457,11 +2596,23 @@ class EEGMeditationApp(App):
         self._session_program_segments = segments
         self._persist_session_program(self._current_user_id)
 
+    def _require_user(self, action: str) -> Optional[int]:
+        """Return the active uid, or explain why the action can't run and return
+        None. Per-user handlers call this instead of a bare silent `return` — the
+        hard gate should make None unreachable, this is the defense-in-depth."""
+        if self._current_user_id:
+            return self._current_user_id
+        self._info_popup("No profile selected", f"Select a profile before you can {action}.")
+        return None
+
     def _on_program_save(self, name: str) -> None:
         """Save the active program under `name`. Unique names: an existing name
         overwrites (after confirm); a new name is added directly."""
         name = name.strip()
-        if not name or not self._current_user_id:
+        if not name:
+            self._info_popup("Name required", "Enter a name for the program before saving.")
+            return
+        if self._require_user("save a program") is None:
             return
         progs = self._db.get_saved_programs(self._current_user_id)
         existing = next((i for i, p in enumerate(progs) if p.get("name") == name), None)
@@ -2480,8 +2631,14 @@ class EEGMeditationApp(App):
     def _save_program(self, index, name: str) -> None:
         """Add (index=None) or overwrite (index set) a saved program by name."""
         if index is None:
-            self._db.add_saved_program(self._current_user_id, name,
-                                       self._session_program_segments)
+            if not self._db.add_saved_program(self._current_user_id, name,
+                                              self._session_program_segments):
+                self._info_popup(
+                    "Program library full",
+                    f"You can keep up to {self._db._MAX_SAVED_PROGRAMS} saved "
+                    f"programs. Delete one before saving another.",
+                )
+                return
             logger.info(f"Saved new program '{name}'")
         else:
             self._db.update_saved_program(self._current_user_id, index, name,
@@ -2507,7 +2664,7 @@ class EEGMeditationApp(App):
         return saved.get("segments") != segs
 
     def _on_program_load(self, index: int) -> None:
-        if not self._current_user_id:
+        if self._require_user("load a program") is None:
             return
         progs = self._db.get_saved_programs(self._current_user_id)
         if not (0 <= index < len(progs)):
@@ -2539,7 +2696,7 @@ class EEGMeditationApp(App):
         logger.info(f"Loaded program '{name}'")
 
     def _on_program_delete(self, index: int) -> None:
-        if not self._current_user_id:
+        if self._require_user("delete a program") is None:
             return
         progs = self._db.get_saved_programs(self._current_user_id)
         if not (0 <= index < len(progs)):
@@ -2594,7 +2751,7 @@ class EEGMeditationApp(App):
         """Refresh the saved formulas list in settings UI."""
         if not self._current_user_id:
             self._settings_screen.populate_saved_formulas([])
-            return
+            return  # silent-ok: renders empty library; no per-user formulas without a user
         formulas = self._db.get_saved_formulas(self._current_user_id)
         self._settings_screen.populate_saved_formulas(formulas)
 
@@ -2793,7 +2950,7 @@ class EEGMeditationApp(App):
     def _persist_band_view(self, mode: str, sort_by: str, descending: bool) -> None:
         """Persist the diary band-table view (mode/sort) per user."""
         if not self._current_user_id:
-            return
+            return  # silent-ok: view-pref persistence; no concrete user (All-Users) = nothing to save
         self._db.set_user_json_setting(
             self._current_user_id, "band_breakdown_view",
             {"mode": mode, "sort": sort_by, "desc": descending},
@@ -2940,7 +3097,7 @@ class EEGMeditationApp(App):
         if not force and not self._history_dirty:
             return
         with timed("history.get_all_sessions"):
-            sessions = self._db.get_all_sessions(user_id=self._current_user_id)
+            sessions = sessions_for_view(self._db, self._current_user_id, self._view_all_users)
         # Rows build in chunks (history_screen); spinner stays up until the last
         # chunk lands so the UI isn't frozen during the ~0.9s widget build.
         self.show_loading("Loading history…")
@@ -2951,7 +3108,7 @@ class EEGMeditationApp(App):
         self._history_dirty = True
 
     def _refresh_diary(self) -> None:
-        sessions = self._db.get_all_sessions(user_id=self._current_user_id)
+        sessions = sessions_for_view(self._db, self._current_user_id, self._view_all_users)
         self._diary_screen.populate_sessions(sessions)
 
     def _on_user_switch(self, user_id: Optional[int]) -> None:
@@ -2959,6 +3116,7 @@ class EEGMeditationApp(App):
         # Save current user's settings before switching
         self._save_user_settings()
         self._current_user_id = user_id
+        self._view_all_users = user_id is None  # None here = deliberate All-Users view
         if user_id:
             user = self._db.get_user(user_id)
             name = user["name"] if user else "Unknown"
@@ -2973,7 +3131,7 @@ class EEGMeditationApp(App):
     def _on_history_view_mode_change(self, mode: str) -> None:
         """Persist the user's preferred History view layout."""
         if not self._current_user_id:
-            return
+            return  # silent-ok: pref persistence; view already changed, no user to save to
         self._db.set_user_setting(self._current_user_id, "history_view_mode", mode)
 
     def _count_sessions_for_user(self, user_id: int) -> int:
@@ -3060,6 +3218,15 @@ class EEGMeditationApp(App):
 
     def _on_restore_pressed(self) -> None:
         """Pick a backup file and restore it."""
+        if self._session_pipeline_live():
+            # A restore closes the DB and force-relaunches — a running (or
+            # connecting) session would be silently dropped. Refuse with an
+            # explanation instead.
+            self._info_popup(
+                "Session in progress",
+                "Stop the current session before restoring a backup.",
+            )
+            return
         if self._is_android():
             self._run_restore_saf()
         else:
@@ -3166,10 +3333,27 @@ class EEGMeditationApp(App):
     def _do_restore_and_restart(self, source_path: str) -> None:
 
 
+        if self._session_pipeline_live():
+            # Defense for the async picker flow (a session may have started — or
+            # begun connecting — since _on_restore_pressed's check).
+            self._info_popup(
+                "Session in progress",
+                "Stop the current session before restoring a backup.",
+            )
+            return
         try:
+            # No-op every DB access during the restore + relaunch window so nothing
+            # reopens the connection and clobbers the freshly-imported file. Error
+            # paths below replace self._db with a fresh (live) manager.
+            self._db.mark_shutting_down()
             self._db.close()
-        except Exception:
+        except Exception as e:
+            # Surface it (not a silent abort) AND un-latch: mark_shutting_down()
+            # already ran, so without a fresh manager every later write would
+            # no-op into the null connection forever.
             logger.exception("DB close before restore failed")
+            report_soft_error("restore_failed", f"Could not close the database to restore: {e}")
+            self._db = DatabaseManager(db_path=APP.DB_PATH)
             return
 
         try:
@@ -3185,15 +3369,21 @@ class EEGMeditationApp(App):
             self._db = DatabaseManager(db_path=APP.DB_PATH)
             return
 
-        # DB is now closed and the file replaced. Tell on_stop to skip
-        # _save_user_settings (which would crash on a closed conn anyway,
-        # and would also clobber the freshly-restored state).
+        # DB is now closed and the file replaced. Tell on_stop/on_pause to skip
+        # the settings flush (it would clobber the freshly-restored state).
         self._restoring = True
+        self._show_relaunch_popup()
 
+    def _show_relaunch_popup(self) -> None:
+        """Blocking 'please relaunch' popup after a restore. Also re-shown from
+        on_resume if Android resumed the process instead of killing it — the DB
+        is shut down at that point, so the only way forward is a real relaunch."""
+        if getattr(self, "_relaunch_popup", None) is not None:
+            return
         content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
         content.add_widget(Label(
             text="Database restored.\n\nThe app will now exit — please relaunch.",
-            halign="center", valign="middle", color=C.TEXT,
+            halign="center", valign="middle", color=POPUP_TEXT,
         ))
         ok = StyledButton(text="OK", bg_color=C.ACCENT)
         content.add_widget(ok)
@@ -3201,8 +3391,10 @@ class EEGMeditationApp(App):
             title="Restore complete", content=content,
             size_hint=(0.8, 0.4), auto_dismiss=False,
         )
+        self._relaunch_popup = popup
 
         def _quit(*_a):
+            self._relaunch_popup = None
             popup.dismiss()
             App.get_running_app().stop()
 
@@ -3273,6 +3465,7 @@ class EEGMeditationApp(App):
 
         if source == "wizard":
             self._current_user_id = user_id
+            self._view_all_users = False
             self._db.set_setting("last_user_id", str(user_id))
             self._wizard_screen._user_name = name
             self._wizard_screen._advance_to_step2()
@@ -3301,11 +3494,27 @@ class EEGMeditationApp(App):
         self._refresh_profile()
 
     def _on_user_delete(self, user_id: int) -> None:
-        """Delete a user profile."""
-        if self._current_user_id == user_id:
-            self._current_user_id = None
+        """Delete a user profile. Deleting the ACTIVE profile drops the app into
+        the no-user state, so re-enter the hard gate instead of leaving the app
+        usable with nothing selected."""
+        deleted_active = self._current_user_id == user_id
+        if deleted_active and self._session_pipeline_live():
+            # Discard the running (or connecting) session — otherwise the tick
+            # thread keeps running and writes an orphaned session, and saving it
+            # under a profile that's about to be deleted just orphans it anyway.
+            self._discard_running_session()
         self._db.delete_user(user_id)
-        self._refresh_profile()
+        remaining = self._db.get_all_users()
+        # Re-enter the gate when no usable active user is left: the active profile
+        # was deleted, OR the last profile was removed while in the All-Users view
+        # (which would otherwise leave the app usable with zero users, no gate).
+        if deleted_active or not remaining:
+            self._current_user_id = None
+            self._view_all_users = False
+            self._refresh_profile()
+            self._open_user_gate(0)
+        else:
+            self._refresh_profile()
 
     def _refresh_profile(self) -> None:
         users = self._db.get_all_users()
@@ -3316,7 +3525,7 @@ class EEGMeditationApp(App):
         """Persist current UI settings for the active user."""
         uid = self._current_user_id
         if not uid:
-            return
+            return  # silent-ok: batch persistence; no active user = nothing to save
         # Sync timer settings from the UI into the headless model.
         self._timer_state.set_enabled(self._settings_screen.timer_enabled)
         self._timer_state.set_duration(self._settings_screen.timer_minutes)
@@ -3604,7 +3813,11 @@ class EEGMeditationApp(App):
         """
         self._is_paused = True
         logger.info("on_pause fired — _is_paused=True")
-        self._save_user_settings()
+        # Skip the settings flush during a restore's relaunch window (mirrors
+        # on_stop): the DB was just replaced with the imported file, so writing
+        # the old in-memory settings back would clobber the freshly-restored data.
+        if not getattr(self, "_restoring", False):
+            self._save_user_settings()
         return True
 
     def on_resume(self) -> None:
@@ -3618,6 +3831,23 @@ class EEGMeditationApp(App):
         """
         self._is_paused = False
         logger.info("on_resume fired — _is_paused=False")
+        # Post-restore, the DB is shut down (null connection) and only a real
+        # relaunch fixes it. If Android resumed the process instead of killing
+        # it, keep the app blocked behind the relaunch popup rather than letting
+        # it run against a no-op DB that looks empty.
+        if getattr(self, "_restoring", False):
+            self._show_relaunch_popup()
+            return
+        # Re-validate the user gate: if the process survived a background/kill
+        # in an unset state (not the deliberate All-Users view) and no gate is
+        # already up, re-enter it rather than resume usable with no user.
+        # getattr guards keep this safe if on_resume fires before build() runs.
+        if (getattr(self, "_bottom_nav", None) is not None
+                and getattr(self, "_current_user_id", None) is None
+                and not getattr(self, "_view_all_users", False)
+                and getattr(self, "_gate_popup", None) is None):
+            self._open_user_gate(0)
+            return
         try:
             Clock.schedule_once(lambda dt: self._refresh_ui_after_resume(), 0)
         except Exception:
@@ -3675,8 +3905,13 @@ class EEGMeditationApp(App):
         """
         if not getattr(self, "_restoring", False):
             self._save_user_settings()
-        if self._session_manager.state in (SessionState.RUNNING, SessionState.PAUSED):
-            self._stop_and_save()
+            if self._session_manager.state in (SessionState.RUNNING, SessionState.PAUSED):
+                # Skipped while _restoring: the DB is already shut down, so the
+                # save would silently no-op into the null connection. (The restore
+                # entry points refuse to run while a session is active, so this is
+                # defense-in-depth, not a data-loss path.)
+                self._stop_and_save()
         self._audio.cleanup()
+        self._db.mark_shutting_down()
         self._db.close()
         logger.info("Application closed")
