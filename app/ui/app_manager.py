@@ -2641,8 +2641,10 @@ class EEGMeditationApp(App):
                 return
             logger.info(f"Saved new program '{name}'")
         else:
-            self._db.update_saved_program(self._current_user_id, index, name,
-                                          self._session_program_segments)
+            if not self._db.update_saved_program(self._current_user_id, index, name,
+                                                 self._session_program_segments):
+                logger.warning(f"Overwrite skipped: program index {index} out of range")
+                return  # no write happened — don't flash a false 'Saved' confirmation
             logger.info(f"Overwrote program '{name}'")
         self._session_program_name = name  # the active program now carries this name
         self._persist_session_program(self._current_user_id)

@@ -664,10 +664,10 @@ class TestStyledButtonPressRing(unittest.TestCase):
     def setUp(self):
         from app.ui.theme import C
         self._C = C
-        self._orig = C.current_theme if hasattr(C, "current_theme") else "Dark Blue"
+        self._orig = C.theme_name
 
     def tearDown(self):
-        self._C.set_theme(self._orig if isinstance(self._orig, str) else "Dark Blue")
+        self._C.set_theme(self._orig)
 
     def test_press_raises_ring(self):
         from app.ui.theme import C, StyledButton
@@ -686,6 +686,17 @@ class TestStyledButtonPressRing(unittest.TestCase):
         self.assertGreater(b._ring_rgb()[0], 0.5)          # light ring on a dark theme
         C.set_theme("Light Cream")
         self.assertLess(b._ring_rgb()[0], 0.5)             # dark ring on a light theme
+
+    def test_ring_resets_when_disabled_while_pressed(self):
+        # Disabling a pressed button before release must clear the ring, else re-enabling
+        # later repaints a stuck full-opacity ring (no release event ever follows).
+        from app.ui.theme import C, StyledButton
+        C.set_theme("Dark Blue")
+        b = StyledButton(text="Save", bg_color=C.ACCENT)
+        b.state = "down"
+        self.assertEqual(b._ring_alpha, StyledButton._RING_MAX)
+        b.disabled = True
+        self.assertEqual(b._ring_alpha, 0.0)
 
 
 class TestStyledButtonFlashConfirm(unittest.TestCase):
@@ -743,3 +754,39 @@ class TestStyledButtonFlashConfirm(unittest.TestCase):
         self.assertEqual(list(b.bg_color), list(C.SHAMATHA))
         b._end_confirm()
         self.assertEqual(list(b.bg_color), orig)
+
+    def test_original_markup_state_restored(self):
+        # A button that legitimately uses markup must not have it clobbered off by a confirm.
+        from app.ui.theme import C, StyledButton
+        b = StyledButton(text="Save", bg_color=C.ACCENT)
+        b._label.markup = True                      # pretend this button renders markup
+        b.flash_confirm("Saved", icon=None)
+        b._end_confirm()
+        self.assertTrue(b._label.markup)            # restored, not forced False
+
+    def test_inline_icon_falls_back_when_font_unavailable(self):
+        # Without the MDI font, the inline branch must degrade to plain text, not emit a
+        # [font=Icons] tag that renders tofu.
+        import app.ui.theme as theme
+        from app.ui.theme import C, Icons, StyledButton
+        b = StyledButton(text="Save", bg_color=C.ACCENT)
+        orig_flag = theme.ICONS_AVAILABLE
+        theme.ICONS_AVAILABLE = False
+        try:
+            b.flash_confirm("Saved", icon=Icons.CHECK)
+            self.assertNotIn("font=Icons", b._label.text)
+            self.assertIn("Saved", b._label.text)
+        finally:
+            theme.ICONS_AVAILABLE = orig_flag
+
+    def test_icon_only_button_morphs_icon(self):
+        # Icon-only button (empty text) has its _label off-tree; confirm morphs the icon and
+        # must not push confirm text onto the invisible label.
+        from app.ui.theme import C, Icons, StyledButton
+        b = StyledButton(text="", icon=Icons.PENCIL, bg_color=C.ACCENT)
+        self.assertIsNone(b._label.parent)          # label never added for icon-only
+        b.flash_confirm("Saved", icon=Icons.CHECK)
+        self.assertEqual(b._icon_label.text, Icons.CHECK)
+        self.assertEqual(b._label.text, "")         # confirm text not written to off-tree label
+        b._end_confirm()
+        self.assertEqual(b._icon_label.text, Icons.PENCIL)

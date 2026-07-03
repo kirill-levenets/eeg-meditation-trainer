@@ -598,12 +598,14 @@ class DatabaseManager:
         self._save_programs_list(user_id, programs)
         return True
 
-    def update_saved_program(self, user_id: int, index: int, name: str, segments: list[dict]) -> None:
-        """Update a saved program by index."""
+    def update_saved_program(self, user_id: int, index: int, name: str, segments: list[dict]) -> bool:
+        """Update a saved program by index. Returns False if the index is out of range."""
         programs = self.get_saved_programs(user_id)
-        if 0 <= index < len(programs):
-            programs[index] = {"name": name, "segments": segments}
-            self._save_programs_list(user_id, programs)
+        if not (0 <= index < len(programs)):
+            return False
+        programs[index] = {"name": name, "segments": segments}
+        self._save_programs_list(user_id, programs)
+        return True
 
     def remove_saved_program(self, user_id: int, index: int) -> None:
         """Remove a saved program by index."""

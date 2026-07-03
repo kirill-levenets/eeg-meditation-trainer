@@ -537,7 +537,7 @@ class StyledButton(ButtonBehavior, BoxLayout):
             bg_color=self._on_bg_change,
             size=self._redraw,
             pos=self._redraw,
-            disabled=self._redraw,
+            disabled=self._on_disabled,
             _ring_alpha=self._redraw,
         )
         self._redraw()
@@ -557,16 +557,22 @@ class StyledButton(ButtonBehavior, BoxLayout):
             Clock.unschedule(self._confirm_ev)
         else:
             orig_icon = self._icon_label.text if self._icon_label else None
-            self._confirm_orig = (self.text, orig_icon, list(self.bg_color))
+            self._confirm_orig = (self.text, orig_icon, list(self.bg_color), self._label.markup)
             self._confirming = True
-        self.text = text
         if icon is not None and self._icon_label is not None:
             self._icon_label.text = icon
-        elif icon is not None:
-            # text-only button: render the glyph inline via Icons-font markup — a bare MDI
-            # codepoint is tofu in the label's Roboto font (same trick as the band-totals arrow).
-            self._label.markup = True
-            self.text = f"[font=Icons]{icon}[/font] {text}"
+        # Only touch the text label when it's actually in the tree (an icon-only button's
+        # _label is never added — writing to it would be invisible). Render the glyph inline
+        # via Icons-font markup for a text-only button, but only when the font is available
+        # (else a bare [font=Icons] tag is tofu); otherwise keep the button's own markup mode.
+        if self._label.parent is not None:
+            use_inline = (icon is not None and self._icon_label is None and ICONS_AVAILABLE)
+            if use_inline:
+                self._label.markup = True
+                self.text = f"[font=Icons]{icon}[/font] {text}"
+            else:
+                self._label.markup = self._confirm_orig[3]
+                self.text = text
         if confirm_color is not None:
             self.bg_color = list(confirm_color)
         self._confirm_ev = Clock.schedule_once(self._end_confirm, duration)
@@ -574,9 +580,10 @@ class StyledButton(ButtonBehavior, BoxLayout):
     def _end_confirm(self, *_args):
         if not self._confirming:
             return
-        text, icon, bg = self._confirm_orig
-        self._label.markup = False
-        self.text = text
+        text, icon, bg, markup = self._confirm_orig
+        self._label.markup = markup
+        if self._label.parent is not None:
+            self.text = text
         if icon is not None and self._icon_label is not None:
             self._icon_label.text = icon
         self.bg_color = bg
@@ -671,6 +678,14 @@ class StyledButton(ButtonBehavior, BoxLayout):
             self._ring_alpha = self._RING_MAX  # snap on: visible before the fade
         else:
             Animation(_ring_alpha=0.0, duration=self._RING_FADE, t="out_quad").start(self)
+        self._redraw()
+
+    def _on_disabled(self, *args):
+        # Disabling a pressed button gives no release event, so clear the ring here — else
+        # re-enabling later repaints a stuck full-opacity ring.
+        if self.disabled:
+            Animation.cancel_all(self, "_ring_alpha")
+            self._ring_alpha = 0.0
         self._redraw()
 
 
