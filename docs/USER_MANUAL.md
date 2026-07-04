@@ -146,7 +146,11 @@ Settings uses collapsible accordion sections. Tap a section header to expand/col
 Settings → **Data Backup** lets you save a copy of your sessions to a file and restore it later.
 
 - **Backup database** — writes a transaction-safe copy of the live database. On Android the backup goes to `Documents/EEGMeditation/meditation_backup_YYYYMMDD_HHMMSS.db` (visible to file managers and Telegram's "attach file" picker). On desktop, a save dialog opens.
-- **Restore database** — pick a backup file. The app validates it (must be a real SQLite file with `users` and `sessions` tables), shows a confirmation dialog with the current session count, then replaces the live database. The app will exit after restoring — relaunch it to see your imported history.
+- **Restore database** — pick a backup file. The app validates it (must be a real SQLite file with `users` and `sessions` tables), shows a confirmation dialog, then replaces the live database. The app will exit after restoring — relaunch it to see your imported history.
+
+Two things to know before restoring:
+- Restore replaces the **entire database — all profiles** on this device, not just the current one.
+- A backup contains only the database. **Custom sound files** (feedback / reward / timer) are referenced by path and are **not** included, so those paths may not resolve on another device.
 
 The Restore replaces your current database and cannot be undone. Use Backup first if you want to keep the current state.
 

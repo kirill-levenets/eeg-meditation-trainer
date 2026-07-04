@@ -152,6 +152,9 @@ class EEGMeditationApp(App):
         self._flush_counter: int = 0
         self._current_session_id: Optional[int] = None
         self._current_user_id: Optional[int] = None
+        # Suppresses immediate per-setting persistence while _load_user_settings
+        # applies restored values (the callbacks it triggers would re-persist them).
+        self._loading_settings: bool = False
         # True only for the deliberate "Show All Users" aggregate history view,
         # distinct from _current_user_id=None (unset). Keeps the unset state from
         # ever querying all profiles' sessions (cross-profile leak).
@@ -189,6 +192,26 @@ class EEGMeditationApp(App):
             entry = active[i] if i < len(active) and isinstance(active[i], dict) else {}
             self._formula_names[i] = entry.get("name") or f"Custom {i + 1}"
             self._formula_slots[i].set_formula(entry.get("formula", "") or "")
+
+    def _sync_timer_state_from_ui(self) -> None:
+        """Apply the Settings timer widgets to the live headless model — skipped while a
+        session is live, which OWNS _timer_state: a program session force-enables it and
+        seeds its countdown from the program total, so re-applying the simple-mode
+        Enable-Timer checkbox (False in program mode) would silently kill auto-stop
+        (issue #30 review). The DB still persists the widgets' baseline values."""
+        if self._session_pipeline_live():
+            return
+        self._timer_state.set_enabled(self._settings_screen.timer_enabled)
+        self._timer_state.set_duration(self._settings_screen.timer_minutes)
+        self._timer_state.set_custom_sound_path(self._settings_screen.timer_sound_path)
+
+    def _persist_user_setting(self, key: str, value: str) -> None:
+        """Persist one flat setting immediately (issue #30) so a mid-session backup or an
+        Android force-kill keeps it; the batched _save_user_settings still runs on
+        pause/stop as a backstop. No-op with no active user or during settings load."""
+        uid = self._current_user_id
+        if uid and not self._loading_settings:
+            self._db.set_user_setting(uid, key, str(value))
 
     def _persist_active_formulas(self, user_id: int) -> None:
         """Serialize all slots (names + formulas) to a single JSON key."""
@@ -332,6 +355,17 @@ class EEGMeditationApp(App):
                 "Custom feedback file(s) not found: "
                 + ", ".join(repr(p) for p in missing)
                 + " - using rain noise instead.",
+                app=self,
+            )
+
+    def _warn_missing_timer_sound(self) -> None:
+        """Surface (never swallow) a configured timer gong that's gone; the engine falls
+        back to the default gong. Mirrors _warn_missing_feedback_files (issue #30)."""
+        path = self._timer_state.custom_sound_path
+        if self._timer_state.enabled and path and not os.path.isfile(path):
+            report_soft_error(
+                "timer_sound_missing",
+                f"Custom timer sound not found: {path!r} - using the default gong instead.",
                 app=self,
             )
 
@@ -939,9 +973,7 @@ class EEGMeditationApp(App):
 
         self._settings_screen.set_test_timer_sound_callback(self._on_test_timer_sound)
         self._settings_screen.set_stop_timer_sound_callback(self._on_stop_test_timer_sound)
-        self._settings_screen.set_timer_sound_change_callback(
-            self._timer_state.set_custom_sound_path
-        )
+        self._settings_screen.set_timer_sound_change_callback(self._on_timer_sound_change)
 
         self._profile_screen.set_user_switch_callback(self._on_user_switch)
         self._profile_screen.set_user_create_callback(self._on_user_create)
@@ -1411,6 +1443,7 @@ class EEGMeditationApp(App):
         if reward_id:
             fb_sources[reward_id] = self._source_spec(reward_id)
         self._warn_missing_feedback_files(fb_sources)
+        self._warn_missing_timer_sound()
         self._audio.prepare_feedback(fb_sources, fb_initial)
         self._audio.set_reward(reward_id)
         self._live_screen.set_training_series(None)  # set on first segment crossing
@@ -2291,6 +2324,7 @@ class EEGMeditationApp(App):
         self._metrics_engine.meditation_threshold = value
         self._audio.set_threshold(value)
         self._live_screen.graph.set_threshold(float(value), "shamatha_score")
+        self._persist_user_setting("threshold", value)
         logger.debug(f"Threshold changed to {value}")
 
     def _present_series_picker(self, graph) -> None:
@@ -2443,6 +2477,7 @@ class EEGMeditationApp(App):
 
     def _on_rotate_screen(self, rotation: int) -> None:
         Window.rotation = rotation
+        self._persist_user_setting("rotation", rotation)
         logger.info(f"Screen rotation set to {rotation}")
 
     @staticmethod
@@ -2470,18 +2505,23 @@ class EEGMeditationApp(App):
             self._audio_metric_key = FORMULA_KEYS[self._audio_formula_index]
         else:
             self._audio_metric_key = key
+        self._persist_user_setting("audio_metric", self._baseline_audio_metric(self._audio_metric_key))
         logger.info(f"Audio threshold metric changed to: {self._audio_metric_key}")
 
     def _on_feedback_source_change(self, source: str, path: str) -> None:
         """Apply the global (below-threshold) feedback source chosen in Settings."""
         self._feedback_source = source
         self._feedback_sound_path = (path or "").strip()
+        self._persist_user_setting("feedback_source", self._feedback_source)
+        self._persist_user_setting("feedback_sound_path", self._feedback_sound_path)
         logger.info(f"Feedback source -> {self._feedback_source} {self._feedback_sound_path!r}")
 
     def _on_reward_source_change(self, source: str, path: str) -> None:
         """Apply the above-threshold reward source chosen in Settings."""
         self._reward_source = source
         self._reward_sound_path = (path or "").strip()
+        self._persist_user_setting("reward_source", self._reward_source)
+        self._persist_user_setting("reward_sound_path", self._reward_sound_path)
         logger.info(f"Reward source -> {self._reward_source} {self._reward_sound_path!r}")
 
     def _on_audio_formula_index(self, idx: int) -> None:
@@ -2490,7 +2530,11 @@ class EEGMeditationApp(App):
         is selected just remembers the choice for when custom-formula is picked."""
         self._audio_formula_index = max(0, min(idx, _MAX_FORMULAS - 1))
         if self._audio_metric_key in FORMULA_KEYS:
+            # This slot now drives audio; load reconciles the index FROM audio_metric,
+            # so persist both or a reload reverts the switch.
             self._audio_metric_key = FORMULA_KEYS[self._audio_formula_index]
+            self._persist_user_setting("audio_metric", self._baseline_audio_metric(self._audio_metric_key))
+        self._persist_user_setting("audio_formula_index", self._audio_formula_index)
 
     def _on_theme_change(self, theme_name: str) -> None:
         """Save selected theme."""
@@ -2769,15 +2813,23 @@ class EEGMeditationApp(App):
 
     def _on_sinking_alert_toggle(self, active: bool) -> None:
         self._audio.sinking_alert_enabled = active
+        self._persist_user_setting("sinking_alert", active)
         logger.info(f"Sinking alert {'enabled' if active else 'disabled'}")
 
     def _on_subtle_alert_toggle(self, active: bool) -> None:
         self._audio.subtle_alert_enabled = active
+        self._persist_user_setting("subtle_alert", active)
         logger.info(f"Distraction chime {'enabled' if active else 'disabled'}")
 
     def _on_disconnect_alert_toggle(self, active: bool) -> None:
         self._audio.disconnect_alert_enabled = active
+        self._persist_user_setting("disconnect_alert", active)
         logger.info(f"Disconnect alert {'enabled' if active else 'disabled'}")
+
+    def _on_timer_sound_change(self, path: str) -> None:
+        """Set the custom timer-gong path and persist it immediately (issue #30)."""
+        self._timer_state.set_custom_sound_path(path)
+        self._persist_user_setting("timer_sound", self._timer_state.custom_sound_path)
 
     def _on_test_timer_sound(self) -> None:
         logger.debug(f"Test timer sound, path='{self._timer_state.custom_sound_path}'")
@@ -3156,7 +3208,9 @@ class EEGMeditationApp(App):
 
     def _on_backup_pressed(self) -> None:
         """Backup the live DB to a user-visible location."""
-
+        # Flush in-memory settings into the DB first (main thread), so a mid-session
+        # backup captures current values, not the last pause/stop snapshot (issue #30).
+        self._save_user_settings()
 
         ts = _dt.now().strftime("%Y%m%d_%H%M%S")
         filename = f"meditation_backup_{ts}.db"
@@ -3316,14 +3370,18 @@ class EEGMeditationApp(App):
 
         n = self._db.get_record_counts()["sessions"]
         content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
-        content.add_widget(Label(
+        warn = Label(
             text=(
-                f"Replace current database with backup?\n\n"
-                f"Your current sessions ({n}) will be replaced.\n"
+                f"Replace the ENTIRE database with this backup?\n\n"
+                f"ALL profiles and their sessions on this device "
+                f"(currently {n}) will be replaced by the backup's.\n"
+                f"Custom sound files are not stored in a backup.\n"
                 f"This cannot be undone."
             ),
-            halign="center", valign="middle", color=C.TEXT,
-        ))
+            halign="center", valign="middle", color=POPUP_TEXT,
+        )
+        warn.bind(size=warn.setter("text_size"))  # enable wrapping so long lines don't overflow
+        content.add_widget(warn)
         btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
         ok_btn = StyledButton(text="Restore", bg_color=C.DANGER)
         cancel_btn = StyledButton(
@@ -3332,7 +3390,7 @@ class EEGMeditationApp(App):
         btn_row.add_widget(ok_btn)
         btn_row.add_widget(cancel_btn)
         content.add_widget(btn_row)
-        popup = Popup(title="Restore database", content=content, size_hint=(0.85, 0.5))
+        popup = Popup(title="Restore database", content=content, size_hint=(0.85, 0.55))
 
         def _do_restore(*_a):
             popup.dismiss()
@@ -3538,10 +3596,7 @@ class EEGMeditationApp(App):
         uid = self._current_user_id
         if not uid:
             return  # silent-ok: batch persistence; no active user = nothing to save
-        # Sync timer settings from the UI into the headless model.
-        self._timer_state.set_enabled(self._settings_screen.timer_enabled)
-        self._timer_state.set_duration(self._settings_screen.timer_minutes)
-        self._timer_state.set_custom_sound_path(self._settings_screen.timer_sound_path)
+        self._sync_timer_state_from_ui()
         self._db.set_user_setting(uid, "timer_enabled", str(self._settings_screen.timer_enabled))
         self._db.set_user_setting(uid, "timer_minutes", str(self._settings_screen.timer_minutes))
         self._db.set_user_setting(uid, "timer_sound", self._timer_state.custom_sound_path)
@@ -3634,6 +3689,13 @@ class EEGMeditationApp(App):
 
     def _load_user_settings(self, user_id: int) -> None:
         """Restore persisted settings for a user."""
+        self._loading_settings = True  # suppress immediate re-persist of values we're applying
+        try:
+            self._load_user_settings_inner(user_id)
+        finally:
+            self._loading_settings = False
+
+    def _load_user_settings_inner(self, user_id: int) -> None:
         g = self._db.get_user_setting
 
         timer_on = g(user_id, "timer_enabled")
