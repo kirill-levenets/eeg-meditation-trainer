@@ -437,9 +437,23 @@ class DatabaseManager:
         return dict(row) if row else None
 
     def delete_user(self, user_id: int) -> None:
-        """Delete a user profile."""
-        self._conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
-        self._conn.commit()
+        """Delete a user profile and all data it owns (sessions, metrics, settings).
+
+        FKs are declared but not enforced (no PRAGMA foreign_keys / ON DELETE CASCADE),
+        so purge children explicitly and in order — otherwise the row deletion orphans
+        the user's sessions (which then surface in the All-Users view), their metrics,
+        and every `user_{id}_*` settings row. GLOB (not LIKE) so the literal `_` in the
+        key prefix isn't treated as a wildcard and user_1 can't match user_11's keys.
+        """
+        c = self._conn
+        c.execute(
+            "DELETE FROM metrics WHERE session_id IN "
+            "(SELECT id FROM sessions WHERE user_id = ?)", (user_id,)
+        )
+        c.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+        c.execute("DELETE FROM app_settings WHERE key GLOB ?", (f"user_{user_id}_*",))
+        c.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        c.commit()
 
     # ---- Session management ----
 
