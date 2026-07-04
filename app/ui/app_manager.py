@@ -39,6 +39,7 @@ from app.metrics.noise_detector import PowerLineDetector
 from app.session.manager import SessionManager, SessionState
 from app.session.session_program import SessionProgram
 from app.session.timer_state import TimerState
+from app.settings.registry import BOOL, FLOAT, INT, STR, Setting, SettingsStore
 from app.storage import android_saf as _saf
 from app.storage import backup as _backup
 from app.storage.backup import restore_backup, validate_backup
@@ -205,13 +206,15 @@ class EEGMeditationApp(App):
         self._timer_state.set_duration(self._settings_screen.timer_minutes)
         self._timer_state.set_custom_sound_path(self._settings_screen.timer_sound_path)
 
-    def _persist_user_setting(self, key: str, value: str) -> None:
-        """Persist one flat setting immediately (issue #30) so a mid-session backup or an
-        Android force-kill keeps it; the batched _save_user_settings still runs on
-        pause/stop as a backstop. No-op with no active user or during settings load."""
-        uid = self._current_user_id
-        if uid and not self._loading_settings:
-            self._db.set_user_setting(uid, key, str(value))
+    def _persist_user_setting(self, key: str, value=None) -> None:
+        """Persist one setting immediately (issue #30) via the registry, which reads the
+        live value and serializes it. `value` is vestigial (the store reads get()). No-op
+        with no user or during a load. Defensive getattr so __new__ test instances skip."""
+        if self._loading_settings:
+            return
+        store = getattr(self, "_settings_store", None)
+        if store is not None:
+            store.persist(self._current_user_id, key)
 
     def _persist_active_formulas(self, user_id: int) -> None:
         """Serialize all slots (names + formulas) to a single JSON key."""
@@ -697,6 +700,7 @@ class EEGMeditationApp(App):
         self._timer_state = TimerState()
 
         self._wizard_screen = WizardScreen()
+        self._build_settings_store()  # after screens exist, before any user load
         self._sm.add_widget(self._live_screen)
         self._sm.add_widget(self._wizard_screen)
         self._sm.add_widget(self._history_screen)
@@ -2542,8 +2546,10 @@ class EEGMeditationApp(App):
         self._persist_user_setting("audio_formula_index", self._audio_formula_index)
 
     def _on_theme_change(self, theme_name: str) -> None:
-        """Save selected theme."""
-        self._db.set_setting("theme", theme_name)
+        """Persist the selected theme PER-USER (the selector already applied it to C).
+        The startup global-theme load seeds the per-user default, so existing users keep
+        their theme; new/unset users default to it too."""
+        self._persist_user_setting("theme")
         logger.info(f"Theme changed to: {theme_name}")
 
     def _on_formula_slot_change(self, idx: int, name: str, formula: str, *, show: bool = True) -> None:
@@ -3597,33 +3603,121 @@ class EEGMeditationApp(App):
         self._profile_screen.populate_users(users, self._current_user_id)
         self._settings_screen.populate_users(users, self._current_user_id)
 
+    def _build_settings_store(self) -> None:
+        """Build the per-user scalar-settings registry (single source of truth for key,
+        default, type, and live get/set). Defaults are snapshotted from the app's initial
+        state NOW — call once in build() after the screens exist and before any user load,
+        so `get()` returns the constructed defaults, not a loaded user's values."""
+        ss = self._settings_screen
+        ls = self._live_screen
+        graph = ls.graph
+        settings: list[Setting] = []
+
+        def set_timer_enabled(v):
+            self._timer_state.set_enabled(v); ss.timer_enabled = v
+
+        def set_timer_minutes(v):
+            self._timer_state.set_duration(v); ss.timer_minutes = v
+
+        def set_timer_sound(v):
+            self._timer_state.set_custom_sound_path(v); ss.timer_sound_path = v
+
+        def set_sinking(v):
+            self._audio.sinking_alert_enabled = v; ss._sinking_alert_cb.active = v
+
+        def set_subtle(v):
+            self._audio.subtle_alert_enabled = v; ss._subtle_alert_cb.active = v
+
+        def set_disconnect(v):
+            self._audio.disconnect_alert_enabled = v; ss._disconnect_alert_cb.active = v
+
+        def set_threshold(v):
+            ss._threshold_slider.value = v
+            self._metrics_engine.meditation_threshold = v
+            self._audio.set_threshold(v)
+            graph.set_threshold(float(v), "shamatha_score")
+
+        def set_use_mock(v):
+            APP.USE_MOCK_DEVICE = v; ss._device_mode_cb.active = v
+
+        def set_line_width(v):
+            ss._line_width_slider.value = v; self._on_line_width_change(v)
+
+        def set_rotation(v):
+            ss._current_rotation = v
+            ss._rotate_btn.text = f"Rotate Screen ({v}°)"
+            Window.rotation = v
+
+        def set_zoom(v):
+            graph._set_viewport(int(v * graph._sample_rate))
+
+        def set_audio_index(v):
+            self._audio_formula_index = max(0, min(int(v), _MAX_FORMULAS - 1))
+
+        def set_audio_metric(v):
+            v = self._baseline_audio_metric(v)  # heal a leaked program slot
+            self._audio_metric_key = v
+            if v in FORMULA_KEYS:
+                self._audio_formula_index = FORMULA_KEYS.index(v)
+            ss.audio_metric = "custom_formula" if v in FORMULA_KEYS else v
+            ss.audio_formula_index = self._audio_formula_index
+
+        def set_feedback_source(v):
+            self._feedback_source = v; ss.set_feedback_source(v, self._feedback_sound_path)
+
+        def set_feedback_path(v):
+            self._feedback_sound_path = v; ss.set_feedback_source(self._feedback_source, v)
+
+        def set_reward_source(v):
+            self._reward_source = v; ss.set_reward_source(v, self._reward_sound_path)
+
+        def set_reward_path(v):
+            self._reward_sound_path = v; ss.set_reward_source(self._reward_source, v)
+
+        def add(key, codec, get, set_):
+            settings.append(Setting(key, get(), codec[0], codec[1], get, set_))
+
+        add("timer_enabled", BOOL, lambda: ss.timer_enabled, set_timer_enabled)
+        add("timer_minutes", INT, lambda: ss.timer_minutes, set_timer_minutes)
+        add("timer_sound", STR, lambda: self._timer_state.custom_sound_path, set_timer_sound)
+        add("sinking_alert", BOOL, lambda: self._audio.sinking_alert_enabled, set_sinking)
+        add("subtle_alert", BOOL, lambda: self._audio.subtle_alert_enabled, set_subtle)
+        add("disconnect_alert", BOOL, lambda: self._audio.disconnect_alert_enabled, set_disconnect)
+        add("threshold", INT, lambda: int(ss.threshold), set_threshold)
+        add("use_mock", BOOL, lambda: APP.USE_MOCK_DEVICE, set_use_mock)
+        add("line_width", FLOAT, lambda: ss._line_width_slider.value, set_line_width)
+        add("rotation", INT, lambda: ss._current_rotation, set_rotation)
+        add("graph_zoom_seconds", FLOAT,
+            lambda: graph.viewport_points / graph._sample_rate, set_zoom)
+        # audio_formula_index BEFORE audio_metric: metric reconciles the index when it's a slot.
+        add("audio_formula_index", INT, lambda: self._audio_formula_index, set_audio_index)
+        add("audio_metric", STR,
+            lambda: self._baseline_audio_metric(self._audio_metric_key), set_audio_metric)
+        add("feedback_source", STR, lambda: self._feedback_source, set_feedback_source)
+        add("feedback_sound_path", STR, lambda: self._feedback_sound_path, set_feedback_path)
+        add("reward_source", STR, lambda: self._reward_source, set_reward_source)
+        add("reward_sound_path", STR, lambda: self._reward_sound_path, set_reward_path)
+        add("marker_hotkey", STR, lambda: ss.marker_hotkey,
+            lambda v: setattr(ss, "marker_hotkey", v))
+        add("stats_view_mode", STR, lambda: getattr(ls, "_stats_mode", "live"),
+            self._apply_stats_mode)
+        add("theme", STR, lambda: C.theme_name, C.set_theme)
+
+        self._settings_store = SettingsStore(self._db, settings)
+
+    def _apply_stats_mode(self, mode: str) -> None:
+        self._live_screen._stats_mode = mode if mode in ("live", "aggregate") else "live"
+        self._live_screen._apply_stats_mode_styling()
+
     def _save_user_settings(self) -> None:
         """Persist current UI settings for the active user."""
         uid = self._current_user_id
         if not uid:
             return  # silent-ok: batch persistence; no active user = nothing to save
         self._sync_timer_state_from_ui()
-        self._db.set_user_setting(uid, "timer_enabled", str(self._settings_screen.timer_enabled))
-        self._db.set_user_setting(uid, "timer_minutes", str(self._settings_screen.timer_minutes))
-        self._db.set_user_setting(uid, "timer_sound", self._timer_state.custom_sound_path)
-        self._db.set_user_setting(uid, "sinking_alert", str(self._audio.sinking_alert_enabled))
-        self._db.set_user_setting(uid, "subtle_alert", str(self._audio.subtle_alert_enabled))
-        self._db.set_user_setting(uid, "disconnect_alert", str(self._audio.disconnect_alert_enabled))
-        self._db.set_user_setting(uid, "threshold", str(self._settings_screen.threshold))
-        self._db.set_user_setting(uid, "use_mock", str(APP.USE_MOCK_DEVICE))
-        self._db.set_user_setting(
-            uid, "line_width", str(self._settings_screen._line_width_slider.value)
-        )
-        self._db.set_user_setting(
-            uid, "rotation", str(self._settings_screen._current_rotation)
-        )
+        self._settings_store.save(uid)          # all scalar per-user settings + theme
         self._persist_active_formulas(uid)
         self._persist_session_program(uid)
-        self._db.set_user_setting(uid, "audio_formula_index", str(self._audio_formula_index))
-        # Save zoom level as viewport duration in seconds
-        graph = self._live_screen.graph
-        zoom_seconds = graph.viewport_points / graph._sample_rate
-        self._db.set_user_setting(uid, "graph_zoom_seconds", str(zoom_seconds))
         # Per-graph series selection (the on-graph picker is the source of truth).
         for g in self._all_graphs():
             if g.graph_id and len(g.series_keys()) > 1:
@@ -3633,17 +3727,6 @@ class EEGMeditationApp(App):
                     uid, f"graph_series_{g.graph_id}",
                     [k for k in g.visible_keys() if k not in PROGRAM_FORMULA_KEYS],
                 )
-        self._db.set_user_setting(
-            uid, "audio_metric", self._baseline_audio_metric(self._audio_metric_key)
-        )
-        self._db.set_user_setting(uid, "feedback_source", self._feedback_source)
-        self._db.set_user_setting(uid, "feedback_sound_path", self._feedback_sound_path)
-        self._db.set_user_setting(uid, "reward_source", self._reward_source)
-        self._db.set_user_setting(uid, "reward_sound_path", self._reward_sound_path)
-        self._db.set_user_setting(uid, "marker_hotkey", self._settings_screen.marker_hotkey)
-        self._db.set_user_setting(
-            uid, "stats_view_mode", getattr(self._live_screen, "_stats_mode", "live")
-        )
         logger.debug(f"Saved settings for user {uid}")
 
     def _restore_graph_series(self, user_id: int) -> None:
@@ -3704,60 +3787,9 @@ class EEGMeditationApp(App):
     def _load_user_settings_inner(self, user_id: int) -> None:
         g = self._db.get_user_setting
 
-        timer_on = g(user_id, "timer_enabled")
-        if timer_on is not None:
-            active = timer_on == "True"
-            self._timer_state.set_enabled(active)
-            self._settings_screen.timer_enabled = active
-
-        timer_min = g(user_id, "timer_minutes")
-        if timer_min is not None:
-            try:
-                val = int(timer_min)
-                self._timer_state.set_duration(val)
-                self._settings_screen.timer_minutes = val
-            except (ValueError, TypeError):
-                pass
-
-        timer_sound = g(user_id, "timer_sound")
-        if timer_sound is not None:
-            self._timer_state.set_custom_sound_path(timer_sound)
-            self._settings_screen.timer_sound_path = timer_sound
-
-        self._feedback_source = g(user_id, "feedback_source") or self._feedback_source
-        self._feedback_sound_path = g(user_id, "feedback_sound_path") or self._feedback_sound_path
-        self._settings_screen.set_feedback_source(self._feedback_source, self._feedback_sound_path)
-        self._reward_source = g(user_id, "reward_source") or self._reward_source
-        self._reward_sound_path = g(user_id, "reward_sound_path") or self._reward_sound_path
-        self._settings_screen.set_reward_source(self._reward_source, self._reward_sound_path)
-
-        sink = g(user_id, "sinking_alert")
-        if sink is not None:
-            val = sink == "True"
-            self._audio.sinking_alert_enabled = val
-            self._settings_screen._sinking_alert_cb.active = val
-
-        subtle = g(user_id, "subtle_alert")
-        if subtle is not None:
-            val = subtle == "True"
-            self._audio.subtle_alert_enabled = val
-            self._settings_screen._subtle_alert_cb.active = val
-
-        disc = g(user_id, "disconnect_alert")
-        if disc is not None:
-            val = disc == "True"
-            self._audio.disconnect_alert_enabled = val
-            self._settings_screen._disconnect_alert_cb.active = val
-
-        threshold = g(user_id, "threshold")
-        if threshold is not None:
-            try:
-                tval = int(threshold)
-                self._settings_screen._threshold_slider.value = tval
-                self._metrics_engine.meditation_threshold = tval
-                self._audio.set_threshold(tval)
-            except (ValueError, TypeError):
-                pass
+        # All scalar per-user settings (+ theme): always applied with defaults, so a
+        # fresh/partial user never inherits the previously-active user's values.
+        self._settings_store.load(user_id)
 
         # Load formulas BEFORE _restore_graph_series so the per-slot validity gate
         # sees real is_valid; the picker selection (graph_series_*) decides visibility.
@@ -3767,12 +3799,6 @@ class EEGMeditationApp(App):
         self._settings_screen.set_program_name(self._session_program_name)  # show loaded name
         # Saved-programs list pushed to both UIs at the end via _refresh_saved_programs.
         self._push_formula_names_to_graph()
-        idx = g(user_id, "audio_formula_index")
-        if idx is not None:
-            try:
-                self._audio_formula_index = max(0, min(int(idx), _MAX_FORMULAS - 1))
-            except (ValueError, TypeError):
-                pass
         # Reflect every slot's name+formula into the Settings inputs.
         for i in range(_MAX_FORMULAS):
             self._settings_screen.set_formula_slot(i, self._formula_names[i], self._formula_slots[i].formula)
@@ -3788,15 +3814,7 @@ class EEGMeditationApp(App):
                 self._settings_screen.update_device_status(
                     False, meta=f"Saved device: {bt_name or bt_addr}"
                 )
-
-            use_mock = g(user_id, "use_mock")
-            if use_mock is not None:
-                val = use_mock == "True"
-                APP.USE_MOCK_DEVICE = val
-                self._settings_screen._device_mode_cb.active = val
-            elif bt_addr:
-                APP.USE_MOCK_DEVICE = False
-                self._settings_screen._device_mode_cb.active = False
+            # use_mock is applied by the settings registry (store.load) above.
 
         # Update live screen device label to match current mode
         if APP.USE_MOCK_DEVICE:
@@ -3804,57 +3822,6 @@ class EEGMeditationApp(App):
         elif self._real_stream._device_address:
             name = self._real_stream._device_name or "Real EEG"
             self._live_screen.update_device_status(False, device_name=name)
-
-        lw = g(user_id, "line_width")
-        if lw is not None:
-            try:
-                lw_val = float(lw)
-                self._settings_screen._line_width_slider.value = lw_val
-                self._on_line_width_change(lw_val)
-            except (ValueError, TypeError):
-                pass
-
-        rot = g(user_id, "rotation")
-        if rot is not None:
-            try:
-                rot_val = int(rot)
-                self._settings_screen._current_rotation = rot_val
-                self._settings_screen._rotate_btn.text = f"Rotate Screen ({rot_val}\u00b0)"
-                self._on_rotate_screen(rot_val)
-            except (ValueError, TypeError):
-                pass
-
-        zoom_s = g(user_id, "graph_zoom_seconds")
-        if zoom_s is not None:
-            try:
-                sec = float(zoom_s)
-                graph = self._live_screen.graph
-                graph._set_viewport(int(sec * graph._sample_rate))
-            except (ValueError, TypeError):
-                pass
-
-        audio_met = g(user_id, "audio_metric")
-        if audio_met is not None:
-            audio_met = self._baseline_audio_metric(audio_met)  # heal a leaked program slot
-            self._audio_metric_key = audio_met
-            if audio_met in FORMULA_KEYS:
-                self._audio_formula_index = FORMULA_KEYS.index(audio_met)
-            # Reflect audio_metric: radios use "custom_formula" key for any formula slot
-            ui_key = "custom_formula" if audio_met in FORMULA_KEYS else audio_met
-            self._settings_screen.audio_metric = ui_key
-            self._settings_screen.audio_formula_index = self._audio_formula_index
-
-        marker_hk = g(user_id, "marker_hotkey")
-        if marker_hk is not None:
-            self._settings_screen.marker_hotkey = marker_hk
-
-        stats_mode = g(user_id, "stats_view_mode")
-        if stats_mode in ("live", "aggregate"):
-            try:
-                self._live_screen._stats_mode = stats_mode
-                self._live_screen._apply_stats_mode_styling()
-            except Exception:
-                pass
 
         history_mode = g(user_id, "history_view_mode") or "calendar"
         self._history_screen.set_view_mode(history_mode)
