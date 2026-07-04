@@ -700,7 +700,6 @@ class EEGMeditationApp(App):
         self._timer_state = TimerState()
 
         self._wizard_screen = WizardScreen()
-        self._build_settings_store()  # after screens exist, before any user load
         self._sm.add_widget(self._live_screen)
         self._sm.add_widget(self._wizard_screen)
         self._sm.add_widget(self._history_screen)
@@ -735,6 +734,9 @@ class EEGMeditationApp(App):
 
         self._bind_callbacks()
         self._link_graph_zoom()
+        # After _bind_callbacks (which initialises _audio_metric_key/_feedback_source/…
+        # that the descriptors' get() read for their defaults) and before any user load.
+        self._build_settings_store()
         resolved_user = self._restore_last_user()
         self._refresh_profile()
 
