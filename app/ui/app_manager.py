@@ -1121,6 +1121,11 @@ class EEGMeditationApp(App):
             self._db.set_setting("last_user_id", str(e.user_id))
             logger.info(f"Wizard: adopting existing user {e.name} (id={e.user_id})")
         self._view_all_users = False  # a concrete user is now active
+        # Load the resolved user's per-user settings/UI (saved programs, formulas,
+        # threshold, audio, ...). The gate can resolve to an existing/other user after
+        # a profile delete; without this their per-user UI shows the prior user's stale
+        # data (e.g. the deleted user's saved programs), and delete-by-index no-ops.
+        self._load_user_settings(self._current_user_id)
 
         # Set device
         if device_addr:
@@ -3582,6 +3587,7 @@ class EEGMeditationApp(App):
             self._current_user_id = None
             self._view_all_users = False
             self._refresh_profile()
+            self._refresh_saved_programs()  # drop the deleted user's programs from the UI now
             self._open_user_gate(0)
         else:
             self._refresh_profile()
