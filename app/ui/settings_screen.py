@@ -28,10 +28,10 @@ from app.ui.theme import (
     F,
     Icons,
     PresetRow,
-    RevealBox,
     S,
     StyledButton,
     ThemedAccordion,
+    make_scroll_popup,
 )
 from app.ui.widgets.user_picker import UserPickerForm
 
@@ -44,6 +44,20 @@ PROGRAM_BUILTIN_FORMULAS: list[tuple[str, str]] = [
     ("native_meditation", "NS Meditation"),
 ]
 _PROGRAM_BUILTIN_LABELS: dict[str, str] = dict(PROGRAM_BUILTIN_FORMULAS)
+
+# Feedback / reward sound sources, offered through the shared source picker.
+_SOURCE_LABELS: dict[str, str] = {
+    "none": "Off", "noise": "Rain", "tone": "Tone", "heartbeat": "Crickets", "custom": "Custom",
+}
+_FEEDBACK_SOURCE_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("Off", "none"), ("Rain", "noise"), ("Tone", "tone"), ("Custom file...", "custom"),
+)
+# Reward adds the periodic Crickets cue (issue #11); below-threshold feedback does not.
+# ("heartbeat" is the stable internal source id — the timbre is a cricket chirp.)
+_REWARD_SOURCE_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("Off", "none"), ("Rain", "noise"), ("Tone", "tone"),
+    ("Crickets", "heartbeat"), ("Custom file...", "custom"),
+)
 
 
 def open_audio_file_chooser(on_select: Callable[[str], None], title: str = "Choose audio file") -> None:
@@ -156,13 +170,11 @@ class SettingsScreen(Screen):
         self._on_feedback_source_change: Optional[Callable] = None
         self._feedback_source: str = "noise"
         self._feedback_sound_path: str = ""
-        self._feedback_source_buttons: dict[str, StyledButton] = {}
-        self._suppress_feedback_cb: bool = False
+        self._feedback_source_btn: Optional[StyledButton] = None
         self._on_reward_source_change: Optional[Callable] = None
         self._reward_source: str = "none"   # above-threshold reward (off by default)
         self._reward_sound_path: str = ""
-        self._reward_source_buttons: dict[str, StyledButton] = {}
-        self._suppress_reward_cb: bool = False
+        self._reward_source_btn: Optional[StyledButton] = None
         self._graph_toggles: dict[str, bool] = {
             "shamatha_score": True,
             "meditation_score": False,
@@ -744,7 +756,7 @@ class SettingsScreen(Screen):
         audio_desc = Label(
             text=(
                 "Rain noise — volume decreases as meditation deepens\n"
-                "Test: noise sweep (0-max-0), sinking bell (dullness > 60, every 15s),\n"
+                "Test: reward sample, feedback sweep (0-max-0), sinking bell (every 15s),\n"
                 "distraction chime (subtle > 30, every 20s), disconnect warble (device lost)"
             ),
             font_size=F.SMALL,
@@ -775,33 +787,13 @@ class SettingsScreen(Screen):
         fb_label.bind(size=fb_label.setter("text_size"))
         audio_section.add_widget(fb_label)
 
-        fb_row = BoxLayout(size_hint_y=None, height=dp(32), spacing=S.GAP)
-        for key, lbl in (("none", "Off"), ("noise", "Rain"), ("tone", "Tone"), ("custom", "Custom")):
-            btn = StyledButton(
-                text=lbl, font_size=F.SMALL, size_hint_y=None, height=dp(28),
-                bg_color=C.ACCENT if key == "noise" else C.BG_CARD, text_color=C.TEXT,
-            )
-            btn._feedback_key = key
-            btn.bind(on_release=self._on_feedback_source_pressed)
-            self._feedback_source_buttons[key] = btn
-            fb_row.add_widget(btn)
-        audio_section.add_widget(fb_row)
-
-        # Detach-when-hidden (RevealBox): a collapse-in-place disabled row would eat
-        # taps on the Custom button above it (Kivy on_touch_down consumes disabled hits).
-        self._feedback_custom_row = RevealBox(dp(40), spacing=S.GAP_SM)
-        self._feedback_custom_input = CenteredTextInput(
-            hint_text="custom audio file", font_size=F.SMALL, multiline=False,
-            foreground_color=C.TEXT, background_color=list(C.BG_INPUT), size_hint_x=0.7,
+        self._feedback_source_btn = StyledButton(
+            text=self._source_label(self._feedback_source, self._feedback_sound_path),
+            font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT,
+            size_hint_y=None, height=dp(36),
         )
-        self._feedback_custom_input.bind(text=self._on_feedback_custom_path_change)
-        fb_browse = StyledButton(
-            text="Browse", font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT,
-            size_hint_x=0.3,
-        )
-        fb_browse.bind(on_release=self._on_feedback_custom_browse)
-        self._feedback_custom_row.set_content(self._feedback_custom_input, fb_browse)
-        audio_section.add_widget(self._feedback_custom_row)
+        self._feedback_source_btn.bind(on_release=lambda *_a: self._open_feedback_source_picker())
+        audio_section.add_widget(self._feedback_source_btn)
 
         # Above-threshold reward channel (issue #12): a second sound that rises as the
         # score climbs above the threshold. Off by default.
@@ -812,31 +804,13 @@ class SettingsScreen(Screen):
         rw_label.bind(size=rw_label.setter("text_size"))
         audio_section.add_widget(rw_label)
 
-        rw_row = BoxLayout(size_hint_y=None, height=dp(32), spacing=S.GAP)
-        for key, lbl in (("none", "Off"), ("noise", "Rain"), ("tone", "Tone"), ("custom", "Custom")):
-            btn = StyledButton(
-                text=lbl, font_size=F.SMALL, size_hint_y=None, height=dp(28),
-                bg_color=C.ACCENT if key == "none" else C.BG_CARD, text_color=C.TEXT,
-            )
-            btn._reward_key = key
-            btn.bind(on_release=self._on_reward_source_pressed)
-            self._reward_source_buttons[key] = btn
-            rw_row.add_widget(btn)
-        audio_section.add_widget(rw_row)
-
-        self._reward_custom_row = RevealBox(dp(40), spacing=S.GAP_SM)
-        self._reward_custom_input = CenteredTextInput(
-            hint_text="custom reward audio file", font_size=F.SMALL, multiline=False,
-            foreground_color=C.TEXT, background_color=list(C.BG_INPUT), size_hint_x=0.7,
+        self._reward_source_btn = StyledButton(
+            text=self._source_label(self._reward_source, self._reward_sound_path),
+            font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT,
+            size_hint_y=None, height=dp(36),
         )
-        self._reward_custom_input.bind(text=self._on_reward_custom_path_change)
-        rw_browse = StyledButton(
-            text="Browse", font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT,
-            size_hint_x=0.3,
-        )
-        rw_browse.bind(on_release=self._on_reward_custom_browse)
-        self._reward_custom_row.set_content(self._reward_custom_input, rw_browse)
-        audio_section.add_widget(self._reward_custom_row)
+        self._reward_source_btn.bind(on_release=lambda *_a: self._open_reward_source_picker())
+        audio_section.add_widget(self._reward_source_btn)
 
         # Sinking alert toggle
         sinking_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
@@ -1428,6 +1402,25 @@ class SettingsScreen(Screen):
     def set_test_audio_callback(self, callback: Callable) -> None:
         self._on_test_audio = callback
 
+    @staticmethod
+    def _source_label(source: str, path: str = "") -> str:
+        """Human label for a feedback/reward source id, shown on the picker button."""
+        if source == "custom":
+            return f"Custom: {os.path.basename(path)}" if path else "Custom file..."
+        return _SOURCE_LABELS.get(source or "none", "Off")
+
+    def _open_source_picker(self, title: str, options, on_choose: Callable) -> None:
+        """Shared source picker (uses the standard list-select popup): a list of
+        (label, value) rows; a 'custom' value opens the file chooser via on_choose."""
+        holder: dict = {}
+        rows = []
+        for label, value in options:
+            b = StyledButton(text=label, font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT)
+            b.bind(on_release=lambda *_a, v=value: (holder["popup"].dismiss(), on_choose(v)))
+            rows.append(b)
+        holder["popup"] = make_scroll_popup(title, rows, width_hint=0.8)
+        holder["popup"].open()
+
     def set_feedback_source_callback(self, callback: Callable) -> None:
         self._on_feedback_source_change = callback
 
@@ -1436,41 +1429,24 @@ class SettingsScreen(Screen):
         return self._feedback_source
 
     def set_feedback_source(self, source: str, path: str = "") -> None:
-        """Reflect a restored/loaded feedback selection in the UI without firing the callback."""
-        self._suppress_feedback_cb = True
-        try:
-            self._feedback_source = source or "noise"
-            self._feedback_sound_path = path or ""
-            self._feedback_custom_input.text = self._feedback_sound_path
-            self._sync_feedback_source_ui()
-        finally:
-            self._suppress_feedback_cb = False
+        """Reflect a restored/loaded feedback selection on the picker button (no callback)."""
+        self._feedback_source = source or "noise"
+        self._feedback_sound_path = path or ""
+        if self._feedback_source_btn is not None:
+            self._feedback_source_btn.text = self._source_label(self._feedback_source, self._feedback_sound_path)
 
-    def _sync_feedback_source_ui(self) -> None:
-        """Highlight the active source button and show the custom row only for the custom source."""
-        for key, btn in self._feedback_source_buttons.items():
-            btn.bg_color = C.ACCENT if key == self._feedback_source else C.BG_CARD
-        self._feedback_custom_row.reveal(self._feedback_source == "custom")
+    def _open_feedback_source_picker(self) -> None:
+        self._open_source_picker("Feedback sound", _FEEDBACK_SOURCE_OPTIONS, self._choose_feedback_source)
 
-    def _on_feedback_source_pressed(self, btn) -> None:
-        self._feedback_source = btn._feedback_key
-        self._sync_feedback_source_ui()
-        self._emit_feedback_source()
-        # Custom with no file yet: open the picker directly — users expect the
-        # selector to ask for a file, not just reveal an empty path row.
-        if self._feedback_source == "custom" and not self._feedback_sound_path:
-            self._on_feedback_custom_browse()
-
-    def _on_feedback_custom_path_change(self, _instance, value: str) -> None:
-        self._feedback_sound_path = value.strip()
-        self._emit_feedback_source()
-
-    def _on_feedback_custom_browse(self, *_args) -> None:
-        open_audio_file_chooser(lambda p: setattr(self._feedback_custom_input, "text", p))
-
-    def _emit_feedback_source(self) -> None:
-        if self._suppress_feedback_cb:
+    def _choose_feedback_source(self, value: str) -> None:
+        if value == "custom":
+            open_audio_file_chooser(
+                lambda p: self._apply_feedback_source("custom", p), title="Feedback sound file")
             return
+        self._apply_feedback_source(value, "")
+
+    def _apply_feedback_source(self, source: str, path: str) -> None:
+        self.set_feedback_source(source, path)
         if self._on_feedback_source_change:
             self._on_feedback_source_change(self._feedback_source, self._feedback_sound_path)
 
@@ -1478,38 +1454,24 @@ class SettingsScreen(Screen):
         self._on_reward_source_change = callback
 
     def set_reward_source(self, source: str, path: str = "") -> None:
-        """Reflect a restored/loaded reward selection in the UI without firing the callback."""
-        self._suppress_reward_cb = True
-        try:
-            self._reward_source = source or "none"
-            self._reward_sound_path = path or ""
-            self._reward_custom_input.text = self._reward_sound_path
-            self._sync_reward_source_ui()
-        finally:
-            self._suppress_reward_cb = False
+        """Reflect a restored/loaded reward selection on the picker button (no callback)."""
+        self._reward_source = source or "none"
+        self._reward_sound_path = path or ""
+        if self._reward_source_btn is not None:
+            self._reward_source_btn.text = self._source_label(self._reward_source, self._reward_sound_path)
 
-    def _sync_reward_source_ui(self) -> None:
-        for key, btn in self._reward_source_buttons.items():
-            btn.bg_color = C.ACCENT if key == self._reward_source else C.BG_CARD
-        self._reward_custom_row.reveal(self._reward_source == "custom")
+    def _open_reward_source_picker(self) -> None:
+        self._open_source_picker("Reward sound", _REWARD_SOURCE_OPTIONS, self._choose_reward_source)
 
-    def _on_reward_source_pressed(self, btn) -> None:
-        self._reward_source = btn._reward_key
-        self._sync_reward_source_ui()
-        self._emit_reward_source()
-        if self._reward_source == "custom" and not self._reward_sound_path:
-            self._on_reward_custom_browse()
-
-    def _on_reward_custom_path_change(self, _instance, value: str) -> None:
-        self._reward_sound_path = value.strip()
-        self._emit_reward_source()
-
-    def _on_reward_custom_browse(self, *_args) -> None:
-        open_audio_file_chooser(lambda p: setattr(self._reward_custom_input, "text", p))
-
-    def _emit_reward_source(self) -> None:
-        if self._suppress_reward_cb:
+    def _choose_reward_source(self, value: str) -> None:
+        if value == "custom":
+            open_audio_file_chooser(
+                lambda p: self._apply_reward_source("custom", p), title="Reward sound file")
             return
+        self._apply_reward_source(value, "")
+
+    def _apply_reward_source(self, source: str, path: str) -> None:
+        self.set_reward_source(source, path)
         if self._on_reward_source_change:
             self._on_reward_source_change(self._reward_source, self._reward_sound_path)
 

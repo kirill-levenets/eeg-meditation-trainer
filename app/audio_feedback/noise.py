@@ -164,6 +164,7 @@ def _make_noise_player(path: str):
 METRICS_THRESHOLD_FALLBACK = 100
 _FADE_SAMPLES = 512
 _NOISE_BUFFER_SECONDS = 10
+_HEARTBEAT_PULSE_SECONDS = 0.1  # short cricket chirp on a ~10s silent bed -> one chirp per loop
 
 
 def _write_wav(path: str, samples: bytes, rate: int) -> None:
@@ -255,6 +256,32 @@ def _generate_tone_wav(rate: int, freq: float, duration: float) -> bytes:
         raw[n_samples - _FADE_SAMPLES + i] = int(tail * t + head * (1 - t))
 
     raw = [max(-32767, min(32767, s)) for s in raw]
+    return struct.pack(f"<{n_samples}h", *raw)
+
+
+def _generate_heartbeat_wav(rate: int, duration: float, pulse_seconds: float) -> bytes:
+    """Liveness cue: a silent bed with one short cricket-like chirp, so a looping player
+    fires a soft chirp once per `duration`s. The chirp is a high tonal carrier (+ a
+    harmonic for a buzzy, cicada-ish edge) gated by a fast half-wave amplitude trill so
+    it reads as insect syllables, not a tone. Loop edges stay silent (lead-in + trailing
+    silence) and the burst is Hann-windowed to zero at both ends, so the loop is seamless."""
+    n_samples = int(rate * duration)
+    raw = [0] * n_samples
+    pulse_len = min(int(rate * pulse_seconds), max(0, n_samples - 2))
+    if pulse_len > 1:
+        start = min(int(rate * 0.2), n_samples - pulse_len - 1)  # lead-in keeps the loop head silent
+        carrier = 4800.0  # Hz — cricket-like chirp pitch (< Nyquist with its 2nd harmonic)
+        trill = 40.0      # Hz — syllable rate that gives the stridulating texture
+        burst = []
+        for i in range(pulse_len):
+            t = i / rate
+            tone = math.sin(2 * math.pi * carrier * t) + 0.3 * math.sin(2 * math.pi * 2 * carrier * t)
+            syllable = max(0.0, math.sin(2 * math.pi * trill * t)) ** 1.5  # half-wave -> distinct chirps
+            window = 0.5 * (1.0 - math.cos(2 * math.pi * i / (pulse_len - 1)))  # Hann: edges -> 0, no click
+            burst.append(tone * syllable * window)
+        peak = max(abs(s) for s in burst) or 1.0
+        for i, s in enumerate(burst):
+            raw[start + i] = max(-32767, min(32767, int((s / peak) * 0.9 * 32767)))
     return struct.pack(f"<{n_samples}h", *raw)
 
 
@@ -358,6 +385,7 @@ class AudioEngine:
         self._bell_path = os.path.join(self._tmpdir, "bell.wav")
         self._timer_bell_path = os.path.join(self._tmpdir, "timer_bell.wav")
         self._tone_path = os.path.join(self._tmpdir, "tone.wav")
+        self._heartbeat_path = os.path.join(self._tmpdir, "heartbeat.wav")
         self._chime_path = os.path.join(self._tmpdir, "chime.wav")
         self._disconnect_path = os.path.join(self._tmpdir, "disconnect.wav")
         self._chime_sound: object = None
@@ -406,6 +434,11 @@ class AudioEngine:
                 pcm = _generate_tone_wav(self._rate, APP.TONE_FREQUENCY, _NOISE_BUFFER_SECONDS)
                 _write_wav(self._tone_path, pcm, self._rate)
             return self._tone_path
+        if kind == "heartbeat":
+            if not os.path.exists(self._heartbeat_path):
+                pcm = _generate_heartbeat_wav(self._rate, _NOISE_BUFFER_SECONDS, _HEARTBEAT_PULSE_SECONDS)
+                _write_wav(self._heartbeat_path, pcm, self._rate)
+            return self._heartbeat_path
         if kind == "custom" and custom_path and os.path.isfile(custom_path):
             return custom_path
         return self._noise_path
@@ -694,11 +727,13 @@ class AudioEngine:
         self._target_volume = 0.0
         self._test_active = False
 
-    def test_audio(self) -> None:
-        """Test all audio channels: noise volume sweep → bell → chime → disconnect.
+    def test_audio(self, reward_id: str = "") -> None:
+        """Test all audio channels: reward sample → noise volume sweep → bell → chime → disconnect.
 
         Demonstrates smooth volume gradient by ramping noise from silence
-        to max and back down, then plays alert sounds.
+        to max and back down, then plays alert sounds. If a reward source is
+        armed, it is previewed first (players are near loop start, so the cricket
+        chirp is caught) before the below-channel sweep.
         """
         was_playing = self._is_playing
         saved_volume = self._volume
@@ -712,9 +747,27 @@ class AudioEngine:
         self._set_noise_volume(0.0)
         with self._lock:
             self._start_noise_loop()
-        logger.info("Audio test: noise volume sweep started")
+        logger.info("Audio test: started")
 
         def _run_sequence():
+            # Reward sample first: the loop just started, so the reward player is near
+            # position 0 and the cricket chirp (~0.2s in) is heard within this window.
+            if self._test_active and reward_id and reward_id in self._feedback_players:
+                logger.info(f"Audio test: reward sample ({reward_id})")
+                self._reward_feedback = reward_id
+                self._reward_target_volume = self._max_volume
+                rp = self._feedback_players[reward_id]
+                try:
+                    rp.volume = self._max_volume
+                except Exception:
+                    logger.exception("Audio test: reward player volume set failed")
+                time.sleep(APP.AUDIO_TEST_DURATION + 1.0)  # long enough to catch one cricket chirp
+                self._reward_target_volume = 0.0
+                try:
+                    rp.volume = 0.0
+                except Exception:
+                    pass
+                self._reward_feedback = ""
             # Sweep noise volume: 0 → max over half duration, max → 0 over other half
             sweep_duration = APP.AUDIO_TEST_DURATION
             step_interval = 0.05  # 50ms steps = 20 updates/sec
@@ -882,6 +935,7 @@ class AudioEngine:
             self._bell_path,
             self._timer_bell_path,
             self._tone_path,
+            self._heartbeat_path,
             self._chime_path,
             self._disconnect_path,
         ):

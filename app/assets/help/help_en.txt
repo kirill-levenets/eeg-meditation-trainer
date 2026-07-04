@@ -59,14 +59,17 @@ For good EEG signal:
 
 ## Audio Feedback
 
-Two feedback channels in Settings → Audio, each
-Off / Rain / Tone / Custom (wav/mp3/ogg/flac/m4a):
-- Feedback sound (below threshold): plays while you
-  are below your threshold and fades out as you
-  approach it. Default Rain.
-- Reward sound (above threshold): silent until you
-  cross the threshold, then fades in and grows the
-  further above you go. Default Off.
+Two feedback channels in Settings → Audio. Tap a
+channel to open a picker; Custom file... browses for
+your own audio (wav/mp3/ogg/flac/m4a):
+- Feedback sound (below threshold): Off / Rain / Tone
+  / Custom. Plays while you are below your threshold
+  and fades out as you approach it. Default Rain.
+- Reward sound (above threshold): Off / Rain / Tone /
+  Crickets / Custom. Silent until you cross the
+  threshold, then fades in and grows the further above
+  you go. Default Off. Crickets is a soft cricket chirp
+  about every 10 s (a "still here / doing well" cue).
 
 So: quieter (or the reward swelling) = deeper. The
 two cross-fade at the threshold. Set either to Off

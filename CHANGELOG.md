@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Crickets reward sound** (issue #11): a new reward-channel source that plays a soft ~0.1 s cricket chirp roughly once every 10 seconds while you hold above the threshold — a gentle "you're doing well / still here" cue instead of a continuous drone. The periodicity is baked into a looping ~10 s waveform (mostly silence + one short chirp), so it rides the existing lock-safe volume ramp with no extra timers. Settings → Audio → Reward sound → **Crickets**. The **Test Audio** button now also previews the reward source first, so you can hear Crickets (or Tone/Custom) before a session.
+- **Feedback / reward sound source is now a picker** instead of a row of buttons: tapping **Feedback sound** or **Reward sound (above threshold)** opens a chooser list (Off / Rain / Tone / [Crickets] / Custom file…); choosing **Custom file…** opens the file browser directly and the button shows the chosen file. Removes the crowded button row and the separate custom-path row.
 - **Visible button press feedback** (issue #33): pressing any button now raises an edge-visible ring that lingers as it fades on release — the old feedback only darkened the fill *while held*, which a fingertip covers on mobile, so taps on buttons like **Save** felt dead. The ring colour tracks the theme (light on dark themes, dark on light) so it stays visible on every palette. Saving a Session Program now flashes a green **"Saved"** confirmation on the button, so an overwrite (which doesn't change the list) is no longer silent.
 
 ### Fixed
