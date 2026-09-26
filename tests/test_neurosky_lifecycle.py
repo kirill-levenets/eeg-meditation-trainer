@@ -1,9 +1,6 @@
-"""Reader-thread lifecycle: a stopped connect must never leave a live socket.
-
-The MindWave serves one RFCOMM channel. A second connected-but-undrained
-channel stalls its transmitter until the headset is power-cycled, so an
-abandoned connect is not a leak of memory but a hardware failure.
-"""
+"""Reader lifecycle: no path may leave the MindWave's single RFCOMM channel connected but undrained."""
+import os
+import socket
 import threading
 import time
 
@@ -22,7 +19,7 @@ class FakeSocket:
 
 
 class SlowConnectStream(NeuroSkyStream):
-    """Stream whose connect takes `delay` seconds, then adopts a fake socket."""
+    """Stream whose connect takes `delay` seconds (uninterruptible), then adopts a fake socket."""
 
     def __init__(self, delay: float):
         super().__init__()
@@ -38,6 +35,15 @@ class SlowConnectStream(NeuroSkyStream):
         self.sockets.append(sock)
         self._bt_socket = sock
         self._connected_event.set()
+
+
+def _wait_until(predicate, timeout: float = 2.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return predicate()
 
 
 class TestReaderLifecycle:
@@ -61,12 +67,12 @@ class TestReaderLifecycle:
         s = SlowConnectStream(delay=0.6)
         s._STOP_JOIN_TIMEOUT = 0.1
         s.set_device("AA:BB:CC:DD:EE:FF", "Fake")
-        s.start()
+        assert s.start() is True
         time.sleep(0.05)
         s.stop()
         assert s._thread is not None and s._thread.is_alive()
 
-        s.start()
+        assert s.start() is False
         assert s.connect_calls == 1, "a second reader thread was started"
         assert "still closing" in s._last_connect_error
 
@@ -74,10 +80,53 @@ class TestReaderLifecycle:
         assert s.sockets[0].closed
         s._delay = 0.0
         s._connected_event.clear()
-        s.start()
+        assert s.start() is True
         assert s._connected_event.wait(2.0)
         assert s.connect_calls == 2
         s.stop()
+
+    def test_start_without_a_device_is_refused_with_a_reason(self):
+        s = SlowConnectStream(delay=0.0)
+        assert s.start() is False
+        assert s._last_connect_error
+        assert s.connect_calls == 0
+
+    def test_concurrent_stops_do_not_crash(self):
+        """The tick thread and the main thread can both be inside stop()."""
+        s = SlowConnectStream(delay=0.4)
+        s.set_device("AA:BB:CC:DD:EE:FF", "Fake")
+        s.start()
+        time.sleep(0.05)
+        errors: list[BaseException] = []
+
+        def stop():
+            try:
+                s.stop()
+            except BaseException as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=stop) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(3.0)
+        assert errors == []
+        assert s._thread is None
+
+    def test_reader_exit_clears_a_connected_flag_set_after_a_racing_stop(self):
+        """A stop() between the epoch check and `_connected = True` must not leave it stuck True."""
+
+        class RacingStopStream(SlowConnectStream):
+            def _boost_thread_priority(self):
+                # Runs right after `_connected = True`: land a stop() here.
+                self._running = False
+                self._connect_epoch += 1
+
+        s = RacingStopStream(delay=0.0)
+        s.set_device("AA:BB:CC:DD:EE:FF", "Fake")
+        s.start()
+        s._thread.join(2.0)
+        assert s.is_connected is False
 
     def test_clean_start_stop_closes_the_socket_once(self):
         s = SlowConnectStream(delay=0.0)
@@ -92,26 +141,6 @@ class TestReaderLifecycle:
         assert s.sockets[0].closed
         assert s.is_connected is False
 
-    def test_superseded_reader_does_not_adopt_a_second_channel(self):
-        """The pre-fix failure: stop() abandons a connecting thread, start()
-        launches another, and both end up holding a live RFCOMM channel."""
-        s = SlowConnectStream(delay=0.5)
-        s.set_device("AA:BB:CC:DD:EE:FF", "Fake")
-        s.start()
-        time.sleep(0.05)
-        s.stop()
-        s._thread = None  # drop the guard: reproduce the old start() path
-        s._delay = 0.0
-        s._connected_event.clear()
-        s.start()
-        assert s._connected_event.wait(2.0)
-        time.sleep(0.7)  # first thread finishes connecting well after
-
-        assert len(s.sockets) == 2, "expected both connects to have completed"
-        live = [i for i, sock in enumerate(s.sockets) if not sock.closed]
-        assert len(live) <= 1, f"{len(live)} RFCOMM channels left open: {live}"
-        assert s.sockets[0].closed, "the superseded thread kept its channel open"
-
     def test_epoch_advances_on_every_start_and_stop(self):
         s = SlowConnectStream(delay=0.0)
         s.set_device("AA:BB:CC:DD:EE:FF", "Fake")
@@ -122,17 +151,63 @@ class TestReaderLifecycle:
         assert s._connect_epoch == first + 2
 
 
+class TestStopWakesBlockedReads:
+    def test_stop_wakes_a_reader_blocked_in_a_desktop_recv(self):
+        near, far = socket.socketpair()
+        near.settimeout(5.0)  # the desktop read timeout; no data ever arrives
+
+        class DesktopStream(NeuroSkyStream):
+            def _connect_bluetooth(self):
+                self._desktop_socket = near
+
+        s = DesktopStream()
+        s.set_device("AA:BB:CC:DD:EE:FF", "Fake")
+        try:
+            s.start()
+            assert _wait_until(lambda: s.is_connected)
+            time.sleep(0.1)  # reader is blocked in recv()
+            t0 = time.monotonic()
+            s.stop()
+            assert time.monotonic() - t0 < 1.0, "stop() waited out the recv timeout"
+            assert s._thread is None
+        finally:
+            far.close()
+
+    def test_stop_wakes_a_reader_blocked_on_a_silent_serial_device(self):
+        r, w = os.pipe()  # a splitter that never writes
+
+        class SerialStream(NeuroSkyStream):
+            def _connect_bluetooth(self):
+                self._serial_fd = r
+
+        s = SerialStream()
+        s.set_device("/tmp/fake_splitter", "Fake")
+        try:
+            s.start()
+            assert _wait_until(lambda: s.is_connected)
+            time.sleep(0.1)
+            t0 = time.monotonic()
+            s.stop()
+            assert time.monotonic() - t0 < 1.5, "stop() waited on a blocked os.read()"
+            assert s._thread is None, "reader outlived stop(); start() would refuse"
+        finally:
+            os.close(w)
+
+
 class BlockingSocket:
     """Android-like socket: connect() blocks until close() aborts it."""
 
-    def __init__(self, fail: bool = False):
+    def __init__(self, fail: bool = False, succeed: bool = False):
         self.closed = False
         self.fail = fail
+        self.succeed = succeed
         self._closed_event = threading.Event()
 
     def connect(self):
         if self.fail:
             raise OSError("host is down")
+        if self.succeed:
+            return
         if self._closed_event.wait(5.0):
             raise OSError("socket closed")
 
@@ -161,7 +236,7 @@ class AttemptStream(NeuroSkyStream):
         self._run_connect_attempts([("secure", self._make), ("insecure", self._make)])
 
 
-class TestConnectAbort:
+class TestConnectAttempts:
     def test_stop_aborts_a_blocked_connect_without_trying_the_next_method(self):
         s = AttemptStream([BlockingSocket(), BlockingSocket()])
         s.set_device("AA:BB:CC:DD:EE:FF", "Fake")
@@ -176,14 +251,57 @@ class TestConnectAbort:
         assert s.made[0].closed
         assert s._last_connect_error == "", "a user stop was recorded as a connect failure"
 
+    def test_successful_attempt_is_adopted_and_closed_on_stop(self):
+        s = AttemptStream([BlockingSocket(succeed=True)])
+        s.set_device("AA:BB:CC:DD:EE:FF", "Fake")
+        s.start()
+        assert _wait_until(lambda: s.is_connected)
+        sock = s.made[0]
+        assert s._bt_socket is sock
+        assert s._pending_socket is None
+        assert not sock.closed
+
+        s.stop()
+        assert sock.closed
+        assert s.is_connected is False
+
     def test_failed_attempts_close_every_socket(self):
         s = AttemptStream([BlockingSocket(fail=True), BlockingSocket(fail=True)])
         s._running = True
         try:
             s._connect_bluetooth()
         except RuntimeError as e:
-            assert "secure" in str(e) and "insecure" in str(e)
+            detail = str(e).split("All RFCOMM methods failed:", 1)[1]
+            labels = [part.split(":", 1)[0].strip() for part in detail.split(";")]
+            assert labels == ["secure", "insecure"]
         else:
             raise AssertionError("expected all attempts to fail")
         assert all(sock.closed for sock in s.made)
         assert s._pending_socket is None
+
+
+class TestCloseWakesEverySocketKind:
+    def test_close_shuts_down_a_non_native_socket_before_closing_it(self):
+        """PyBluez sockets aren't socket.socket, but a blocked connect() still needs shutdown()."""
+        calls: list[str] = []
+
+        class PyBluezLike:
+            def shutdown(self, how):
+                calls.append(f"shutdown({how})")
+
+            def close(self):
+                calls.append("close")
+
+        s = NeuroSkyStream()
+        s._pending_socket = PyBluezLike()
+        s._close_socket()
+        assert calls == [f"shutdown({socket.SHUT_RDWR})", "close"]
+        assert s._pending_socket is None
+
+    def test_close_tolerates_a_socket_without_shutdown(self):
+        """Android's Java BluetoothSocket has no shutdown(); close() alone must still run."""
+        fake = FakeSocket()
+        s = NeuroSkyStream()
+        s._pending_socket = fake
+        s._close_socket()
+        assert fake.closed

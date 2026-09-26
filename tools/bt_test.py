@@ -58,109 +58,111 @@ def parse_packets(sock: socket.socket, duration: float = 30.0) -> None:
 
     print(f"Reading packets for {duration:.0f}s...\n")
 
-    while time.time() - t0 < duration:
-        try:
-            # Sync: find two consecutive 0xAA bytes
-            b = read_byte(sock)
-            byte_count += 1
-            if b != SYNC:
-                continue
-            b = read_byte(sock)
-            byte_count += 1
-            if b != SYNC:
-                continue
+    # Summary in finally: a Ctrl-C or dropped socket must still report the codes seen.
+    try:
+        while time.time() - t0 < duration:
+            try:
+                # Sync: find two consecutive 0xAA bytes
+                b = read_byte(sock)
+                byte_count += 1
+                if b != SYNC:
+                    continue
+                b = read_byte(sock)
+                byte_count += 1
+                if b != SYNC:
+                    continue
 
-            # Read payload length
-            plen = read_byte(sock)
-            byte_count += 1
-            if plen > 169:
-                continue
+                # Read payload length
+                plen = read_byte(sock)
+                byte_count += 1
+                if plen > 169:
+                    continue
 
-            # Read payload
-            payload = bytearray()
-            for _ in range(plen):
-                payload.append(read_byte(sock))
+                # Read payload
+                payload = bytearray()
+                for _ in range(plen):
+                    payload.append(read_byte(sock))
+                    byte_count += 1
+
+                # Read checksum
+                chksum = read_byte(sock)
                 byte_count += 1
 
-            # Read checksum
-            chksum = read_byte(sock)
-            byte_count += 1
+                # Verify checksum
+                calc = (~sum(payload) & 0xFF)
+                if calc != chksum:
+                    continue
 
-            # Verify checksum
-            calc = (~sum(payload) & 0xFF)
-            if calc != chksum:
-                continue
+                packet_count += 1
 
-            packet_count += 1
-
-            # Parse payload
-            i = 0
-            sq = None
-            att = None
-            med = None
-            bands = None
-            bat = None
-            while i < len(payload):
-                code = payload[i]
-                i += 1
-                if code >= 0x80:
-                    vlen = payload[i]
+                # Parse payload
+                i = 0
+                sq = None
+                att = None
+                med = None
+                bands = None
+                bat = None
+                while i < len(payload):
+                    code = payload[i]
                     i += 1
-                    if code == CODE_EEG_POWER and vlen == 24:
-                        bands = {}
-                        for bi, name in enumerate(BAND_NAMES):
-                            val = struct.unpack(">I", b"\x00" + payload[i + bi * 3:i + bi * 3 + 3])[0]
-                            bands[name] = val
-                    i += vlen
-                else:
-                    val = payload[i]
-                    i += 1
-                    codes_seen[code] = val
-                    if code == CODE_SIGNAL:
-                        sq = val
-                    elif code == CODE_ATTENTION:
-                        att = val
-                    elif code == CODE_MEDITATION:
-                        med = val
-                    elif code == CODE_BATTERY:
-                        bat = val
+                    if code >= 0x80:
+                        vlen = payload[i]
+                        i += 1
+                        if code == CODE_EEG_POWER and vlen == 24:
+                            bands = {}
+                            for bi, name in enumerate(BAND_NAMES):
+                                val = struct.unpack(">I", b"\x00" + payload[i + bi * 3:i + bi * 3 + 3])[0]
+                                bands[name] = val
+                        i += vlen
+                    else:
+                        val = payload[i]
+                        i += 1
+                        codes_seen[code] = val
+                        if code == CODE_SIGNAL:
+                            sq = val
+                        elif code == CODE_ATTENTION:
+                            att = val
+                        elif code == CODE_MEDITATION:
+                            med = val
+                        elif code == CODE_BATTERY:
+                            bat = val
 
-            # Report only the ~1 Hz packets. Printing every raw-wave packet
-            # is 512 lines/s, whose I/O alone can stall the reader and
-            # manufacture the dropouts this tool exists to measure.
-            if sq is not None or att is not None or med is not None or bands or bat is not None:
+                # Report only the ~1 Hz packets. Printing every raw-wave packet
+                # is 512 lines/s, whose I/O alone can stall the reader and
+                # manufacture the dropouts this tool exists to measure.
+                if sq is not None or att is not None or med is not None or bands or bat is not None:
+                    elapsed = time.time() - t0
+                    parts = [f"t={elapsed:5.1f}s pkt#{packet_count:4d}"]
+                    if sq is not None:
+                        parts.append(f"sq={sq:3d}")
+                    if att is not None:
+                        parts.append(f"att={att:3d}")
+                    if med is not None:
+                        parts.append(f"med={med:3d}")
+                    if bat is not None:
+                        parts.append(f"BAT={bat:3d}")
+                    if bands:
+                        total = sum(bands.values())
+                        parts.append(f"total={total:>10d}")
+                        parts.append(f"alpha1={bands['alpha1']:>8d}")
+                    print("  ".join(parts))
+
+            except socket.timeout:
                 elapsed = time.time() - t0
-                parts = [f"t={elapsed:5.1f}s pkt#{packet_count:4d}"]
-                if sq is not None:
-                    parts.append(f"sq={sq:3d}")
-                if att is not None:
-                    parts.append(f"att={att:3d}")
-                if med is not None:
-                    parts.append(f"med={med:3d}")
-                if bat is not None:
-                    parts.append(f"BAT={bat:3d}")
-                if bands:
-                    total = sum(bands.values())
-                    parts.append(f"total={total:>10d}")
-                    parts.append(f"alpha1={bands['alpha1']:>8d}")
-                print("  ".join(parts))
+                print(f"  t={elapsed:5.1f}s  [read timeout — no data for {READ_TIMEOUT}s]")
 
-        except socket.timeout:
-            elapsed = time.time() - t0
-            print(f"  t={elapsed:5.1f}s  [read timeout — no data for {READ_TIMEOUT}s]")
-
-        # Periodic summary
-        now = time.time()
-        if now - last_report > 10:
-            elapsed = now - t0
-            rate = byte_count / elapsed if elapsed > 0 else 0
-            print(f"\n  --- {elapsed:.0f}s: {packet_count} packets, {byte_count} bytes ({rate:.0f} bytes/s) ---\n")
-            last_report = now
-
-    elapsed = time.time() - t0
-    print(f"\nDone. {packet_count} packets, {byte_count} bytes in {elapsed:.1f}s")
-    seen = ", ".join(f"0x{c:02X}(last={v})" for c, v in sorted(codes_seen.items()))
-    print(f"Single-byte codes the device actually sent: {seen or 'none'}")
+            # Periodic summary
+            now = time.time()
+            if now - last_report > 10:
+                elapsed = now - t0
+                rate = byte_count / elapsed if elapsed > 0 else 0
+                print(f"\n  --- {elapsed:.0f}s: {packet_count} packets, {byte_count} bytes ({rate:.0f} bytes/s) ---\n")
+                last_report = now
+    finally:
+        elapsed = time.time() - t0
+        print(f"\nDone. {packet_count} packets, {byte_count} bytes in {elapsed:.1f}s")
+        seen = ", ".join(f"0x{c:02X}(last={v})" for c, v in sorted(codes_seen.items()))
+        print(f"Single-byte codes the device actually sent: {seen or 'none'}")
 
 
 def main():
