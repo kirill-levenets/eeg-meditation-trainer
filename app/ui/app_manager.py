@@ -1465,15 +1465,20 @@ class EEGMeditationApp(App):
         self._tick_count = 0
         logger.info("Session started via UI")
 
+    def _abort_bt_wait(self) -> None:
+        """Tear down a BT-connect wait; the tick watcher stops first or it reads our stop as a failed connect."""
+        self._stop_tick_thread()
+        self._waiting_for_bt = False
+        self._bt_signal_start = None
+        self._real_stream.stop()
+        self._release_wake_lock()
+        self._stop_session_keep_alive_service()
+
     def _on_connect_cancel(self, *args) -> None:
         """Cancel button on connection overlay."""
         self._live_screen.hide_overlay()
         if self._waiting_for_bt or self._tick_thread is not None:
-            self._real_stream.stop()
-            self._waiting_for_bt = False
-            self._stop_tick_thread()
-            self._release_wake_lock()
-            self._stop_session_keep_alive_service()
+            self._abort_bt_wait()
         self._live_screen.set_controls_idle()
         self._live_screen.update_device_status(False)
         self._live_screen.update_state("IDLE")
@@ -1523,15 +1528,11 @@ class EEGMeditationApp(App):
     def _on_stop(self, *args) -> None:
         # If still waiting for BT, session never started — just clean up
         if getattr(self, '_waiting_for_bt', False):
-            self._stop_tick_thread()
-            self._waiting_for_bt = False
-            self._eeg_stream.stop()
+            self._abort_bt_wait()
             self._live_screen.set_controls_idle()
             self._live_screen.update_device_status(False)
             self._live_screen.update_state("Cancelled")
             self._timer_state.reset()
-            self._release_wake_lock()
-            self._stop_session_keep_alive_service()
             logger.info("Session cancelled during BT connection wait")
             return
 

@@ -17,7 +17,8 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 from app.logger import logger
 
@@ -165,6 +166,8 @@ class NeuroSkyStream:
     Uses pyjnius on Android, Python socket on desktop Linux.
     """
 
+    _STOP_JOIN_TIMEOUT: float = 5.0
+
     def __init__(self) -> None:
         self._running: bool = False
         self._connected: bool = False
@@ -193,6 +196,19 @@ class NeuroSkyStream:
         self._windows_serial = None  # Windows only (pyserial Serial object)
         self._serial_fd: Optional[int] = None  # Serial device mode (splitter)
         self._read_count: int = 0
+        # Backlog telemetry: a rising high-water mark means the reader is
+        # losing to the 4 KB/s stream and RFCOMM is buffering behind us.
+        self._avail_high_water: int = 0
+        self._bytes_read: int = 0
+        self._rate_window_start: float = 0.0
+        # Connect generation: a reader thread that outlives its stop() must
+        # close its socket instead of adopting it. The MindWave is a
+        # single-connection device — a second live RFCOMM channel nobody
+        # drains stalls its transmitter until it is power-cycled.
+        self._connect_epoch: int = 0
+        self._socket_seq: int = 0
+        # Android socket inside connect(); stop() closes it to abort the connect.
+        self._pending_socket = None
 
     def set_device(self, address: str, name: str = "") -> None:
         """Set the target Bluetooth device address."""
@@ -203,6 +219,13 @@ class NeuroSkyStream:
     def start(self) -> None:
         """Start reading from the device in a background thread."""
         if self._running:
+            return
+        if self._thread is not None and self._thread.is_alive():
+            # A previous reader is still winding down (typically blocked in
+            # connect). Starting a second one races it for _bt_socket and
+            # leaves whichever loses connected but unreferenced.
+            logger.warning("NeuroSky start ignored: previous reader thread still alive")
+            self._last_connect_error = "Previous connection is still closing.\nRetry in a few seconds."
             return
         if not self._device_address:
             logger.warning("NeuroSky start failed: no device address set")
@@ -219,17 +242,31 @@ class NeuroSkyStream:
         self._latest_signal_quality = 200
         self._raw_wave_buffer.clear()
         self._last_packet_time = 0.0
-        self._thread = threading.Thread(target=self._read_loop, daemon=True)
+        self._connect_epoch += 1
+        self._thread = threading.Thread(
+            target=self._read_loop, args=(self._connect_epoch,), daemon=True
+        )
         self._thread.start()
-        logger.info("NeuroSky stream started")
+        logger.info(f"NeuroSky stream started (epoch {self._connect_epoch})")
 
     def stop(self) -> None:
         """Stop the reader thread and close the socket."""
         self._running = False
         self._connected = False
+        # Close BEFORE the join: it aborts a blocked read() and, on Android, a
+        # blocked connect() (via _pending_socket), so the reader actually exits.
+        # A reader that still outlives the join is caught by the epoch check.
+        self._connect_epoch += 1
+        self._close_socket()
         if self._thread:
-            self._thread.join(timeout=3.0)
-            self._thread = None
+            self._thread.join(timeout=self._STOP_JOIN_TIMEOUT)
+            if self._thread.is_alive():
+                # Keep the reference: start() must refuse until this reader exits.
+                logger.warning(
+                    f"NeuroSky reader thread did not exit within {self._STOP_JOIN_TIMEOUT:.0f}s"
+                )
+            else:
+                self._thread = None
         self._close_socket()
         logger.info("NeuroSky stream stopped")
 
@@ -278,12 +315,21 @@ class NeuroSkyStream:
             self._sample_count += 1
             return sample
 
-    def _read_loop(self) -> None:
-        """Background thread: connect and read ThinkGear packets."""
+    def _read_loop(self, epoch: int) -> None:
+        """Background thread: connect and read ThinkGear packets.
+
+        `epoch` is the connect generation this thread was started for. A
+        stop() bumps it, so a thread that finishes connecting after being
+        stopped closes its socket instead of leaving it live.
+        """
         try:
             self._connect_bluetooth()
             self._last_connect_error = ""
         except Exception as e:
+            if epoch != self._connect_epoch:
+                logger.info(f"NeuroSky connect aborted (epoch {epoch} superseded)")
+                self._close_socket()
+                return
             logger.error(f"NeuroSky BT connect failed: {e}")
             err = str(e)
             if "Host is down" in err:
@@ -298,37 +344,87 @@ class NeuroSkyStream:
             self._connected = False
             return
 
+        if epoch != self._connect_epoch or not self._running:
+            logger.warning(
+                f"NeuroSky connect superseded (epoch {epoch} != {self._connect_epoch}); "
+                "closing the orphaned socket"
+            )
+            self._close_socket()
+            return
+
         logger.info("NeuroSky BT connected, reading packets...")
         self._connected = True
         self._read_count = 0
+        self._bytes_read = 0
+        self._avail_high_water = 0
+        self._rate_window_start = time.monotonic()
+        self._boost_thread_priority()
 
-        while self._running:
+        while self._running and epoch == self._connect_epoch:
             try:
                 data = self._read_bytes(512)
                 if not data:
                     time.sleep(0.01)
                     continue
                 self._read_count += 1
-                if self._read_count == 1 or self._read_count % 1000 == 0:
-                    logger.debug(f"BT read #{self._read_count}: {len(data)} bytes")
+                self._bytes_read += len(data)
+                self._log_throughput()
                 packets = self._parser.feed(data)
                 for pkt in packets:
                     self._apply_packet(pkt)
             except Exception as e:
-                if not self._running:
+                if not self._running or epoch != self._connect_epoch:
                     break  # socket closed by stop(), not a real error
                 logger.error(f"NeuroSky read error: {e}")
                 self._connected = False
                 time.sleep(2.0)
-                if self._running:
+                if self._running and epoch == self._connect_epoch:
                     try:
                         self._close_socket()
                         self._connect_bluetooth()
+                        if epoch != self._connect_epoch:
+                            self._close_socket()
+                            break
                         self._connected = True
                         logger.info("NeuroSky reconnected")
                     except Exception as re:
+                        if epoch != self._connect_epoch:
+                            break
                         logger.error(f"NeuroSky reconnect failed: {re}")
                         self._running = False
+        self._close_socket()
+
+    @staticmethod
+    def _boost_thread_priority() -> None:
+        """Raise the reader thread above the UI thread (Android only).
+
+        Matches the NeuroSky SDK's reader, which runs at Java MAX_PRIORITY
+        (nice -8).  A default-priority Python thread loses to Kivy's renderer
+        and lets the RFCOMM backlog grow.
+        """
+        if not _IS_ANDROID:
+            return
+        try:
+            from jnius import autoclass
+            autoclass("android.os.Process").setThreadPriority(-8)
+        except Exception as e:
+            logger.debug(f"Thread priority boost skipped: {e}")
+
+    def _log_throughput(self) -> None:
+        """Log read throughput and the RFCOMM backlog high-water mark."""
+        now = time.monotonic()
+        window = now - self._rate_window_start
+        if window < 30.0:
+            return
+        logger.info(
+            f"BT throughput: {self._bytes_read / window:.0f} B/s, "
+            f"{self._bytes_read / max(1, self._read_count):.0f} B/read, "
+            f"backlog high-water {self._avail_high_water} B"
+        )
+        self._rate_window_start = now
+        self._bytes_read = 0
+        self._read_count = 0
+        self._avail_high_water = 0
 
     def _apply_packet(self, pkt: dict) -> None:
         """Update internal state from a parsed packet."""
@@ -408,6 +504,13 @@ class NeuroSkyStream:
 
     # ---- Android backend ----
 
+    def _adopt_socket(self, socket, how: str) -> None:
+        """Take ownership of a connected Android RFCOMM socket."""
+        self._socket_seq += 1
+        self._bt_socket = socket
+        self._bt_input_stream = socket.getInputStream()
+        logger.info(f"RFCOMM socket #{self._socket_seq} connected ({how})")
+
     def _connect_android(self) -> None:
         """Open RFCOMM socket via Android Bluetooth API (pyjnius)."""
         try:
@@ -437,50 +540,43 @@ class NeuroSkyStream:
         except Exception as e:
             logger.warning(f"cancelDiscovery failed (non-fatal): {e}")
 
+        # createRfcommSocket(1) is called directly: via Class.getMethod() pyjnius
+        # can't resolve the varargs overload and never reached Bluetooth.
+        self._run_connect_attempts([
+            ("secure", lambda: device.createRfcommSocketToServiceRecord(uuid)),
+            ("insecure", lambda: device.createInsecureRfcommSocketToServiceRecord(uuid)),
+            ("reflection ch=1", lambda: device.createRfcommSocket(1)),
+        ])
+
+    def _run_connect_attempts(self, attempts: list[tuple[str, Callable[[], Any]]]) -> None:
+        """Adopt the first RFCOMM socket that connects; stop() can abort the one in flight."""
         errors: list[str] = []
-
-        # Method 1: Standard secure RFCOMM
-        try:
-            socket = device.createRfcommSocketToServiceRecord(uuid)
-            socket.connect()
-            self._bt_socket = socket
-            self._bt_input_stream = socket.getInputStream()
-            logger.info("RFCOMM socket connected (secure)")
+        for label, make_socket in attempts:
+            sock = None
+            try:
+                sock = make_socket()
+                # Publish before the _running check so stop() either sees the
+                # socket to close or we see the stop — never neither.
+                self._pending_socket = sock
+                if not self._running:
+                    raise RuntimeError("connect aborted by stop()")
+                sock.connect()
+            except Exception as e:
+                self._pending_socket = None
+                # An unclosed failed socket keeps the headset's only channel reserved.
+                if sock is not None:
+                    try:
+                        sock.close()
+                    except Exception as ce:
+                        logger.debug(f"closing failed {label} socket: {ce}")
+                if not self._running:
+                    raise RuntimeError("connect aborted by stop()") from e
+                errors.append(f"{label}: {e}")
+                logger.warning(f"{label.capitalize()} RFCOMM failed: {e}")
+                continue
+            self._pending_socket = None
+            self._adopt_socket(sock, label)
             return
-        except Exception as e:
-            errors.append(f"secure: {e}")
-            logger.warning(f"Secure RFCOMM failed: {e}")
-
-        # Method 2: Insecure RFCOMM
-        try:
-            socket = device.createInsecureRfcommSocketToServiceRecord(uuid)
-            socket.connect()
-            self._bt_socket = socket
-            self._bt_input_stream = socket.getInputStream()
-            logger.info("RFCOMM socket connected (insecure)")
-            return
-        except Exception as e:
-            errors.append(f"insecure: {e}")
-            logger.warning(f"Insecure RFCOMM failed: {e}")
-
-        # Method 3: Reflection-based createRfcommSocket(channel=1)
-        try:
-            from jnius import cast
-            Integer = autoclass("java.lang.Integer")
-            clazz = device.getClass()
-            intclass = Integer.TYPE
-            method = clazz.getMethod("createRfcommSocket", [intclass])
-            raw_socket = method.invoke(device, [Integer.valueOf(1)])
-            socket = cast("android.bluetooth.BluetoothSocket", raw_socket)
-            socket.connect()
-            self._bt_socket = socket
-            self._bt_input_stream = socket.getInputStream()
-            logger.info("RFCOMM socket connected (reflection ch=1)")
-            return
-        except Exception as e:
-            errors.append(f"reflection: {e}")
-            logger.warning(f"Reflection RFCOMM failed: {e}")
-
         raise RuntimeError(f"All RFCOMM methods failed: {'; '.join(errors)}")
 
     # ---- Serial device backend (splitter) ----
@@ -670,34 +766,40 @@ class NeuroSkyStream:
             raise
 
     def _read_bytes_android(self, max_bytes: int) -> bytes:
-        """Read bytes using Java InputStream (Android)."""
-        if self._bt_input_stream is None:
+        """Read bytes using Java InputStream (Android), one JNI call per chunk.
+
+        Reading a byte at a time cost ~4000 pyjnius round-trips/s at the
+        MindWave's 512 Hz raw rate; once the reader falls behind, RFCOMM
+        backpressure wedges the headset's ThinkGear until it is power-cycled.
+        The buffer is allocated at the exact read size on purpose — pyjnius
+        marshals the whole array in both directions, so a reused oversized
+        one is slower than the byte-at-a-time loop it replaces.
+        """
+        stream = self._bt_input_stream
+        if stream is None:
             return b""
         try:
-            available = self._bt_input_stream.available()
+            available = stream.available()
             if available <= 0:
-                first = self._bt_input_stream.read()
+                # Block for the next byte (pyjnius releases the GIL here),
+                # then drain whatever arrived alongside it.
+                first = stream.read()
                 if first < 0:
                     return b""
-                result = bytearray([first])
-                available = self._bt_input_stream.available()
-                if available > 0:
-                    to_read = min(available, max_bytes - 1)
-                    for _ in range(to_read):
-                        b = self._bt_input_stream.read()
-                        if b < 0:
-                            break
-                        result.append(b)
-                return bytes(result)
+                head = bytes([first & 0xFF])
+                available = stream.available()
+                if available <= 0:
+                    return head
+                max_bytes -= 1
             else:
-                to_read = min(available, max_bytes)
-                result = bytearray()
-                for _ in range(to_read):
-                    b = self._bt_input_stream.read()
-                    if b < 0:
-                        break
-                    result.append(b)
-                return bytes(result)
+                head = b""
+            to_read = min(available, max_bytes)
+            self._avail_high_water = max(self._avail_high_water, available)
+            buf = bytearray(to_read)
+            n = stream.read(buf, 0, to_read)
+            if n <= 0:
+                return head
+            return head + bytes(buf[:n])
         except Exception as e:
             logger.debug(f"_read_bytes_android error: {e}")
             raise
@@ -744,11 +846,20 @@ class NeuroSkyStream:
             except Exception:
                 pass
             self._serial_fd = None
+        pending = self._pending_socket
+        if pending is not None:
+            self._pending_socket = None
+            try:
+                pending.close()
+                logger.info("Aborted in-flight RFCOMM connect")
+            except Exception as e:
+                logger.debug(f"closing in-flight RFCOMM socket: {e}")
         if self._bt_socket:
             try:
                 self._bt_socket.close()
-            except Exception:
-                pass
+                logger.info(f"RFCOMM socket #{self._socket_seq} closed")
+            except Exception as e:
+                logger.debug(f"closing RFCOMM socket: {e}")
             self._bt_socket = None
         if self._desktop_socket:
             try:

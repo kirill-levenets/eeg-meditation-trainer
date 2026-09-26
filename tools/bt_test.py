@@ -5,6 +5,7 @@ Tests raw RFCOMM connection and ThinkGear packet parsing with no app code.
 Usage:
     python tools/bt_test.py C4:64:E3:E8:CC:CA
     python tools/bt_test.py              # uses default MAC
+    python tools/bt_test.py C4:64:E3:E8:CC:CA 1800   # MAC + seconds
 """
 import socket
 import struct
@@ -17,6 +18,7 @@ CONNECT_TIMEOUT = 30.0
 READ_TIMEOUT = 5.0
 
 SYNC = 0xAA
+CODE_BATTERY = 0x01
 CODE_SIGNAL = 0x02
 CODE_ATTENTION = 0x04
 CODE_MEDITATION = 0x05
@@ -52,6 +54,7 @@ def parse_packets(sock: socket.socket, duration: float = 30.0) -> None:
     packet_count = 0
     byte_count = 0
     last_report = t0
+    codes_seen: dict[int, int] = {}
 
     print(f"Reading packets for {duration:.0f}s...\n")
 
@@ -96,6 +99,7 @@ def parse_packets(sock: socket.socket, duration: float = 30.0) -> None:
             att = None
             med = None
             bands = None
+            bat = None
             while i < len(payload):
                 code = payload[i]
                 i += 1
@@ -111,27 +115,35 @@ def parse_packets(sock: socket.socket, duration: float = 30.0) -> None:
                 else:
                     val = payload[i]
                     i += 1
+                    codes_seen[code] = val
                     if code == CODE_SIGNAL:
                         sq = val
                     elif code == CODE_ATTENTION:
                         att = val
                     elif code == CODE_MEDITATION:
                         med = val
+                    elif code == CODE_BATTERY:
+                        bat = val
 
-            # Report
-            elapsed = time.time() - t0
-            parts = [f"t={elapsed:5.1f}s pkt#{packet_count:4d}"]
-            if sq is not None:
-                parts.append(f"sq={sq:3d}")
-            if att is not None:
-                parts.append(f"att={att:3d}")
-            if med is not None:
-                parts.append(f"med={med:3d}")
-            if bands:
-                total = sum(bands.values())
-                parts.append(f"total={total:>10d}")
-                parts.append(f"alpha1={bands['alpha1']:>8d}")
-            print("  ".join(parts))
+            # Report only the ~1 Hz packets. Printing every raw-wave packet
+            # is 512 lines/s, whose I/O alone can stall the reader and
+            # manufacture the dropouts this tool exists to measure.
+            if sq is not None or att is not None or med is not None or bands or bat is not None:
+                elapsed = time.time() - t0
+                parts = [f"t={elapsed:5.1f}s pkt#{packet_count:4d}"]
+                if sq is not None:
+                    parts.append(f"sq={sq:3d}")
+                if att is not None:
+                    parts.append(f"att={att:3d}")
+                if med is not None:
+                    parts.append(f"med={med:3d}")
+                if bat is not None:
+                    parts.append(f"BAT={bat:3d}")
+                if bands:
+                    total = sum(bands.values())
+                    parts.append(f"total={total:>10d}")
+                    parts.append(f"alpha1={bands['alpha1']:>8d}")
+                print("  ".join(parts))
 
         except socket.timeout:
             elapsed = time.time() - t0
@@ -147,11 +159,14 @@ def parse_packets(sock: socket.socket, duration: float = 30.0) -> None:
 
     elapsed = time.time() - t0
     print(f"\nDone. {packet_count} packets, {byte_count} bytes in {elapsed:.1f}s")
+    seen = ", ".join(f"0x{c:02X}(last={v})" for c, v in sorted(codes_seen.items()))
+    print(f"Single-byte codes the device actually sent: {seen or 'none'}")
 
 
 def main():
     mac = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_MAC
-    print(f"MindWave BT Test — {mac}")
+    duration = float(sys.argv[2]) if len(sys.argv) > 2 else 30.0
+    print(f"MindWave BT Test — {mac}, {duration:.0f}s")
     print("=" * 50)
 
     try:
@@ -161,7 +176,7 @@ def main():
         sys.exit(1)
 
     try:
-        parse_packets(sock, duration=30.0)
+        parse_packets(sock, duration=duration)
     except KeyboardInterrupt:
         print("\nInterrupted")
     except Exception as e:
