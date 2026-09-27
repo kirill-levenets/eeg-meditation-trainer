@@ -108,6 +108,7 @@ class EEGMeditationApp(App):
     """Main Kivy application for EEG Meditation Trainer."""
 
     title = APP.APP_NAME
+    _PERSIST_SETTLE_S: float = 0.5  # quiet time before a slider/text change is written
     icon = os.path.join(
         os.path.dirname(os.path.dirname(__file__)),
         "assets", "icons", "icon_128.png",
@@ -158,6 +159,7 @@ class EEGMeditationApp(App):
         # Suppresses immediate per-setting persistence while _load_user_settings
         # applies restored values (the callbacks it triggers would re-persist them).
         self._loading_settings: bool = False
+        self._persist_triggers: dict = {}  # setting key -> debounced persist (continuous inputs)
         # True only for the deliberate "Show All Users" aggregate history view,
         # distinct from _current_user_id=None (unset). Keeps the unset state from
         # ever querying all profiles' sessions (cross-profile leak).
@@ -208,15 +210,33 @@ class EEGMeditationApp(App):
         self._timer_state.set_duration(self._settings_screen.timer_minutes)
         self._timer_state.set_custom_sound_path(self._settings_screen.timer_sound_path)
 
-    def _persist_user_setting(self, key: str, value=None) -> None:
-        """Persist one setting immediately (issue #30) via the registry, which reads the
-        live value and serializes it. `value` is vestigial (the store reads get()). No-op
-        with no user or during a load. Defensive getattr so __new__ test instances skip."""
+    def _persist_user_setting(self, key: str) -> None:
+        """Persist one setting now via the registry (it reads the live value); no-op mid-load or unbuilt."""
         if self._loading_settings:
             return
         store = getattr(self, "_settings_store", None)
-        if store is not None:
+        if store is None:
+            return
+        try:
             store.persist(self._current_user_id, key)
+        except sqlite3.Error as e:
+            # The value stays applied in memory; the next batch save retries it.
+            report_soft_error("settings_save_failed", f"Couldn't save setting {key!r}: {e}", app=self)
+
+    def _persist_user_setting_later(self, key: str) -> None:
+        """Persist a continuous input (slider drag, typing) once it settles, not on every step."""
+        if self._loading_settings:
+            return
+        triggers = getattr(self, "_persist_triggers", None)
+        if triggers is None:
+            triggers = self._persist_triggers = {}
+        ev = triggers.get(key)
+        if ev is None:
+            ev = triggers[key] = Clock.create_trigger(
+                lambda _dt: self._persist_user_setting(key), self._PERSIST_SETTLE_S
+            )
+        ev.cancel()  # restart the settle window on every change
+        ev()
 
     def _persist_active_formulas(self, user_id: int) -> None:
         """Serialize all slots (names + formulas) to a single JSON key."""
@@ -2340,7 +2360,7 @@ class EEGMeditationApp(App):
         self._metrics_engine.meditation_threshold = value
         self._audio.set_threshold(value)
         self._live_screen.graph.set_threshold(float(value), "shamatha_score")
-        self._persist_user_setting("threshold", value)
+        self._persist_user_setting_later("threshold")
         logger.debug(f"Threshold changed to {value}")
 
     def _present_series_picker(self, graph) -> None:
@@ -2493,7 +2513,7 @@ class EEGMeditationApp(App):
 
     def _on_rotate_screen(self, rotation: int) -> None:
         Window.rotation = rotation
-        self._persist_user_setting("rotation", rotation)
+        self._persist_user_setting("rotation")
         logger.info(f"Screen rotation set to {rotation}")
 
     @staticmethod
@@ -2521,23 +2541,23 @@ class EEGMeditationApp(App):
             self._audio_metric_key = FORMULA_KEYS[self._audio_formula_index]
         else:
             self._audio_metric_key = key
-        self._persist_user_setting("audio_metric", self._baseline_audio_metric(self._audio_metric_key))
+        self._persist_user_setting("audio_metric")
         logger.info(f"Audio threshold metric changed to: {self._audio_metric_key}")
 
     def _on_feedback_source_change(self, source: str, path: str) -> None:
         """Apply the global (below-threshold) feedback source chosen in Settings."""
         self._feedback_source = source
         self._feedback_sound_path = (path or "").strip()
-        self._persist_user_setting("feedback_source", self._feedback_source)
-        self._persist_user_setting("feedback_sound_path", self._feedback_sound_path)
+        self._persist_user_setting("feedback_source")
+        self._persist_user_setting("feedback_sound_path")
         logger.info(f"Feedback source -> {self._feedback_source} {self._feedback_sound_path!r}")
 
     def _on_reward_source_change(self, source: str, path: str) -> None:
         """Apply the above-threshold reward source chosen in Settings."""
         self._reward_source = source
         self._reward_sound_path = (path or "").strip()
-        self._persist_user_setting("reward_source", self._reward_source)
-        self._persist_user_setting("reward_sound_path", self._reward_sound_path)
+        self._persist_user_setting("reward_source")
+        self._persist_user_setting("reward_sound_path")
         logger.info(f"Reward source -> {self._reward_source} {self._reward_sound_path!r}")
 
     def _on_audio_formula_index(self, idx: int) -> None:
@@ -2549,8 +2569,8 @@ class EEGMeditationApp(App):
             # This slot now drives audio; load reconciles the index FROM audio_metric,
             # so persist both or a reload reverts the switch.
             self._audio_metric_key = FORMULA_KEYS[self._audio_formula_index]
-            self._persist_user_setting("audio_metric", self._baseline_audio_metric(self._audio_metric_key))
-        self._persist_user_setting("audio_formula_index", self._audio_formula_index)
+            self._persist_user_setting("audio_metric")
+        self._persist_user_setting("audio_formula_index")
 
     def _on_theme_change(self, theme_name: str) -> None:
         """Persist the selected theme PER-USER (the selector already applied it to C).
@@ -2831,23 +2851,23 @@ class EEGMeditationApp(App):
 
     def _on_sinking_alert_toggle(self, active: bool) -> None:
         self._audio.sinking_alert_enabled = active
-        self._persist_user_setting("sinking_alert", active)
+        self._persist_user_setting("sinking_alert")
         logger.info(f"Sinking alert {'enabled' if active else 'disabled'}")
 
     def _on_subtle_alert_toggle(self, active: bool) -> None:
         self._audio.subtle_alert_enabled = active
-        self._persist_user_setting("subtle_alert", active)
+        self._persist_user_setting("subtle_alert")
         logger.info(f"Distraction chime {'enabled' if active else 'disabled'}")
 
     def _on_disconnect_alert_toggle(self, active: bool) -> None:
         self._audio.disconnect_alert_enabled = active
-        self._persist_user_setting("disconnect_alert", active)
+        self._persist_user_setting("disconnect_alert")
         logger.info(f"Disconnect alert {'enabled' if active else 'disabled'}")
 
     def _on_timer_sound_change(self, path: str) -> None:
-        """Set the custom timer-gong path and persist it immediately (issue #30)."""
+        """Set the custom timer-gong path; persist it once typing settles."""
         self._timer_state.set_custom_sound_path(path)
-        self._persist_user_setting("timer_sound", self._timer_state.custom_sound_path)
+        self._persist_user_setting_later("timer_sound")
 
     def _on_test_timer_sound(self) -> None:
         logger.debug(f"Test timer sound, path='{self._timer_state.custom_sound_path}'")
@@ -3732,18 +3752,23 @@ class EEGMeditationApp(App):
         if not uid:
             return  # silent-ok: batch persistence; no active user = nothing to save
         self._sync_timer_state_from_ui()
-        self._settings_store.save(uid)          # all scalar per-user settings + theme
-        self._persist_active_formulas(uid)
-        self._persist_session_program(uid)
-        # Per-graph series selection (the on-graph picker is the source of truth).
-        for g in self._all_graphs():
-            if g.graph_id and len(g.series_keys()) > 1:
-                if g is self._live_screen.graph and self._program_governs_live_series():
-                    continue  # program-driven visibility; keep the saved manual selection
-                self._db.set_user_json_setting(
-                    uid, f"graph_series_{g.graph_id}",
-                    [k for k in g.visible_keys() if k not in PROGRAM_FORMULA_KEYS],
-                )
+        try:
+            self._settings_store.save(uid)          # all scalar per-user settings + theme
+            self._persist_active_formulas(uid)
+            self._persist_session_program(uid)
+            # Per-graph series selection (the on-graph picker is the source of truth).
+            for g in self._all_graphs():
+                if g.graph_id and len(g.series_keys()) > 1:
+                    if g is self._live_screen.graph and self._program_governs_live_series():
+                        continue  # program-driven visibility; keep the saved manual selection
+                    self._db.set_user_json_setting(
+                        uid, f"graph_series_{g.graph_id}",
+                        [k for k in g.visible_keys() if k not in PROGRAM_FORMULA_KEYS],
+                    )
+        except sqlite3.Error as e:
+            # Runs from UI callbacks (backup, pause, profile switch): report, don't crash.
+            report_soft_error("settings_save_failed", f"Couldn't save your settings: {e}", app=self)
+            return
         logger.debug(f"Saved settings for user {uid}")
 
     def _restore_graph_series(self, user_id: int) -> None:
