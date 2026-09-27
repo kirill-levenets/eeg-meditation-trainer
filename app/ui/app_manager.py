@@ -71,6 +71,7 @@ FORMULA_KEYS: tuple[str, ...] = ("custom_formula", "custom_formula_2", "custom_f
 # Program-driven custom-formula lines: one per distinct custom formula in a program.
 PROGRAM_FORMULA_KEYS: tuple[str, ...] = ("program_formula", "program_formula_2", "program_formula_3")
 _MAX_FORMULAS = len(FORMULA_KEYS)
+_BACKUP_SOUND_NOTE = "Custom sound files are not included in a backup."
 
 
 def resolve_startup_user(db) -> Optional[int]:
@@ -2682,7 +2683,7 @@ class EEGMeditationApp(App):
         progs = self._db.get_saved_programs(self._current_user_id)
         existing = next((i for i, p in enumerate(progs) if p.get("name") == name), None)
         if existing is not None:
-            self._confirm_program_action(
+            self._confirm_action(
                 "Overwrite program",
                 f"A program named '{name}' already exists.\n"
                 f"Overwrite it with the current segments?",
@@ -2742,7 +2743,7 @@ class EEGMeditationApp(App):
         if not self._program_has_unsaved_changes():
             self._load_program(index, name)
             return
-        self._confirm_program_action(
+        self._confirm_action(
             "Load program",
             f"Load '{name}'?\nUnsaved changes to the current program will be lost.",
             "Load",
@@ -2770,7 +2771,7 @@ class EEGMeditationApp(App):
         if not (0 <= index < len(progs)):
             return
         name = progs[index].get("name", "")
-        self._confirm_program_action(
+        self._confirm_action(
             "Delete program",
             f"Delete saved program '{name}'?",
             "Delete",
@@ -2790,22 +2791,23 @@ class EEGMeditationApp(App):
         self._settings_screen.set_saved_programs(progs)
         self._live_screen.set_session_programs(progs, self._session_program_name)
 
-    def _confirm_program_action(self, title, message, ok_text, on_ok,
-                                ok_color=None) -> None:
-        """Modal confirm dialog (mirrors _confirm_restore); on_ok runs on confirm."""
-        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
-        content.add_widget(Label(
-            text=message, halign="center", valign="middle", color=POPUP_TEXT,
-        ))
+    def _confirm_action(self, title, message, ok_text, on_ok, ok_color=None) -> None:
+        """Modal confirm whose message wraps and scrolls, so no line is ever silently dropped."""
+        width_hint = 0.85
+        label = Label(text=message, halign="center", valign="top", color=POPUP_TEXT, size_hint_y=None)
+        # Measure the wrapped text now so the popup sizes to it (capped; beyond that it scrolls).
+        label.text_size = (Window.width * width_hint - dp(48), None)
+        label.texture_update()
+        label.height = label.texture_size[1]
+        label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)),
+                   texture_size=lambda w, v: setattr(w, "height", v[1]))
         btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
         ok_btn = StyledButton(text=ok_text, bg_color=ok_color or C.ACCENT)
-        cancel_btn = StyledButton(
-            text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_MUTED,
-        )
+        cancel_btn = StyledButton(text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_MUTED)
         btn_row.add_widget(ok_btn)
         btn_row.add_widget(cancel_btn)
-        content.add_widget(btn_row)
-        popup = Popup(title=title, content=content, size_hint=(0.85, 0.4))
+        popup = make_scroll_popup(title, [label], footer=btn_row, width_hint=width_hint,
+                                  est_rows=int(label.height // dp(44)) + 1)
 
         def _do(*_a):
             popup.dismiss()
@@ -3266,7 +3268,7 @@ class EEGMeditationApp(App):
         try:
             tmp_path = _backup.online_backup_to_tempfile(self._db)
             ok = _saf.write_file_to_uri(uri_str, tmp_path)
-            msg = "Backup saved" if ok else "Could not write backup to that location"
+            msg = f"Backup saved. {_BACKUP_SOUND_NOTE}" if ok else "Could not write backup to that location"
             if ok:
                 Clock.schedule_once(lambda dt: self._settings_screen.show_backup_status(msg))
             else:
@@ -3299,7 +3301,7 @@ class EEGMeditationApp(App):
                 )
                 return
             Clock.schedule_once(lambda dt: self._settings_screen.show_backup_status(
-                f"Saved to {target_path}",
+                f"Saved to {target_path}. {_BACKUP_SOUND_NOTE}",
             ))
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -3390,37 +3392,19 @@ class EEGMeditationApp(App):
             )
             return
 
-        n = self._db.get_record_counts()["sessions"]
-        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
-        warn = Label(
-            text=(
-                f"Replace the ENTIRE database with this backup?\n\n"
-                f"ALL profiles and their sessions on this device "
-                f"(currently {n}) will be replaced by the backup's.\n"
-                f"Custom sound files are not stored in a backup.\n"
-                f"This cannot be undone."
-            ),
-            halign="center", valign="middle", color=POPUP_TEXT,
+        counts = self._db.get_record_counts()
+        self._confirm_action(
+            "Restore database",
+            f"Replace the ENTIRE database with this backup?\n\n"
+            f"All {counts['users']} profile(s) on this device, with their "
+            f"{counts['sessions']} session(s), settings, programs and formulas, "
+            f"will be replaced by the backup's.\n"
+            f"{_BACKUP_SOUND_NOTE}\n"
+            f"This cannot be undone.",
+            "Restore",
+            lambda: self._do_restore_and_restart(source_path),
+            ok_color=C.DANGER,
         )
-        warn.bind(size=warn.setter("text_size"))  # enable wrapping so long lines don't overflow
-        content.add_widget(warn)
-        btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
-        ok_btn = StyledButton(text="Restore", bg_color=C.DANGER)
-        cancel_btn = StyledButton(
-            text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_MUTED,
-        )
-        btn_row.add_widget(ok_btn)
-        btn_row.add_widget(cancel_btn)
-        content.add_widget(btn_row)
-        popup = Popup(title="Restore database", content=content, size_hint=(0.85, 0.55))
-
-        def _do_restore(*_a):
-            popup.dismiss()
-            self._do_restore_and_restart(source_path)
-
-        ok_btn.bind(on_release=_do_restore)
-        cancel_btn.bind(on_release=popup.dismiss)
-        popup.open()
 
     def _do_restore_and_restart(self, source_path: str) -> None:
 
