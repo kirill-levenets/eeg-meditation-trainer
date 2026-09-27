@@ -140,12 +140,13 @@ Settings uses collapsible accordion sections. Tap a section header to expand/col
 - Type a new name into the input and tap **Create** to add a profile.
 - If the name you typed already exists, an inline message offers two buttons: **Use existing 'X'** (switch to that profile) or **Change name** (back to the input). Names are unique and case-sensitive.
 - Each user has separate sessions, settings, and formulas. The **X** button on a row deletes that profile after a confirmation.
+- Switching profiles is refused while a session is running or connecting ("Session in progress") — a running session keeps the settings it started with. Stop the session first.
 
 ### Data Backup
 
 Settings → **Data Backup** lets you save a copy of your sessions to a file and restore it later.
 
-- **Backup database** — writes a transaction-safe copy of the live database. On Android the backup goes to `Documents/EEGMeditation/meditation_backup_YYYYMMDD_HHMMSS.db` (visible to file managers and Telegram's "attach file" picker). On desktop, a save dialog opens.
+- **Backup database** — saves your current settings, then writes a transaction-safe copy of the live database (all profiles) as `meditation_backup_YYYYMMDD_HHMMSS.db`. You choose where: on Android a system save dialog opens (e.g. Downloads, Documents, a cloud drive); on desktop, a file dialog. The confirmation line reminds you that custom sound files are not included.
 - **Restore database** — pick a backup file. The app validates it (must be a real SQLite file with `users` and `sessions` tables), shows a confirmation dialog, then replaces the live database. The app will exit after restoring — relaunch it to see your imported history.
 
 Two things to know before restoring:

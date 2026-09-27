@@ -122,16 +122,17 @@ issue so we can fix it.
 ## Data Backup
 
 Settings → Data Backup → tap "Backup database"
-to write a copy of your session history to a file.
-On Android, backups go to Documents/EEGMeditation/
-and are visible to file managers and Telegram's
-file picker. On desktop, you choose where to save.
+to write a copy of all profiles, sessions and
+settings to a file. You choose where to save it
+(on Android a system save dialog opens). Custom
+sound files are not included in a backup.
 
-Tap "Restore database" to replace the current
-database with a backup file. This cannot be undone
-— your current sessions are replaced. The app will
-exit after restoring; relaunch to see your imported
-history.
+Tap "Restore database" to replace the ENTIRE
+database — all profiles on this device — with a
+backup file. This cannot be undone. Restore is
+unavailable while a session is running. The app
+will exit after restoring; relaunch to see your
+imported history.
 
 ## User Profiles
 
@@ -142,6 +143,9 @@ profile. Tap an existing profile to keep using it,
 or type a new name to start fresh. Names must be
 unique — if you type a name that exists, you'll be
 offered a "Use existing" / "Change name" choice.
+
+You can't switch profiles while a session is
+running or connecting — stop the session first.
 
 ## Session Program
 
