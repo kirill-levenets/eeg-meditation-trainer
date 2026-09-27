@@ -358,29 +358,18 @@ class EEGMeditationApp(App):
             return getattr(self, "_feedback_sound_path", "") or "noise"
         return src
 
-    def _warn_missing_feedback_files(self, sources: dict) -> None:
-        """Surface (never swallow) custom feedback files that don't exist; the engine uses rain."""
-        missing = [path for kind, path in sources.values()
+    def _warn_missing_sound_files(self, feedback_sources: dict, timer_path: str = "") -> None:
+        """Surface (never swallow) missing custom sound files in ONE report; two would race for the dialog."""
+        problems = []
+        missing = [path for kind, path in feedback_sources.values()
                    if kind == "custom" and not (path and os.path.isfile(path))]
         if missing:
-            report_soft_error(
-                "feedback_sound_missing",
-                "Custom feedback file(s) not found: "
-                + ", ".join(repr(p) for p in missing)
-                + " - using rain noise instead.",
-                app=self,
-            )
-
-    def _warn_missing_timer_sound(self) -> None:
-        """Surface (never swallow) a configured timer gong that's gone; the engine falls
-        back to the default gong. Mirrors _warn_missing_feedback_files (issue #30)."""
-        path = self._timer_state.custom_sound_path
-        if self._timer_state.enabled and path and not os.path.isfile(path):
-            report_soft_error(
-                "timer_sound_missing",
-                f"Custom timer sound not found: {path!r} - using the default gong instead.",
-                app=self,
-            )
+            problems.append("Custom feedback file(s) not found: "
+                            + ", ".join(repr(p) for p in missing) + " - using rain noise instead.")
+        if timer_path and not os.path.isfile(timer_path):
+            problems.append(f"Custom timer sound not found: {timer_path!r} - using the default gong instead.")
+        if problems:
+            report_soft_error("sound_files_missing", "\n".join(problems), app=self)
 
     def _apply_program_visibility(self, prog) -> list:
         """Set the live graph to EXACTLY the program's metric set and label each program
@@ -1460,8 +1449,8 @@ class EEGMeditationApp(App):
         reward_id = self._reward_id()
         if reward_id:
             fb_sources[reward_id] = self._source_spec(reward_id)
-        self._warn_missing_feedback_files(fb_sources)
-        self._warn_missing_timer_sound()
+        timer = self._timer_state
+        self._warn_missing_sound_files(fb_sources, timer.custom_sound_path if timer.enabled else "")
         self._audio.prepare_feedback(fb_sources, fb_initial)
         self._audio.set_reward(reward_id)
         self._live_screen.set_training_series(None)  # set on first segment crossing
@@ -2483,7 +2472,7 @@ class EEGMeditationApp(App):
     def _on_test_audio(self) -> None:
         """Sample the selected feedback + reward sources, then the alert channels."""
         sources, gid, reward_id = self._test_audio_sources()
-        self._warn_missing_feedback_files(sources)
+        self._warn_missing_sound_files(sources)
         self._audio.prepare_feedback(sources, gid)
         self._audio.test_audio(reward_id)
 
@@ -2856,6 +2845,7 @@ class EEGMeditationApp(App):
 
     def _on_test_timer_sound(self) -> None:
         logger.debug(f"Test timer sound, path='{self._timer_state.custom_sound_path}'")
+        self._warn_missing_sound_files({}, self._timer_state.custom_sound_path)
         self._audio.play_timer_sound(self._timer_state.custom_sound_path)
         # When the file ends naturally, flip the Settings test button back
         # from "Stop" to "Test". Sound objects are SoundLoader-backed and
