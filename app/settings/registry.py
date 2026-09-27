@@ -66,9 +66,8 @@ class SettingsStore:
             self._loading = False
 
     def save(self, uid: int) -> None:
-        """Persist every setting's current live value for `uid`."""
-        for s in self._settings:
-            self._db.set_user_setting(uid, s.key, s.serialize(s.get()))
+        """Persist every setting's current live value for `uid` in one transaction."""
+        self._db.set_user_settings(uid, {s.key: s.serialize(s.get()) for s in self._settings})
 
     def persist(self, uid: int, key: str) -> None:
         """Write one setting immediately (change-callback path). No-op with no user or

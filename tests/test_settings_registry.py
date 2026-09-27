@@ -15,6 +15,12 @@ class _FakeDB:
         self.store[(uid, key)] = value
         self.writes.append((uid, key, value))
 
+    def set_user_settings(self, uid, items):
+        self.batches = getattr(self, "batches", 0) + 1
+        for key, value in items.items():
+            self.store[(uid, key)] = value
+            self.writes.append((uid, key, value))
+
 
 def _cell(initial):
     box = {"v": initial}
@@ -66,6 +72,16 @@ def test_save_serializes_all():
     db = _FakeDB()
     _store(db, [s]).save(7)
     assert db.get_user_setting(7, "sinking_alert") == "True"
+
+
+def test_save_writes_every_setting_in_one_batch():
+    """One transaction per save, not one commit per key."""
+    s1 = Setting("sinking_alert", False, BOOL[0], BOOL[1], *_cell(True)[1:])
+    s2 = Setting("line_width", 1.2, FLOAT[0], FLOAT[1], *_cell(2.5)[1:])
+    db = _FakeDB()
+    _store(db, [s1, s2]).save(7)
+    assert db.batches == 1
+    assert db.store == {(7, "sinking_alert"): "True", (7, "line_width"): "2.5"}
 
 
 def test_persist_writes_single_key():
