@@ -35,3 +35,17 @@ def test_gate_adopt_existing_loads_that_users_settings():
     app._on_wizard_complete("Existing", None, None)
     assert app._current_user_id == 9
     app._load_user_settings.assert_called_once_with(9)
+
+
+def test_wizard_pick_existing_without_device_loads_that_users_settings():
+    """Picking an existing profile in the wizard (no saved device) must load it before step 2."""
+    app = _gate_app(created_uid=0)
+    app._db.get_user.return_value = {"id": 4, "name": "Kirill"}
+    app._db.get_user_setting.return_value = None  # no saved bt_device_address
+    app._wizard_screen = MagicMock()
+
+    app._on_pick_existing_user(4, "wizard")
+
+    assert app._current_user_id == 4
+    app._load_user_settings.assert_called_once_with(4)
+    app._wizard_screen._advance_to_step2.assert_called_once()

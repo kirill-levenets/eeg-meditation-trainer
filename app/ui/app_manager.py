@@ -1007,6 +1007,13 @@ class EEGMeditationApp(App):
         self._settings_screen.set_backup_callback(self._on_backup_pressed)
         self._settings_screen.set_restore_callback(self._on_restore_pressed)
 
+    def _activate_user(self, uid: int) -> None:
+        """Make `uid` the active profile and load its settings; every path that picks a user goes here."""
+        self._current_user_id = uid
+        self._view_all_users = False
+        self._db.set_setting("last_user_id", str(uid))
+        self._load_user_settings(uid)
+
     def _restore_last_user(self) -> Optional[int]:
         """Restore the last selected user; return the resolved uid, or None when
         the app must prompt (no/stale/corrupt last_user_id). build() opens the
@@ -1014,9 +1021,7 @@ class EEGMeditationApp(App):
         uid = resolve_startup_user(self._db)
         if uid is None:
             return None
-        self._current_user_id = uid
-        self._view_all_users = False  # a concrete user is active, not the All-Users view
-        self._load_user_settings(uid)
+        self._activate_user(uid)
         logger.info(f"Restored last user id={uid}")
         return uid
 
@@ -1130,18 +1135,10 @@ class EEGMeditationApp(App):
 
         try:
             uid = self._db.create_user(user_name)
-            self._current_user_id = uid
-            self._db.set_setting("last_user_id", str(uid))
         except UserExistsError as e:
-            self._current_user_id = e.user_id
-            self._db.set_setting("last_user_id", str(e.user_id))
+            uid = e.user_id
             logger.info(f"Wizard: adopting existing user {e.name} (id={e.user_id})")
-        self._view_all_users = False  # a concrete user is now active
-        # Load the resolved user's per-user settings/UI (saved programs, formulas,
-        # threshold, audio, ...). The gate can resolve to an existing/other user after
-        # a profile delete; without this their per-user UI shows the prior user's stale
-        # data (e.g. the deleted user's saved programs), and delete-by-index no-ops.
-        self._load_user_settings(self._current_user_id)
+        self._activate_user(uid)
 
         # Set device
         if device_addr:
@@ -3215,15 +3212,14 @@ class EEGMeditationApp(App):
             return
         # Save current user's settings before switching
         self._save_user_settings()
-        self._current_user_id = user_id
-        self._view_all_users = user_id is None  # None here = deliberate All-Users view
         if user_id:
             user = self._db.get_user(user_id)
             name = user["name"] if user else "Unknown"
-            self._db.set_setting("last_user_id", str(user_id))
-            self._load_user_settings(user_id)
+            self._activate_user(user_id)
             logger.info(f"Switched to user: {name} (id={user_id})")
         else:
+            self._current_user_id = None
+            self._view_all_users = True  # deliberate All-Users view
             logger.info("Switched to: All Users")
         self._mark_history_dirty()
         self._refresh_profile()
@@ -3570,9 +3566,7 @@ class EEGMeditationApp(App):
             return
 
         if source == "wizard":
-            self._current_user_id = user_id
-            self._view_all_users = False
-            self._db.set_setting("last_user_id", str(user_id))
+            self._activate_user(user_id)
             self._wizard_screen._user_name = name
             self._wizard_screen._advance_to_step2()
         else:  # first_run
