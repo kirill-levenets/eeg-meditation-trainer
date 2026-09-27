@@ -1,17 +1,4 @@
-"""Code-defined per-user settings registry.
-
-One `Setting` descriptor per preference is the single source of truth for its key,
-default, type (parse/serialize), and live accessors (read/apply the in-memory field +
-its UI widget). `SettingsStore` derives ALL behavior generically:
-
-- load(uid): each setting = parsed stored value, or its default when absent/unparseable
-  -> ALWAYS applies a value, so a fresh/partial user can never inherit the previously
-  active user's in-memory value (the leak that motivated this module).
-- save(uid): serialize every setting's live value.
-- persist(uid, key): immediate single-key write, suppressed during load.
-
-Replaces the ~100 hand-written save/load/default sites scattered across app_manager.
-"""
+"""Per-user settings registry: one Setting descriptor per preference; load always applies a value, so none leak."""
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -70,8 +57,7 @@ class SettingsStore:
         self._db.set_user_settings(uid, {s.key: s.serialize(s.get()) for s in self._settings})
 
     def persist(self, uid: int, key: str) -> None:
-        """Write one setting immediately (change-callback path). No-op with no user or
-        while load() is applying values (those callbacks would re-persist what we read)."""
+        """Write one setting now; no-op with no user or while load() applies values it would re-persist."""
         if self._loading or not uid:
             return
         s = self._by_key.get(key)

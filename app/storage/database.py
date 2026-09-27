@@ -82,8 +82,7 @@ class DatabaseManager:
         self._conn_obj: Optional[sqlite3.Connection] = None
         self._shutting_down: bool = False
         self._reconnect_lock = threading.Lock()
-        # The tick thread and the UI thread share one connection, so one transaction
-        # at a time: an interleaved commit ends the other thread's transaction mid-batch.
+        # One transaction at a time: the tick and UI threads share this connection.
         self._write_lock = threading.RLock()
         self._init_db()
 
@@ -456,20 +455,14 @@ class DatabaseManager:
         return dict(row) if row else None
 
     def delete_user(self, user_id: int) -> None:
-        """Delete a user profile and all data it owns (sessions, metrics, settings).
-
-        FKs are declared but not enforced (no PRAGMA foreign_keys / ON DELETE CASCADE),
-        so purge children explicitly and in order — otherwise the row deletion orphans
-        the user's sessions (which then surface in the All-Users view), their metrics,
-        and every `user_{id}_*` settings row. GLOB (not LIKE) so the literal `_` in the
-        key prefix isn't treated as a wildcard and user_1 can't match user_11's keys.
-        """
+        """Delete a user and everything it owns; FKs aren't enforced, so children are purged explicitly."""
         with self._write() as c:
             c.execute(
                 "DELETE FROM metrics WHERE session_id IN "
                 "(SELECT id FROM sessions WHERE user_id = ?)", (user_id,)
             )
             c.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+            # GLOB, not LIKE: '_' is a LIKE wildcard, and user_1_* must not match user_11's keys.
             c.execute("DELETE FROM app_settings WHERE key GLOB ?", (f"user_{user_id}_*",))
             c.execute("DELETE FROM users WHERE id = ?", (user_id,))
 

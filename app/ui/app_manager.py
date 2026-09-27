@@ -157,8 +157,7 @@ class EEGMeditationApp(App):
         self._flush_counter: int = 0
         self._current_session_id: Optional[int] = None
         self._current_user_id: Optional[int] = None
-        # Suppresses immediate per-setting persistence while _load_user_settings
-        # applies restored values (the callbacks it triggers would re-persist them).
+        # True while _load_user_settings applies values, so its change callbacks don't re-persist them.
         self._loading_settings: bool = False
         self._persist_triggers: dict = {}  # setting key -> debounced persist (continuous inputs)
         # True only for the deliberate "Show All Users" aggregate history view,
@@ -734,8 +733,7 @@ class EEGMeditationApp(App):
 
         self._bind_callbacks()
         self._link_graph_zoom()
-        # After _bind_callbacks (which initialises _audio_metric_key/_feedback_source/…
-        # that the descriptors' get() read for their defaults) and before any user load.
+        # After _bind_callbacks (it sets the fields get() snapshots as defaults), before any user load.
         self._build_settings_store()
         resolved_user = self._restore_last_user()
         self._refresh_profile()
@@ -2185,10 +2183,7 @@ class EEGMeditationApp(App):
             # The real stop()/release() teardown is deferred to the main
             # thread below, where the Looper is live and release() won't hang.
             self._audio.mute()
-            # Stop the tick loop NOW (in the thread itself) so it doesn't keep
-            # iterating through the pause while _finish_on_main waits on the
-            # paused Clock. The shared helper also clears _tick_thread, so an
-            # idle app no longer reads as a live session.
+            # Stop the loop now (safe from this thread); also clears _tick_thread so idle isn't "live".
             self._stop_tick_thread()
             def _finish_on_main(_dt=None):
                 self._audio.stop()  # full noise teardown on the main thread
@@ -2541,16 +2536,13 @@ class EEGMeditationApp(App):
         is selected just remembers the choice for when custom-formula is picked."""
         self._audio_formula_index = max(0, min(idx, _MAX_FORMULAS - 1))
         if self._audio_metric_key in FORMULA_KEYS:
-            # This slot now drives audio; load reconciles the index FROM audio_metric,
-            # so persist both or a reload reverts the switch.
+            # Load derives the index from audio_metric, so persist both or a reload reverts the switch.
             self._audio_metric_key = FORMULA_KEYS[self._audio_formula_index]
             self._persist_user_setting("audio_metric")
         self._persist_user_setting("audio_formula_index")
 
     def _on_theme_change(self, theme_name: str) -> None:
-        """Persist the selected theme PER-USER (the selector already applied it to C).
-        The startup global-theme load seeds the per-user default, so existing users keep
-        their theme; new/unset users default to it too."""
+        """Persist the theme per user; the selector already applied it to C."""
         self._persist_user_setting("theme")
         logger.info(f"Theme changed to: {theme_name}")
 
@@ -3193,9 +3185,7 @@ class EEGMeditationApp(App):
     def _on_user_switch(self, user_id: Optional[int]) -> None:
         """Switch the active user profile."""
         if user_id != self._current_user_id and self._session_pipeline_live():
-            # A running session owns the loaded settings (timer, threshold, sounds) and
-            # saves under the profile it started with; loading another profile mid-way
-            # would rewrite them underneath it.
+            # The running session owns the loaded settings and saves under its own profile.
             self._info_popup(
                 "Session in progress",
                 "Stop the current session before switching profiles.",
@@ -3232,8 +3222,7 @@ class EEGMeditationApp(App):
 
     def _on_backup_pressed(self) -> None:
         """Backup the live DB to a user-visible location."""
-        # Flush in-memory settings into the DB first (main thread), so a mid-session
-        # backup captures current values, not the last pause/stop snapshot (issue #30).
+        # Flush first so a mid-session backup holds current settings, not the last pause snapshot.
         self._save_user_settings()
 
         ts = _dt.now().strftime("%Y%m%d_%H%M%S")
@@ -3597,10 +3586,7 @@ class EEGMeditationApp(App):
         self._settings_screen.populate_users(users, self._current_user_id)
 
     def _build_settings_store(self) -> None:
-        """Build the per-user scalar-settings registry (single source of truth for key,
-        default, type, and live get/set). Defaults are snapshotted from the app's initial
-        state NOW — call once in build() after the screens exist and before any user load,
-        so `get()` returns the constructed defaults, not a loaded user's values."""
+        """Build the settings registry; call once in build() before any user load, as get() snapshots defaults."""
         ss = self._settings_screen
         ls = self._live_screen
         graph = ls.graph
@@ -3784,8 +3770,7 @@ class EEGMeditationApp(App):
     def _load_user_settings_inner(self, user_id: int) -> None:
         g = self._db.get_user_setting
 
-        # All scalar per-user settings (+ theme): always applied with defaults, so a
-        # fresh/partial user never inherits the previously-active user's values.
+        # Always applies a value (default if absent), so no user inherits the previous user's settings.
         self._settings_store.load(user_id)
 
         # Load formulas BEFORE _restore_graph_series so the per-slot validity gate
