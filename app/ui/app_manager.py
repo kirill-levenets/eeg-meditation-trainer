@@ -2192,8 +2192,9 @@ class EEGMeditationApp(App):
             self._audio.mute()
             # Stop the tick loop NOW (in the thread itself) so it doesn't keep
             # iterating through the pause while _finish_on_main waits on the
-            # paused Clock.
-            self._tick_stop_event.set()
+            # paused Clock. The shared helper also clears _tick_thread, so an
+            # idle app no longer reads as a live session.
+            self._stop_tick_thread()
             def _finish_on_main(_dt=None):
                 self._audio.stop()  # full noise teardown on the main thread
                 self._finalize_stop_ui(stats, session_id)
