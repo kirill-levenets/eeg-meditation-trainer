@@ -1,5 +1,7 @@
-"""Change-callbacks persist immediately through the settings registry, and the
-timer→model sync is skipped while a session is live (issue #30)."""
+"""Change-callbacks persist through the settings registry; a settings save never touches the live timer."""
+from unittest.mock import MagicMock
+
+from app.session.timer_state import TimerState
 from app.settings.registry import BOOL, INT, STR, Setting, SettingsStore
 from app.ui.app_manager import EEGMeditationApp
 
@@ -52,8 +54,8 @@ def test_audio_formula_index_switch_copersists_metric():
                     lambda: app._baseline_audio_metric(app._audio_metric_key), lambda v: None)
     app._settings_store = SettingsStore(app._db, [idx_s, met_s])
     app._on_audio_formula_index(1)
-    keys = [k for _, k, _ in app._db.writes]
-    assert "audio_formula_index" in keys and "audio_metric" in keys
+    stored = {k: v for _, k, v in app._db.writes}
+    assert stored == {"audio_formula_index": "1", "audio_metric": "custom_formula_2"}
 
 
 def test_persist_noop_without_store():
@@ -64,30 +66,22 @@ def test_persist_noop_without_store():
     app._on_disconnect_alert_toggle(True)   # must not raise
 
 
-# --- timer->model sync guard (issue #30) ----------------------------------------
+# --- a settings save leaves the live timer alone --------------------------------
 
-def _spy_timer_app(live):
+def test_saving_settings_mid_program_keeps_the_programs_timer():
+    """A pause/backup flush mid-program must not reapply the simple-mode timer widgets (that killed auto-stop)."""
     app = _app()
-    calls = []
-    app._timer_state = type("T", (), {
-        "set_enabled": lambda self, v: calls.append(("enabled", v)),
-        "set_duration": lambda self, v: calls.append(("duration", v)),
-        "set_custom_sound_path": lambda self, v: calls.append(("sound", v)),
-    })()
-    app._settings_screen = type("S", (), {
-        "timer_enabled": True, "timer_minutes": 20, "timer_sound_path": "/x.wav",
-    })()
-    app._session_pipeline_live = lambda: live
-    return app, calls
+    app._timer_state = TimerState()
+    app._timer_state.set_enabled(True)   # program force-enables the timer...
+    app._timer_state.set_duration(45)    # ...with the program's total
+    app._settings_screen = MagicMock(timer_enabled=False, timer_minutes=20)
+    app._settings_store = MagicMock()
+    app._persist_active_formulas = MagicMock()
+    app._persist_session_program = MagicMock()
+    app._all_graphs = lambda: []
 
+    app._save_user_settings()
 
-def test_timer_sync_skipped_during_live_session():
-    app, calls = _spy_timer_app(live=True)
-    app._sync_timer_state_from_ui()
-    assert calls == []
-
-
-def test_timer_sync_applies_when_idle():
-    app, calls = _spy_timer_app(live=False)
-    app._sync_timer_state_from_ui()
-    assert ("enabled", True) in calls and ("duration", 20) in calls
+    assert app._timer_state.enabled is True
+    assert app._timer_state.duration_minutes == 45
+    app._settings_store.save.assert_called_once_with(7)

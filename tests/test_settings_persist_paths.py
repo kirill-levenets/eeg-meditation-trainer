@@ -89,7 +89,6 @@ def test_a_failed_setting_write_is_reported_not_raised(monkeypatch):
 
 def test_a_failed_batch_save_is_reported_not_raised(monkeypatch):
     app, _, reports = _make_app(monkeypatch)
-    app._sync_timer_state_from_ui = MagicMock()
     app._settings_store.save.side_effect = sqlite3.OperationalError("disk I/O error")
 
     app._save_user_settings()  # the pre-backup flush path; must not crash the app

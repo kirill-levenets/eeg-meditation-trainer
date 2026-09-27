@@ -198,18 +198,6 @@ class EEGMeditationApp(App):
             self._formula_names[i] = entry.get("name") or f"Custom {i + 1}"
             self._formula_slots[i].set_formula(entry.get("formula", "") or "")
 
-    def _sync_timer_state_from_ui(self) -> None:
-        """Apply the Settings timer widgets to the live headless model — skipped while a
-        session is live, which OWNS _timer_state: a program session force-enables it and
-        seeds its countdown from the program total, so re-applying the simple-mode
-        Enable-Timer checkbox (False in program mode) would silently kill auto-stop
-        (issue #30 review). The DB still persists the widgets' baseline values."""
-        if self._session_pipeline_live():
-            return
-        self._timer_state.set_enabled(self._settings_screen.timer_enabled)
-        self._timer_state.set_duration(self._settings_screen.timer_minutes)
-        self._timer_state.set_custom_sound_path(self._settings_screen.timer_sound_path)
-
     def _persist_user_setting(self, key: str) -> None:
         """Persist one setting now via the registry (it reads the live value); no-op mid-load or unbuilt."""
         if self._loading_settings:
@@ -3716,7 +3704,7 @@ class EEGMeditationApp(App):
 
         add("timer_enabled", BOOL, lambda: ss.timer_enabled, set_timer_enabled)
         add("timer_minutes", INT, lambda: ss.timer_minutes, set_timer_minutes)
-        add("timer_sound", STR, lambda: self._timer_state.custom_sound_path, set_timer_sound)
+        add("timer_sound", STR, lambda: ss.timer_sound_path, set_timer_sound)
         add("sinking_alert", BOOL, lambda: self._audio.sinking_alert_enabled, set_sinking)
         add("subtle_alert", BOOL, lambda: self._audio.subtle_alert_enabled, set_subtle)
         add("disconnect_alert", BOOL, lambda: self._audio.disconnect_alert_enabled, set_disconnect)
@@ -3751,7 +3739,6 @@ class EEGMeditationApp(App):
         uid = self._current_user_id
         if not uid:
             return  # silent-ok: batch persistence; no active user = nothing to save
-        self._sync_timer_state_from_ui()
         try:
             self._settings_store.save(uid)          # all scalar per-user settings + theme
             self._persist_active_formulas(uid)
