@@ -3195,6 +3195,16 @@ class EEGMeditationApp(App):
 
     def _on_user_switch(self, user_id: Optional[int]) -> None:
         """Switch the active user profile."""
+        if user_id != self._current_user_id and self._session_pipeline_live():
+            # A running session owns the loaded settings (timer, threshold, sounds) and
+            # saves under the profile it started with; loading another profile mid-way
+            # would rewrite them underneath it.
+            self._info_popup(
+                "Session in progress",
+                "Stop the current session before switching profiles.",
+            )
+            self._refresh_profile()  # snap the picker back to the active profile
+            return
         # Save current user's settings before switching
         self._save_user_settings()
         self._current_user_id = user_id
