@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **No alert sound when a session ended on lost signal**: when a session auto-stopped because the headset stopped sending data or the Bluetooth link dropped, the warble that should tell you so was cut off within milliseconds by the audio shutdown that follows it, so the session ended silently. The warble now plays to the end.
 - **Settings leaked between profiles / weren't reset for a new profile.** Most settings (threshold, audio metric, feedback/reward sounds, alert toggles, timer, line width, rotation, zoom, marker hotkey, stats view, device mode) were only *applied if present* on load, so switching to a profile that hadn't set one — or creating a fresh profile after another was active — kept the previous profile's value instead of the default. All per-user settings now load through a single registry that always applies a defined default, so each profile is fully isolated. (Also fixes saved programs and other per-user UI showing the previous/deleted profile's data.)
 - **Deleting a profile left its data behind.** `delete_user` only removed the profile row, orphaning its sessions (which could still appear in the All-Users history view), metrics, and settings. It now purges all of the deleted profile's data.
 

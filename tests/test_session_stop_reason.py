@@ -55,3 +55,26 @@ def test_set_audio_attaches_engine():
     fake_audio = MagicMock()
     mgr.set_audio(fake_audio)
     assert mgr._audio is fake_audio
+
+
+def test_failure_stop_warble_survives_the_audio_teardown_that_follows_it(monkeypatch):
+    # _stop_and_save stops the session (which starts the warble) and calls _audio.stop() on the next
+    # line; stop() used to unload the warble milliseconds in, so a stale-data/BT-lost end was silent.
+    from app.audio_feedback.noise import AudioEngine
+
+    engine = AudioEngine()
+    try:
+        played = []
+        monkeypatch.setattr(engine, "_play_sound", lambda path, vol: played.append(MagicMock()) or played[-1])
+        chime = MagicMock()
+        engine._chime_sound = chime
+        mgr = _make_manager()
+        mgr._audio = engine
+        mgr.stop(reason="stale_data")
+        engine.stop()
+        warble = played[-1]
+        warble.stop.assert_not_called()
+        warble.unload.assert_not_called()
+        chime.unload.assert_called_once()
+    finally:
+        engine.cleanup()

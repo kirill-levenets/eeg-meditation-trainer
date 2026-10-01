@@ -355,6 +355,9 @@ class AudioEngine:
     Uses only stdlib + Kivy. No external audio libraries.
     """
 
+    # Not the gong (_bell_sound) or the failure warble (_disconnect_sound): both start just before stop().
+    _STOP_UNLOADS: tuple[str, ...] = ("_chime_sound",)
+
     # Volume interpolation: ramp toward target in small steps
     _RAMP_INTERVAL: float = 0.025  # 25ms between steps (40 updates/sec)
     _RAMP_SPEED: float = 0.6  # max volume change per second
@@ -647,32 +650,17 @@ class AudioEngine:
 
     def _play_bell(self) -> None:
         """Play the sinking bell WAV."""
-        if self._bell_sound:
-            try:
-                self._bell_sound.stop()
-                self._bell_sound.unload()
-            except Exception:
-                pass
+        self._unload_one_shot("_bell_sound")
         self._bell_sound = self._play_sound(self._bell_path, 0.8)
 
     def _play_chime(self) -> None:
         """Play the gentle chime WAV for subtle distraction."""
-        if self._chime_sound:
-            try:
-                self._chime_sound.stop()
-                self._chime_sound.unload()
-            except Exception:
-                pass
+        self._unload_one_shot("_chime_sound")
         self._chime_sound = self._play_sound(self._chime_path, 0.6)
 
     def _play_disconnect(self) -> None:
         """Play the harsh disconnect alert WAV."""
-        if self._disconnect_sound:
-            try:
-                self._disconnect_sound.stop()
-                self._disconnect_sound.unload()
-            except Exception:
-                pass
+        self._unload_one_shot("_disconnect_sound")
         self._disconnect_sound = self._play_sound(self._disconnect_path, 0.9)
 
     def start(self) -> None:
@@ -706,22 +694,9 @@ class AudioEngine:
         if self._ramp_thread:
             self._ramp_thread.join(timeout=0.5)
             self._ramp_thread = None
-        # NOTE: _bell_sound is deliberately excluded. It holds the timer-end gong
-        # (SoundLoader fallback on desktop), which must keep ringing AFTER the
-        # session stops — the timer-expiry path calls stop() (noise teardown) one
-        # frame after starting the gong, so unloading it here cut the gong off
-        # (desktop only; Android's gong uses the separate _timer_bell_player).
-        # The gong is owned by play_timer_sound / stop_timer_bell instead.
         self._teardown_feedback_players()
-        for snd_attr in ("_chime_sound", "_disconnect_sound"):
-            snd = getattr(self, snd_attr, None)
-            if snd:
-                try:
-                    snd.stop()
-                    snd.unload()
-                except Exception:
-                    logger.exception(f"Failed to stop/unload {snd_attr}")
-                setattr(self, snd_attr, None)
+        for snd_attr in self._STOP_UNLOADS:
+            self._unload_one_shot(snd_attr)
         self._is_playing = False
         self._volume = 0.0
         self._target_volume = 0.0
@@ -861,15 +836,18 @@ class AudioEngine:
         start), where releasing the MediaPlayer gong is safe.
         """
         self._release_timer_bell()
-        snd = self._bell_sound
+        self._unload_one_shot("_bell_sound")
+
+    def _unload_one_shot(self, attr: str) -> None:
+        snd = getattr(self, attr, None)
         if not snd:
             return
         try:
             snd.stop()
             snd.unload()
         except Exception:
-            logger.exception("Failed to stop/unload bell")
-        self._bell_sound = None
+            logger.exception(f"Failed to stop/unload {attr}")
+        setattr(self, attr, None)
 
     def play_connect_sound(self) -> None:
         """Play a chime to confirm device connected."""
@@ -930,6 +908,8 @@ class AudioEngine:
     def cleanup(self) -> None:
         """Stop playback, unload sounds, remove temp files."""
         self.stop()
+        self.stop_timer_bell()
+        self._unload_one_shot("_disconnect_sound")
         for path in (
             self._noise_path,
             self._bell_path,
