@@ -1,12 +1,14 @@
 import colorsys
 import math
 import time as _time
-from collections import deque
+from collections import OrderedDict, deque
+from functools import lru_cache
 from typing import Optional
 
 from kivy.core.text import Label as CoreLabel
 from kivy.core.window import Window
-from kivy.graphics import Color, InstructionGroup, Line, Rectangle
+from kivy.graphics import Color, InstructionGroup, Line, Mesh, Rectangle
+from kivy.graphics.texture import Texture
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
@@ -18,6 +20,47 @@ from app.config import APP
 from app.ui import render_stats
 from app.ui.theme import C as TC
 from app.ui.touch_utils import point_in_rect
+
+# Labels by (text, font_size, color); the CoreLabel is kept since it re-renders its texture after a GL context loss.
+_LABEL_CACHE: "OrderedDict[tuple, CoreLabel]" = OrderedDict()
+_LABEL_CACHE_MAX = 512
+
+# X grid steps (s); the smallest that keeps time labels _MIN_X_LABEL_GAP_DP apart is used.
+_X_GRID_STEPS_S = (10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200)
+_MIN_X_LABEL_GAP_DP = 70
+
+
+def _x_grid_step(graph_w: float, visible_seconds: float) -> float:
+    px_per_s = graph_w / max(visible_seconds, 1e-9)
+    return next((s for s in _X_GRID_STEPS_S if s * px_per_s >= dp(_MIN_X_LABEL_GAP_DP)), _X_GRID_STEPS_S[-1])
+
+
+def _heatmap_rgba(value: float) -> tuple:
+    """Blue (0) → red (100+) via HSV hue 240° → 0°, vivid saturation/value."""
+    t = max(0.0, min(value / 100.0, 1.0))
+    r, g, b = colorsys.hsv_to_rgb((1.0 - t) * (240.0 / 360.0), 0.9, 0.95)
+    return (r, g, b, 1.0)
+
+
+_HEATMAP_TEXELS = 64
+# Mesh indices are 16-bit: 16000 quads × 4 vertices stays under 65536.
+_MESH_MAX_QUADS = 16000
+
+
+def _fill_heatmap_texture(texture) -> None:
+    """Fill (and on reload re-fill) the gradient; the wrap is set here too so a reload can't revert it to repeat."""
+    texture.wrap = "clamp_to_edge"
+    rgba = (_heatmap_rgba(100.0 * i / (_HEATMAP_TEXELS - 1)) for i in range(_HEATMAP_TEXELS))
+    texture.blit_buffer(bytes(round(c * 255) for px in rgba for c in px), colorfmt="rgba", bufferfmt="ubyte")
+
+
+@lru_cache(maxsize=1)
+def _heatmap_texture() -> Texture:
+    """1×64 blue→red gradient; refilled after a GL context loss (Android pause), clamped beyond 0 and 100."""
+    texture = Texture.create(size=(1, _HEATMAP_TEXELS), colorfmt="rgba")
+    _fill_heatmap_texture(texture)
+    texture.add_reload_observer(_fill_heatmap_texture)
+    return texture
 
 
 class ScrollableGraphWidget(Widget):
@@ -46,6 +89,7 @@ class ScrollableGraphWidget(Widget):
         self._auto_scale: bool = auto_scale
         self._grid_step: float = grid_step
         self._markers: list[int] = []
+        self._drawing_enabled: bool = True
         self._line_width: float = 1.2
         self._sample_rate: float = sample_rate if sample_rate > 0 else (1.0 / APP.UPDATE_FREQUENCY)
         effective_max = max_points if max_points > 0 else APP.GRAPH_POINTS_MAX
@@ -142,17 +186,6 @@ class ScrollableGraphWidget(Widget):
             self._heatmap_keys.discard(key)
         self._redraw()
 
-    @staticmethod
-    def _heatmap_color(value: float) -> tuple:
-        """Blue→red gradient via HSV.
-
-        0 → blue (hue 240°), 100+ → red (hue 0°).  Clamps below 0 and
-        above 100. Uses high saturation/value for vivid line color.
-        """
-        t = max(0.0, min(value / 100.0, 1.0))
-        hue = (1.0 - t) * (240.0 / 360.0)
-        r, g, b = colorsys.hsv_to_rgb(hue, 0.9, 0.95)
-        return (r, g, b, 1.0)
 
     @property
     def total_points(self) -> int:
@@ -259,11 +292,27 @@ class ScrollableGraphWidget(Widget):
     def _make_text_texture(self, text: str, font_size: int = 10,
                            color: tuple = (1, 1, 1, 1)):
         """Render text string to a texture for canvas drawing."""
-        cl = CoreLabel(text=text, font_size=dp(font_size), color=color)
-        cl.refresh()
+        key = (text, font_size, tuple(color))
+        cl = _LABEL_CACHE.get(key)
+        if cl is None:
+            cl = CoreLabel(text=text, font_size=dp(font_size), color=color)
+            cl.refresh()
+            _LABEL_CACHE[key] = cl
+            if len(_LABEL_CACHE) > _LABEL_CACHE_MAX:
+                _LABEL_CACHE.popitem(last=False)
+        else:
+            _LABEL_CACHE.move_to_end(key)
         return cl.texture
 
+    def set_drawing_enabled(self, enabled: bool) -> None:
+        """Owners that detach a graph pause its drawing; data still accrues and is drawn once it is shown again."""
+        self._drawing_enabled = enabled
+        if enabled:
+            self._redraw()
+
     def _redraw(self, *args) -> None:
+        if not self._drawing_enabled:
+            return
         t0 = _time.perf_counter()
         try:
             self._draw()
@@ -410,8 +459,8 @@ class ScrollableGraphWidget(Widget):
 
             t_start = start_idx / self._sample_rate
             t_end = end_idx / self._sample_rate
-            grid_sec = 10.0
-            # First grid line at nearest 10s boundary >= t_start
+            grid_sec = _x_grid_step(graph_w, vp / self._sample_rate)
+            # First grid line at nearest grid boundary >= t_start
             first_mark = math.ceil(t_start / grid_sec) * grid_sec
             if first_mark == 0.0:
                 first_mark = grid_sec
@@ -482,31 +531,11 @@ class ScrollableGraphWidget(Widget):
                     y = graph_y + min(max(val, 0.0) / draw_scale, 1.0) * graph_h
                 xy.append((x, y))
 
+            points = [coord for x, y in xy for coord in (x, y)]
             if heatmap and not self._bipolar:
-                # Per-segment heatmap coloring (color follows the value).
-                # One Line per segment; the segment color is derived from
-                # the average of its two endpoint values.
-                lw = dp(self._line_width)
-                for i in range(len(xy) - 1):
-                    v_avg = (slice_data[i] + slice_data[i + 1]) * 0.5
-                    self._gfx.add(Color(*self._heatmap_color(v_avg)))
-                    self._gfx.add(Line(
-                        points=[xy[i][0], xy[i][1], xy[i + 1][0], xy[i + 1][1]],
-                        width=lw,
-                    ))
+                self._add_heatmap_line(points, graph_y, graph_h, draw_scale)
             else:
-                # Single-color line (original behaviour).
-                self._gfx.add(Color(*color))
-                points = [coord for x, y in xy for coord in (x, y)]
-                if len(points) >= 4:
-                    max_coords = 1024  # 512 points × 2 coords each
-                    if len(points) <= max_coords:
-                        self._gfx.add(Line(points=points, width=dp(self._line_width)))
-                    else:
-                        for chunk_start in range(0, len(points) - 2, max_coords - 2):
-                            chunk = points[chunk_start:chunk_start + max_coords]
-                            if len(chunk) >= 4:
-                                self._gfx.add(Line(points=chunk, width=dp(self._line_width)))
+                self._add_polyline(points, color)
 
             # Realtime value label at right edge of line
             if self._show_value_labels and slice_data:
@@ -548,6 +577,47 @@ class ScrollableGraphWidget(Widget):
 
         self._draw_series_icon()
         self._draw_expand_icon()
+
+    def _add_polyline(self, points: list[float], color) -> None:
+        if color is None or len(points) < 4:
+            return
+        self._gfx.add(Color(*color))
+        width = dp(self._line_width)
+        max_coords = 1024  # 512 points × 2 coords each
+        for start in range(0, max(len(points) - 2, 1), max_coords - 2):
+            chunk = points[start:start + max_coords]
+            if len(chunk) >= 4:
+                self._gfx.add(Line(points=chunk, width=width))
+
+    def _add_heatmap_line(self, points: list[float], graph_y: float, graph_h: float, draw_scale: float) -> None:
+        """Color by value in one Mesh (one draw call per frame): each vertex samples the gradient at its height."""
+        hw = dp(self._line_width)  # Kivy Line width is the half-thickness of the stroke
+        v_scale = (draw_scale / 100.0) / graph_h  # texture v (0 = blue at value 0, 1 = red at 100) per pixel of height
+        v_off = -graph_y * v_scale
+        verts: list[float] = []
+        ext = verts.extend
+        n = len(points) // 2
+        for i in range(n):
+            x, y = points[2 * i], points[2 * i + 1]
+            lo, hi = (y - hw) * v_scale + v_off, (y + hw) * v_scale + v_off
+            # Square patch at the vertex: fills the notch two segment quads leave at a turn.
+            ext((x - hw, y - hw, 0.5, lo, x + hw, y - hw, 0.5, lo, x + hw, y + hw, 0.5, hi, x - hw, y + hw, 0.5, hi))
+            if i + 1 < n:
+                x2, y2 = points[2 * i + 2], points[2 * i + 3]
+                k = hw / (math.hypot(x2 - x, y2 - y) or 1.0)
+                nx, ny = (y - y2) * k, (x2 - x) * k
+                ext((x + nx, y + ny, 0.5, (y + ny) * v_scale + v_off, x2 + nx, y2 + ny, 0.5, (y2 + ny) * v_scale + v_off,
+                     x2 - nx, y2 - ny, 0.5, (y2 - ny) * v_scale + v_off, x - nx, y - ny, 0.5, (y - ny) * v_scale + v_off))
+        self._gfx.add(Color(1, 1, 1, 1))
+        quads = len(verts) // 16
+        for first in range(0, quads, _MESH_MAX_QUADS):
+            count = min(_MESH_MAX_QUADS, quads - first)
+            self._gfx.add(Mesh(
+                vertices=verts[first * 16:(first + count) * 16],
+                indices=[b + o for b in range(0, 4 * count, 4) for o in (0, 1, 2, 2, 3, 0)],
+                mode="triangles",
+                texture=_heatmap_texture(),
+            ))
 
     @staticmethod
     def _compute_nice_step(max_val: float) -> float:

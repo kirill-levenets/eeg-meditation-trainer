@@ -429,6 +429,8 @@ class LiveSessionScreen(Screen):
         self._graph_area = BoxLayout(size_hint_y=None, height=dp(400))
         self._graph_area.add_widget(self._metrics_container)
         self._active_view = "metrics"
+        for g in self._view_graphs("raw"):
+            g.set_drawing_enabled(False)
 
         # ── Stats row ──
         stats_card = Card(
@@ -754,11 +756,19 @@ class LiveSessionScreen(Screen):
         except Exception:
             pass
 
+    def _view_graphs(self, view: str) -> tuple:
+        return (self._raw_graph, self._band_graph) if view == "raw" else (self._graph,)
+
     def _set_view(self, view: str) -> None:
         """Switch between 'metrics' and 'raw' graph views."""
         if view == self._active_view:
             return
         self._graph_area.clear_widgets()
+        # A detached graph keeps its size, so it would keep drawing every tick unseen.
+        for g in self._view_graphs(self._active_view):
+            g.set_drawing_enabled(False)
+        for g in self._view_graphs(view):
+            g.set_drawing_enabled(True)
         if view == "raw":
             self._graph_area.add_widget(self._raw_container)
             self._btn_view_raw.bg_color = C.PRIMARY
