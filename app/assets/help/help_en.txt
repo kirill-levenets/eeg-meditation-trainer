@@ -124,8 +124,10 @@ issue so we can fix it.
 Settings → Data Backup → tap "Backup database"
 to write a copy of all profiles, sessions and
 settings to a file. You choose where to save it
-(on Android a system save dialog opens). Custom
-sound files are not included in a backup.
+(on Android a system save dialog opens); the
+suggested name holds the profile name, date and
+time. Custom sound files are not included in a
+backup.
 
 Tap "Restore database" to replace the ENTIRE
 database — all profiles on this device — with a

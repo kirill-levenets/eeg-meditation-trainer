@@ -1,15 +1,29 @@
 """DB backup and restore — file-level operations isolated from UI."""
 
 import os
+import re
 import shutil
 import sqlite3
 import tempfile
+from datetime import datetime
 
 from app.logger import logger
+
+# Path separators, whitespace, control characters and the characters FAT/exFAT storage rejects.
+_UNSAFE_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|\s\x00-\x1f]+')
+# Keeps the name far below the 255-byte filename limit even for multi-byte (e.g. Cyrillic) names.
+_MAX_NAME_CHARS = 40
 
 
 class BackupValidationError(Exception):
     """Raised when a candidate backup file fails schema validation."""
+
+
+def backup_filename(user_name: str | None, now: datetime) -> str:
+    """Suggested backup name: profile and local time up front, where a narrow save field still shows them."""
+    stamp = now.strftime("%Y-%m-%d_%H-%M")
+    user = _UNSAFE_FILENAME_CHARS.sub("_", user_name or "")[:_MAX_NAME_CHARS].strip("._")
+    return f"eeg_backup_{user}_{stamp}.db" if user else f"eeg_backup_{stamp}.db"
 
 
 def online_backup_to_tempfile(db) -> str:

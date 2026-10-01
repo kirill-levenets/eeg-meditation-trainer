@@ -146,7 +146,7 @@ Settings uses collapsible accordion sections. Tap a section header to expand/col
 
 Settings → **Data Backup** lets you save a copy of your sessions to a file and restore it later.
 
-- **Backup database** — saves your current settings, then writes a transaction-safe copy of the live database (all profiles) as `meditation_backup_YYYYMMDD_HHMMSS.db`. You choose where: on Android a system save dialog opens (e.g. Downloads, Documents, a cloud drive); on desktop, a file dialog. The confirmation line reminds you that custom sound files are not included.
+- **Backup database** — saves your current settings, then writes a transaction-safe copy of the live database (all profiles) The suggested file name carries the profile name and the date and time, e.g. `eeg_backup_Anna_2026-09-29_17-49.db`. You choose where: on Android a system save dialog opens (e.g. Downloads, Documents, a cloud drive); on desktop, a file dialog. A **Backup saved** dialog confirms it and reminds you that custom sound files are not included.
 - **Restore database** — pick a backup file. The app validates it (must be a real SQLite file with `users` and `sessions` tables), shows a confirmation dialog, then replaces the live database. The app will exit after restoring — relaunch it to see your imported history.
 
 Two things to know before restoring:

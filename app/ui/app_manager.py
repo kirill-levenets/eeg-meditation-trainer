@@ -3205,8 +3205,8 @@ class EEGMeditationApp(App):
         # Flush first so a mid-session backup holds current settings, not the last pause snapshot.
         self._save_user_settings()
 
-        ts = _dt.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"meditation_backup_{ts}.db"
+        user = self._db.get_user(self._current_user_id) if self._current_user_id else None
+        filename = _backup.backup_filename(user["name"] if user else None, _dt.now())
 
         if self._is_android():
             self._run_backup_saf(filename)
@@ -3236,12 +3236,11 @@ class EEGMeditationApp(App):
         tmp_path = None
         try:
             tmp_path = _backup.online_backup_to_tempfile(self._db)
-            ok = _saf.write_file_to_uri(uri_str, tmp_path)
-            msg = f"Backup saved. {_BACKUP_SOUND_NOTE}" if ok else "Could not write backup to that location"
-            if ok:
-                Clock.schedule_once(lambda dt: self._settings_screen.show_backup_status(msg))
+            if _saf.write_file_to_uri(uri_str, tmp_path):
+                Clock.schedule_once(lambda dt: self._report_backup_saved(uri_str, show_location=False))
             else:
-                Clock.schedule_once(lambda dt: report_soft_error("backup_failed", msg))
+                Clock.schedule_once(lambda dt: report_soft_error(
+                    "backup_failed", "Could not write backup to that location"))
         except Exception as exc:
             logger.exception("SAF backup failed")
             Clock.schedule_once(
@@ -3269,11 +3268,16 @@ class EEGMeditationApp(App):
                     lambda dt, _msg=err_msg: report_soft_error("backup_failed", _msg),
                 )
                 return
-            Clock.schedule_once(lambda dt: self._settings_screen.show_backup_status(
-                f"Saved to {target_path}. {_BACKUP_SOUND_NOTE}",
-            ))
+            Clock.schedule_once(lambda dt: self._report_backup_saved(target_path))
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _report_backup_saved(self, location: str, *, show_location: bool = True) -> None:
+        """Success also pops up: the status line is small and sits at the bottom of a collapsed section."""
+        logger.info(f"Backup saved to {location}")
+        self._settings_screen.show_backup_status("Backup saved")
+        body = f"Saved to:\n{location}\n\n{_BACKUP_SOUND_NOTE}" if show_location else _BACKUP_SOUND_NOTE
+        self._info_popup("Backup saved", body)
 
     def _on_restore_pressed(self) -> None:
         """Pick a backup file and restore it."""

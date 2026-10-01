@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dragging the threshold slider or typing a gong path wrote to storage on every step** (up to ~160 writes for one drag, one per keystroke), on the UI thread; each change is now saved once, half a second after you stop.
 - **After a timed or program session, Restore was refused with "Session in progress"** (with Stop disabled) until another session was started and stopped, and deleting the active profile in that state also deleted the session just saved.
 - **Rare crash or lost session data from overlapping database writes**: a setting change or Backup landing during the session's 60-second save could crash the app, drop up to a minute of recorded metrics, or save duplicate rows. Database writes from the session and the UI are now serialized.
+- **Backup gave no visible confirmation**: the "Backup saved" note appeared only as a small line at the bottom of the Data Backup section, easy to miss. A **Backup saved** dialog now confirms it (with the reminder that custom sound files are not included).
+- **Android backup dialog came up with an empty file name**, so each backup had to be named by hand. It now suggests `eeg_backup_<profile>_<date>_<time>.db`.
 - **"Press back again to exit" hint never appeared on Android**: the first back press on the Session screen now shows it, as intended.
 - **Deleting a profile didn't say its sessions go with it**: the confirmation said only "All their settings will be lost"; it now states how many sessions will be permanently deleted with the profile.
 
