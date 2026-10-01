@@ -46,6 +46,7 @@ from app.storage import backup as _backup
 from app.storage.backup import restore_backup, validate_backup
 from app.storage.csv_export import build_sessions_zip
 from app.storage.database import DatabaseManager, UserExistsError
+from app.ui import render_stats
 from app.ui.diary_screen import DiaryScreen
 from app.ui.history_screen import HistoryScreen
 from app.ui.live_session import METRICS_COLORS, SERIES_NAMES, LiveSessionScreen
@@ -3809,6 +3810,7 @@ class EEGMeditationApp(App):
             flush_pre_app_errors()
         except Exception:
             logger.exception("flush_pre_app_errors failed")
+        render_stats.start()
 
     def on_pause(self) -> bool:
         """Android lifecycle: save settings and allow Kivy to pause cleanly.

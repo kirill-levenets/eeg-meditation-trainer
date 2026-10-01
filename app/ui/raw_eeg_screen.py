@@ -15,6 +15,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
 from app.config import APP
+from app.ui import render_stats
 from app.ui.theme import C as TC
 from app.ui.touch_utils import point_in_rect
 
@@ -263,6 +264,13 @@ class ScrollableGraphWidget(Widget):
         return cl.texture
 
     def _redraw(self, *args) -> None:
+        t0 = _time.perf_counter()
+        try:
+            self._draw()
+        finally:
+            render_stats.STATS.record_redraw(self._graph_id, _time.perf_counter() - t0)
+
+    def _draw(self) -> None:
         self._gfx.clear()
         if self.width < 10 or self.height < 10:
             return
