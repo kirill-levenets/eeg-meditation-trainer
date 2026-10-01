@@ -14,14 +14,12 @@ from kivy.graphics import Color, Line, Rectangle, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
-from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
 from app.ui.theme import (
     ICONS_AVAILABLE,
-    POPUP_TEXT,
     C,
     Card,
     CenteredTextInput,
@@ -32,6 +30,7 @@ from app.ui.theme import (
     S,
     StyledButton,
     format_duration,
+    make_message_popup,
 )
 
 
@@ -1011,45 +1010,10 @@ class HistoryScreen(Screen):
 
     def _confirm_delete(self, session_id: int, name: str) -> None:
         """Show a delete confirmation popup."""
-
-        content = BoxLayout(orientation="vertical", spacing=S.GAP, padding=S.GAP)
-        msg_label = Label(
-            text=f"Delete session\n\"{name}\"?",
-            font_size=F.BODY,
-            # Kivy's Popup chrome is always dark (never themed), so the body
-            # text must be light too — C.TEXT is dark in the light themes and
-            # rendered the name invisible (dark-on-dark). The text_size binding
-            # below makes halign/valign work so a long name wraps instead of
-            # overflowing the narrow mobile popup.
-            color=POPUP_TEXT,
-            halign="center",
-            valign="middle",
-            size_hint_y=0.6,
-        )
-        msg_label.bind(size=msg_label.setter("text_size"))
-        content.add_widget(msg_label)
-        btn_row = BoxLayout(spacing=S.GAP, size_hint_y=0.4)
-        btn_cancel = StyledButton(
-            text="Cancel",
-            bg_color=C.BG_CARD,
-            text_color=C.TEXT_SECONDARY,
-            height=dp(38),
-        )
-        btn_confirm = StyledButton(
-            text="Delete",
-            bg_color=C.DANGER,
-            height=dp(38),
-        )
-        btn_row.add_widget(btn_cancel)
-        btn_row.add_widget(btn_confirm)
-        content.add_widget(btn_row)
-
-        popup = Popup(
-            title="Confirm Delete",
-            content=content,
-            size_hint=(0.85, 0.35),
-            auto_dismiss=True,
-        )
+        btn_cancel = StyledButton(text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY)
+        btn_confirm = StyledButton(text="Delete", bg_color=C.DANGER)
+        popup = make_message_popup("Confirm Delete", f'Delete session\n"{name}"?',
+                                   [btn_cancel, btn_confirm])
         btn_cancel.bind(on_release=popup.dismiss)
 
         def _do_delete(*args):

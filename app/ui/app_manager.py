@@ -60,6 +60,7 @@ from app.ui.theme import (
     Icons,
     S,
     StyledButton,
+    make_message_popup,
     make_scroll_popup,
 )
 from app.ui.widgets.legend import LegendBar
@@ -2783,23 +2784,16 @@ class EEGMeditationApp(App):
         self._settings_screen.set_saved_programs(progs)
         self._live_screen.set_session_programs(progs, self._session_program_name)
 
+    def _info_popup(self, title: str, message: str) -> None:
+        ok_btn = StyledButton(text="OK", bg_color=C.ACCENT)
+        popup = make_message_popup(title, message, [ok_btn])
+        ok_btn.bind(on_release=popup.dismiss)
+        popup.open()
+
     def _confirm_action(self, title, message, ok_text, on_ok, ok_color=None) -> None:
-        """Modal confirm whose message wraps and scrolls, so no line is ever silently dropped."""
-        width_hint = 0.85
-        label = Label(text=message, halign="center", valign="top", color=POPUP_TEXT, size_hint_y=None)
-        # Measure the wrapped text now so the popup sizes to it (capped; beyond that it scrolls).
-        label.text_size = (Window.width * width_hint - dp(48), None)
-        label.texture_update()
-        label.height = label.texture_size[1]
-        label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)),
-                   texture_size=lambda w, v: setattr(w, "height", v[1]))
-        btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
         ok_btn = StyledButton(text=ok_text, bg_color=ok_color or C.ACCENT)
         cancel_btn = StyledButton(text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_MUTED)
-        btn_row.add_widget(ok_btn)
-        btn_row.add_widget(cancel_btn)
-        popup = make_scroll_popup(title, [label], footer=btn_row, width_hint=width_hint,
-                                  est_rows=int(label.height // dp(44)) + 1)
+        popup = make_message_popup(title, message, [ok_btn, cancel_btn])
 
         def _do(*_a):
             popup.dismiss()
@@ -3146,21 +3140,6 @@ class EEGMeditationApp(App):
         self.hide_loading()
         self._history_screen.set_select_mode(False)
         self._info_popup("Export complete", f"Exported {count} session(s) to:\n{dest}")
-
-    def _info_popup(self, title: str, message: str) -> None:
-        from kivy.uix.boxlayout import BoxLayout as _Box
-        from kivy.uix.label import Label as _Lbl
-        from kivy.uix.popup import Popup as _Popup
-        body = _Box(orientation="vertical", spacing=S.GAP, padding=S.GAP)
-        lbl = _Lbl(text=message, font_size=F.BODY, color=POPUP_TEXT, halign="center",
-                   valign="middle")
-        lbl.bind(size=lbl.setter("text_size"))
-        body.add_widget(lbl)
-        btn = StyledButton(text="OK", bg_color=C.ACCENT, size_hint_y=None, height=dp(40))
-        body.add_widget(btn)
-        popup = _Popup(title=title, content=body, size_hint=(0.9, 0.4))
-        btn.bind(on_release=popup.dismiss)
-        popup.open()
 
     _history_dirty: bool = True
 

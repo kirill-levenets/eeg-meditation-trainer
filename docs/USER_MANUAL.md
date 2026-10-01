@@ -139,7 +139,7 @@ Settings uses collapsible accordion sections. Tap a section header to expand/col
 - **Existing profiles** appear in a list at the top of the form. Tap one to switch to it.
 - Type a new name into the input and tap **Create** to add a profile.
 - If the name you typed already exists, an inline message offers two buttons: **Use existing 'X'** (switch to that profile) or **Change name** (back to the input). Names are unique and case-sensitive.
-- Each user has separate sessions, settings, and formulas. The **X** button on a row deletes that profile after a confirmation.
+- Each user has separate sessions, settings, and formulas. The **X** button on a row deletes that profile after a confirmation — together with all its sessions and settings; the dialog shows how many sessions will go.
 - Switching profiles is refused while a session is running or connecting ("Session in progress") — a running session keeps the settings it started with. Stop the session first.
 
 ### Data Backup
