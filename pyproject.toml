@@ -80,6 +80,8 @@ ignore = [
 "app/storage/android_share.py" = ["PLC0415", "BLE001"]
 # Android SAF: lazy pyjnius import, broad except for platform safety
 "app/storage/android_saf.py" = ["PLC0415", "BLE001"]
+# pyjnius helpers: lazy pyjnius import
+"app/android_jni.py" = ["PLC0415"]
 # AST validator/evaluator: deeply branched by design
 "app/metrics/custom_formula.py" = ["BLE001", "PLR0911", "PLR0912"]
 # Android storage resolution

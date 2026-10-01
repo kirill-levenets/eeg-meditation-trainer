@@ -23,6 +23,7 @@ from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import ScreenManager, SlideTransition
 from kivy.utils import platform as kivy_platform
 
+from app.android_jni import java_string
 from app.audio_feedback.noise import AudioEngine
 from app.config import APP
 from app.crash_handler import (
@@ -2286,7 +2287,7 @@ class EEGMeditationApp(App):
                 PythonActivity = autoclass("org.kivy.android.PythonActivity")
                 Toast = autoclass("android.widget.Toast")
                 Toast.makeText(
-                    PythonActivity.mActivity, message, Toast.LENGTH_SHORT
+                    PythonActivity.mActivity, java_string(message), Toast.LENGTH_SHORT
                 ).show()
             _show()
         except Exception as e:
