@@ -38,6 +38,8 @@ build_windows.bat
 gh workflow run release.yml -f platform=windows   # or linux, macos, android, all
 ```
 
+**Removing an Android requirement doesn't remove it from local builds.** p4a keeps it installed in `.buildozer/android/platform/build-arm64-v8a/build/python-installs/eegmeditation/arm64-v8a/` and keeps reusing the dist `.buildozer/android/platform/build-arm64-v8a/dists/eegmeditation/` (its `dist_info.json` lists the recipes it was built with — a superset of the current ones still counts as a match), so every later APK keeps bundling it. A numpy probe (2026-10-01) left numpy + Cython (+16 MB) in every build after `numpy` was taken back out of `requirements`. After dropping a requirement, delete that package from `python-installs/` and the `dists/eegmeditation` folder (the next build recreates the dist in about a minute), then check the bundle: site-packages live inside `lib/arm64-v8a/libpybundle.so`, a tar inside the APK. CI builds start clean and are unaffected.
+
 ## Architecture
 
 **Entry point:** `main.py` → instantiates `EEGMeditationApp` (Kivy app with ScreenManager).
