@@ -89,6 +89,7 @@ class ScrollableGraphWidget(Widget):
         self._auto_scale: bool = auto_scale
         self._grid_step: float = grid_step
         self._markers: list[int] = []
+        self._drawing_enabled: bool = True
         self._line_width: float = 1.2
         self._sample_rate: float = sample_rate if sample_rate > 0 else (1.0 / APP.UPDATE_FREQUENCY)
         effective_max = max_points if max_points > 0 else APP.GRAPH_POINTS_MAX
@@ -303,7 +304,15 @@ class ScrollableGraphWidget(Widget):
             _LABEL_CACHE.move_to_end(key)
         return cl.texture
 
+    def set_drawing_enabled(self, enabled: bool) -> None:
+        """Owners that detach a graph pause its drawing; data still accrues and is drawn once it is shown again."""
+        self._drawing_enabled = enabled
+        if enabled:
+            self._redraw()
+
     def _redraw(self, *args) -> None:
+        if not self._drawing_enabled:
+            return
         t0 = _time.perf_counter()
         try:
             self._draw()

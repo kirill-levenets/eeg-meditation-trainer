@@ -45,3 +45,26 @@ def test_graph_redraw_is_recorded_under_its_graph_id(monkeypatch):
     graph._redraw()
     assert "diary_freq" in s._redraws
     assert s._redraws["diary_freq"][0] >= 1
+
+
+def test_hidden_live_view_graphs_do_not_draw_until_shown_again(monkeypatch):
+    # The Metrics/Raw toggle detaches the hidden view, but a detached graph keeps its size; after one visit to Raw
+    # the hidden raw graph kept redrawing ~5000 points every tick (~130 ms each on the phone).
+    from app.ui.live_session import LiveSessionScreen
+
+    s = RenderStats()
+    monkeypatch.setattr(render_stats, "STATS", s)
+    screen = LiveSessionScreen()
+    raw, band, metrics = screen._raw_graph, screen._band_graph, screen._graph
+    for g in (raw, band, metrics):
+        g.size = (400, 300)
+    screen._set_view("raw")
+    screen._set_view("metrics")
+    s._redraws.clear()
+    raw.add_points_batch(next(iter(raw._data)), [1.0] * 50)
+    band.add_point(dict.fromkeys(band._data, 1.0))
+    metrics.add_point(dict.fromkeys(metrics._data, 50.0))
+    assert "live_raw" not in s._redraws and "live_band" not in s._redraws
+    assert "live_metrics" in s._redraws
+    screen._set_view("raw")
+    assert "live_raw" in s._redraws and "live_band" in s._redraws, "shown again: drawn with what accrued while hidden"
