@@ -1546,23 +1546,24 @@ class EEGMeditationApp(App):
     _summary_saved_notes: str = ""  # notes last written from the card for the session it shows
 
     def _on_summary_save_notes(self, *args) -> None:
-        sid = self._live_screen.summary_session_id
-        notes = self._live_screen.summary_notes
-        if not sid:
-            return  # silent-ok: the card is not showing a session
-        if notes == self._summary_saved_notes:
-            if notes:
+        if self._live_screen.summary_notes == self._summary_saved_notes:
+            if self._summary_saved_notes:
                 self._toast("Notes saved")  # already saved; say so rather than ignore the tap
             return
-        if self._save_session_notes(sid, notes=notes):
-            self._summary_saved_notes = notes
+        self._flush_summary_notes()
 
     def _flush_summary_notes(self) -> None:
-        """Keep notes typed but not saved (OK, app pause); empty or unchanged notes write nothing."""
+        """Write the card's notes only if they changed since the last save, so an untouched card writes nothing."""
         sid = self._live_screen.summary_session_id
         notes = self._live_screen.summary_notes
-        if sid and notes and notes != self._summary_saved_notes and self._save_session_notes(sid, notes=notes):
+        if sid and notes != self._summary_saved_notes and self._save_session_notes(sid, notes=notes):
             self._summary_saved_notes = notes
+
+    def _flush_on_leave(self) -> None:
+        """Persist what the user changed but hasn't saved, before the app pauses or exits."""
+        if getattr(self, "_live_screen", None) is not None:
+            self._flush_summary_notes()
+        self._save_user_settings()
 
     def _on_summary_ok(self, *args) -> None:
         self._flush_summary_notes()
@@ -3813,13 +3814,11 @@ class EEGMeditationApp(App):
         """
         self._is_paused = True
         logger.info("on_pause fired — _is_paused=True")
-        if getattr(self, "_live_screen", None) is not None:
-            self._flush_summary_notes()  # notes typed on the session-end card survive the app being killed
-        # Skip the settings flush during a restore's relaunch window (mirrors
-        # on_stop): the DB was just replaced with the imported file, so writing
-        # the old in-memory settings back would clobber the freshly-restored data.
+        # Skip the flush during a restore's relaunch window (mirrors on_stop):
+        # the DB was just replaced with the imported file, so writing the old
+        # in-memory state back would clobber the freshly-restored data.
         if not getattr(self, "_restoring", False):
-            self._save_user_settings()
+            self._flush_on_leave()
         return True
 
     def on_resume(self) -> None:
@@ -3902,11 +3901,11 @@ class EEGMeditationApp(App):
         "connected but no packets" problem caused by a stale ACL.
 
         After a Restore-database, _restoring is set so we skip
-        _save_user_settings: the DB file has just been replaced and writing
-        the current in-memory settings would clobber the imported state.
+        _flush_on_leave: the DB file has just been replaced and writing
+        the current in-memory state would clobber the imported data.
         """
         if not getattr(self, "_restoring", False):
-            self._save_user_settings()
+            self._flush_on_leave()
             if self._session_manager.state in (SessionState.RUNNING, SessionState.PAUSED):
                 # Skipped while _restoring: the DB is already shut down, so the
                 # save would silently no-op into the null connection. (The restore

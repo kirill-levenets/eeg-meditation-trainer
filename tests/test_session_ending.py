@@ -134,13 +134,47 @@ def test_empty_or_unchanged_notes_write_nothing_on_ok(typed, saved):
     app._toast.assert_not_called()
 
 
-def test_app_pause_with_the_card_open_flushes_typed_notes():
+def test_saved_notes_cleared_before_ok_are_cleared_in_the_db():
+    app = _app()
+    app._live_screen.summary_notes = "abc"
+    app._on_summary_save_notes()
+    app._live_screen.summary_notes = ""
+    app._on_summary_ok()
+    assert _notes_writes(app) == ["abc", ""]
+
+
+def _leaving_app(notes: str, restoring: bool = False):
     app = _app()
     app._is_paused = False
-    app._restoring = True  # skip the settings flush, which needs a full app
-    app._live_screen.summary_notes = "written before the phone locked"
+    app._restoring = restoring
+    app._save_user_settings = MagicMock()
+    app._session_manager = MagicMock()
+    app._session_manager.state = SessionState.IDLE
+    app._live_screen.summary_notes = notes
+    return app
+
+
+def test_app_pause_with_the_card_open_flushes_typed_notes():
+    app = _leaving_app("written before the phone locked")
     assert app.on_pause() is True
     assert _notes_writes(app) == ["written before the phone locked"]
+    app._save_user_settings.assert_called_once()
+
+
+def test_app_exit_with_the_card_open_flushes_typed_notes_before_the_db_closes():
+    app = _leaving_app("written before closing the window")
+    app._db.close.side_effect = lambda: app._db.update_session_notes.assert_called()
+    app.on_stop()
+    assert _notes_writes(app) == ["written before closing the window"]
+    app._db.close.assert_called_once()
+
+
+@pytest.mark.parametrize("hook", ["on_pause", "on_stop"])
+def test_leaving_during_a_restore_writes_no_notes(hook):
+    app = _leaving_app("typed", restoring=True)
+    getattr(app, hook)()
+    app._db.update_session_notes.assert_not_called()
+    app._save_user_settings.assert_not_called()
 
 
 def test_a_failed_notes_save_is_reported_not_toasted(monkeypatch):

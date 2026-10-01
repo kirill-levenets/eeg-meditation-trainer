@@ -68,7 +68,7 @@ Tap **Mark** to place a vertical line on the graph. Use this to tag events ("hea
 Every ending (Stop, timer, lost signal) shows the same **Session saved** card:
 - Duration, Avg Shamatha, Avg Meditation, Time Above Threshold, Time Shamatha ≥ 90
 - Quick notes field with **Save notes** next to it — saves them ("Notes saved") and keeps the card open
-- **OK** — closes the card; notes you typed but didn't save are saved automatically (also if the app goes to the background)
+- **OK** — closes the card; notes you typed but didn't save are saved automatically (also if the app goes to the background or is closed)
 - **Delete session** — permanently deletes the session after a confirmation ("This can't be undone"); Cancel keeps it
 
 ### Session Limit
