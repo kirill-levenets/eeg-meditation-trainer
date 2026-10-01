@@ -8,13 +8,13 @@ from collections import deque
 from datetime import datetime as _dt
 from typing import Optional
 
+from kivy.animation import Animation
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
-from kivy.graphics import Color, Rectangle
+from kivy.graphics import Color, Rectangle, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.button import Button
 from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
@@ -893,9 +893,9 @@ class EEGMeditationApp(App):
         self._live_screen.on_program_pick = self._on_session_program_pick
         self._live_screen.overlay_cancel_btn.bind(on_release=self._on_connect_cancel)
         self._live_screen.overlay_retry_btn.bind(on_release=self._on_connect_retry)
-        self._live_screen.summary_save_btn.bind(on_release=self._on_summary_save)
-        self._live_screen.summary_history_btn.bind(on_release=self._on_summary_history)
-        self._live_screen.summary_close_btn.bind(on_release=self._on_summary_close)
+        self._live_screen.summary_ok_btn.bind(on_release=self._on_summary_ok)
+        self._live_screen.summary_save_notes_btn.bind(on_release=self._on_summary_save_notes)
+        self._live_screen.summary_delete_btn.bind(on_release=self._on_summary_delete)
 
         # Tap on graph to set marker (Android — no keyboard available)
         if kivy_platform == "android":
@@ -1542,27 +1542,61 @@ class EEGMeditationApp(App):
         self._live_screen.set_controls_idle()
         self._on_start()
 
-    def _on_summary_save(self, *args) -> None:
-        """Save notes from summary overlay."""
-        self._audio.stop_timer_bell()
+    # The session-end card: the session is already saved on every ending; the card only adds notes or deletes it.
+    _summary_saved_notes: str = ""  # notes last written from the card for the session it shows
+
+    def _on_summary_save_notes(self, *args) -> None:
         sid = self._live_screen.summary_session_id
         notes = self._live_screen.summary_notes
-        if sid and notes:
-            self._db.update_session_notes(sid, notes)
-            self._mark_history_dirty()
-            logger.info(f"Quick notes saved for session {sid}")
-        self._live_screen.hide_summary()
+        if not sid:
+            return  # silent-ok: the card is not showing a session
+        if notes == self._summary_saved_notes:
+            if notes:
+                self._toast("Notes saved")  # already saved; say so rather than ignore the tap
+            return
+        if self._save_session_notes(sid, notes=notes):
+            self._summary_saved_notes = notes
 
-    def _on_summary_history(self, *args) -> None:
-        """Navigate to history from summary."""
+    def _flush_summary_notes(self) -> None:
+        """Keep notes typed but not saved (OK, app pause); empty or unchanged notes write nothing."""
+        sid = self._live_screen.summary_session_id
+        notes = self._live_screen.summary_notes
+        if sid and notes and notes != self._summary_saved_notes and self._save_session_notes(sid, notes=notes):
+            self._summary_saved_notes = notes
+
+    def _on_summary_ok(self, *args) -> None:
+        self._flush_summary_notes()
         self._audio.stop_timer_bell()
         self._live_screen.hide_summary()
-        self._switch_screen("history")
 
-    def _on_summary_close(self, *args) -> None:
-        """Close summary without saving notes."""
-        self._audio.stop_timer_bell()
-        self._live_screen.hide_summary()
+    def _on_summary_delete(self, *args) -> None:
+        sid = self._live_screen.summary_session_id
+        if not sid:
+            return  # silent-ok: the card is not showing a session
+
+        def _delete():
+            self._audio.stop_timer_bell()
+            self._live_screen.hide_summary()
+            self._delete_sessions([sid])
+
+        self._confirm_action("Delete session", "Delete this session permanently? This can't be undone.",
+                             "Delete", _delete, ok_color=C.DANGER)
+
+    def _save_session_notes(self, session_id: int, notes: Optional[str] = None,
+                            tags: Optional[str] = None, mood: Optional[int] = None) -> bool:
+        """The one notes-save path (session-end card, diary): writes only the given fields; failures are reported."""
+        try:
+            saved = self._db.update_session_notes(session_id, notes=notes, tags=tags, mood_rating=mood)
+        except sqlite3.Error as exc:
+            report_soft_error("notes_save_failed", f"Notes for session {session_id} were not saved: {exc}")
+            return False
+        if not saved:
+            report_soft_error("notes_save_failed", f"Notes for session {session_id} were not saved: no such session")
+            return False
+        self._mark_history_dirty()
+        self._toast("Notes saved")
+        logger.info(f"Notes saved for session {session_id}")
+        return True
 
     def _on_pause(self, *args) -> None:
         if self._session_manager.state == SessionState.RUNNING:
@@ -1593,41 +1627,11 @@ class EEGMeditationApp(App):
 
         # Pause the tick thread while the dialog is open
         self._stop_tick_thread()
-
-        content = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(12))
-        content.add_widget(Label(
-            text="Save session data?",
-            font_size=dp(16),
-            halign="center",
-        ))
-        btn_row = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
-        btn_save = Button(
-            text="Save", font_size=dp(15), bold=True,
-            background_color=(0.2, 0.7, 0.3, 1.0),
+        # Every ending saves (the same path as a timer or lost-signal stop); deleting is a confirmed card action.
+        self._confirm_action(
+            "Stop session?", "The session will be saved. You can delete it on the next screen.",
+            "Stop", lambda: self._stop_and_save(reason="user"), on_cancel=self._cancel_stop,
         )
-        btn_discard = Button(
-            text="Discard", font_size=dp(15), bold=True,
-            background_color=(0.8, 0.2, 0.2, 1.0),
-        )
-        btn_cancel = Button(
-            text="Cancel", font_size=dp(15),
-            background_color=(0.3, 0.3, 0.4, 1.0),
-        )
-        btn_row.add_widget(btn_save)
-        btn_row.add_widget(btn_discard)
-        btn_row.add_widget(btn_cancel)
-        content.add_widget(btn_row)
-
-        popup = Popup(
-            title="Stop Session",
-            content=content,
-            size_hint=(0.7, 0.3),
-            auto_dismiss=False,
-        )
-        btn_save.bind(on_release=lambda x: self._finish_stop(popup, save=True))
-        btn_discard.bind(on_release=lambda x: self._finish_stop(popup, save=False))
-        btn_cancel.bind(on_release=lambda x: self._cancel_stop(popup))
-        popup.open()
 
     def _make_session_name(self) -> str:
         """Generate default session name including device type."""
@@ -1729,6 +1733,7 @@ class EEGMeditationApp(App):
         self._stop_session_keep_alive_service()
         self._mark_history_dirty()
         if stats and session_id:
+            self._summary_saved_notes = ""
             self._live_screen.show_summary(session_id, stats)
 
     def _session_pipeline_live(self) -> bool:
@@ -1744,8 +1749,8 @@ class EEGMeditationApp(App):
         """Halt a running session and DELETE its data — used when its owning
         profile is deleted. The 60s partial flush may already have written a
         session row under the doomed profile; without the delete it survives as
-        an orphan. Mirrors _finish_stop's discard branch, then reuses the shared
-        _finalize_stop_ui teardown so the Session screen returns to idle."""
+        an orphan. Then reuses the shared _finalize_stop_ui teardown so the
+        Session screen returns to idle."""
         self._waiting_for_bt = False  # also halt a session still in the BT-connect wait
         self._bt_signal_start = None
         self._stop_tick_thread()
@@ -1771,66 +1776,11 @@ class EEGMeditationApp(App):
             f"Session stopped and saved (took {time.monotonic() - t_start:.3f}s)"
         )
 
-    def _cancel_stop(self, popup) -> None:
+    def _cancel_stop(self) -> None:
         """Back to the session after cancelling stop; a paused one gets its tick back only on Resume."""
-        popup.dismiss()
         if self._session_manager.state == SessionState.RUNNING:
             self._start_tick_thread()
         logger.info("Stop cancelled")
-
-    def _finish_stop(self, popup, save: bool) -> None:
-        """Finish stopping the session, optionally saving data."""
-        popup.dismiss()
-
-        stats = self._session_manager.stop(reason="user")
-        if APP.USE_MOCK_DEVICE:
-            self._eeg_stream.stop()
-        self._audio.stop()
-
-        if save and stats:
-            if self._current_session_id is not None:
-                self._db.update_session(
-                    self._current_session_id, stats,
-                    custom_formulas=self._session_custom_formulas_json(),
-                    session_program=self._session_program_json(),
-                    engine_version=MetricsEngine.ENGINE_VERSION,
-                )
-            else:
-                self._current_session_id = self._db.save_session(
-                    stats, user_id=self._current_user_id,
-                    session_name=self._make_session_name(),
-                    custom_formulas=self._session_custom_formulas_json(),
-                    session_program=self._session_program_json(),
-                    engine_version=MetricsEngine.ENGINE_VERSION,
-                )
-            if self._current_session_id is None:
-                logger.error("No session id (DB shutting down) — metrics NOT persisted")
-            elif self._metrics_buffer:
-                self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
-                self._metrics_buffer = []
-            logger.info("Session stopped and saved")
-        else:
-            # Discard: delete partially flushed data if any
-            if self._current_session_id is not None:
-                self._db.delete_session(self._current_session_id)
-                logger.info(f"Session {self._current_session_id} discarded")
-            self._metrics_buffer = []
-            logger.info("Session stopped, data discarded")
-
-        self._live_screen.set_controls_idle()
-        self._live_screen.update_device_status(False)
-        self._shamatha_active = False
-        self._shamatha_streak = 0
-        self._live_screen.set_shamatha(False)
-        self._live_screen.update_state("FINISHED")
-        self._timer_state.reset()
-        self._session_manager.reset()
-        self._release_wake_lock()
-        self._stop_session_keep_alive_service()
-        self._mark_history_dirty()
-
-        if save and stats and self._current_session_id:
-            self._live_screen.show_summary(self._current_session_id, stats)
 
     _BT_CONNECT_TIMEOUT = 30.0  # seconds before BT socket gives up
     _BT_SIGNAL_TIMEOUT = 8.0   # seconds to wait for EEG packets after connected
@@ -2275,6 +2225,28 @@ class EEGMeditationApp(App):
         self._last_back_time = now
         self._android_toast("Press back again to exit")
         return True
+
+    def _toast(self, message: str) -> None:
+        """Short non-blocking confirmation: the native toast on Android, a fading label elsewhere."""
+        if hasattr(sys, "getandroidapilevel"):
+            self._android_toast(message)
+            return
+        root = getattr(self, "_float_root", None)
+        if root is None:
+            logger.debug(f"toast: {message}")
+            return
+        lbl = Label(text=message, font_size=F.BODY, color=POPUP_TEXT, size_hint=(None, None),
+                    padding=(dp(16), dp(10)), pos_hint={"center_x": 0.5, "y": 0.12})
+        lbl.texture_update()
+        lbl.size = lbl.texture_size
+        with lbl.canvas.before:
+            Color(0, 0, 0, 0.8)
+            bg = RoundedRectangle(pos=lbl.pos, size=lbl.size, radius=[dp(8)])
+        lbl.bind(pos=lambda w, v: setattr(bg, "pos", v), size=lambda w, v: setattr(bg, "size", v))
+        root.add_widget(lbl)
+        fade = Animation(opacity=0, duration=0.4)
+        fade.bind(on_complete=lambda *_a: root.remove_widget(lbl))
+        Clock.schedule_once(lambda _dt: fade.start(lbl), 1.6)
 
     def _android_toast(self, message: str) -> None:
         """Short Android toast; no-op (logged) off Android."""
@@ -2794,17 +2766,22 @@ class EEGMeditationApp(App):
         ok_btn.bind(on_release=popup.dismiss)
         popup.open()
 
-    def _confirm_action(self, title, message, ok_text, on_ok, ok_color=None) -> None:
+    def _confirm_action(self, title, message, ok_text, on_ok, ok_color=None, on_cancel=None) -> None:
+        """on_cancel runs on every close that isn't OK: Cancel, a tap outside, or Android back."""
         ok_btn = StyledButton(text=ok_text, bg_color=ok_color or C.ACCENT)
         cancel_btn = StyledButton(text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_MUTED)
         popup = make_message_popup(title, message, [ok_btn, cancel_btn])
+        confirmed = []
 
         def _do(*_a):
+            confirmed.append(True)
             popup.dismiss()
             on_ok()
 
         ok_btn.bind(on_release=_do)
         cancel_btn.bind(on_release=popup.dismiss)
+        if on_cancel is not None:
+            popup.bind(on_dismiss=lambda *_a: None if confirmed else on_cancel())
         popup.open()
 
     def _refresh_saved_formulas(self) -> None:
@@ -3067,16 +3044,22 @@ class EEGMeditationApp(App):
     def _on_save_notes(
         self, session_id: int, notes: str, tags: str, mood: int
     ) -> None:
-        self._db.update_session_notes(session_id, notes, tags, mood)
-        self._refresh_diary()
-        logger.info(f"Notes saved for session {session_id}")
+        if self._save_session_notes(session_id, notes=notes, tags=tags, mood=mood):
+            self._refresh_diary()
 
     def _on_delete_session(self, session_id: int) -> None:
-        """Delete a session and refresh lists."""
-        self._db.delete_session(session_id)
+        self._delete_sessions([session_id])
+
+    def _delete_sessions(self, session_ids: list[int]) -> None:
+        """The one session-delete path (History row, session-end card); History rebuilds now only if it is on screen."""
+        for sid in session_ids:
+            self._db.delete_session(sid)
+            logger.info(f"Session {sid} deleted")
         self._refresh_diary()
-        self._refresh_history(force=True)
-        logger.info(f"Session {session_id} deleted")
+        if self._sm.current == "history":
+            self._refresh_history(force=True)
+        else:
+            self._mark_history_dirty()  # its rebuild shows a full-screen spinner, so not over the Session screen
 
     def _on_rename_session(self, session_id: int, new_name: str) -> None:
         """Rename a session and refresh lists."""
@@ -3830,6 +3813,8 @@ class EEGMeditationApp(App):
         """
         self._is_paused = True
         logger.info("on_pause fired — _is_paused=True")
+        if getattr(self, "_live_screen", None) is not None:
+            self._flush_summary_notes()  # notes typed on the session-end card survive the app being killed
         # Skip the settings flush during a restore's relaunch window (mirrors
         # on_stop): the DB was just replaced with the imported file, so writing
         # the old in-memory settings back would clobber the freshly-restored data.

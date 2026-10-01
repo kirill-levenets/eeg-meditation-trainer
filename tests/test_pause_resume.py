@@ -32,6 +32,7 @@ def _make_minimal_app():
     app._session_manager.state = fake_state
     app._session_manager.elapsed_formatted = "0:00"
     app._live_screen = MagicMock()
+    app._live_screen.summary_session_id = None  # no session-end card open
     return app
 
 

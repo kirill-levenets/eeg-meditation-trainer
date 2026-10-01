@@ -24,7 +24,7 @@ Inspired by the [EEG meditation research and Vernihor formula](https://scripture
 - **CSV export** — Full session data with file chooser dialog; includes marker column
 - **Mock EEG simulation** — NeuroSky-compatible: band powers, 512Hz raw waveform, eSense values; state machine with smooth transitions
 - **User profiles** — Multiple profiles with per-user sessions, settings, and formulas; last user persisted; diary disabled until user selected
-- **Session guards** — Start blocked without user or device; stop dialog with Save/Discard/Cancel; timer auto-stop saves automatically
+- **Session guards** — Start blocked without user or device; every ending (Stop, timer, lost signal) saves the session; the end card adds notes or deletes the session after a confirmation
 - **Navigation** — 3-tab bottom navigation (Session / History / Settings) with Material Design icons
 - **First-run wizard** — 2-step setup on first launch (create profile, connect device or use demo mode); existing profiles surface in a picker so reinstalls don't lose history
 - **Existing-user picker** — Wizard, first-run popup, and Settings → User Profile share one form: pick an existing profile or type a new name; duplicate names trigger an inline "Use existing 'X'" / "Change name" choice (DB enforces unique names)

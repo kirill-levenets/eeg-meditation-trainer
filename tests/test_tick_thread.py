@@ -34,7 +34,7 @@ def test_stop_then_cancel_while_paused_then_resume_runs_one_tick_thread():
         app._start_tick_thread()
         app._on_pause()                 # Pause
         app._stop_tick_thread()         # Stop: the confirm dialog opens with the tick stopped
-        app._cancel_stop(MagicMock())   # Cancel while still paused
+        app._cancel_stop()               # Cancel while still paused
         assert _live_ticks() == base, "a paused session must not get its tick back from Cancel"
         app._on_pause()                 # Resume
         assert _live_ticks() == base + 1
@@ -51,7 +51,7 @@ def test_cancel_while_running_restarts_the_tick():
     try:
         app._start_tick_thread()
         app._stop_tick_thread()
-        app._cancel_stop(MagicMock())
+        app._cancel_stop()
         assert _live_ticks() == base + 1
     finally:
         app._stop_tick_thread()

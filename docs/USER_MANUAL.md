@@ -61,16 +61,15 @@ Tap **Mark** to place a vertical line on the graph. Use this to tag events ("hea
 ### Pause / Resume / Stop
 
 - **Pause** — temporarily stops recording (paused time excluded from duration)
-- **Stop** — ends the session, shows a summary card
+- **Stop** — asks **"Stop session?"** (Stop / Cancel). The session is always saved — the same as when the timer ends or the headset signal is lost; Cancel returns to the session.
 
 ### Session End Summary
 
-After stopping, an overlay shows:
-- Duration, Avg Shamatha, Avg Meditation, Time Above Threshold
-- Quick notes text field for immediate reflection
-- **Save** — saves notes and closes
-- **View in History** — navigates to History tab
-- **Close** — dismisses without saving notes
+Every ending (Stop, timer, lost signal) shows the same **Session saved** card:
+- Duration, Avg Shamatha, Avg Meditation, Time Above Threshold, Time Shamatha ≥ 90
+- Quick notes field with **Save notes** next to it — saves them ("Notes saved") and keeps the card open
+- **OK** — closes the card; notes you typed but didn't save are saved automatically (also if the app goes to the background)
+- **Delete session** — permanently deletes the session after a confirmation ("This can't be undone"); Cancel keeps it
 
 ### Session Limit
 

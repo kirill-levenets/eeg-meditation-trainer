@@ -560,7 +560,7 @@ class LiveSessionScreen(Screen):
             orientation="vertical",
             size_hint=(1, 1),
             pos_hint={"x": 0, "y": 0},
-            padding=dp(20),
+            padding=[dp(20), dp(8)],  # tight vertically: the card must fit a landscape phone (~390 dp)
             spacing=S.GAP,
         )
         with self._summary.canvas.before:
@@ -573,8 +573,9 @@ class LiveSessionScreen(Screen):
 
         self._summary.add_widget(BoxLayout(size_hint_y=0.1))  # top spacer
 
+        # Every ending saves the session; the title says so (an extra row overflowed landscape phones).
         self._summary_title = Label(
-            text="Session Complete",
+            text="Session saved",
             font_size=F.H1,
             bold=True,
             color=C.ACCENT,
@@ -624,44 +625,45 @@ class LiveSessionScreen(Screen):
         notes_lbl.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
         self._summary.add_widget(notes_lbl)
 
+        notes_row = BoxLayout(size_hint_y=None, height=dp(70), spacing=S.GAP)
         self._summary_notes = TextInput(
             hint_text="How was the session?",
             multiline=True,
-            size_hint_y=None,
-            height=dp(70),
             font_size=F.BODY,
             foreground_color=C.TEXT,
             background_color=list(C.BG_INPUT),
             cursor_color=C.PRIMARY,
         )
-        self._summary.add_widget(self._summary_notes)
+        self._summary_save_notes_btn = StyledButton(
+            text="Save notes", bg_color=C.PRIMARY, bg_pressed=C.PRIMARY_DIM,
+            size_hint_x=None, width=dp(110),
+        )
+        notes_row.add_widget(self._summary_notes)
+        notes_row.add_widget(self._summary_save_notes_btn)
+        self._summary.add_widget(notes_row)
 
-        # Buttons
+        # Delete is low-emphasis and kept apart from OK: it is the one destructive action here.
         summary_btns = BoxLayout(size_hint_y=None, height=S.BTN_H, spacing=S.GAP)
-        self._summary_save_btn = StyledButton(
-            text="Save", icon=Icons.CHECK,
+        self._summary_delete_btn = StyledButton(
+            text="Delete session", icon=Icons.DELETE,
+            bg_color=C.BG_CARD, text_color=C.DANGER,
+            size_hint_x=None, width=dp(150),
+        )
+        self._summary_ok_btn = StyledButton(
+            text="OK", icon=Icons.CHECK,
             bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM,
+            size_hint_x=None, width=dp(120),
         )
-        self._summary_history_btn = StyledButton(
-            text="View in History", icon=Icons.HISTORY,
-            bg_color=C.PRIMARY, bg_pressed=C.PRIMARY_DIM,
-        )
-        self._summary_close_btn = StyledButton(
-            text="Close",
-            bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY,
-        )
-        summary_btns.add_widget(self._summary_save_btn)
-        summary_btns.add_widget(self._summary_history_btn)
-        summary_btns.add_widget(self._summary_close_btn)
+        summary_btns.add_widget(self._summary_delete_btn)
+        summary_btns.add_widget(Widget())
+        summary_btns.add_widget(self._summary_ok_btn)
         self._summary.add_widget(summary_btns)
 
         self._summary.add_widget(BoxLayout(size_hint_y=0.1))  # bottom spacer
 
-        self._summary.opacity = 0
-        self._summary.size_hint = (0, 0)
-        self._summary.size = (0, 0)
+        # Shown by attaching, hidden by detaching: invisible attached buttons swallowed Start/Stop taps.
+        self._summary_host = float_root
         self._summary_session_id = None
-        float_root.add_widget(self._summary)
 
         # ── Connection overlay ──
         self._overlay = BoxLayout(
@@ -1180,27 +1182,25 @@ class LiveSessionScreen(Screen):
         sham90 = stats.get("time_shamatha_90", 0)
         self._summary_stats["time_shamatha_90"].text = format_duration(sham90)
         self._summary_notes.text = ""
-        # Show
-        self._summary.opacity = 1
-        self._summary.size_hint = (1, 1)
+        if self._summary.parent is None:
+            self._summary_host.add_widget(self._summary)
 
     def hide_summary(self) -> None:
-        self._summary.opacity = 0
-        self._summary.size_hint = (0, 0)
-        self._summary.size = (0, 0)
+        if self._summary.parent is not None:
+            self._summary.parent.remove_widget(self._summary)
         self._summary_session_id = None
 
     @property
-    def summary_save_btn(self) -> StyledButton:
-        return self._summary_save_btn
+    def summary_ok_btn(self) -> StyledButton:
+        return self._summary_ok_btn
 
     @property
-    def summary_history_btn(self) -> StyledButton:
-        return self._summary_history_btn
+    def summary_delete_btn(self) -> StyledButton:
+        return self._summary_delete_btn
 
     @property
-    def summary_close_btn(self) -> StyledButton:
-        return self._summary_close_btn
+    def summary_save_notes_btn(self) -> StyledButton:
+        return self._summary_save_notes_btn
 
     @property
     def summary_notes(self) -> str:
