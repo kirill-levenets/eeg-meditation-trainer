@@ -1332,14 +1332,14 @@ class EEGMeditationApp(App):
         Clock.schedule_once(lambda dt: fn(), 0)
 
     def _start_tick_thread(self) -> None:
-        """Start the 2 Hz tick loop in a background daemon thread.
-
-        Survives Kivy pause (Android screen lock) because it runs outside
-        the UI thread.
-        """
-        self._tick_stop_event.clear()
+        """Start the 2 Hz tick loop in a daemon thread (survives Android screen lock); no-op while one is running."""
+        if self._tick_thread is not None and self._tick_thread.is_alive():
+            return
+        # Each thread gets its own stop event: clearing a shared one revived a thread whose stop join timed out.
+        stop = threading.Event()
+        self._tick_stop_event = stop
         self._tick_thread = threading.Thread(
-            target=self._tick_loop, daemon=True, name="SessionTick"
+            target=self._tick_loop, args=(stop,), daemon=True, name="SessionTick"
         )
         self._tick_thread.start()
         logger.debug("SessionTick thread started")
@@ -1364,11 +1364,11 @@ class EEGMeditationApp(App):
             t.join(timeout=1.0)
         logger.debug("SessionTick thread stopped")
 
-    def _tick_loop(self) -> None:
-        """Daemon-thread loop: call _update_tick every UPDATE_FREQUENCY seconds."""
+    def _tick_loop(self, stop: threading.Event) -> None:
+        """Daemon-thread loop: call _update_tick every UPDATE_FREQUENCY seconds until this thread's stop is set."""
         interval = APP.UPDATE_FREQUENCY
         next_t = time.monotonic()
-        while not self._tick_stop_event.is_set():
+        while not stop.is_set():
             try:
                 self._update_tick(interval)
             except Exception:
@@ -1376,7 +1376,7 @@ class EEGMeditationApp(App):
             next_t += interval
             remaining = next_t - time.monotonic()
             if remaining > 0:
-                if self._tick_stop_event.wait(remaining):
+                if stop.wait(remaining):
                     break
             else:
                 next_t = time.monotonic()
@@ -1772,10 +1772,11 @@ class EEGMeditationApp(App):
         )
 
     def _cancel_stop(self, popup) -> None:
-        """Resume the session after cancelling stop."""
+        """Back to the session after cancelling stop; a paused one gets its tick back only on Resume."""
         popup.dismiss()
-        self._start_tick_thread()
-        logger.info("Stop cancelled, session resumed")
+        if self._session_manager.state == SessionState.RUNNING:
+            self._start_tick_thread()
+        logger.info("Stop cancelled")
 
     def _finish_stop(self, popup, save: bool) -> None:
         """Finish stopping the session, optionally saving data."""
