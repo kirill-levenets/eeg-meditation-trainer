@@ -667,14 +667,39 @@ class AudioEngine:
         """Start noise playback."""
         if self._is_playing:
             return
-        self._is_playing = True
         initial = self._volume if self._volume > 0.001 else self._max_volume * 0.5
         self._volume = initial
         self._target_volume = initial
+        self._play_prepared()
+        logger.info("Audio engine started")
+
+    def pause(self) -> None:
+        """Silence and pause every feedback player but keep the prepared set and its roles for resume(); main thread."""
+        self._is_playing = False  # gates the alert channels and update()
+        self._ramp_running = False
+        if self._ramp_thread:
+            self._ramp_thread.join(timeout=0.5)
+            self._ramp_thread = None
+        for sid, player in self._feedback_players.items():
+            try:
+                player.volume = 0.0
+                player.stop()
+            except Exception:
+                logger.exception(f"pause: feedback player {sid!r} failed")
+        logger.info("Audio engine paused")
+
+    def resume(self) -> None:
+        """Replay the players pause() kept; the ramp brings each role back to its last target volume."""
+        if self._is_playing:
+            return
+        self._play_prepared()
+        logger.info("Audio engine resumed")
+
+    def _play_prepared(self) -> None:
+        self._is_playing = True
         with self._lock:
             self._start_noise_loop()
         self._ensure_ramp_thread()
-        logger.info("Audio engine started")
 
     def mute(self) -> None:
         """Silence all feedback players immediately via setVolume only (tick/lock-safe; no teardown)."""

@@ -1568,13 +1568,14 @@ class EEGMeditationApp(App):
         if self._session_manager.state == SessionState.RUNNING:
             self._session_manager.pause()
             self._live_screen.set_controls_paused()
-            self._audio.stop()
+            # Not stop(): that tears down the session's prepared players, which only session start rebuilds.
+            self._audio.pause()
             self._stop_tick_thread()
             logger.info("Session paused")
         elif self._session_manager.state == SessionState.PAUSED:
             self._session_manager.resume()
             self._live_screen.set_controls_running()
-            self._audio.start()
+            self._audio.resume()
             self._start_tick_thread()
             logger.info("Session resumed")
 
