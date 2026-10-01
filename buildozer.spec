@@ -19,7 +19,8 @@ source.include_exts = py,png,jpg,kv,atlas,wav,ttf,txt
 source.exclude_exts =
 
 # (list) List of directory to exclude (let empty to not exclude anything)
-source.exclude_dirs = tests,venv,.git,__pycache__,.buildozer,docs,tools,.claude,bin
+# build_venv_android: the venv build_android.sh runs buildozer from; dist, build: PyInstaller output (build_linux.sh)
+source.exclude_dirs = tests,venv,.git,__pycache__,.buildozer,docs,tools,.claude,bin,build_venv_android,dist,build
 
 # (list) List of exclusions using pattern matching
 source.exclude_patterns = *.db,*.db-shm,*.db-wal,*.csv,*.pyc,*.eeg,*.ods,*.md,*.sh,*.bat,*.spec

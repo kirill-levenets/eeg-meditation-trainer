@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Visible button press feedback** (issue #33): pressing any button now raises an edge-visible ring that lingers as it fades on release — the old feedback only darkened the fill *while held*, which a fingertip covers on mobile, so taps on buttons like **Save** felt dead. The ring colour tracks the theme (light on dark themes, dark on light) so it stays visible on every palette. Saving a Session Program now flashes a green **"Saved"** confirmation on the button, so an overwrite (which doesn't change the list) is no longer silent.
 - **Per-user theme.** The colour theme is now saved per profile (was one global setting shared by everyone). Existing installs keep their current theme; each profile can now choose its own.
 
+### Changed
+
+- **Android app is half the size**: the APK no longer carries the build tools' Python environment by mistake. APK 39 MB → 20 MB; the app files unpacked on the first launch after an install or update 53 MB → 2.4 MB.
+
 ### Fixed
 
 - **No alert sound when a session ended on lost signal**: when a session auto-stopped because the headset stopped sending data or the Bluetooth link dropped, the warble that should tell you so was cut off within milliseconds by the audio shutdown that follows it, so the session ended silently. The warble now plays to the end.
