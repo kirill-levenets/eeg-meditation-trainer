@@ -1,7 +1,7 @@
 import colorsys
 import math
 import time as _time
-from collections import deque
+from collections import OrderedDict, deque
 from typing import Optional
 
 from kivy.core.text import Label as CoreLabel
@@ -18,6 +18,20 @@ from app.config import APP
 from app.ui import render_stats
 from app.ui.theme import C as TC
 from app.ui.touch_utils import point_in_rect
+
+# Labels by (text, font_size, color); the CoreLabel is kept since it re-renders its texture after a GL context loss.
+_LABEL_CACHE: "OrderedDict[tuple, CoreLabel]" = OrderedDict()
+_LABEL_CACHE_MAX = 512
+
+# X grid steps (s); the smallest that keeps time labels _MIN_X_LABEL_GAP_DP apart is used.
+_X_GRID_STEPS_S = (10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200)
+_MIN_X_LABEL_GAP_DP = 70
+
+
+def _x_grid_step(graph_w: float, visible_seconds: float) -> float:
+    px_per_s = graph_w / max(visible_seconds, 1e-9)
+    return next((s for s in _X_GRID_STEPS_S if s * px_per_s >= dp(_MIN_X_LABEL_GAP_DP)), _X_GRID_STEPS_S[-1])
+
 
 
 class ScrollableGraphWidget(Widget):
@@ -259,8 +273,16 @@ class ScrollableGraphWidget(Widget):
     def _make_text_texture(self, text: str, font_size: int = 10,
                            color: tuple = (1, 1, 1, 1)):
         """Render text string to a texture for canvas drawing."""
-        cl = CoreLabel(text=text, font_size=dp(font_size), color=color)
-        cl.refresh()
+        key = (text, font_size, tuple(color))
+        cl = _LABEL_CACHE.get(key)
+        if cl is None:
+            cl = CoreLabel(text=text, font_size=dp(font_size), color=color)
+            cl.refresh()
+            _LABEL_CACHE[key] = cl
+            if len(_LABEL_CACHE) > _LABEL_CACHE_MAX:
+                _LABEL_CACHE.popitem(last=False)
+        else:
+            _LABEL_CACHE.move_to_end(key)
         return cl.texture
 
     def _redraw(self, *args) -> None:
@@ -410,8 +432,8 @@ class ScrollableGraphWidget(Widget):
 
             t_start = start_idx / self._sample_rate
             t_end = end_idx / self._sample_rate
-            grid_sec = 10.0
-            # First grid line at nearest 10s boundary >= t_start
+            grid_sec = _x_grid_step(graph_w, vp / self._sample_rate)
+            # First grid line at nearest grid boundary >= t_start
             first_mark = math.ceil(t_start / grid_sec) * grid_sec
             if first_mark == 0.0:
                 first_mark = grid_sec
