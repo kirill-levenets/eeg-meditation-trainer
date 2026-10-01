@@ -102,6 +102,7 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     app._current_user_id = 1
     app._make_session_name = MagicMock(return_value="sess")
     app._tick_stop_event = MagicMock()
+    app._tick_thread = None  # as __init__ leaves it
 
     app._session_program_active = False
     app._session_program_segments = []
@@ -463,6 +464,28 @@ def test_timer_expiry_persists_on_tick_thread():
     # UI teardown + gong are still deferred to the main thread (one dispatch,
     # since the per-tick UI update is skipped while paused/locked).
     app._on_main.assert_called_once()
+
+
+def test_timer_expiry_leaves_no_live_pipeline_behind():
+    """A timer-ended session must not look live while idle: Restore and profile switch key off it."""
+    app = _make_tick_app()
+    app._timer_state.tick.return_value = True
+    app._timer_state.custom_sound_path = ""
+    app._session_manager.stop.return_value = {"duration": 100}
+    app._metrics_buffer = []
+    app._waiting_for_bt = False
+    app._tick_thread = MagicMock()  # the running SessionTick thread
+
+    def stop(reason):
+        app._session_manager.state = SessionState.IDLE
+        return {"duration": 100}
+
+    app._session_manager.stop.side_effect = stop
+
+    _drive_tick(app, _raw_sample(), _metrics())
+
+    assert app._tick_thread is None
+    assert app._session_pipeline_live() is False
 
 
 def test_timer_expiry_persists_before_muting_audio():

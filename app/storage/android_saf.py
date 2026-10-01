@@ -10,6 +10,7 @@ All jnius imports are function-local so this module imports cleanly off-Android.
 
 import sys
 
+from app.android_jni import java_string
 from app.logger import logger
 
 _IS_ANDROID = hasattr(sys, "getandroidapilevel")
@@ -137,7 +138,7 @@ def _launch(request_code: int, display_name: str | None) -> None:
         intent.addCategory(Intent.CATEGORY_OPENABLE)
         intent.setType("application/octet-stream" if display_name else "*/*")
         if display_name:
-            intent.putExtra(Intent.EXTRA_TITLE, display_name)
+            intent.putExtra(Intent.EXTRA_TITLE, java_string(display_name))
         PythonActivity.mActivity.startActivityForResult(intent, request_code)
 
     _run()

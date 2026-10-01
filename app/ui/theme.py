@@ -93,6 +93,23 @@ def make_scroll_popup(title, rows, footer=None, *, width_hint=0.85, row_h=None,
                  height=height, auto_dismiss=auto_dismiss)
 
 
+def make_message_popup(title, message, buttons, *, color=None, width_hint=0.85):
+    """Message modal with a row of `buttons`; the text wraps and scrolls, so no line is ever silently dropped."""
+    label = Label(text=message, font_size=F.BODY, halign="center", valign="top",
+                  color=color or POPUP_TEXT, size_hint_y=None)
+    # Measure the wrapped text now so the popup sizes to it (capped; beyond that it scrolls).
+    label.text_size = (Window.width * width_hint - dp(48), None)
+    label.texture_update()
+    label.height = label.texture_size[1]
+    label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)),
+               texture_size=lambda w, v: setattr(w, "height", v[1]))
+    btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+    for btn in buttons:
+        btn_row.add_widget(btn)
+    return make_scroll_popup(title, [label], footer=btn_row, width_hint=width_hint,
+                             est_rows=int(label.height // dp(44)) + 1)
+
+
 class Icons:
     """Material Design Icon codepoints (used with font_name='Icons')."""
     PLAY = "\U000F040A"

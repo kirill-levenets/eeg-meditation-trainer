@@ -78,6 +78,8 @@ class TestAudioDriveKey(unittest.TestCase):
     def _app(self):
         app = EEGMeditationApp.__new__(EEGMeditationApp)
         app._init_formula_slots()
+        app._current_user_id = None       # no active user -> _persist_user_setting no-ops
+        app._loading_settings = False
         return app
 
     def test_audio_falls_back_to_shamatha_when_bound_slot_invalid(self):

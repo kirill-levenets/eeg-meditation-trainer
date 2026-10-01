@@ -74,40 +74,34 @@ def test_history_screen_view_mode_callback_fires_on_toggle():
 def test_confirm_delete_label_shows_name_visibly(monkeypatch):
     # Regression (caught on-device): the name was invisible on the always-dark
     # Kivy popup because the label used C.TEXT, which is dark in light themes
-    # (dark-on-dark). Body text must be light. text_size must also track size
-    # so the name wraps instead of overflowing the narrow mobile popup.
+    # (dark-on-dark). Body text must be light, and it must wrap without a height
+    # cap (a capped text_size drops the lines that don't fit).
     from kivy.uix.label import Label
+    from kivy.uix.popup import Popup
 
     import app.ui.history_screen as hs_mod
     from app.ui.history_screen import HistoryScreen
 
-    captured = {}
+    monkeypatch.setattr(Popup, "open", lambda self, *a, **k: None)
+    opened = []
+    real = hs_mod.make_message_popup
 
-    class _FakePopup:
-        def __init__(self, **kwargs):
-            captured["content"] = kwargs.get("content")
+    def _capture(*a, **k):
+        popup = real(*a, **k)
+        opened.append(popup)
+        return popup
 
-        def open(self):
-            captured["opened"] = True
-
-        def dismiss(self, *args):
-            pass
-
-    monkeypatch.setattr(hs_mod, "Popup", _FakePopup)
+    monkeypatch.setattr(hs_mod, "make_message_popup", _capture)
 
     screen = HistoryScreen()
     name = "14:32 - MindWave Mobile (very long session name)"
     screen._confirm_delete(7, name)
 
-    content = captured["content"]
-    labels = [w for w in content.children if isinstance(w, Label)]
-    assert labels, "no message label in confirm-delete dialog"
-    msg = labels[0]
-    assert name in msg.text
+    msg = next(w for w in opened[0].content.walk() if isinstance(w, Label) and name in w.text)
 
     # Light enough to read on the dark popup chrome (the original C.TEXT in a
     # light theme had luminance ~0.15 and was invisible).
     assert sum(msg.color[:3]) / 3 > 0.7
 
-    msg.size = (300, 80)  # binding fires synchronously on size change
-    assert list(msg.text_size) == [300, 80]
+    msg.width = 300  # binding fires synchronously on width change
+    assert list(msg.text_size) == [300, None]

@@ -29,6 +29,7 @@ from app.ui.theme import (
     S,
     StyledButton,
     format_duration,
+    make_message_popup,
 )
 from app.ui.widgets.band_totals import BandTotalsView
 from app.ui.widgets.legend import LegendBar
@@ -898,34 +899,10 @@ class DiaryScreen(Screen):
 
     def _show_export_result(self, message: str, success: bool = True) -> None:
         """Show a result popup after export attempt."""
-        content = BoxLayout(orientation="vertical", spacing=S.GAP, padding=S.GAP)
-        msg = Label(
-            text=message,
-            font_size=F.BODY,
-            color=C.ACCENT if success else C.DANGER,
-            halign="center",
-            valign="middle",
-            size_hint_y=0.6,
-        )
-        msg.bind(size=msg.setter("text_size"))
-        content.add_widget(msg)
-
-        btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=S.GAP)
-
-        btn_ok = StyledButton(
-            text="OK",
-            bg_color=C.ACCENT if success else C.DANGER,
-            height=dp(40),
-        )
-        btn_row.add_widget(btn_ok)
-        content.add_widget(btn_row)
-
-        popup = Popup(
-            title="Export Complete" if success else "Export Failed",
-            content=content,
-            size_hint=(0.8, 0.4),
-            auto_dismiss=True,
-        )
+        tone = C.ACCENT if success else C.DANGER
+        btn_ok = StyledButton(text="OK", bg_color=tone)
+        popup = make_message_popup("Export Complete" if success else "Export Failed", message,
+                                   [btn_ok], color=tone)
         btn_ok.bind(on_release=popup.dismiss)
         self._export_result_popup = popup
         popup.open()

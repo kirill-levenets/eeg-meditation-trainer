@@ -139,14 +139,19 @@ Settings uses collapsible accordion sections. Tap a section header to expand/col
 - **Existing profiles** appear in a list at the top of the form. Tap one to switch to it.
 - Type a new name into the input and tap **Create** to add a profile.
 - If the name you typed already exists, an inline message offers two buttons: **Use existing 'X'** (switch to that profile) or **Change name** (back to the input). Names are unique and case-sensitive.
-- Each user has separate sessions, settings, and formulas. The **X** button on a row deletes that profile after a confirmation.
+- Each user has separate sessions, settings, and formulas. The **X** button on a row deletes that profile after a confirmation — together with all its sessions and settings; the dialog shows how many sessions will go.
+- Switching profiles is refused while a session is running or connecting ("Session in progress") — a running session keeps the settings it started with. Stop the session first.
 
 ### Data Backup
 
 Settings → **Data Backup** lets you save a copy of your sessions to a file and restore it later.
 
-- **Backup database** — writes a transaction-safe copy of the live database. On Android the backup goes to `Documents/EEGMeditation/meditation_backup_YYYYMMDD_HHMMSS.db` (visible to file managers and Telegram's "attach file" picker). On desktop, a save dialog opens.
-- **Restore database** — pick a backup file. The app validates it (must be a real SQLite file with `users` and `sessions` tables), shows a confirmation dialog with the current session count, then replaces the live database. The app will exit after restoring — relaunch it to see your imported history.
+- **Backup database** — saves your current settings, then writes a transaction-safe copy of the live database (all profiles) The suggested file name carries the profile name and the date and time, e.g. `eeg_backup_Anna_2026-09-29_17-49.db`. You choose where: on Android a system save dialog opens (e.g. Downloads, Documents, a cloud drive); on desktop, a file dialog. A **Backup saved** dialog confirms it and reminds you that custom sound files are not included.
+- **Restore database** — pick a backup file. The app validates it (must be a real SQLite file with `users` and `sessions` tables), shows a confirmation dialog, then replaces the live database. The app will exit after restoring — relaunch it to see your imported history.
+
+Two things to know before restoring:
+- Restore replaces the **entire database — all profiles** on this device, not just the current one.
+- A backup contains only the database. **Custom sound files** (feedback / reward / timer) are referenced by path and are **not** included, so those paths may not resolve on another device.
 
 The Restore replaces your current database and cannot be undone. Use Backup first if you want to keep the current state.
 

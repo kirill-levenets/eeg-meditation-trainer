@@ -20,7 +20,6 @@ from kivy.uix.slider import Slider
 from app.config import APP, METRICS
 from app.logger import logger
 from app.ui.theme import (
-    POPUP_TEXT,
     THEMES,
     C,
     CenteredTextInput,
@@ -31,6 +30,7 @@ from app.ui.theme import (
     S,
     StyledButton,
     ThemedAccordion,
+    make_message_popup,
     make_scroll_popup,
 )
 from app.ui.widgets.user_picker import UserPickerForm
@@ -2163,21 +2163,13 @@ class SettingsScreen(Screen):
 
     def _confirm_user_delete(self, user_id, user_name):
         """Show confirmation before deleting a user."""
-        content = BoxLayout(orientation="vertical", spacing=S.GAP, padding=S.GAP)
-        msg_label = Label(
-            text=f'Delete user "{user_name}"?\nAll their settings will be lost.',
-            font_size=F.BODY, color=POPUP_TEXT,  # dark popup chrome: keep body light
-            halign="center", valign="middle", size_hint_y=0.6,
-        )
-        msg_label.bind(size=msg_label.setter("text_size"))
-        content.add_widget(msg_label)
-        btn_row = BoxLayout(spacing=S.GAP, size_hint_y=0.4)
-        btn_cancel = StyledButton(text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY, height=dp(38))
-        btn_confirm = StyledButton(text="Delete", icon=Icons.DELETE, bg_color=C.DANGER, height=dp(38))
-        btn_row.add_widget(btn_cancel)
-        btn_row.add_widget(btn_confirm)
-        content.add_widget(btn_row)
-        popup = Popup(title="Confirm Delete", content=content, size_hint=(0.7, 0.3), auto_dismiss=True)
+        n = self._count_user_sessions(user_id)
+        message = (f'Delete profile "{user_name}"?\n\n'
+                   f"Its {n} session(s) and all its settings will be permanently deleted.\n"
+                   "This cannot be undone.")
+        btn_cancel = StyledButton(text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY)
+        btn_confirm = StyledButton(text="Delete", icon=Icons.DELETE, bg_color=C.DANGER)
+        popup = make_message_popup("Confirm Delete", message, [btn_cancel, btn_confirm])
         btn_cancel.bind(on_release=popup.dismiss)
 
         def _do_delete(*args):

@@ -122,6 +122,11 @@ def _schedule_dialog(report: str, fatal: bool = True, title: str = "") -> None:
 
 
 def _handle_exception(exc_type, exc_value, tb, source: str, app) -> None:
+    # Log first: a crash with no running event loop (e.g. in build()) can't show the dialog.
+    logger.error(
+        "Unhandled %s exception:\n%s",
+        source, "".join(_traceback.format_exception(exc_type, exc_value, tb)),
+    )
     if _STATE["in_dialog"]:
         _sys.stderr.write("Re-entrant exception during crash dialog:\n")
         _traceback.print_exception(exc_type, exc_value, tb)

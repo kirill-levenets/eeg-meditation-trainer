@@ -5,6 +5,7 @@ import math
 import os
 import sqlite3
 import threading
+from contextlib import contextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
@@ -48,6 +49,9 @@ class _NullConnection:
     def commit(self):
         pass
 
+    def rollback(self):
+        pass
+
     def close(self):
         pass
 
@@ -78,6 +82,8 @@ class DatabaseManager:
         self._conn_obj: Optional[sqlite3.Connection] = None
         self._shutting_down: bool = False
         self._reconnect_lock = threading.Lock()
+        # One transaction at a time: the tick and UI threads share this connection.
+        self._write_lock = threading.RLock()
         self._init_db()
 
     @property
@@ -104,6 +110,18 @@ class DatabaseManager:
     @_conn.setter
     def _conn(self, value) -> None:
         self._conn_obj = value
+
+    @contextmanager
+    def _write(self):
+        """Run one write transaction under the write lock; commit on success, roll back on error."""
+        with self._write_lock:
+            conn = self._conn
+            try:
+                yield conn
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
 
     def _init_db(self) -> None:
         os.makedirs(os.path.dirname(self._db_path) or ".", exist_ok=True)
@@ -246,32 +264,32 @@ class DatabaseManager:
         as "not persisted". `custom_formulas` is a JSON string. `engine_version`
         stamps which metric-formula version produced the stored values.
         """
-        cursor = self._conn.execute(
-            """
-            INSERT INTO sessions
-            (user_id, date_time, duration, threshold_used, avg_meditation, avg_shamatha,
-             max_meditation, time_above_threshold, longest_streak, session_name,
-             time_shamatha_90, custom_formulas, session_program, engine_version)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                user_id,
-                datetime.now().isoformat(),
-                stats.get("duration", 0),
-                stats.get("threshold_used", 50),
-                stats.get("avg_meditation", 0),
-                stats.get("avg_shamatha", 0),
-                stats.get("max_meditation", 0),
-                stats.get("time_above_threshold", 0),
-                stats.get("longest_streak", 0),
-                session_name,
-                stats.get("time_shamatha_90", 0),
-                custom_formulas,
-                session_program,
-                engine_version,
-            ),
-        )
-        self._conn.commit()
+        with self._write() as c:
+            cursor = c.execute(
+                """
+                INSERT INTO sessions
+                (user_id, date_time, duration, threshold_used, avg_meditation, avg_shamatha,
+                 max_meditation, time_above_threshold, longest_streak, session_name,
+                 time_shamatha_90, custom_formulas, session_program, engine_version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    datetime.now().isoformat(),
+                    stats.get("duration", 0),
+                    stats.get("threshold_used", 50),
+                    stats.get("avg_meditation", 0),
+                    stats.get("avg_shamatha", 0),
+                    stats.get("max_meditation", 0),
+                    stats.get("time_above_threshold", 0),
+                    stats.get("longest_streak", 0),
+                    session_name,
+                    stats.get("time_shamatha_90", 0),
+                    custom_formulas,
+                    session_program,
+                    engine_version,
+                ),
+            )
         session_id = cursor.lastrowid
         if session_id is None:
             logger.error("save_session no-oped — DB is shutting down; session NOT persisted")
@@ -313,20 +331,20 @@ class DatabaseManager:
             )
             for m in metrics_list
         ]
-        self._conn.executemany(
-            """
-            INSERT INTO metrics
-            (session_id, timestamp, delta_raw, theta_raw, alpha1_raw, alpha2_raw,
-             beta1_raw, beta2_raw, gamma1_raw, gamma2_raw,
-             alpha_norm, beta_norm, theta_norm, delta_norm, gamma_norm,
-             meditation_score, distraction, subtle_distraction, sinking,
-             shamatha_score, stability, calmness,
-             native_attention, native_meditation, marker)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            rows,
-        )
-        self._conn.commit()
+        with self._write() as c:
+            c.executemany(
+                """
+                INSERT INTO metrics
+                (session_id, timestamp, delta_raw, theta_raw, alpha1_raw, alpha2_raw,
+                 beta1_raw, beta2_raw, gamma1_raw, gamma2_raw,
+                 alpha_norm, beta_norm, theta_norm, delta_norm, gamma_norm,
+                 meditation_score, distraction, subtle_distraction, sinking,
+                 shamatha_score, stability, calmness,
+                 native_attention, native_meditation, marker)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
 
     def get_all_sessions(self, user_id: Optional[int] = None) -> list[dict]:
         """Return sessions ordered by date descending, optionally filtered by user."""
@@ -372,11 +390,11 @@ class DatabaseManager:
         self, session_id: int, notes: str = "", tags: str = "", mood_rating: int = 0
     ) -> None:
         """Update diary fields for a session."""
-        self._conn.execute(
-            "UPDATE sessions SET notes = ?, tags = ?, mood_rating = ? WHERE id = ?",
-            (notes, tags, mood_rating, session_id),
-        )
-        self._conn.commit()
+        with self._write() as c:
+            c.execute(
+                "UPDATE sessions SET notes = ?, tags = ?, mood_rating = ? WHERE id = ?",
+                (notes, tags, mood_rating, session_id),
+            )
 
     def get_sessions_in_range(self, start_date: str, end_date: str) -> list[dict]:
         """Return sessions within a date range for analytics."""
@@ -388,9 +406,9 @@ class DatabaseManager:
 
     def delete_session(self, session_id: int) -> None:
         """Delete a session and its metrics."""
-        self._conn.execute("DELETE FROM metrics WHERE session_id = ?", (session_id,))
-        self._conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
-        self._conn.commit()
+        with self._write() as c:
+            c.execute("DELETE FROM metrics WHERE session_id = ?", (session_id,))
+            c.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
 
     # ---- User profile methods ----
 
@@ -401,11 +419,11 @@ class DatabaseManager:
             UserExistsError: if a user with this name already exists.
         """
         try:
-            cursor = self._conn.execute(
-                "INSERT INTO users (name, created_at) VALUES (?, ?)",
-                (name, datetime.now().isoformat()),
-            )
-            self._conn.commit()
+            with self._write() as c:
+                cursor = c.execute(
+                    "INSERT INTO users (name, created_at) VALUES (?, ?)",
+                    (name, datetime.now().isoformat()),
+                )
         except sqlite3.IntegrityError:
             existing = self.find_user_by_name(name)
             if existing:
@@ -437,9 +455,16 @@ class DatabaseManager:
         return dict(row) if row else None
 
     def delete_user(self, user_id: int) -> None:
-        """Delete a user profile."""
-        self._conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
-        self._conn.commit()
+        """Delete a user and everything it owns; FKs aren't enforced, so children are purged explicitly."""
+        with self._write() as c:
+            c.execute(
+                "DELETE FROM metrics WHERE session_id IN "
+                "(SELECT id FROM sessions WHERE user_id = ?)", (user_id,)
+            )
+            c.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+            # GLOB, not LIKE: '_' is a LIKE wildcard, and user_1_* must not match user_11's keys.
+            c.execute("DELETE FROM app_settings WHERE key GLOB ?", (f"user_{user_id}_*",))
+            c.execute("DELETE FROM users WHERE id = ?", (user_id,))
 
     # ---- Session management ----
 
@@ -471,19 +496,19 @@ class DatabaseManager:
             cols.append("engine_version = ?")
             vals.append(engine_version)
         vals.append(session_id)
-        self._conn.execute(
-            f"UPDATE sessions SET {', '.join(cols)} WHERE id = ?", vals
-        )
-        self._conn.commit()
+        with self._write() as c:
+            c.execute(
+                f"UPDATE sessions SET {', '.join(cols)} WHERE id = ?", vals
+            )
         logger.info(f"Session {session_id} updated with final stats")
 
     def rename_session(self, session_id: int, new_name: str) -> None:
         """Rename a session."""
-        self._conn.execute(
-            "UPDATE sessions SET session_name = ? WHERE id = ?",
-            (new_name, session_id),
-        )
-        self._conn.commit()
+        with self._write() as c:
+            c.execute(
+                "UPDATE sessions SET session_name = ? WHERE id = ?",
+                (new_name, session_id),
+            )
 
     # ---- Settings persistence ----
 
@@ -502,11 +527,11 @@ class DatabaseManager:
         running; a write during deliberate shutdown / restore is a benign no-op via
         the null connection (never resurrects/clobbers the freshly-restored DB).
         """
-        self._conn.execute(
-            "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
-            (key, value),
-        )
-        self._conn.commit()
+        with self._write() as c:
+            c.execute(
+                "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
+                (key, value),
+            )
 
     def get_user_setting(self, user_id: int, key: str) -> Optional[str]:
         """Get a per-user setting value."""
@@ -515,6 +540,16 @@ class DatabaseManager:
     def set_user_setting(self, user_id: int, key: str, value: str) -> None:
         """Set a per-user setting value."""
         self.set_setting(f"user_{user_id}_{key}", value)
+
+    def set_user_settings(self, user_id: int, items: dict[str, str]) -> None:
+        """Set many per-user settings in one transaction (one commit, not one per key)."""
+        if not items:
+            return
+        with self._write() as c:
+            c.executemany(
+                "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
+                [(f"user_{user_id}_{k}", v) for k, v in items.items()],
+            )
 
     def get_user_json_setting(self, user_id: int, key: str, default=None):
         """Get a per-user setting decoded from JSON, or `default` if absent/corrupt."""
