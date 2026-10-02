@@ -4,12 +4,12 @@ Kivy's automatic nested touch dispatch through ScrollViews / custom containers
 is unreliable, so this app routes touches manually and hit-tests sub-regions
 (History session rows, the graph expand glyph, ...).
 
-Coordinate frame matters: a widget under `GraphAwareScrollView` receives touches
-in a mid-chain frame that matches neither its canvas-drawn rect (`touch.x/y`)
-nor a `to_widget`/`to_local` conversion. The robust approach there is to compare
-in WINDOW coordinates — the touch's canonical window position
-(`touch.sx*Window.width, touch.sy*Window.height`) against the target's rendered
-window rect (`widget.to_window(...)`). See `ScrollableGraphWidget._touch_in_window_rect`.
+Coordinate frame matters: a ScrollView translates its canvas, so its children's
+x/y are content coordinates. Compare in WINDOW coordinates — the touch's window
+position (`widget.to_window(*touch.pos)` with `touch.pos` in that widget's parent
+frame; `touch.sx/sy` ignore the app's screen rotation) against the target's
+rendered window rect (`widget.to_window(...)`). See
+`ScrollableGraphWidget._touch_in_window_rect` and `GraphAwareScrollView._graph_under_touch`.
 `point_in_rect` is the shared rect test used on both sides.
 """
 
