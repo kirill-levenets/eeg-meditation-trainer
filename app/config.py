@@ -1,6 +1,8 @@
 import os
 import sys
 
+from app.storage.fileops import copy_file_atomic
+
 APP_VERSION = "1.4.0"
 
 
@@ -24,8 +26,7 @@ def _resolve_android_base_dir() -> str:
     new_db = os.path.join(p, "meditation.db")
     if os.path.isfile(old_db) and not os.path.isfile(new_db):
         try:
-            import shutil
-            shutil.copy2(old_db, new_db)
+            copy_file_atomic(old_db, new_db)
         except (PermissionError, OSError) as e:
             from app.crash_handler import queue_pre_app_error
             queue_pre_app_error(
@@ -48,15 +49,13 @@ def _maybe_migrate_desktop_db(new_dir: str, legacy_dirs: list) -> None:
     new_db = os.path.join(new_dir, "meditation.db")
     if os.path.isfile(new_db):
         return
-    import shutil
-
     from app.crash_handler import queue_pre_app_error
 
     for old_dir in legacy_dirs:
         old_db = os.path.join(old_dir, "meditation.db")
         if os.path.isfile(old_db):
             try:
-                shutil.copy2(old_db, new_db)
+                copy_file_atomic(old_db, new_db)
             except (PermissionError, OSError) as e:
                 queue_pre_app_error(
                     "db_migration_desktop",

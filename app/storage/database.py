@@ -760,6 +760,13 @@ class DatabaseManager:
         clobber the freshly-restored DB."""
         self._shutting_down = True
 
+    def reopen(self) -> None:
+        """Undo mark_shutting_down() + close() after a restore that left the file untouched; the same object, so every holder stays live."""
+        with self._reconnect_lock:
+            self._shutting_down = False
+            if self._conn_obj is None:
+                self._init_db()
+
 
 if __name__ == "__main__":
     import tempfile

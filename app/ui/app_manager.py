@@ -46,6 +46,7 @@ from app.storage import backup as _backup
 from app.storage.backup import restore_backup, validate_backup
 from app.storage.csv_export import build_sessions_zip
 from app.storage.database import DatabaseManager, UserExistsError
+from app.storage.fileops import discard_file
 from app.ui import render_stats
 from app.ui.diary_screen import DiaryScreen
 from app.ui.history_screen import HistoryScreen
@@ -2772,17 +2773,24 @@ class EEGMeditationApp(App):
         ok_btn = StyledButton(text=ok_text, bg_color=ok_color or C.ACCENT)
         cancel_btn = StyledButton(text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_MUTED)
         popup = make_message_popup(title, message, [ok_btn, cancel_btn])
-        confirmed = []
+        decided = []  # one outcome only: Kivy still delivers taps while the popup fades out
 
         def _do(*_a):
-            confirmed.append(True)
+            if decided:
+                return
+            decided.append("ok")
             popup.dismiss()
             on_ok()
 
+        def _closed(*_a):
+            if not decided:
+                decided.append("cancel")
+                if on_cancel is not None:
+                    on_cancel()
+
         ok_btn.bind(on_release=_do)
         cancel_btn.bind(on_release=popup.dismiss)
-        if on_cancel is not None:
-            popup.bind(on_dismiss=lambda *_a: None if confirmed else on_cancel())
+        popup.bind(on_dismiss=_closed)
         popup.open()
 
     def _refresh_saved_formulas(self) -> None:
@@ -3302,12 +3310,13 @@ class EEGMeditationApp(App):
             logger.exception("SAF restore read failed")
             ok = False
         if not ok:
+            discard_file(candidate)
             Clock.schedule_once(
                 lambda dt: report_soft_error(
                     "restore_failed", "Could not read the selected file", force=True),
             )
             return
-        Clock.schedule_once(lambda dt: self._confirm_restore(candidate))
+        Clock.schedule_once(lambda dt: self._confirm_restore(candidate, discard_after=True))
 
     def _open_restore_picker_desktop(self) -> None:
 
@@ -3339,18 +3348,27 @@ class EEGMeditationApp(App):
         cancel.bind(on_release=popup.dismiss)
         popup.open()
 
-    def _confirm_restore(self, source_path: str) -> None:
-        """Validate, then show confirm dialog → on OK, replace + restart."""
-
+    def _confirm_restore(self, source_path: str, discard_after: bool = False) -> None:
+        """Validate, then show confirm dialog → on OK, replace + restart. `discard_after`: source is our temp copy."""
+        def _done():
+            if discard_after:
+                discard_file(source_path)
 
         ok, msg = validate_backup(source_path)
         if not ok:
+            _done()
             report_soft_error(
                 "restore_invalid",
                 f"Selected file is not a valid backup: {msg}",
                 force=True,
             )
             return
+
+        def _restore():
+            try:
+                self._do_restore_and_restart(source_path)
+            finally:
+                _done()
 
         counts = self._db.get_record_counts()
         self._confirm_action(
@@ -3362,8 +3380,9 @@ class EEGMeditationApp(App):
             f"{_BACKUP_SOUND_NOTE}\n"
             f"This cannot be undone.",
             "Restore",
-            lambda: self._do_restore_and_restart(source_path),
+            _restore,
             ok_color=C.DANGER,
+            on_cancel=_done,
         )
 
     def _do_restore_and_restart(self, source_path: str) -> None:
@@ -3380,29 +3399,22 @@ class EEGMeditationApp(App):
         try:
             # No-op every DB access during the restore + relaunch window so nothing
             # reopens the connection and clobbers the freshly-imported file. Error
-            # paths below replace self._db with a fresh (live) manager.
+            # paths below reopen the same manager, so every holder (the settings
+            # store, …) is live again; a replaced manager left them on the null connection.
             self._db.mark_shutting_down()
             self._db.close()
         except Exception as e:
-            # Surface it (not a silent abort) AND un-latch: mark_shutting_down()
-            # already ran, so without a fresh manager every later write would
-            # no-op into the null connection forever.
             logger.exception("DB close before restore failed")
             report_soft_error("restore_failed", f"Could not close the database to restore: {e}")
-            self._db = DatabaseManager(db_path=APP.DB_PATH)
+            self._db.reopen()
             return
 
         try:
             restore_backup(source_path, APP.DB_PATH)
-        except (PermissionError, OSError) as e:
-            report_soft_error(
-                "restore_failed", f"Restore from {source_path} failed: {e}",
-            )
-            self._db = DatabaseManager(db_path=APP.DB_PATH)
-            return
         except Exception as e:
-            report_soft_error("restore_failed", f"Restore failed: {e}")
-            self._db = DatabaseManager(db_path=APP.DB_PATH)
+            # restore_backup replaces the file atomically, so a failure means the live DB is untouched.
+            report_soft_error("restore_failed", f"Restore from {source_path} failed: {e}")
+            self._db.reopen()
             return
 
         # DB is now closed and the file replaced. Tell on_stop/on_pause to skip
