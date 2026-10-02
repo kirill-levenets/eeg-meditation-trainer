@@ -1005,6 +1005,7 @@ class EEGMeditationApp(App):
         self._view_all_users = False
         self._db.set_setting("last_user_id", str(uid))
         self._load_user_settings(uid)
+        self._mark_history_dirty()  # History still lists the previous profile's sessions
 
     def _restore_last_user(self) -> Optional[int]:
         """Restore the last selected user; return the resolved uid, or None when
@@ -3060,21 +3061,17 @@ class EEGMeditationApp(App):
         self._delete_sessions([session_id])
 
     def _delete_sessions(self, session_ids: list[int]) -> None:
-        """The one session-delete path (History row, session-end card); History rebuilds now only if it is on screen."""
+        """The one session-delete path (History row, session-end card): History drops the rows in place, no rebuild."""
+        t0 = time.monotonic()
         for sid in session_ids:
             self._db.delete_session(sid)
             logger.info(f"Session {sid} deleted")
-        self._refresh_diary()
-        if self._sm.current == "history":
-            self._refresh_history(force=True)
-        else:
-            self._mark_history_dirty()  # its rebuild shows a full-screen spinner, so not over the Session screen
+        logger.info(f"Deleted {len(session_ids)} session(s) in {(time.monotonic() - t0) * 1000:.0f} ms")
+        self._history_screen.remove_sessions(session_ids)
 
     def _on_rename_session(self, session_id: int, new_name: str) -> None:
-        """Rename a session and refresh lists."""
+        """Rename a session; its History row already shows the new name."""
         self._db.rename_session(session_id, new_name)
-        self._refresh_diary()
-        self._refresh_history(force=True)
         logger.info(f"Session {session_id} renamed to '{new_name}'")
 
     def _on_export_csv(self, session_id: int, path: Optional[str] = None) -> Optional[str]:
@@ -3138,6 +3135,7 @@ class EEGMeditationApp(App):
         self._info_popup("Export complete", f"Exported {count} session(s) to:\n{dest}")
 
     _history_dirty: bool = True
+    _history_view: Optional[tuple] = None  # (profile, all-users) History last loaded; a day filter survives only that
 
     def _refresh_history(self, force: bool = False) -> None:
         if not force and not self._history_dirty:
@@ -3147,7 +3145,9 @@ class EEGMeditationApp(App):
         # Rows build in chunks (history_screen); spinner stays up until the last
         # chunk lands so the UI isn't frozen during the ~0.9s widget build.
         self.show_loading("Loading history…")
-        self._history_screen.load_sessions(sessions, on_complete=self.hide_loading)
+        view = (self._current_user_id, self._view_all_users)
+        self._history_screen.load_sessions(sessions, on_complete=self.hide_loading, keep_filter=view == self._history_view)
+        self._history_view = view
         self._history_dirty = False
 
     def _mark_history_dirty(self) -> None:
@@ -3550,6 +3550,7 @@ class EEGMeditationApp(App):
             # under a profile that's about to be deleted just orphans it anyway.
             self._discard_running_session()
         self._db.delete_user(user_id)
+        self._mark_history_dirty()  # its sessions are gone (the All-Users view lists them)
         remaining = self._db.get_all_users()
         # Re-enter the gate when no usable active user is left: the active profile
         # was deleted, OR the last profile was removed while in the All-Users view
