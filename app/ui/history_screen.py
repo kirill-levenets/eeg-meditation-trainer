@@ -18,6 +18,7 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
+from app.logger import logger
 from app.ui.theme import (
     ICONS_AVAILABLE,
     C,
@@ -387,6 +388,25 @@ class Last14DaysBars(Widget):
                 self.add_widget(score_lbl)
 
 
+class _StableScrollView(ScrollView):
+    """A ScrollView whose list grows while it may be scrolled: a height change keeps the pixel offset from the top."""
+
+    def _update_effect_y_bounds(self, *args):
+        # Kivy 2.3 rescales the fraction (max * scroll_y): past an edge that overscroll grew with every chunk of rows
+        # until the list ran out of view (#56). Rows are appended at the bottom, so keep the offset from the top.
+        effect = self.effect_y
+        if not self._viewport or not effect:
+            return
+        new_max = self.height - self.viewport_size[1]
+        if new_max == effect.max:  # the touch start/stop resync: keep Kivy's own overscroll bounce
+            super()._update_effect_y_bounds(*args)
+            return
+        from_top = effect.max * (self.scroll_y - 1)
+        effect.min = 0 if new_max < 0 else new_max
+        effect.max = new_max
+        effect.value = new_max + from_top
+
+
 class HistoryScreen(Screen):
     """Unified history: calendar heatmap + session list + session detail."""
 
@@ -404,6 +424,9 @@ class HistoryScreen(Screen):
         self._on_view_mode_change: Optional[Callable] = None
         # Multi-select CSV export (issue #7)
         self._pending_rows: list[dict] = []
+        self._row_build_idx: int = 0
+        self._row_build_ev = None
+        self._settled_log_ev = None
         self._current_header: str = "All sessions"
         self._select_mode: bool = False
         self._selected_ids: set[int] = set()
@@ -552,7 +575,7 @@ class HistoryScreen(Screen):
         root.add_widget(Divider())
 
         # Session list (scrollable)
-        scroll = ScrollView()
+        scroll = _StableScrollView()
         self._session_list = BoxLayout(
             orientation="vertical",
             size_hint_y=None,
@@ -715,72 +738,107 @@ class HistoryScreen(Screen):
         if self._on_view_mode_change:
             self._on_view_mode_change(mode)
 
-    def load_sessions(self, sessions: list[dict], on_complete: Optional[Callable] = None) -> None:
+    def load_sessions(self, sessions: list[dict], on_complete: Optional[Callable] = None,
+                      keep_filter: bool = True) -> None:
         """Load all sessions and build heatmap data. `on_complete` fires once the
         (chunked) row build finishes — used to hide the loading overlay."""
         self._sessions = sessions
-        # Build day → avg shamatha mapping
+        if not keep_filter:
+            self._set_filter(None)
+        self._set_day_data()
+        if self._filtered_date:  # a reload of the same view keeps the user's day filter, as a delete does
+            self._show_day(self._filtered_date, on_complete=on_complete)
+        else:
+            self._show_sessions(sessions, "All sessions", on_complete=on_complete)
+
+    def remove_sessions(self, session_ids) -> None:
+        """Drop deleted sessions from the model and their rows, in place: no rebuild, the scroll position and any day filter stay."""
+        gone = set(session_ids)
+        if not gone:
+            return
+        self._sessions = [s for s in self._sessions if s.get("id") not in gone]
+        built = self._pending_rows[:self._row_build_idx]
+        self._row_build_idx -= sum(1 for s in built if s.get("id") in gone)
+        self._pending_rows = [s for s in self._pending_rows if s.get("id") not in gone]
+        self._selected_ids -= gone
+        self._update_export_button()
+        for w in list(self._session_list.children):
+            opts = getattr(w, "_session_opts", None)
+            if opts is not None and opts["sid"] in gone:
+                self._session_list.remove_widget(w)
+        self._set_day_data()
+        if self._pending_rows:
+            self._date_label.text = f"{self._current_header} ({len(self._pending_rows)} sessions)"
+        else:
+            self._show_sessions([], self._current_header)
+
+    def _set_day_data(self) -> None:
+        """Calendar and bars both show each day's average shamatha over the model's sessions."""
         day_scores: dict[str, list[float]] = {}
-        for s in sessions:
+        for s in self._sessions:
             dt_str = s.get("date_time", "")
             if len(dt_str) >= 10:
-                day = dt_str[:10]
-                score = s.get("avg_shamatha", 0) or 0
-                day_scores.setdefault(day, []).append(score)
-
-        day_avg = {}
-        for day, scores in day_scores.items():
-            day_avg[day] = sum(scores) / len(scores) if scores else 0
-
+                day_scores.setdefault(dt_str[:10], []).append(s.get("avg_shamatha", 0) or 0)
+        day_avg = {day: sum(scores) / len(scores) for day, scores in day_scores.items()}
         self._heatmap.set_data(day_avg)
         self._bars.set_data(day_avg)
-        # Show all sessions initially
-        self._show_sessions(sessions, "All sessions", on_complete=on_complete)
 
     def _on_day_tap(self, date_str: str) -> None:
         """Filter sessions to the tapped day. Tap again to reset."""
         if date_str == self._filtered_date:
             self._reset_filter()
             return
+        self._set_filter(date_str)
+        self._show_day(date_str)
+
+    def _set_filter(self, date_str: Optional[str]) -> None:
+        """The one owner of the day filter: the filtered day, its highlight in both views and the Show-all button."""
         self._filtered_date = date_str
-        day_sessions = [
-            s for s in self._sessions
-            if s.get("date_time", "")[:10] == date_str
-        ]
+        for view in (self._heatmap, self._bars):
+            view._selected_date = date_str
+            view._redraw()
+        self._btn_show_all.opacity = 1 if date_str else 0
+        self._btn_show_all.disabled = not date_str
+
+    def _show_day(self, date_str: str, on_complete: Optional[Callable] = None) -> None:
+        day_sessions = [s for s in self._sessions if s.get("date_time", "")[:10] == date_str]
         try:
-            dt = datetime.date.fromisoformat(date_str)
-            nice_date = dt.strftime("%B %d, %Y")
+            nice_date = datetime.date.fromisoformat(date_str).strftime("%B %d, %Y")
         except (ValueError, TypeError):
             nice_date = date_str
-        self._show_sessions(day_sessions, nice_date)
-        self._btn_show_all.opacity = 1
-        self._btn_show_all.disabled = False
+        self._show_sessions(day_sessions, nice_date, on_complete=on_complete)
 
     def _reset_filter(self) -> None:
         """Clear day filter and show all sessions."""
-        self._filtered_date = None
-        self._heatmap._selected_date = None
-        self._heatmap._redraw()
+        self._set_filter(None)
         self._show_sessions(self._sessions, "All sessions")
-        self._btn_show_all.opacity = 0
-        self._btn_show_all.disabled = True
 
     _ROW_CHUNK = 8  # rows built per frame so a long list doesn't freeze the UI
 
     def _cancel_row_build(self) -> None:
-        ev = getattr(self, "_row_build_ev", None)
-        if ev is not None:
-            ev.cancel()
-            self._row_build_ev = None
+        for attr in ("_row_build_ev", "_settled_log_ev"):
+            ev = getattr(self, attr)
+            if ev is not None:
+                ev.cancel()
+                setattr(self, attr, None)
 
     def _show_sessions(self, sessions: list[dict], header: str,
                        on_complete: Optional[Callable] = None) -> None:
         """Populate the session list, building rows in chunks across frames so a
         long list (76+ sessions) doesn't block the UI thread for ~0.9s."""
         self._cancel_row_build()
+        self._log_list_state("rebuild start")
+        # A new list starts at the top, at rest: reset the effect itself (pixels, velocity, overscroll) —
+        # setting scroll_y alone was overwritten by a fling still in flight.
+        scroll = self._session_list.parent
+        scroll.effect_y.reset(scroll.effect_y.max)
+        scroll.scroll_y = 1
         self._current_header = header
         self._session_list.clear_widgets()
         self._date_label.text = f"{header} ({len(sessions)} sessions)"
+        # The model is the list on screen, also when it's empty (remove_sessions and Select read it).
+        self._pending_rows = sessions
+        self._row_build_idx = 0
 
         if not sessions:
             lbl = Label(
@@ -795,8 +853,6 @@ class HistoryScreen(Screen):
                 on_complete()
             return
 
-        self._pending_rows = sessions
-        self._row_build_idx = 0
         self._rows_on_complete = on_complete
         self._row_build_ev = Clock.schedule_once(self._build_row_chunk, 0)
 
@@ -810,9 +866,22 @@ class HistoryScreen(Screen):
             self._row_build_ev = Clock.schedule_once(self._build_row_chunk, 0)
         else:
             self._row_build_ev = None
+            self._log_list_state("built")
+            self._settled_log_ev = Clock.schedule_once(lambda _dt: self._log_list_state("settled"), 1.0)
             cb, self._rows_on_complete = self._rows_on_complete, None
             if cb:
                 cb()
+
+    def _log_list_state(self, tag: str) -> None:
+        """Rows, heights and scroll state, so a device log shows where a rebuilt list ended up (#56)."""
+        sv = self._session_list.parent
+        ey = sv.effect_y
+        rows = sum(1 for w in self._session_list.children if getattr(w, "_session_opts", None))
+        logger.info(
+            f"History list {tag}: rows={rows}/{len(self._pending_rows)} list_h={self._session_list.height:.0f} "
+            f"viewport_h={sv.height:.0f} scroll_y={sv.scroll_y:.3f} effect={ey.value:.1f} "
+            f"bounds=({ey.min:.1f},{ey.max:.1f}) v={ey.velocity:.1f}"
+        )
 
     def _make_session_row(self, session: dict) -> BoxLayout:
         """Create a session row: tap to view, rename/delete buttons on right."""
@@ -979,6 +1048,8 @@ class HistoryScreen(Screen):
             txt = rename_input.text.strip()
             if txt:
                 name_label.text = txt
+                session["session_name"] = txt  # the model row this widget shows
+                wrapper._session_opts["name"] = txt
                 if self._on_rename_session:
                     self._on_rename_session(sid, txt)
             _toggle_rename()

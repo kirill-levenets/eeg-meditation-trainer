@@ -25,11 +25,8 @@ def _app() -> EEGMeditationApp:
     app._live_screen.summary_notes = ""
     app._summary_saved_notes = ""
     app._toast = MagicMock()
-    app._mark_history_dirty = MagicMock()
-    app._refresh_diary = MagicMock()
+    app._history_screen = MagicMock()
     app._refresh_history = MagicMock()
-    app._sm = MagicMock()
-    app._sm.current = "live_session"
     return app
 
 
@@ -90,16 +87,16 @@ def test_card_delete_confirmed_removes_the_session_and_stops_the_gong():
     app._db.delete_session.assert_called_once_with(SID)
     app._audio.stop_timer_bell.assert_called_once()
     app._live_screen.hide_summary.assert_called_once()
-    app._refresh_history.assert_not_called()  # History isn't on screen: no spinner over the Session screen
-    app._mark_history_dirty.assert_called()
+    app._history_screen.remove_sessions.assert_called_once_with([SID])
+    app._refresh_history.assert_not_called()  # the row goes in place; no full-screen rebuild spinner
 
 
-def test_history_row_delete_rebuilds_history_when_it_is_on_screen():
+def test_history_row_delete_removes_its_row_in_place():
     app = _app()
-    app._sm.current = "history"
     app._on_delete_session(SID)
     app._db.delete_session.assert_called_once_with(SID)
-    app._refresh_history.assert_called_once_with(force=True)
+    app._history_screen.remove_sessions.assert_called_once_with([SID])
+    app._refresh_history.assert_not_called()
 
 
 # --- Notes: typed notes are kept; empty or untouched notes write nothing ---------------------------------------
