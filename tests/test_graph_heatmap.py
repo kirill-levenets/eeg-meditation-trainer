@@ -86,16 +86,18 @@ def test_long_heatmap_splits_into_meshes_of_at_most_max_quads(monkeypatch):
     assert all(len(m.vertices) <= 100 * 16 for m in meshes)
 
 
-def test_a_long_session_zoomed_out_draws_within_the_gles2_index_limit():
-    # Zooming out over a ~50-minute session (6000 points at 2 Hz) built one Mesh of ~12000 quads = 72000 indices;
-    # Kivy raises past 65535 indices (GLES2), and the app crashed mid-session.
-    values = RAMP * 20
-    g = _graph(values)
-    g._draw()
+def test_a_long_heatmap_line_splits_within_the_gles2_index_limit():
+    # A ~50-minute line built one Mesh of ~12000 quads = 72000 indices; Kivy raises past 65535 indices (GLES2) and the
+    # app crashed mid-session. Folding (#70) keeps a zoomed-out graph far below that, but a wide fullscreen graph
+    # draws up to 4 points per pixel column, so the split must still hold.
+    g = _graph(RAMP)
+    points = [c for i in range(6000) for c in (i * 0.1, 50 + (i % 100))]
+    g._gfx.clear()
+    g._add_heatmap_line(points, graph_y=0.0, graph_h=360.0, draw_scale=100.0)
     meshes = [c for c in g._gfx.children if isinstance(c, Mesh)]
     assert len(meshes) >= 2
     assert all(len(m.indices) <= 65535 for m in meshes)
-    assert sum(len(m.vertices) for m in meshes) == (2 * len(values) - 1) * 16  # every quad drawn
+    assert sum(len(m.vertices) for m in meshes) == (2 * 6000 - 1) * 16  # every quad drawn
 
 
 def test_heatmap_stroke_matches_a_plain_line_and_is_coloured_by_value(tmp_path):

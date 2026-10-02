@@ -47,6 +47,44 @@ _HEATMAP_TEXELS = 64
 _MESH_MAX_QUADS = 65535 // 6
 
 
+# Samples per pixel column from which folding is cheaper than drawing every point. A heatmap point is two quads, a
+# patch and texture coordinates, a plain line point two floats (desktop, 2026-10-02: a heatmap at 4/px 5.2 -> 3.1 ms,
+# a line at 4/px 0.9 -> 1.2 ms but at 8/px 1.9 -> 1.4 ms).
+_FOLD_MIN_PER_PX_HEATMAP = 4
+_FOLD_MIN_PER_PX_LINE = 8
+
+
+def _column_bounds(n: int, offset: int, per_px: float) -> list[int]:
+    """Where each pixel column's samples end, for n samples starting at viewport position `offset` with per_px samples
+    per column: a sample's column is floor((offset + i) / per_px). Shared by every series of one redraw."""
+    stops: list[int] = []
+    start = 0
+    while start < n:
+        column = math.floor((offset + start) / per_px)
+        # Where the next column starts, then corrected by the same floor rule (float rounding at a boundary).
+        stop = min(n, max(start + 1, math.ceil((column + 1) * per_px) - offset))
+        while stop > start + 1 and math.floor((offset + stop - 1) / per_px) > column:
+            stop -= 1
+        while stop < n and math.floor((offset + stop) / per_px) == column:
+            stop += 1
+        stops.append(stop)
+        start = stop
+    return stops
+
+
+def _fold_columns(values: list[float], stops: list[int]) -> list[int]:
+    """Indices into values to draw: each pixel column's first, last, min and max sample (M4 aggregation, Jugel et al.,
+    VLDB 2014), in sample order. The line entering and leaving every column at its real samples and spanning its real
+    extremes rasterizes like the full series, so a redraw costs the graph's width, not its zoom."""
+    out: list[int] = []
+    start = 0
+    for stop in stops:
+        col = values[start:stop]
+        out.extend(start + i for i in sorted({0, col.index(min(col)), col.index(max(col)), len(col) - 1}))
+        start = stop
+    return out
+
+
 def _fill_heatmap_texture(texture) -> None:
     """Fill (and on reload re-fill) the gradient; the wrap is set here too so a reload can't revert it to repeat."""
     texture.wrap = "clamp_to_edge"
@@ -348,20 +386,15 @@ class ScrollableGraphWidget(Widget):
         # Compute visible slice
         end_idx = self._total_points - self._scroll_offset
         start_idx = max(0, end_idx - self._viewport_points)
+        slices = {key: list(data)[start_idx:end_idx] for key, data in self._data.items()
+                  if self._visible.get(key, True)}
 
         # Y-axis scale
         if self._auto_scale:
             max_scale = 0.0
-            for key in self._data:
-                if not self._visible.get(key, True):
-                    continue
-                data_list = list(self._data[key])
-                slice_vals = data_list[start_idx:end_idx]
+            for slice_vals in slices.values():
                 if slice_vals:
-                    if self._bipolar:
-                        peak = max(abs(v) for v in slice_vals)
-                    else:
-                        peak = max(slice_vals)
+                    peak = max(max(slice_vals), -min(slice_vals)) if self._bipolar else max(slice_vals)
                     max_scale = max(max_scale, peak)
             if max_scale < 1.0:
                 max_scale = 100.0
@@ -506,11 +539,8 @@ class ScrollableGraphWidget(Widget):
 
         # Data lines + endpoint value labels
         label_y_positions: list[float] = []
-        for key, data in self._data.items():
-            if not self._visible.get(key, True):
-                continue
-            data_list = list(data)
-            slice_data = data_list[start_idx:end_idx]
+        column_stops: dict[int, list[int]] = {}  # by slice length: the same pixel columns for every series
+        for key, slice_data in slices.items():
             if len(slice_data) < 2:
                 continue
 
@@ -522,11 +552,19 @@ class ScrollableGraphWidget(Widget):
             n = len(slice_data)
             vp = max(self._viewport_points, n)
             x_offset = vp - n
+            span = max(vp - 1, 1)
 
-            # Compute (x, y) for each point once.
+            # (x, y) once per drawn point: at most 4 per pixel column (M4) once folding pays, whatever the zoom.
+            per_px = span / graph_w
+            drawn = range(n)
+            if n >= 3 and per_px >= (_FOLD_MIN_PER_PX_HEATMAP if heatmap else _FOLD_MIN_PER_PX_LINE):
+                if n not in column_stops:
+                    column_stops[n] = _column_bounds(n, x_offset, per_px)
+                drawn = _fold_columns(slice_data, column_stops[n])
             xy: list[tuple[float, float]] = []
-            for i, val in enumerate(slice_data):
-                x = graph_x + ((x_offset + i) / max(vp - 1, 1)) * graph_w
+            for i in drawn:
+                val = slice_data[i]
+                x = graph_x + ((x_offset + i) / span) * graph_w
                 if self._bipolar:
                     norm = (val / draw_scale + 1.0) * 0.5
                     y = graph_y + max(0.0, min(norm, 1.0)) * graph_h
