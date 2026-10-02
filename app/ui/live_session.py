@@ -4,14 +4,12 @@ import time
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
-from kivy.graphics import Color, Rectangle, RoundedRectangle
+from kivy.graphics import Color, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.gridlayout import GridLayout
-from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
-from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
 from app.ui.raw_eeg_screen import (
@@ -27,6 +25,9 @@ from app.ui.theme import (
     Icons,
     S,
     StyledButton,
+    ThemedLabel,
+    ThemedTextInput,
+    fill_background,
     format_duration,
     make_scroll_popup,
     readable_fg,
@@ -173,7 +174,7 @@ class _DurationPickerButton(BoxLayout):
         self._on_release = on_release
         self._pressed = False
 
-        self._text_label = Label(
+        self._text_label = ThemedLabel(
             text="",
             font_size=F.TINY,
             bold=True,
@@ -184,7 +185,7 @@ class _DurationPickerButton(BoxLayout):
         )
         self._text_label.bind(size=self._text_label.setter("text_size"))
 
-        self._chevron_label = Label(
+        self._chevron_label = ThemedLabel(
             text=Icons.MENU_DOWN if ICONS_AVAILABLE else "v",
             font_name="Icons" if ICONS_AVAILABLE else "Roboto",
             font_size=F.SMALL,
@@ -199,8 +200,7 @@ class _DurationPickerButton(BoxLayout):
         self.add_widget(self._chevron_label)
 
         self.bind(size=self._redraw, pos=self._redraw, disabled=self._redraw)
-        # Refresh background + label colors when the theme palette changes.
-        C.add_listener(self._refresh_theme)
+        C.add_listener(self._redraw)
         self._redraw()
 
     @property
@@ -215,9 +215,6 @@ class _DurationPickerButton(BoxLayout):
         """Set the button text; `large` bumps the font (used for the program 'P')."""
         self._text_label.text = text
         self._text_label.font_size = F.H3 if large else F.TINY
-
-    def _refresh_theme(self) -> None:
-        self._redraw()
 
     def _redraw(self, *args) -> None:
         self.canvas.before.clear()
@@ -264,7 +261,6 @@ class LiveSessionScreen(Screen):
         self.name = "live_session"
         self._last_metrics: dict = {}
         self._build_ui()
-        C.add_listener(self._refresh_theme)
         # Scroll height tracking is persistent (the widget itself lives for the screen's lifetime)
         self._scroll.bind(height=self._reflow)
 
@@ -279,34 +275,28 @@ class LiveSessionScreen(Screen):
         self._root = BoxLayout(orientation="vertical", padding=S.PAGE_PAD, spacing=S.GAP_SM,
                                size_hint=(1, 1), pos_hint={"x": 0, "y": 0})
         root = self._root
-        with root.canvas.before:
-            Color(*C.BG)
-            self._root_bg = Rectangle(size=root.size, pos=root.pos)
-        root.bind(
-            size=lambda w, v: setattr(self._root_bg, "size", v),
-            pos=lambda w, v: setattr(self._root_bg, "pos", v),
-        )
+        fill_background(root, C.BG)
 
         # ── Header ──
         header = BoxLayout(size_hint_y=None, height=dp(10), spacing=S.GAP_SM)
-        self._device_label = Label(
+        self._device_label = ThemedLabel(
             text="[Mock EEG]",
             size_hint_x=1 / 3,
             color=C.DEVICE_IDLE,
             font_size=F.SMALL,
         )
-        self._timer_label = Label(
+        self._timer_label = ThemedLabel(
             text="00:00",
             size_hint_x=1 / 3,
             font_size=F.BODY,
             bold=True,
             color=C.TEXT,
         )
-        # Deprecated alias kept so _refresh_theme and reset_display can reference it
+        # Deprecated alias kept so reset_display can reference it
         # without branching; both point to the same single label now.
         self._start_time_label = self._timer_label
         self._start_time_str: str = ""  # wall-clock string cached for combined display
-        self._state_label = Label(
+        self._state_label = ThemedLabel(
             text="IDLE",
             size_hint_x=1 / 3,
             font_size=F.BODY,
@@ -330,7 +320,7 @@ class LiveSessionScreen(Screen):
         root.add_widget(header)
 
         # ── Alert banner ──
-        self._alert_label = Label(
+        self._alert_label = ThemedLabel(
             text="",
             size_hint_y=None,
             height=dp(0),
@@ -440,7 +430,7 @@ class LiveSessionScreen(Screen):
             bg_color=C.BG_CARD,
         )
         self._stats_card = stats_card
-        self._stat_labels: dict[str, Label] = {}
+        self._stat_labels: dict[str, ThemedLabel] = {}
         stat_items = [
             ("shamatha_score", "Shamatha"),
             ("distraction", "Distraction"),
@@ -452,11 +442,11 @@ class LiveSessionScreen(Screen):
         self._stat_keys_in_order = [k for k, _ in stat_items]
         for key, title in stat_items:
             box = BoxLayout(orientation="vertical")
-            title_lbl = Label(
+            title_lbl = ThemedLabel(
                 text=title, font_size=F.TINY, color=C.TEXT_MUTED,
                 size_hint_y=0.4,
             )
-            value_lbl = Label(
+            value_lbl = ThemedLabel(
                 text="0", font_size=F.H2, bold=True,
                 color=C.TEXT,
                 size_hint_y=0.6,
@@ -563,18 +553,12 @@ class LiveSessionScreen(Screen):
             padding=[dp(20), dp(8)],  # tight vertically: the card must fit a landscape phone (~390 dp)
             spacing=S.GAP,
         )
-        with self._summary.canvas.before:
-            Color(*C.BG_OVERLAY)
-            self._summary_bg = Rectangle(size=self._summary.size, pos=self._summary.pos)
-        self._summary.bind(
-            size=lambda w, v: setattr(self._summary_bg, "size", v),
-            pos=lambda w, v: setattr(self._summary_bg, "pos", v),
-        )
+        fill_background(self._summary, C.BG_OVERLAY)
 
         self._summary.add_widget(BoxLayout(size_hint_y=0.1))  # top spacer
 
         # Every ending saves the session; the title says so (an extra row overflowed landscape phones).
-        self._summary_title = Label(
+        self._summary_title = ThemedLabel(
             text="Session saved",
             font_size=F.H1,
             bold=True,
@@ -601,12 +585,12 @@ class LiveSessionScreen(Screen):
             ("time_shamatha_90", "Time Shamatha \u2265 90"),
         ]:
             row = BoxLayout(size_hint_y=None, height=dp(24))
-            lbl = Label(
+            lbl = ThemedLabel(
                 text=label_text, font_size=F.BODY, color=C.TEXT_SECONDARY,
                 halign="left", size_hint_x=0.6,
             )
             lbl.bind(size=lbl.setter("text_size"))
-            val = Label(
+            val = ThemedLabel(
                 text="-", font_size=F.BODY, bold=True, color=C.TEXT,
                 halign="right", size_hint_x=0.4,
             )
@@ -618,7 +602,7 @@ class LiveSessionScreen(Screen):
         self._summary.add_widget(self._summary_stats_card)
 
         # Quick notes
-        notes_lbl = Label(
+        notes_lbl = ThemedLabel(
             text="Quick notes:", font_size=F.BODY, color=C.TEXT_SECONDARY,
             size_hint_y=None, height=dp(22), halign="left",
         )
@@ -626,12 +610,12 @@ class LiveSessionScreen(Screen):
         self._summary.add_widget(notes_lbl)
 
         notes_row = BoxLayout(size_hint_y=None, height=dp(70), spacing=S.GAP)
-        self._summary_notes = TextInput(
+        self._summary_notes = ThemedTextInput(
             hint_text="How was the session?",
             multiline=True,
             font_size=F.BODY,
             foreground_color=C.TEXT,
-            background_color=list(C.BG_INPUT),
+            background_color=C.BG_INPUT,
             cursor_color=C.PRIMARY,
         )
         self._summary_save_notes_btn = StyledButton(
@@ -673,17 +657,11 @@ class LiveSessionScreen(Screen):
             padding=dp(40),
             spacing=S.GAP_LG,
         )
-        with self._overlay.canvas.before:
-            Color(*C.BG_OVERLAY)
-            self._overlay_bg = Rectangle(size=self._overlay.size, pos=self._overlay.pos)
-        self._overlay.bind(
-            size=lambda w, v: setattr(self._overlay_bg, "size", v),
-            pos=lambda w, v: setattr(self._overlay_bg, "pos", v),
-        )
+        fill_background(self._overlay, C.BG_OVERLAY)
 
         self._overlay.add_widget(BoxLayout(size_hint_y=1))
 
-        self._overlay_status = Label(
+        self._overlay_status = ThemedLabel(
             text="",
             font_size=F.BODY,
             color=C.TEXT,
@@ -695,7 +673,7 @@ class LiveSessionScreen(Screen):
         self._overlay_status.bind(size=self._overlay_status.setter("text_size"))
         self._overlay.add_widget(self._overlay_status)
 
-        self._overlay_dots = Label(
+        self._overlay_dots = ThemedLabel(
             text="",
             font_size=dp(24),
             color=C.PRIMARY,
@@ -1045,7 +1023,7 @@ class LiveSessionScreen(Screen):
 
         rows = []
         if not self._session_programs:
-            rows.append(Label(text="No saved programs", color=C.TEXT,
+            rows.append(ThemedLabel(text="No saved programs", color=C.TEXT,
                               size_hint_y=None, height=dp(44)))
         else:
             for i, entry in enumerate(self._session_programs):
@@ -1240,27 +1218,3 @@ class LiveSessionScreen(Screen):
         for i, key in enumerate(self._stat_keys_in_order):
             self._stat_labels[key].text = values[i]
             self._stat_title_labels[key].text = titles[i]
-
-    def _refresh_theme(self):
-        """Update background and label colors when theme changes."""
-        self._root.canvas.before.clear()
-        with self._root.canvas.before:
-            Color(*C.BG)
-            self._root_bg = Rectangle(size=self._root.size, pos=self._root.pos)
-        self._overlay.canvas.before.clear()
-        with self._overlay.canvas.before:
-            Color(*C.BG_OVERLAY)
-            self._overlay_bg = Rectangle(size=self._overlay.size, pos=self._overlay.pos)
-        # Update label colors
-        self._device_label.color = C.DEVICE_IDLE
-        self._timer_label.color = C.TEXT
-        if self._shamatha_active:
-            self._state_label.color = readable_fg(C.SHAMATHA)
-            self._shamatha_bg.rgb = C.SHAMATHA[:3]
-        else:
-            self._apply_state_style(self._last_state)
-        self._alert_label.color = C.WARM
-        self._overlay_status.color = C.TEXT
-        self._overlay_dots.color = C.PRIMARY
-        for lbl in self._stat_labels.values():
-            lbl.color = C.TEXT

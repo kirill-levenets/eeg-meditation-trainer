@@ -6,6 +6,8 @@ Design direction: calm, focused, minimal — dark theme with soft accents.
 
 import os
 import struct
+import types
+import weakref
 import zlib
 
 from kivy.animation import Animation
@@ -26,6 +28,8 @@ from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
+
+from app.logger import logger
 
 # ── Icon font ────────────────────────────────────────────────────────
 
@@ -321,18 +325,32 @@ THEMES = {
 }
 
 
-class _ColorAccessor:
-    """Provides attribute access to the active theme palette.
+class ThemeColor(tuple):
+    """A palette RGBA that remembers its role, so a themed widget or ThemedColor given it follows theme switches.
+    list() or a slice of it is a plain, fixed colour."""
 
-    All existing code uses C.PRIMARY, C.BG etc. — this class makes
-    that work while allowing the underlying palette to be swapped at runtime.
-    Supports listeners that get called on theme change for live refresh.
+    def __new__(cls, rgba, role: str):
+        color = super().__new__(cls, rgba)
+        color.role = role
+        return color
+
+
+class _ColorAccessor:
+    """The active palette as attributes (C.PRIMARY, C.BG, ...), swappable at runtime.
+
+    A colour read from it carries its role. A theme switch re-applies every role a themed widget property
+    (ThemedMixin) or a ThemedColor was given, then calls the listeners for bespoke repaints.
     """
 
     def __init__(self):
-        self._palette = dict(_DARK_BLUE)
-        self._name = "Dark Blue"
-        self._listeners = []
+        self._listeners: dict = {}  # key -> getter of the callback, in registration order; a dead widget's entry drops itself
+        self._roles = weakref.WeakKeyDictionary()  # themed widget -> {colour property: role}
+        self._canvas_colors = weakref.WeakSet()
+        self._use("Dark Blue")
+
+    def _use(self, name: str) -> None:
+        self._palette = {role: ThemeColor(rgba, role) for role, rgba in THEMES[name].items()}
+        self._name = name
 
     def __getattr__(self, name):
         if name.startswith("_"):
@@ -343,20 +361,60 @@ class _ColorAccessor:
             raise AttributeError(f"No color '{name}' in theme")
 
     def set_theme(self, name: str) -> None:
-        """Switch the active palette and notify listeners."""
-        if name in THEMES:
-            self._palette = dict(THEMES[name])
-            self._name = name
-            for cb in self._listeners:
-                try:
-                    cb()
-                except Exception:
-                    pass
+        """Switch the active palette, re-apply every themed colour, then notify listeners."""
+        if name not in THEMES or name == self._name:
+            return
+        self._use(name)
+        for widget, roles in list(self._roles.items()):
+            try:
+                for prop, role in list(roles.items()):
+                    setattr(widget, prop, self._palette[role])
+            except Exception:
+                logger.exception("Theme repaint of %r failed", widget)
+        for instr in list(self._canvas_colors):
+            instr.rgba = self._rgba(instr.role, instr.pinned_alpha)
+        for get in list(self._listeners.values()):
+            callback = get()
+            if callback is None:
+                continue
+            try:
+                callback()
+            except Exception:
+                logger.exception("Theme listener %r failed", callback)
 
     def add_listener(self, callback) -> None:
-        """Register a callback to be called when theme changes."""
-        if callback not in self._listeners:
-            self._listeners.append(callback)
+        """Call back after every theme switch, once however often it is registered. A bound method is held weakly, so
+        it never keeps its widget alive."""
+        if isinstance(callback, types.MethodType):
+            ref = weakref.WeakMethod(callback, self._forget_listener)
+            self._listeners[ref] = ref
+        else:
+            self._listeners[callback] = lambda: callback
+
+    def _forget_listener(self, ref) -> None:
+        self._listeners.pop(ref, None)
+
+    def resolve(self, color):
+        """A colour to draw now: a palette colour in the current palette (even one read before a switch, e.g. a
+        module-level series colour), any other colour as it is."""
+        role = getattr(color, "role", None)
+        return self._palette[role] if role else color
+
+    def _rgba(self, role: str, alpha: float | None = None) -> tuple:
+        rgba = self._palette[role]
+        return tuple(rgba) if alpha is None else (*rgba[:3], alpha)
+
+    def _themed_value(self, widget, prop: str, value):
+        """The value to store in a themed widget's colour property: a palette colour is recorded by role and resolved
+        in the current palette (even one read before a switch); any other value drops the role and stays fixed."""
+        role = getattr(value, "role", None)
+        if role is None:
+            roles = self._roles.get(widget)
+            if roles:
+                roles.pop(prop, None)
+            return value
+        self._roles.setdefault(widget, {})[prop] = role
+        return self._palette[role]
 
     @property
     def theme_name(self) -> str:
@@ -403,7 +461,48 @@ class S:
 
 # ── Styled widgets ───────────────────────────────────────────────────
 
-class CenteredTextInput(TextInput):
+_THEMED_PROPS = frozenset({
+    "color", "disabled_color", "bg_color", "bg_pressed", "text_color", "background_color",
+    "foreground_color", "cursor_color", "hint_text_color", "selection_color",
+})
+
+
+class ThemedMixin:
+    """Mixed in ahead of a Kivy widget: a colour property given a palette colour (C.X) follows theme switches;
+    any other colour stays fixed."""
+
+    def __setattr__(self, name, value):
+        if name in _THEMED_PROPS:
+            value = C._themed_value(self, name, value)
+        super().__setattr__(name, value)
+
+    def assigned_color(self, prop: str):
+        """prop's colour as it was given: the palette colour it follows, or its fixed value. Restoring a saved copy
+        restores the role too, where a list() of the property would freeze it."""
+        role = C._roles.get(self, {}).get(prop)
+        return getattr(C, role) if role else list(getattr(self, prop))
+
+
+class ThemedLabel(ThemedMixin, Label):
+    """The app's Label: its colours follow theme switches."""
+
+
+class ThemedTextInput(ThemedMixin, TextInput):
+    """The app's TextInput: its colours follow theme switches."""
+
+
+class ThemedColor(Color):
+    """Canvas Color drawn with a palette colour (C.X) that re-reads its role on every theme switch; alpha= pins
+    the alpha (by default it is the palette's)."""
+
+    def __init__(self, color: ThemeColor, alpha: float | None = None, **kwargs):
+        super().__init__(*C._rgba(color.role, alpha), **kwargs)
+        self.role = color.role
+        self.pinned_alpha = alpha
+        C._canvas_colors.add(self)
+
+
+class CenteredTextInput(ThemedTextInput):
     """Single-line input with text centered horizontally and vertically.
 
     Kivy's TextInput supports `halign` but has no `valign`, so the vertical
@@ -446,7 +545,7 @@ def readable_fg(bg):
     return _FG_DARK if _contrast(_FG_DARK, bg) >= _contrast(_FG_LIGHT, bg) else _FG_LIGHT
 
 
-class StyledButton(ButtonBehavior, BoxLayout):
+class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
     """Rounded button with press color shift. Replaces default Kivy Button.
 
     Usage:
@@ -469,22 +568,13 @@ class StyledButton(ButtonBehavior, BoxLayout):
     def __init__(self, **kwargs):
         kwargs.setdefault("size_hint_y", None)
         kwargs.setdefault("height", S.BTN_H)
+        kwargs.setdefault("bg_color", C.PRIMARY)
         vertical = kwargs.pop("vertical", False)
-        # Glyph colour role (re-applied on bg/theme change so it never keeps a stale snapshot;
-        # the class default is a frozen import-time ~white that rendered icons invisible on
-        # light themes). AUTO (no text_color) = pick light/dark for the highest contrast with
-        # THIS button's bg — fixes both light-icon-on-light-fill and dark-on-saturated cases.
-        # Explicit C.TEXT / C.TEXT_SECONDARY follow that theme role; any other colour is fixed.
-        passed = kwargs.get("text_color")
+        # AUTO until a text_color is given (here or later): the light or dark glyph with the higher contrast against
+        # THIS button's bg, re-picked whenever the bg changes. A palette text_color (C.X) follows the theme through
+        # ThemedMixin; any other is fixed.
+        self._auto_text = True
         super().__init__(**kwargs)
-        if passed is None:
-            self._text_role = "AUTO"
-        elif list(passed) == list(C.TEXT):
-            self._text_role = "TEXT"
-        elif list(passed) == list(C.TEXT_SECONDARY):
-            self._text_role = "TEXT_SECONDARY"
-        else:
-            self._text_role = None
         self._apply_role_text()
         self.orientation = "vertical" if vertical else "horizontal"
         self.padding = [dp(2), dp(2)] if vertical else [dp(12), 0]
@@ -574,7 +664,7 @@ class StyledButton(ButtonBehavior, BoxLayout):
             Clock.unschedule(self._confirm_ev)
         else:
             orig_icon = self._icon_label.text if self._icon_label else None
-            self._confirm_orig = (self.text, orig_icon, list(self.bg_color), self._label.markup)
+            self._confirm_orig = (self.text, orig_icon, self.assigned_color("bg_color"), self._label.markup)
             self._confirming = True
         if icon is not None and self._icon_label is not None:
             self._icon_label.text = icon
@@ -608,7 +698,7 @@ class StyledButton(ButtonBehavior, BoxLayout):
         self._confirm_ev = None
 
     def _on_theme_change(self, *args):
-        """Re-apply the glyph colour role, then repaint."""
+        """Repaint: the disabled/outline fill and the press ring are drawn from the palette."""
         self._apply_role_text()
         self._redraw()
 
@@ -617,14 +707,15 @@ class StyledButton(ButtonBehavior, BoxLayout):
         self._apply_role_text()
         self._redraw()
 
+    def __setattr__(self, name, value):
+        if name == "text_color":
+            self._auto_text = False
+        super().__setattr__(name, value)
+
     def _apply_role_text(self):
-        """Resolve the glyph colour role into text_color (-> _update_colors via binding)."""
-        if self._text_role == "AUTO":
-            self.text_color = readable_fg(self.bg_color)
-        elif self._text_role == "TEXT":
-            self.text_color = list(C.TEXT)
-        elif self._text_role == "TEXT_SECONDARY":
-            self.text_color = list(C.TEXT_SECONDARY)
+        """AUTO: resolve the glyph colour against the current bg (-> _update_colors via binding)."""
+        if self._auto_text:
+            super().__setattr__("text_color", readable_fg(self.bg_color))  # past our __setattr__: stays AUTO
 
     def _update_label(self, *args):
         self._label.text = self.text
@@ -706,12 +797,21 @@ class StyledButton(ButtonBehavior, BoxLayout):
         self._redraw()
 
 
-class Card(BoxLayout):
+def fill_background(widget, color: ThemeColor) -> None:
+    """Paint widget's background with a palette colour that follows its size, position and theme switches."""
+    with widget.canvas.before:
+        ThemedColor(color)
+        rect = Rectangle(size=widget.size, pos=widget.pos)
+    widget.bind(size=lambda _w, v: setattr(rect, "size", v), pos=lambda _w, v: setattr(rect, "pos", v))
+
+
+class Card(ThemedMixin, BoxLayout):
     """Rounded card container with subtle background."""
 
     bg_color = ListProperty(list(C.BG_CARD))
 
     def __init__(self, **kwargs):
+        kwargs.setdefault("bg_color", C.BG_CARD)
         kwargs.setdefault("padding", S.CARD_PAD)
         kwargs.setdefault("spacing", S.GAP_SM)
         super().__init__(**kwargs)
@@ -725,16 +825,17 @@ class Card(BoxLayout):
             RoundedRectangle(pos=self.pos, size=self.size, radius=[S.RADIUS])
 
 
-class Divider(BoxLayout):
+class Divider(ThemedMixin, BoxLayout):
     """Thin horizontal line separator."""
 
     color = ListProperty(list(C.BORDER))
 
     def __init__(self, **kwargs):
+        kwargs.setdefault("color", C.BORDER)
         kwargs.setdefault("size_hint_y", None)
         kwargs.setdefault("height", dp(1))
         super().__init__(**kwargs)
-        self.bind(size=self._redraw, pos=self._redraw)
+        self.bind(size=self._redraw, pos=self._redraw, color=self._redraw)
         self._redraw()
 
     def _redraw(self, *args):
@@ -744,7 +845,7 @@ class Divider(BoxLayout):
             Rectangle(pos=self.pos, size=self.size)
 
 
-class SectionLabel(Label):
+class SectionLabel(ThemedLabel):
     """Section header label with consistent styling."""
 
     def __init__(self, **kwargs):
@@ -839,7 +940,6 @@ class _AccordionSection(BoxLayout):
 
         self._scroll.bind(height=self._recalc_height)
         self._recalc_height()
-        C.add_listener(self._refresh_theme)
 
     def add_widget(self, widget, *args, **kwargs):
         if hasattr(self, "_content"):
@@ -894,10 +994,6 @@ class _AccordionSection(BoxLayout):
         else:
             content_h = self._content.minimum_height
             self._scroll.height = min(content_h, dp(500))
-
-    def _refresh_theme(self):
-        self._header.bg_color = C.BG_CARD
-        self._header.text_color = C.TEXT_SECONDARY
 
 
 class RevealBox(BoxLayout):
@@ -970,10 +1066,10 @@ class PresetRow(BoxLayout):
             items = [(fmt.format(v), v) for v in values]
 
         self._buttons: dict = {}
-        self._default_bg = list(C.BG_CARD)
-        self._default_text = list(C.TEXT_MUTED)
-        self._selected_bg = list(C.ACCENT)
-        self._selected_text = list(C.TEXT)
+        self._default_bg = C.BG_CARD
+        self._default_text = C.TEXT_MUTED
+        self._selected_bg = C.ACCENT
+        self._selected_text = C.TEXT
 
         for label, value in items:
             btn = StyledButton(
@@ -1006,7 +1102,7 @@ class PresetRow(BoxLayout):
                 btn.bold = False
 
 
-class IconLabel(Label):
+class IconLabel(ThemedLabel):
     """Label that renders a text icon character at a given size."""
 
     def __init__(self, icon="", **kwargs):
@@ -1041,15 +1137,7 @@ class BottomNav(BoxLayout):
         self._callback = callback
         self._tab_widgets = {}
 
-        with self.canvas.before:
-            Color(*C.BG_DARK)
-            self._bg = Rectangle(size=self.size, pos=self.pos)
-            # Top border line
-            Color(*C.BORDER)
-            self._border = Rectangle(
-                size=(self.size[0], dp(1)),
-                pos=(self.pos[0], self.pos[1] + self.size[1] - dp(1)),
-            )
+        self._update_bg()
         self.bind(size=self._update_bg, pos=self._update_bg)
 
         _TAB_ICONS = {
@@ -1065,18 +1153,13 @@ class BottomNav(BoxLayout):
 
         if tabs:
             self.active_tab = tabs[0][1]
-        C.add_listener(self._refresh_theme)
-
-    def _refresh_theme(self):
-        self._update_bg()
-        self.on_active_tab()
 
     def _update_bg(self, *args):
         self.canvas.before.clear()
         with self.canvas.before:
-            Color(*C.BG_DARK)
+            ThemedColor(C.BG_DARK)
             self._bg = Rectangle(size=self.size, pos=self.pos)
-            Color(*C.BORDER)
+            ThemedColor(C.BORDER)
             self._border = Rectangle(
                 size=(self.size[0], dp(1)),
                 pos=(self.pos[0], self.pos[1] + self.size[1] - dp(1)),
@@ -1105,7 +1188,7 @@ class _NavTab(ButtonBehavior, BoxLayout):
 
         self._icon = None
         if icon and ICONS_AVAILABLE:
-            self._icon = Label(
+            self._icon = ThemedLabel(
                 text=icon,
                 font_name="Icons",
                 font_size=dp(20),
@@ -1115,7 +1198,7 @@ class _NavTab(ButtonBehavior, BoxLayout):
             )
             self.add_widget(self._icon)
 
-        self._label = Label(
+        self._label = ThemedLabel(
             text=label,
             font_size=F.TINY,
             bold=True,
@@ -1140,7 +1223,7 @@ class _NavTab(ButtonBehavior, BoxLayout):
             if self._icon:
                 self._icon.color = C.PRIMARY
             with self._indicator.canvas.before:
-                Color(*C.PRIMARY)
+                ThemedColor(C.PRIMARY)
                 RoundedRectangle(
                     pos=self._indicator.pos,
                     size=self._indicator.size,
@@ -1156,7 +1239,7 @@ class _NavTab(ButtonBehavior, BoxLayout):
         if self.active:
             self._indicator.canvas.before.clear()
             with self._indicator.canvas.before:
-                Color(*C.PRIMARY)
+                ThemedColor(C.PRIMARY)
                 RoundedRectangle(
                     pos=self._indicator.pos,
                     size=self._indicator.size,

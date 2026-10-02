@@ -12,12 +12,11 @@ from kivy.animation import Animation
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
-from kivy.graphics import Color, Rectangle, RoundedRectangle
+from kivy.graphics import Color, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.floatlayout import FloatLayout
-from kivy.uix.label import Label
 from kivy.uix.modalview import ModalView
 from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import ScreenManager, SlideTransition
@@ -63,6 +62,8 @@ from app.ui.theme import (
     Icons,
     S,
     StyledButton,
+    ThemedLabel,
+    fill_background,
     make_message_popup,
     make_scroll_popup,
 )
@@ -684,13 +685,7 @@ class EEGMeditationApp(App):
             logger.info(f"Serial device override: {path}")
 
         root = BoxLayout(orientation="vertical")
-        with root.canvas.before:
-            Color(*C.BG_DARK)
-            self._root_bg = Rectangle(size=root.size, pos=root.pos)
-        root.bind(
-            size=lambda w, v: setattr(self._root_bg, "size", v),
-            pos=lambda w, v: setattr(self._root_bg, "pos", v),
-        )
+        fill_background(root, C.BG_DARK)
 
         # --- Screen manager (all screens still exist, routed via nav) ---
         self._sm = ScreenManager(transition=SlideTransition())
@@ -808,13 +803,7 @@ class EEGMeditationApp(App):
         orig_size = list(graph.size)
 
         overlay = FloatLayout(size_hint=(1, 1), pos_hint={"x": 0, "y": 0})
-        with overlay.canvas.before:
-            Color(*C.BG_DARK)
-            bg = Rectangle(size=overlay.size, pos=overlay.pos)
-        overlay.bind(
-            size=lambda w, v: setattr(bg, "size", v),
-            pos=lambda w, v: setattr(bg, "pos", v),
-        )
+        fill_background(overlay, C.BG_DARK)
 
         # Hide only the expand glyph while fullscreen (already fullscreen); keep
         # the series picker so the user can change series here too.
@@ -835,7 +824,7 @@ class EEGMeditationApp(App):
             size_hint=(None, None), size=(dp(48), dp(48)),
             pos_hint={"right": 0.99, "top": 0.99},
             bg_color=[0, 0, 0, 0], bg_pressed=[0, 0, 0, 0],
-            text_color=list(C.TEXT),
+            text_color=C.TEXT,
         )
         # StyledButton hard-sets horizontal padding (12dp) which would crop the
         # circular glyph; the icon needs the button's full width.
@@ -1073,7 +1062,7 @@ class EEGMeditationApp(App):
 
         content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
 
-        welcome = Label(
+        welcome = ThemedLabel(
             text="Welcome! Create a profile or pick an existing one:",
             font_size=F.BODY, color=C.TEXT,
             size_hint_y=None, height=dp(48),
@@ -2246,7 +2235,7 @@ class EEGMeditationApp(App):
         if root is None:
             logger.debug(f"toast: {message}")
             return
-        lbl = Label(text=message, font_size=F.BODY, color=POPUP_TEXT, size_hint=(None, None),
+        lbl = ThemedLabel(text=message, font_size=F.BODY, color=POPUP_TEXT, size_hint=(None, None),
                     padding=(dp(16), dp(10)), pos_hint={"center_x": 0.5, "y": 0.12})
         lbl.texture_update()
         lbl.size = lbl.texture_size
@@ -2384,7 +2373,7 @@ class EEGMeditationApp(App):
 
         rows = []
         if not formulas:
-            rows.append(Label(
+            rows.append(ThemedLabel(
                 text="No saved formulas", color=C.TEXT_SECONDARY,
                 height=dp(44), size_hint_y=None,
             ))
@@ -3463,7 +3452,7 @@ class EEGMeditationApp(App):
         if getattr(self, "_relaunch_popup", None) is not None:
             return
         content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
-        content.add_widget(Label(
+        content.add_widget(ThemedLabel(
             text="Database restored.\n\nThe app will now exit — please relaunch.",
             halign="center", valign="middle", color=POPUP_TEXT,
         ))

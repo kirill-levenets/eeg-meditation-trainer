@@ -5,17 +5,14 @@ import sys
 from collections.abc import Callable
 from typing import Optional
 
-from kivy.graphics import Color, Rectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.gridlayout import GridLayout
-from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.slider import Slider
-from kivy.uix.textinput import TextInput
 
 from app.config import APP
 from app.logger import logger, timed
@@ -28,6 +25,9 @@ from app.ui.theme import (
     Icons,
     S,
     StyledButton,
+    ThemedLabel,
+    ThemedTextInput,
+    fill_background,
     format_duration,
     make_message_popup,
 )
@@ -175,15 +175,9 @@ class DiaryScreen(Screen):
         self._theme_C = C
 
         root = BoxLayout(orientation="vertical", padding=S.PAGE_PAD, spacing=S.GAP)
-        with root.canvas.before:
-            Color(*C.BG)
-            self._root_bg = Rectangle(size=root.size, pos=root.pos)
-        root.bind(
-            size=lambda w, v: setattr(self._root_bg, "size", v),
-            pos=lambda w, v: setattr(self._root_bg, "pos", v),
-        )
+        fill_background(root, C.BG)
 
-        self._title_label = Label(
+        self._title_label = ThemedLabel(
             text="Session Diary",
             font_size=F.H1,
             bold=True,
@@ -232,7 +226,7 @@ class DiaryScreen(Screen):
         self._back_btn.bind(on_release=self._on_back_pressed)
         self._detail_layout.add_widget(self._back_btn)
 
-        self._detail_title = Label(
+        self._detail_title = ThemedLabel(
             text="Select a session",
             font_size=F.H2,
             bold=True,
@@ -250,7 +244,7 @@ class DiaryScreen(Screen):
             spacing=dp(4),
             padding=dp(4),
         )
-        self._detail_stats: dict[str, Label] = {}
+        self._detail_stats: dict[str, ThemedLabel] = {}
         stat_keys = [
             ("duration", "Duration"),
             ("avg_meditation", "Avg Meditation"),
@@ -262,7 +256,7 @@ class DiaryScreen(Screen):
             ("mood_rating", "Mood Rating"),
         ]
         for key, display in stat_keys:
-            lbl_title = Label(
+            lbl_title = ThemedLabel(
                 text=display,
                 font_size=F.SMALL,
                 color=C.TEXT_SECONDARY,
@@ -271,7 +265,7 @@ class DiaryScreen(Screen):
                 height=dp(20),
             )
             lbl_title.bind(size=lbl_title.setter("text_size"))
-            lbl_value = Label(
+            lbl_value = ThemedLabel(
                 text="-",
                 font_size=F.H3,
                 bold=True,
@@ -287,7 +281,7 @@ class DiaryScreen(Screen):
         self._detail_layout.add_widget(self._stats_grid)
 
         # Per-band total power over the whole session
-        band_header = Label(
+        band_header = ThemedLabel(
             text="Band Power (whole session)",
             font_size=F.SMALL,
             color=C.TEXT_SECONDARY,
@@ -302,7 +296,7 @@ class DiaryScreen(Screen):
         self._detail_layout.add_widget(self._band_totals)
 
         # Notes
-        notes_label = Label(
+        notes_label = ThemedLabel(
             text="Notes:",
             font_size=F.BODY,
             color=C.TEXT_SECONDARY,
@@ -315,20 +309,20 @@ class DiaryScreen(Screen):
         notes_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
         self._detail_layout.add_widget(notes_label)
 
-        self._notes_input = TextInput(
+        self._notes_input = ThemedTextInput(
             hint_text="Enter session notes...",
             multiline=True,
             size_hint_y=None,
             height=dp(80),
             font_size=F.BODY,
             foreground_color=C.TEXT,
-            background_color=list(C.BG_INPUT),
+            background_color=C.BG_INPUT,
             cursor_color=C.PRIMARY,
         )
         self._detail_layout.add_widget(self._notes_input)
 
         # Tags
-        tags_label = Label(
+        tags_label = ThemedLabel(
             text="Tags (comma-separated):",
             font_size=F.BODY,
             color=C.TEXT_SECONDARY,
@@ -348,18 +342,18 @@ class DiaryScreen(Screen):
             height=dp(34),
             font_size=F.BODY,
             foreground_color=C.TEXT,
-            background_color=list(C.BG_INPUT),
+            background_color=C.BG_INPUT,
             cursor_color=C.PRIMARY,
         )
         self._detail_layout.add_widget(self._tags_input)
 
         # Mood slider
         mood_row = BoxLayout(size_hint_y=None, height=dp(34), spacing=S.GAP)
-        mood_label = Label(
+        mood_label = ThemedLabel(
             text="Mood:", font_size=F.BODY, color=C.TEXT_SECONDARY, size_hint_x=0.2,
         )
         self._mood_slider = Slider(min=1, max=5, value=3, step=1, size_hint_x=0.6)
-        self._mood_value = Label(
+        self._mood_value = ThemedLabel(
             text="3", font_size=F.H3, bold=True, color=C.TEXT, size_hint_x=0.2,
         )
         self._mood_slider.bind(
@@ -390,7 +384,7 @@ class DiaryScreen(Screen):
         btn_row.add_widget(self._export_btn)
         self._detail_layout.add_widget(btn_row)
 
-        self._export_status = Label(
+        self._export_status = ThemedLabel(
             text="",
             font_size=F.TINY,
             color=C.ACCENT,
@@ -521,7 +515,7 @@ class DiaryScreen(Screen):
         self._session_list_layout.clear_widgets()
 
         if not sessions:
-            lbl = Label(
+            lbl = ThemedLabel(
                 text="No sessions yet",
                 font_size=dp(14),
                 color=(0.5, 0.5, 0.5, 1.0),
@@ -771,7 +765,7 @@ class DiaryScreen(Screen):
             self._file_chooser = None
             export_dir = self._get_android_export_dir()
 
-            loc_label = Label(
+            loc_label = ThemedLabel(
                 text="Will appear in:\nDocuments/EEGMeditation/",
                 font_size=F.SMALL,
                 color=C.TEXT_SECONDARY,
@@ -793,7 +787,7 @@ class DiaryScreen(Screen):
 
         # Filename row
         name_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=S.GAP)
-        name_label = Label(text="File name:", font_size=F.BODY, size_hint_x=0.25,
+        name_label = ThemedLabel(text="File name:", font_size=F.BODY, size_hint_x=0.25,
                            color=C.TEXT_SECONDARY)
         self._export_filename = CenteredTextInput(
             text=f"session_{self._selected_session_id}.csv",
@@ -801,7 +795,7 @@ class DiaryScreen(Screen):
             font_size=F.BODY,
             size_hint_x=0.75,
             foreground_color=C.TEXT,
-            background_color=list(C.BG_INPUT),
+            background_color=C.BG_INPUT,
         )
         name_row.add_widget(name_label)
         name_row.add_widget(self._export_filename)

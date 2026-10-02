@@ -11,7 +11,6 @@ from kivy.graphics import Color, InstructionGroup, Line, Mesh, Rectangle
 from kivy.graphics.texture import Texture
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
@@ -19,6 +18,7 @@ from kivy.uix.widget import Widget
 from app.config import APP
 from app.ui import render_stats
 from app.ui.theme import C as TC
+from app.ui.theme import ThemedLabel
 from app.ui.touch_utils import point_in_rect
 
 # Labels by (text, font_size, color); the CoreLabel is kept since it re-renders its texture after a GL context loss.
@@ -137,6 +137,7 @@ class ScrollableGraphWidget(Widget):
         self._gfx: InstructionGroup = InstructionGroup()
         self.canvas.add(self._gfx)
         self.bind(size=self._redraw, pos=self._redraw)
+        TC.add_listener(self._redraw)
         # Bind Window scroll for zoom (bypasses ScrollView interception)
         Window.bind(on_mouse_down=self._on_window_mouse_down)
 
@@ -238,7 +239,7 @@ class ScrollableGraphWidget(Widget):
             self._visibility_callback()
 
     def series_color(self, key: str) -> tuple:
-        return self._colors.get(key, (1, 1, 1, 1))
+        return TC.resolve(self._colors.get(key, (1, 1, 1, 1)))
 
     def set_visibility_callback(self, callback) -> None:
         """Invoked after any set_visible — lets the owning screen refresh its legend."""
@@ -513,7 +514,7 @@ class ScrollableGraphWidget(Widget):
             if len(slice_data) < 2:
                 continue
 
-            color = self._colors[key]
+            color = self.series_color(key)
             scale = self._scales.get(key, 100.0)
             draw_scale = max_scale if not self._bipolar else scale
             heatmap = key in self._heatmap_keys
@@ -1069,7 +1070,7 @@ class RawEEGScreen(Screen):
     def _build_ui(self) -> None:
         root = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(4))
 
-        title = Label(
+        title = ThemedLabel(
             text="Raw EEG Data",
             font_size=dp(18),
             bold=True,
@@ -1079,7 +1080,7 @@ class RawEEGScreen(Screen):
         root.add_widget(title)
 
         # --- Raw EEG signal graph (composite waveform) ---
-        raw_label = Label(
+        raw_label = ThemedLabel(
             text="Raw EEG Signal",
             font_size=dp(12),
             size_hint_y=None,
@@ -1104,7 +1105,7 @@ class RawEEGScreen(Screen):
         root.add_widget(self._raw_graph)
 
         # --- Frequency bands graph ---
-        band_label = Label(
+        band_label = ThemedLabel(
             text="Frequency Bands",
             font_size=dp(12),
             size_hint_y=None,
@@ -1128,7 +1129,7 @@ class RawEEGScreen(Screen):
         # Band legend
         band_legend = BoxLayout(size_hint_y=None, height=dp(20), spacing=dp(2))
         for band, color in self.BAND_COLORS.items():
-            lbl = Label(text=band, font_size=dp(9), color=color)
+            lbl = ThemedLabel(text=band, font_size=dp(9), color=color)
             band_legend.add_widget(lbl)
         root.add_widget(band_legend)
 

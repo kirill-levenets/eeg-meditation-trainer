@@ -1,10 +1,8 @@
 from kivy.clock import Clock
-from kivy.graphics import Color, Rectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.label import Label
 
-from app.ui.theme import POPUP_TEXT, C, F
+from app.ui.theme import POPUP_TEXT, C, F, ThemedLabel, fill_background
 
 
 class LoadingOverlay(BoxLayout):
@@ -17,17 +15,11 @@ class LoadingOverlay(BoxLayout):
 
     def __init__(self, **kwargs) -> None:
         super().__init__(orientation="vertical", **kwargs)
-        with self.canvas.before:
-            self._bg_color = Color(*C.BG_OVERLAY)
-            self._bg_rect = Rectangle(size=self.size, pos=self.pos)
-        self.bind(
-            size=lambda w, v: setattr(self._bg_rect, "size", v),
-            pos=lambda w, v: setattr(self._bg_rect, "pos", v),
-        )
+        fill_background(self, C.BG_OVERLAY)
 
         self.add_widget(BoxLayout(size_hint_y=1))  # top spacer
 
-        self._status = Label(
+        self._status = ThemedLabel(
             text="", font_size=F.BODY, color=POPUP_TEXT,
             halign="center", valign="middle",
             size_hint_y=None, height=dp(80),
@@ -35,7 +27,7 @@ class LoadingOverlay(BoxLayout):
         self._status.bind(size=self._status.setter("text_size"))
         self.add_widget(self._status)
 
-        self._dots = Label(
+        self._dots = ThemedLabel(
             text="", font_size=dp(24), color=C.PRIMARY,
             size_hint_y=None, height=dp(30),
         )
@@ -48,7 +40,6 @@ class LoadingOverlay(BoxLayout):
         self.opacity = 0
         self.size_hint = (0, 0)
         self.size = (0, 0)
-        C.add_listener(self._refresh_theme)
 
     @property
     def is_visible(self) -> bool:
@@ -87,7 +78,3 @@ class LoadingOverlay(BoxLayout):
     def _animate_dots(self, dt: float) -> None:
         self._dot_count = (self._dot_count + 1) % 4
         self._dots.text = ".  " * self._dot_count
-
-    def _refresh_theme(self, *args) -> None:
-        self._bg_color.rgba = C.BG_OVERLAY
-        self._dots.color = C.PRIMARY

@@ -4,10 +4,8 @@ import sys
 from collections.abc import Callable
 from typing import Optional
 
-from kivy.graphics import Color, Rectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
 
@@ -19,6 +17,8 @@ from app.ui.theme import (
     Icons,
     S,
     StyledButton,
+    ThemedLabel,
+    fill_background,
 )
 from app.ui.widgets.user_picker import UserPickerForm
 
@@ -40,18 +40,12 @@ class WizardScreen(Screen):
 
     def _build_ui(self) -> None:
         root = BoxLayout(orientation="vertical", padding=dp(24), spacing=S.GAP_LG)
-        with root.canvas.before:
-            Color(*C.BG)
-            self._bg = Rectangle(size=root.size, pos=root.pos)
-        root.bind(
-            size=lambda w, v: setattr(self._bg, "size", v),
-            pos=lambda w, v: setattr(self._bg, "pos", v),
-        )
+        fill_background(root, C.BG)
 
         root.add_widget(BoxLayout(size_hint_y=0.15))  # top spacer
 
         # Welcome header
-        self._title = Label(
+        self._title = ThemedLabel(
             text="Welcome",
             font_size=dp(28),
             bold=True,
@@ -61,7 +55,7 @@ class WizardScreen(Screen):
         )
         root.add_widget(self._title)
 
-        self._subtitle = Label(
+        self._subtitle = ThemedLabel(
             text="Let's set up your meditation trainer",
             font_size=F.BODY,
             color=C.TEXT_SECONDARY,
@@ -73,7 +67,7 @@ class WizardScreen(Screen):
         root.add_widget(BoxLayout(size_hint_y=0.05))
 
         # Step indicator
-        self._step_label = Label(
+        self._step_label = ThemedLabel(
             text="Step 1 of 2",
             font_size=F.SMALL,
             color=C.TEXT_MUTED,
@@ -85,7 +79,7 @@ class WizardScreen(Screen):
         # --- Step 1: Name input via shared UserPickerForm ---
         self._step1 = BoxLayout(orientation="vertical", spacing=S.GAP)
 
-        name_label = Label(
+        name_label = ThemedLabel(
             text="What's your name?",
             font_size=F.H2,
             color=C.TEXT,
@@ -108,7 +102,7 @@ class WizardScreen(Screen):
         if _IS_ANDROID:
             self._user_form._name_input.bind(focus=self._open_name_popup_if_focused)
 
-        name_hint = Label(
+        name_hint = ThemedLabel(
             text="This creates your profile to track sessions and settings",
             font_size=F.SMALL,
             color=C.TEXT_MUTED,
@@ -124,7 +118,7 @@ class WizardScreen(Screen):
         # --- Step 2: Device selection ---
         self._step2 = BoxLayout(orientation="vertical", spacing=S.GAP)
 
-        device_label = Label(
+        device_label = ThemedLabel(
             text="Connect your EEG device",
             font_size=F.H2,
             color=C.TEXT,
@@ -135,7 +129,7 @@ class WizardScreen(Screen):
         device_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
         self._step2.add_widget(device_label)
 
-        device_hint = Label(
+        device_hint = ThemedLabel(
             text="Make sure your MindWave is paired in\nsystem Bluetooth settings first",
             font_size=F.SMALL,
             color=C.TEXT_MUTED,
@@ -162,7 +156,7 @@ class WizardScreen(Screen):
         self._device_list.bind(minimum_height=self._device_list.setter("height"))
         self._step2.add_widget(self._device_list)
 
-        self._scan_status = Label(
+        self._scan_status = ThemedLabel(
             text="",
             font_size=F.SMALL,
             color=C.TEXT_SECONDARY,
@@ -247,7 +241,7 @@ class WizardScreen(Screen):
             font_size=F.H2,
             size_hint_y=None, height=dp(48),
             foreground_color=C.TEXT,
-            background_color=list(C.BG_INPUT),
+            background_color=C.BG_INPUT,
             cursor_color=C.PRIMARY,
         )
         content.add_widget(text_input)
