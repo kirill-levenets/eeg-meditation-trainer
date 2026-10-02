@@ -4,11 +4,10 @@ from typing import Optional
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
-from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 
-from app.ui.theme import CenteredTextInput
+from app.ui.theme import CenteredTextInput, ThemedLabel
 
 
 class ProfileScreen(Screen):
@@ -26,7 +25,7 @@ class ProfileScreen(Screen):
     def _build_ui(self) -> None:
         root = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(8))
 
-        title = Label(
+        title = ThemedLabel(
             text="User Profiles",
             font_size=dp(20),
             bold=True,
@@ -36,7 +35,7 @@ class ProfileScreen(Screen):
         root.add_widget(title)
 
         # --- Current user indicator ---
-        self._current_user_label = Label(
+        self._current_user_label = ThemedLabel(
             text="Current: All Users",
             font_size=dp(14),
             color=(0.3, 0.8, 1.0, 1.0),
@@ -66,7 +65,7 @@ class ProfileScreen(Screen):
         create_row.add_widget(self._create_btn)
         root.add_widget(create_row)
 
-        self._status_label = Label(
+        self._status_label = ThemedLabel(
             text="",
             font_size=dp(11),
             color=(0.8, 0.4, 0.4, 1.0),
@@ -88,7 +87,7 @@ class ProfileScreen(Screen):
         root.add_widget(all_btn)
 
         # --- User list ---
-        list_label = Label(
+        list_label = ThemedLabel(
             text="Select user to switch:",
             font_size=dp(13),
             size_hint_y=None,
@@ -134,7 +133,7 @@ class ProfileScreen(Screen):
                     break
 
         if not users:
-            lbl = Label(
+            lbl = ThemedLabel(
                 text="No users yet. Create one above.",
                 font_size=dp(13),
                 color=(0.5, 0.5, 0.5, 1.0),

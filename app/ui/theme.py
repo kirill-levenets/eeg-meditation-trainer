@@ -6,6 +6,8 @@ Design direction: calm, focused, minimal — dark theme with soft accents.
 
 import os
 import struct
+import types
+import weakref
 import zlib
 
 from kivy.animation import Animation
@@ -20,12 +22,16 @@ from kivy.properties import (
     NumericProperty,
     StringProperty,
 )
+from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
+
+from app.logger import logger
 
 # ── Icon font ────────────────────────────────────────────────────────
 
@@ -89,14 +95,14 @@ def make_scroll_popup(title, rows, footer=None, *, width_hint=0.85, row_h=None,
     n = (est_rows if est_rows is not None else len(rows)) + (1 if footer is not None else 0)
     content_h = n * (row_h + S.GAP_SM) + dp(90)  # rows + title bar + padding chrome
     height = min(content_h, Window.height * max_height_hint)
-    return Popup(title=title, content=body, size_hint=(width_hint, None),
-                 height=height, auto_dismiss=auto_dismiss)
+    return ThemedPopup(title=title, content=body, size_hint=(width_hint, None),
+                       height=height, auto_dismiss=auto_dismiss)
 
 
-def make_message_popup(title, message, buttons, *, color=None, width_hint=0.85):
+def make_message_popup(title, message, buttons, *, width_hint=0.85, auto_dismiss=True):
     """Message modal with a row of `buttons`; the text wraps and scrolls, so no line is ever silently dropped."""
-    label = Label(text=message, font_size=F.BODY, halign="center", valign="top",
-                  color=color or POPUP_TEXT, size_hint_y=None)
+    label = ThemedLabel(text=message, font_size=F.BODY, halign="center", valign="top",
+                        color=C.TEXT, size_hint_y=None)
     # Measure the wrapped text now so the popup sizes to it (capped; beyond that it scrolls).
     label.text_size = (Window.width * width_hint - dp(48), None)
     label.texture_update()
@@ -107,7 +113,7 @@ def make_message_popup(title, message, buttons, *, color=None, width_hint=0.85):
     for btn in buttons:
         btn_row.add_widget(btn)
     return make_scroll_popup(title, [label], footer=btn_row, width_hint=width_hint,
-                             est_rows=int(label.height // dp(44)) + 1)
+                             est_rows=int(label.height // dp(44)) + 1, auto_dismiss=auto_dismiss)
 
 
 class Icons:
@@ -313,6 +319,8 @@ _LIGHT_GREEN = {
     "DEVICE_IDLE": (0.30, 0.60, 0.45, 1.0),
 }
 
+DEFAULT_THEME = "Dark Blue"
+
 THEMES = {
     "Dark Blue": _DARK_BLUE,
     "Dark Green": _DARK_GREEN,
@@ -321,18 +329,32 @@ THEMES = {
 }
 
 
-class _ColorAccessor:
-    """Provides attribute access to the active theme palette.
+class ThemeColor(tuple):
+    """A palette RGBA that remembers its role, so a themed widget or ThemedColor given it follows theme switches.
+    list() or a slice of it is a plain, fixed colour."""
 
-    All existing code uses C.PRIMARY, C.BG etc. — this class makes
-    that work while allowing the underlying palette to be swapped at runtime.
-    Supports listeners that get called on theme change for live refresh.
+    def __new__(cls, rgba, role: str):
+        color = super().__new__(cls, rgba)
+        color.role = role
+        return color
+
+
+class _ColorAccessor:
+    """The active palette as attributes (C.PRIMARY, C.BG, ...), swappable at runtime.
+
+    A colour read from it carries its role. A theme switch re-applies every role a themed widget property
+    (ThemedMixin) or a ThemedColor was given, then calls the listeners for bespoke repaints.
     """
 
     def __init__(self):
-        self._palette = dict(_DARK_BLUE)
-        self._name = "Dark Blue"
-        self._listeners = []
+        self._listeners: dict = {}  # key -> getter of the callback, in registration order; a dead widget's entry drops itself
+        self._roles = weakref.WeakKeyDictionary()  # themed widget -> {colour property: role}
+        self._canvas_colors = weakref.WeakSet()
+        self._use(DEFAULT_THEME)
+
+    def _use(self, name: str) -> None:
+        self._palette = {role: ThemeColor(rgba, role) for role, rgba in THEMES[name].items()}
+        self._name = name
 
     def __getattr__(self, name):
         if name.startswith("_"):
@@ -343,20 +365,60 @@ class _ColorAccessor:
             raise AttributeError(f"No color '{name}' in theme")
 
     def set_theme(self, name: str) -> None:
-        """Switch the active palette and notify listeners."""
-        if name in THEMES:
-            self._palette = dict(THEMES[name])
-            self._name = name
-            for cb in self._listeners:
-                try:
-                    cb()
-                except Exception:
-                    pass
+        """Switch the active palette, re-apply every themed colour, then notify listeners."""
+        if name not in THEMES or name == self._name:
+            return
+        self._use(name)
+        for widget, roles in list(self._roles.items()):
+            try:
+                for prop, role in list(roles.items()):
+                    setattr(widget, prop, self._palette[role])
+            except Exception:
+                logger.exception("Theme repaint of %r failed", widget)
+        for instr in list(self._canvas_colors):
+            instr.rgba = self._rgba(instr.role, instr.pinned_alpha)
+        for get in list(self._listeners.values()):
+            callback = get()
+            if callback is None:
+                continue
+            try:
+                callback()
+            except Exception:
+                logger.exception("Theme listener %r failed", callback)
 
     def add_listener(self, callback) -> None:
-        """Register a callback to be called when theme changes."""
-        if callback not in self._listeners:
-            self._listeners.append(callback)
+        """Call back after every theme switch, once however often it is registered. A bound method is held weakly, so
+        it never keeps its widget alive."""
+        if isinstance(callback, types.MethodType):
+            ref = weakref.WeakMethod(callback, self._forget_listener)
+            self._listeners[ref] = ref
+        else:
+            self._listeners[callback] = lambda: callback
+
+    def _forget_listener(self, ref) -> None:
+        self._listeners.pop(ref, None)
+
+    def resolve(self, color):
+        """A colour to draw now: a palette colour in the current palette (even one read before a switch, e.g. a
+        module-level series colour), any other colour as it is."""
+        role = getattr(color, "role", None)
+        return self._palette[role] if role else color
+
+    def _rgba(self, role: str, alpha: float | None = None) -> tuple:
+        rgba = self._palette[role]
+        return tuple(rgba) if alpha is None else (*rgba[:3], alpha)
+
+    def _themed_value(self, widget, prop: str, value):
+        """The value to store in a themed widget's colour property: a palette colour is recorded by role and resolved
+        in the current palette (even one read before a switch); any other value drops the role and stays fixed."""
+        role = getattr(value, "role", None)
+        if role is None:
+            roles = self._roles.get(widget)
+            if roles:
+                roles.pop(prop, None)
+            return value
+        self._roles.setdefault(widget, {})[prop] = role
+        return self._palette[role]
 
     @property
     def theme_name(self) -> str:
@@ -365,10 +427,6 @@ class _ColorAccessor:
 
 C = _ColorAccessor()
 
-# Kivy's Popup chrome (background + title) is always dark and is never themed,
-# so popup body text must stay light in every palette — the themed C.TEXT is
-# dark in the light themes and renders dark-on-dark (invisible).
-POPUP_TEXT = (0.93, 0.93, 0.95, 1.0)
 
 
 # ── Typography ───────────────────────────────────────────────────────
@@ -403,7 +461,55 @@ class S:
 
 # ── Styled widgets ───────────────────────────────────────────────────
 
-class CenteredTextInput(TextInput):
+_THEMED_PROPS = frozenset({
+    "color", "disabled_color", "bg_color", "bg_pressed", "text_color", "background_color",
+    "foreground_color", "cursor_color", "hint_text_color", "selection_color",
+    "title_color", "separator_color", "overlay_color",
+})
+
+
+class ThemedMixin:
+    """Mixed in ahead of a Kivy widget: a colour property given a palette colour (C.X) follows theme switches;
+    any other colour stays fixed."""
+
+    def __setattr__(self, name, value):
+        if name in _THEMED_PROPS:
+            value = C._themed_value(self, name, value)
+        super().__setattr__(name, value)
+
+    def assigned_color(self, prop: str):
+        """prop's colour as it was given: the palette colour it follows, or its fixed value. Restoring a saved copy
+        restores the role too, where a list() of the property would freeze it."""
+        role = C._roles.get(self, {}).get(prop)
+        return getattr(C, role) if role else list(getattr(self, prop))
+
+
+class ThemedLabel(ThemedMixin, Label):
+    """The app's Label: its colours follow theme switches."""
+
+
+class ThemedTextInput(ThemedMixin, TextInput):
+    """The app's TextInput: the theme's input colours by default, following theme switches."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("foreground_color", C.TEXT)
+        kwargs.setdefault("background_color", C.BG_INPUT)
+        kwargs.setdefault("cursor_color", C.PRIMARY)
+        super().__init__(**kwargs)
+
+
+class ThemedColor(Color):
+    """Canvas Color drawn with a palette colour (C.X) that re-reads its role on every theme switch; alpha= pins
+    the alpha (by default it is the palette's)."""
+
+    def __init__(self, color: ThemeColor, alpha: float | None = None, **kwargs):
+        super().__init__(*C._rgba(color.role, alpha), **kwargs)
+        self.role = color.role
+        self.pinned_alpha = alpha
+        C._canvas_colors.add(self)
+
+
+class CenteredTextInput(ThemedTextInput):
     """Single-line input with text centered horizontally and vertically.
 
     Kivy's TextInput supports `halign` but has no `valign`, so the vertical
@@ -446,11 +552,11 @@ def readable_fg(bg):
     return _FG_DARK if _contrast(_FG_DARK, bg) >= _contrast(_FG_LIGHT, bg) else _FG_LIGHT
 
 
-class StyledButton(ButtonBehavior, BoxLayout):
+class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
     """Rounded button with press color shift. Replaces default Kivy Button.
 
     Usage:
-        btn = StyledButton(text="Start", bg_color=C.ACCENT, text_color=C.TEXT)
+        btn = StyledButton(text="Start", bg_color=C.ACCENT)  # glyph colour: AUTO for the fill
         btn.bind(on_release=callback)
     """
     text = StringProperty("")
@@ -469,22 +575,13 @@ class StyledButton(ButtonBehavior, BoxLayout):
     def __init__(self, **kwargs):
         kwargs.setdefault("size_hint_y", None)
         kwargs.setdefault("height", S.BTN_H)
+        kwargs.setdefault("bg_color", C.PRIMARY)
         vertical = kwargs.pop("vertical", False)
-        # Glyph colour role (re-applied on bg/theme change so it never keeps a stale snapshot;
-        # the class default is a frozen import-time ~white that rendered icons invisible on
-        # light themes). AUTO (no text_color) = pick light/dark for the highest contrast with
-        # THIS button's bg — fixes both light-icon-on-light-fill and dark-on-saturated cases.
-        # Explicit C.TEXT / C.TEXT_SECONDARY follow that theme role; any other colour is fixed.
-        passed = kwargs.get("text_color")
+        # AUTO while text_color is None (the default; assign None to return to it): the light or dark glyph with the
+        # higher contrast against THIS button's bg, re-picked whenever the bg changes. A palette text_color (C.X)
+        # follows the theme through ThemedMixin; any other is fixed. A selected state is an accent fill + AUTO.
+        self._auto_text = True
         super().__init__(**kwargs)
-        if passed is None:
-            self._text_role = "AUTO"
-        elif list(passed) == list(C.TEXT):
-            self._text_role = "TEXT"
-        elif list(passed) == list(C.TEXT_SECONDARY):
-            self._text_role = "TEXT_SECONDARY"
-        else:
-            self._text_role = None
         self._apply_role_text()
         self.orientation = "vertical" if vertical else "horizontal"
         self.padding = [dp(2), dp(2)] if vertical else [dp(12), 0]
@@ -574,7 +671,7 @@ class StyledButton(ButtonBehavior, BoxLayout):
             Clock.unschedule(self._confirm_ev)
         else:
             orig_icon = self._icon_label.text if self._icon_label else None
-            self._confirm_orig = (self.text, orig_icon, list(self.bg_color), self._label.markup)
+            self._confirm_orig = (self.text, orig_icon, self.assigned_color("bg_color"), self._label.markup)
             self._confirming = True
         if icon is not None and self._icon_label is not None:
             self._icon_label.text = icon
@@ -608,7 +705,7 @@ class StyledButton(ButtonBehavior, BoxLayout):
         self._confirm_ev = None
 
     def _on_theme_change(self, *args):
-        """Re-apply the glyph colour role, then repaint."""
+        """Repaint: the disabled/outline fill and the press ring are drawn from the palette."""
         self._apply_role_text()
         self._redraw()
 
@@ -617,14 +714,17 @@ class StyledButton(ButtonBehavior, BoxLayout):
         self._apply_role_text()
         self._redraw()
 
+    def __setattr__(self, name, value):
+        if name == "text_color":
+            self._auto_text = value is None
+            if value is None:
+                value = readable_fg(self.bg_color)
+        super().__setattr__(name, value)
+
     def _apply_role_text(self):
-        """Resolve the glyph colour role into text_color (-> _update_colors via binding)."""
-        if self._text_role == "AUTO":
-            self.text_color = readable_fg(self.bg_color)
-        elif self._text_role == "TEXT":
-            self.text_color = list(C.TEXT)
-        elif self._text_role == "TEXT_SECONDARY":
-            self.text_color = list(C.TEXT_SECONDARY)
+        """AUTO: resolve the glyph colour against the current bg (-> _update_colors via binding)."""
+        if self._auto_text:
+            super().__setattr__("text_color", readable_fg(self.bg_color))  # past our __setattr__: stays AUTO
 
     def _update_label(self, *args):
         self._label.text = self.text
@@ -706,12 +806,44 @@ class StyledButton(ButtonBehavior, BoxLayout):
         self._redraw()
 
 
-class Card(BoxLayout):
+def cancel_button(text: str = "Cancel", **kwargs) -> StyledButton:
+    """A modal's dismiss button (Cancel / Close): one neutral look in every popup, never mistaken for its action."""
+    kwargs.setdefault("bg_color", C.BG_CARD)
+    kwargs.setdefault("text_color", C.TEXT_SECONDARY)
+    return StyledButton(text=text, **kwargs)
+
+
+def fill_background(widget, color: ThemeColor) -> None:
+    """Paint widget's background with a palette colour that follows its size, position and theme switches."""
+    with widget.canvas.before:
+        ThemedColor(color)
+        rect = Rectangle(size=widget.size, pos=widget.pos)
+    widget.bind(size=lambda _w, v: setattr(rect, "size", v), pos=lambda _w, v: setattr(rect, "pos", v))
+
+
+def paint_panel(widget) -> None:
+    """The modal panel every popup and in-screen modal card is drawn on: the screen colour, rounded, with a border
+    edge, following the widget's size, position and theme switches."""
+    with widget.canvas.before:
+        ThemedColor(C.BG)
+        fill = RoundedRectangle(pos=widget.pos, size=widget.size, radius=[S.RADIUS])
+        ThemedColor(C.BORDER)
+        edge = Line(rounded_rectangle=[widget.x, widget.y, widget.width, widget.height, S.RADIUS], width=1)
+
+    def _place(*_a):
+        fill.pos, fill.size = widget.pos, widget.size
+        edge.rounded_rectangle = [widget.x, widget.y, widget.width, widget.height, S.RADIUS]
+
+    widget.bind(pos=_place, size=_place)
+
+
+class Card(ThemedMixin, BoxLayout):
     """Rounded card container with subtle background."""
 
     bg_color = ListProperty(list(C.BG_CARD))
 
     def __init__(self, **kwargs):
+        kwargs.setdefault("bg_color", C.BG_CARD)
         kwargs.setdefault("padding", S.CARD_PAD)
         kwargs.setdefault("spacing", S.GAP_SM)
         super().__init__(**kwargs)
@@ -725,16 +857,17 @@ class Card(BoxLayout):
             RoundedRectangle(pos=self.pos, size=self.size, radius=[S.RADIUS])
 
 
-class Divider(BoxLayout):
+class Divider(ThemedMixin, BoxLayout):
     """Thin horizontal line separator."""
 
     color = ListProperty(list(C.BORDER))
 
     def __init__(self, **kwargs):
+        kwargs.setdefault("color", C.BORDER)
         kwargs.setdefault("size_hint_y", None)
         kwargs.setdefault("height", dp(1))
         super().__init__(**kwargs)
-        self.bind(size=self._redraw, pos=self._redraw)
+        self.bind(size=self._redraw, pos=self._redraw, color=self._redraw)
         self._redraw()
 
     def _redraw(self, *args):
@@ -744,7 +877,7 @@ class Divider(BoxLayout):
             Rectangle(pos=self.pos, size=self.size)
 
 
-class SectionLabel(Label):
+class SectionLabel(ThemedLabel):
     """Section header label with consistent styling."""
 
     def __init__(self, **kwargs):
@@ -757,6 +890,106 @@ class SectionLabel(Label):
         kwargs.setdefault("valign", "middle")
         super().__init__(**kwargs)
         self.bind(size=self.setter("text_size"))
+
+
+_MODAL_PAD = dp(12)  # Popup's frame padding, so in-screen modal cards match it
+
+
+class ModalScrim(AnchorLayout):
+    """The dimmed backdrop of an in-screen modal (session end, connection, loading): centres its ModalPanel and,
+    like a popup's overlay, keeps taps from reaching the screen behind."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        fill_background(self, C.BG_OVERLAY)
+
+    def on_touch_down(self, touch):
+        if self.width <= 0 or self.height <= 0:  # collapsed (hidden): collide_point is still true at its origin
+            return False
+        return super().on_touch_down(touch) or self.collide_point(*touch.pos)
+
+
+class ModalPanel(BoxLayout):
+    """An in-screen modal card (session end, connection, loading): the popup panel, title and separator, so it looks
+    like every ThemedPopup. Its height follows its content."""
+
+    def __init__(self, title: str = "", **kwargs):
+        kwargs.setdefault("orientation", "vertical")
+        kwargs.setdefault("size_hint_y", None)
+        kwargs.setdefault("padding", _MODAL_PAD)
+        kwargs.setdefault("spacing", S.GAP)
+        super().__init__(**kwargs)
+        self.bind(minimum_height=self.setter("height"))
+        paint_panel(self)
+        self.title_label = None
+        if title:
+            self.title_label = ThemedLabel(text=title, font_size=F.H3, bold=True, color=C.TEXT, halign="center",
+                                           size_hint_y=None)
+            self.title_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)),
+                                  texture_size=lambda w, v: setattr(w, "height", v[1] + dp(8)))
+            self.add_widget(self.title_label)
+            self.add_widget(Divider())
+
+
+class ThemedPopup(ThemedMixin, Popup):
+    """The app's popup: the modal panel (paint_panel) over the theme's dimmed screen, with a bold centred title."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("background", "")
+        kwargs.setdefault("background_color", (0, 0, 0, 0))  # paint_panel draws the window behind Popup's frame
+        kwargs.setdefault("overlay_color", C.BG_OVERLAY)
+        kwargs.setdefault("title_color", C.TEXT)
+        kwargs.setdefault("title_size", F.H3)
+        kwargs.setdefault("title_align", "center")
+        kwargs.setdefault("separator_color", C.BORDER)
+        kwargs.setdefault("separator_height", dp(1))
+        fit = ((kwargs.get("size_hint", (1, 1))[1] is None or ("size_hint_y" in kwargs and kwargs["size_hint_y"] is None))
+               and "height" not in kwargs)
+        super().__init__(**kwargs)
+        frame = self._container.parent  # the title / separator / content grid from Popup's kv rule
+        paint_panel(frame)
+        self._title_label = next(w for w in frame.children if isinstance(w, Label))
+        self._title_label.bold = True
+        self._fits_content = fit
+        self._fitted = None  # the content whose minimum_height the height follows
+        if fit:  # size_hint=(w, None) and no height: as tall as the content, capped like make_scroll_popup
+            self._title_label.bind(height=self._fit_height)
+            self.bind(content=self._fit_height)
+            self.bind(on_open=lambda *_a: Window.bind(size=self._fit_height),
+                      on_dismiss=lambda *_a: Window.unbind(size=self._fit_height))
+            self._fit_height()
+
+    def _fit_height(self, *_a) -> None:
+        content = self.content
+        if content is not self._fitted:
+            if self._fitted is not None:
+                self._fitted.unbind(minimum_height=self._fit_height)
+            self._fitted = content
+            if content is not None and "minimum_height" in content.properties():
+                content.bind(minimum_height=self._fit_height)
+        if content is None or "minimum_height" not in content.properties():
+            return
+        frame = self._container.parent
+        chrome = frame.padding[1] + frame.padding[3] + self._title_label.height + dp(4)  # + the separator row
+        self.height = min(content.minimum_height + chrome, Window.height * 0.85)
+
+
+class ThemedFileChooser(FileChooserListView):
+    """FileChooserListView with its entries in the theme's text colour (Kivy draws them white, unreadable on a light
+    panel)."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        for w in self.walk(restrict=True):  # the Name / Size column headers
+            if isinstance(w, Label):
+                w.color = C.TEXT_SECONDARY
+
+    def on_entry_added(self, node, parent=None):
+        node.color_selected = (*C.PRIMARY[:3], 0.3)  # Kivy's fixed grey made a selected name dark on dark
+        for w in node.walk(restrict=True):
+            if isinstance(w, Label):
+                w.color = C.TEXT
+        super().on_entry_added(node, parent)
 
 
 class ThemedAccordion(BoxLayout):
@@ -839,7 +1072,6 @@ class _AccordionSection(BoxLayout):
 
         self._scroll.bind(height=self._recalc_height)
         self._recalc_height()
-        C.add_listener(self._refresh_theme)
 
     def add_widget(self, widget, *args, **kwargs):
         if hasattr(self, "_content"):
@@ -894,10 +1126,6 @@ class _AccordionSection(BoxLayout):
         else:
             content_h = self._content.minimum_height
             self._scroll.height = min(content_h, dp(500))
-
-    def _refresh_theme(self):
-        self._header.bg_color = C.BG_CARD
-        self._header.text_color = C.TEXT_SECONDARY
 
 
 class RevealBox(BoxLayout):
@@ -970,10 +1198,10 @@ class PresetRow(BoxLayout):
             items = [(fmt.format(v), v) for v in values]
 
         self._buttons: dict = {}
-        self._default_bg = list(C.BG_CARD)
-        self._default_text = list(C.TEXT_MUTED)
-        self._selected_bg = list(C.ACCENT)
-        self._selected_text = list(C.TEXT)
+        self._default_bg = C.BG_CARD
+        self._default_text = C.TEXT_MUTED
+        self._selected_bg = C.ACCENT
+        self._selected_text = None  # AUTO on the accent fill
 
         for label, value in items:
             btn = StyledButton(
@@ -1006,7 +1234,7 @@ class PresetRow(BoxLayout):
                 btn.bold = False
 
 
-class IconLabel(Label):
+class IconLabel(ThemedLabel):
     """Label that renders a text icon character at a given size."""
 
     def __init__(self, icon="", **kwargs):
@@ -1041,15 +1269,7 @@ class BottomNav(BoxLayout):
         self._callback = callback
         self._tab_widgets = {}
 
-        with self.canvas.before:
-            Color(*C.BG_DARK)
-            self._bg = Rectangle(size=self.size, pos=self.pos)
-            # Top border line
-            Color(*C.BORDER)
-            self._border = Rectangle(
-                size=(self.size[0], dp(1)),
-                pos=(self.pos[0], self.pos[1] + self.size[1] - dp(1)),
-            )
+        self._update_bg()
         self.bind(size=self._update_bg, pos=self._update_bg)
 
         _TAB_ICONS = {
@@ -1065,18 +1285,13 @@ class BottomNav(BoxLayout):
 
         if tabs:
             self.active_tab = tabs[0][1]
-        C.add_listener(self._refresh_theme)
-
-    def _refresh_theme(self):
-        self._update_bg()
-        self.on_active_tab()
 
     def _update_bg(self, *args):
         self.canvas.before.clear()
         with self.canvas.before:
-            Color(*C.BG_DARK)
+            ThemedColor(C.BG_DARK)
             self._bg = Rectangle(size=self.size, pos=self.pos)
-            Color(*C.BORDER)
+            ThemedColor(C.BORDER)
             self._border = Rectangle(
                 size=(self.size[0], dp(1)),
                 pos=(self.pos[0], self.pos[1] + self.size[1] - dp(1)),
@@ -1105,7 +1320,7 @@ class _NavTab(ButtonBehavior, BoxLayout):
 
         self._icon = None
         if icon and ICONS_AVAILABLE:
-            self._icon = Label(
+            self._icon = ThemedLabel(
                 text=icon,
                 font_name="Icons",
                 font_size=dp(20),
@@ -1115,7 +1330,7 @@ class _NavTab(ButtonBehavior, BoxLayout):
             )
             self.add_widget(self._icon)
 
-        self._label = Label(
+        self._label = ThemedLabel(
             text=label,
             font_size=F.TINY,
             bold=True,
@@ -1140,7 +1355,7 @@ class _NavTab(ButtonBehavior, BoxLayout):
             if self._icon:
                 self._icon.color = C.PRIMARY
             with self._indicator.canvas.before:
-                Color(*C.PRIMARY)
+                ThemedColor(C.PRIMARY)
                 RoundedRectangle(
                     pos=self._indicator.pos,
                     size=self._indicator.size,
@@ -1156,7 +1371,7 @@ class _NavTab(ButtonBehavior, BoxLayout):
         if self.active:
             self._indicator.canvas.before.clear()
             with self._indicator.canvas.before:
-                Color(*C.PRIMARY)
+                ThemedColor(C.PRIMARY)
                 RoundedRectangle(
                     pos=self._indicator.pos,
                     size=self._indicator.size,

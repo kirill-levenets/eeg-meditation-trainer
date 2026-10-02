@@ -13,7 +13,6 @@ from kivy.clock import Clock
 from kivy.graphics import Color, Line, Rectangle, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
@@ -30,6 +29,9 @@ from app.ui.theme import (
     RevealBox,
     S,
     StyledButton,
+    ThemedLabel,
+    cancel_button,
+    fill_background,
     format_duration,
     make_message_popup,
 )
@@ -70,6 +72,7 @@ class CalendarHeatmap(Widget):
         self._on_day_tap: Optional[Callable] = None
         self._selected_date: Optional[str] = None
         self.bind(size=self._redraw, pos=self._redraw)
+        C.add_listener(self._redraw)
 
     def _compute_cell_size(self) -> float:
         """Cell size that fills the available width given WEEKS_VISIBLE columns,
@@ -177,7 +180,7 @@ class CalendarHeatmap(Widget):
         # Day-of-week labels
         for i, text in enumerate(["M", "", "W", "", "F", "", "S"]):
             if text:
-                lbl = Label(
+                lbl = ThemedLabel(
                     text=text,
                     font_size=F.TINY,
                     color=C.TEXT_MUTED,
@@ -200,7 +203,7 @@ class CalendarHeatmap(Widget):
             if current.day <= 7 and current.month != prev_month and dow <= 3:
                 month_name = current.strftime("%b")
                 mx = x0 + col * (cell + gap)
-                lbl = Label(
+                lbl = ThemedLabel(
                     text=month_name,
                     font_size=F.TINY,
                     color=C.TEXT_SECONDARY,
@@ -242,6 +245,7 @@ class Last14DaysBars(Widget):
         self._on_day_tap: Optional[Callable] = None
         self._selected_date: Optional[str] = None
         self.bind(size=self._redraw, pos=self._redraw)
+        C.add_listener(self._redraw)
 
     def set_data(self, day_values: dict[str, float]) -> None:
         self._day_values = day_values
@@ -336,7 +340,7 @@ class Last14DaysBars(Widget):
         # Y-axis labels on the left
         for v in self.GRID_VALUES:
             gy = graph_y + (v / 100.0) * graph_h
-            ylbl = Label(
+            ylbl = ThemedLabel(
                 text=str(v),
                 font_size=F.TINY,
                 color=C.TEXT_MUTED,
@@ -357,7 +361,7 @@ class Last14DaysBars(Widget):
             initial = dow_initials[day.weekday()]
             day_num = day.day
             text = initial if day_num != 1 and idx > 0 else f"{day_num}"
-            day_lbl = Label(
+            day_lbl = ThemedLabel(
                 text=text,
                 font_size=F.TINY,
                 color=C.TEXT_MUTED,
@@ -374,7 +378,7 @@ class Last14DaysBars(Widget):
             score = self._day_values.get(date_str, 0)
             if score > 0:
                 bar_h = max(score / 100.0 * graph_h, self.MIN_BAR_HEIGHT)
-                score_lbl = Label(
+                score_lbl = ThemedLabel(
                     text=f"{int(round(score))}",
                     font_size=F.TINY,
                     color=C.TEXT,
@@ -432,21 +436,14 @@ class HistoryScreen(Screen):
         self._selected_ids: set[int] = set()
         self._on_export_sessions: Optional[Callable] = None
         self._build_ui()
-        C.add_listener(self._refresh_theme)
 
     def _build_ui(self) -> None:
         self._root = BoxLayout(orientation="vertical", padding=S.PAGE_PAD, spacing=S.GAP)
         root = self._root
-        with root.canvas.before:
-            Color(*C.BG)
-            self._bg = Rectangle(size=root.size, pos=root.pos)
-        root.bind(
-            size=lambda w, v: setattr(self._bg, "size", v),
-            pos=lambda w, v: setattr(self._bg, "pos", v),
-        )
+        fill_background(root, C.BG)
 
         # Title
-        title = Label(
+        title = ThemedLabel(
             text="History",
             font_size=F.H1,
             bold=True,
@@ -499,7 +496,6 @@ class HistoryScreen(Screen):
         self._btn_calendar = StyledButton(
             text="Cal",
             bg_color=C.PRIMARY,
-            text_color=C.TEXT,
             font_size=F.SMALL,
             bold=True,
         )
@@ -520,7 +516,7 @@ class HistoryScreen(Screen):
 
         # Date label + Show All button
         date_row = BoxLayout(size_hint_y=None, height=dp(28), spacing=S.GAP)
-        self._date_label = Label(
+        self._date_label = ThemedLabel(
             text="Tap a day to see sessions",
             font_size=F.BODY,
             color=C.TEXT_SECONDARY,
@@ -710,7 +706,7 @@ class HistoryScreen(Screen):
             self._graph_wrap.add_widget(self._heatmap)
             self._graph_row.height = cal_h
             self._btn_calendar.bg_color = C.PRIMARY
-            self._btn_calendar.text_color = C.TEXT
+            self._btn_calendar.text_color = None
             self._btn_calendar.bold = True
             self._btn_bars.bg_color = C.BG_CARD
             self._btn_bars.text_color = C.TEXT_SECONDARY
@@ -723,7 +719,7 @@ class HistoryScreen(Screen):
             self._btn_calendar.text_color = C.TEXT_SECONDARY
             self._btn_calendar.bold = False
             self._btn_bars.bg_color = C.PRIMARY
-            self._btn_bars.text_color = C.TEXT
+            self._btn_bars.text_color = None
             self._btn_bars.bold = True
         # Force the synchronous layout cascade so the user sees the new
         # geometry immediately.
@@ -841,7 +837,7 @@ class HistoryScreen(Screen):
         self._row_build_idx = 0
 
         if not sessions:
-            lbl = Label(
+            lbl = ThemedLabel(
                 text="No sessions on this day",
                 font_size=F.BODY,
                 color=C.TEXT_MUTED,
@@ -915,7 +911,7 @@ class HistoryScreen(Screen):
         # Multi-select checkbox (only in select mode); tapping the row toggles it.
         checkbox = None
         if self._select_mode:
-            checkbox = Label(
+            checkbox = ThemedLabel(
                 font_name="Icons" if ICONS_AVAILABLE else "Roboto",
                 font_size=F.H2, size_hint_x=None, width=dp(36),
                 halign="center", valign="middle",
@@ -939,7 +935,7 @@ class HistoryScreen(Screen):
 
         # Info column (tappable → session detail)
         info = BoxLayout(orientation="vertical", padding=[dp(6), 0])
-        name_label = Label(
+        name_label = ThemedLabel(
             text=name,
             font_size=F.BODY,
             color=C.TEXT,
@@ -948,7 +944,7 @@ class HistoryScreen(Screen):
             size_hint_y=0.55,
         )
         name_label.bind(size=name_label.setter("text_size"))
-        stats_line = Label(
+        stats_line = ThemedLabel(
             text=f"Shamatha: {avg_sh:.0f}  |  {format_duration(duration)}",
             font_size=F.TINY,
             color=C.TEXT_MUTED,
@@ -1012,7 +1008,7 @@ class HistoryScreen(Screen):
             text=name,
             font_size=F.BODY,
             foreground_color=C.TEXT,
-            background_color=list(C.BG_INPUT),
+            background_color=C.BG_INPUT,
             cursor_color=C.PRIMARY,
             multiline=False,
             write_tab=False,
@@ -1081,7 +1077,7 @@ class HistoryScreen(Screen):
 
     def _confirm_delete(self, session_id: int, name: str) -> None:
         """Show a delete confirmation popup."""
-        btn_cancel = StyledButton(text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY)
+        btn_cancel = cancel_button()
         btn_confirm = StyledButton(text="Delete", bg_color=C.DANGER)
         popup = make_message_popup("Confirm Delete", f'Delete session\n"{name}"?',
                                    [btn_cancel, btn_confirm])
@@ -1135,12 +1131,3 @@ class HistoryScreen(Screen):
                 self._on_session_select(opts["sid"])
             return True
         return False
-
-    def _refresh_theme(self):
-        """Update background when theme changes."""
-        self._root.canvas.before.clear()
-        with self._root.canvas.before:
-            Color(*C.BG)
-            self._bg = Rectangle(size=self._root.size, pos=self._root.pos)
-        self._date_label.color = C.TEXT_SECONDARY
-        self._heatmap._redraw()

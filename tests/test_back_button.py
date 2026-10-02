@@ -18,7 +18,7 @@ def _app(current="live_session"):
     app._toasts = []
     app._switch_screen = lambda name: app._switched.append(name)
     app._on_diary_back = lambda: setattr(app, "_diary_back_calls", app._diary_back_calls + 1)
-    app._android_toast = lambda msg: app._toasts.append(msg)
+    app._toast = lambda msg: app._toasts.append(msg)
     return app
 
 

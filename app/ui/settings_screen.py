@@ -5,14 +5,9 @@ from typing import Optional
 
 from kivy.clock import Clock
 from kivy.core.window import Keyboard, Window
-from kivy.graphics import Color, Rectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.button import Button
 from kivy.uix.checkbox import CheckBox
-from kivy.uix.filechooser import FileChooserListView
-from kivy.uix.label import Label
-from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.slider import Slider
@@ -30,6 +25,11 @@ from app.ui.theme import (
     S,
     StyledButton,
     ThemedAccordion,
+    ThemedFileChooser,
+    ThemedLabel,
+    ThemedPopup,
+    cancel_button,
+    fill_background,
     make_message_popup,
     make_scroll_popup,
 )
@@ -62,19 +62,19 @@ _REWARD_SOURCE_OPTIONS: tuple[tuple[str, str], ...] = (
 
 def open_audio_file_chooser(on_select: Callable[[str], None], title: str = "Choose audio file") -> None:
     """Shared audio-file picker popup for the timer sound, global feedback, and per-segment feedback."""
-    chooser = FileChooserListView(
+    chooser = ThemedFileChooser(
         path=os.path.expanduser("~"),
         filters=["*.wav", "*.mp3", "*.ogg", "*.flac", "*.m4a"],
     )
     content = BoxLayout(orientation="vertical", spacing=dp(8))
     content.add_widget(chooser)
     btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
-    btn_cancel = Button(text="Cancel", font_size=F.SMALL)
-    btn_select = Button(text="Select", font_size=F.SMALL, background_color=(0.2, 0.6, 0.3, 1.0))
+    btn_cancel = cancel_button(font_size=F.SMALL)
+    btn_select = StyledButton(text="Select", font_size=F.SMALL, bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM)
     btn_row.add_widget(btn_cancel)
     btn_row.add_widget(btn_select)
     content.add_widget(btn_row)
-    popup = Popup(title=title, content=content, size_hint=(0.9, 0.85))
+    popup = ThemedPopup(title=title, content=content, size_hint=(0.9, 0.85))
 
     def _on_select(*_):
         sel = chooser.selection
@@ -189,11 +189,7 @@ class SettingsScreen(Screen):
     def _build_ui(self) -> None:
         root = BoxLayout(orientation="vertical")
 
-        # Screen background
-        with root.canvas.before:
-            Color(*C.BG)
-            self._bg_rect = Rectangle(size=root.size, pos=root.pos)
-        root.bind(size=self._update_bg, pos=self._update_bg)
+        fill_background(root, C.BG)
 
         scroll = ScrollView()
         accordion = ThemedAccordion()
@@ -201,7 +197,7 @@ class SettingsScreen(Screen):
         # --- Profile section ---
         profile_section = accordion.add_section("User Profile", collapsed=False)
 
-        self._profile_current_label = Label(
+        self._profile_current_label = ThemedLabel(
             text="No user selected",
             font_size=F.BODY,
             color=C.PRIMARY,
@@ -233,7 +229,7 @@ class SettingsScreen(Screen):
             active=False, size_hint_x=0.15,
             size_hint_y=None, height=S.ROW_SM,
         )
-        timer_enable_lbl = Label(
+        timer_enable_lbl = ThemedLabel(
             text="Enable Timer",
             font_size=F.BODY,
             color=C.TEXT,
@@ -247,7 +243,7 @@ class SettingsScreen(Screen):
         # Mode: Simple | Program segmented toggle (placed before the mode-specific
         # content so the layout reads top-down: mode -> content -> sound).
         mode_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
-        mode_row.add_widget(Label(
+        mode_row.add_widget(ThemedLabel(
             text="Mode:", font_size=F.BODY, color=C.TEXT_SECONDARY,
             size_hint_x=0.25, halign="left", valign="middle",
         ))
@@ -260,7 +256,6 @@ class SettingsScreen(Screen):
                 size_hint_y=None,
                 height=dp(28),
                 bg_color=C.ACCENT if mode_key == "simple" else C.BG_CARD,
-                text_color=C.TEXT,
             )
             btn._mode_key = mode_key
             btn.bind(on_release=self._on_program_mode_pressed)
@@ -288,7 +283,7 @@ class SettingsScreen(Screen):
         self._simple_box.bind(minimum_height=self._simple_box.setter("height"))
         self._simple_box.add_widget(timer_toggle_row)  # Enable Timer (simple mode only)
         timer_dur_row = BoxLayout(size_hint_y=None, height=S.ROW_SM, spacing=S.GAP)
-        timer_dur_lbl = Label(
+        timer_dur_lbl = ThemedLabel(
             text="Duration:", font_size=F.BODY, color=C.TEXT_SECONDARY,
             size_hint_x=0.25, halign="left",
         )
@@ -296,7 +291,7 @@ class SettingsScreen(Screen):
         self._timer_duration_slider = Slider(
             min=1, max=120, value=20, step=1, size_hint_x=0.55,
         )
-        self._timer_duration_label = Label(
+        self._timer_duration_label = ThemedLabel(
             text="20 min", font_size=F.BODY, bold=True, color=C.TEXT,
             size_hint_x=0.2,
         )
@@ -327,7 +322,7 @@ class SettingsScreen(Screen):
             minimum_height=self._program_box.setter("height")
         )
 
-        self._program_total_label = Label(
+        self._program_total_label = ThemedLabel(
             text="Total: 0 min",
             font_size=F.SMALL, bold=True, color=C.TEXT,
             size_hint_y=None, height=dp(22),
@@ -338,7 +333,7 @@ class SettingsScreen(Screen):
         )
 
         # At-a-glance "which program is loaded" indicator at the top of the editor.
-        self._program_loaded_label = Label(
+        self._program_loaded_label = ThemedLabel(
             text="Loaded: (unsaved)",
             font_size=F.SMALL, bold=True, color=C.PRIMARY,
             size_hint_y=None, height=dp(22),
@@ -368,7 +363,7 @@ class SettingsScreen(Screen):
             multiline=False,
             font_size=F.SMALL,
             foreground_color=C.TEXT,
-            background_color=list(C.BG_INPUT),
+            background_color=C.BG_INPUT,
             size_hint_x=0.7,
         )
         self._program_save_btn = StyledButton(
@@ -383,7 +378,7 @@ class SettingsScreen(Screen):
         program_save_row.add_widget(self._program_name_input)
         program_save_row.add_widget(self._program_save_btn)
 
-        saved_programs_label = Label(
+        saved_programs_label = ThemedLabel(
             text="Saved Programs:",
             font_size=F.SMALL, color=C.TEXT_SECONDARY,
             size_hint_y=None, height=dp(22),
@@ -406,7 +401,7 @@ class SettingsScreen(Screen):
             minimum_height=self._segments_box.setter("height")
         )
         # What the editor is + what each cell means (the rows are otherwise cryptic).
-        program_intro = Label(
+        program_intro = ThemedLabel(
             text=(
                 "A program runs timed stages in order (top to bottom). Each row:\n"
                 "Min = length in minutes   Metric = what to train   Target = goal value\n"
@@ -422,7 +417,7 @@ class SettingsScreen(Screen):
         segments_header = BoxLayout(size_hint_y=None, height=dp(20), spacing=S.GAP_SM)
         for _lbl, _w in (("Min", 0.16), ("Metric", 0.3), ("Target", 0.14),
                          ("End cue", 0.16), ("Feedback", 0.16), ("", 0.1)):
-            col = Label(
+            col = ThemedLabel(
                 text=_lbl, font_size=F.TINY, bold=True, color=C.TEXT_MUTED,
                 size_hint_x=_w, halign="center", valign="middle",
             )
@@ -442,7 +437,7 @@ class SettingsScreen(Screen):
 
         # Custom timer-end sound (shared by both modes): path + browse + test.
         # When empty, the synthesised tingsha bell is used.
-        timer_sound_lbl = Label(
+        timer_sound_lbl = ThemedLabel(
             text="Timer End Sound (optional)",
             font_size=F.SMALL,
             color=C.TEXT_SECONDARY,
@@ -461,7 +456,7 @@ class SettingsScreen(Screen):
             multiline=False,
             font_size=F.SMALL,
             foreground_color=C.TEXT,
-            background_color=list(C.BG_INPUT),
+            background_color=C.BG_INPUT,
             size_hint_x=0.5,
         )
         self._timer_sound_input.bind(text=self._on_timer_sound_path_change)
@@ -499,7 +494,7 @@ class SettingsScreen(Screen):
         # One-shot banner used by focus_device_section(message). Empty/0-height
         # by default so it doesn't take space; populated when we route the
         # user here (e.g. multiple MindWave devices found, scan returned 0).
-        self._device_picker_banner = Label(
+        self._device_picker_banner = ThemedLabel(
             text="",
             font_size=F.BODY,
             color=C.WARM,
@@ -514,7 +509,7 @@ class SettingsScreen(Screen):
         )
         device_section.add_widget(self._device_picker_banner)
 
-        self._device_status_label = Label(
+        self._device_status_label = ThemedLabel(
             text="Not connected",
             font_size=F.BODY,
             size_hint_y=None,
@@ -525,7 +520,7 @@ class SettingsScreen(Screen):
         self._device_status_label.bind(size=self._device_status_label.setter("text_size"))
         device_section.add_widget(self._device_status_label)
 
-        self._device_meta_label = Label(
+        self._device_meta_label = ThemedLabel(
             text="Mode: Mock Data",
             font_size=F.SMALL,
             size_hint_y=None,
@@ -543,7 +538,7 @@ class SettingsScreen(Screen):
             size_hint_y=None, height=dp(36),
         )
         self._device_mode_cb.bind(active=self._on_device_mode_change)
-        device_mode_lbl = Label(
+        device_mode_lbl = ThemedLabel(
             text="Use Mock Data (uncheck for real device)",
             font_size=F.BODY,
             color=C.TEXT,
@@ -613,7 +608,7 @@ class SettingsScreen(Screen):
             size_hint_y=None,
             height=dp(40),
         )
-        self._backup_status = Label(
+        self._backup_status = ThemedLabel(
             text="",
             font_size=F.SMALL,
             color=C.TEXT_MUTED,
@@ -654,7 +649,7 @@ class SettingsScreen(Screen):
             step=1,
             size_hint_x=1,
         )
-        self._threshold_value_label = Label(
+        self._threshold_value_label = ThemedLabel(
             text=str(METRICS.MEDITATION_THRESHOLD_DEFAULT),
             font_size=F.H2,
             bold=True,
@@ -678,7 +673,7 @@ class SettingsScreen(Screen):
         threshold_section.add_widget(threshold_presets)
 
         # Audio threshold metric picker
-        audio_metric_label = Label(
+        audio_metric_label = ThemedLabel(
             text="Audio control metric:",
             font_size=F.BODY,
             size_hint_y=None,
@@ -711,7 +706,7 @@ class SettingsScreen(Screen):
             )
             rb.audio_metric_key = key
             rb.bind(active=self._on_audio_metric_radio)
-            lbl = Label(
+            lbl = ThemedLabel(
                 text=display_name,
                 font_size=F.BODY,
                 color=C.TEXT,
@@ -726,7 +721,7 @@ class SettingsScreen(Screen):
 
         # Formula slot index selector (shown below the custom-formula radio)
         index_row = BoxLayout(size_hint_y=None, height=dp(32), spacing=S.GAP)
-        index_row.add_widget(Label(
+        index_row.add_widget(ThemedLabel(
             text="    Slot:",
             font_size=F.SMALL,
             color=C.TEXT_SECONDARY,
@@ -741,7 +736,6 @@ class SettingsScreen(Screen):
                 size_hint_y=None,
                 height=dp(28),
                 bg_color=C.ACCENT if slot_idx == 0 else C.BG_CARD,
-                text_color=C.TEXT,
             )
             btn._slot_idx = slot_idx
             btn.bind(on_release=self._on_audio_formula_index_pressed)
@@ -753,7 +747,7 @@ class SettingsScreen(Screen):
         # --- Audio section ---
         audio_section = accordion.add_section("Audio", collapsed=True)
 
-        audio_desc = Label(
+        audio_desc = ThemedLabel(
             text=(
                 "Rain noise — volume decreases as meditation deepens\n"
                 "Test: reward sample, feedback sweep (0-max-0), sinking bell (every 15s),\n"
@@ -780,7 +774,7 @@ class SettingsScreen(Screen):
         self._test_audio_btn.bind(on_release=self._on_test_audio_pressed)
         audio_section.add_widget(self._test_audio_btn)
 
-        fb_label = Label(
+        fb_label = ThemedLabel(
             text="Feedback sound:", font_size=F.SMALL, color=C.TEXT_SECONDARY,
             size_hint_y=None, height=dp(24), halign="left", valign="middle",
         )
@@ -797,7 +791,7 @@ class SettingsScreen(Screen):
 
         # Above-threshold reward channel (issue #12): a second sound that rises as the
         # score climbs above the threshold. Off by default.
-        rw_label = Label(
+        rw_label = ThemedLabel(
             text="Reward sound (above threshold):", font_size=F.SMALL, color=C.TEXT_SECONDARY,
             size_hint_y=None, height=dp(24), halign="left", valign="middle",
         )
@@ -819,7 +813,7 @@ class SettingsScreen(Screen):
             size_hint_y=None, height=dp(36),
         )
         self._sinking_alert_cb.bind(active=self._on_sinking_alert_change)
-        sinking_lbl = Label(
+        sinking_lbl = ThemedLabel(
             text="Enable Sinking Alert Bell",
             font_size=F.BODY,
             color=C.TEXT,
@@ -838,7 +832,7 @@ class SettingsScreen(Screen):
             size_hint_y=None, height=dp(36),
         )
         self._subtle_alert_cb.bind(active=self._on_subtle_alert_change)
-        subtle_lbl = Label(
+        subtle_lbl = ThemedLabel(
             text="Enable Distraction Chime",
             font_size=F.BODY,
             color=C.TEXT,
@@ -857,7 +851,7 @@ class SettingsScreen(Screen):
             size_hint_y=None, height=dp(36),
         )
         self._disconnect_alert_cb.bind(active=self._on_disconnect_alert_change)
-        disconnect_lbl = Label(
+        disconnect_lbl = ThemedLabel(
             text="Audio alert on disconnect / signal loss",
             font_size=F.BODY,
             color=C.TEXT,
@@ -874,7 +868,7 @@ class SettingsScreen(Screen):
 
         # Line width slider
         lw_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
-        lw_label = Label(
+        lw_label = ThemedLabel(
             text="Line Width:", font_size=F.BODY,
             color=C.TEXT,
             size_hint_x=0.3, halign="left",
@@ -883,7 +877,7 @@ class SettingsScreen(Screen):
         self._line_width_slider = Slider(
             min=0.5, max=4.0, value=1.2, step=0.1, size_hint_x=0.5,
         )
-        self._line_width_value = Label(
+        self._line_width_value = ThemedLabel(
             text="1.2", font_size=F.BODY, bold=True, color=C.TEXT, size_hint_x=0.2,
         )
         self._line_width_slider.bind(value=self._on_line_width_slider)
@@ -913,7 +907,7 @@ class SettingsScreen(Screen):
 
         # Marker hotkey picker
         marker_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
-        marker_lbl = Label(
+        marker_lbl = ThemedLabel(
             text="Marker Hotkey:", font_size=F.BODY,
             color=C.TEXT,
             size_hint_x=0.35, halign="left",
@@ -954,7 +948,7 @@ class SettingsScreen(Screen):
         # --- Custom Formula section ---
         formula_section = accordion.add_section("Custom Formula", collapsed=True)
 
-        formula_desc = Label(
+        formula_desc = ThemedLabel(
             text=(
                 "Enter a Python-style formula to track as an extra metric.\n"
                 "Leave empty to disable."
@@ -972,9 +966,9 @@ class SettingsScreen(Screen):
         # Apply/Save buttons, and a status label.
         self._formula_inputs: list[CenteredTextInput] = []
         self._formula_name_inputs: list[CenteredTextInput] = []
-        self._formula_statuses: list[Label] = []
+        self._formula_statuses: list[ThemedLabel] = []
         for i in range(3):
-            slot_header = Label(
+            slot_header = ThemedLabel(
                 text=f"Formula {i + 1}",
                 font_size=F.SMALL,
                 bold=True,
@@ -993,7 +987,7 @@ class SettingsScreen(Screen):
                 size_hint_y=None,
                 height=dp(36),
                 multiline=False,
-                background_color=list(C.BG_INPUT),
+                background_color=C.BG_INPUT,
                 foreground_color=C.TEXT,
             )
             name_input.bind(on_text_validate=lambda _w, idx=i: self._submit_slot(idx))
@@ -1007,7 +1001,7 @@ class SettingsScreen(Screen):
                 size_hint_y=None,
                 height=dp(40),
                 multiline=False,
-                background_color=list(C.BG_INPUT),
+                background_color=C.BG_INPUT,
                 foreground_color=C.TEXT,
             )
             formula_input.bind(
@@ -1040,7 +1034,7 @@ class SettingsScreen(Screen):
             formula_btns.add_widget(save_btn)
             formula_section.add_widget(formula_btns)
 
-            status = Label(
+            status = ThemedLabel(
                 text="",
                 font_size=F.SMALL,
                 size_hint_y=None,
@@ -1054,7 +1048,7 @@ class SettingsScreen(Screen):
 
         # Saved formulas header with export button
         saved_header = BoxLayout(size_hint_y=None, height=dp(26), spacing=S.GAP_SM)
-        saved_label = Label(
+        saved_label = ThemedLabel(
             text="Saved Formulas:",
             font_size=F.SMALL,
             size_hint_x=0.6,
@@ -1085,7 +1079,7 @@ class SettingsScreen(Screen):
         )
         formula_section.add_widget(self._saved_formulas_box)
 
-        examples = Label(
+        examples = ThemedLabel(
             text=(
                 "Examples:\n"
                 "  (alpha1 + alpha2) / (beta1 + beta2 + 1)\n"
@@ -1105,7 +1099,7 @@ class SettingsScreen(Screen):
         examples.bind(size=examples.setter("text_size"))
         formula_section.add_widget(examples)
 
-        ref = Label(
+        ref = ThemedLabel(
             text=(
                 "Bands: alpha1 alpha2 beta1 beta2\n"
                 "  gamma1 gamma2 theta delta\n"
@@ -1141,36 +1135,19 @@ class SettingsScreen(Screen):
             size_hint_y=None, height=dp(36), spacing=S.GAP_SM,
         )
         for theme_name in THEMES:
-            is_active = theme_name == C.theme_name
-            btn = StyledButton(
-                text=theme_name,
-                bg_color=C.PRIMARY if is_active else C.BG_CARD,
-                text_color=C.TEXT if is_active else C.TEXT_SECONDARY,
-                font_size=F.TINY,
-                height=dp(34),
-                bold=is_active,
-            )
+            btn = StyledButton(text=theme_name, font_size=F.TINY, height=dp(34))
             btn._theme_name = theme_name
             btn.bind(on_release=self._on_theme_select)
             theme_row.add_widget(btn)
             self._theme_buttons[theme_name] = btn
         theme_section.add_widget(theme_row)
-
-        theme_note = Label(
-            text="Theme change takes effect on next app restart",
-            font_size=F.TINY,
-            color=C.TEXT_MUTED,
-            size_hint_y=None,
-            height=dp(18),
-            halign="left",
-        )
-        theme_note.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
-        theme_section.add_widget(theme_note)
+        self._show_active_theme()
+        C.add_listener(self._show_active_theme)
 
         # --- Developer Tools section ---
         dev_section = accordion.add_section("Developer Tools", collapsed=True)
 
-        dev_desc = Label(
+        dev_desc = ThemedLabel(
             text="Trigger unhandled exceptions to verify crash-handler hooks.",
             font_size=F.SMALL,
             size_hint_y=None,
@@ -1231,7 +1208,7 @@ class SettingsScreen(Screen):
         help_section = accordion.add_section("Help & Troubleshooting", collapsed=True)
         help_topics = _load_help_topics()
         for topic_title, topic_text in help_topics:
-            topic_label = Label(
+            topic_label = ThemedLabel(
                 text=f"[b]{topic_title}[/b]",
                 markup=True,
                 font_size=F.BODY,
@@ -1243,7 +1220,7 @@ class SettingsScreen(Screen):
             topic_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
             help_section.add_widget(topic_label)
 
-            body = Label(
+            body = ThemedLabel(
                 text=topic_text,
                 font_size=F.SMALL,
                 color=C.TEXT_SECONDARY,
@@ -1262,12 +1239,6 @@ class SettingsScreen(Screen):
         self._accordion = accordion
         self._settings_scroll = scroll
         self.add_widget(root)
-
-    def _update_bg(self, *args) -> None:
-        root = self.children[0] if self.children else None
-        if root and hasattr(self, '_bg_rect'):
-            self._bg_rect.size = root.size
-            self._bg_rect.pos = root.pos
 
     def _on_slider_value(self, instance, value) -> None:
         val = int(value)
@@ -1336,7 +1307,8 @@ class SettingsScreen(Screen):
         """Enter hotkey capture mode — next key press sets the marker hotkey."""
         self._waiting_for_hotkey = True
         self._marker_hotkey_btn.text = "Press a key..."
-        self._marker_hotkey_btn.bg_color = list(C.WARM)
+        self._marker_hotkey_btn.bg_color = C.WARM
+        self._marker_hotkey_btn.text_color = None  # AUTO on the capture fill
         Window.bind(on_key_down=self._on_hotkey_capture)
 
     def _on_hotkey_capture(self, window, key, scancode, codepoint, modifiers) -> bool:
@@ -1353,7 +1325,8 @@ class SettingsScreen(Screen):
         else:
             self._marker_hotkey_btn.text = f"key {key}"
             self._marker_hotkey = str(key)
-        self._marker_hotkey_btn.bg_color = list(C.BG_CARD)
+        self._marker_hotkey_btn.bg_color = C.BG_CARD
+        self._marker_hotkey_btn.text_color = C.PRIMARY
         return True
 
     def _on_marker_hotkey_clear(self, *args) -> None:
@@ -1363,7 +1336,8 @@ class SettingsScreen(Screen):
             self._waiting_for_hotkey = False
         self._marker_hotkey = ""
         self._marker_hotkey_btn.text = "(none)"
-        self._marker_hotkey_btn.bg_color = list(C.BG_CARD)
+        self._marker_hotkey_btn.bg_color = C.BG_CARD
+        self._marker_hotkey_btn.text_color = C.PRIMARY
 
     @property
     def marker_hotkey(self) -> str:
@@ -1675,7 +1649,7 @@ class SettingsScreen(Screen):
         duration_in = CenteredTextInput(
             text=str(minutes), input_filter="int", multiline=False,
             font_size=F.SMALL, foreground_color=C.TEXT,
-            background_color=list(C.BG_INPUT),
+            background_color=C.BG_INPUT,
             size_hint_x=0.16,
         )
         formula_btn = StyledButton(
@@ -1686,7 +1660,7 @@ class SettingsScreen(Screen):
         target_in = CenteredTextInput(
             text=str(target), input_filter="int", multiline=False,
             font_size=F.SMALL, foreground_color=C.TEXT,
-            background_color=list(C.BG_INPUT),
+            background_color=C.BG_INPUT,
             size_hint_x=0.14,
         )
         end_sound_btn = StyledButton(
@@ -1762,14 +1736,15 @@ class SettingsScreen(Screen):
 
     def _open_segment_end_sound_picker(self, row, btn) -> None:
         """Pick a segment's end cue: Chime (default) or Warble."""
-        box = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
-        popup = Popup(title="Segment end cue", content=box, size_hint=(0.8, 0.4))
+        rows = []
         for label, value in (("Chime", None), ("Warble", "warble")):
-            b = StyledButton(text=label, font_size=F.SMALL, size_hint_y=None, height=dp(44),
-                             bg_color=C.BG_CARD, text_color=C.TEXT)
+            b = StyledButton(text=label, font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT)
             b.bind(on_release=lambda *_a, v=value: (
                 self._set_segment_end_sound(row, btn, v), popup.dismiss()))
-            box.add_widget(b)
+            rows.append(b)
+        cancel = cancel_button()
+        popup = make_scroll_popup("Segment end cue", rows, footer=cancel, width_hint=0.8)
+        cancel.bind(on_release=lambda *_a: popup.dismiss())
         popup.open()
 
     def _feedback_seg_label(self, value) -> str:
@@ -1789,22 +1764,22 @@ class SettingsScreen(Screen):
 
     def _open_segment_feedback_picker(self, row, btn) -> None:
         """Pick a segment's feedback source: Default (inherit global), Rain, Tone, or a custom file."""
-        box = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
-        popup = Popup(title="Segment feedback sound", content=box, size_hint=(0.8, 0.6))
+        rows = []
         for label, value in (("Default (use global)", ""), ("Rain", "noise"), ("Tone", "tone")):
-            b = StyledButton(text=label, font_size=F.SMALL, size_hint_y=None, height=dp(44),
-                             bg_color=C.BG_CARD, text_color=C.TEXT)
+            b = StyledButton(text=label, font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT)
             b.bind(on_release=lambda *_a, v=value: (
                 self._set_segment_feedback(row, btn, v), popup.dismiss()))
-            box.add_widget(b)
-        custom = StyledButton(text="Custom file...", font_size=F.SMALL, size_hint_y=None,
-                              height=dp(44), bg_color=C.BG_CARD, text_color=C.TEXT)
+            rows.append(b)
+        custom = StyledButton(text="Custom file...", font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT)
         custom.bind(on_release=lambda *_a: (
             popup.dismiss(),
             open_audio_file_chooser(
                 lambda p: self._set_segment_feedback(row, btn, p),
                 title="Segment feedback sound file")))
-        box.add_widget(custom)
+        rows.append(custom)
+        cancel = cancel_button()
+        popup = make_scroll_popup("Segment feedback sound", rows, footer=cancel, width_hint=0.8)
+        cancel.bind(on_release=lambda *_a: popup.dismiss())
         popup.open()
 
     def _formula_label(self, formula) -> str:
@@ -1813,19 +1788,6 @@ class SettingsScreen(Screen):
         return _PROGRAM_BUILTIN_LABELS.get(formula, str(formula))
 
     def _open_segment_formula_picker(self, row) -> None:
-        content = BoxLayout(
-            orientation="vertical", spacing=S.GAP_SM, padding=S.GAP_SM,
-        )
-        scroll = ScrollView()
-        listbox = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(2))
-        listbox.bind(minimum_height=listbox.setter("height"))
-
-        popup = Popup(
-            title="Choose metric / formula",
-            content=content,
-            size_hint=(0.9, 0.85),
-        )
-
         def _choose(value):
             row._formula = value
             row._formula_btn.text = self._formula_label(value)
@@ -1833,36 +1795,26 @@ class SettingsScreen(Screen):
             self._emit_program_changed()
             popup.dismiss()
 
+        rows = []
         for key, label in PROGRAM_BUILTIN_FORMULAS:
-            btn = StyledButton(
-                text=label, font_size=F.BODY, bg_color=C.BG_CARD,
-                text_color=C.TEXT, size_hint_y=None, height=dp(40),
-            )
+            btn = StyledButton(text=label, font_size=F.BODY, bg_color=C.BG_CARD, text_color=C.TEXT, height=dp(40))
             btn.bind(on_release=lambda *_a, k=key: _choose(k))
-            listbox.add_widget(btn)
+            rows.append(btn)
 
         for entry in self._saved_formulas_cache:
             name = entry.get("name") or entry.get("formula", "")[:30]
             formula = entry.get("formula", "")
-            btn = StyledButton(
-                text=name, font_size=F.BODY, bg_color=C.PRIMARY_DIM,
-                text_color=C.TEXT, size_hint_y=None, height=dp(40),
-            )
+            btn = StyledButton(text=name, font_size=F.BODY, bg_color=C.PRIMARY_DIM, height=dp(40))
             btn.bind(
                 on_release=lambda *_a, n=name, f=formula: _choose(
                     {"name": n, "formula": f}
                 )
             )
-            listbox.add_widget(btn)
+            rows.append(btn)
 
-        scroll.add_widget(listbox)
-        content.add_widget(scroll)
-        cancel_btn = StyledButton(
-            text="Cancel", font_size=F.BODY, bg_color=C.BG_CARD,
-            text_color=C.TEXT, size_hint_y=None, height=dp(40),
-        )
-        cancel_btn.bind(on_release=popup.dismiss)
-        content.add_widget(cancel_btn)
+        cancel = cancel_button(font_size=F.BODY, height=dp(40))
+        popup = make_scroll_popup("Choose metric / formula", rows, footer=cancel, row_h=dp(40))
+        cancel.bind(on_release=lambda *_a: popup.dismiss())
         popup.open()
 
     def _on_segment_edited(self, *_args) -> None:
@@ -1991,7 +1943,7 @@ class SettingsScreen(Screen):
         """Populate the BT device list with scan results."""
         self._bt_device_list.clear_widgets()
         if not devices:
-            lbl = Label(
+            lbl = ThemedLabel(
                 text="No paired devices found",
                 font_size=F.SMALL,
                 size_hint_y=None,
@@ -2083,22 +2035,18 @@ class SettingsScreen(Screen):
                 self._on_audio_metric_change(key)
 
     def _on_theme_select(self, btn) -> None:
-        """Handle theme button press."""
         name = btn._theme_name
         C.set_theme(name)
-        # Update button visuals
-        for tname, tbtn in self._theme_buttons.items():
-            if tname == name:
-                tbtn.bg_color = C.PRIMARY
-                tbtn.text_color = C.TEXT
-                tbtn.bold = True
-            else:
-                tbtn.bg_color = C.BG_CARD
-                tbtn.text_color = C.TEXT_SECONDARY
-                tbtn.bold = False
-        # Save via callback
         if self._on_theme_change:
             self._on_theme_change(name)
+
+    def _show_active_theme(self) -> None:
+        """Highlight the active theme's button, whoever applied it (this selector or a profile's settings load)."""
+        for name, btn in self._theme_buttons.items():
+            active = name == C.theme_name
+            btn.bg_color = C.PRIMARY if active else C.BG_CARD
+            btn.text_color = None if active else C.TEXT_SECONDARY
+            btn.bold = active
 
     def set_theme_callback(self, callback: Callable) -> None:
         self._on_theme_change = callback
@@ -2167,7 +2115,7 @@ class SettingsScreen(Screen):
         message = (f'Delete profile "{user_name}"?\n\n'
                    f"Its {n} session(s) and all its settings will be permanently deleted.\n"
                    "This cannot be undone.")
-        btn_cancel = StyledButton(text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY)
+        btn_cancel = cancel_button()
         btn_confirm = StyledButton(text="Delete", icon=Icons.DELETE, bg_color=C.DANGER)
         popup = make_message_popup("Confirm Delete", message, [btn_cancel, btn_confirm])
         btn_cancel.bind(on_release=popup.dismiss)

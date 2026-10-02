@@ -213,18 +213,29 @@ class CrashDialog:
     @classmethod
     def show(cls, report: str, app, fatal: bool = True, title: str = "") -> None:
         from kivy.core.clipboard import Clipboard  # noqa: PLC0415
-        from kivy.metrics import dp  # noqa: PLC0415
-        from kivy.uix.boxlayout import BoxLayout  # noqa: PLC0415
-        from kivy.uix.button import Button  # noqa: PLC0415
-        from kivy.uix.label import Label  # noqa: PLC0415
-        from kivy.uix.popup import Popup  # noqa: PLC0415
-        from kivy.uix.scrollview import ScrollView  # noqa: PLC0415
-        from kivy.uix.textinput import TextInput  # noqa: PLC0415
 
         try:
             Clipboard.copy(report)
         except Exception:  # noqa: BLE001
             logger.exception("Clipboard copy failed during crash dialog.")
+        try:
+            cls._popup = cls._build(report, app, fatal, title, _themed_makers())
+            cls._popup.open()
+        except Exception:  # noqa: BLE001 - the crash may be in the theme layer itself
+            logger.exception("Themed diagnostic dialog failed; showing the plain one.")
+            try:
+                cls._popup = cls._build(report, app, fatal, title, _plain_makers())
+                cls._popup.open()
+            except Exception:  # noqa: BLE001
+                logger.exception("Diagnostic dialog failed; the report is in the log.")
+                _STATE["in_dialog"] = False  # else every later report would be dropped as re-entrant
+
+    @classmethod
+    def _build(cls, report: str, app, fatal: bool, title: str, make: dict):
+        from kivy.core.clipboard import Clipboard  # noqa: PLC0415
+        from kivy.metrics import dp  # noqa: PLC0415
+        from kivy.uix.boxlayout import BoxLayout  # noqa: PLC0415
+        from kivy.uix.scrollview import ScrollView  # noqa: PLC0415
 
         root = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12))
         if fatal:
@@ -240,7 +251,7 @@ class CrashDialog:
                 "into Telegram / email / GitHub if you'd like help with this issue. "
                 "You can keep using the app."
             )
-        banner = Label(
+        banner = make["label"](
             text=banner_text,
             size_hint_y=None,
             height=dp(72),
@@ -251,7 +262,7 @@ class CrashDialog:
         root.add_widget(banner)
 
         scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False)
-        text = TextInput(
+        text = make["input"](
             text=report,
             readonly=True,
             font_name="Roboto",
@@ -270,8 +281,8 @@ class CrashDialog:
             height=dp(48),
             spacing=dp(8),
         )
-        btn_copy = Button(text="Copied \u2713")
-        btn_dismiss = Button(text="Dismiss & Exit" if fatal else "Close")
+        btn_copy = make["action"]("Copied \u2713")
+        btn_dismiss = make["danger"]("Dismiss & Exit") if fatal else make["dismiss"]("Close")
 
         def _on_copy(_btn):
             try:
@@ -308,14 +319,50 @@ class CrashDialog:
         else:
             popup_title = "Diagnostic report"
 
-        cls._popup = Popup(
+        return make["popup"](
             title=popup_title,
             content=root,
             size_hint=(0.92, 0.92),
             auto_dismiss=False,
         )
-        if cls._popup is not None:
-            cls._popup.open()
+
+
+def _themed_makers() -> dict:
+    """The dialog in the app's modal style."""
+    from app.ui.theme import (  # noqa: PLC0415
+        C,
+        StyledButton,
+        ThemedLabel,
+        ThemedPopup,
+        ThemedTextInput,
+        cancel_button,
+    )
+
+    return {
+        "label": lambda **kw: ThemedLabel(color=C.TEXT, **kw),
+        "input": ThemedTextInput,
+        "action": lambda text: StyledButton(text=text, bg_color=C.PRIMARY),
+        "danger": lambda text: StyledButton(text=text, bg_color=C.DANGER),
+        "dismiss": cancel_button,
+        "popup": ThemedPopup,
+    }
+
+
+def _plain_makers() -> dict:
+    """Stock Kivy widgets, for when the app's own widgets are what failed."""
+    from kivy.uix.button import Button  # noqa: PLC0415
+    from kivy.uix.label import Label  # noqa: PLC0415
+    from kivy.uix.popup import Popup  # noqa: PLC0415  # plain-ok: theme fallback
+    from kivy.uix.textinput import TextInput  # noqa: PLC0415
+
+    return {
+        "label": Label,
+        "input": TextInput,
+        "action": lambda text: Button(text=text),
+        "danger": lambda text: Button(text=text),
+        "dismiss": lambda text: Button(text=text),
+        "popup": Popup,
+    }
 
 
 def _sys_hook(exc_type, exc_value, tb) -> None:

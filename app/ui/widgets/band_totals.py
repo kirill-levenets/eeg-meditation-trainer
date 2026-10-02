@@ -7,10 +7,9 @@ from kivy.graphics import Color, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 
-from app.ui.theme import ICONS_AVAILABLE, C, F, Icons, S, StyledButton
+from app.ui.theme import ICONS_AVAILABLE, C, F, Icons, S, StyledButton, ThemedLabel
 
 BANDS = ["delta", "theta", "alpha1", "alpha2", "beta1", "beta2", "gamma1", "gamma2"]
 GROUPS = ["delta", "theta", "alpha", "beta", "gamma"]
@@ -118,7 +117,7 @@ class Bar(Widget):
         self._rect.size = self.size
 
 
-class _HeaderCell(ButtonBehavior, Label):
+class _HeaderCell(ButtonBehavior, ThemedLabel):
     """A tap-to-sort column header."""
 
     def __init__(self, on_sort, **kwargs):
@@ -144,7 +143,7 @@ class BandTotalsView(BoxLayout):
         self._sort_by = "band"
         self._descending = False
         self._rows: list[dict] = []
-        self._value_labels: dict[str, Label] = {}
+        self._value_labels: dict[str, ThemedLabel] = {}
         self._bars: dict[str, Bar] = {}
         C.add_listener(self._render)
         self._render()
@@ -243,7 +242,7 @@ class BandTotalsView(BoxLayout):
     def _build_row(self, r: dict) -> BoxLayout:
         row = BoxLayout(orientation="horizontal", size_hint_y=None, height=_ROW_H,
                         spacing=S.GAP_SM)
-        name_lbl = Label(text=r["name"], font_size=F.SMALL, color=C.TEXT_SECONDARY,
+        name_lbl = ThemedLabel(text=r["name"], font_size=F.SMALL, color=C.TEXT_SECONDARY,
                          halign="left", valign="middle", size_hint_x=None, width=_W_NAME)
         name_lbl.bind(size=name_lbl.setter("text_size"))
 
@@ -252,10 +251,10 @@ class BandTotalsView(BoxLayout):
         track.add_widget(bar)
         track.add_widget(Widget(size_hint_x=max(0.0, 1.0 - r["share"])))
 
-        power_lbl = Label(text=format_power(r["total"]), font_size=F.SMALL, color=C.TEXT,
+        power_lbl = ThemedLabel(text=format_power(r["total"]), font_size=F.SMALL, color=C.TEXT,
                           halign="right", valign="middle", size_hint_x=None, width=_W_POWER)
         power_lbl.bind(size=power_lbl.setter("text_size"))
-        pct_lbl = Label(text=f"{round(r['share'] * 100)}%", font_size=F.SMALL, color=C.TEXT,
+        pct_lbl = ThemedLabel(text=f"{round(r['share'] * 100)}%", font_size=F.SMALL, color=C.TEXT,
                         halign="right", valign="middle", size_hint_x=None, width=_W_PCT)
         pct_lbl.bind(size=pct_lbl.setter("text_size"))
 

@@ -292,9 +292,9 @@ def test_gate_back_first_press_warns_second_exits(monkeypatch):
     monkeypatch.setattr(am, "App", fake_app_cls)
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._last_back_time = 0.0
-    app._android_toast = MagicMock()
+    app._toast = MagicMock()
     assert EEGMeditationApp._handle_gate_back(app) is True   # consumed
-    app._android_toast.assert_called_once()                   # warned
+    app._toast.assert_called_once()                           # warned
     fake_app_cls.get_running_app.return_value.stop.assert_not_called()
     assert EEGMeditationApp._handle_gate_back(app) is True   # second press < 2s
     fake_app_cls.get_running_app.return_value.stop.assert_called_once()  # exits

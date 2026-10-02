@@ -6,11 +6,10 @@ from typing import Optional
 from kivy.clock import Clock
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.label import Label
 from kivy.uix.scrollview import ScrollView
 
 from app.logger import logger
-from app.ui.theme import C, CenteredTextInput, F, S, StyledButton
+from app.ui.theme import C, CenteredTextInput, F, S, StyledButton, ThemedLabel
 
 
 class UserPickerForm(BoxLayout):
@@ -58,7 +57,7 @@ class UserPickerForm(BoxLayout):
             disabled=True,
         )
 
-        self._existing_header = Label(
+        self._existing_header = ThemedLabel(
             text="Existing profiles (0)",
             font_size=F.SMALL,
             color=C.TEXT_SECONDARY,
@@ -88,7 +87,7 @@ class UserPickerForm(BoxLayout):
             multiline=False,
             font_size=F.BODY,
             foreground_color=C.TEXT,
-            background_color=list(C.BG_INPUT),
+            background_color=C.BG_INPUT,
             cursor_color=C.PRIMARY,
             size_hint_x=0.65,
         )
@@ -126,7 +125,7 @@ class UserPickerForm(BoxLayout):
             opacity=0,
             disabled=True,
         )
-        self._error_label = Label(
+        self._error_label = ThemedLabel(
             text="",
             font_size=F.SMALL,
             color=C.DANGER,

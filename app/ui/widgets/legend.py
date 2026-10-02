@@ -6,10 +6,9 @@ labels left-to-right and wraps to new rows, growing its own height.
 """
 
 from kivy.metrics import dp
-from kivy.uix.label import Label
 from kivy.uix.stacklayout import StackLayout
 
-from app.ui.theme import F
+from app.ui.theme import F, ThemedLabel
 
 
 class LegendBar(StackLayout):
@@ -34,7 +33,7 @@ class LegendBar(StackLayout):
         self.clear_widgets()
         for text, color in items:
             is_active = active_text is not None and text == active_text
-            lbl = Label(
+            lbl = ThemedLabel(
                 text=f"» {text}" if is_active else text,
                 font_size=self._font_size,
                 color=color,
