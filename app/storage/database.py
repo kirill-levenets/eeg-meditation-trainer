@@ -254,6 +254,12 @@ class DatabaseManager:
         if "engine_version" not in sess_cols:
             self._conn.execute("ALTER TABLE sessions ADD COLUMN engine_version TEXT DEFAULT ''")
             logger.info("Migrated: added column sessions.engine_version")
+        # Which metric the session was scored on (#51); '' marks rows from before, scored on meditation.
+        for col, col_type in (("score_metric_key", "TEXT DEFAULT ''"), ("score_metric_name", "TEXT DEFAULT ''"),
+                              ("avg_score", "REAL DEFAULT NULL")):
+            if col not in sess_cols:
+                self._conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {col_type}")
+                logger.info(f"Migrated: added column sessions.{col}")
 
         self._conn.commit()
 
@@ -271,8 +277,9 @@ class DatabaseManager:
                 INSERT INTO sessions
                 (user_id, date_time, duration, threshold_used, avg_meditation, avg_shamatha,
                  max_meditation, time_above_threshold, longest_streak, session_name,
-                 time_shamatha_90, custom_formulas, session_program, engine_version)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 time_shamatha_90, custom_formulas, session_program, engine_version,
+                 score_metric_key, score_metric_name, avg_score)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user_id,
@@ -289,6 +296,9 @@ class DatabaseManager:
                     custom_formulas,
                     session_program,
                     engine_version,
+                    stats.get("score_metric_key", ""),
+                    stats.get("score_metric_name", ""),
+                    stats.get("avg_score"),
                 ),
             )
         session_id = cursor.lastrowid
@@ -480,7 +490,8 @@ class DatabaseManager:
         """Update an existing session's aggregate stats (+ formula snapshot if given)."""
         cols = ["duration = ?", "threshold_used = ?", "avg_meditation = ?",
                 "avg_shamatha = ?", "max_meditation = ?", "time_above_threshold = ?",
-                "longest_streak = ?", "time_shamatha_90 = ?"]
+                "longest_streak = ?", "time_shamatha_90 = ?",
+                "score_metric_key = ?", "score_metric_name = ?", "avg_score = ?"]
         vals: list = [
             stats.get("duration", 0),
             stats.get("threshold_used", 50),
@@ -490,6 +501,9 @@ class DatabaseManager:
             stats.get("time_above_threshold", 0),
             stats.get("longest_streak", 0),
             stats.get("time_shamatha_90", 0),
+            stats.get("score_metric_key", ""),
+            stats.get("score_metric_name", ""),
+            stats.get("avg_score"),
         ]
         if custom_formulas is not None:
             cols.append("custom_formulas = ?")

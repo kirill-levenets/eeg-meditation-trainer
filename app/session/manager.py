@@ -2,6 +2,7 @@ import time
 from enum import Enum
 
 from app.logger import logger
+from app.session.scoring import GoalAccrual
 
 
 class SessionState(Enum):
@@ -21,10 +22,10 @@ class SessionManager:
         self._pause_start: float = 0.0
         self._total_paused: float = 0.0
         self._metrics_accumulator: list[dict[str, float]] = []
-        self._time_above_threshold: float = 0.0
+        self._goal = GoalAccrual()  # time above / longest streak on the scored metric
+        self._score_sum: float = 0.0  # the scored metric's per-tick values, for avg_score
+        self._score_ticks: int = 0
         self._time_shamatha_90: float = 0.0
-        self._current_streak: float = 0.0
-        self._longest_streak: float = 0.0
         self._threshold_used: int = 50
         self._active_metric: str = "meditation_score"
         self._active_target: float | None = None
@@ -34,10 +35,18 @@ class SessionManager:
         """Attach the audio engine so non-user stops can play the alert."""
         self._audio = audio
 
-    def set_active_goal(self, metric_key: str, target: float) -> None:
-        """Program mode: accrue 'time above threshold' against this metric/target per tick."""
+    def set_active_goal(self, metric_key: str, target: float | None = None) -> None:
+        """Score the session on this metric from now on: against `target` (a program segment), else the threshold."""
         self._active_metric = metric_key
         self._active_target = target
+
+    @property
+    def _time_above_threshold(self) -> float:
+        return self._goal.time_above
+
+    @property
+    def _longest_streak(self) -> float:
+        return self._goal.longest_streak
 
     @property
     def state(self) -> SessionState:
@@ -67,10 +76,8 @@ class SessionManager:
             self._elapsed = 0.0
             self._total_paused = 0.0
             self._metrics_accumulator = []
-            self._time_above_threshold = 0.0
+            self._reset_scoring()
             self._time_shamatha_90 = 0.0
-            self._current_streak = 0.0
-            self._longest_streak = 0.0
             self._threshold_used = threshold
             self._active_metric = "meditation_score"
             self._active_target = None
@@ -113,13 +120,10 @@ class SessionManager:
         if self._state == SessionState.RUNNING:
             self._metrics_accumulator.append(metric)
             goal = self._active_target if self._active_target is not None else self._threshold_used
-            if metric.get(self._active_metric, 0) >= goal:
-                self._time_above_threshold += 0.5  # 2 Hz tick = 0.5s
-                self._current_streak += 0.5
-                if self._current_streak > self._longest_streak:
-                    self._longest_streak = self._current_streak
-            else:
-                self._current_streak = 0.0
+            value = metric.get(self._active_metric, 0)
+            self._goal.add(value, goal)
+            self._score_sum += value
+            self._score_ticks += 1
             if metric.get("shamatha_score", 0) >= 90:
                 self._time_shamatha_90 += 0.5
 
@@ -137,6 +141,8 @@ class SessionManager:
                 "longest_streak": 0,
                 "distraction_rate": 0.0,
                 "sinking_rate": 0.0,
+                "score_metric_key": None,  # nothing scored yet
+                "avg_score": None,
             }
 
         n = len(self._metrics_accumulator)
@@ -161,16 +167,21 @@ class SessionManager:
             "longest_streak": int(self._longest_streak),
             "distraction_rate": round(distraction_count / n * 100, 1),
             "sinking_rate": round(sinking_count / n * 100, 1),
+            "score_metric_key": self._active_metric if self._score_ticks else None,
+            "avg_score": round(self._score_sum / self._score_ticks, 2) if self._score_ticks else None,
         }
+
+    def _reset_scoring(self) -> None:
+        self._goal = GoalAccrual()
+        self._score_sum = 0.0
+        self._score_ticks = 0
 
     def reset(self) -> None:
         self._state = SessionState.IDLE
         self._metrics_accumulator = []
         self._elapsed = 0.0
-        self._time_above_threshold = 0.0
+        self._reset_scoring()
         self._time_shamatha_90 = 0.0
-        self._current_streak = 0.0
-        self._longest_streak = 0.0
         self._total_paused = 0.0
         self._active_metric = "meditation_score"
         self._active_target = None

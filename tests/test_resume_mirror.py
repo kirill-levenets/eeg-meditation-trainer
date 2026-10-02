@@ -517,8 +517,9 @@ def test_timer_expiry_updates_existing_session_row():
 
     _drive_tick(app, _raw_sample(), _metrics())
 
-    app._db.update_session.assert_called_once_with(
-        7, {"duration": 100}, custom_formulas="[]", session_program="",
-        engine_version=MetricsEngine.ENGINE_VERSION,
-    )
+    app._db.update_session.assert_called_once()
+    (sid, stats), kwargs = app._db.update_session.call_args
+    assert sid == 7 and stats["duration"] == 100  # the row the earlier flush created, with the final stats
+    assert stats["score_metric_key"] == app._audio_drive_key() and "score_metric_name" in stats  # #51
+    assert kwargs == {"custom_formulas": "[]", "session_program": "", "engine_version": MetricsEngine.ENGINE_VERSION}
     app._db.save_session.assert_not_called()
