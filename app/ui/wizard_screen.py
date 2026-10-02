@@ -6,7 +6,6 @@ from typing import Optional
 
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
 
 from app.ui.theme import (
@@ -18,6 +17,8 @@ from app.ui.theme import (
     S,
     StyledButton,
     ThemedLabel,
+    ThemedPopup,
+    cancel_button,
     fill_background,
 )
 from app.ui.widgets.user_picker import UserPickerForm
@@ -247,16 +248,14 @@ class WizardScreen(Screen):
         content.add_widget(text_input)
         btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
         ok_btn = StyledButton(text="OK", bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM)
-        cancel_btn = StyledButton(
-            text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_MUTED,
-        )
+        cancel_btn = cancel_button()
         btn_row.add_widget(ok_btn)
         btn_row.add_widget(cancel_btn)
         content.add_widget(btn_row)
-        popup = Popup(
+        popup = ThemedPopup(
             title="Your name",
             content=content,
-            size_hint=(0.85, 0.35),
+            size_hint=(0.85, None),
             auto_dismiss=False,
         )
 

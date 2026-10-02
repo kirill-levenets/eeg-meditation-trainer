@@ -12,13 +12,10 @@ from kivy.animation import Animation
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
-from kivy.graphics import Color, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.modalview import ModalView
-from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import ScreenManager, SlideTransition
 from kivy.utils import platform as kivy_platform
 
@@ -54,7 +51,8 @@ from app.ui.profile_screen import ProfileScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
 from app.ui.theme import (
-    POPUP_TEXT,
+    DEFAULT_THEME,
+    THEMES,
     BottomNav,
     C,
     CenteredTextInput,
@@ -62,10 +60,14 @@ from app.ui.theme import (
     Icons,
     S,
     StyledButton,
+    ThemedFileChooser,
     ThemedLabel,
+    ThemedPopup,
+    cancel_button,
     fill_background,
     make_message_popup,
     make_scroll_popup,
+    paint_panel,
 )
 from app.ui.widgets.legend import LegendBar
 from app.ui.widgets.loading_overlay import LoadingOverlay
@@ -96,6 +98,33 @@ def resolve_startup_user(db) -> Optional[int]:
     if uid <= 0:  # not a valid AUTOINCREMENT id — don't rely on get_user(0) missing
         return None
     return uid if db.get_user(uid) else None
+
+
+def theme_seed(db) -> str:
+    """The theme of a profile without its own: the global setting from before themes were per-user, else the
+    default."""
+    seed = db.get_setting("theme")
+    return seed if seed in THEMES else DEFAULT_THEME
+
+
+def _parse_theme(raw: str) -> str:
+    if raw not in THEMES:
+        raise ValueError(f"unknown theme {raw!r}")
+    return raw
+
+
+def theme_setting(seed: str) -> Setting:
+    """The per-user theme. An unknown stored name loads the seed: set_theme ignores it, which kept the previous
+    profile's palette."""
+    return Setting("theme", seed, _parse_theme, STR[1], lambda: C.theme_name, C.set_theme)
+
+
+def startup_theme(db) -> str:
+    """The palette to build the UI in: the startup profile's theme, else the seed. The profile load then applies the
+    same theme (a no-op) instead of repainting everything the build just drew."""
+    uid = resolve_startup_user(db)
+    theme = db.get_user_setting(uid, "theme") if uid else None
+    return theme if theme in THEMES else theme_seed(db)
 
 
 def sessions_for_view(db, current_uid: Optional[int], show_all: bool) -> list:
@@ -672,10 +701,8 @@ class EEGMeditationApp(App):
     def build(self) -> FloatLayout:
         install_crash_handler(self)
 
-        # Restore saved theme before building UI
-        saved_theme = self._db.get_setting("theme")
-        if saved_theme:
-            C.set_theme(saved_theme)
+        self._theme_seed = theme_seed(self._db)
+        C.set_theme(startup_theme(self._db))
 
         # Apply --serial override if provided
         if self.serial_device_override:
@@ -1029,7 +1056,7 @@ class EEGMeditationApp(App):
             App.get_running_app().stop()
             return True
         self._last_back_time = now
-        self._android_toast("Press back again to exit")
+        self._toast("Press back again to exit")
         return True
 
     def _gate_active(self) -> bool:
@@ -1071,10 +1098,10 @@ class EEGMeditationApp(App):
         welcome.bind(size=welcome.setter("text_size"))
         content.add_widget(welcome)
 
-        popup = Popup(
+        popup = ThemedPopup(
             title="Select Profile",
             content=content,
-            size_hint=(0.9, 0.7),
+            size_hint=(0.9, None),
             auto_dismiss=False,
         )
         # Tracked so _on_keyboard can make the gate un-escapable (back/Esc must
@@ -1553,9 +1580,13 @@ class EEGMeditationApp(App):
 
     def _flush_on_leave(self) -> None:
         """Persist what the user changed but hasn't saved, before the app pauses or exits."""
-        if getattr(self, "_live_screen", None) is not None:
-            self._flush_summary_notes()
-        self._save_user_settings()
+        self._leaving = True
+        try:
+            if getattr(self, "_live_screen", None) is not None:
+                self._flush_summary_notes()
+            self._save_user_settings()
+        finally:
+            self._leaving = False
 
     def _on_summary_ok(self, *args) -> None:
         self._flush_summary_notes()
@@ -2223,29 +2254,26 @@ class EEGMeditationApp(App):
             App.get_running_app().stop()
             return True
         self._last_back_time = now
-        self._android_toast("Press back again to exit")
+        self._toast("Press back again to exit")
         return True
 
+    _leaving = False  # set while _flush_on_leave runs: nothing the app draws is seen any more
+
     def _toast(self, message: str) -> None:
-        """Short non-blocking confirmation: the native toast on Android, a fading label elsewhere."""
-        if hasattr(sys, "getandroidapilevel"):
+        """Short non-blocking confirmation on the theme's modal panel, above any popup. While the app is leaving it is
+        the native Android toast instead, the one thing still seen then."""
+        if self._leaving and hasattr(sys, "getandroidapilevel"):
             self._android_toast(message)
             return
-        root = getattr(self, "_float_root", None)
-        if root is None:
-            logger.debug(f"toast: {message}")
-            return
-        lbl = ThemedLabel(text=message, font_size=F.BODY, color=POPUP_TEXT, size_hint=(None, None),
-                    padding=(dp(16), dp(10)), pos_hint={"center_x": 0.5, "y": 0.12})
+        lbl = ThemedLabel(text=message, font_size=F.BODY, color=C.TEXT, size_hint=(None, None),
+                          padding=(dp(16), dp(10)))
         lbl.texture_update()
         lbl.size = lbl.texture_size
-        with lbl.canvas.before:
-            Color(0, 0, 0, 0.8)
-            bg = RoundedRectangle(pos=lbl.pos, size=lbl.size, radius=[dp(8)])
-        lbl.bind(pos=lambda w, v: setattr(bg, "pos", v), size=lambda w, v: setattr(bg, "size", v))
-        root.add_widget(lbl)
+        lbl.pos = ((Window.width - lbl.width) / 2, Window.height * 0.12)
+        paint_panel(lbl)
+        Window.add_widget(lbl)
         fade = Animation(opacity=0, duration=0.4)
-        fade.bind(on_complete=lambda *_a: root.remove_widget(lbl))
+        fade.bind(on_complete=lambda *_a: Window.remove_widget(lbl))
         Clock.schedule_once(lambda _dt: fade.start(lbl), 1.6)
 
     def _android_toast(self, message: str) -> None:
@@ -2327,7 +2355,7 @@ class EEGMeditationApp(App):
             btn = StyledButton(
                 text=graph.series_name(key), height=dp(44),
                 bg_color=C.ACCENT if vis else C.BG_CARD,
-                text_color=C.TEXT if vis else C.TEXT_SECONDARY, bold=vis,
+                text_color=None if vis else C.TEXT_SECONDARY, bold=vis,
             )
             btn.bind(on_release=lambda b, k=key: self._toggle_series_row(graph, k, b))
             if is_live and key in FORMULA_KEYS:
@@ -2344,13 +2372,8 @@ class EEGMeditationApp(App):
                 rows.append(row)
             else:
                 rows.append(btn)
-        # Neutral outlined Close — a green fill (PRIMARY) collided with the
-        # green "selected" pills (ACCENT) on the green palettes.
-        close_btn = StyledButton(
-            text="Close", height=dp(44),
-            outline=True, bg_color=C.TEXT_SECONDARY,
-            text_color=C.TEXT, bg_pressed=C.BG_CARD,
-        )
+        # Neutral, not a fill: a green Close (PRIMARY) collided with the green "selected" pills on the green palettes.
+        close_btn = cancel_button("Close", height=dp(44))
         popup = make_scroll_popup("Graph series", rows, footer=close_btn)
         close_btn.bind(on_release=lambda *_a: popup.dismiss())
         popup.bind(on_dismiss=lambda *_a: self._persist_graph_series(graph))
@@ -2368,7 +2391,7 @@ class EEGMeditationApp(App):
             self._assign_saved_to_slot(slot_idx, entry)
             vis = self._live_screen.graph.is_visible(FORMULA_KEYS[slot_idx])
             toggle_btn.bg_color = C.ACCENT if vis else C.BG_CARD
-            toggle_btn.text_color = C.TEXT if vis else C.TEXT_SECONDARY
+            toggle_btn.text_color = None if vis else C.TEXT_SECONDARY
             toggle_btn.bold = vis
 
         rows = []
@@ -2386,10 +2409,7 @@ class EEGMeditationApp(App):
                 )
                 row_btn.bind(on_release=lambda _b, e=entry: _choose(e))
                 rows.append(row_btn)
-        cancel_btn = StyledButton(
-            text="Cancel", height=dp(44),
-            bg_color=C.PRIMARY, bg_pressed=C.PRIMARY_DIM,
-        )
+        cancel_btn = cancel_button(height=dp(44))
         inner_popup = make_scroll_popup("Choose saved formula", rows, footer=cancel_btn, width_hint=0.8)
         cancel_btn.bind(on_release=lambda *_a: inner_popup.dismiss())
         inner_popup.open()
@@ -2406,7 +2426,7 @@ class EEGMeditationApp(App):
         self._refresh_fullscreen_legend()
         vis = graph.is_visible(key)
         btn.bg_color = C.ACCENT if vis else C.BG_CARD
-        btn.text_color = C.TEXT if vis else C.TEXT_SECONDARY
+        btn.text_color = None if vis else C.TEXT_SECONDARY
         btn.bold = vis
 
     def _refresh_fullscreen_legend(self) -> None:
@@ -2795,7 +2815,7 @@ class EEGMeditationApp(App):
     def _confirm_action(self, title, message, ok_text, on_ok, ok_color=None, on_cancel=None) -> None:
         """on_cancel runs on every close that isn't OK: Cancel, a tap outside, or Android back."""
         ok_btn = StyledButton(text=ok_text, bg_color=ok_color or C.ACCENT)
-        cancel_btn = StyledButton(text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_MUTED)
+        cancel_btn = cancel_button()
         popup = make_message_popup(title, message, [ok_btn, cancel_btn])
         decided = []  # one outcome only: Kivy still delivers taps while the popup fades out
 
@@ -3345,21 +3365,19 @@ class EEGMeditationApp(App):
 
 
         content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
-        chooser = FileChooserListView(
+        chooser = ThemedFileChooser(
             path=os.path.dirname(APP.DB_PATH),
             filters=["*.db"],
             size_hint_y=0.85,
         )
         btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
         ok = StyledButton(text="Restore", bg_color=C.PRIMARY)
-        cancel = StyledButton(
-            text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_MUTED,
-        )
+        cancel = cancel_button()
         btn_row.add_widget(ok)
         btn_row.add_widget(cancel)
         content.add_widget(chooser)
         content.add_widget(btn_row)
-        popup = Popup(title="Pick a backup", content=content, size_hint=(0.9, 0.9))
+        popup = ThemedPopup(title="Pick a backup", content=content, size_hint=(0.9, 0.9))
 
         def _do_pick(*_a):
             if not chooser.selection:
@@ -3451,17 +3469,9 @@ class EEGMeditationApp(App):
         is shut down at that point, so the only way forward is a real relaunch."""
         if getattr(self, "_relaunch_popup", None) is not None:
             return
-        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
-        content.add_widget(ThemedLabel(
-            text="Database restored.\n\nThe app will now exit — please relaunch.",
-            halign="center", valign="middle", color=POPUP_TEXT,
-        ))
         ok = StyledButton(text="OK", bg_color=C.ACCENT)
-        content.add_widget(ok)
-        popup = Popup(
-            title="Restore complete", content=content,
-            size_hint=(0.8, 0.4), auto_dismiss=False,
-        )
+        popup = make_message_popup("Restore complete", "Database restored.\n\nThe app will now exit — please relaunch.",
+                                   [ok], width_hint=0.8, auto_dismiss=False)
         self._relaunch_popup = popup
 
         def _quit(*_a):
@@ -3476,7 +3486,7 @@ class EEGMeditationApp(App):
 
 
         content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
-        chooser = FileChooserListView(
+        chooser = ThemedFileChooser(
             path=os.path.dirname(APP.DB_PATH),
             filters=["*.db"],
             size_hint_y=0.7,
@@ -3489,14 +3499,13 @@ class EEGMeditationApp(App):
         )
         btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
         ok = StyledButton(text="Save", bg_color=C.ACCENT)
-        cancel = StyledButton(text="Cancel", bg_color=C.BG_CARD,
-                              text_color=C.TEXT_MUTED)
+        cancel = cancel_button()
         btn_row.add_widget(ok)
         btn_row.add_widget(cancel)
         content.add_widget(chooser)
         content.add_widget(name_input)
         content.add_widget(btn_row)
-        popup = Popup(title="Save backup", content=content, size_hint=(0.9, 0.9))
+        popup = ThemedPopup(title="Save backup", content=content, size_hint=(0.9, 0.9))
 
         def _do_save(*_a):
             target = os.path.join(chooser.path, name_input.text.strip())
@@ -3687,7 +3696,8 @@ class EEGMeditationApp(App):
             lambda v: setattr(ss, "marker_hotkey", v))
         add("stats_view_mode", STR, lambda: getattr(ls, "_stats_mode", "live"),
             self._apply_stats_mode)
-        add("theme", STR, lambda: C.theme_name, C.set_theme)
+        # Its default is the seed, not the startup profile's theme the UI was built in.
+        settings.append(theme_setting(self._theme_seed))
 
         self._settings_store = SettingsStore(self._db, settings)
 

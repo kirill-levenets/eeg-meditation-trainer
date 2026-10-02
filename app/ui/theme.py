@@ -22,8 +22,10 @@ from kivy.properties import (
     NumericProperty,
     StringProperty,
 )
+from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
@@ -93,14 +95,14 @@ def make_scroll_popup(title, rows, footer=None, *, width_hint=0.85, row_h=None,
     n = (est_rows if est_rows is not None else len(rows)) + (1 if footer is not None else 0)
     content_h = n * (row_h + S.GAP_SM) + dp(90)  # rows + title bar + padding chrome
     height = min(content_h, Window.height * max_height_hint)
-    return Popup(title=title, content=body, size_hint=(width_hint, None),
-                 height=height, auto_dismiss=auto_dismiss)
+    return ThemedPopup(title=title, content=body, size_hint=(width_hint, None),
+                       height=height, auto_dismiss=auto_dismiss)
 
 
-def make_message_popup(title, message, buttons, *, color=None, width_hint=0.85):
+def make_message_popup(title, message, buttons, *, width_hint=0.85, auto_dismiss=True):
     """Message modal with a row of `buttons`; the text wraps and scrolls, so no line is ever silently dropped."""
-    label = Label(text=message, font_size=F.BODY, halign="center", valign="top",
-                  color=color or POPUP_TEXT, size_hint_y=None)
+    label = ThemedLabel(text=message, font_size=F.BODY, halign="center", valign="top",
+                        color=C.TEXT, size_hint_y=None)
     # Measure the wrapped text now so the popup sizes to it (capped; beyond that it scrolls).
     label.text_size = (Window.width * width_hint - dp(48), None)
     label.texture_update()
@@ -111,7 +113,7 @@ def make_message_popup(title, message, buttons, *, color=None, width_hint=0.85):
     for btn in buttons:
         btn_row.add_widget(btn)
     return make_scroll_popup(title, [label], footer=btn_row, width_hint=width_hint,
-                             est_rows=int(label.height // dp(44)) + 1)
+                             est_rows=int(label.height // dp(44)) + 1, auto_dismiss=auto_dismiss)
 
 
 class Icons:
@@ -317,6 +319,8 @@ _LIGHT_GREEN = {
     "DEVICE_IDLE": (0.30, 0.60, 0.45, 1.0),
 }
 
+DEFAULT_THEME = "Dark Blue"
+
 THEMES = {
     "Dark Blue": _DARK_BLUE,
     "Dark Green": _DARK_GREEN,
@@ -346,7 +350,7 @@ class _ColorAccessor:
         self._listeners: dict = {}  # key -> getter of the callback, in registration order; a dead widget's entry drops itself
         self._roles = weakref.WeakKeyDictionary()  # themed widget -> {colour property: role}
         self._canvas_colors = weakref.WeakSet()
-        self._use("Dark Blue")
+        self._use(DEFAULT_THEME)
 
     def _use(self, name: str) -> None:
         self._palette = {role: ThemeColor(rgba, role) for role, rgba in THEMES[name].items()}
@@ -423,10 +427,6 @@ class _ColorAccessor:
 
 C = _ColorAccessor()
 
-# Kivy's Popup chrome (background + title) is always dark and is never themed,
-# so popup body text must stay light in every palette — the themed C.TEXT is
-# dark in the light themes and renders dark-on-dark (invisible).
-POPUP_TEXT = (0.93, 0.93, 0.95, 1.0)
 
 
 # ── Typography ───────────────────────────────────────────────────────
@@ -464,6 +464,7 @@ class S:
 _THEMED_PROPS = frozenset({
     "color", "disabled_color", "bg_color", "bg_pressed", "text_color", "background_color",
     "foreground_color", "cursor_color", "hint_text_color", "selection_color",
+    "title_color", "separator_color", "overlay_color",
 })
 
 
@@ -488,7 +489,13 @@ class ThemedLabel(ThemedMixin, Label):
 
 
 class ThemedTextInput(ThemedMixin, TextInput):
-    """The app's TextInput: its colours follow theme switches."""
+    """The app's TextInput: the theme's input colours by default, following theme switches."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("foreground_color", C.TEXT)
+        kwargs.setdefault("background_color", C.BG_INPUT)
+        kwargs.setdefault("cursor_color", C.PRIMARY)
+        super().__init__(**kwargs)
 
 
 class ThemedColor(Color):
@@ -549,7 +556,7 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
     """Rounded button with press color shift. Replaces default Kivy Button.
 
     Usage:
-        btn = StyledButton(text="Start", bg_color=C.ACCENT, text_color=C.TEXT)
+        btn = StyledButton(text="Start", bg_color=C.ACCENT)  # glyph colour: AUTO for the fill
         btn.bind(on_release=callback)
     """
     text = StringProperty("")
@@ -570,9 +577,9 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
         kwargs.setdefault("height", S.BTN_H)
         kwargs.setdefault("bg_color", C.PRIMARY)
         vertical = kwargs.pop("vertical", False)
-        # AUTO until a text_color is given (here or later): the light or dark glyph with the higher contrast against
-        # THIS button's bg, re-picked whenever the bg changes. A palette text_color (C.X) follows the theme through
-        # ThemedMixin; any other is fixed.
+        # AUTO while text_color is None (the default; assign None to return to it): the light or dark glyph with the
+        # higher contrast against THIS button's bg, re-picked whenever the bg changes. A palette text_color (C.X)
+        # follows the theme through ThemedMixin; any other is fixed. A selected state is an accent fill + AUTO.
         self._auto_text = True
         super().__init__(**kwargs)
         self._apply_role_text()
@@ -709,7 +716,9 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
 
     def __setattr__(self, name, value):
         if name == "text_color":
-            self._auto_text = False
+            self._auto_text = value is None
+            if value is None:
+                value = readable_fg(self.bg_color)
         super().__setattr__(name, value)
 
     def _apply_role_text(self):
@@ -797,12 +806,35 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
         self._redraw()
 
 
+def cancel_button(text: str = "Cancel", **kwargs) -> StyledButton:
+    """A modal's dismiss button (Cancel / Close): one neutral look in every popup, never mistaken for its action."""
+    kwargs.setdefault("bg_color", C.BG_CARD)
+    kwargs.setdefault("text_color", C.TEXT_SECONDARY)
+    return StyledButton(text=text, **kwargs)
+
+
 def fill_background(widget, color: ThemeColor) -> None:
     """Paint widget's background with a palette colour that follows its size, position and theme switches."""
     with widget.canvas.before:
         ThemedColor(color)
         rect = Rectangle(size=widget.size, pos=widget.pos)
     widget.bind(size=lambda _w, v: setattr(rect, "size", v), pos=lambda _w, v: setattr(rect, "pos", v))
+
+
+def paint_panel(widget) -> None:
+    """The modal panel every popup and in-screen modal card is drawn on: the screen colour, rounded, with a border
+    edge, following the widget's size, position and theme switches."""
+    with widget.canvas.before:
+        ThemedColor(C.BG)
+        fill = RoundedRectangle(pos=widget.pos, size=widget.size, radius=[S.RADIUS])
+        ThemedColor(C.BORDER)
+        edge = Line(rounded_rectangle=[widget.x, widget.y, widget.width, widget.height, S.RADIUS], width=1)
+
+    def _place(*_a):
+        fill.pos, fill.size = widget.pos, widget.size
+        edge.rounded_rectangle = [widget.x, widget.y, widget.width, widget.height, S.RADIUS]
+
+    widget.bind(pos=_place, size=_place)
 
 
 class Card(ThemedMixin, BoxLayout):
@@ -858,6 +890,106 @@ class SectionLabel(ThemedLabel):
         kwargs.setdefault("valign", "middle")
         super().__init__(**kwargs)
         self.bind(size=self.setter("text_size"))
+
+
+_MODAL_PAD = dp(12)  # Popup's frame padding, so in-screen modal cards match it
+
+
+class ModalScrim(AnchorLayout):
+    """The dimmed backdrop of an in-screen modal (session end, connection, loading): centres its ModalPanel and,
+    like a popup's overlay, keeps taps from reaching the screen behind."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        fill_background(self, C.BG_OVERLAY)
+
+    def on_touch_down(self, touch):
+        if self.width <= 0 or self.height <= 0:  # collapsed (hidden): collide_point is still true at its origin
+            return False
+        return super().on_touch_down(touch) or self.collide_point(*touch.pos)
+
+
+class ModalPanel(BoxLayout):
+    """An in-screen modal card (session end, connection, loading): the popup panel, title and separator, so it looks
+    like every ThemedPopup. Its height follows its content."""
+
+    def __init__(self, title: str = "", **kwargs):
+        kwargs.setdefault("orientation", "vertical")
+        kwargs.setdefault("size_hint_y", None)
+        kwargs.setdefault("padding", _MODAL_PAD)
+        kwargs.setdefault("spacing", S.GAP)
+        super().__init__(**kwargs)
+        self.bind(minimum_height=self.setter("height"))
+        paint_panel(self)
+        self.title_label = None
+        if title:
+            self.title_label = ThemedLabel(text=title, font_size=F.H3, bold=True, color=C.TEXT, halign="center",
+                                           size_hint_y=None)
+            self.title_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)),
+                                  texture_size=lambda w, v: setattr(w, "height", v[1] + dp(8)))
+            self.add_widget(self.title_label)
+            self.add_widget(Divider())
+
+
+class ThemedPopup(ThemedMixin, Popup):
+    """The app's popup: the modal panel (paint_panel) over the theme's dimmed screen, with a bold centred title."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("background", "")
+        kwargs.setdefault("background_color", (0, 0, 0, 0))  # paint_panel draws the window behind Popup's frame
+        kwargs.setdefault("overlay_color", C.BG_OVERLAY)
+        kwargs.setdefault("title_color", C.TEXT)
+        kwargs.setdefault("title_size", F.H3)
+        kwargs.setdefault("title_align", "center")
+        kwargs.setdefault("separator_color", C.BORDER)
+        kwargs.setdefault("separator_height", dp(1))
+        fit = ((kwargs.get("size_hint", (1, 1))[1] is None or ("size_hint_y" in kwargs and kwargs["size_hint_y"] is None))
+               and "height" not in kwargs)
+        super().__init__(**kwargs)
+        frame = self._container.parent  # the title / separator / content grid from Popup's kv rule
+        paint_panel(frame)
+        self._title_label = next(w for w in frame.children if isinstance(w, Label))
+        self._title_label.bold = True
+        self._fits_content = fit
+        self._fitted = None  # the content whose minimum_height the height follows
+        if fit:  # size_hint=(w, None) and no height: as tall as the content, capped like make_scroll_popup
+            self._title_label.bind(height=self._fit_height)
+            self.bind(content=self._fit_height)
+            self.bind(on_open=lambda *_a: Window.bind(size=self._fit_height),
+                      on_dismiss=lambda *_a: Window.unbind(size=self._fit_height))
+            self._fit_height()
+
+    def _fit_height(self, *_a) -> None:
+        content = self.content
+        if content is not self._fitted:
+            if self._fitted is not None:
+                self._fitted.unbind(minimum_height=self._fit_height)
+            self._fitted = content
+            if content is not None and "minimum_height" in content.properties():
+                content.bind(minimum_height=self._fit_height)
+        if content is None or "minimum_height" not in content.properties():
+            return
+        frame = self._container.parent
+        chrome = frame.padding[1] + frame.padding[3] + self._title_label.height + dp(4)  # + the separator row
+        self.height = min(content.minimum_height + chrome, Window.height * 0.85)
+
+
+class ThemedFileChooser(FileChooserListView):
+    """FileChooserListView with its entries in the theme's text colour (Kivy draws them white, unreadable on a light
+    panel)."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        for w in self.walk(restrict=True):  # the Name / Size column headers
+            if isinstance(w, Label):
+                w.color = C.TEXT_SECONDARY
+
+    def on_entry_added(self, node, parent=None):
+        node.color_selected = (*C.PRIMARY[:3], 0.3)  # Kivy's fixed grey made a selected name dark on dark
+        for w in node.walk(restrict=True):
+            if isinstance(w, Label):
+                w.color = C.TEXT
+        super().on_entry_added(node, parent)
 
 
 class ThemedAccordion(BoxLayout):
@@ -1069,7 +1201,7 @@ class PresetRow(BoxLayout):
         self._default_bg = C.BG_CARD
         self._default_text = C.TEXT_MUTED
         self._selected_bg = C.ACCENT
-        self._selected_text = C.TEXT
+        self._selected_text = None  # AUTO on the accent fill
 
         for label, value in items:
             btn = StyledButton(

@@ -7,10 +7,7 @@ from kivy.clock import Clock
 from kivy.core.window import Keyboard, Window
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.button import Button
 from kivy.uix.checkbox import CheckBox
-from kivy.uix.filechooser import FileChooserListView
-from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.slider import Slider
@@ -28,7 +25,10 @@ from app.ui.theme import (
     S,
     StyledButton,
     ThemedAccordion,
+    ThemedFileChooser,
     ThemedLabel,
+    ThemedPopup,
+    cancel_button,
     fill_background,
     make_message_popup,
     make_scroll_popup,
@@ -62,19 +62,19 @@ _REWARD_SOURCE_OPTIONS: tuple[tuple[str, str], ...] = (
 
 def open_audio_file_chooser(on_select: Callable[[str], None], title: str = "Choose audio file") -> None:
     """Shared audio-file picker popup for the timer sound, global feedback, and per-segment feedback."""
-    chooser = FileChooserListView(
+    chooser = ThemedFileChooser(
         path=os.path.expanduser("~"),
         filters=["*.wav", "*.mp3", "*.ogg", "*.flac", "*.m4a"],
     )
     content = BoxLayout(orientation="vertical", spacing=dp(8))
     content.add_widget(chooser)
     btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
-    btn_cancel = Button(text="Cancel", font_size=F.SMALL)
-    btn_select = Button(text="Select", font_size=F.SMALL, background_color=(0.2, 0.6, 0.3, 1.0))
+    btn_cancel = cancel_button(font_size=F.SMALL)
+    btn_select = StyledButton(text="Select", font_size=F.SMALL, bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM)
     btn_row.add_widget(btn_cancel)
     btn_row.add_widget(btn_select)
     content.add_widget(btn_row)
-    popup = Popup(title=title, content=content, size_hint=(0.9, 0.85))
+    popup = ThemedPopup(title=title, content=content, size_hint=(0.9, 0.85))
 
     def _on_select(*_):
         sel = chooser.selection
@@ -256,7 +256,6 @@ class SettingsScreen(Screen):
                 size_hint_y=None,
                 height=dp(28),
                 bg_color=C.ACCENT if mode_key == "simple" else C.BG_CARD,
-                text_color=C.TEXT,
             )
             btn._mode_key = mode_key
             btn.bind(on_release=self._on_program_mode_pressed)
@@ -737,7 +736,6 @@ class SettingsScreen(Screen):
                 size_hint_y=None,
                 height=dp(28),
                 bg_color=C.ACCENT if slot_idx == 0 else C.BG_CARD,
-                text_color=C.TEXT,
             )
             btn._slot_idx = slot_idx
             btn.bind(on_release=self._on_audio_formula_index_pressed)
@@ -1310,6 +1308,7 @@ class SettingsScreen(Screen):
         self._waiting_for_hotkey = True
         self._marker_hotkey_btn.text = "Press a key..."
         self._marker_hotkey_btn.bg_color = C.WARM
+        self._marker_hotkey_btn.text_color = None  # AUTO on the capture fill
         Window.bind(on_key_down=self._on_hotkey_capture)
 
     def _on_hotkey_capture(self, window, key, scancode, codepoint, modifiers) -> bool:
@@ -1327,6 +1326,7 @@ class SettingsScreen(Screen):
             self._marker_hotkey_btn.text = f"key {key}"
             self._marker_hotkey = str(key)
         self._marker_hotkey_btn.bg_color = C.BG_CARD
+        self._marker_hotkey_btn.text_color = C.PRIMARY
         return True
 
     def _on_marker_hotkey_clear(self, *args) -> None:
@@ -1337,6 +1337,7 @@ class SettingsScreen(Screen):
         self._marker_hotkey = ""
         self._marker_hotkey_btn.text = "(none)"
         self._marker_hotkey_btn.bg_color = C.BG_CARD
+        self._marker_hotkey_btn.text_color = C.PRIMARY
 
     @property
     def marker_hotkey(self) -> str:
@@ -1735,14 +1736,15 @@ class SettingsScreen(Screen):
 
     def _open_segment_end_sound_picker(self, row, btn) -> None:
         """Pick a segment's end cue: Chime (default) or Warble."""
-        box = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
-        popup = Popup(title="Segment end cue", content=box, size_hint=(0.8, 0.4))
+        rows = []
         for label, value in (("Chime", None), ("Warble", "warble")):
-            b = StyledButton(text=label, font_size=F.SMALL, size_hint_y=None, height=dp(44),
-                             bg_color=C.BG_CARD, text_color=C.TEXT)
+            b = StyledButton(text=label, font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT)
             b.bind(on_release=lambda *_a, v=value: (
                 self._set_segment_end_sound(row, btn, v), popup.dismiss()))
-            box.add_widget(b)
+            rows.append(b)
+        cancel = cancel_button()
+        popup = make_scroll_popup("Segment end cue", rows, footer=cancel, width_hint=0.8)
+        cancel.bind(on_release=lambda *_a: popup.dismiss())
         popup.open()
 
     def _feedback_seg_label(self, value) -> str:
@@ -1762,22 +1764,22 @@ class SettingsScreen(Screen):
 
     def _open_segment_feedback_picker(self, row, btn) -> None:
         """Pick a segment's feedback source: Default (inherit global), Rain, Tone, or a custom file."""
-        box = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
-        popup = Popup(title="Segment feedback sound", content=box, size_hint=(0.8, 0.6))
+        rows = []
         for label, value in (("Default (use global)", ""), ("Rain", "noise"), ("Tone", "tone")):
-            b = StyledButton(text=label, font_size=F.SMALL, size_hint_y=None, height=dp(44),
-                             bg_color=C.BG_CARD, text_color=C.TEXT)
+            b = StyledButton(text=label, font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT)
             b.bind(on_release=lambda *_a, v=value: (
                 self._set_segment_feedback(row, btn, v), popup.dismiss()))
-            box.add_widget(b)
-        custom = StyledButton(text="Custom file...", font_size=F.SMALL, size_hint_y=None,
-                              height=dp(44), bg_color=C.BG_CARD, text_color=C.TEXT)
+            rows.append(b)
+        custom = StyledButton(text="Custom file...", font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT)
         custom.bind(on_release=lambda *_a: (
             popup.dismiss(),
             open_audio_file_chooser(
                 lambda p: self._set_segment_feedback(row, btn, p),
                 title="Segment feedback sound file")))
-        box.add_widget(custom)
+        rows.append(custom)
+        cancel = cancel_button()
+        popup = make_scroll_popup("Segment feedback sound", rows, footer=cancel, width_hint=0.8)
+        cancel.bind(on_release=lambda *_a: popup.dismiss())
         popup.open()
 
     def _formula_label(self, formula) -> str:
@@ -1786,19 +1788,6 @@ class SettingsScreen(Screen):
         return _PROGRAM_BUILTIN_LABELS.get(formula, str(formula))
 
     def _open_segment_formula_picker(self, row) -> None:
-        content = BoxLayout(
-            orientation="vertical", spacing=S.GAP_SM, padding=S.GAP_SM,
-        )
-        scroll = ScrollView()
-        listbox = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(2))
-        listbox.bind(minimum_height=listbox.setter("height"))
-
-        popup = Popup(
-            title="Choose metric / formula",
-            content=content,
-            size_hint=(0.9, 0.85),
-        )
-
         def _choose(value):
             row._formula = value
             row._formula_btn.text = self._formula_label(value)
@@ -1806,36 +1795,26 @@ class SettingsScreen(Screen):
             self._emit_program_changed()
             popup.dismiss()
 
+        rows = []
         for key, label in PROGRAM_BUILTIN_FORMULAS:
-            btn = StyledButton(
-                text=label, font_size=F.BODY, bg_color=C.BG_CARD,
-                text_color=C.TEXT, size_hint_y=None, height=dp(40),
-            )
+            btn = StyledButton(text=label, font_size=F.BODY, bg_color=C.BG_CARD, text_color=C.TEXT, height=dp(40))
             btn.bind(on_release=lambda *_a, k=key: _choose(k))
-            listbox.add_widget(btn)
+            rows.append(btn)
 
         for entry in self._saved_formulas_cache:
             name = entry.get("name") or entry.get("formula", "")[:30]
             formula = entry.get("formula", "")
-            btn = StyledButton(
-                text=name, font_size=F.BODY, bg_color=C.PRIMARY_DIM,
-                text_color=C.TEXT, size_hint_y=None, height=dp(40),
-            )
+            btn = StyledButton(text=name, font_size=F.BODY, bg_color=C.PRIMARY_DIM, height=dp(40))
             btn.bind(
                 on_release=lambda *_a, n=name, f=formula: _choose(
                     {"name": n, "formula": f}
                 )
             )
-            listbox.add_widget(btn)
+            rows.append(btn)
 
-        scroll.add_widget(listbox)
-        content.add_widget(scroll)
-        cancel_btn = StyledButton(
-            text="Cancel", font_size=F.BODY, bg_color=C.BG_CARD,
-            text_color=C.TEXT, size_hint_y=None, height=dp(40),
-        )
-        cancel_btn.bind(on_release=popup.dismiss)
-        content.add_widget(cancel_btn)
+        cancel = cancel_button(font_size=F.BODY, height=dp(40))
+        popup = make_scroll_popup("Choose metric / formula", rows, footer=cancel, row_h=dp(40))
+        cancel.bind(on_release=lambda *_a: popup.dismiss())
         popup.open()
 
     def _on_segment_edited(self, *_args) -> None:
@@ -2066,7 +2045,7 @@ class SettingsScreen(Screen):
         for name, btn in self._theme_buttons.items():
             active = name == C.theme_name
             btn.bg_color = C.PRIMARY if active else C.BG_CARD
-            btn.text_color = C.TEXT if active else C.TEXT_SECONDARY
+            btn.text_color = None if active else C.TEXT_SECONDARY
             btn.bold = active
 
     def set_theme_callback(self, callback: Callable) -> None:
@@ -2136,7 +2115,7 @@ class SettingsScreen(Screen):
         message = (f'Delete profile "{user_name}"?\n\n'
                    f"Its {n} session(s) and all its settings will be permanently deleted.\n"
                    "This cannot be undone.")
-        btn_cancel = StyledButton(text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY)
+        btn_cancel = cancel_button()
         btn_confirm = StyledButton(text="Delete", icon=Icons.DELETE, bg_color=C.DANGER)
         popup = make_message_popup("Confirm Delete", message, [btn_cancel, btn_confirm])
         btn_cancel.bind(on_release=popup.dismiss)

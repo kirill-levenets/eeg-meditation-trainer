@@ -10,6 +10,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.screenmanager import Screen
+from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
 from app.ui.raw_eeg_screen import (
@@ -23,10 +24,13 @@ from app.ui.theme import (
     Card,
     F,
     Icons,
+    ModalPanel,
+    ModalScrim,
     S,
     StyledButton,
     ThemedLabel,
     ThemedTextInput,
+    cancel_button,
     fill_background,
     format_duration,
     make_scroll_popup,
@@ -545,28 +549,15 @@ class LiveSessionScreen(Screen):
 
         float_root.add_widget(root)
 
-        # ── Session summary overlay ──
-        self._summary = BoxLayout(
-            orientation="vertical",
+        # ── Session summary overlay: the theme's modal panel over the dimmed screen, like every popup ──
+        self._summary = ModalScrim(
             size_hint=(1, 1),
             pos_hint={"x": 0, "y": 0},
-            padding=[dp(20), dp(8)],  # tight vertically: the card must fit a landscape phone (~390 dp)
-            spacing=S.GAP,
+            padding=[dp(20), dp(8)],  # tight vertically: a landscape phone has ~310 dp above the bottom nav
         )
-        fill_background(self._summary, C.BG_OVERLAY)
-
-        self._summary.add_widget(BoxLayout(size_hint_y=0.1))  # top spacer
-
         # Every ending saves the session; the title says so (an extra row overflowed landscape phones).
-        self._summary_title = ThemedLabel(
-            text="Session saved",
-            font_size=F.H1,
-            bold=True,
-            color=C.ACCENT,
-            size_hint_y=None,
-            height=dp(32),
-        )
-        self._summary.add_widget(self._summary_title)
+        summary_panel = ModalPanel(title="Session saved")
+        self._summary_title = summary_panel.title_label
 
         # Stats card
         self._summary_stats_card = Card(
@@ -599,19 +590,11 @@ class LiveSessionScreen(Screen):
             row.add_widget(val)
             self._summary_stats_card.add_widget(row)
             self._summary_stats[key] = val
-        self._summary.add_widget(self._summary_stats_card)
-
-        # Quick notes
-        notes_lbl = ThemedLabel(
-            text="Quick notes:", font_size=F.BODY, color=C.TEXT_SECONDARY,
-            size_hint_y=None, height=dp(22), halign="left",
-        )
-        notes_lbl.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
-        self._summary.add_widget(notes_lbl)
+        summary_panel.add_widget(self._summary_stats_card)
 
         notes_row = BoxLayout(size_hint_y=None, height=dp(70), spacing=S.GAP)
         self._summary_notes = ThemedTextInput(
-            hint_text="How was the session?",
+            hint_text="Quick notes: how was the session?",
             multiline=True,
             font_size=F.BODY,
             foreground_color=C.TEXT,
@@ -624,7 +607,7 @@ class LiveSessionScreen(Screen):
         )
         notes_row.add_widget(self._summary_notes)
         notes_row.add_widget(self._summary_save_notes_btn)
-        self._summary.add_widget(notes_row)
+        summary_panel.add_widget(notes_row)
 
         # Delete is low-emphasis and kept apart from OK: it is the one destructive action here.
         summary_btns = BoxLayout(size_hint_y=None, height=S.BTN_H, spacing=S.GAP)
@@ -641,25 +624,32 @@ class LiveSessionScreen(Screen):
         summary_btns.add_widget(self._summary_delete_btn)
         summary_btns.add_widget(Widget())
         summary_btns.add_widget(self._summary_ok_btn)
-        self._summary.add_widget(summary_btns)
+        summary_panel.add_widget(summary_btns)
+        # As tall as the card when it fits, else the space there is, scrolling the rest: like every popup's cap.
+        summary_scroll = ScrollView(size_hint=(1, None), do_scroll_x=False)
+        summary_scroll.add_widget(summary_panel)
+        self._summary_scroll = summary_scroll
 
-        self._summary.add_widget(BoxLayout(size_hint_y=0.1))  # bottom spacer
+        def _fit_summary(*_a):
+            pad = self._summary.padding
+            summary_scroll.height = min(summary_panel.height, max(0, self._summary.height - pad[1] - pad[3]))
+
+        summary_panel.bind(height=_fit_summary)
+        self._summary.bind(height=_fit_summary, padding=_fit_summary)
+        self._summary.add_widget(summary_scroll)
 
         # Shown by attaching, hidden by detaching: invisible attached buttons swallowed Start/Stop taps.
         self._summary_host = float_root
         self._summary_session_id = None
 
-        # ── Connection overlay ──
-        self._overlay = BoxLayout(
-            orientation="vertical",
+        # ── Connection overlay: the theme's modal panel over the dimmed screen ──
+        self._overlay = ModalScrim(
             size_hint=(1, 1),
             pos_hint={"x": 0, "y": 0},
-            padding=dp(40),
-            spacing=S.GAP_LG,
+            padding=dp(20),
         )
-        fill_background(self._overlay, C.BG_OVERLAY)
-
-        self._overlay.add_widget(BoxLayout(size_hint_y=1))
+        overlay_panel = ModalPanel(size_hint_x=0.85, spacing=S.GAP_LG)
+        self._overlay_panel = overlay_panel
 
         self._overlay_status = ThemedLabel(
             text="",
@@ -671,7 +661,7 @@ class LiveSessionScreen(Screen):
             height=dp(100),
         )
         self._overlay_status.bind(size=self._overlay_status.setter("text_size"))
-        self._overlay.add_widget(self._overlay_status)
+        overlay_panel.add_widget(self._overlay_status)
 
         self._overlay_dots = ThemedLabel(
             text="",
@@ -680,7 +670,7 @@ class LiveSessionScreen(Screen):
             size_hint_y=None,
             height=dp(30),
         )
-        self._overlay.add_widget(self._overlay_dots)
+        overlay_panel.add_widget(self._overlay_dots)
 
         self._overlay_cancel_btn = StyledButton(
             text="Cancel",
@@ -690,7 +680,7 @@ class LiveSessionScreen(Screen):
             bg_color=C.DANGER,
             bg_pressed=C.DANGER_DIM,
         )
-        self._overlay.add_widget(self._overlay_cancel_btn)
+        overlay_panel.add_widget(self._overlay_cancel_btn)
 
         self._overlay_retry_btn = StyledButton(
             text="Retry",
@@ -699,12 +689,8 @@ class LiveSessionScreen(Screen):
             pos_hint={"center_x": 0.5},
             bg_color=C.PRIMARY,
             bg_pressed=C.PRIMARY_DIM,
-            opacity=0,
-            disabled=True,
-        )
-        self._overlay.add_widget(self._overlay_retry_btn)
-
-        self._overlay.add_widget(BoxLayout(size_hint_y=1))
+        )  # attached only on failure (show_overlay_retry): a hidden one left a blank slot in the card
+        self._overlay.add_widget(overlay_panel)
 
         self._overlay.opacity = 0
         self._overlay.size_hint = (0, 0)
@@ -752,13 +738,13 @@ class LiveSessionScreen(Screen):
         if view == "raw":
             self._graph_area.add_widget(self._raw_container)
             self._btn_view_raw.bg_color = C.PRIMARY
-            self._btn_view_raw.text_color = C.TEXT
+            self._btn_view_raw.text_color = None
             self._btn_view_metrics.bg_color = C.BG_CARD
             self._btn_view_metrics.text_color = C.TEXT_SECONDARY
         else:
             self._graph_area.add_widget(self._metrics_container)
             self._btn_view_metrics.bg_color = C.PRIMARY
-            self._btn_view_metrics.text_color = C.TEXT
+            self._btn_view_metrics.text_color = None
             self._btn_view_raw.bg_color = C.BG_CARD
             self._btn_view_raw.text_color = C.TEXT_SECONDARY
         self._active_view = view
@@ -968,7 +954,7 @@ class LiveSessionScreen(Screen):
             btn = StyledButton(
                 text=label,
                 bg_color=C.ACCENT if is_active else C.BG_CARD,
-                text_color=C.TEXT if is_active else C.TEXT_SECONDARY,
+                text_color=None if is_active else C.TEXT_SECONDARY,
                 bold=is_active,
                 size_hint_y=None,
                 height=dp(44),
@@ -1032,14 +1018,13 @@ class LiveSessionScreen(Screen):
                 btn = StyledButton(
                     text=name,
                     bg_color=C.ACCENT if is_current else C.BG_CARD,
-                    text_color=C.TEXT if is_current else C.TEXT_SECONDARY,
+                    text_color=None if is_current else C.TEXT_SECONDARY,
                     bold=is_current,
                     size_hint_y=None, height=dp(44),
                 )
                 btn.bind(on_release=lambda _b, idx=i: _pick(idx))
                 rows.append(btn)
-        cancel = StyledButton(text="Cancel", bg_color=C.PRIMARY,
-                              size_hint_y=None, height=dp(44))
+        cancel = cancel_button(size_hint_y=None, height=dp(44))
         popup = make_scroll_popup("Choose program", rows, footer=cancel)
         cancel.bind(on_release=lambda *_a: popup.dismiss())
         popup.open()
@@ -1077,8 +1062,8 @@ class LiveSessionScreen(Screen):
         self._overlay_status.text = text
         self._overlay.opacity = 1
         self._overlay.size_hint = (1, 1)
-        self._overlay_retry_btn.opacity = 0
-        self._overlay_retry_btn.disabled = True
+        if self._overlay_retry_btn.parent is not None:
+            self._overlay_panel.remove_widget(self._overlay_retry_btn)
         self._overlay_cancel_btn.text = "Cancel"
         self._dot_count = 0
         if self._dot_event:
@@ -1103,8 +1088,8 @@ class LiveSessionScreen(Screen):
     def show_overlay_retry(self, text: str) -> None:
         """Show failure state with Retry button."""
         self._overlay_status.text = text
-        self._overlay_retry_btn.opacity = 1
-        self._overlay_retry_btn.disabled = False
+        if self._overlay_retry_btn.parent is None:
+            self._overlay_panel.add_widget(self._overlay_retry_btn)
         self._overlay_cancel_btn.text = "Close"
         if self._dot_event:
             self._dot_event.cancel()
@@ -1160,6 +1145,7 @@ class LiveSessionScreen(Screen):
         sham90 = stats.get("time_shamatha_90", 0)
         self._summary_stats["time_shamatha_90"].text = format_duration(sham90)
         self._summary_notes.text = ""
+        self._summary_scroll.scroll_y = 1  # each card opens at its title, wherever the last one was scrolled to
         if self._summary.parent is None:
             self._summary_host.add_widget(self._summary)
 

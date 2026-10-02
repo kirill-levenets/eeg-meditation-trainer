@@ -30,6 +30,7 @@ from app.ui.theme import (
     S,
     StyledButton,
     ThemedLabel,
+    cancel_button,
     fill_background,
     format_duration,
     make_message_popup,
@@ -495,7 +496,6 @@ class HistoryScreen(Screen):
         self._btn_calendar = StyledButton(
             text="Cal",
             bg_color=C.PRIMARY,
-            text_color=C.TEXT,
             font_size=F.SMALL,
             bold=True,
         )
@@ -706,7 +706,7 @@ class HistoryScreen(Screen):
             self._graph_wrap.add_widget(self._heatmap)
             self._graph_row.height = cal_h
             self._btn_calendar.bg_color = C.PRIMARY
-            self._btn_calendar.text_color = C.TEXT
+            self._btn_calendar.text_color = None
             self._btn_calendar.bold = True
             self._btn_bars.bg_color = C.BG_CARD
             self._btn_bars.text_color = C.TEXT_SECONDARY
@@ -719,7 +719,7 @@ class HistoryScreen(Screen):
             self._btn_calendar.text_color = C.TEXT_SECONDARY
             self._btn_calendar.bold = False
             self._btn_bars.bg_color = C.PRIMARY
-            self._btn_bars.text_color = C.TEXT
+            self._btn_bars.text_color = None
             self._btn_bars.bold = True
         # Force the synchronous layout cascade so the user sees the new
         # geometry immediately.
@@ -1077,7 +1077,7 @@ class HistoryScreen(Screen):
 
     def _confirm_delete(self, session_id: int, name: str) -> None:
         """Show a delete confirmation popup."""
-        btn_cancel = StyledButton(text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY)
+        btn_cancel = cancel_button()
         btn_confirm = StyledButton(text="Delete", bg_color=C.DANGER)
         popup = make_message_popup("Confirm Delete", f'Delete session\n"{name}"?',
                                    [btn_cancel, btn_confirm])

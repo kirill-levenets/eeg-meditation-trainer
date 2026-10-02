@@ -7,9 +7,7 @@ from typing import Optional
 
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.gridlayout import GridLayout
-from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.slider import Slider
@@ -25,8 +23,11 @@ from app.ui.theme import (
     Icons,
     S,
     StyledButton,
+    ThemedFileChooser,
     ThemedLabel,
+    ThemedPopup,
     ThemedTextInput,
+    cancel_button,
     fill_background,
     format_duration,
     make_message_popup,
@@ -397,7 +398,7 @@ class DiaryScreen(Screen):
         graph_tabs = BoxLayout(size_hint_y=None, height=dp(30), spacing=S.GAP_SM)
         self._tab_metrics_btn = StyledButton(
             text="Metrics", font_size=F.SMALL, height=dp(30),
-            bg_color=C.PRIMARY, text_color=C.TEXT,
+            bg_color=C.PRIMARY,
         )
         self._tab_raw_btn = StyledButton(
             text="Raw EEG", font_size=F.SMALL, height=dp(30),
@@ -552,7 +553,7 @@ class DiaryScreen(Screen):
                     child.bg_color = C.BG_CARD
                     child.text_color = C.TEXT_SECONDARY
             btn.bg_color = C.PRIMARY_DIM
-            btn.text_color = C.TEXT
+            btn.text_color = None
             self._on_session_select(sid)
 
     def set_band_totals(self, totals: dict[str, float]) -> None:
@@ -695,7 +696,7 @@ class DiaryScreen(Screen):
         ]:
             if key == tab:
                 btn.bg_color = C.PRIMARY
-                btn.text_color = C.TEXT
+                btn.text_color = None
             else:
                 btn.bg_color = C.BG_CARD
                 btn.text_color = C.TEXT_SECONDARY
@@ -778,7 +779,7 @@ class DiaryScreen(Screen):
             content.add_widget(loc_label)
         else:
             # Desktop: FileChooser
-            self._file_chooser = FileChooserListView(
+            self._file_chooser = ThemedFileChooser(
                 path=os.path.expanduser("~"),
                 dirselect=True,
                 filters=["!.*"],
@@ -802,9 +803,7 @@ class DiaryScreen(Screen):
         content.add_widget(name_row)
 
         btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=S.GAP)
-        btn_cancel = StyledButton(
-            text="Cancel", bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY, height=dp(40),
-        )
+        btn_cancel = cancel_button(height=dp(40))
         btn_save = StyledButton(
             text="Save", icon=Icons.CHECK, bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM,
             height=dp(40),
@@ -813,10 +812,10 @@ class DiaryScreen(Screen):
         btn_row.add_widget(btn_save)
         content.add_widget(btn_row)
 
-        popup = Popup(
+        popup = ThemedPopup(
             title="Export CSV",
             content=content,
-            size_hint=(0.9, 0.4) if is_android else (0.95, 0.85),
+            size_hint=(0.9, None) if is_android else (0.95, 0.85),
         )
         self._export_popup = popup
         btn_cancel.bind(on_release=popup.dismiss)
@@ -895,8 +894,7 @@ class DiaryScreen(Screen):
         """Show a result popup after export attempt."""
         tone = C.ACCENT if success else C.DANGER
         btn_ok = StyledButton(text="OK", bg_color=tone)
-        popup = make_message_popup("Export Complete" if success else "Export Failed", message,
-                                   [btn_ok], color=tone)
+        popup = make_message_popup("Export Complete" if success else "Export Failed", message, [btn_ok])
         btn_ok.bind(on_release=popup.dismiss)
         self._export_result_popup = popup
         popup.open()
