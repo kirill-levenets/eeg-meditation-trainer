@@ -1458,6 +1458,7 @@ class EEGMeditationApp(App):
         self._audio.prepare_feedback(fb_sources, fb_initial)
         self._audio.set_reward(reward_id)
         self._live_screen.set_training_series(None)  # set on first segment crossing
+        self._scored_key = None  # a simple session marks its scored series on the first tick
         self._shamatha_active = False
         self._shamatha_streak = 0
         self._shamatha_threshold = threshold
@@ -1653,7 +1654,7 @@ class EEGMeditationApp(App):
         user unlocks — the main-thread Clock (and `_on_main`) is paused while
         locked, so deferring the save risked losing the whole session.
         """
-        stats = self._session_manager.stop(reason=reason)
+        stats = self._with_score(self._session_manager.stop(reason=reason))
         # Keep real BT connection alive between sessions to avoid EBUSY on reconnect.
         # Only the mock stream gets stopped here; real stream stays connected.
         if APP.USE_MOCK_DEVICE:
@@ -2039,8 +2040,13 @@ class EEGMeditationApp(App):
                     ev.push_variables(formula_vars)
                     metrics[key] = ev.evaluate(formula_vars)
 
-        if getattr(self, "_timer_mode", "simple") == "program":
+        # Program vs simple is what the session started as, not the Settings toggle (editable mid-session).
+        # The drive key is resolved once: the tick scores and sounds the same metric.
+        if self._session_program_active:
             self._apply_program_tick(metrics, raw_sample)
+            drive_key, _scored = self._audio_drive_key(), None
+        else:
+            drive_key = _scored = self._score_on_drive_key()
 
         self._session_manager.add_metric(metrics)
         # Merge raw + computed for full storage
@@ -2049,7 +2055,7 @@ class EEGMeditationApp(App):
         self._raw_buffer.append(raw_sample)
 
         # Audio is thread-safe — update directly
-        self._audio.update(metrics.get(self._audio_drive_key(), 0))
+        self._audio.update(metrics.get(drive_key, 0))
         if self._tick_count > 10:
             self._audio.update_sinking(metrics.get("sinking", 0))
             self._audio.update_subtle_distraction(metrics.get("subtle_distraction", 0))
@@ -2096,13 +2102,15 @@ class EEGMeditationApp(App):
 
         def _ui_update(
             m=metrics, rs=raw_sample, ef=_elapsed_fmt, mp=_marker_pending,
-            sa=self._shamatha_active, sc=_sham_changed,
+            sa=self._shamatha_active, sc=_sham_changed, sk=self._scored_mark(_scored),
         ) -> None:
             self._live_screen.graph.add_point(m)
             self._live_screen.update_stats(m)
             self._live_screen.update_state(m.get("state", "Neutral"))
             if sc:
                 self._live_screen.set_shamatha(sa)
+            if sk is not None:
+                self._live_screen.set_training_series(sk)
             self._live_screen.update_timer(ef)
             self._live_screen.add_raw_sample(rs)
             if mp:
@@ -2163,7 +2171,7 @@ class EEGMeditationApp(App):
         ticks_per_flush = int(APP.FLUSH_INTERVAL_SECONDS / APP.UPDATE_FREQUENCY)
         if self._flush_counter >= ticks_per_flush and self._metrics_buffer:
             if self._current_session_id is None:
-                stats_partial = self._session_manager.compute_statistics()
+                stats_partial = self._with_score(self._session_manager.compute_statistics())
                 self._current_session_id = self._db.save_session(
                     stats_partial, user_id=self._current_user_id,
                     session_name=self._make_session_name(),
@@ -2471,6 +2479,32 @@ class EEGMeditationApp(App):
         """The user's persisted audio metric; program-formula slots are program-only
         and must never persist as a baseline (outside a program they read 0 -> max noise)."""
         return "shamatha_score" if (not key or key in PROGRAM_FORMULA_KEYS) else key
+
+    _scored_key: Optional[str] = None  # the series the live legend marks as scored in a simple session
+
+    def _score_on_drive_key(self) -> str:
+        """A simple session is scored on the metric that drives the feedback sound (#51), so they can't diverge."""
+        key = self._audio_drive_key()
+        self._session_manager.set_active_goal(key)
+        return key
+
+    def _scored_mark(self, key: Optional[str]) -> Optional[str]:
+        """The scored series for the legend to mark this tick: only on a change, and only while the UI is showing (a
+        change during a screen lock is picked up by the first tick after it)."""
+        if key is None or key == self._scored_key or self._is_paused:
+            return None
+        self._scored_key = key
+        return key
+
+    def _with_score(self, stats: dict) -> dict:
+        """Stats to save, with the scored metric's display name; a program session is scored per segment."""
+        if not stats:
+            return stats
+        if self._session_program_json():
+            return {**stats, "score_metric_key": "program",
+                    "score_metric_name": self._session_program_name or "Program", "avg_score": None}
+        key = stats.get("score_metric_key") or self._audio_drive_key()  # no scored tick yet: what it would score
+        return {**stats, "score_metric_key": key, "score_metric_name": self._live_screen.graph.series_name(key)}
 
     def _audio_drive_key(self) -> str:
         """Metric key feeding noise. A running program drives it from the active segment's

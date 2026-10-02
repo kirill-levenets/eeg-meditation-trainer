@@ -12,11 +12,11 @@ def _make_manager():
     mgr._pause_start = 0.0
     mgr._total_paused = 0.0
     mgr._metrics_accumulator = []
-    mgr._time_above_threshold = 0.0
+    mgr._reset_scoring()
     mgr._time_shamatha_90 = 0.0
-    mgr._current_streak = 0.0
-    mgr._longest_streak = 0.0
     mgr._threshold_used = 50
+    mgr._active_metric = "meditation_score"
+    mgr._active_target = None
     return mgr
 
 
