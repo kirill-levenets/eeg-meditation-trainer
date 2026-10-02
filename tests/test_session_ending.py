@@ -223,6 +223,34 @@ def test_ok_on_the_confirm_does_not_run_on_cancel():
     on_cancel.assert_not_called()
 
 
+def _tap(btn):
+    btn.dispatch("on_release")
+    for _ in range(3):
+        EventLoop.idle()
+
+
+def test_a_second_ok_during_the_fade_out_does_not_run_the_action_again():
+    from app.ui.theme import StyledButton
+    on_ok, on_cancel = MagicMock(), MagicMock()
+    popup = _open_confirm(on_ok, on_cancel)
+    ok = next(w for w in popup.walk() if isinstance(w, StyledButton) and w.text == "Stop")
+    ok.dispatch("on_release")
+    ok.dispatch("on_release")  # Kivy still delivers taps while the popup fades out
+    on_ok.assert_called_once()
+    on_cancel.assert_not_called()
+
+
+def test_ok_right_after_cancel_does_not_run_the_action():
+    from app.ui.theme import StyledButton
+    on_ok, on_cancel = MagicMock(), MagicMock()
+    popup = _open_confirm(on_ok, on_cancel)
+    buttons = {w.text: w for w in popup.walk() if isinstance(w, StyledButton)}
+    buttons["Cancel"].dispatch("on_release")
+    buttons["Stop"].dispatch("on_release")
+    on_cancel.assert_called_once()
+    on_ok.assert_not_called()
+
+
 def test_cancelling_stop_restarts_the_tick_only_for_a_running_session():
     app = _app()
     app._start_tick_thread = MagicMock()

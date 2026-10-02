@@ -1,13 +1,14 @@
 """DB backup and restore — file-level operations isolated from UI."""
 
+import errno
 import os
 import re
-import shutil
 import sqlite3
 import tempfile
 from datetime import datetime
 
 from app.logger import logger
+from app.storage.fileops import copy_file_atomic, discard_file
 
 # Path separators, whitespace, control characters and the characters FAT/exFAT storage rejects.
 _UNSAFE_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|\s\x00-\x1f]+')
@@ -44,10 +45,7 @@ def online_backup_to_tempfile(db) -> str:
         finally:
             target_conn.close()
     except BaseException:
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            logger.warning(f"Could not remove temp backup {tmp_path}")
+        discard_file(tmp_path)
         raise
     return tmp_path
 
@@ -58,15 +56,15 @@ def make_backup(db, target_path: str) -> None:
     Uses SQLite's online backup API so concurrent writes from the live
     DB don't corrupt the result.
     """
+    if os.path.realpath(target_path) == os.path.realpath(db._db_path):
+        # Replacing the live file would leave the open connection writing to the swapped-out copy.
+        raise OSError(errno.EINVAL, "Choose another name: this is the app's live database", target_path)
     os.makedirs(os.path.dirname(target_path) or ".", exist_ok=True)
     tmp_path = online_backup_to_tempfile(db)
     try:
-        shutil.copy2(tmp_path, target_path)
+        copy_file_atomic(tmp_path, target_path)
     finally:
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            logger.warning(f"Could not remove temp backup {tmp_path}")
+        discard_file(tmp_path)
     logger.info(f"Backup written: {target_path}")
 
 
@@ -105,5 +103,8 @@ def restore_backup(source_path: str, target_path: str) -> None:
     ok, msg = validate_backup(source_path)
     if not ok:
         raise BackupValidationError(msg)
-    shutil.copy2(source_path, target_path)
+    copy_file_atomic(source_path, target_path)
+    # SQLite would replay the replaced DB's leftover WAL onto the restored file.
+    for suffix in ("-wal", "-shm"):
+        discard_file(target_path + suffix)
     logger.info(f"Restored {source_path} -> {target_path}")

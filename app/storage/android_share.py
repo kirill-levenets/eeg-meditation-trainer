@@ -8,10 +8,10 @@ On non-Android platforms, falls back to simple file copy.
 """
 
 import os
-import shutil
 import sys
 
 from app.logger import logger
+from app.storage.fileops import copy_file_atomic
 
 _IS_ANDROID = hasattr(sys, "getandroidapilevel")
 
@@ -47,7 +47,7 @@ def _copy_desktop(private_path: str, subfolder: str, display_name: str) -> str |
     docs = os.path.join(os.path.expanduser("~"), "Documents", subfolder)
     os.makedirs(docs, exist_ok=True)
     dest = os.path.join(docs, display_name)
-    shutil.copy2(private_path, dest)
+    copy_file_atomic(private_path, dest)
     logger.info(f"Copied to: {dest}")
     return dest
 

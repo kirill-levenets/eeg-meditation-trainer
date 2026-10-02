@@ -88,7 +88,7 @@ def test_maybe_migrate_desktop_db_queues_error_on_permission_error(monkeypatch, 
     def boom(src, dst):
         raise PermissionError("denied")
 
-    monkeypatch.setattr("shutil.copy2", boom)
+    monkeypatch.setattr("app.config.copy_file_atomic", boom)
     _maybe_migrate_desktop_db(new_dir=str(new_dir), legacy_dirs=[str(old_dir)])
 
     assert len(crash_handler._PRE_APP_ERRORS) == 1
