@@ -129,7 +129,7 @@ class TestGraphAwareScrollViewGuard(unittest.TestCase):
     def test_touch_above_viewport_not_stolen(self):
         sv, g = self._make(viewport_h=200)
         touch = _FakeTouch(200, 300)  # outside viewport (y>200) but inside graph (y<600)
-        self.assertIs(sv._graph_under_touch(touch), g)  # graph bounds DO cover it
+        self.assertIsNone(sv._graph_under_touch(touch))  # the graph's bounds cover it, but it isn't drawn there
         sv.on_touch_down(touch)
         self.assertEqual(len(g._grabbed_touches), 0)  # ...but the guard stops the graph grabbing it
 
@@ -211,7 +211,7 @@ class TestGraphTouchScroll(unittest.TestCase):
         )
 
     def test_touch_fields_initialized(self):
-        self.assertEqual(self.graph._touch_start_x, 0.0)
+        self.assertEqual(self.graph._grabbed_touches, {})
         self.assertEqual(self.graph._touch_start_offset, 0)
 
     def test_touch_down_outside_ignored(self):
