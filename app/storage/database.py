@@ -20,6 +20,7 @@ class _NullCursor:
     """Empty cursor returned by the null connection while shutting down."""
 
     lastrowid = None
+    rowcount = 0
 
     def fetchone(self):
         return None
@@ -387,14 +388,18 @@ class DatabaseManager:
         return {b: float(row[i] or 0.0) for i, b in enumerate(bands)}
 
     def update_session_notes(
-        self, session_id: int, notes: str = "", tags: str = "", mood_rating: int = 0
-    ) -> None:
-        """Update diary fields for a session."""
+        self, session_id: int, notes: str | None = None, tags: str | None = None,
+        mood_rating: int | None = None,
+    ) -> bool:
+        """Update only the diary fields given (others keep their value); True if the session row was updated."""
+        fields = {"notes": notes, "tags": tags, "mood_rating": mood_rating}
+        given = {k: v for k, v in fields.items() if v is not None}
+        if not given:
+            return False
+        assignments = ", ".join(f"{k} = ?" for k in given)
         with self._write() as c:
-            c.execute(
-                "UPDATE sessions SET notes = ?, tags = ?, mood_rating = ? WHERE id = ?",
-                (notes, tags, mood_rating, session_id),
-            )
+            cur = c.execute(f"UPDATE sessions SET {assignments} WHERE id = ?", (*given.values(), session_id))
+        return cur.rowcount > 0
 
     def get_sessions_in_range(self, start_date: str, end_date: str) -> list[dict]:
         """Return sessions within a date range for analytics."""
@@ -785,7 +790,7 @@ if __name__ == "__main__":
          "meditation_score": 70, "shamatha_score": 45, "stability": 4, "calmness": 3.5},
     ])
 
-    db.update_session_notes(sid, notes="Good session", tags="morning,calm", mood_rating=4)
+    print(f"Notes saved: {db.update_session_notes(sid, notes='Good session', tags='morning,calm', mood_rating=4)}")
 
     sessions = db.get_all_sessions(user_id=uid)
     print(f"User sessions: {len(sessions)}")

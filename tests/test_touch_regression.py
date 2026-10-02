@@ -78,6 +78,24 @@ def find_collapsed_disabled_with_children(root):
     return bad
 
 
+def find_invisible_interactive(root):
+    """[widget, ...] — enabled interactive widgets that are attached, have a real size, but are invisible (own or an
+    ancestor's opacity ~0): Kivy still dispatches touches to them, so they take taps meant for what is drawn there."""
+    bad = []
+    for w in root.walk():
+        if not isinstance(w, INTERACTIVE) or w.disabled or w.width <= 0 or w.height <= 0:
+            continue
+        node, invisible = w, False
+        while node is not None and node is not root.parent:
+            if node.opacity < 0.01:
+                invisible = True
+                break
+            node = node.parent
+        if invisible:
+            bad.append(w)
+    return bad
+
+
 def _describe(dead):
     return "; ".join(
         f"{type(c).__name__}('{getattr(c, 'text', '')}') blocked by "
@@ -110,3 +128,32 @@ def test_audio_source_pickers_no_dead_zones():
                          + ", ".join(type(w).__name__ for w in bad))
     finally:
         _unmount(s)
+
+
+def test_hidden_session_end_card_leaves_no_invisible_buttons_and_start_stop_take_taps():
+    # The hidden card used to stay attached at opacity 0 with fixed-size buttons on screen: Delete sat over Start and
+    # OK over Stop, so Start/Stop responded to about one tap in ten.
+    from kivy.tests.common import UnitTestTouch
+
+    from app.ui.live_session import LiveSessionScreen
+    screen = LiveSessionScreen()
+    _mount(screen)
+    try:
+        assert find_invisible_interactive(screen) == []
+        screen.show_summary(1, {"duration": 60})
+        _pump()
+        screen.hide_summary()
+        _pump()
+        assert find_invisible_interactive(screen) == []
+        for btn in (screen._btn_start, screen._btn_stop):
+            btn.disabled = False
+            hits = []
+            btn.bind(on_release=lambda *_a, b=btn: hits.append(b))
+            x, y = btn.to_window(btn.center_x, btn.center_y)
+            touch = UnitTestTouch(x, y)
+            touch.touch_down()
+            touch.touch_up()
+            _pump(2)
+            assert hits == [btn], f"a tap on {btn.text!r} did not reach it"
+    finally:
+        _unmount(screen)

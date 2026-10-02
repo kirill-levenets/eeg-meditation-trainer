@@ -851,6 +851,7 @@ class AudioEngine:
         except Exception:
             logger.exception("Failed to release timer gong player")
         self._timer_bell_player = None
+        logger.info("Timer gong released")
 
     def stop_timer_bell(self) -> None:
         """Stop the timer-end bell early (e.g. user pressed a summary button).
