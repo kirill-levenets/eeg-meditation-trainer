@@ -43,8 +43,8 @@ def _heatmap_rgba(value: float) -> tuple:
 
 
 _HEATMAP_TEXELS = 64
-# Mesh indices are 16-bit: 16000 quads × 4 vertices stays under 65536.
-_MESH_MAX_QUADS = 16000
+# Kivy caps a Mesh at 65535 indices (GLES2, enforced on Android): 6 per quad, so 10922 quads (43688 vertices).
+_MESH_MAX_QUADS = 65535 // 6
 
 
 def _fill_heatmap_texture(texture) -> None:

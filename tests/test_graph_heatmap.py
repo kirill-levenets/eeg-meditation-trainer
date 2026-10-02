@@ -77,13 +77,25 @@ def test_heatmap_is_one_mesh_whatever_the_point_count():
         assert kinds.count(Mesh) == 1, len(values)
 
 
-def test_long_heatmap_splits_at_the_16bit_index_limit(monkeypatch):
+def test_long_heatmap_splits_into_meshes_of_at_most_max_quads(monkeypatch):
     monkeypatch.setattr(rg, "_MESH_MAX_QUADS", 100)
     g = _graph(RAMP)
     g._draw()
     meshes = [c for c in g._gfx.children if isinstance(c, Mesh)]
     assert len(meshes) == -(-(2 * len(RAMP) - 1) // 100)
     assert all(len(m.vertices) <= 100 * 16 for m in meshes)
+
+
+def test_a_long_session_zoomed_out_draws_within_the_gles2_index_limit():
+    # Zooming out over a ~50-minute session (6000 points at 2 Hz) built one Mesh of ~12000 quads = 72000 indices;
+    # Kivy raises past 65535 indices (GLES2), and the app crashed mid-session.
+    values = RAMP * 20
+    g = _graph(values)
+    g._draw()
+    meshes = [c for c in g._gfx.children if isinstance(c, Mesh)]
+    assert len(meshes) >= 2
+    assert all(len(m.indices) <= 65535 for m in meshes)
+    assert sum(len(m.vertices) for m in meshes) == (2 * len(values) - 1) * 16  # every quad drawn
 
 
 def test_heatmap_stroke_matches_a_plain_line_and_is_coloured_by_value(tmp_path):
