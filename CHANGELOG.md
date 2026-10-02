@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Graphs stay fast however far you zoom out** (#70): zoomed out, a graph now draws at most a few points per pixel column (each column's first, last, highest and lowest value), so zooming out over a long session — or the Raw EEG view zoomed out over its last minute — no longer makes every redraw slower. The line looks the same: no peak or dip is dropped.
 - **All pop-up windows share one look, in your theme**: confirmations (Stop, Delete), the graph series and duration pickers, the program and formula pickers, file pickers, the profile chooser, info and diagnostic dialogs, the session-end card, the connection and loading screens and the "Notes saved" message are now the same rounded panel in the current theme's colours — they used to be always dark, whatever the theme. Every Cancel/Close button looks the same, and windows size to their content instead of leaving half the window empty. The quick-notes field on the session-end card now says "Quick notes" inside it (the separate label made the card too tall for a landscape phone).
 - **Android app is half the size**: the APK no longer carries the build tools' Python environment by mistake. APK 39 MB → 20 MB; the app files unpacked on the first launch after an install or update 53 MB → 2.4 MB.
 
