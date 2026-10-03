@@ -9,7 +9,6 @@ from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.screenmanager import Screen
-from kivy.uix.scrollview import ScrollView
 from kivy.uix.slider import Slider
 
 from app.config import APP
@@ -151,24 +150,19 @@ FREQ_PREVIEW_SCALES = {
 }
 
 
-class SessionListItem(BoxLayout):
-    """Single row in the session list."""
-
-
 class DiaryScreen(Screen):
-    """Diary & Analytics screen with session list, details, and notes."""
+    """Session detail, opened from History: stats, notes, tags and mood, graphs."""
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.name = "diary"
-        self._on_session_select: Optional[Callable] = None
         self._on_save_notes: Optional[Callable] = None
         self._on_export_csv: Optional[Callable] = None
         self._on_delete_session: Optional[Callable] = None
         self._on_rename_session: Optional[Callable] = None
         self._on_back: Optional[Callable] = None
         self._selected_session_id: Optional[int] = None
-        self._sessions_data: list[dict] = []
+        self._saved_notes_state: tuple[str, str, int] | None = None  # the fields as loaded or last saved
         self._session_formula_series: dict[str, list[float]] = {}
         self._build_ui()
 
@@ -178,31 +172,7 @@ class DiaryScreen(Screen):
         root = BoxLayout(orientation="vertical", padding=S.PAGE_PAD, spacing=S.GAP)
         fill_background(root, C.BG)
 
-        self._title_label = ThemedLabel(
-            text="Session Diary",
-            font_size=F.H1,
-            bold=True,
-            color=C.TEXT,
-            size_hint_y=None,
-            height=dp(36),
-        )
-        root.add_widget(self._title_label)
-
-        # --- Session list (hidden when coming from History) ---
-        self._session_list_layout = BoxLayout(
-            orientation="vertical",
-            size_hint_y=None,
-            spacing=dp(4),
-        )
-        self._session_list_layout.bind(
-            minimum_height=self._session_list_layout.setter("height")
-        )
-        self._session_scroll = ScrollView(size_hint_y=0.4)
-        self._session_scroll.add_widget(self._session_list_layout)
-        root.add_widget(self._session_scroll)
-
-        # --- Detail panel ---
-        detail_scroll = GraphAwareScrollView(size_hint_y=0.6)
+        detail_scroll = GraphAwareScrollView()
         self._detail_layout = BoxLayout(
             orientation="vertical",
             padding=dp(8),
@@ -473,9 +443,6 @@ class DiaryScreen(Screen):
 
         self.add_widget(root)
 
-    def set_session_select_callback(self, callback: Callable) -> None:
-        self._on_session_select = callback
-
     def set_save_notes_callback(self, callback: Callable) -> None:
         self._on_save_notes = callback
 
@@ -492,69 +459,8 @@ class DiaryScreen(Screen):
         self._on_back = callback
 
     def _on_back_pressed(self, *args) -> None:
-        # Restore session list when going back
-        self._show_list_section(True)
         if self._on_back:
             self._on_back()
-
-    def _show_list_section(self, show: bool) -> None:
-        """Show or hide the session list + title, expanding detail to full height."""
-        if show:
-            self._title_label.height = dp(36)
-            self._title_label.opacity = 1
-            self._session_scroll.size_hint_y = 0.4
-            self._session_scroll.opacity = 1
-        else:
-            self._title_label.height = 0
-            self._title_label.opacity = 0
-            self._session_scroll.size_hint_y = 0
-            self._session_scroll.opacity = 0
-
-    def populate_sessions(self, sessions: list[dict]) -> None:
-        """Fill the session list from DB data."""
-        self._sessions_data = sessions
-        self._session_list_layout.clear_widgets()
-
-        if not sessions:
-            lbl = ThemedLabel(
-                text="No sessions yet",
-                font_size=dp(14),
-                color=(0.5, 0.5, 0.5, 1.0),
-                size_hint_y=None,
-                height=dp(40),
-            )
-            self._session_list_layout.add_widget(lbl)
-            return
-
-        C = self._theme_C
-        for s in sessions:
-            btn = StyledButton(
-                text=(
-                    f"#{s['id']}  {s.get('date_time', '')[:16]}  "
-                    f"{format_duration(s.get('duration', 0))}  "
-                    f"Shamatha: {s.get('avg_shamatha', 0):.0f}"
-                ),
-                height=dp(36),
-                font_size=F.SMALL,
-                bg_color=C.BG_CARD,
-                text_color=C.TEXT_SECONDARY,
-                bold=False,
-            )
-            btn.session_id = s["id"]
-            btn.bind(on_release=self._on_session_btn)
-            self._session_list_layout.add_widget(btn)
-
-    def _on_session_btn(self, btn) -> None:
-        C = self._theme_C
-        sid = getattr(btn, "session_id", None)
-        if sid is not None and self._on_session_select:
-            for child in self._session_list_layout.children:
-                if hasattr(child, "session_id") and isinstance(child, StyledButton):
-                    child.bg_color = C.BG_CARD
-                    child.text_color = C.TEXT_SECONDARY
-            btn.bg_color = C.PRIMARY_DIM
-            btn.text_color = None
-            self._on_session_select(sid)
 
     def set_band_totals(self, totals: dict[str, float]) -> None:
         """Populate the per-band session power breakdown."""
@@ -568,10 +474,8 @@ class DiaryScreen(Screen):
         if self.band_view_persist_cb:
             self.band_view_persist_cb(mode, sort_by, descending)
 
-    def show_session_detail(self, session: dict, from_history: bool = True) -> None:
+    def show_session_detail(self, session: dict) -> None:
         """Display detail for a selected session."""
-        if from_history:
-            self._show_list_section(False)
         self._selected_session_id = session.get("id")
         self._detail_title.text = f"Session #{session.get('id', '?')} — {session.get('date_time', '')[:16]}"
 
@@ -587,6 +491,8 @@ class DiaryScreen(Screen):
         self._notes_input.text = session.get("notes", "")
         self._tags_input.text = session.get("tags", "")
         self._mood_slider.value = session.get("mood_rating", 3) or 3
+        # Compared with what the fields show, not the row: an unrated session shows mood 3 and isn't an edit.
+        self._saved_notes_state = self._notes_state()
         session_name = session.get("notes", "").strip()
         if not session_name:
             dt = session.get("date_time", "")[:16]
@@ -733,13 +639,34 @@ class DiaryScreen(Screen):
         ])
 
     def _on_save_pressed(self, *args) -> None:
-        if self._selected_session_id and self._on_save_notes:
-            self._on_save_notes(
-                self._selected_session_id,
-                self._notes_input.text,
-                self._tags_input.text,
-                int(self._mood_slider.value),
-            )
+        notes, tags, mood = self._notes_state()
+        self._save_notes(notes=notes, tags=tags, mood=mood)  # Save keeps what the screen shows, mood included
+
+    def _notes_state(self) -> tuple[str, str, int]:
+        return self._notes_input.text, self._tags_input.text, int(self._mood_slider.value)
+
+    def _changes(self) -> dict:
+        """The fields that differ from what was loaded or last saved: leaving can't rate an unrated session."""
+        saved = self._saved_notes_state or (None, None, None)
+        return {key: now for key, now, then in zip(("notes", "tags", "mood"), self._notes_state(), saved)
+                if now != then}
+
+    def _save_notes(self, **fields) -> None:
+        if self._selected_session_id is None or not self._on_save_notes:
+            return
+        state = self._notes_state()
+        if self._on_save_notes(self._selected_session_id, **fields):
+            self._saved_notes_state = state
+
+    def flush_notes(self) -> None:
+        """Save the fields that changed since they were loaded or last saved."""
+        changes = self._changes()
+        if changes:
+            self._save_notes(**changes)
+
+    def on_pre_leave(self, *args) -> None:
+        # Every way out of the detail (Back, a bottom-nav tab, Android back) is a screen change: none loses an edit.
+        self.flush_notes()
 
     @staticmethod
     def _get_android_export_dir() -> str:

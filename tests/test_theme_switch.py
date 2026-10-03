@@ -405,8 +405,6 @@ def test_session_detail_repaints(old, new):
         ])
         screen.set_band_totals({"delta": 3.0, "theta": 2.0, "alpha1": 4.0, "alpha2": 3.5,
                                 "beta1": 1.0, "beta2": 0.8, "gamma1": 0.3, "gamma2": 0.2})
-        screen.populate_sessions([{"id": 1, "date_time": "2026-09-20T10:00:00", "duration": 600, "avg_shamatha": 55},
-                                  {"id": 2, "date_time": "2026-09-21T10:00:00", "duration": 900, "avg_shamatha": 60}])
         _pump()
         C.set_theme(new)
         _assert_repainted(screen, old, new, "metrics tab")

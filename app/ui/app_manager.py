@@ -975,7 +975,6 @@ class EEGMeditationApp(App):
         self._session_program_name: str = ""  # name of the loaded/saved active program
         self._timer_mode: str = "simple"
 
-        self._diary_screen.set_session_select_callback(self._on_session_select)
         self._diary_screen.set_save_notes_callback(self._on_save_notes)
         self._diary_screen.set_export_csv_callback(self._on_export_csv)
         self._diary_screen.set_delete_session_callback(self._on_delete_session)
@@ -1255,8 +1254,6 @@ class EEGMeditationApp(App):
         self._sm.current = name
         if name == "history":
             self._refresh_history()
-        elif name == "diary":
-            self._refresh_diary()
         elif name == "profile":
             self._refresh_profile()
         elif name == "live_session":
@@ -1584,6 +1581,10 @@ class EEGMeditationApp(App):
         try:
             if getattr(self, "_live_screen", None) is not None:
                 self._flush_summary_notes()
+            # Only on screen: leaving it already saved (or reported a failed save), and a retry on every pause
+            # repeated the error, e.g. for a session deleted since.
+            if getattr(self, "_diary_screen", None) is not None and self._sm.current == self._diary_screen.name:
+                self._diary_screen.flush_notes()
             self._save_user_settings()
         finally:
             self._leaving = False
@@ -1617,7 +1618,8 @@ class EEGMeditationApp(App):
         if not saved:
             report_soft_error("notes_save_failed", f"Notes for session {session_id} were not saved: no such session")
             return False
-        self._mark_history_dirty()
+        # In place: a reload would start the History list from the top.
+        self._history_screen.update_session(session_id, notes=notes, tags=tags, mood_rating=mood)
         self._toast("Notes saved")
         logger.info(f"Notes saved for session {session_id}")
         return True
@@ -3094,11 +3096,9 @@ class EEGMeditationApp(App):
         back = getattr(self, "_session_detail_back", "history")
         self._switch_screen(back)
 
-    def _on_save_notes(
-        self, session_id: int, notes: str, tags: str, mood: int
-    ) -> None:
-        if self._save_session_notes(session_id, notes=notes, tags=tags, mood=mood):
-            self._refresh_diary()
+    def _on_save_notes(self, session_id: int, notes: str | None = None, tags: str | None = None,
+                       mood: int | None = None) -> bool:
+        return self._save_session_notes(session_id, notes=notes, tags=tags, mood=mood)
 
     def _on_delete_session(self, session_id: int) -> None:
         self._delete_sessions([session_id])
@@ -3192,10 +3192,6 @@ class EEGMeditationApp(App):
 
     def _mark_history_dirty(self) -> None:
         self._history_dirty = True
-
-    def _refresh_diary(self) -> None:
-        sessions = sessions_for_view(self._db, self._current_user_id, self._view_all_users)
-        self._diary_screen.populate_sessions(sessions)
 
     def _on_user_switch(self, user_id: Optional[int]) -> None:
         """Switch the active user profile."""

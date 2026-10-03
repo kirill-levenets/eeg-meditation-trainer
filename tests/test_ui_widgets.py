@@ -298,24 +298,6 @@ class TestDiaryScreenUI(unittest.TestCase):
         screen._switch_graph_tab("metrics")
         self.assertEqual(screen._active_graph_tab, "metrics")
 
-    def test_selected_session_highlight(self):
-        from app.ui.diary_screen import DiaryScreen
-        from app.ui.theme import C
-        screen = DiaryScreen()
-        sessions = [
-            {"id": 1, "date_time": "2025-01-01", "duration": 60,
-             "avg_shamatha": 50},
-            {"id": 2, "date_time": "2025-01-02", "duration": 120,
-             "avg_shamatha": 60},
-        ]
-        screen.populate_sessions(sessions)
-        btns = [c for c in screen._session_list_layout.children
-                if hasattr(c, "session_id")]
-        self.assertEqual(len(btns), 2)
-        # All start with card background color
-        for b in btns:
-            self.assertEqual(list(b.bg_color), list(C.BG_CARD))
-
     def test_set_metrics_threshold(self):
         from app.ui.diary_screen import DiaryScreen
         screen = DiaryScreen()

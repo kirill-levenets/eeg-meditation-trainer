@@ -191,7 +191,7 @@ def _app() -> EEGMeditationApp:
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._db = MagicMock()
     app._history_screen = MagicMock()
-    for name in ("_refresh_history", "_refresh_diary", "show_loading"):
+    for name in ("_refresh_history", "show_loading"):
         setattr(app, name, MagicMock())
     return app
 
@@ -202,7 +202,6 @@ def test_deleting_sessions_removes_their_rows_and_rebuilds_nothing():
     assert [c.args[0] for c in app._db.delete_session.call_args_list] == [7, 9]
     app._history_screen.remove_sessions.assert_called_once_with([7, 9])
     app._refresh_history.assert_not_called()
-    app._refresh_diary.assert_not_called()
     app.show_loading.assert_not_called()
 
 
@@ -211,7 +210,6 @@ def test_renaming_a_session_rebuilds_nothing():
     app._on_rename_session(7, "Evening sit")
     app._db.rename_session.assert_called_once_with(7, "Evening sit")
     app._refresh_history.assert_not_called()
-    app._refresh_diary.assert_not_called()
 
 
 
