@@ -97,7 +97,7 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
 
     # Persistence deps (used by the timer-expiry path via _persist_session_data).
     app._db = MagicMock()
-    app._db.save_session.return_value = 42
+    app._db.checkpoint_session.return_value = 42
     app._current_session_id = None
     app._current_user_id = 1
     app._make_session_name = MagicMock(return_value="sess")
@@ -451,8 +451,8 @@ def test_timer_expiry_persists_on_tick_thread():
 
     # Persisted synchronously even though _on_main (MagicMock) never ran.
     app._session_manager.stop.assert_called_once_with(reason="timer")
-    app._db.save_session.assert_called_once()
-    app._db.save_metrics_batch.assert_called_once()
+    app._db.checkpoint_session.assert_called_once()  # the row and the buffered ticks, in one transaction
+    assert {"shamatha_score": 1.0} in app._db.checkpoint_session.call_args.args[2]
     # Noise is silenced with the non-blocking mute() on the tick thread...
     app._audio.mute.assert_called_once()
     # ...the gong rings here too (on the tick thread → through the lock)...
@@ -490,7 +490,7 @@ def test_timer_expiry_leaves_no_live_pipeline_behind():
 
 def test_timer_expiry_persists_before_muting_audio():
     # Order matters: the save must complete before any audio call, so a hang
-    # in audio teardown can never cost the session. Assert save_session is
+    # in audio teardown can never cost the session. Assert the checkpoint is
     # invoked and precedes mute() in call order.
     app = _make_tick_app(is_paused=True)
     app._timer_state.tick.return_value = True
@@ -500,7 +500,7 @@ def test_timer_expiry_persists_before_muting_audio():
 
     calls = []
     app._session_manager.stop.side_effect = lambda **k: calls.append("stop") or {"duration": 100}
-    app._db.save_session.side_effect = lambda *a, **k: calls.append("save") or 42
+    app._db.checkpoint_session.side_effect = lambda *a, **k: calls.append("save") or 42
     app._audio.mute.side_effect = lambda: calls.append("mute")
 
     _drive_tick(app, _raw_sample(), _metrics())
@@ -517,9 +517,9 @@ def test_timer_expiry_updates_existing_session_row():
 
     _drive_tick(app, _raw_sample(), _metrics())
 
-    app._db.update_session.assert_called_once()
-    (sid, stats), kwargs = app._db.update_session.call_args
+    app._db.checkpoint_session.assert_called_once()
+    (sid, stats, _ticks), kwargs = app._db.checkpoint_session.call_args
     assert sid == 7 and stats["duration"] == 100  # the row the earlier flush created, with the final stats
     assert stats["score_metric_key"] == app._audio_drive_key() and "score_metric_name" in stats  # #51
-    assert kwargs == {"custom_formulas": "[]", "session_program": "", "engine_version": MetricsEngine.ENGINE_VERSION}
-    app._db.save_session.assert_not_called()
+    assert (kwargs["custom_formulas"], kwargs["session_program"], kwargs["engine_version"]) == (
+        "[]", "", MetricsEngine.ENGINE_VERSION)

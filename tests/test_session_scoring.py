@@ -252,7 +252,7 @@ def test_the_partial_flush_saves_the_scored_metric():
                                                             "avg_score": 52.5}
     app._live_screen.graph.series_name.return_value = "Shamatha"
     _drive_tick(app, _raw_sample(), _metrics())
-    stats = app._db.save_session.call_args.args[0]
+    stats = app._db.checkpoint_session.call_args.args[1]
     assert (stats["score_metric_key"], stats["score_metric_name"], stats["avg_score"]) == (
         "shamatha_score", "Shamatha", 52.5)
 

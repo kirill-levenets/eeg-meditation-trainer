@@ -1581,6 +1581,7 @@ class EEGMeditationApp(App):
         try:
             if getattr(self, "_live_screen", None) is not None:
                 self._flush_summary_notes()
+            self._checkpoint_or_report()  # Android may kill a backgrounded app before the next 60 s checkpoint
             # Only on screen: leaving it already saved (or reported a failed save), and a retry on every pause
             # repeated the error, e.g. for a session deleted since.
             if getattr(self, "_diary_screen", None) is not None and self._sm.current == self._diary_screen.name:
@@ -1588,6 +1589,14 @@ class EEGMeditationApp(App):
             self._save_user_settings()
         finally:
             self._leaving = False
+
+    def _checkpoint_or_report(self) -> None:
+        """Checkpoint a running session where a failure must not stop what follows (leaving the app, a backup)."""
+        try:
+            self._checkpoint_session()
+        except Exception as exc:
+            logger.exception("Session checkpoint failed")
+            report_soft_error("session_checkpoint_failed", f"The running session could not be saved: {exc}")
 
     def _on_summary_ok(self, *args) -> None:
         self._flush_summary_notes()
@@ -1683,27 +1692,51 @@ class EEGMeditationApp(App):
             self._eeg_stream.stop()
 
         if stats:
-            if self._current_session_id is not None:
-                self._db.update_session(
-                    self._current_session_id, stats,
-                    custom_formulas=self._session_custom_formulas_json(),
-                    session_program=self._session_program_json(),
-                    engine_version=MetricsEngine.ENGINE_VERSION,
-                )
-            else:
-                self._current_session_id = self._db.save_session(
-                    stats, user_id=self._current_user_id,
+            self._checkpoint_session(stats)
+        return stats
+
+    def _checkpoint_session(self, stats: dict | None = None) -> None:
+        """Bring the session's row and its buffered ticks into the DB in one transaction (any thread, no Kivy).
+
+        Every snapshot point uses it: the 60 s flush, the final save (with the stop's `stats`), leaving the app and a
+        backup. A process killed between checkpoints keeps the row and the data of the last one, which agree.
+        """
+        with self._checkpoint_lock:
+            if stats is None:
+                sm = getattr(self, "_session_manager", None)  # leaving the app may come before build() made it
+                if sm is None or sm.state not in (SessionState.RUNNING, SessionState.PAUSED):
+                    return
+                stats = self._with_score(self._session_manager.compute_statistics())
+            batch, self._metrics_buffer = self._metrics_buffer, []
+            try:
+                sid = self._db.checkpoint_session(
+                    self._current_session_id, stats, batch,
+                    user_id=self._current_user_id,
                     session_name=self._make_session_name(),
                     custom_formulas=self._session_custom_formulas_json(),
                     session_program=self._session_program_json(),
                     engine_version=MetricsEngine.ENGINE_VERSION,
                 )
-            if self._current_session_id is None:
-                logger.error("No session id (DB shutting down) — metrics NOT persisted")
-            elif self._metrics_buffer:
-                self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
-                self._metrics_buffer = []
-        return stats
+            except Exception:
+                self._metrics_buffer[:0] = batch  # kept for the next checkpoint
+                raise
+            self._flush_counter = 0
+            if sid is None:
+                logger.error("Session checkpoint skipped — DB shutting down; session NOT persisted")
+                return
+            self._current_session_id = sid
+
+    def _record_tick(self, metrics: dict, full_record: dict) -> None:
+        """Add one tick to the session's stats and the buffer of rows still to write, as one step for a checkpoint."""
+        with self._checkpoint_lock:
+            self._session_manager.add_metric(metrics)
+            self._metrics_buffer.append(full_record)
+
+    def _flush_tick(self) -> None:
+        """Every FLUSH_INTERVAL_SECONDS of ticks, checkpoint the session: its row as well as its data."""
+        self._flush_counter += 1
+        if self._flush_counter >= int(APP.FLUSH_INTERVAL_SECONDS / APP.UPDATE_FREQUENCY) and self._metrics_buffer:
+            self._checkpoint_session()
 
     def _reload_live_graphs_from_mirror(self) -> None:
         """Batch-reload the 3 live graphs from the session-lifetime mirror
@@ -1773,7 +1806,7 @@ class EEGMeditationApp(App):
 
     def _discard_running_session(self) -> None:
         """Halt a running session and DELETE its data — used when its owning
-        profile is deleted. The 60s partial flush may already have written a
+        profile is deleted. A checkpoint (the 60 s flush, leaving the app, a backup) may already have written a
         session row under the doomed profile; without the delete it survives as
         an orphan. Then reuses the shared _finalize_stop_ui teardown so the
         Session screen returns to idle."""
@@ -2070,10 +2103,13 @@ class EEGMeditationApp(App):
         else:
             drive_key = _scored = self._score_on_drive_key()
 
-        self._session_manager.add_metric(metrics)
-        # Merge raw + computed for full storage
+        # Merge raw + computed for full storage; a pending marker is in the row before a checkpoint can write it.
         full_record = {**raw_sample, **metrics}
-        self._metrics_buffer.append(full_record)
+        _marker_pending = self._pending_marker
+        if _marker_pending:
+            self._pending_marker = False
+            full_record["marker"] = 1
+        self._record_tick(metrics, full_record)
         self._raw_buffer.append(raw_sample)
 
         # Audio is thread-safe — update directly
@@ -2107,10 +2143,6 @@ class EEGMeditationApp(App):
 
         # UI updates — dispatch to main thread
         _elapsed_fmt = self._session_manager.elapsed_formatted
-        _marker_pending = self._pending_marker
-        if _marker_pending:
-            self._pending_marker = False
-            full_record["marker"] = 1
 
         # Debounced shamatha-zone crossing (tick thread) — only the change is
         # dispatched, so the chip can't restyle every tick.
@@ -2188,27 +2220,7 @@ class EEGMeditationApp(App):
             self._audio.play_timer_sound(self._timer_state.custom_sound_path)
             return
 
-        # Flush buffer to DB every 60 seconds (DB opened with check_same_thread=False)
-        self._flush_counter += 1
-        ticks_per_flush = int(APP.FLUSH_INTERVAL_SECONDS / APP.UPDATE_FREQUENCY)
-        if self._flush_counter >= ticks_per_flush and self._metrics_buffer:
-            if self._current_session_id is None:
-                stats_partial = self._with_score(self._session_manager.compute_statistics())
-                self._current_session_id = self._db.save_session(
-                    stats_partial, user_id=self._current_user_id,
-                    session_name=self._make_session_name(),
-                    custom_formulas=self._session_custom_formulas_json(),
-                    session_program=self._session_program_json(),
-                    engine_version=MetricsEngine.ENGINE_VERSION,
-                )
-            if self._current_session_id is None:
-                # save_session no-oped (DB shutting down) — don't batch metrics
-                # under a None id (would insert orphaned session_id=NULL rows).
-                logger.error("Partial flush skipped — no session id (DB shutting down)")
-            else:
-                self._db.save_metrics_batch(self._current_session_id, self._metrics_buffer)
-                self._metrics_buffer = []
-                self._flush_counter = 0
+        self._flush_tick()  # DB opened with check_same_thread=False
 
     def _on_key_down(self, window, key, scancode, codepoint, modifiers) -> bool:
         """Handle keyboard hotkey for marker."""
@@ -3177,6 +3189,8 @@ class EEGMeditationApp(App):
         self._history_screen.set_select_mode(False)
         self._info_popup("Export complete", f"Exported {count} session(s) to:\n{dest}")
 
+    # A tick (session stats + buffered row) and a checkpoint's snapshot of both, one at a time; one app per process.
+    _checkpoint_lock = threading.Lock()
     _history_dirty: bool = True
     _history_view: Optional[tuple] = None  # (profile, all-users) History last loaded; a day filter survives only that
 
@@ -3266,6 +3280,7 @@ class EEGMeditationApp(App):
     def _backup_to_uri_worker(self, uri_str: str) -> None:
         tmp_path = None
         try:
+            self._checkpoint_or_report()  # a running session is in the backup as of now
             tmp_path = _backup.online_backup_to_tempfile(self._db)
             if _saf.write_file_to_uri(uri_str, tmp_path):
                 Clock.schedule_once(lambda dt: self._report_backup_saved(uri_str, show_location=False))
@@ -3292,6 +3307,7 @@ class EEGMeditationApp(App):
 
         def _worker():
             try:
+                self._checkpoint_or_report()  # a running session is in the backup as of now
                 _backup.make_backup(self._db, target_path)
             except (OSError, sqlite3.Error) as exc:
                 err_msg = f"Backup to {target_path} failed: {exc}"

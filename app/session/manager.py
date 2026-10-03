@@ -56,6 +56,8 @@ class SessionManager:
     def elapsed_seconds(self) -> float:
         if self._state == SessionState.RUNNING:
             return time.time() - self._start_time - self._total_paused
+        if self._state == SessionState.PAUSED:  # frozen at the pause (a checkpoint while paused wrote 0)
+            return self._pause_start - self._start_time - self._total_paused
         return self._elapsed
 
     @property
