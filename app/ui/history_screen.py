@@ -867,6 +867,14 @@ class HistoryScreen(Screen):
         self._set_day_data()
         self._date_label.text = f"{self._current_header} ({len(self._shown)} sessions)"
 
+    def update_session(self, sid, **fields) -> None:
+        """Apply a saved edit (the fields not None) to that session in the model, in place: no reload."""
+        session = next((s for s in self._sessions if s.get("id") == sid), None)
+        if session is None:
+            return
+        session.update({k: v for k, v in fields.items() if v is not None})
+        self._update_item(sid)
+
     def _set_day_data(self) -> None:
         """Calendar and bars both show each day's average shamatha over the model's sessions."""
         day_scores: dict[str, list[float]] = {}

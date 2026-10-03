@@ -311,7 +311,6 @@ def test_no_screen_draws_a_fixed_glyph_colour_on_an_accent_fill(theme):
     live._set_view("raw")
     live._set_view("metrics")
     hist.set_view_mode("bars")
-    diary.populate_sessions([{"id": 1, "date_time": "2026-09-20T10:00:00", "duration": 600, "avg_shamatha": 55}])
     diary._switch_graph_tab("raw")
     sett.load_program([{"minutes": 10, "target": 50, "formula": "shamatha_score"}], "program")
     sections = [x for x in sett.walk(restrict=True) if type(x).__name__ == "_AccordionSection"]
