@@ -13,6 +13,9 @@ from kivy.clock import Clock
 from kivy.graphics import Color, Line, Rectangle, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.recycleboxlayout import RecycleBoxLayout
+from kivy.uix.recycleview import RecycleView
+from kivy.uix.recycleview.views import RecycleDataViewBehavior
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
@@ -393,11 +396,11 @@ class Last14DaysBars(Widget):
 
 
 class _StableScrollView(ScrollView):
-    """A ScrollView whose list grows while it may be scrolled: a height change keeps the pixel offset from the top."""
+    """A ScrollView whose content height changes while it may be scrolled: a change keeps the pixel offset from the top."""
 
     def _update_effect_y_bounds(self, *args):
-        # Kivy 2.3 rescales the fraction (max * scroll_y): past an edge that overscroll grew with every chunk of rows
-        # until the list ran out of view (#56). Rows are appended at the bottom, so keep the offset from the top.
+        # Kivy 2.3 rescales the fraction (max * scroll_y): past an edge the overscroll grew with every height change
+        # until the list ran out of view (#56). Keep the offset from the top, where the list starts.
         effect = self.effect_y
         if not self._viewport or not effect:
             return
@@ -409,6 +412,119 @@ class _StableScrollView(ScrollView):
         effect.min = 0 if new_max < 0 else new_max
         effect.max = new_max
         effect.value = new_max + from_top
+
+
+_ROW_H = dp(56)
+_RENAME_H = dp(40)  # the inline editor under a row being renamed
+
+
+def _checkbox_glyph(selected: bool) -> str:
+    if ICONS_AVAILABLE:
+        return Icons.CHECKBOX_MARKED if selected else Icons.CHECKBOX_BLANK
+    return "[x]" if selected else "[ ]"
+
+
+def _row_title(session: dict) -> str:
+    name = session.get("session_name", "") or ""
+    if name:
+        return name
+    dt_str = session.get("date_time", "")
+    time_str = dt_str[11:16] if len(dt_str) > 16 else dt_str
+    return f"{time_str} ({format_duration(session.get('duration', 0))})"
+
+
+class _SessionRow(RecycleDataViewBehavior, BoxLayout):
+    """One History row, reused for whichever session scrolls into it: every refresh sets everything it shows."""
+
+    def __init__(self, **kwargs):
+        super().__init__(orientation="vertical", **kwargs)
+        self.sid = None
+        self.name = ""
+        self._card = Card(orientation="horizontal", size_hint_y=None, height=_ROW_H, bg_color=C.BG_CARD,
+                          spacing=S.GAP_SM, padding=0)
+        self._checkbox = ThemedLabel(font_name="Icons" if ICONS_AVAILABLE else "Roboto", font_size=F.H2,
+                                     size_hint_x=None, width=dp(36), halign="center", valign="middle")
+        score_bar = Widget(size_hint_x=None, width=dp(4))
+        with score_bar.canvas:
+            self._score_color = Color(1, 1, 1, 1)
+            rect = RoundedRectangle(pos=score_bar.pos, size=score_bar.size, radius=[dp(2)])
+        score_bar.bind(pos=lambda w, v: setattr(rect, "pos", v), size=lambda w, v: setattr(rect, "size", v))
+        info = BoxLayout(orientation="vertical", padding=[dp(6), 0])
+        self._name_label = ThemedLabel(font_size=F.BODY, color=C.TEXT, halign="left", valign="middle",
+                                       size_hint_y=0.55)
+        self._name_label.bind(size=self._name_label.setter("text_size"))
+        self._stats_label = ThemedLabel(font_size=F.TINY, color=C.TEXT_MUTED, halign="left", valign="middle",
+                                        size_hint_y=0.45)
+        self._stats_label.bind(size=self._stats_label.setter("text_size"))
+        info.add_widget(self._name_label)
+        info.add_widget(self._stats_label)
+        # Rename + delete are drawn only: the screen's list router hit-tests the strip (see _list_touch_down).
+        self._actions = BoxLayout(orientation="horizontal", size_hint_x=None, width=dp(80), spacing=dp(2))
+        for icon, color in ((Icons.PENCIL, C.PRIMARY), (Icons.DELETE, C.DANGER)):
+            self._actions.add_widget(StyledButton(text="", icon=icon, bg_color=color, text_color=color,
+                                                  font_size=F.SMALL, size_hint_y=1, bold=False, outline=True))
+        for w in (score_bar, info, self._actions):
+            self._card.add_widget(w)
+        self.add_widget(self._card)
+
+    def on_parent(self, _row, parent):
+        owner = getattr(self, "_owner", None)
+        if owner is None:
+            return
+        if parent is not None:
+            # Back at the position it last showed, Kivy reuses a row without refresh_view_attrs: it may have
+            # missed a select-mode, selection or rename change while it was off screen.
+            self.sync(owner)
+        elif owner._rename_row.parent is self:
+            # Scrolled off, a row keeps its widgets until it is reused: it mustn't keep the editor. A relayout also
+            # removes and re-adds every row, so the focus (the keyboard) is dropped only if no row takes it back.
+            self.remove_widget(owner._rename_row)
+            owner._rename_focus_check()
+
+    def refresh_view_attrs(self, rv, index, data):
+        # Size and position come from the layout; nothing else in the data is a view property.
+        self._owner = rv.owner
+        self.sid = data["sid"]
+        self.name = data["name"]
+        self._name_label.text = data["name"]
+        self._stats_label.text = data["stats"]
+        self._score_color.rgba = data["color"]
+        self.sync(rv.owner)
+
+    def sync(self, owner: "HistoryScreen") -> None:
+        """Show the screen's state for this row's session: select mode, its checkbox, the rename editor."""
+        select = owner._select_mode
+        if select != (self._checkbox.parent is not None):
+            if select:
+                self._card.add_widget(self._checkbox, index=len(self._card.children))
+                self._card.remove_widget(self._actions)
+            else:
+                self._card.remove_widget(self._checkbox)
+                self._card.add_widget(self._actions)
+        selected = self.sid in owner._selected_ids
+        self._checkbox.text = _checkbox_glyph(selected)
+        self._checkbox.color = C.ACCENT if selected else C.TEXT_SECONDARY
+        editor = owner._rename_row
+        if owner._renaming_sid == self.sid and self.sid is not None:
+            if editor.parent is not self:
+                if editor.parent is not None:
+                    editor.parent.remove_widget(editor)
+                self.add_widget(editor)
+        elif editor.parent is self:
+            self.remove_widget(editor)
+
+
+class _SessionList(_StableScrollView, RecycleView):
+    """The session list: one data item per shown session, row widgets only for the rows on screen."""
+
+    def __init__(self, owner: "HistoryScreen", **kwargs):
+        super().__init__(**kwargs)
+        self.owner = owner
+        rows = RecycleBoxLayout(orientation="vertical", size_hint_y=None, default_size=(None, _ROW_H),
+                                default_size_hint=(1, None), spacing=S.GAP_SM, padding=[0, S.GAP_SM])
+        rows.bind(minimum_height=rows.setter("height"))
+        self.add_widget(rows)
+        self.viewclass = _SessionRow  # stored on the layout manager, so only once there is one
 
 
 class HistoryScreen(Screen):
@@ -426,10 +542,8 @@ class HistoryScreen(Screen):
         self._filtered_date: Optional[str] = None
         self._view_mode: str = "calendar"
         self._on_view_mode_change: Optional[Callable] = None
-        # Multi-select CSV export (issue #7)
-        self._pending_rows: list[dict] = []
-        self._row_build_idx: int = 0
-        self._row_build_ev = None
+        self._shown: list[dict] = []  # the sessions the list shows: all of them, or the filtered day's
+        self._renaming_sid: int | None = None
         self._settled_log_ev = None
         self._current_header: str = "All sessions"
         self._select_mode: bool = False
@@ -570,21 +684,15 @@ class HistoryScreen(Screen):
 
         root.add_widget(Divider())
 
-        # Session list (scrollable)
-        scroll = _StableScrollView()
-        self._session_list = BoxLayout(
-            orientation="vertical",
-            size_hint_y=None,
-            spacing=S.GAP_SM,
-            padding=[0, S.GAP_SM],
-        )
-        self._session_list.bind(minimum_height=self._session_list.setter("height"))
-        # Single manual touch router for the session list. Avoids flakiness
-        # with Kivy's nested widget on_touch_down dispatch: we explicitly find
-        # which row/action the tap landed on and call the right callback.
-        self._session_list.bind(on_touch_down=self._list_touch_down)
-        scroll.add_widget(self._session_list)
-        root.add_widget(scroll)
+        # Session list: a RecycleView. The router hit-tests the visible rows (see _list_touch_down).
+        self._build_rename_row()
+        self._empty_label = ThemedLabel(text="No sessions on this day", font_size=F.BODY, color=C.TEXT_MUTED,
+                                        size_hint_y=None, height=dp(40))
+        self._list_area = BoxLayout(orientation="vertical")
+        self._rv = _SessionList(self)
+        self._rv.layout_manager.bind(on_touch_down=self._list_touch_down)
+        self._list_area.add_widget(self._rv)
+        root.add_widget(self._list_area)
 
         self.add_widget(root)
 
@@ -611,20 +719,19 @@ class HistoryScreen(Screen):
         return self._selected_ids
 
     def _shown_sids(self) -> list:
-        return [s.get("id") for s in self._pending_rows]
+        return [s.get("id") for s in self._shown]
 
     def set_select_mode(self, on: bool) -> None:
-        """Enter/leave multi-select mode; leaving drops the selection. Rebuilds the
-        list so rows gain/lose their checkbox (rebuild, not in-place hide, keeps the
-        touch layer clean)."""
+        """Enter/leave multi-select mode; leaving drops the selection. The rows on screen gain/lose their checkbox."""
         self._select_mode = bool(on)
         if not on:
             self._selected_ids = set()
         self._btn_select.opacity = 0 if on else 1
         self._btn_select.disabled = on
         self._select_bar.reveal(on)
+        self._close_rename()
         self._update_export_button()
-        self._rebuild_visible()
+        self._sync_rows()
 
     def toggle_session_selection(self, sid) -> None:
         if sid in self._selected_ids:
@@ -632,11 +739,12 @@ class HistoryScreen(Screen):
         else:
             self._selected_ids.add(sid)
         self._update_export_button()
+        self._sync_rows()
 
     def select_all_shown(self) -> None:
         self._selected_ids = {s for s in self._shown_sids() if s is not None}
         self._update_export_button()
-        self._rebuild_visible()
+        self._sync_rows()
 
     def export_selected(self) -> None:
         if not self._selected_ids or not self._on_export_sessions:
@@ -647,10 +755,6 @@ class HistoryScreen(Screen):
         n = len(self._selected_ids)
         self._btn_export.text = f"Export {n}"
         self._btn_export.disabled = n == 0
-
-    def _rebuild_visible(self) -> None:
-        if self._pending_rows:
-            self._show_sessions(self._pending_rows, self._current_header)
 
     def _on_active_widget_height(self, instance, value):
         """Track the active widget's height onto graph_row.
@@ -734,39 +838,34 @@ class HistoryScreen(Screen):
         if self._on_view_mode_change:
             self._on_view_mode_change(mode)
 
-    def load_sessions(self, sessions: list[dict], on_complete: Optional[Callable] = None,
-                      keep_filter: bool = True) -> None:
-        """Load all sessions and build heatmap data. `on_complete` fires once the
-        (chunked) row build finishes — used to hide the loading overlay."""
+    def load_sessions(self, sessions: list[dict], keep_filter: bool = True) -> None:
+        """Load all sessions and build heatmap data."""
         self._sessions = sessions
+        # A selection holds only this list's sessions: another profile's would be exported with it.
+        self._selected_ids &= {s.get("id") for s in sessions}
+        self._update_export_button()
         if not keep_filter:
             self._set_filter(None)
         self._set_day_data()
         if self._filtered_date:  # a reload of the same view keeps the user's day filter, as a delete does
-            self._show_day(self._filtered_date, on_complete=on_complete)
+            self._show_day(self._filtered_date)
         else:
-            self._show_sessions(sessions, "All sessions", on_complete=on_complete)
+            self._show_sessions(sessions, "All sessions")
 
     def remove_sessions(self, session_ids) -> None:
-        """Drop deleted sessions from the model and their rows, in place: no rebuild, the scroll position and any day filter stay."""
+        """Drop deleted sessions from the model and the list, in place: the scroll position and any day filter stay."""
         gone = set(session_ids)
         if not gone:
             return
+        if self._renaming_sid in gone:
+            self._close_rename()
         self._sessions = [s for s in self._sessions if s.get("id") not in gone]
-        built = self._pending_rows[:self._row_build_idx]
-        self._row_build_idx -= sum(1 for s in built if s.get("id") in gone)
-        self._pending_rows = [s for s in self._pending_rows if s.get("id") not in gone]
+        self._shown = [s for s in self._shown if s.get("id") not in gone]
         self._selected_ids -= gone
         self._update_export_button()
-        for w in list(self._session_list.children):
-            opts = getattr(w, "_session_opts", None)
-            if opts is not None and opts["sid"] in gone:
-                self._session_list.remove_widget(w)
+        self._show_items()
         self._set_day_data()
-        if self._pending_rows:
-            self._date_label.text = f"{self._current_header} ({len(self._pending_rows)} sessions)"
-        else:
-            self._show_sessions([], self._current_header)
+        self._date_label.text = f"{self._current_header} ({len(self._shown)} sessions)"
 
     def _set_day_data(self) -> None:
         """Calendar and bars both show each day's average shamatha over the model's sessions."""
@@ -796,216 +895,82 @@ class HistoryScreen(Screen):
         self._btn_show_all.opacity = 1 if date_str else 0
         self._btn_show_all.disabled = not date_str
 
-    def _show_day(self, date_str: str, on_complete: Optional[Callable] = None) -> None:
+    def _show_day(self, date_str: str) -> None:
         day_sessions = [s for s in self._sessions if s.get("date_time", "")[:10] == date_str]
         try:
             nice_date = datetime.date.fromisoformat(date_str).strftime("%B %d, %Y")
         except (ValueError, TypeError):
             nice_date = date_str
-        self._show_sessions(day_sessions, nice_date, on_complete=on_complete)
+        self._show_sessions(day_sessions, nice_date)
 
     def _reset_filter(self) -> None:
         """Clear day filter and show all sessions."""
         self._set_filter(None)
         self._show_sessions(self._sessions, "All sessions")
 
-    _ROW_CHUNK = 8  # rows built per frame so a long list doesn't freeze the UI
-
-    def _cancel_row_build(self) -> None:
-        for attr in ("_row_build_ev", "_settled_log_ev"):
-            ev = getattr(self, attr)
-            if ev is not None:
-                ev.cancel()
-                setattr(self, attr, None)
-
-    def _show_sessions(self, sessions: list[dict], header: str,
-                       on_complete: Optional[Callable] = None) -> None:
-        """Populate the session list, building rows in chunks across frames so a
-        long list (76+ sessions) doesn't block the UI thread for ~0.9s."""
-        self._cancel_row_build()
-        self._log_list_state("rebuild start")
+    def _show_sessions(self, sessions: list[dict], header: str) -> None:
+        """Show a new list, from the top: one data item per session, rows built only for what fits on screen."""
+        if self._settled_log_ev is not None:
+            self._settled_log_ev.cancel()
+            self._settled_log_ev = None
         # A new list starts at the top, at rest: reset the effect itself (pixels, velocity, overscroll) —
         # setting scroll_y alone was overwritten by a fling still in flight.
-        scroll = self._session_list.parent
-        scroll.effect_y.reset(scroll.effect_y.max)
-        scroll.scroll_y = 1
+        self._rv.effect_y.reset(self._rv.effect_y.max)
+        self._rv.scroll_y = 1
         self._current_header = header
-        self._session_list.clear_widgets()
         self._date_label.text = f"{header} ({len(sessions)} sessions)"
-        # The model is the list on screen, also when it's empty (remove_sessions and Select read it).
-        self._pending_rows = sessions
-        self._row_build_idx = 0
+        self._close_rename()
+        self._shown = sessions
+        self._show_items()
+        self._settled_log_ev = Clock.schedule_once(lambda _dt: self._log_list_state("settled"), 1.0)
 
-        if not sessions:
-            lbl = ThemedLabel(
-                text="No sessions on this day",
-                font_size=F.BODY,
-                color=C.TEXT_MUTED,
-                size_hint_y=None,
-                height=dp(40),
-            )
-            self._session_list.add_widget(lbl)
-            if on_complete:
-                on_complete()
-            return
+    def _item(self, session: dict) -> dict:
+        sid = session.get("id", 0)
+        avg_sh = session.get("avg_shamatha", 0) or 0
+        return {
+            "sid": sid,
+            "name": _row_title(session),
+            "stats": f"Shamatha: {avg_sh:.0f}  |  {format_duration(session.get('duration', 0))}",
+            "color": _lerp_color(avg_sh),
+            "height": _ROW_H + (_RENAME_H if sid == self._renaming_sid else 0),
+        }
 
-        self._rows_on_complete = on_complete
-        self._row_build_ev = Clock.schedule_once(self._build_row_chunk, 0)
+    def _show_items(self) -> None:
+        self._rv.data = [self._item(s) for s in self._shown]
+        empty = not self._shown
+        if empty and self._empty_label.parent is None:
+            self._list_area.add_widget(self._empty_label, index=len(self._list_area.children))
+        elif not empty and self._empty_label.parent is not None:
+            self._list_area.remove_widget(self._empty_label)
 
-    def _build_row_chunk(self, _dt) -> None:
-        rows = self._pending_rows
-        end = min(self._row_build_idx + self._ROW_CHUNK, len(rows))
-        for i in range(self._row_build_idx, end):
-            self._session_list.add_widget(self._make_session_row(rows[i]))
-        self._row_build_idx = end
-        if end < len(rows):
-            self._row_build_ev = Clock.schedule_once(self._build_row_chunk, 0)
-        else:
-            self._row_build_ev = None
-            self._log_list_state("built")
-            self._settled_log_ev = Clock.schedule_once(lambda _dt: self._log_list_state("settled"), 1.0)
-            cb, self._rows_on_complete = self._rows_on_complete, None
-            if cb:
-                cb()
+    def _update_item(self, sid) -> None:
+        """Re-derive one session's item (its name, its height) after a rename opened, closed or saved."""
+        for i, s in enumerate(self._shown):
+            if s.get("id") == sid:
+                self._rv.data[i] = self._item(s)
+                return
+
+    def _sync_rows(self) -> None:
+        for view in self._rv.layout_manager.children:
+            if isinstance(view, _SessionRow):
+                view.sync(self)
 
     def _log_list_state(self, tag: str) -> None:
-        """Rows, heights and scroll state, so a device log shows where a rebuilt list ended up (#56)."""
-        sv = self._session_list.parent
-        ey = sv.effect_y
-        rows = sum(1 for w in self._session_list.children if getattr(w, "_session_opts", None))
+        """Rows, heights and scroll state, so a device log shows where a list ended up (#56)."""
+        rv = self._rv
+        ey = rv.effect_y
+        views = sum(1 for w in rv.layout_manager.children if isinstance(w, _SessionRow))
         logger.info(
-            f"History list {tag}: rows={rows}/{len(self._pending_rows)} list_h={self._session_list.height:.0f} "
-            f"viewport_h={sv.height:.0f} scroll_y={sv.scroll_y:.3f} effect={ey.value:.1f} "
+            f"History list {tag}: sessions={len(rv.data)} row_widgets={views} list_h={rv.layout_manager.height:.0f} "
+            f"viewport_h={rv.height:.0f} scroll_y={rv.scroll_y:.3f} effect={ey.value:.1f} "
             f"bounds=({ey.min:.1f},{ey.max:.1f}) v={ey.velocity:.1f}"
         )
 
-    def _make_session_row(self, session: dict) -> BoxLayout:
-        """Create a session row: tap to view, rename/delete buttons on right."""
-        sid = session.get("id", 0)
-        dt_str = session.get("date_time", "")
-        duration = session.get("duration", 0)
-        avg_sh = session.get("avg_shamatha", 0) or 0
-        name = session.get("session_name", "") or ""
+    # ── Inline rename: one editor, shown under the row of the session being renamed ──
 
-        time_str = dt_str[11:16] if len(dt_str) > 16 else dt_str
-        if not name:
-            name = f"{time_str} ({format_duration(duration)})"
-
-        # Outer wrapper holds the normal row + hidden rename input
-        wrapper = BoxLayout(
-            orientation="vertical",
-            size_hint_y=None,
-            height=dp(56),
-            spacing=0,
-        )
-
-        row = Card(
-            orientation="horizontal",
-            size_hint_y=None,
-            height=dp(56),
-            bg_color=C.BG_CARD,
-            spacing=S.GAP_SM,
-            padding=0,
-        )
-
-        # Multi-select checkbox (only in select mode); tapping the row toggles it.
-        checkbox = None
-        if self._select_mode:
-            checkbox = ThemedLabel(
-                font_name="Icons" if ICONS_AVAILABLE else "Roboto",
-                font_size=F.H2, size_hint_x=None, width=dp(36),
-                halign="center", valign="middle",
-            )
-            self._apply_checkbox(checkbox, sid)
-            row.add_widget(checkbox)
-
-        # Score indicator (colored bar)
-        score_color = _lerp_color(avg_sh)
-        score_bar = Widget(size_hint_x=None, width=dp(4))
-        with score_bar.canvas:
-            Color(*score_color)
-            score_bar._rect = RoundedRectangle(
-                pos=score_bar.pos, size=score_bar.size, radius=[dp(2)]
-            )
-        score_bar.bind(
-            pos=lambda w, v: setattr(w._rect, "pos", v),
-            size=lambda w, v: setattr(w._rect, "size", v),
-        )
-        row.add_widget(score_bar)
-
-        # Info column (tappable → session detail)
-        info = BoxLayout(orientation="vertical", padding=[dp(6), 0])
-        name_label = ThemedLabel(
-            text=name,
-            font_size=F.BODY,
-            color=C.TEXT,
-            halign="left",
-            valign="middle",
-            size_hint_y=0.55,
-        )
-        name_label.bind(size=name_label.setter("text_size"))
-        stats_line = ThemedLabel(
-            text=f"Shamatha: {avg_sh:.0f}  |  {format_duration(duration)}",
-            font_size=F.TINY,
-            color=C.TEXT_MUTED,
-            halign="left",
-            valign="middle",
-            size_hint_y=0.45,
-        )
-        stats_line.bind(size=stats_line.setter("text_size"))
-        info.add_widget(name_label)
-        info.add_widget(stats_line)
-        row.add_widget(info)
-
-        # Row/button actions are routed manually via _list_touch_down
-        # at the session-list level. See _list_touch_down for details.
-
-        # Right side: rename + delete buttons (visual only) — omitted in select mode.
-        actions = BoxLayout(
-            orientation="horizontal",
-            size_hint_x=None,
-            width=dp(80),
-            spacing=dp(2),
-        )
-        btn_rename = StyledButton(
-            text="", icon=Icons.PENCIL,
-            bg_color=C.PRIMARY,
-            text_color=C.PRIMARY,
-            font_size=F.SMALL,
-            size_hint_y=1,  # fill parent height so click area matches visible area
-            bold=False,
-            outline=True,
-        )
-        btn_del = StyledButton(
-            text="", icon=Icons.DELETE,
-            bg_color=C.DANGER,
-            text_color=C.DANGER,
-            font_size=F.SMALL,
-            size_hint_y=1,
-            bold=False,
-            outline=True,
-        )
-        actions.add_widget(btn_rename)
-        actions.add_widget(btn_del)
-        if not self._select_mode:
-            row.add_widget(actions)
-
-        wrapper.add_widget(row)
-
-        # Hidden rename input row (shown when rename button pressed).
-        # disabled=True is required — otherwise the fixed-size rename_save
-        # button inside stays 60×34dp at the wrapper's bottom edge and
-        # steals touches from the delete button above it.
-        rename_row = BoxLayout(
-            size_hint_y=None,
-            height=0,
-            spacing=S.GAP_SM,
-            padding=[dp(10), 0],
-            opacity=0,
-            disabled=True,
-        )
-        rename_input = CenteredTextInput(
-            text=name,
+    def _build_rename_row(self) -> None:
+        self._rename_row = BoxLayout(size_hint_y=None, height=_RENAME_H, spacing=S.GAP_SM, padding=[dp(10), dp(2)])
+        self._rename_input = CenteredTextInput(
             font_size=F.BODY,
             foreground_color=C.TEXT,
             background_color=C.BG_INPUT,
@@ -1014,66 +979,58 @@ class HistoryScreen(Screen):
             write_tab=False,
             size_hint_x=1,
         )
-        rename_save = StyledButton(
-            text="Save", icon=Icons.CHECK,
-            bg_color=C.ACCENT,
-            font_size=F.SMALL,
-            height=dp(34),
-            size_hint_x=None,
-            width=dp(60),
-        )
-        rename_row.add_widget(rename_input)
-        rename_row.add_widget(rename_save)
-        wrapper.add_widget(rename_row)
+        # 84 dp: the button's 2 x 12 dp padding and 26 dp icon leave 34 dp, room for "Save" on one line.
+        rename_save = StyledButton(text="Save", icon=Icons.CHECK, bg_color=C.ACCENT, font_size=F.SMALL,
+                                   size_hint_x=None, width=dp(84), size_hint_y=1)
+        self._rename_row.add_widget(self._rename_input)
+        self._rename_row.add_widget(rename_save)
+        rename_save.bind(on_release=lambda *a: self._do_rename())
+        self._rename_input.bind(on_text_validate=lambda *a: self._do_rename())
+        self._rename_focus_check = Clock.create_trigger(self._drop_rename_focus_if_hidden)
 
-        # Wire rename toggle
-        def _toggle_rename(*args):
-            if rename_row.opacity == 0:
-                rename_row.opacity = 1
-                rename_row.height = dp(38)
-                rename_row.disabled = False
-                wrapper.height = dp(56) + dp(38) + dp(2)
-                rename_input.focus = True
-            else:
-                rename_row.opacity = 0
-                rename_row.height = 0
-                rename_row.disabled = True
-                wrapper.height = dp(56)
+    def _drop_rename_focus_if_hidden(self, _dt) -> None:
+        if self._rename_row.parent is None:
+            self._rename_input.focus = False
 
-        def _do_rename(*args):
-            txt = rename_input.text.strip()
-            if txt:
-                name_label.text = txt
-                session["session_name"] = txt  # the model row this widget shows
-                wrapper._session_opts["name"] = txt
-                if self._on_rename_session:
-                    self._on_rename_session(sid, txt)
-            _toggle_rename()
+    def _session_by_id(self, sid) -> dict | None:
+        return next((s for s in self._shown if s.get("id") == sid), None)
 
-        # rename_save and rename_input still fire directly (they're inside
-        # the expanded rename_row which _list_touch_down lets propagate).
-        rename_save.bind(on_release=_do_rename)
-        rename_input.bind(on_text_validate=_do_rename)
+    def _toggle_rename(self, sid) -> None:
+        """Open the editor on this session's row, or close it if it is already open there."""
+        reopen = self._renaming_sid != sid
+        self._close_rename()
+        session = self._session_by_id(sid)
+        if not reopen or session is None:
+            return
+        self._renaming_sid = sid
+        self._rename_input.text = _row_title(session)
+        self._update_item(sid)
+        self._sync_rows()
+        Clock.schedule_once(self._focus_rename_input)
 
-        # Store per-wrapper opts so the session-list router can dispatch.
-        wrapper._session_opts = {
-            "sid": sid,
-            "name": name,
-            "rename_row": rename_row,
-            "toggle_rename": _toggle_rename,
-            "checkbox": checkbox,
-        }
+    def _focus_rename_input(self, _dt) -> None:
+        # A tap's own touch-up unfocuses every input it didn't land on (the pencil's tap too): focus a frame later.
+        if self._renaming_sid is not None and self._rename_row.parent is not None:
+            self._rename_input.focus = True
 
-        return wrapper
+    def _close_rename(self) -> None:
+        sid, self._renaming_sid = self._renaming_sid, None
+        if sid is None:
+            return
+        self._rename_input.focus = False
+        if self._rename_row.parent is not None:
+            self._rename_row.parent.remove_widget(self._rename_row)
+        self._update_item(sid)
 
-    def _apply_checkbox(self, checkbox, sid) -> None:
-        """Reflect a row's selection state on its checkbox glyph."""
-        selected = sid in self._selected_ids
-        if ICONS_AVAILABLE:
-            checkbox.text = Icons.CHECKBOX_MARKED if selected else Icons.CHECKBOX_BLANK
-        else:
-            checkbox.text = "[x]" if selected else "[ ]"
-        checkbox.color = C.ACCENT if selected else C.TEXT_SECONDARY
+    def _do_rename(self) -> None:
+        sid = self._renaming_sid
+        session = self._session_by_id(sid)
+        txt = self._rename_input.text.strip()
+        if txt and session is not None:
+            session["session_name"] = txt  # the model row this list shows
+            if self._on_rename_session:
+                self._on_rename_session(sid, txt)
+        self._close_rename()
 
     def _confirm_delete(self, session_id: int, name: str) -> None:
         """Show a delete confirmation popup."""
@@ -1091,43 +1048,31 @@ class HistoryScreen(Screen):
         btn_confirm.bind(on_release=_do_delete)
         popup.open()
 
-    def _list_touch_down(self, list_widget, touch) -> bool:
-        """Single touch router for the session list.
+    def _list_touch_down(self, rows, touch) -> bool:
+        """The one touch router for the session list.
 
-        Bypasses Kivy's flaky nested dispatch for row actions. We walk the
-        visible wrappers, find the one the tap landed in, and route to
-        rename/delete/navigate based on x-position.
+        Bypasses Kivy's flaky nested dispatch for row actions: find the visible row the tap landed in and route to
+        select / rename / delete / open by position.
         """
-        if not list_widget.collide_point(*touch.pos):
+        if not rows.collide_point(*touch.pos):
             return False
-        for wrapper in list_widget.children:
-            opts = getattr(wrapper, "_session_opts", None)
-            if opts is None:
+        for view in rows.children:
+            if not isinstance(view, _SessionRow) or not view.collide_point(*touch.pos):
                 continue
-            if not wrapper.collide_point(*touch.pos):
-                continue
-            # Select mode: any tap on the row toggles its selection.
             if self._select_mode:
-                self.toggle_session_selection(opts["sid"])
-                if opts.get("checkbox") is not None:
-                    self._apply_checkbox(opts["checkbox"], opts["sid"])
+                self.toggle_session_selection(view.sid)
                 return True
-            rename_row = opts["rename_row"]
-            # If rename editor is open and touch is in it, let Kivy dispatch
-            # normally so the TextInput + Save button work.
-            if rename_row.opacity > 0 and rename_row.collide_point(*touch.pos):
+            # The open editor (its input and Save) gets the touch the normal way.
+            if self._rename_row.parent is view and self._rename_row.collide_point(*touch.pos):
                 return False
-            # actions strip: rightmost dp(80) of the row area
-            actions_left = wrapper.right - dp(80)
+            actions_left = view.right - dp(80)
             if touch.x >= actions_left:
-                mid = actions_left + dp(80) / 2
-                if touch.x < mid:
-                    opts["toggle_rename"]()
+                if touch.x < actions_left + dp(40):
+                    self._toggle_rename(view.sid)
                 else:
-                    self._confirm_delete(opts["sid"], opts["name"])
+                    self._confirm_delete(view.sid, view.name)
                 return True
-            # Body tap → open session detail
             if self._on_session_select:
-                self._on_session_select(opts["sid"])
+                self._on_session_select(view.sid)
             return True
         return False

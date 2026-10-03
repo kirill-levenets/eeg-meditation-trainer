@@ -7,7 +7,6 @@ import weakref
 
 import pytest
 from kivy.base import EventLoop
-from kivy.clock import Clock
 from kivy.graphics import Canvas, Color, InstructionGroup
 from kivy.uix.widget import Widget
 
@@ -342,11 +341,7 @@ def _history_sessions(n: int) -> list[dict]:
 
 
 def _drain_history(h) -> None:
-    for _ in range(200):
-        if h._row_build_ev is None:
-            return
-        Clock.tick()
-    raise AssertionError("row build never finished")
+    _pump()  # the list lays out its rows over the next frames
 
 
 @pytest.mark.parametrize("old, new", PAIRS)
