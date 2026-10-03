@@ -3185,11 +3185,8 @@ class EEGMeditationApp(App):
             return
         with timed("history.get_all_sessions"):
             sessions = sessions_for_view(self._db, self._current_user_id, self._view_all_users)
-        # Rows build in chunks (history_screen); spinner stays up until the last
-        # chunk lands so the UI isn't frozen during the ~0.9s widget build.
-        self.show_loading("Loading history…")
         view = (self._current_user_id, self._view_all_users)
-        self._history_screen.load_sessions(sessions, on_complete=self.hide_loading, keep_filter=view == self._history_view)
+        self._history_screen.load_sessions(sessions, keep_filter=view == self._history_view)
         self._history_view = view
         self._history_dirty = False
 

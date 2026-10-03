@@ -3,7 +3,7 @@ from app.ui.history_screen import HistoryScreen
 
 def _history():
     h = HistoryScreen()
-    h._pending_rows = [{"id": 1}, {"id": 2}, {"id": 3}]  # "currently shown" sessions
+    h._shown = [{"id": 1}, {"id": 2}, {"id": 3}]  # "currently shown" sessions
     return h
 
 
