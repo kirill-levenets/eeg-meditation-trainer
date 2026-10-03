@@ -282,8 +282,9 @@ class DatabaseManager:
 
     @staticmethod
     def _insert_session(c, stats: dict, user_id: Optional[int], session_name: str, custom_formulas: str,
-                        session_program: str, engine_version: str) -> Optional[int]:
-        """The session-row INSERT inside the caller's transaction: its id, or None from the null connection."""
+                        session_program: str, engine_version: str, started_at: float | None = None) -> Optional[int]:
+        """The session-row INSERT inside the caller's transaction: its id, or None from the null connection.
+        `started_at` (epoch seconds) dates the row; without it, now."""
         cursor = c.execute(
             """
             INSERT INTO sessions
@@ -295,7 +296,7 @@ class DatabaseManager:
             """,
             (
                 user_id,
-                datetime.now().isoformat(),
+                (datetime.fromtimestamp(started_at) if started_at else datetime.now()).isoformat(),
                 stats.get("duration", 0),
                 stats.get("threshold_used", 50),
                 stats.get("avg_meditation", 0),
@@ -541,14 +542,15 @@ class DatabaseManager:
 
     def checkpoint_session(self, session_id: int | None, stats: dict, metrics: list[dict], *,
                            user_id: int | None = None, session_name: str = "", custom_formulas: str = "",
-                           session_program: str = "", engine_version: str = "") -> int | None:
+                           session_program: str = "", engine_version: str = "",
+                           started_at: float | None = None) -> int | None:
         """Write a session's row (insert or update) and its new metric rows in one transaction, so a process killed at
         any point leaves both as of one checkpoint. Returns the session id; None when a new row couldn't be inserted
         (the null connection, shutting down) — an update there is a no-op that still returns the given id."""
         with self._write() as c:
             if session_id is None:
                 session_id = self._insert_session(c, stats, user_id, session_name, custom_formulas, session_program,
-                                                  engine_version)
+                                                  engine_version, started_at)
             else:
                 self._update_session_row(c, session_id, stats, custom_formulas, session_program, engine_version)
             if session_id is not None:

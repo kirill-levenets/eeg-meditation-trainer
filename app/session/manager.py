@@ -53,6 +53,11 @@ class SessionManager:
         return self._state
 
     @property
+    def started_at(self) -> float:
+        """Wall-clock time the session started (0.0 before start): its date and name, not the first save's."""
+        return self._start_time
+
+    @property
     def elapsed_seconds(self) -> float:
         if self._state == SessionState.RUNNING:
             return time.time() - self._start_time - self._total_paused
@@ -180,6 +185,7 @@ class SessionManager:
 
     def reset(self) -> None:
         self._state = SessionState.IDLE
+        self._start_time = 0.0
         self._metrics_accumulator = []
         self._elapsed = 0.0
         self._reset_scoring()

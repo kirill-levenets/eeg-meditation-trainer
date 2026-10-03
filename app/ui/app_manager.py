@@ -5,6 +5,7 @@ import sys
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from datetime import datetime as _dt
 from typing import Optional
 
@@ -1271,6 +1272,8 @@ class EEGMeditationApp(App):
             logger.warning("Session start blocked: no user selected")
             return
 
+        self._start_attempt += 1
+        attempt = self._start_attempt
         if APP.USE_MOCK_DEVICE:
             self._eeg_stream = self._mock_stream
             self._start_session_common()
@@ -1294,6 +1297,8 @@ class EEGMeditationApp(App):
             matches = self._filter_mindwave(devices)
 
             def _on_main_thread(dt):
+                if attempt != self._start_attempt:
+                    return  # cancelled while scanning
                 if len(matches) == 1:
                     mindwave = matches[0]
                     self._on_device_select(mindwave["address"], mindwave["name"])
@@ -1490,7 +1495,7 @@ class EEGMeditationApp(App):
             self._timer_state.start_countdown()
             self._live_screen.update_device_status(True)
             self._live_screen.update_state("Running")
-            self._live_screen.set_start_time(time.time())
+            self._live_screen.set_start_time(self._session_manager.started_at)
             self._live_screen.hide_overlay()
         elif self._real_stream.is_connected:
             # BT still connected from previous session — reuse it
@@ -1498,13 +1503,8 @@ class EEGMeditationApp(App):
             self._waiting_for_bt = False
             name = self._real_stream._device_name or "Real EEG"
             self._session_manager.start(threshold=threshold)
-            self._audio.start()
-            self._audio.play_connect_sound()
             self._timer_state.start_countdown()
-            self._live_screen.update_device_status(True, device_name=name)
-            self._live_screen.update_state("Running")
-            self._live_screen.set_start_time(time.time())
-            self._live_screen.hide_overlay()
+            self._on_session_connected(name)
             logger.info(f"Reusing existing BT connection to {name}")
         elif not self._begin_bt_wait(threshold):
             return
@@ -1518,15 +1518,14 @@ class EEGMeditationApp(App):
         name = self._real_stream._device_name or "Real EEG"
         if not self._real_stream.start():
             # Nothing is connecting: entering the wait would misreport a refusal as a failed connect.
-            self._release_wake_lock()
-            self._stop_session_keep_alive_service()
-            self._live_screen.set_controls_idle()
+            self._undo_session_setup()
             self._live_screen.update_device_status(False, device_name=name)
             self._live_screen.show_overlay_retry(
                 f"Can't connect to {name} yet.\n{self._real_stream._last_connect_error}"
             )
             logger.info(f"BT start refused: {self._real_stream._last_connect_error!r}")
             return False
+        self._wait_attempt = self._start_attempt
         self._waiting_for_bt = True
         self._pending_threshold = threshold
         self._live_screen.update_device_status(False, device_name=name, connecting=True)
@@ -1545,12 +1544,32 @@ class EEGMeditationApp(App):
 
     def _on_connect_cancel(self, *args) -> None:
         """Cancel button on connection overlay."""
-        self._live_screen.hide_overlay()
+        self._cancel_session_start("IDLE")
+
+    def _cancel_session_start(self, state: str) -> None:
+        """End a start that hasn't become a session: the device scan, the BT wait, or data that arrived in the same frame
+        as the Cancel."""
         if self._waiting_for_bt or self._tick_thread is not None:
             self._abort_bt_wait()
+        self._live_screen.hide_overlay()
+        self._undo_session_setup()  # also resets a session that started in the frame of the Cancel
+        self._live_screen.update_state(state)
+
+    def _undo_session_setup(self) -> None:
+        """Main thread: undo what _start_session_common set up, for a session that ended or never started. Ends its
+        start attempt, so the callbacks still queued for it do nothing."""
+        self._start_attempt += 1
+        self._live_screen.set_training_series(None)  # clear the program "training now" marker
+        self._restore_program_series()
         self._live_screen.set_controls_idle()
         self._live_screen.update_device_status(False)
-        self._live_screen.update_state("IDLE")
+        self._shamatha_active = False
+        self._shamatha_streak = 0
+        self._live_screen.set_shamatha(False)
+        self._timer_state.reset()
+        self._session_manager.reset()
+        self._release_wake_lock()
+        self._stop_session_keep_alive_service()
 
     def _on_connect_retry(self, *args) -> None:
         """Retry button on connection overlay."""
@@ -1649,15 +1668,13 @@ class EEGMeditationApp(App):
             logger.info("Session resumed")
 
     def _on_stop(self, *args) -> None:
-        # If still waiting for BT, session never started — just clean up
-        if getattr(self, '_waiting_for_bt', False):
-            self._abort_bt_wait()
-            self._live_screen.hide_overlay()
-            self._live_screen.set_controls_idle()
-            self._live_screen.update_device_status(False)
-            self._live_screen.update_state("Cancelled")
-            self._timer_state.reset()
-            logger.info("Session cancelled during BT connection wait")
+        # Decided by the session, not by the wait flag: a wait that has just ended cleared the flag before its idle UI.
+        if self._session_manager.state == SessionState.FINISHED:
+            logger.info("Stop ignored: the session has already ended and its teardown is queued")
+            return
+        if self._session_manager.state not in (SessionState.RUNNING, SessionState.PAUSED):
+            self._cancel_session_start("Cancelled")
+            logger.info("Session cancelled before it started")
             return
 
         # Pause the tick thread while the dialog is open
@@ -1673,7 +1690,7 @@ class EEGMeditationApp(App):
         device = "Mock" if APP.USE_MOCK_DEVICE else (
             self._real_stream._device_name or "Real EEG"
         )
-        ts = time.strftime("%H:%M")
+        ts = time.strftime("%H:%M", time.localtime(self._session_manager.started_at or None))
         return f"{ts} - {device}"
 
     def _persist_session_data(self, reason: str) -> dict:
@@ -1716,6 +1733,7 @@ class EEGMeditationApp(App):
                     custom_formulas=self._session_custom_formulas_json(),
                     session_program=self._session_program_json(),
                     engine_version=MetricsEngine.ENGINE_VERSION,
+                    started_at=self._session_manager.started_at or None,
                 )
             except Exception:
                 self._metrics_buffer[:0] = batch  # kept for the next checkpoint
@@ -1774,22 +1792,12 @@ class EEGMeditationApp(App):
             self._reload_live_graphs_from_mirror()
         except Exception:
             logger.exception("graph reload on stop failed")
-        self._live_screen.set_training_series(None)  # clear the program "training now" marker
-        self._restore_program_series()
-        self._live_screen.set_controls_idle()
-        self._live_screen.update_device_status(False)
-        self._shamatha_active = False
-        self._shamatha_streak = 0
-        self._live_screen.set_shamatha(False)
+        self._undo_session_setup()
         self._live_screen.update_state("FINISHED")
         # Sync the header timer to the final duration (it froze at lock time).
         if stats:
             secs = int(stats.get("duration", 0))
             self._live_screen.update_timer(f"{secs // 60:02d}:{secs % 60:02d}")
-        self._timer_state.reset()
-        self._session_manager.reset()
-        self._release_wake_lock()
-        self._stop_session_keep_alive_service()
         self._mark_history_dirty()
         if stats and session_id:
             self._summary_saved_notes = ""
@@ -1835,11 +1843,28 @@ class EEGMeditationApp(App):
             f"Session stopped and saved (took {time.monotonic() - t_start:.3f}s)"
         )
 
+    def _on_session_connected(self, name: str) -> None:
+        """Main thread: a headset session has started (the BT wait's first data, or a kept-alive connection)."""
+        self._live_screen.update_device_status(True, device_name=name)
+        self._live_screen.update_state("Running")
+        self._live_screen.set_start_time(self._session_manager.started_at)
+        self._live_screen.hide_overlay()
+        self._settings_screen.update_device_status(True, name=name)
+        # Audio starts with the overlay hide, so the noise never plays while the connecting loader is still visible.
+        self._audio.start()
+        self._audio.play_connect_sound()
+
     def _cancel_stop(self) -> None:
         """Back to the session after cancelling stop; a paused one gets its tick back only on Resume."""
         if self._session_manager.state == SessionState.RUNNING:
             self._start_tick_thread()
         logger.info("Stop cancelled")
+
+    def _on_main_for_wait(self, fn: Callable[[], object]) -> None:
+        """Tick thread: queue fn for the main thread as part of this BT wait; it does nothing once the wait's start
+        attempt has ended (a Cancel, Stop or profile delete handled before it)."""
+        attempt = self._wait_attempt
+        self._on_main(lambda: fn() if attempt == self._start_attempt else None)
 
     _BT_CONNECT_TIMEOUT = 30.0  # seconds before BT socket gives up
     _BT_SIGNAL_TIMEOUT = 8.0   # seconds to wait for EEG packets after connected
@@ -1907,19 +1932,7 @@ class EEGMeditationApp(App):
                     # fired the timer instantly — a 0s "timer-ended" session.
                     self._timer_state.start_countdown()
                     _n = name
-                    self._on_main(lambda n=_n: (
-                        self._live_screen.update_device_status(True, device_name=n),
-                        self._live_screen.update_state("Running"),
-                        self._live_screen.set_start_time(time.time()),
-                        self._live_screen.hide_overlay(),
-                        self._settings_screen.update_device_status(True, name=n),
-                        # Start audio on the main thread together with hiding the
-                        # overlay, so white-noise never plays while the connecting
-                        # loader is still visible (previously non-atomic: audio
-                        # started on the tick thread, overlay hide was deferred).
-                        self._audio.start(),
-                        self._audio.play_connect_sound(),
-                    ))
+                    self._on_main_for_wait(lambda n=_n: self._on_session_connected(n))
                     logger.info(f"BT device {name} connected, session started")
                 elif signal_elapsed > self._BT_SIGNAL_TIMEOUT and not has_packets:
                     # No packets — ThinkGear didn't start streaming.
@@ -1928,8 +1941,8 @@ class EEGMeditationApp(App):
                     # The only reliable fix is a headset power cycle.
                     self._abort_bt_wait()
                     _n = name
-                    self._on_main(lambda n=_n: (
-                        self._live_screen.set_controls_idle(),
+                    self._on_main_for_wait(lambda n=_n: (
+                        self._undo_session_setup(),
                         self._live_screen.update_device_status(False, device_name=n),
                         self._live_screen.show_overlay_retry(
                             "No EEG data received.\n"
@@ -1958,16 +1971,15 @@ class EEGMeditationApp(App):
                         f"elapsed={signal_elapsed:.0f}s"
                     )
                     _msg = f"Connected to {name}\n{wait_msg}\n{sensor_info}"
-                    self._on_main(lambda m=_msg: self._live_screen.update_overlay(m))
+                    self._on_main_for_wait(lambda m=_msg: self._live_screen.update_overlay(m))
         elif not self._real_stream._running:
             # Connection thread ended with error
             self._abort_bt_wait()
             hint = self._real_stream._last_connect_error or "Check device is on and paired."
             _n = name
             _h = hint
-            self._on_main(lambda n=_n, h=_h: (
-                self._live_screen.set_controls_idle(),
-                self._live_screen.update_device_status(False),
+            self._on_main_for_wait(lambda n=_n, h=_h: (
+                self._undo_session_setup(),
                 self._live_screen.show_overlay_retry(
                     f"Connection to {n} failed.\n{h}"
                 ),
@@ -1978,9 +1990,8 @@ class EEGMeditationApp(App):
             # Timeout waiting for BT socket
             self._abort_bt_wait()
             _n = name
-            self._on_main(lambda n=_n: (
-                self._live_screen.set_controls_idle(),
-                self._live_screen.update_device_status(False),
+            self._on_main_for_wait(lambda n=_n: (
+                self._undo_session_setup(),
                 self._live_screen.show_overlay_retry(
                     f"Connection to {n} timed out.\n"
                     "Make sure the device is turned on\nand in range."
@@ -1991,7 +2002,7 @@ class EEGMeditationApp(App):
             # Still waiting for BT socket — show countdown
             remaining = int(self._BT_CONNECT_TIMEOUT - elapsed)
             _msg = f"Connecting to {name}...\nTimeout in {remaining}s"
-            self._on_main(lambda m=_msg: self._live_screen.update_overlay(m))
+            self._on_main_for_wait(lambda m=_msg: self._live_screen.update_overlay(m))
 
     def _update_tick(self, dt: float) -> None:
         """Main 2 Hz processing loop.
@@ -3191,6 +3202,10 @@ class EEGMeditationApp(App):
 
     # A tick (session stats + buffered row) and a checkpoint's snapshot of both, one at a time; one app per process.
     _checkpoint_lock = threading.Lock()
+    # Each Start and each ending (_undo_session_setup) moves it on: a callback queued for an earlier attempt (the device
+    # scan's result, the BT wait's UI and audio) sees it has changed and does nothing.
+    _start_attempt: int = 0
+    _wait_attempt: int = 0  # the attempt the BT wait belongs to, taken on the main thread when it begins
     _history_dirty: bool = True
     _history_view: Optional[tuple] = None  # (profile, all-users) History last loaded; a day filter survives only that
 
