@@ -4,6 +4,7 @@ import time
 from unittest.mock import MagicMock
 
 import app.ui.app_manager as am
+from app.session.manager import SessionManager
 from app.ui.app_manager import EEGMeditationApp
 
 
@@ -28,14 +29,16 @@ def _make_waiting_app() -> tuple[EEGMeditationApp, list]:
     app._stop_session_keep_alive_service = MagicMock()
     app._live_screen = MagicMock()
     app._timer_state = MagicMock()
+    app._session_manager = SessionManager()  # idle: the session starts only when data arrives
     return app, events
 
 
 def _assert_unwatched_stream_stop(app: EEGMeditationApp, events: list) -> None:
     assert events == ["tick_stopped", ("stream_stopped", False, None)]
     assert app._bt_signal_start is None
-    app._release_wake_lock.assert_called_once()
-    app._stop_session_keep_alive_service.assert_called_once()
+    # Released by the abort itself (on the tick thread for a wait exit), and again by a cancel's shared teardown.
+    app._release_wake_lock.assert_called()
+    app._stop_session_keep_alive_service.assert_called()
 
 
 def test_connect_cancel_stops_watcher_before_stream():
@@ -59,7 +62,8 @@ def test_app_init_defines_bt_wait_state(monkeypatch):
     assert app._waiting_for_bt is False
     assert app._bt_signal_start is None
 
-    app._live_screen = MagicMock()
+    app._live_screen = MagicMock()  # built by build(), which runs before any UI action
+    app._timer_state = MagicMock()
     app._on_connect_cancel()  # must not raise
 
 

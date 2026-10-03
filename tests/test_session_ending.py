@@ -38,6 +38,7 @@ def _notes_writes(app):
 
 def test_user_stop_confirms_then_takes_the_shared_save_path():
     app = _app()
+    app._session_manager = MagicMock(state=SessionState.RUNNING)
     app._waiting_for_bt = False
     app._stop_tick_thread = MagicMock()
     app._stop_and_save = MagicMock()
