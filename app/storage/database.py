@@ -272,44 +272,59 @@ class DatabaseManager:
         stamps which metric-formula version produced the stored values.
         """
         with self._write() as c:
-            cursor = c.execute(
-                """
-                INSERT INTO sessions
-                (user_id, date_time, duration, threshold_used, avg_meditation, avg_shamatha,
-                 max_meditation, time_above_threshold, longest_streak, session_name,
-                 time_shamatha_90, custom_formulas, session_program, engine_version,
-                 score_metric_key, score_metric_name, avg_score)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    user_id,
-                    datetime.now().isoformat(),
-                    stats.get("duration", 0),
-                    stats.get("threshold_used", 50),
-                    stats.get("avg_meditation", 0),
-                    stats.get("avg_shamatha", 0),
-                    stats.get("max_meditation", 0),
-                    stats.get("time_above_threshold", 0),
-                    stats.get("longest_streak", 0),
-                    session_name,
-                    stats.get("time_shamatha_90", 0),
-                    custom_formulas,
-                    session_program,
-                    engine_version,
-                    stats.get("score_metric_key", ""),
-                    stats.get("score_metric_name", ""),
-                    stats.get("avg_score"),
-                ),
-            )
-        session_id = cursor.lastrowid
+            session_id = self._insert_session(c, stats, user_id, session_name, custom_formulas, session_program,
+                                              engine_version)
         if session_id is None:
             logger.error("save_session no-oped — DB is shutting down; session NOT persisted")
             return None
         logger.info(f"Session {session_id} saved")
         return session_id
 
+    @staticmethod
+    def _insert_session(c, stats: dict, user_id: Optional[int], session_name: str, custom_formulas: str,
+                        session_program: str, engine_version: str) -> Optional[int]:
+        """The session-row INSERT inside the caller's transaction: its id, or None from the null connection."""
+        cursor = c.execute(
+            """
+            INSERT INTO sessions
+            (user_id, date_time, duration, threshold_used, avg_meditation, avg_shamatha,
+             max_meditation, time_above_threshold, longest_streak, session_name,
+             time_shamatha_90, custom_formulas, session_program, engine_version,
+             score_metric_key, score_metric_name, avg_score)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                datetime.now().isoformat(),
+                stats.get("duration", 0),
+                stats.get("threshold_used", 50),
+                stats.get("avg_meditation", 0),
+                stats.get("avg_shamatha", 0),
+                stats.get("max_meditation", 0),
+                stats.get("time_above_threshold", 0),
+                stats.get("longest_streak", 0),
+                session_name,
+                stats.get("time_shamatha_90", 0),
+                custom_formulas,
+                session_program,
+                engine_version,
+                stats.get("score_metric_key", ""),
+                stats.get("score_metric_name", ""),
+                stats.get("avg_score"),
+            ),
+        )
+        return cursor.lastrowid
+
     def save_metrics_batch(self, session_id: int, metrics_list: list[dict]) -> None:
         """Batch insert metrics rows with raw and computed data."""
+        if not metrics_list:
+            return
+        with self._write() as c:
+            self._insert_metrics(c, session_id, metrics_list)
+
+    @staticmethod
+    def _insert_metrics(c, session_id: int, metrics_list: list[dict]) -> None:
+        """The metrics INSERT inside the caller's transaction."""
         if not metrics_list:
             return
         rows = [
@@ -342,20 +357,19 @@ class DatabaseManager:
             )
             for m in metrics_list
         ]
-        with self._write() as c:
-            c.executemany(
-                """
-                INSERT INTO metrics
-                (session_id, timestamp, delta_raw, theta_raw, alpha1_raw, alpha2_raw,
-                 beta1_raw, beta2_raw, gamma1_raw, gamma2_raw,
-                 alpha_norm, beta_norm, theta_norm, delta_norm, gamma_norm,
-                 meditation_score, distraction, subtle_distraction, sinking,
-                 shamatha_score, stability, calmness,
-                 native_attention, native_meditation, marker)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                rows,
-            )
+        c.executemany(
+            """
+            INSERT INTO metrics
+            (session_id, timestamp, delta_raw, theta_raw, alpha1_raw, alpha2_raw,
+             beta1_raw, beta2_raw, gamma1_raw, gamma2_raw,
+             alpha_norm, beta_norm, theta_norm, delta_norm, gamma_norm,
+             meditation_score, distraction, subtle_distraction, sinking,
+             shamatha_score, stability, calmness,
+             native_attention, native_meditation, marker)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
 
     def get_all_sessions(self, user_id: Optional[int] = None) -> list[dict]:
         """Return sessions ordered by date descending, optionally filtered by user."""
@@ -488,6 +502,14 @@ class DatabaseManager:
                        session_program: str | None = None,
                        engine_version: str | None = None) -> None:
         """Update an existing session's aggregate stats (+ formula snapshot if given)."""
+        with self._write() as c:
+            self._update_session_row(c, session_id, stats, custom_formulas, session_program, engine_version)
+        logger.info(f"Session {session_id} updated with final stats")
+
+    @staticmethod
+    def _update_session_row(c, session_id: int, stats: dict, custom_formulas: str | None,
+                            session_program: str | None, engine_version: str | None) -> None:
+        """The session-row UPDATE inside the caller's transaction."""
         cols = ["duration = ?", "threshold_used = ?", "avg_meditation = ?",
                 "avg_shamatha = ?", "max_meditation = ?", "time_above_threshold = ?",
                 "longest_streak = ?", "time_shamatha_90 = ?",
@@ -515,11 +537,23 @@ class DatabaseManager:
             cols.append("engine_version = ?")
             vals.append(engine_version)
         vals.append(session_id)
+        c.execute(f"UPDATE sessions SET {', '.join(cols)} WHERE id = ?", vals)
+
+    def checkpoint_session(self, session_id: int | None, stats: dict, metrics: list[dict], *,
+                           user_id: int | None = None, session_name: str = "", custom_formulas: str = "",
+                           session_program: str = "", engine_version: str = "") -> int | None:
+        """Write a session's row (insert or update) and its new metric rows in one transaction, so a process killed at
+        any point leaves both as of one checkpoint. Returns the session id; None when a new row couldn't be inserted
+        (the null connection, shutting down) — an update there is a no-op that still returns the given id."""
         with self._write() as c:
-            c.execute(
-                f"UPDATE sessions SET {', '.join(cols)} WHERE id = ?", vals
-            )
-        logger.info(f"Session {session_id} updated with final stats")
+            if session_id is None:
+                session_id = self._insert_session(c, stats, user_id, session_name, custom_formulas, session_program,
+                                                  engine_version)
+            else:
+                self._update_session_row(c, session_id, stats, custom_formulas, session_program, engine_version)
+            if session_id is not None:
+                self._insert_metrics(c, session_id, metrics)
+        return session_id
 
     def rename_session(self, session_id: int, new_name: str) -> None:
         """Rename a session."""
