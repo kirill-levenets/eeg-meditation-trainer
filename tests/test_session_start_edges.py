@@ -285,7 +285,7 @@ def test_a_session_row_is_dated_and_named_at_the_session_start(monkeypatch):
         app._checkpoint_session()
         row = db.get_session(app._current_session_id)
         assert row["date_time"][:19] == datetime.datetime.fromtimestamp(started).isoformat()[:19]
-        assert row["session_name"] == time.strftime("%H:%M", time.localtime(started)) + " - Mock"
+        assert row["session_name"] == time.strftime("%Y-%m-%d %H:%M", time.localtime(started)) + " - Mock"
     finally:
         db.close()
         for suffix in ("", "-wal", "-shm"):
@@ -303,6 +303,6 @@ def test_a_reset_session_has_no_start_time():
 
 def test_a_name_made_before_the_start_uses_the_current_time(monkeypatch):
     monkeypatch.setattr(APP, "USE_MOCK_DEVICE", True)
-    before = time.strftime("%H:%M")
+    before = time.strftime("%Y-%m-%d %H:%M")
     name = _app()._make_session_name()
-    assert name in (before + " - Mock", time.strftime("%H:%M") + " - Mock")
+    assert name in (before + " - Mock", time.strftime("%Y-%m-%d %H:%M") + " - Mock")

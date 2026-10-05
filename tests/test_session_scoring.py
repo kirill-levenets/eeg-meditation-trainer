@@ -185,10 +185,11 @@ def test_recorded_score_of_new_legacy_and_program_rows():
     from app.session.scoring import recorded_score
     assert recorded_score({"score_metric_key": "custom_formula", "score_metric_name": "Calm ratio",
                            "avg_score": 70.0}) == ("custom_formula", "Calm ratio", 70.0)
-    assert recorded_score({"score_metric_key": "", "session_program": "", "avg_meditation": 44.0}) == (
-        "meditation_score", "Meditation", 44.0)  # a legacy simple session was scored on meditation
-    assert recorded_score({"score_metric_key": "", "session_program": '[{"duration": 60}]'}) == (
-        "program", "Program", None)
+    # Before #51 no metric was saved: nothing is deduced for a simple session or a program.
+    assert recorded_score({"score_metric_key": "", "session_program": "", "avg_meditation": 44.0}) is None
+    assert recorded_score({"score_metric_key": "", "session_program": '[{"duration": 60}]'}) is None
+    assert recorded_score({"score_metric_key": "program", "score_metric_name": "Evening ladder",
+                           "avg_score": None}) == ("program", "Evening ladder", None)
 
 
 def test_recomputing_from_the_stored_ticks_reproduces_the_stored_stats():

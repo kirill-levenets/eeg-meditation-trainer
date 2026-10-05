@@ -50,6 +50,7 @@ from app.ui.history_screen import HistoryScreen
 from app.ui.live_session import METRICS_COLORS, SERIES_NAMES, LiveSessionScreen
 from app.ui.profile_screen import ProfileScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
+from app.ui.session_labels import session_title, start_stamp
 from app.ui.settings_screen import SettingsScreen
 from app.ui.theme import (
     DEFAULT_THEME,
@@ -1690,7 +1691,8 @@ class EEGMeditationApp(App):
         device = "Mock" if APP.USE_MOCK_DEVICE else (
             self._real_stream._device_name or "Real EEG"
         )
-        ts = time.strftime("%H:%M", time.localtime(self._session_manager.started_at or None))
+        started = self._session_manager.started_at
+        ts = start_stamp(_dt.fromtimestamp(started) if started else _dt.now())
         return f"{ts} - {device}"
 
     def _persist_session_data(self, reason: str) -> dict:
@@ -1801,7 +1803,12 @@ class EEGMeditationApp(App):
         self._mark_history_dirty()
         if stats and session_id:
             self._summary_saved_notes = ""
-            self._live_screen.show_summary(session_id, stats)
+            try:
+                saved = self._db.get_session(session_id)  # titled like its History row, from what was stored
+            except sqlite3.Error:
+                logger.exception(f"Session {session_id} saved, but its title couldn't be read for the end card")
+                saved = None
+            self._live_screen.show_summary(session_id, stats, title=session_title(saved) if saved else "")
 
     def _session_pipeline_live(self) -> bool:
         """True if a session is RUNNING/PAUSED *or* still in the BT-connect wait

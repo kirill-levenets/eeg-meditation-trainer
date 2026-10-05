@@ -19,6 +19,7 @@ def _app() -> EEGMeditationApp:
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._db = MagicMock()
     app._db.update_session_notes.return_value = True
+    app._db.get_session.return_value = None
     app._audio = MagicMock()
     app._live_screen = MagicMock()
     app._live_screen.summary_session_id = SID
@@ -67,7 +68,7 @@ def test_user_stop_restores_program_series_and_clears_the_training_marker():
     app._persist_session_data.assert_called_once_with("user")
     app._restore_program_series.assert_called_once()
     app._live_screen.set_training_series.assert_called_with(None)
-    app._live_screen.show_summary.assert_called_once_with(SID, {"duration": 30})
+    app._live_screen.show_summary.assert_called_once_with(SID, {"duration": 30}, title="")
 
 
 # --- Delete: only after confirmation, through the shared delete -------------------------------------------------

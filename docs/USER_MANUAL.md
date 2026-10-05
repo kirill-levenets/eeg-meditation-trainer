@@ -66,7 +66,7 @@ Tap **Mark** to place a vertical line on the graph. Use this to tag events ("hea
 ### Session End Summary
 
 Every ending (Stop, timer, lost signal) shows the same **Session saved** card:
-- Duration, Avg Shamatha, Avg Meditation, Time Above Threshold, Time Shamatha ≥ 90
+- The session's name (date, start time and device), Duration, **Scored on** (the metric that drove the feedback sound and its threshold, e.g. "Shamatha ≥ 50"; for a program, its name), Time Above Threshold and Longest Streak
 - Quick notes field with **Save notes** next to it — saves them ("Notes saved") and keeps the card open
 - **OK** — closes the card; notes you typed but didn't save are saved automatically (also if the app goes to the background or is closed)
 - **Delete session** — permanently deletes the session after a confirmation ("This can't be undone"); Cancel keeps it
@@ -106,10 +106,13 @@ In either view, tap a day (cell or bar) to filter the session list below to that
 
 Each session row shows:
 - Color indicator (score)
-- Session name (e.g. "14:30 - MindWave Mobile")
-- Stats (Shamatha score, duration)
-- **Pencil icon** — tap to rename inline
+- **Date, start time and name**, e.g. "2026-09-26 14:30 - MindWave Mobile" (a renamed session: "2026-09-26 14:30 - Morning sit"; the date and time are always shown, also in a day's list)
+- **Score line**: the metric the session was scored on (the one that drove the feedback sound) and its average, the duration, and the longest streak above the threshold, e.g. "Shamatha 72 · 25m 00s · Streak 4m 30s". A program session shows the program's name instead of an average; a streak of 0 is left out. Sessions recorded before the app saved which metric they were scored on show the average Shamatha and the duration, as before ("Shamatha 50 · 15m 00s").
+- **Notes**: the first line of the session's notes, when it has any
+- **Pencil icon** — tap to rename inline (you edit the name; the date and time stay)
 - **Trash icon** — tap to delete (with confirmation)
+
+Long names and notes are cut with "…" to fit the row. The session detail is titled the same way as its row.
 
 Tap a session row to view full details (graphs, notes, tags, mood).
 
@@ -117,7 +120,7 @@ Tap a session row to view full details (graphs, notes, tags, mood).
 
 ### Session Detail
 
-Shows full statistics, a **Band Power (whole session)** breakdown, notes/tags/mood editor, and three graph tabs:
+Titled like its row. Shows Duration, **Scored on** (the metric and threshold that Time Above Threshold and Longest Streak were measured against, or the program's name; sessions from before this was saved show **Threshold Used** instead), Time Above Threshold, Longest Streak and Mood Rating, a **Band Power (whole session)** breakdown, notes/tags/mood editor, and three graph tabs (the Metrics legend marks the scored series with **»**):
 - **Metrics** — all computed metrics
 - **Raw EEG** — synthesized waveform from stored band powers
 - **Frequencies** — band power chart

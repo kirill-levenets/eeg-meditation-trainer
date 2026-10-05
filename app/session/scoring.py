@@ -30,12 +30,10 @@ def goal_stats(values: Iterable[float], goal: float) -> tuple[float, float]:
     return acc.time_above, acc.longest_streak
 
 
-def recorded_score(session: dict) -> tuple[str, str, float | None]:
-    """(metric key, display name, average) a stored session was scored on. Rows from before #51 have no key: a simple
-    one was scored on meditation, a program per segment."""
+def recorded_score(session: dict) -> tuple[str, str, float | None] | None:
+    """(metric key, display name, average) a stored session was scored on, or None for a row from before #51, which
+    saved none: nothing is deduced for it."""
     key = session.get("score_metric_key") or ""
-    if key:
-        return key, session.get("score_metric_name") or key, session.get("avg_score")
-    if session.get("session_program"):
-        return "program", "Program", None
-    return "meditation_score", "Meditation", session.get("avg_meditation")
+    if not key:
+        return None
+    return key, session.get("score_metric_name") or key, session.get("avg_score")

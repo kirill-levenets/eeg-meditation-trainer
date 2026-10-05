@@ -142,7 +142,7 @@ def test_a_row_shows_its_sessions_name_after_reuse(history):
     for y in (1, 0.4, 0):
         _scroll(history, y)
         for sid, view in _views(history).items():
-            assert view._name_label.text == f"Session {sid}"
+            assert view._name_label.text.endswith(f" - Session {sid}")
 
 
 def test_select_all_selects_every_session_in_the_filter_including_rows_never_shown(history):
@@ -191,7 +191,7 @@ def test_the_action_strip_renames_and_deletes_its_row(history):
     _frames()
     sid, view = next(iter(sorted(_views(history).items())))
     _tap(view, dx=view.width / 2 - dp(20))  # the right half of the 80 dp strip: delete
-    assert asked == [(sid, f"Session {sid}")]
+    assert asked == [(sid, view._name_label.text)] and view._name_label.text.endswith(f" - Session {sid}")
     _tap(view, dx=view.width / 2 - dp(60))  # the left half: rename
     _frames()
     assert history._renaming_sid == sid
@@ -235,7 +235,7 @@ def test_the_rename_editor_follows_its_session_while_scrolling(history):
     _frames()
     assert renamed == [(0, "Evening sit")]
     assert history._sessions[0]["session_name"] == "Evening sit"
-    assert _views(history)[0]._name_label.text == "Evening sit"
+    assert _views(history)[0]._name_label.text == "2026-09-28 10:00 - Evening sit"
     assert history._rename_row.parent is None and history._renaming_sid is None
     assert _views(history)[0].height == dp(56)
 
