@@ -310,6 +310,8 @@ def test_finalize_stop_ui_reloads_full_graph_and_sets_duration():
     app._release_wake_lock = MagicMock()
     app._stop_session_keep_alive_service = MagicMock()
     app._mark_history_dirty = MagicMock()
+    app._db = MagicMock()
+    app._db.get_session.return_value = None
 
     EEGMeditationApp._finalize_stop_ui(app, {"duration": 60}, 7)
 
@@ -317,7 +319,7 @@ def test_finalize_stop_ui_reloads_full_graph_and_sets_duration():
     series = ls.graph.load_static_data.call_args[0][0]
     assert all(len(v) == 10 for v in series.values())  # full session, not partial
     ls.update_timer.assert_called_once_with("01:00")    # real duration, not frozen
-    ls.show_summary.assert_called_once_with(7, {"duration": 60})
+    ls.show_summary.assert_called_once_with(7, {"duration": 60}, title="")
 
 
 def test_resume_refreshes_stats_state_and_timer():

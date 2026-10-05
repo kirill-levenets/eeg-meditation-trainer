@@ -29,7 +29,7 @@ Inspired by the [EEG meditation research and Vernihor formula](https://scripture
 - **First-run wizard** — 2-step setup on first launch (create profile, connect device or use demo mode); existing profiles surface in a picker so reinstalls don't lose history
 - **Existing-user picker** — Wizard, first-run popup, and Settings → User Profile share one form: pick an existing profile or type a new name; duplicate names trigger an inline "Use existing 'X'" / "Change name" choice (DB enforces unique names)
 - **Session end summary** — Post-session overlay with stats and quick notes field
-- **History view** — Calendar heatmap (GitHub-style by avg shamatha) **or** 14-day bar chart, toggleable per user; tap a day in either to filter the session list
+- **History view** — Calendar heatmap (GitHub-style by avg shamatha) **or** 14-day bar chart, toggleable per user; tap a day in either to filter the session list. Each session row shows its date and start time, the metric it was scored on with its average, the duration, the longest streak and the first line of its notes
 - **Theme system** — 4 themes (Dark Blue, Dark Green, Light Cream, Light Green) with live refresh; custom styled widgets with rounded corners
 - **App icon** — Custom EEG brainwave icon and Android presplash
 - **macOS support** — Native build via PyInstaller
@@ -57,6 +57,7 @@ app/
 │   ├── app_manager.py          # Main app, screen routing, session lifecycle
 │   ├── live_session.py         # Session screen (metrics + raw EEG toggle)
 │   ├── history_screen.py       # Calendar/14-Day toggle + session list
+│   ├── session_labels.py       # A session's title, score line and notes line (History rows, session detail)
 │   ├── settings_screen.py      # Accordion settings: User Profile, Timer, Device, Data Backup, …
 │   ├── wizard_screen.py        # First-run setup wizard
 │   ├── diary_screen.py         # Session detail view with graphs

@@ -182,7 +182,7 @@ def test_renaming_updates_the_row_and_the_model_in_place():
     h._rename_input.dispatch("on_text_validate")
     assert renamed == [(1, "Evening sit")]
     assert next(s for s in h._sessions if s["id"] == 1)["session_name"] == "Evening sit"
-    assert _listed(h)[1]["name"] == "Evening sit"
+    assert _listed(h)[1]["name"] == "2026-09-28 11:00 - Evening sit"
 
 
 # --- the app: one delete path, no rebuild of History or the hidden diary list -------------------------------

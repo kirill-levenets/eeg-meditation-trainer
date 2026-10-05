@@ -18,6 +18,7 @@ from app.ui.raw_eeg_screen import (
     RawEEGScreen,
     ScrollableGraphWidget,
 )
+from app.ui.session_labels import session_threshold_row
 from app.ui.theme import (
     ICONS_AVAILABLE,
     C,
@@ -563,33 +564,41 @@ class LiveSessionScreen(Screen):
         self._summary_stats_card = Card(
             orientation="vertical",
             size_hint_y=None,
-            height=dp(144),
             bg_color=C.BG_CARD,
             spacing=S.GAP_SM,
         )
         self._summary_stats = {}
-        for key, label_text in [
+        summary_rows = [
             ("duration", "Duration"),
-            ("avg_shamatha", "Avg Shamatha"),
-            ("avg_meditation", "Avg Meditation"),
+            ("scored_on", "Scored on"),  # what Time Above Threshold and Longest Streak were measured against
             ("time_above", "Time Above Threshold"),
-            ("time_shamatha_90", "Time Shamatha \u2265 90"),
-        ]:
-            row = BoxLayout(size_hint_y=None, height=dp(24))
-            lbl = ThemedLabel(
-                text=label_text, font_size=F.BODY, color=C.TEXT_SECONDARY,
-                halign="left", size_hint_x=0.6,
-            )
-            lbl.bind(size=lbl.setter("text_size"))
+            ("longest_streak", "Longest Streak"),
+        ]
+        card = self._summary_stats_card
+        row_h = dp(24)
+        lines = 1 + len(summary_rows)  # the session's name, then the rows
+        card.height = lines * row_h + (lines - 1) * S.GAP_SM + card.padding[1] + card.padding[3]
+        name = ThemedLabel(text="", font_size=F.BODY, bold=True, color=C.TEXT, halign="center", valign="middle",
+                           size_hint_y=None, height=row_h, shorten=True, shorten_from="right")
+        name.bind(size=name.setter("text_size"))
+        card.add_widget(name)
+        self._summary_stats["name"] = name
+        for key, label_text in summary_rows:
+            row = BoxLayout(size_hint_y=None, height=row_h)
+            # The label takes its text's width and the value the rest: a Scored on value is longer than its label.
+            lbl = ThemedLabel(text=label_text, font_size=F.BODY, color=C.TEXT_SECONDARY, size_hint_x=None)
+            lbl.bind(texture_size=lambda w, ts: setattr(w, "width", ts[0] + S.GAP))
             val = ThemedLabel(
                 text="-", font_size=F.BODY, bold=True, color=C.TEXT,
-                halign="right", size_hint_x=0.4,
+                halign="right", valign="middle", shorten=True, shorten_from="right",
             )
             val.bind(size=val.setter("text_size"))
             row.add_widget(lbl)
             row.add_widget(val)
             self._summary_stats_card.add_widget(row)
             self._summary_stats[key] = val
+            if key == "scored_on":
+                self._summary_scored_on_title = lbl
         summary_panel.add_widget(self._summary_stats_card)
 
         notes_row = BoxLayout(size_hint_y=None, height=dp(70), spacing=S.GAP)
@@ -1132,18 +1141,15 @@ class LiveSessionScreen(Screen):
             label.text = "0"
         self.set_controls_idle()
 
-    def show_summary(self, session_id: int, stats: dict) -> None:
-        """Show post-session summary overlay with stats and notes field."""
+    def show_summary(self, session_id: int, stats: dict, title: str = "") -> None:
+        """Show the post-session card: the session's name, its duration and scored stats, and a notes field."""
         self._summary_session_id = session_id
-        # Fill stats
-        dur = stats.get("duration", 0)
-        self._summary_stats["duration"].text = format_duration(dur)
-        self._summary_stats["avg_shamatha"].text = f"{stats.get('avg_shamatha', 0):.0f}"
-        self._summary_stats["avg_meditation"].text = f"{stats.get('avg_meditation', 0):.0f}"
-        above = stats.get("time_above_threshold", 0)
-        self._summary_stats["time_above"].text = format_duration(above)
-        sham90 = stats.get("time_shamatha_90", 0)
-        self._summary_stats["time_shamatha_90"].text = format_duration(sham90)
+        shown = self._summary_stats
+        shown["name"].text = title
+        shown["duration"].text = format_duration(int(stats.get("duration", 0) or 0))
+        self._summary_scored_on_title.text, shown["scored_on"].text = session_threshold_row(stats)
+        shown["time_above"].text = format_duration(int(stats.get("time_above_threshold", 0) or 0))
+        shown["longest_streak"].text = format_duration(int(stats.get("longest_streak", 0) or 0))
         self._summary_notes.text = ""
         self._summary_scroll.scroll_y = 1  # each card opens at its title, wherever the last one was scrolled to
         if self._summary.parent is None:

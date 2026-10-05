@@ -21,6 +21,12 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
 from app.logger import logger
+from app.ui.session_labels import (
+    session_label,
+    session_notes_line,
+    session_stats_line,
+    session_title,
+)
 from app.ui.theme import (
     ICONS_AVAILABLE,
     C,
@@ -35,7 +41,6 @@ from app.ui.theme import (
     ThemedLabel,
     cancel_button,
     fill_background,
-    format_duration,
     make_message_popup,
 )
 
@@ -415,6 +420,7 @@ class _StableScrollView(ScrollView):
 
 
 _ROW_H = dp(56)
+_ROW_H_NOTES = dp(76)  # a row with a notes line
 _RENAME_H = dp(40)  # the inline editor under a row being renamed
 
 
@@ -422,15 +428,6 @@ def _checkbox_glyph(selected: bool) -> str:
     if ICONS_AVAILABLE:
         return Icons.CHECKBOX_MARKED if selected else Icons.CHECKBOX_BLANK
     return "[x]" if selected else "[ ]"
-
-
-def _row_title(session: dict) -> str:
-    name = session.get("session_name", "") or ""
-    if name:
-        return name
-    dt_str = session.get("date_time", "")
-    time_str = dt_str[11:16] if len(dt_str) > 16 else dt_str
-    return f"{time_str} ({format_duration(session.get('duration', 0))})"
 
 
 class _SessionRow(RecycleDataViewBehavior, BoxLayout):
@@ -449,13 +446,16 @@ class _SessionRow(RecycleDataViewBehavior, BoxLayout):
             self._score_color = Color(1, 1, 1, 1)
             rect = RoundedRectangle(pos=score_bar.pos, size=score_bar.size, radius=[dp(2)])
         score_bar.bind(pos=lambda w, v: setattr(rect, "pos", v), size=lambda w, v: setattr(rect, "size", v))
-        info = BoxLayout(orientation="vertical", padding=[dp(6), 0])
+        self._info = info = BoxLayout(orientation="vertical", padding=[dp(6), 0])
+        # One line each, cut with an ellipsis: a long name or note never wraps out of its row.
         self._name_label = ThemedLabel(font_size=F.BODY, color=C.TEXT, halign="left", valign="middle",
-                                       size_hint_y=0.55)
-        self._name_label.bind(size=self._name_label.setter("text_size"))
+                                       size_hint_y=0.55, shorten=True, shorten_from="right")
         self._stats_label = ThemedLabel(font_size=F.TINY, color=C.TEXT_MUTED, halign="left", valign="middle",
-                                        size_hint_y=0.45)
-        self._stats_label.bind(size=self._stats_label.setter("text_size"))
+                                        size_hint_y=0.45, shorten=True, shorten_from="right")
+        self._notes_label = ThemedLabel(font_size=F.TINY, color=C.TEXT_MUTED, halign="left", valign="middle",
+                                        size_hint_y=0.45, shorten=True, shorten_from="right")
+        for label in (self._name_label, self._stats_label, self._notes_label):
+            label.bind(size=label.setter("text_size"))
         info.add_widget(self._name_label)
         info.add_widget(self._stats_label)
         # Rename + delete are drawn only: the screen's list router hit-tests the strip (see _list_touch_down).
@@ -488,6 +488,13 @@ class _SessionRow(RecycleDataViewBehavior, BoxLayout):
         self.name = data["name"]
         self._name_label.text = data["name"]
         self._stats_label.text = data["stats"]
+        self._notes_label.text = data["notes"]
+        if bool(data["notes"]) != (self._notes_label.parent is not None):
+            if data["notes"]:
+                self._info.add_widget(self._notes_label, index=0)
+            else:
+                self._info.remove_widget(self._notes_label)
+        self._card.height = data["card_h"]
         self._score_color.rgba = data["color"]
         self.sync(rv.owner)
 
@@ -934,13 +941,16 @@ class HistoryScreen(Screen):
 
     def _item(self, session: dict) -> dict:
         sid = session.get("id", 0)
-        avg_sh = session.get("avg_shamatha", 0) or 0
+        notes = session_notes_line(session)
+        card_h = _ROW_H_NOTES if notes else _ROW_H
         return {
             "sid": sid,
-            "name": _row_title(session),
-            "stats": f"Shamatha: {avg_sh:.0f}  |  {format_duration(session.get('duration', 0))}",
-            "color": _lerp_color(avg_sh),
-            "height": _ROW_H + (_RENAME_H if sid == self._renaming_sid else 0),
+            "name": session_title(session),
+            "stats": session_stats_line(session),
+            "notes": notes,
+            "color": _lerp_color(session.get("avg_shamatha", 0) or 0),
+            "card_h": card_h,
+            "height": card_h + (_RENAME_H if sid == self._renaming_sid else 0),
         }
 
     def _show_items(self) -> None:
@@ -952,7 +962,7 @@ class HistoryScreen(Screen):
             self._list_area.remove_widget(self._empty_label)
 
     def _update_item(self, sid) -> None:
-        """Re-derive one session's item (its name, its height) after a rename opened, closed or saved."""
+        """Re-derive one session's item after a rename opened, closed or saved, or its notes were saved."""
         for i, s in enumerate(self._shown):
             if s.get("id") == sid:
                 self._rv.data[i] = self._item(s)
@@ -1011,7 +1021,7 @@ class HistoryScreen(Screen):
         if not reopen or session is None:
             return
         self._renaming_sid = sid
-        self._rename_input.text = _row_title(session)
+        self._rename_input.text = session_label(session)
         self._update_item(sid)
         self._sync_rows()
         Clock.schedule_once(self._focus_rename_input)
@@ -1034,7 +1044,7 @@ class HistoryScreen(Screen):
         sid = self._renaming_sid
         session = self._session_by_id(sid)
         txt = self._rename_input.text.strip()
-        if txt and session is not None:
+        if txt and session is not None and txt != session_label(session):  # unchanged: the stored name stays
             session["session_name"] = txt  # the model row this list shows
             if self._on_rename_session:
                 self._on_rename_session(sid, txt)

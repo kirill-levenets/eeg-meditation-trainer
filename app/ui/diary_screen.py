@@ -13,8 +13,11 @@ from kivy.uix.slider import Slider
 
 from app.config import APP
 from app.logger import logger, timed
+from app.session.scoring import recorded_score
 from app.session.session_program import SessionProgram
+from app.ui.live_session import SERIES_NAMES
 from app.ui.raw_eeg_screen import GraphAwareScrollView, ScrollableGraphWidget
+from app.ui.session_labels import session_threshold_row, session_title
 from app.ui.theme import (
     C,
     CenteredTextInput,
@@ -162,6 +165,7 @@ class DiaryScreen(Screen):
         self._on_rename_session: Optional[Callable] = None
         self._on_back: Optional[Callable] = None
         self._selected_session_id: Optional[int] = None
+        self._scored_key: Optional[str] = None  # the series the shown session was scored on, marked in its legend
         self._saved_notes_state: tuple[str, str, int] | None = None  # the fields as loaded or last saved
         self._session_formula_series: dict[str, list[float]] = {}
         self._build_ui()
@@ -204,38 +208,40 @@ class DiaryScreen(Screen):
             color=C.TEXT,
             size_hint_y=None,
             height=dp(30),
+            halign="center",
+            valign="middle",
+            shorten=True,
+            shorten_from="right",
         )
+        self._detail_title.bind(size=self._detail_title.setter("text_size"))
         self._detail_layout.add_widget(self._detail_title)
 
         # Stats grid
-        self._stats_grid = GridLayout(
-            cols=2,
-            size_hint_y=None,
-            height=dp(204),
-            spacing=dp(4),
-            padding=dp(4),
-        )
         self._detail_stats: dict[str, ThemedLabel] = {}
         stat_keys = [
             ("duration", "Duration"),
-            ("avg_meditation", "Avg Meditation"),
-            ("avg_shamatha", "Avg Shamatha"),
+            ("scored_on", "Scored on"),  # what Time Above Threshold and Longest Streak were measured against
             ("time_above_threshold", "Time Above Threshold"),
-            ("time_shamatha_90", "Time Shamatha \u2265 90"),
             ("longest_streak", "Longest Streak"),
-            ("threshold_used", "Threshold Used"),
             ("mood_rating", "Mood Rating"),
         ]
+        self._stats_grid = GridLayout(
+            cols=2,
+            size_hint_y=None,
+            height=len(stat_keys) * dp(20) + (len(stat_keys) - 1) * dp(4) + 2 * dp(4),
+            spacing=dp(4),
+            padding=dp(4),
+        )
         for key, display in stat_keys:
+            # A title takes its text's width (the column, its widest title) and the value the rest of the row.
             lbl_title = ThemedLabel(
                 text=display,
                 font_size=F.SMALL,
                 color=C.TEXT_SECONDARY,
-                halign="left",
-                size_hint_y=None,
+                size_hint=(None, None),
                 height=dp(20),
             )
-            lbl_title.bind(size=lbl_title.setter("text_size"))
+            lbl_title.bind(texture_size=lambda w, ts: setattr(w, "width", ts[0] + S.GAP))
             lbl_value = ThemedLabel(
                 text="-",
                 font_size=F.H3,
@@ -244,11 +250,15 @@ class DiaryScreen(Screen):
                 halign="left",
                 size_hint_y=None,
                 height=dp(20),
+                shorten=True,
+                shorten_from="right",
             )
             lbl_value.bind(size=lbl_value.setter("text_size"))
             self._stats_grid.add_widget(lbl_title)
             self._stats_grid.add_widget(lbl_value)
             self._detail_stats[key] = lbl_value
+            if key == "scored_on":
+                self._scored_on_title = lbl_title  # "Threshold Used" for a session that saved no metric
         self._detail_layout.add_widget(self._stats_grid)
 
         # Per-band total power over the whole session
@@ -396,6 +406,7 @@ class DiaryScreen(Screen):
         self._metrics_graph = ScrollableGraphWidget(
             colors=METRICS_PREVIEW_COLORS,
             scales=METRICS_PREVIEW_SCALES,
+            names=SERIES_NAMES,  # the live graph's names: a session's Scored on is saved under them
             viewport_seconds=60,
             show_value_labels=True,
             show_timestamps=True,
@@ -477,12 +488,14 @@ class DiaryScreen(Screen):
     def show_session_detail(self, session: dict) -> None:
         """Display detail for a selected session."""
         self._selected_session_id = session.get("id")
-        self._detail_title.text = f"Session #{session.get('id', '?')} — {session.get('date_time', '')[:16]}"
+        self._detail_title.text = session_title(session)
+        score = recorded_score(session)
+        self._scored_key = score[0] if score is not None else None  # a program's "program" is no series: unmarked
 
-        _time_keys = {"duration", "time_above_threshold", "longest_streak",
-                      "time_shamatha_90"}
+        _time_keys = {"duration", "time_above_threshold", "longest_streak"}
+        self._scored_on_title.text, scored_on = session_threshold_row(session)
         for key, label in self._detail_stats.items():
-            val = session.get(key, "-")
+            val = scored_on if key == "scored_on" else session.get(key, "-")
             if key in _time_keys and isinstance(val, (int, float)):
                 label.text = format_duration(int(val))
             else:
@@ -493,12 +506,6 @@ class DiaryScreen(Screen):
         self._mood_slider.value = session.get("mood_rating", 3) or 3
         # Compared with what the fields show, not the row: an unrated session shows mood 3 and isn't an edit.
         self._saved_notes_state = self._notes_state()
-        session_name = session.get("notes", "").strip()
-        if not session_name:
-            dt = session.get("date_time", "")[:16]
-            dur = session.get("duration", 0) or 0
-            session_name = f"Session {dt} ({format_duration(dur)})"
-        # session_name used for title display only (rename moved to History)
         self._metrics_graph.clear_data()
         self._raw_eeg_graph.clear_data()
         self._freq_graph.clear_data()
@@ -633,10 +640,11 @@ class DiaryScreen(Screen):
     def _rebuild_legend(self, tab: str) -> None:
         """Rebuild legend labels for the active graph tab's visible series."""
         graph = self._graph_for_tab(tab)
+        scored = self._scored_key if tab == "metrics" and self._scored_key in graph.visible_keys() else None
         self._legend_container.set_items([
             (graph.series_name(key), graph.series_color(key))
             for key in graph.visible_keys()
-        ])
+        ], active_text=graph.series_name(scored) if scored else None)  # » on the series it was scored on
 
     def _on_save_pressed(self, *args) -> None:
         notes, tags, mood = self._notes_state()
