@@ -39,9 +39,8 @@ from app.ui.theme import (
     S,
     StyledButton,
     ThemedLabel,
-    cancel_button,
+    confirm_popup,
     fill_background,
-    make_message_popup,
 )
 
 
@@ -436,7 +435,6 @@ class _SessionRow(RecycleDataViewBehavior, BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(orientation="vertical", **kwargs)
         self.sid = None
-        self.name = ""
         self._card = Card(orientation="horizontal", size_hint_y=None, height=_ROW_H, bg_color=C.BG_CARD,
                           spacing=S.GAP_SM, padding=0)
         self._checkbox = ThemedLabel(font_name="Icons" if ICONS_AVAILABLE else "Roboto", font_size=F.H2,
@@ -485,7 +483,6 @@ class _SessionRow(RecycleDataViewBehavior, BoxLayout):
         # Size and position come from the layout; nothing else in the data is a view property.
         self._owner = rv.owner
         self.sid = data["sid"]
-        self.name = data["name"]
         self._name_label.text = data["name"]
         self._stats_label.text = data["stats"]
         self._notes_label.text = data["notes"]
@@ -542,7 +539,7 @@ class HistoryScreen(Screen):
         self.name = "history"
         self._on_session_select: Optional[Callable] = None
         self._on_save_notes: Optional[Callable] = None
-        self._on_delete_session: Optional[Callable] = None
+        self._on_delete_sessions: Optional[Callable] = None  # (ids, done) -> done(True) once deleted
         self._on_export_csv: Optional[Callable] = None
         self._on_rename_session: Optional[Callable] = None
         self._sessions: list[dict] = []
@@ -676,6 +673,9 @@ class HistoryScreen(Screen):
         )
         self._btn_export.disabled = True
         self._btn_export.bind(on_release=lambda *a: self.export_selected())
+        self._btn_delete = StyledButton(text="Delete 0", bg_color=C.DANGER, font_size=F.SMALL, height=dp(40))
+        self._btn_delete.disabled = True
+        self._btn_delete.bind(on_release=lambda *a: self.delete_selected())
         self._btn_select_all = StyledButton(
             text="Select all", bg_color=C.BG_CARD, text_color=C.TEXT,
             font_size=F.SMALL, height=dp(40),
@@ -686,7 +686,7 @@ class HistoryScreen(Screen):
             font_size=F.SMALL, height=dp(40),
         )
         self._btn_cancel.bind(on_release=lambda *a: self.set_select_mode(False))
-        self._select_bar.set_content(self._btn_export, self._btn_select_all, self._btn_cancel)
+        self._select_bar.set_content(self._btn_export, self._btn_delete, self._btn_select_all, self._btn_cancel)
         root.add_widget(self._select_bar)
 
         root.add_widget(Divider())
@@ -707,13 +707,13 @@ class HistoryScreen(Screen):
         self,
         on_session_select=None,
         on_save_notes=None,
-        on_delete_session=None,
+        on_delete_sessions=None,
         on_export_csv=None,
         on_rename_session=None,
     ) -> None:
         self._on_session_select = on_session_select
         self._on_save_notes = on_save_notes
-        self._on_delete_session = on_delete_session
+        self._on_delete_sessions = on_delete_sessions
         self._on_export_csv = on_export_csv
         self._on_rename_session = on_rename_session
 
@@ -737,7 +737,7 @@ class HistoryScreen(Screen):
         self._btn_select.disabled = on
         self._select_bar.reveal(on)
         self._close_rename()
-        self._update_export_button()
+        self._update_selection_buttons()
         self._sync_rows()
 
     def toggle_session_selection(self, sid) -> None:
@@ -745,12 +745,12 @@ class HistoryScreen(Screen):
             self._selected_ids.discard(sid)
         else:
             self._selected_ids.add(sid)
-        self._update_export_button()
+        self._update_selection_buttons()
         self._sync_rows()
 
     def select_all_shown(self) -> None:
         self._selected_ids = {s for s in self._shown_sids() if s is not None}
-        self._update_export_button()
+        self._update_selection_buttons()
         self._sync_rows()
 
     def export_selected(self) -> None:
@@ -758,10 +758,15 @@ class HistoryScreen(Screen):
             return
         self._on_export_sessions(sorted(self._selected_ids))
 
-    def _update_export_button(self) -> None:
+    def delete_selected(self) -> None:
+        if self._selected_ids:
+            self._confirm_delete(sorted(self._selected_ids))
+
+    def _update_selection_buttons(self) -> None:
         n = len(self._selected_ids)
-        self._btn_export.text = f"Export {n}"
-        self._btn_export.disabled = n == 0
+        for button, verb in ((self._btn_export, "Export"), (self._btn_delete, "Delete")):
+            button.text = f"{verb} {n}"
+            button.disabled = n == 0
 
     def _on_active_widget_height(self, instance, value):
         """Track the active widget's height onto graph_row.
@@ -850,7 +855,7 @@ class HistoryScreen(Screen):
         self._sessions = sessions
         # A selection holds only this list's sessions: another profile's would be exported with it.
         self._selected_ids &= {s.get("id") for s in sessions}
-        self._update_export_button()
+        self._update_selection_buttons()
         if not keep_filter:
             self._set_filter(None)
         self._set_day_data()
@@ -869,7 +874,7 @@ class HistoryScreen(Screen):
         self._sessions = [s for s in self._sessions if s.get("id") not in gone]
         self._shown = [s for s in self._shown if s.get("id") not in gone]
         self._selected_ids -= gone
-        self._update_export_button()
+        self._update_selection_buttons()
         self._show_items()
         self._set_day_data()
         self._date_label.text = f"{self._current_header} ({len(self._shown)} sessions)"
@@ -1050,21 +1055,28 @@ class HistoryScreen(Screen):
                 self._on_rename_session(sid, txt)
         self._close_rename()
 
-    def _confirm_delete(self, session_id: int, name: str) -> None:
-        """Show a delete confirmation popup."""
-        btn_cancel = cancel_button()
-        btn_confirm = StyledButton(text="Delete", bg_color=C.DANGER)
-        popup = make_message_popup("Confirm Delete", f'Delete session\n"{name}"?',
-                                   [btn_cancel, btn_confirm])
-        btn_cancel.bind(on_release=popup.dismiss)
+    def _confirm_delete(self, session_ids: list[int]) -> None:
+        """Confirm, then delete one session (a row's delete) or the selection (Delete N) through the one callback."""
+        wanted = set(session_ids)
+        sessions = [s for s in self._sessions if s.get("id") in wanted]
+        if len(session_ids) == 1:
+            what = f'Delete session\n"{session_title(sessions[0])}"?' if sessions else "Delete this session?"
+        else:
+            days = sorted({s.get("date_time", "")[:10] for s in sessions})
+            span = "" if not days else f" on {days[0]}" if len(days) == 1 else f" from {days[0]} to {days[-1]}"
+            what = f"Delete {len(session_ids)} sessions{span}?"
+            profiles = {s.get("user_id") for s in sessions} - {None}
+            if len(profiles) > 1:
+                what += f"\nThey are from {len(profiles)} profiles."
+        def _deleted(ok: bool) -> None:
+            if ok and self._select_mode:
+                self.set_select_mode(False)
 
-        def _do_delete(*args):
-            popup.dismiss()
-            if self._on_delete_session:
-                self._on_delete_session(session_id)
+        def _delete() -> None:
+            if self._on_delete_sessions:
+                self._on_delete_sessions(list(session_ids), _deleted)
 
-        btn_confirm.bind(on_release=_do_delete)
-        popup.open()
+        confirm_popup("Confirm Delete", f"{what}\nThis can't be undone.", "Delete", _delete, ok_color=C.DANGER)
 
     def _list_touch_down(self, rows, touch) -> bool:
         """The one touch router for the session list.
@@ -1088,7 +1100,7 @@ class HistoryScreen(Screen):
                 if touch.x < actions_left + dp(40):
                     self._toggle_rename(view.sid)
                 else:
-                    self._confirm_delete(view.sid, view.name)
+                    self._confirm_delete([view.sid])
                 return True
             if self._on_session_select:
                 self._on_session_select(view.sid)

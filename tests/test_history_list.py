@@ -9,6 +9,7 @@ from kivy.metrics import dp
 from kivy.tests.common import UnitTestTouch
 
 import app.ui.app_manager as app_manager
+from app.session.manager import SessionManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.history_screen import HistoryScreen, _checkbox_glyph, _SessionRow
 
@@ -186,12 +187,12 @@ def test_a_tap_on_a_row_opens_its_session(history):
 
 def test_the_action_strip_renames_and_deletes_its_row(history):
     asked = []
-    history._confirm_delete = lambda sid, name: asked.append((sid, name))
+    history._confirm_delete = lambda ids: asked.append(ids)
     history.load_sessions(_sessions(20))
     _frames()
     sid, view = next(iter(sorted(_views(history).items())))
     _tap(view, dx=view.width / 2 - dp(20))  # the right half of the 80 dp strip: delete
-    assert asked == [(sid, view._name_label.text)] and view._name_label.text.endswith(f" - Session {sid}")
+    assert asked == [[sid]]
     _tap(view, dx=view.width / 2 - dp(60))  # the left half: rename
     _frames()
     assert history._renaming_sid == sid
@@ -352,6 +353,7 @@ def test_history_loads_without_the_full_screen_spinner(monkeypatch):
     app._history_screen = MagicMock()
     app._current_user_id = 1
     app._view_all_users = False
+    app._session_manager = SessionManager()  # no session running
     app.show_loading = MagicMock()
     monkeypatch.setattr(app_manager, "sessions_for_view", lambda db, uid, show_all: _sessions(3))
     app._refresh_history(force=True)

@@ -118,6 +118,8 @@ Tap a session row to view full details (graphs, notes, tags, mood).
 
 **Export multiple sessions:** tap **Select** (top right of the list) to enter selection mode — checkboxes appear, tap rows to select them (or **Select all**), then **Export N** bundles the chosen sessions into one **ZIP** containing one CSV per session. On Android the ZIP is saved to `Documents/EEGMeditation/`; on desktop to a Documents folder. **Cancel** leaves selection mode.
 
+**Delete multiple sessions:** in selection mode, **Delete N** deletes the chosen sessions after one confirmation, which states how many and over which days (and how many profiles, in the All Users view). It can't be undone. The list keeps your place, and selection mode ends once they are deleted. A session that is still running isn't listed in History; it appears there once it ends.
+
 ### Session Detail
 
 Titled like its row. Shows Duration, **Scored on** (the metric and threshold that Time Above Threshold and Longest Streak were measured against, or the program's name; sessions from before this was saved show **Threshold Used** instead), Time Above Threshold, Longest Streak and Mood Rating, a **Band Power (whole session)** breakdown, notes/tags/mood editor, and three graph tabs (the Metrics legend marks the scored series with **»**):

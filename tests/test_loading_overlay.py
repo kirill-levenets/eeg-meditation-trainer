@@ -1,4 +1,7 @@
+import time
 import unittest
+
+from kivy.clock import Clock
 
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.widgets.loading_overlay import LoadingOverlay
@@ -56,6 +59,32 @@ class TestLoadingOverlay(unittest.TestCase):
         ov.show("x")
         self.assertTrue(ov.on_touch_down(_T()))  # visible: swallowed
         ov.hide()
+
+    def test_a_delayed_show_is_modal_at_once_and_paints_after_the_delay(self):
+        ov = LoadingOverlay()
+        ov.show("Deleting", delay=0.15)
+        self.assertFalse(ov.is_visible)  # a job that ends sooner never flashes it
+        self.assertTrue(ov.on_touch_down(_Touch()))  # but the screen behind already takes no taps
+        time.sleep(0.2)
+        Clock.tick()
+        self.assertTrue(ov.is_visible)
+        self.assertEqual(ov._status.text, "Deleting")
+        ov.hide()
+
+    def test_hide_before_the_delay_never_paints_and_releases_touches(self):
+        ov = LoadingOverlay()
+        ov.show("x", delay=0.15)
+        ov.hide()
+        time.sleep(0.2)
+        Clock.tick()
+        self.assertFalse(ov.is_visible)
+        self.assertFalse(ov.on_touch_down(_Touch()))
+
+
+class _Touch:
+    pos = (10, 10)
+    x = 10
+    y = 10
 
 
 class TestAppLoadingDelegation(unittest.TestCase):
