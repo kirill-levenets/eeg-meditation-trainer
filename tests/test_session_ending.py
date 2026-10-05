@@ -2,13 +2,14 @@
 
 import os
 import tempfile
+import time
 from unittest.mock import MagicMock
 
 import pytest
 from kivy.base import EventLoop
 from kivy.uix.popup import Popup
 
-from app.session.manager import SessionState
+from app.session.manager import SessionManager, SessionState
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 
@@ -69,6 +70,73 @@ def test_user_stop_restores_program_series_and_clears_the_training_marker():
     app._restore_program_series.assert_called_once()
     app._live_screen.set_training_series.assert_called_with(None)
     app._live_screen.show_summary.assert_called_once_with(SID, {"duration": 30}, title="")
+
+
+# --- A Stop confirmed after the session already ended another way keeps it ------------------------------------
+
+
+@pytest.fixture
+def db():
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    d = DatabaseManager(db_path=path)
+    yield d
+    d.close()
+    for suffix in ("", "-wal", "-shm"):
+        if os.path.exists(path + suffix):
+            os.remove(path + suffix)
+
+
+def _recorded_session(db) -> EEGMeditationApp:
+    """A running headset session two minutes in, its ticks checkpointed: only UI, audio and Android parts are mocked."""
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._db = db
+    app._current_user_id = db.create_user("t")
+    app._current_session_id = None
+    app._metrics_buffer = []
+    app._flush_counter = 0
+    app._session_manager = SessionManager()
+    app._session_manager.start()
+    app._with_score = lambda stats: stats
+    app._session_custom_formulas_json = lambda: ""
+    app._session_program_json = lambda: ""
+    app._make_session_name = lambda: "2026-10-05 07:00 - MindWave Mobile"
+    app._waiting_for_bt = False
+    app._tick_thread = None
+    app._eeg_stream = MagicMock()
+    for name in ("_stop_tick_thread", "_audio", "_live_screen", "_timer_state", "_confirm_action",
+                 "_release_wake_lock", "_stop_session_keep_alive_service", "_reload_live_graphs_from_mirror",
+                 "_mark_history_dirty", "_restore_program_series"):
+        setattr(app, name, MagicMock())
+    for _ in range(240):
+        metrics = {"shamatha_score": 70, "meditation_score": 60}
+        app._record_tick(metrics, {"timestamp": 0.0, **metrics})
+    app._session_manager._start_time = time.time() - 120
+    app._checkpoint_session()
+    return app
+
+
+def _stored(db, sid) -> tuple | None:
+    row = db.get_session(sid)
+    ticks = db._conn.execute("SELECT COUNT(*) FROM metrics WHERE session_id = ?", (sid,)).fetchone()[0]
+    return (row["duration"], ticks) if row else None
+
+
+@pytest.mark.parametrize("ended_by", ["headset off", "timer"])
+def test_a_stop_confirmed_after_the_session_ended_another_way_keeps_it(db, ended_by):
+    # A slow phone handled the Stop tap late: the session had ended meanwhile (the headset switched off, or the timer),
+    # and its stop had saved it. v1.4.0's confirm then found no stats and took its Discard branch, deleting the session.
+    app = _recorded_session(db)
+    app._on_stop()  # the user's Stop tap, handled while the session still runs: its dialog opens
+    on_ok = app._confirm_action.call_args.args[3]
+    if ended_by == "headset off":  # the stale-data stop queued behind the tap
+        app._stop_and_save(reason="stale_data")
+    else:  # the tick thread saved the timed session; its UI teardown runs on the main thread
+        app._finalize_stop_ui(app._persist_session_data("timer"), app._current_session_id)
+    saved = _stored(db, app._current_session_id)
+    assert saved is not None and saved[0] >= 119 and saved[1] == 240
+    on_ok()  # the user confirms the Stop
+    assert _stored(db, app._current_session_id) == saved  # still there, unchanged
 
 
 # --- Delete: only after confirmation, through the shared delete -------------------------------------------------
