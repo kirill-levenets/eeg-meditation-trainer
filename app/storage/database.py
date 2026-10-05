@@ -436,9 +436,23 @@ class DatabaseManager:
 
     def delete_session(self, session_id: int) -> None:
         """Delete a session and its metrics."""
+        self.delete_sessions([session_id])
+
+    def delete_sessions(self, session_ids) -> int:
+        """Delete sessions and their metrics in one transaction, so an error deletes none of them. Returns how many."""
+        rows = [(sid,) for sid in session_ids]
+        if not rows:
+            return 0
         with self._write() as c:
-            c.execute("DELETE FROM metrics WHERE session_id = ?", (session_id,))
-            c.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+            c.executemany("DELETE FROM metrics WHERE session_id = ?", rows)
+            deleted = c.executemany("DELETE FROM sessions WHERE id = ?", rows).rowcount
+        # One big transaction parks every deleted page in the WAL, which keeps that size until a clean close.
+        try:
+            with self._write_lock:
+                self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.Error as e:  # the delete has committed: only the WAL stays large, until the next checkpoint
+            logger.warning(f"WAL checkpoint after deleting {deleted} session(s) failed: {e}")
+        return deleted
 
     # ---- User profile methods ----
 

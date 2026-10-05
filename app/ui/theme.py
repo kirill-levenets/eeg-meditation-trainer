@@ -813,6 +813,34 @@ def cancel_button(text: str = "Cancel", **kwargs) -> StyledButton:
     return StyledButton(text=text, **kwargs)
 
 
+def confirm_popup(title, message, ok_text, on_ok, *, ok_color=None, on_cancel=None):
+    """The one confirm: OK runs on_ok; every other close (Cancel, a tap outside, Android back) runs on_cancel. It decides
+    once, because Kivy still delivers taps to a popup while it fades out."""
+    ok_btn = StyledButton(text=ok_text, bg_color=ok_color or C.ACCENT)
+    cancel_btn = cancel_button()
+    popup = make_message_popup(title, message, [ok_btn, cancel_btn])
+    decided = []
+
+    def _ok(*_a):
+        if decided:
+            return
+        decided.append("ok")
+        popup.dismiss()
+        on_ok()
+
+    def _closed(*_a):
+        if not decided:
+            decided.append("cancel")
+            if on_cancel is not None:
+                on_cancel()
+
+    ok_btn.bind(on_release=_ok)
+    cancel_btn.bind(on_release=popup.dismiss)
+    popup.bind(on_dismiss=_closed)
+    popup.open()
+    return popup
+
+
 def fill_background(widget, color: ThemeColor) -> None:
     """Paint widget's background with a palette colour that follows its size, position and theme switches."""
     with widget.canvas.before:

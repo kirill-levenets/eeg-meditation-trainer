@@ -9,6 +9,7 @@ import pytest
 from kivy.base import EventLoop
 from kivy.uix.popup import Popup
 
+import app.ui.app_manager as am
 from app.session.manager import SessionManager, SessionState
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
@@ -29,6 +30,8 @@ def _app() -> EEGMeditationApp:
     app._toast = MagicMock()
     app._history_screen = MagicMock()
     app._refresh_history = MagicMock()
+    app._session_manager = SessionManager()  # idle: the card's session has ended
+    app._on_main = lambda fn: fn()
     return app
 
 
@@ -149,22 +152,24 @@ def test_card_delete_without_confirmation_deletes_nothing():
     app._live_screen.hide_summary.assert_not_called()
 
 
-def test_card_delete_confirmed_removes_the_session_and_stops_the_gong():
+def test_card_delete_confirmed_removes_the_session_and_stops_the_gong(monkeypatch):
+    monkeypatch.setattr(am.threading, "Thread", lambda target, **k: MagicMock(start=target))  # the worker, inline
     app = _app()
     app._confirm_action = MagicMock()
     app._on_summary_delete()
     app._confirm_action.call_args.args[3]()  # the user confirms
-    app._db.delete_session.assert_called_once_with(SID)
+    app._db.delete_sessions.assert_called_once_with([SID])
     app._audio.stop_timer_bell.assert_called_once()
     app._live_screen.hide_summary.assert_called_once()
     app._history_screen.remove_sessions.assert_called_once_with([SID])
     app._refresh_history.assert_not_called()  # the row goes in place; no full-screen rebuild spinner
 
 
-def test_history_row_delete_removes_its_row_in_place():
+def test_history_row_delete_removes_its_row_in_place(monkeypatch):
+    monkeypatch.setattr(am.threading, "Thread", lambda target, **k: MagicMock(start=target))  # the worker, inline
     app = _app()
     app._on_delete_session(SID)
-    app._db.delete_session.assert_called_once_with(SID)
+    app._db.delete_sessions.assert_called_once_with([SID])
     app._history_screen.remove_sessions.assert_called_once_with([SID])
     app._refresh_history.assert_not_called()
 

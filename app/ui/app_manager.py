@@ -66,6 +66,7 @@ from app.ui.theme import (
     ThemedLabel,
     ThemedPopup,
     cancel_button,
+    confirm_popup,
     fill_background,
     make_message_popup,
     make_scroll_popup,
@@ -781,10 +782,10 @@ class EEGMeditationApp(App):
 
         return float_root
 
-    def show_loading(self, text: str = "Loading…") -> None:
-        """Show the app-global loading overlay (no-op before build)."""
+    def show_loading(self, text: str = "Loading…", delay: float = 0.0) -> None:
+        """Show the app-global loading overlay (no-op before build); `delay` as in LoadingOverlay.show."""
         if getattr(self, "_loading_overlay", None) is not None:
-            self._loading_overlay.show(text)
+            self._loading_overlay.show(text, delay)
 
     def hide_loading(self) -> None:
         """Hide the app-global loading overlay (no-op before build)."""
@@ -987,7 +988,7 @@ class EEGMeditationApp(App):
         self._history_screen.set_callbacks(
             on_session_select=self._on_session_select,
             on_save_notes=self._on_save_notes,
-            on_delete_session=self._on_delete_session,
+            on_delete_sessions=self._delete_sessions,
             on_export_csv=self._on_export_csv,
             on_rename_session=self._on_rename_session,
         )
@@ -1628,13 +1629,9 @@ class EEGMeditationApp(App):
         if not sid:
             return  # silent-ok: the card is not showing a session
 
-        def _delete():
-            self._audio.stop_timer_bell()
-            self._live_screen.hide_summary()
-            self._delete_sessions([sid])
-
+        # The delete closes the card and stops the gong once the session is gone; a failed one leaves both.
         self._confirm_action("Delete session", "Delete this session permanently? This can't be undone.",
-                             "Delete", _delete, ok_color=C.DANGER)
+                             "Delete", lambda: self._delete_sessions([sid]), ok_color=C.DANGER)
 
     def _save_session_notes(self, session_id: int, notes: Optional[str] = None,
                             tags: Optional[str] = None, mood: Optional[int] = None) -> bool:
@@ -2846,28 +2843,7 @@ class EEGMeditationApp(App):
 
     def _confirm_action(self, title, message, ok_text, on_ok, ok_color=None, on_cancel=None) -> None:
         """on_cancel runs on every close that isn't OK: Cancel, a tap outside, or Android back."""
-        ok_btn = StyledButton(text=ok_text, bg_color=ok_color or C.ACCENT)
-        cancel_btn = cancel_button()
-        popup = make_message_popup(title, message, [ok_btn, cancel_btn])
-        decided = []  # one outcome only: Kivy still delivers taps while the popup fades out
-
-        def _do(*_a):
-            if decided:
-                return
-            decided.append("ok")
-            popup.dismiss()
-            on_ok()
-
-        def _closed(*_a):
-            if not decided:
-                decided.append("cancel")
-                if on_cancel is not None:
-                    on_cancel()
-
-        ok_btn.bind(on_release=_do)
-        cancel_btn.bind(on_release=popup.dismiss)
-        popup.bind(on_dismiss=_closed)
-        popup.open()
+        confirm_popup(title, message, ok_text, on_ok, ok_color=ok_color, on_cancel=on_cancel)
 
     def _refresh_saved_formulas(self) -> None:
         """Refresh the saved formulas list in settings UI."""
@@ -3133,14 +3109,45 @@ class EEGMeditationApp(App):
     def _on_delete_session(self, session_id: int) -> None:
         self._delete_sessions([session_id])
 
-    def _delete_sessions(self, session_ids: list[int]) -> None:
-        """The one session-delete path (History row, session-end card): History drops the rows in place, no rebuild."""
+    def _delete_sessions(self, session_ids: list[int], on_done: Optional[Callable[[bool], None]] = None) -> None:
+        """The one session-delete path (a History row, the selection, the session-end card): one transaction on a worker
+        thread, then History drops the rows in place and the end card closes if it shows one of them. on_done(True)
+        once deleted; on_done(False) when refused or failed, with nothing deleted."""
+        ids = list(session_ids)
+        done = on_done or (lambda _ok: None)
+        if self._session_pipeline_live() and self._current_session_id in ids:
+            # Its row is in History after the first checkpoint; its next checkpoints would write data for no session.
+            self._info_popup("Session in progress",
+                             "Stop the session first: a running session can't be deleted. Nothing was deleted.")
+            done(False)
+            return
+        # Modal at once, so a tap can't reach the rows or the end card being deleted; painted only if it takes a while.
+        self.show_loading(f"Deleting {len(ids)} session(s)\u2026", delay=0.15)
         t0 = time.monotonic()
-        for sid in session_ids:
-            self._db.delete_session(sid)
-            logger.info(f"Session {sid} deleted")
-        logger.info(f"Deleted {len(session_ids)} session(s) in {(time.monotonic() - t0) * 1000:.0f} ms")
-        self._history_screen.remove_sessions(session_ids)
+
+        def _finish(error) -> None:
+            self.hide_loading()
+            if error is not None:
+                report_soft_error("session_delete_failed", f"{len(ids)} session(s) were not deleted: {error}")
+                done(False)
+                return
+            logger.info(f"Deleted session(s) {ids} in {(time.monotonic() - t0) * 1000:.0f} ms")
+            if self._live_screen.summary_session_id in ids:  # the end card shows a session that's gone
+                self._audio.stop_timer_bell()
+                self._live_screen.hide_summary()
+            self._history_screen.remove_sessions(ids)
+            done(True)
+
+        def _worker() -> None:
+            try:
+                self._db.delete_sessions(ids)
+            except sqlite3.Error as e:
+                logger.exception(f"Deleting sessions {ids} failed")
+                self._on_main(lambda err=e: _finish(err))
+                return
+            self._on_main(lambda: _finish(None))
+
+        threading.Thread(target=_worker, daemon=True, name="SessionDelete").start()
 
     def _on_rename_session(self, session_id: int, new_name: str) -> None:
         """Rename a session; its History row already shows the new name."""
@@ -3221,6 +3228,10 @@ class EEGMeditationApp(App):
             return
         with timed("history.get_all_sessions"):
             sessions = sessions_for_view(self._db, self._current_user_id, self._view_all_users)
+        if self._session_pipeline_live():
+            # The running session's row exists from its first checkpoint, with stats as of that checkpoint: History
+            # lists finished sessions only, and the ending marks History dirty so it appears then.
+            sessions = [s for s in sessions if s.get("id") != self._current_session_id]
         view = (self._current_user_id, self._view_all_users)
         self._history_screen.load_sessions(sessions, keep_filter=view == self._history_view)
         self._history_view = view

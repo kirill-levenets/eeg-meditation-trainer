@@ -32,7 +32,9 @@ class LoadingOverlay(ModalScrim):
         self.add_widget(panel)
 
         self._dot_event = None
+        self._reveal_event = None
         self._dot_count = 0
+        self._active = False
         self.opacity = 0
         self.size_hint = (0, 0)
         self.size = (0, 0)
@@ -42,34 +44,47 @@ class LoadingOverlay(ModalScrim):
         return self.opacity > 0
 
     def on_touch_down(self, touch):
-        # Modal while loading: swallow taps so they don't reach the screen
+        # Modal from show() on, also before a delayed show paints: swallow taps so they don't reach the screen
         # behind (e.g. a second session-row tap spawning a second load).
-        if self.is_visible:
+        if self._active:
             return True
         return super().on_touch_down(touch)
 
-    def show(self, text: str = "Loading…") -> None:
+    def show(self, text: str = "Loading…", delay: float = 0.0) -> None:
+        """Make the screen modal now and paint after `delay` seconds, so a job that ends sooner never flashes it."""
         self._status.text = text
-        self.opacity = 1
+        self._active = True
         self.size_hint = (1, 1)
+        self._cancel_events()
+        if delay > 0:
+            self._reveal_event = Clock.schedule_once(lambda _dt: self._reveal(), delay)
+        else:
+            self._reveal()
+
+    def _reveal(self) -> None:
+        self._reveal_event = None
+        self.opacity = 1
         self._dot_count = 0
-        if self._dot_event:
-            self._dot_event.cancel()
         self._dot_event = Clock.schedule_interval(self._animate_dots, 0.5)
 
     def update(self, text: str) -> None:
         """Change the status text, but only while the overlay is showing."""
-        if self.is_visible:
+        if self._active:
             self._status.text = text
 
     def hide(self) -> None:
+        self._active = False
         self.opacity = 0
         self.size_hint = (0, 0)
         self.size = (0, 0)
-        if self._dot_event:
-            self._dot_event.cancel()
-            self._dot_event = None
+        self._cancel_events()
         self._dots.text = ""
+
+    def _cancel_events(self) -> None:
+        for event in (self._dot_event, self._reveal_event):
+            if event:
+                event.cancel()
+        self._dot_event = self._reveal_event = None
 
     def _animate_dots(self, dt: float) -> None:
         self._dot_count = (self._dot_count + 1) % 4

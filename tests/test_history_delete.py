@@ -4,6 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import app.ui.app_manager as am
+from app.session.manager import SessionManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.history_screen import HistoryScreen
 
@@ -164,6 +166,7 @@ def test_history_keeps_the_day_filter_only_for_the_same_profile_and_view():
     app.show_loading = MagicMock()
     app.hide_loading = MagicMock()
     app._view_all_users = False
+    app._session_manager = SessionManager()  # no session running
     keeps = []
     for uid in (1, 1, 2, 2):
         app._current_user_id = uid
@@ -191,18 +194,25 @@ def _app() -> EEGMeditationApp:
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._db = MagicMock()
     app._history_screen = MagicMock()
-    for name in ("_refresh_history", "show_loading"):
+    app._session_manager = SessionManager()  # idle: nothing running to protect
+    app._live_screen = MagicMock(summary_session_id=None)
+    app._audio = MagicMock()
+    app._on_main = lambda fn: fn()
+    for name in ("_refresh_history", "show_loading", "hide_loading"):
         setattr(app, name, MagicMock())
     return app
 
 
-def test_deleting_sessions_removes_their_rows_and_rebuilds_nothing():
+def test_deleting_sessions_removes_their_rows_and_rebuilds_nothing(monkeypatch):
+    monkeypatch.setattr(am.threading, "Thread", lambda target, **k: MagicMock(start=target))  # the worker, inline
     app = _app()
     app._delete_sessions([7, 9])
-    assert [c.args[0] for c in app._db.delete_session.call_args_list] == [7, 9]
+    app._db.delete_sessions.assert_called_once_with([7, 9])  # one transaction
     app._history_screen.remove_sessions.assert_called_once_with([7, 9])
     app._refresh_history.assert_not_called()
-    app.show_loading.assert_not_called()
+    # No spinner: only the delayed overlay, which paints if the delete runs long, and is gone once it ends.
+    assert [c.kwargs.get("delay", 0) > 0 for c in app.show_loading.call_args_list] == [True]
+    app.hide_loading.assert_called_once()
 
 
 def test_renaming_a_session_rebuilds_nothing():
