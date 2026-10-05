@@ -3,9 +3,11 @@ import time
 
 from kivy.app import App
 from kivy.clock import Clock
+from kivy.core.text import Label as CoreLabel
 from kivy.core.window import Window
 from kivy.graphics import Color, RoundedRectangle
 from kivy.metrics import dp
+from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.gridlayout import GridLayout
@@ -18,7 +20,7 @@ from app.ui.raw_eeg_screen import (
     RawEEGScreen,
     ScrollableGraphWidget,
 )
-from app.ui.session_labels import session_threshold_row
+from app.ui.session_labels import session_threshold_rows
 from app.ui.theme import (
     ICONS_AVAILABLE,
     C,
@@ -160,6 +162,25 @@ def _format_stats_slots(
 
 # Duration picker responsive sizing — below narrow threshold the button
 # collapses to an icon-only pill so the Start button can claim the width.
+def _cut_to_width(text: str, label) -> str:
+    """`text`, or its longest start plus an ellipsis, no wider than `label` at its font."""
+    def width(s: str) -> float:
+        core = CoreLabel(text=s, font_size=label.font_size, bold=label.bold)
+        core.refresh()
+        return core.texture.size[0]
+
+    if width(text) <= label.width:
+        return text
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if width(text[:mid].rstrip() + "\u2026") <= label.width:
+            lo = mid
+        else:
+            hi = mid - 1
+    return text[:lo].rstrip() + "\u2026"
+
+
 _DURATION_PICKER_WIDTH = dp(20)
 
 
@@ -554,54 +575,30 @@ class LiveSessionScreen(Screen):
         self._summary = ModalScrim(
             size_hint=(1, 1),
             pos_hint={"x": 0, "y": 0},
-            padding=[dp(20), dp(8)],  # tight vertically: a landscape phone has ~310 dp above the bottom nav
+            padding=[dp(20), dp(6)],  # tight vertically: a landscape phone has ~314 dp above the bottom nav
         )
-        # Every ending saves the session; the title says so (an extra row overflowed landscape phones).
+        # Every ending saves the session; the title says so, and names the session (_fit_summary_title).
         summary_panel = ModalPanel(title="Session saved")
+        self._summary_panel = summary_panel
         self._summary_title = summary_panel.title_label
+        self._summary_session_title = ""
+        self._summary_title.bind(width=self._fit_summary_title)
 
-        # Stats card
+        # Stats card: one (label, value) row per stat, set by show_summary — a session that saved no metric has one
+        # threshold row where the others have Metric and Threshold. Lines are 22 dp with no gap between them.
         self._summary_stats_card = Card(
             orientation="vertical",
             size_hint_y=None,
             bg_color=C.BG_CARD,
-            spacing=S.GAP_SM,
+            spacing=0,
         )
-        self._summary_stats = {}
-        summary_rows = [
-            ("duration", "Duration"),
-            ("scored_on", "Scored on"),  # what Time Above Threshold and Longest Streak were measured against
-            ("time_above", "Time Above Threshold"),
-            ("longest_streak", "Longest Streak"),
-        ]
-        card = self._summary_stats_card
-        row_h = dp(24)
-        lines = 1 + len(summary_rows)  # the session's name, then the rows
-        card.height = lines * row_h + (lines - 1) * S.GAP_SM + card.padding[1] + card.padding[3]
-        name = ThemedLabel(text="", font_size=F.BODY, bold=True, color=C.TEXT, halign="center", valign="middle",
-                           size_hint_y=None, height=row_h, shorten=True, shorten_from="right")
-        name.bind(size=name.setter("text_size"))
-        card.add_widget(name)
-        self._summary_stats["name"] = name
-        for key, label_text in summary_rows:
-            row = BoxLayout(size_hint_y=None, height=row_h)
-            # The label takes its text's width and the value the rest: a Scored on value is longer than its label.
-            lbl = ThemedLabel(text=label_text, font_size=F.BODY, color=C.TEXT_SECONDARY, size_hint_x=None)
-            lbl.bind(texture_size=lambda w, ts: setattr(w, "width", ts[0] + S.GAP))
-            val = ThemedLabel(
-                text="-", font_size=F.BODY, bold=True, color=C.TEXT,
-                halign="right", valign="middle", shorten=True, shorten_from="right",
-            )
-            val.bind(size=val.setter("text_size"))
-            row.add_widget(lbl)
-            row.add_widget(val)
-            self._summary_stats_card.add_widget(row)
-            self._summary_stats[key] = val
-            if key == "scored_on":
-                self._summary_scored_on_title = lbl
-        summary_panel.add_widget(self._summary_stats_card)
+        self._summary_line_h = dp(22)
+        self._summary_row_pool: list[tuple[BoxLayout, ThemedLabel, ThemedLabel]] = []
+        self._summary_rows: list[tuple[ThemedLabel, ThemedLabel]] = []  # (label, value) of the rows shown, in order
 
-        notes_row = BoxLayout(size_hint_y=None, height=dp(70), spacing=S.GAP)
+        # The stats, then the notes field and Save notes: arranged by _layout_summary in one column or two.
+        self._summary_body = BoxLayout(size_hint_y=None, spacing=S.GAP)
+        self._summary_notes_box = BoxLayout(size_hint_y=None, spacing=S.GAP)
         self._summary_notes = ThemedTextInput(
             hint_text="Quick notes: how was the session?",
             multiline=True,
@@ -614,9 +611,15 @@ class LiveSessionScreen(Screen):
             text="Save notes", bg_color=C.PRIMARY, bg_pressed=C.PRIMARY_DIM,
             size_hint_x=None, width=dp(110),
         )
-        notes_row.add_widget(self._summary_notes)
-        notes_row.add_widget(self._summary_save_notes_btn)
-        summary_panel.add_widget(notes_row)
+        self._summary_save_holder = AnchorLayout(anchor_x="right", size_hint_y=None, height=S.BTN_H)
+        self._summary_save_holder.add_widget(self._summary_save_notes_btn)
+        self._summary_notes_box.add_widget(self._summary_notes)
+        self._summary_notes_box.add_widget(self._summary_save_holder)
+        self._summary_body.add_widget(self._summary_stats_card)
+        self._summary_body.add_widget(self._summary_notes_box)
+        summary_panel.add_widget(self._summary_body)
+        self._set_summary_rows([])
+        summary_panel.bind(width=self._layout_summary)
 
         # Delete is low-emphasis and kept apart from OK: it is the one destructive action here.
         summary_btns = BoxLayout(size_hint_y=None, height=S.BTN_H, spacing=S.GAP)
@@ -1144,16 +1147,79 @@ class LiveSessionScreen(Screen):
     def show_summary(self, session_id: int, stats: dict, title: str = "") -> None:
         """Show the post-session card: the session's name, its duration and scored stats, and a notes field."""
         self._summary_session_id = session_id
-        shown = self._summary_stats
-        shown["name"].text = title
-        shown["duration"].text = format_duration(int(stats.get("duration", 0) or 0))
-        self._summary_scored_on_title.text, shown["scored_on"].text = session_threshold_row(stats)
-        shown["time_above"].text = format_duration(int(stats.get("time_above_threshold", 0) or 0))
-        shown["longest_streak"].text = format_duration(int(stats.get("longest_streak", 0) or 0))
+        self._summary_session_title = title
+        self._fit_summary_title()
+        self._set_summary_rows([
+            ("Duration", format_duration(int(stats.get("duration", 0) or 0))),
+            *session_threshold_rows(stats),  # what Time Above Threshold and Longest Streak were measured against
+            ("Time Above Threshold", format_duration(int(stats.get("time_above_threshold", 0) or 0))),
+            ("Longest Streak", format_duration(int(stats.get("longest_streak", 0) or 0))),
+        ])
         self._summary_notes.text = ""
         self._summary_scroll.scroll_y = 1  # each card opens at its title, wherever the last one was scrolled to
         if self._summary.parent is None:
             self._summary_host.add_widget(self._summary)
+
+    def _fit_summary_title(self, *_a) -> None:
+        """"Session saved · <name>" on one line over two columns, else the name on a line of its own under it; a name
+        too long for its line is cut with an ellipsis, so the title never takes more lines than that."""
+        title, name = self._summary_title, self._summary_session_title
+        if not name:
+            title.text = "Session saved"
+        elif self._summary_in_two_columns(title.width):  # the title spans the card's inside, as the columns do
+            title.text = _cut_to_width(f"Session saved \u00b7 {name}", title)
+        else:
+            title.text = "Session saved\n" + _cut_to_width(name, title)
+
+    def _make_summary_row(self) -> tuple[BoxLayout, ThemedLabel, ThemedLabel]:
+        row = BoxLayout(size_hint_y=None, height=self._summary_line_h)
+        # The label takes its text's width and the value the rest: a Metric value can be longer than its label.
+        label = ThemedLabel(text="", font_size=F.BODY, color=C.TEXT_SECONDARY, size_hint_x=None)
+        label.bind(texture_size=lambda w, ts: setattr(w, "width", ts[0] + S.GAP))
+        value = ThemedLabel(text="-", font_size=F.BODY, bold=True, color=C.TEXT, halign="right", valign="middle",
+                            shorten=True, shorten_from="right")
+        value.bind(size=value.setter("text_size"))
+        row.add_widget(label)
+        row.add_widget(value)
+        return row, label, value
+
+    def _set_summary_rows(self, rows: list[tuple[str, str]]) -> None:
+        """Show these (label, value) rows under the session's name; the card is as tall as its lines."""
+        card = self._summary_stats_card
+        while len(self._summary_row_pool) < len(rows):
+            self._summary_row_pool.append(self._make_summary_row())
+        for box, _label, _value in self._summary_row_pool:
+            if box.parent is not None:
+                card.remove_widget(box)
+        used = self._summary_row_pool[:len(rows)]
+        for (text, shown), (box, label, value) in zip(rows, used):
+            label.text, value.text = text, shown
+            card.add_widget(box)
+        self._summary_rows = [(label, value) for _box, label, value in used]
+        lines = len(rows)
+        card.height = lines * self._summary_line_h + max(lines - 1, 0) * card.spacing + card.padding[1] + card.padding[3]
+        self._layout_summary()
+
+    @staticmethod
+    def _summary_in_two_columns(inner_width: float) -> bool:
+        """Two columns from 520 dp inside the card: a landscape phone has ~670 dp there, a portrait one ~300."""
+        return inner_width >= dp(520)
+
+    def _layout_summary(self, *_a) -> None:
+        """Two columns on a wide card (a landscape phone): the stats left, the notes field over Save notes right, which
+        gives the notes a few lines and keeps OK well inside the screen. Else one column: the stats, then the notes
+        field as tall as Save notes beside it. Delete and OK stay under both."""
+        panel, card, body, box, holder = (self._summary_panel, self._summary_stats_card, self._summary_body,
+                                          self._summary_notes_box, self._summary_save_holder)
+        two = self._summary_in_two_columns(panel.width - panel.padding[0] - panel.padding[2])
+        if two:
+            body.orientation, body.height = "horizontal", card.height
+            box.orientation, box.height = "vertical", card.height
+            holder.size_hint_x = 1
+        else:
+            body.orientation, body.height = "vertical", card.height + S.GAP + S.BTN_H
+            box.orientation, box.height = "horizontal", S.BTN_H
+            holder.size_hint_x, holder.width = None, self._summary_save_notes_btn.width
 
     def hide_summary(self) -> None:
         if self._summary.parent is not None:

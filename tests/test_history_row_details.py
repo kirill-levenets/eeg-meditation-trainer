@@ -15,7 +15,7 @@ from app.ui.session_labels import (
     session_label,
     session_notes_line,
     session_stats_line,
-    session_threshold_row,
+    session_threshold_rows,
     session_title,
 )
 
@@ -66,17 +66,19 @@ def test_a_session_that_saved_no_metric_keeps_its_old_line(program):
     assert session_stats_line(legacy) == "Shamatha 70 · 10m 00s"
 
 
-@pytest.mark.parametrize("session, row", [
-    (_scored(threshold_used=50), ("Scored on", "Shamatha ≥ 50")),
+@pytest.mark.parametrize("session, rows", [
+    (_scored(threshold_used=50), [("Metric", "Shamatha"), ("Threshold", "50")]),
     (_scored(score_metric_key="custom_formula", score_metric_name="Calm ratio", threshold_used=120),
-     ("Scored on", "Calm ratio ≥ 120")),
+     [("Metric", "Calm ratio"), ("Threshold", "120")]),
     (_scored(score_metric_key="program", score_metric_name="Evening ladder", avg_score=None, threshold_used=40,
-             session_program='[{"duration": 60}]'), ("Scored on", "Evening ladder (program)")),
-    ({"score_metric_key": "", "session_program": "", "threshold_used": 50}, ("Threshold Used", "50")),
-    ({"score_metric_key": "", "session_program": '[{"duration": 60}]', "threshold_used": 40}, ("Threshold Used", "40")),
+             session_program='[{"duration": 60}]'), [("Metric", "Evening ladder (program)"), ("Threshold", "Per segment")]),
+    (_scored(score_metric_key="program", score_metric_name="Program", avg_score=None, threshold_used=40,
+             session_program='[{"duration": 60}]'), [("Metric", "Program"), ("Threshold", "Per segment")]),
+    ({"score_metric_key": "", "session_program": "", "threshold_used": 50}, [("Threshold Used", "50")]),
+    ({"score_metric_key": "", "session_program": '[{"duration": 60}]', "threshold_used": 40}, [("Threshold Used", "40")]),
 ])
-def test_the_threshold_row_names_the_saved_metric_or_keeps_the_old_row(session, row):
-    assert session_threshold_row(session) == row
+def test_the_threshold_rows_are_the_saved_metric_and_its_threshold_or_the_old_row(session, rows):
+    assert session_threshold_rows(session) == rows
 
 
 def test_a_program_session_shows_the_program_name_and_no_average():
@@ -281,47 +283,101 @@ def _legend_texts(diary) -> list[str]:
     return [w.text for w in diary._legend_container.children]
 
 
-def test_the_session_detail_names_what_the_session_was_scored_on():
+def _detail_rows(diary) -> list[tuple[str, str]]:
+    return [(title.text, value.text) for title, value in diary._detail_rows]
+
+
+def _detail_row(diary, title: str):
+    return next(value for t, value in diary._detail_rows if t.text == title)
+
+
+def test_the_session_detail_names_the_metric_and_its_threshold_on_their_own_rows():
     diary = _diary_with(dict(_sessions()[0], threshold_used=50))
-    assert (diary._scored_on_title.text, diary._detail_stats["scored_on"].text) == ("Scored on", "Shamatha ≥ 50")
+    assert _detail_rows(diary)[1:3] == [("Metric", "Shamatha"), ("Threshold", "50")]
     assert "» Shamatha" in _legend_texts(diary)
 
 
 def test_the_session_detail_shows_only_the_scored_stats():
     diary = _diary_with(dict(_sessions()[0], threshold_used=50))
-    assert list(diary._detail_stats) == ["duration", "scored_on", "time_above_threshold", "longest_streak",
-                                         "mood_rating"]  # no averages and no time shamatha >= 90
+    assert [title for title, _ in _detail_rows(diary)] == [
+        "Duration", "Metric", "Threshold", "Time Above Threshold", "Longest Streak", "Mood Rating",
+    ]  # no averages and no time shamatha >= 90
     grid = diary._stats_grid
     rows = len(grid.children) // 2
+    assert rows == 6
     assert grid.height >= rows * dp(20) + (rows - 1) * grid.spacing[1] + grid.padding[1] + grid.padding[3]
 
 
 def test_a_session_that_saved_no_metric_keeps_its_threshold_row_and_marks_no_series():
     diary = _diary_with(dict(_sessions()[1], threshold_used=50))
-    assert (diary._scored_on_title.text, diary._detail_stats["scored_on"].text) == ("Threshold Used", "50")
+    assert _detail_rows(diary)[1] == ("Threshold Used", "50")
+    assert "Metric" not in [title for title, _ in _detail_rows(diary)]
     assert not any(t.startswith("» ") for t in _legend_texts(diary))
+
+
+def test_the_session_detail_follows_the_rows_of_each_session_it_shows():
+    # A detail opened on a session that saved no metric after one that did, and back: no row is left from the last.
+    diary = _diary_with(dict(_sessions()[0], threshold_used=50))
+    for session, titles in [
+        (dict(_sessions()[1], threshold_used=40), ["Duration", "Threshold Used", "Time Above Threshold",
+                                                   "Longest Streak", "Mood Rating"]),
+        (dict(_sessions()[0], threshold_used=60), ["Duration", "Metric", "Threshold", "Time Above Threshold",
+                                                   "Longest Streak", "Mood Rating"]),
+    ]:
+        diary.show_session_detail(session)
+        assert [title for title, _ in _detail_rows(diary)] == titles
+        assert len(diary._stats_grid.children) == 2 * len(titles)
+    assert _detail_row(diary, "Threshold").text == "60"
 
 
 def test_a_program_session_marks_no_single_series():
     diary = _diary_with(dict(_sessions()[0], score_metric_key="program", score_metric_name="Evening ladder",
                              avg_score=None, session_program='[{"duration": 60, "target": 50}]'))
-    assert diary._detail_stats["scored_on"].text == "Evening ladder (program)"
+    assert _detail_rows(diary)[1:3] == [("Metric", "Evening ladder (program)"), ("Threshold", "Per segment")]
     assert not any(t.startswith("» ") for t in _legend_texts(diary))
 
 
-def test_the_end_card_shows_the_name_duration_and_the_scored_stats():
+def test_the_end_card_shows_the_name_duration_and_the_scored_stats(phone_window):
     from app.ui.live_session import LiveSessionScreen
     screen = LiveSessionScreen()
-    stats = {"duration": 600, "avg_shamatha": 70, "avg_meditation": 50, "time_above_threshold": 300,
-             "time_shamatha_90": 20, "longest_streak": 120, "threshold_used": 50,
-             "score_metric_key": "shamatha_score", "score_metric_name": "Shamatha", "avg_score": 70.0}
-    screen.show_summary(7, stats, title="2026-10-03 20:05 - MindWave Mobile")
-    shown = {k: v.text for k, v in screen._summary_stats.items()}
-    assert shown == {"name": "2026-10-03 20:05 - MindWave Mobile", "duration": "10m 00s",
-                     "scored_on": "Shamatha ≥ 50", "time_above": "5m 00s", "longest_streak": "2m 00s"}
-    assert screen._summary_scored_on_title.text == "Scored on"
-    card = screen._summary_stats_card
-    assert card.height >= sum(c.height for c in card.children) + card.padding[1] + card.padding[3]
+    phone_window.add_widget(screen)
+    try:
+        stats = {"duration": 600, "avg_shamatha": 70, "avg_meditation": 50, "time_above_threshold": 300,
+                 "time_shamatha_90": 20, "longest_streak": 120, "threshold_used": 50,
+                 "score_metric_key": "shamatha_score", "score_metric_name": "Shamatha", "avg_score": 70.0}
+        screen.show_summary(7, stats, title="2026-10-03 20:05 - MindWave Mobile")
+        _frames()
+        assert screen._summary_title.text == "Session saved\n2026-10-03 20:05 - MindWave Mobile"
+        assert _summary_rows(screen) == [("Duration", "10m 00s"), ("Metric", "Shamatha"), ("Threshold", "50"),
+                                         ("Time Above Threshold", "5m 00s"), ("Longest Streak", "2m 00s")]
+        card = screen._summary_stats_card
+        assert len(card.children) == 5  # the rows: the name is in the title
+        assert card.height >= sum(c.height for c in card.children) + card.padding[1] + card.padding[3]
+    finally:
+        screen.hide_summary()
+        phone_window.remove_widget(screen)
+
+
+def _summary_rows(screen) -> list[tuple[str, str]]:
+    return [(label.text, value.text) for label, value in screen._summary_rows]
+
+
+def test_the_end_card_follows_the_rows_of_each_session_it_shows():
+    from app.ui.live_session import LiveSessionScreen
+    screen = LiveSessionScreen()
+    scored = {"duration": 600, "threshold_used": 50, "score_metric_key": "shamatha_score",
+              "score_metric_name": "Shamatha", "avg_score": 70.0}
+    for stats, titles in [
+        (scored, ["Duration", "Metric", "Threshold", "Time Above Threshold", "Longest Streak"]),
+        ({"duration": 600, "threshold_used": 50}, ["Duration", "Threshold Used", "Time Above Threshold",
+                                                   "Longest Streak"]),
+        (dict(scored, threshold_used=70), ["Duration", "Metric", "Threshold", "Time Above Threshold",
+                                           "Longest Streak"]),
+    ]:
+        screen.show_summary(1, stats)
+        assert [label for label, _ in _summary_rows(screen)] == titles
+        assert len(screen._summary_stats_card.children) == len(titles)
+    assert _summary_rows(screen)[2] == ("Threshold", "70")
 
 
 def test_the_end_card_is_titled_with_the_saved_session(monkeypatch):
@@ -369,7 +425,7 @@ def test_the_end_card_shows_a_long_scored_on_value_whole_on_a_phone(phone_window
                  "score_metric_name": "Morning ladder", "avg_score": None}
         screen.show_summary(1, stats, title="2026-10-03 07:15 - MindWave Mobile")
         _frames()
-        value = screen._summary_stats["scored_on"]
+        value = screen._summary_rows[1][1]
         assert value.text == "Morning ladder (program)"
         assert value.width >= _natural_width(value), (value.width, _natural_width(value))
     finally:
@@ -385,7 +441,8 @@ def test_the_session_detail_shows_a_long_scored_on_value_whole_on_a_phone(phone_
         diary.show_session_detail(dict(_sessions()[0], score_metric_key="program", score_metric_name="Morning ladder",
                                        avg_score=None, session_program='[{"duration": 60, "target": 50}]'))
         _frames()
-        value = diary._detail_stats["scored_on"]
+        value = _detail_row(diary, "Metric")
+        assert value.text == "Morning ladder (program)"
         assert value.width >= _natural_width(value), (value.width, _natural_width(value))
     finally:
         phone_window.remove_widget(diary)
@@ -396,7 +453,7 @@ def test_the_detail_legend_names_a_series_as_the_live_graph_does():
     from app.ui.live_session import SERIES_NAMES
     diary = _diary_with(dict(_sessions()[0], score_metric_key="native_meditation", score_metric_name="NS Meditation",
                              threshold_used=50))
-    assert diary._detail_stats["scored_on"].text == "NS Meditation ≥ 50"
+    assert _detail_row(diary, "Metric").text == "NS Meditation"
     assert diary._metrics_graph.series_name("native_meditation") == SERIES_NAMES["native_meditation"]
     assert "» NS Meditation" in _legend_texts(diary)
 

@@ -157,19 +157,124 @@ def test_the_in_screen_modals_are_the_same_panel_with_readable_text(theme):
         Window.remove_widget(screen)
 
 
-def test_the_session_end_card_fits_a_landscape_phone():
+_SCORED = {"duration": 600, "threshold_used": 100, "score_metric_key": "shamatha_score",
+           "score_metric_name": "Shamatha", "avg_score": 70.0}
+_NAME = "2026-10-05 07:15 - MindWave Mobile"
+_PORTRAIT, _LANDSCAPE = (dp(360), dp(780)), (dp(732), dp(360))
+
+
+@pytest.fixture
+def end_card():
     from app.ui.live_session import LiveSessionScreen
+    old = Window.size
     screen = LiveSessionScreen()
     Window.add_widget(screen)
-    try:
-        screen.show_summary(1, {"duration": 600})
+
+    def show(size, stats=_SCORED, title=_NAME):
+        Window.size = size
         _pump()
-        panel = next(w for w in screen._summary.walk(restrict=True) if isinstance(w, ModalPanel))
-        pad = screen._summary.padding
-        assert panel.height + pad[1] + pad[3] <= dp(390), panel.height
-    finally:
-        screen.hide_summary()
-        Window.remove_widget(screen)
+        screen.show_summary(1, stats, title=title)
+        _pump()
+        return screen
+
+    yield show
+    screen.hide_summary()
+    Window.remove_widget(screen)
+    Window.size = old
+    _pump()
+
+
+def test_the_session_end_card_fits_a_landscape_phone_above_the_bottom_bar(end_card):
+    # A just-saved session always has its metric: Metric and Threshold make it the tallest card. Above the bottom bar
+    # a landscape phone has 360 dp less the bar: OK and Save notes show without scrolling.
+    from app.ui.theme import S
+    screen = end_card(_LANDSCAPE)
+    assert len(screen._summary_rows) == 5
+    panel = next(w for w in screen._summary.walk(restrict=True) if isinstance(w, ModalPanel))
+    pad = screen._summary.padding
+    assert panel.height + pad[1] + pad[3] <= dp(360) - S.NAV_H, panel.height
+
+
+def _win(widget) -> tuple[float, float, float, float]:
+    """(left, bottom, right, top) in window coordinates."""
+    x, y = widget.to_window(widget.x, widget.y)
+    return x, y, x + widget.width, y + widget.height
+
+
+def _text_width(text: str, label) -> float:
+    from kivy.core.text import Label as CoreLabel
+    core = CoreLabel(text=text, font_size=label.font_size, bold=label.bold)
+    core.refresh()
+    return core.texture.size[0]
+
+
+@pytest.mark.parametrize("size, name, title", [
+    (_LANDSCAPE, _NAME, "Session saved \u00b7 " + _NAME),  # one line beside the two columns
+    (_PORTRAIT, _NAME, "Session saved\n" + _NAME),  # the name under the title
+    (_PORTRAIT, "2026-10-05 07:15 - Mock", "Session saved\n2026-10-05 07:15 - Mock"),  # even when it would fit beside
+])
+def test_the_end_cards_title_names_the_session(end_card, size, name, title):
+    screen = end_card(size, title=name)
+    assert screen._summary_title.text == title
+    assert screen._summary_stats_card.children == [box for box, _l, _v in screen._summary_row_pool[:5]][::-1]
+
+
+@pytest.mark.parametrize("size, lines", [(_LANDSCAPE, 1), (_PORTRAIT, 2)])
+def test_a_long_name_is_cut_to_its_line(end_card, size, lines):
+    screen = end_card(size, title="2026-10-05 07:15 - " + "Evening sit by the lake after a long day at work, " * 3)
+    title = screen._summary_title
+    shown = title.text.split("\n")
+    assert len(shown) == lines and shown[-1].endswith("\u2026")
+    assert all(_text_width(line, title) <= title.width for line in shown)
+
+
+def test_the_end_cards_title_follows_the_width_and_the_session(end_card):
+    screen = end_card(_LANDSCAPE)
+    Window.size = _PORTRAIT
+    _pump()
+    assert screen._summary_title.text == "Session saved\n" + _NAME
+    screen.show_summary(2, _SCORED, title="")
+    _pump()
+    assert screen._summary_title.text == "Session saved"
+
+
+def test_a_landscape_phone_shows_the_stats_beside_the_notes(end_card):
+    from app.ui.theme import S
+    screen = end_card(_LANDSCAPE)
+    card, notes, save = screen._summary_stats_card, screen._summary_notes, screen._summary_save_notes_btn
+    c, n, s = _win(card), _win(notes), _win(save)
+    d, o = _win(screen._summary_delete_btn), _win(screen._summary_ok_btn)
+    assert c[2] <= n[0]  # the stats on the left, the notes on the right
+    assert c[3] == pytest.approx(n[3])  # both columns start under the title
+    assert n[1] >= s[3] and s[2] == pytest.approx(n[2])  # Save notes under the field, at its right edge
+    assert s[1] == pytest.approx(c[1])  # ...and level with the bottom of the stats
+    assert max(d[3], o[3]) <= min(c[1], s[1])  # Delete and OK under both columns
+    assert notes.height == pytest.approx(card.height - S.GAP - save.height)  # the rest of the column: a few lines
+
+
+def test_a_portrait_phone_keeps_one_column(end_card):
+    screen = end_card(_PORTRAIT)
+    card, notes, save = screen._summary_stats_card, screen._summary_notes, screen._summary_save_notes_btn
+    c, n, s = _win(card), _win(notes), _win(save)
+    assert n[3] <= c[1]  # the notes under the stats
+    assert n[2] <= s[0] and n[1] == pytest.approx(s[1])  # Save notes beside the field
+    assert c[2] == pytest.approx(s[2])  # the stats as wide as the card
+
+
+def test_turning_the_phone_rearranges_the_open_card_and_keeps_the_notes(end_card):
+    screen = end_card(_PORTRAIT)
+    screen._summary_notes.text = "calm after ten minutes"
+    for size, beside in [(_LANDSCAPE, True), (_PORTRAIT, False), (_LANDSCAPE, True)]:
+        Window.size = size
+        _pump()
+        assert (_win(screen._summary_stats_card)[2] <= _win(screen._summary_notes)[0]) is beside, size
+        assert ("\n" not in screen._summary_title.text) is beside
+        assert screen._summary_notes.text == "calm after ten minutes"
+
+
+def test_the_notes_field_is_as_tall_as_save_notes_next_to_it(end_card):
+    screen = end_card(_PORTRAIT)
+    assert screen._summary_notes.height == screen._summary_save_notes_btn.height
 
 
 @pytest.mark.parametrize("theme", ["Light Cream", "Dark Blue"])

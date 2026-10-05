@@ -61,15 +61,15 @@ def session_notes_line(session: dict) -> str:
     return next((line.strip() for line in (session.get("notes") or "").splitlines() if line.strip()), "")
 
 
-def session_threshold_row(session: dict) -> tuple[str, str]:
-    """(label, value) of the row above Time Above Threshold and Longest Streak: what they were measured against — the
-    saved metric and its threshold, or a program, whose segments have their own. A session that saved no metric keeps
-    its old Threshold Used row."""
+def session_threshold_rows(session: dict) -> list[tuple[str, str]]:
+    """(label, value) rows above Time Above Threshold and Longest Streak: what they were measured against — the saved
+    metric and its threshold, or a program, whose segments have their own. A session that saved no metric keeps its
+    old Threshold Used row."""
     threshold = session.get("threshold_used", 0) or 0
     score = recorded_score(session)
     if score is None:
-        return "Threshold Used", str(threshold)
+        return [("Threshold Used", str(threshold))]
     key, name, _avg = score
     if key == "program":
-        return "Scored on", name if name == "Program" else f"{name} (program)"
-    return "Scored on", f"{name} \u2265 {threshold}"
+        return [("Metric", name if name == "Program" else f"{name} (program)"), ("Threshold", "Per segment")]
+    return [("Metric", name), ("Threshold", str(threshold))]

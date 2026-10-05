@@ -65,8 +65,8 @@ Tap **Mark** to place a vertical line on the graph. Use this to tag events ("hea
 
 ### Session End Summary
 
-Every ending (Stop, timer, lost signal) shows the same **Session saved** card:
-- The session's name (date, start time and device), Duration, **Scored on** (the metric that drove the feedback sound and its threshold, e.g. "Shamatha ≥ 50"; for a program, its name), Time Above Threshold and Longest Streak
+Every ending (Stop, timer, lost signal) shows the same **Session saved** card, its title naming the session (date, start time and device). With the phone held sideways the stats are on the left and the notes on the right:
+- Duration, **Metric** (the metric that drove the feedback sound, e.g. "Shamatha"; for a program, its name) and **Threshold** (e.g. "50"; for a program, "Per segment"), Time Above Threshold and Longest Streak
 - Quick notes field with **Save notes** next to it — saves them ("Notes saved") and keeps the card open
 - **OK** — closes the card; notes you typed but didn't save are saved automatically (also if the app goes to the background or is closed)
 - **Delete session** — permanently deletes the session after a confirmation ("This can't be undone"); Cancel keeps it
@@ -122,7 +122,7 @@ Tap a session row to view full details (graphs, notes, tags, mood).
 
 ### Session Detail
 
-Titled like its row. Shows Duration, **Scored on** (the metric and threshold that Time Above Threshold and Longest Streak were measured against, or the program's name; sessions from before this was saved show **Threshold Used** instead), Time Above Threshold, Longest Streak and Mood Rating, a **Band Power (whole session)** breakdown, notes/tags/mood editor, and three graph tabs (the Metrics legend marks the scored series with **»**):
+Titled like its row. Shows Duration, **Metric** and **Threshold** (what Time Above Threshold and Longest Streak were measured against; for a program, its name and "Per segment"; sessions from before this was saved show one **Threshold Used** row instead), Time Above Threshold, Longest Streak and Mood Rating, a **Band Power (whole session)** breakdown, notes/tags/mood editor, and three graph tabs (the Metrics legend marks the scored series with **»**):
 - **Metrics** — all computed metrics
 - **Raw EEG** — synthesized waveform from stored band powers
 - **Frequencies** — band power chart
