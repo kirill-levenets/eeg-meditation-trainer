@@ -15,7 +15,8 @@
    metric that drives the sound (Settings >
    Threshold > Audio control metric), marked » in
    the graph legend when that line is shown. It
-   can't change while a session runs
+   can't change while a session runs (a program
+   uses its segments' metrics instead)
 
 ## Connection Troubleshooting
 

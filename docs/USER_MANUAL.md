@@ -221,7 +221,7 @@ When Program mode is off, the Simple timer behaves exactly as before.
 - Slider (20-180) with presets: 50, 80, 100, 130, 160
 - Sets the dashed line on graphs, "time above threshold" stats, and audio feedback target
 - **Time above threshold** and **Longest streak** are measured on the **audio control metric** below — the same metric that drives the feedback sound — and the live graph legend marks it with **»** when that line is shown. Each session records which metric it was scored on. (Sessions recorded before this change were measured on Meditation.)
-- **Audio control metric** — choose which metric drives the audio: Shamatha, NS Meditation, NS Attention, or Custom Formula (slot 1, 2, or 3 selected via the `[1][2][3]` buttons). If the selected custom slot has no valid formula the audio falls back to shamatha. While a session runs (or connects) this choice is locked, and so is the formula in the selected slot: a session is scored on one metric from start to stop. The other formula slots and the threshold stay editable.
+- **Audio control metric** — choose which metric drives the audio: Shamatha, NS Meditation, NS Attention, or Custom Formula (slot 1, 2, or 3 selected via the `[1][2][3]` buttons). If the selected custom slot has no valid formula the audio falls back to shamatha. While a session runs (or connects) this choice is locked, and so is the formula in the selected slot: a session is scored on one metric from start to stop. The other formula slots and the threshold stay editable, and a program session, scored on its segments' metrics, leaves all of it free.
 
 ### Audio
 

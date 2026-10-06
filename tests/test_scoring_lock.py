@@ -26,6 +26,7 @@ def app(monkeypatch):
     a._formula_slots[1].set_formula("theta / alpha1 * 100")
     a._audio_metric_key = "shamatha_score"
     a._audio_formula_index = 0
+    a._session_program_active = False
     return a
 
 
@@ -133,3 +134,13 @@ def test_the_other_session_locks_say_the_same(app, call, doing):
     app._refresh_profile = MagicMock()
     call(app)
     assert app._info_popup.call_args.args == ("Session in progress", f"Stop the current session before {doing}.")
+
+
+def test_a_program_session_leaves_the_audio_metric_free(app):
+    # A program is scored per segment, on the segments' own metrics: the audio control metric plays no part.
+    app._session_program_active = True
+    app._audio_metric_key = FORMULA_KEYS[0]
+    app._on_audio_metric_change("meditation_score")
+    app._on_formula_slot_change(1, "Drowsy", "theta / beta1 * 100")
+    assert not _refused(app)
+    assert app._audio_metric_key == "meditation_score"

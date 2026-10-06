@@ -2587,7 +2587,7 @@ class EEGMeditationApp(App):
         """Switch which metric drives the audio threshold feedback: a running session keeps the one it is scored on
         (#51 scores it on the drive key every tick, so a switch mixed both metrics into one average and streak)."""
         new_key = FORMULA_KEYS[self._audio_formula_index] if key == "custom_formula" else key
-        if new_key != self._audio_metric_key and self._refused_while_session_runs("changing the metric it is scored on"):
+        if new_key != self._audio_metric_key and self._scoring_locked("changing the metric it is scored on"):
             self._show_audio_metric()
             return
         self._audio_metric_key = new_key
@@ -2616,7 +2616,7 @@ class EEGMeditationApp(App):
         is selected just remembers the choice for when custom-formula is picked."""
         idx = max(0, min(idx, _MAX_FORMULAS - 1))
         if (self._audio_metric_key in FORMULA_KEYS and FORMULA_KEYS[idx] != self._audio_metric_key
-                and self._refused_while_session_runs("changing the metric it is scored on")):
+                and self._scoring_locked("changing the metric it is scored on")):
             self._show_audio_metric()
             return
         self._audio_formula_index = idx
@@ -2625,6 +2625,12 @@ class EEGMeditationApp(App):
             self._audio_metric_key = FORMULA_KEYS[self._audio_formula_index]
             self._persist_user_setting("audio_metric")
         self._persist_user_setting("audio_formula_index")
+
+    def _scoring_locked(self, doing: str) -> bool:
+        """True (after telling the user) while a simple session runs: it is scored on the audio control metric (#51)
+        until it stops. A program session is scored on its segments' metrics, so the control stays free."""
+        return (not getattr(self, "_session_program_active", False)
+                and self._refused_while_session_runs(doing))
 
     def _show_audio_metric(self) -> None:
         """Settings' audio-metric choice and formula-slot buttons show the metric in force."""
@@ -2649,7 +2655,7 @@ class EEGMeditationApp(App):
         key = FORMULA_KEYS[idx]
         # The slot the sound is set to is what a running session is scored on (or its shamatha fallback, while empty).
         if (key == self._audio_metric_key and formula != ev.formula
-                and self._refused_while_session_runs("changing the formula it is scored on")):
+                and self._scoring_locked("changing the formula it is scored on")):
             self._settings_screen.set_formula_slot(idx, self._formula_names[idx], ev.formula)
             return
         self._formula_names[idx] = name or f"Custom {idx + 1}"
