@@ -153,6 +153,36 @@ FREQ_PREVIEW_SCALES = {
 }
 
 
+def detail_graph_data(rows: list[dict], formula_series: dict[str, list[float]]) -> dict:
+    """Each detail graph's series and markers from a session's stored rows: pure Python, so the open runs it on its
+    worker and the main thread only loads it. {"metrics" | "raw" | "freq": (series by key, marker indices)}."""
+    metrics_series: dict[str, list[float]] = {k: [] for k in METRICS_PREVIEW_COLORS}
+    for row in rows:
+        for key in metrics_series:
+            metrics_series[key].append(row.get(key, 0.0))
+    # Custom-formula columns aren't stored per tick: they come entirely from the session's formula replay. A slot the
+    # session didn't record stays empty (no flat zero-line phantom).
+    for key in metrics_series:
+        if key.startswith("custom_formula"):
+            metrics_series[key] = formula_series.get(key, [])
+
+    with timed("diary.synth_waveform"):
+        synth, raw_start = _synthesize_waveform(rows)  # tail only, see _synthesize_waveform
+
+    freq_series: dict[str, list[float]] = {k: [] for k in FREQ_PREVIEW_COLORS}
+    for row in rows:
+        freq_series["alpha"].append(row.get("alpha1_raw", 0.0) + row.get("alpha2_raw", 0.0))
+        freq_series["beta"].append(row.get("beta1_raw", 0.0) + row.get("beta2_raw", 0.0))
+        freq_series["gamma"].append(row.get("gamma1_raw", 0.0) + row.get("gamma2_raw", 0.0))
+        freq_series["theta"].append(row.get("theta_raw", 0.0))
+        freq_series["delta"].append(row.get("delta_raw", 0.0))
+
+    markers = [i for i, row in enumerate(rows) if row.get("marker", 0)]
+    # The raw graph holds only the tail (from raw_start): its markers are offset to it.
+    raw_markers = [(i - raw_start) * _SAMPLES_PER_TICK for i in markers if i >= raw_start]
+    return {"metrics": (metrics_series, markers), "raw": ({"eeg": synth}, raw_markers), "freq": (freq_series, markers)}
+
+
 class DiaryScreen(Screen):
     """Session detail, opened from History: stats, notes, tags and mood, graphs."""
 
@@ -237,7 +267,13 @@ class DiaryScreen(Screen):
         self._detail_layout.add_widget(band_header)
         self.band_view_persist_cb = None  # set by AppManager to persist per-user
         self._band_totals = BandTotalsView(on_change=self._on_band_view_change)
-        self._detail_layout.add_widget(self._band_totals)
+        self._band_placeholder = ThemedLabel(text="", font_size=F.BODY, color=C.TEXT_SECONDARY,
+                                             size_hint_y=None, height=dp(40))
+        # Holds the table, or the placeholder until the session's totals arrive; as tall as what it holds.
+        self._band_holder = BoxLayout(size_hint_y=None)
+        self._band_totals.bind(height=self._fit_band_holder)
+        self._band_placeholder.bind(height=self._fit_band_holder)
+        self._detail_layout.add_widget(self._band_holder)
 
         # Notes
         notes_label = ThemedLabel(
@@ -364,6 +400,10 @@ class DiaryScreen(Screen):
             orientation="vertical", size_hint_y=None, height=dp(200),
         )
         self._detail_layout.add_widget(self._graph_container)
+        self._graph_placeholder = ThemedLabel(text="", font_size=F.BODY, color=C.TEXT_SECONDARY)
+        # The sections with their data in place: "metrics", "raw", "freq" (graphs) and "bands" (the totals table).
+        self._ready: set[str] = {"metrics", "raw", "freq", "bands"}
+        self._load_failed = False
 
         # Create all three graphs
         self._metrics_graph = ScrollableGraphWidget(
@@ -408,6 +448,7 @@ class DiaryScreen(Screen):
         self._detail_layout.add_widget(self._legend_container)
 
         self._active_graph_tab: str = "metrics"
+        self._show_band_section()
         self._cached_metrics_rows: list[dict] = []
         self._graph_container.add_widget(self._metrics_graph)
         self._rebuild_legend("metrics")
@@ -436,9 +477,33 @@ class DiaryScreen(Screen):
         if self._on_back:
             self._on_back()
 
+    def _fit_band_holder(self, *_a) -> None:
+        if self._band_holder.children:
+            self._band_holder.height = self._band_holder.children[0].height
+
+    def _show_band_section(self) -> None:
+        """The totals table once its data is in, else the placeholder (loading, or the load failed)."""
+        shown = self._band_totals if "bands" in self._ready else self._band_placeholder
+        self._band_placeholder.text = self._placeholder_text()
+        if shown.parent is not self._band_holder:
+            self._band_holder.clear_widgets()
+            self._band_holder.add_widget(shown)
+        self._fit_band_holder()
+
+    def _placeholder_text(self) -> str:
+        return "Couldn't load this session's data." if self._load_failed else "Loading\u2026"
+
+    def show_load_failed(self) -> None:
+        """The sections still waiting for data say they won't get it; the stats and notes keep working."""
+        self._load_failed = True
+        self._show_band_section()
+        self._switch_graph_tab(self._active_graph_tab)
+
     def set_band_totals(self, totals: dict[str, float]) -> None:
         """Populate the per-band session power breakdown."""
         self._band_totals.set_totals(totals)
+        self._ready.add("bands")
+        self._show_band_section()
 
     def set_band_view_state(self, mode: str, sort_by: str, descending: bool) -> None:
         """Restore the persisted band-table view (mode / sort) before populating."""
@@ -501,6 +566,9 @@ class DiaryScreen(Screen):
         self._freq_graph.clear_data()
         self._cached_metrics_rows = []
         self._session_formula_series = {}
+        self._ready = set()  # graphs and band totals: "Loading…" until their data arrives
+        self._load_failed = False
+        self._show_band_section()
         self._switch_graph_tab("metrics")
 
     def set_session_formulas(self, series: dict[str, list[float]], names: dict[str, str]) -> None:
@@ -510,59 +578,27 @@ class DiaryScreen(Screen):
             self._metrics_graph.set_series_name(key, name)
 
     def load_metrics_preview(self, metrics_rows: list[dict]) -> None:
-        """Load session metrics into all three preview graphs."""
+        """Load session metrics into all three preview graphs at once (the async open fills them one per frame)."""
         self._cached_metrics_rows = metrics_rows
-        if not metrics_rows:
-            return
-        self._load_graph_data(metrics_rows)
+        data = detail_graph_data(metrics_rows, self._session_formula_series)
+        for section in self.graph_fill_order():
+            self.fill_graph(section, data)
 
-    def _load_graph_data(self, rows: list[dict]) -> None:
-        """Populate all three graphs from metrics rows."""
-        # Metrics graph
-        metrics_series: dict[str, list[float]] = {k: [] for k in METRICS_PREVIEW_COLORS}
-        for row in rows:
-            for key in metrics_series:
-                metrics_series[key].append(row.get(key, 0.0))
-        # Custom-formula columns aren't stored per tick — drive them entirely from
-        # the per-session recompute. A slot the session didn't record stays empty
-        # (no flat zero-line phantom); recorded slots get their replayed series.
-        for key in metrics_series:
-            if key.startswith("custom_formula"):
-                metrics_series[key] = self._session_formula_series.get(key, [])
-        with timed("diary.metrics_graph_load"):
-            self._metrics_graph.load_static_data(metrics_series)
+    def graph_fill_order(self) -> list[str]:
+        """The graphs in the order to fill them: the shown tab first."""
+        return [self._active_graph_tab] + [s for s in ("metrics", "raw", "freq") if s != self._active_graph_tab]
 
-        # Raw EEG synthesized waveform from band powers (tail only — see fn)
-        with timed("diary.synth_waveform"):
-            synth, raw_start = _synthesize_waveform(rows)
-        eeg_series: dict[str, list[float]] = {"eeg": synth}
-        with timed("diary.raw_graph_load"):
-            self._raw_eeg_graph.load_static_data(eeg_series)
-
-        # Frequency bands
-        freq_series: dict[str, list[float]] = {k: [] for k in FREQ_PREVIEW_COLORS}
-        for row in rows:
-            freq_series["alpha"].append(row.get("alpha1_raw", 0.0) + row.get("alpha2_raw", 0.0))
-            freq_series["beta"].append(row.get("beta1_raw", 0.0) + row.get("beta2_raw", 0.0))
-            freq_series["gamma"].append(row.get("gamma1_raw", 0.0) + row.get("gamma2_raw", 0.0))
-            freq_series["theta"].append(row.get("theta_raw", 0.0))
-            freq_series["delta"].append(row.get("delta_raw", 0.0))
-        self._freq_graph.load_static_data(freq_series)
-
-        # Load marker positions
-        marker_indices = [i for i, row in enumerate(rows) if row.get("marker", 0)]
-        self._metrics_graph.set_markers(marker_indices)
-        # Raw graph holds only the tail (from raw_start); offset markers to it.
-        raw_marker_indices = [
-            (i - raw_start) * _SAMPLES_PER_TICK for i in marker_indices if i >= raw_start
-        ]
-        self._raw_eeg_graph.set_markers(raw_marker_indices)
-        self._freq_graph.set_markers(marker_indices)
-
-        # Scroll to end so user sees latest data and can drag back
-        self._metrics_graph.set_scroll_offset(0)
-        self._raw_eeg_graph.set_scroll_offset(0)
-        self._freq_graph.set_scroll_offset(0)
+    def fill_graph(self, section: str, data: dict) -> None:
+        """Put one graph's data (from detail_graph_data) in place, and show it if its tab is the shown one."""
+        series, markers = data[section]
+        graph = self._graph_for_tab(section)
+        with timed(f"diary.fill_{section}"):
+            graph.load_static_data(series)
+            graph.set_markers(markers)
+            graph.set_scroll_offset(0)  # at the end, so the user sees the latest data and can drag back
+        self._ready.add(section)
+        if section == self._active_graph_tab:
+            self._switch_graph_tab(section)
 
     def set_metrics_threshold(self, value: float) -> None:
         """Set threshold line on the metrics preview graph."""
@@ -604,15 +640,13 @@ class DiaryScreen(Screen):
                 btn.bg_color = C.BG_CARD
                 btn.text_color = C.TEXT_SECONDARY
 
-        if tab == "metrics":
-            self._graph_container.add_widget(self._metrics_graph)
-            self._metrics_graph._redraw()
-        elif tab == "raw":
-            self._graph_container.add_widget(self._raw_eeg_graph)
-            self._raw_eeg_graph._redraw()
+        if tab not in self._ready:
+            self._graph_placeholder.text = self._placeholder_text()
+            self._graph_container.add_widget(self._graph_placeholder)
         else:
-            self._graph_container.add_widget(self._freq_graph)
-            self._freq_graph._redraw()
+            graph = self._graph_for_tab(tab)
+            self._graph_container.add_widget(graph)
+            graph._redraw()
         self._rebuild_legend(tab)
 
     def _graph_for_tab(self, tab: str) -> ScrollableGraphWidget:

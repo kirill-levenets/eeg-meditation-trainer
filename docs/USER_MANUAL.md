@@ -122,7 +122,7 @@ Tap a session row to view full details (graphs, notes, tags, mood).
 
 ### Session Detail
 
-Titled like its row. Shows Duration, **Metric**, **Average** and **Threshold** (what the session was scored on, that metric's average, and what Time Above Threshold and Longest Streak were measured against; for a program, its name and "Per segment", with no average; sessions from before this was saved show **Avg Shamatha** and **Threshold Used** instead), Time Above Threshold, Longest Streak and Mood Rating, a **Band Power (whole session)** breakdown, notes/tags/mood editor, and three graph tabs (the Metrics legend marks the scored series with **»**):
+Opens as soon as you tap the session: its stats and notes are there at once, and the band power and graphs show "Loading…" until their data is in. Titled like its row. Shows Duration, **Metric**, **Average** and **Threshold** (what the session was scored on, that metric's average, and what Time Above Threshold and Longest Streak were measured against; for a program, its name and "Per segment", with no average; sessions from before this was saved show **Avg Shamatha** and **Threshold Used** instead), Time Above Threshold, Longest Streak and Mood Rating, a **Band Power (whole session)** breakdown, notes/tags/mood editor, and three graph tabs (the Metrics legend marks the scored series with **»**):
 - **Metrics** — all computed metrics
 - **Raw EEG** — synthesized waveform from stored band powers
 - **Frequencies** — band power chart

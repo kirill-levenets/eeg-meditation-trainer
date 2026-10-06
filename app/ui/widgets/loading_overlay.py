@@ -45,7 +45,7 @@ class LoadingOverlay(ModalScrim):
 
     def on_touch_down(self, touch):
         # Modal from show() on, also before a delayed show paints: swallow taps so they don't reach the screen
-        # behind (e.g. a second session-row tap spawning a second load).
+        # behind (e.g. a tap on a session row while it is being deleted).
         if self._active:
             return True
         return super().on_touch_down(touch)

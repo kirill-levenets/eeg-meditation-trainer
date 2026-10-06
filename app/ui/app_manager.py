@@ -45,7 +45,7 @@ from app.storage.csv_export import build_sessions_zip
 from app.storage.database import DatabaseManager, UserExistsError
 from app.storage.fileops import discard_file
 from app.ui import render_stats
-from app.ui.diary_screen import DiaryScreen
+from app.ui.diary_screen import DiaryScreen, detail_graph_data
 from app.ui.history_screen import HistoryScreen
 from app.ui.live_session import METRICS_COLORS, SERIES_NAMES, LiveSessionScreen
 from app.ui.profile_screen import ProfileScreen
@@ -3047,62 +3047,71 @@ class EEGMeditationApp(App):
 
         report_soft_error("user_diagnostics", detail, app=self, force=True)
 
+    _detail_load: int = 0  # the session-detail open in progress; a result for an earlier one is dropped
+
     def _on_session_select(self, session_id: int) -> None:
-        """Load a session into the diary off the UI thread, behind a spinner.
+        """Open the session detail at once (#59): title, stats and notes from the row History holds, so they can be read
+        and edited at once; the band totals and graphs load on a worker and fill in, one section per frame."""
+        session = self._history_screen.session_by_id(session_id)
+        if session is None:  # not in History's list: nothing was tapped
+            logger.warning(f"Session detail: session {session_id} isn't listed")
+            return
+        self._detail_load += 1
+        token = self._detail_load
+        d = self._diary_screen
+        with timed("diary.open"):
+            d.set_session_formulas({}, self._recorded_formulas(session)[1])  # the legend's names from the first frame
+            d.show_session_detail(session)
+            d.set_metrics_threshold(float(session.get("threshold_used", 50)))
+            d.set_program(session.get("session_program", ""))
+            bv = {}
+            if self._current_user_id:
+                bv = self._db.get_user_json_setting(self._current_user_id, "band_breakdown_view", {}) or {}
+            d.set_band_view_state(bv.get("mode", "detailed"), bv.get("sort", "band"), bool(bv.get("desc", False)))
+            self._session_detail_back = self._sm.current
+            self._sm.current = "diary"
+        threading.Thread(target=self._load_session_detail, args=(token, session_id, session), daemon=True,
+                         name="DiaryLoad").start()
 
-        The heavy work (metrics fetch + formula recompute) runs on a worker
-        thread; the Kivy render is dispatched back to the main thread. The
-        worker is deferred one frame so the loading overlay paints first.
-        """
-        self.show_loading("Loading session…")
-        Clock.schedule_once(lambda dt: self._load_session_async(session_id), 0)
-
-    def _load_session_async(self, session_id: int) -> None:
-        def _worker():
-            try:
-                with timed("diary.total"):
-                    with timed("diary.get_session"):
-                        session = self._db.get_session(session_id)
-                    if not session:
-                        self._on_main(self.hide_loading)
-                        return
-                    with timed("diary.compute_formulas"):
-                        series, names = self._compute_session_formulas(session_id, session)
-                    with timed("diary.get_metrics"):
-                        metrics = self._db.get_session_metrics(session_id)
-                    band_totals = self._db.get_session_band_totals(session_id)
-            except Exception:
-                logger.exception("Diary session load failed")
-                self._on_main(self.hide_loading)
-                return
-            self._on_main(
-                lambda: self._render_session_detail(session, series, names, metrics, band_totals)
-            )
-        threading.Thread(target=_worker, daemon=True, name="DiaryLoad").start()
-
-    def _render_session_detail(self, session, series, names, metrics, band_totals=None) -> None:
-        """Main-thread render of a loaded session (Kivy mutations only)."""
+    def _load_session_detail(self, token: int, session_id: int, session: dict) -> None:
+        """Worker: the band totals (one query) first, then the metric rows, read once for the graphs and the formula
+        replay, built into each graph's data off the main thread; each result goes to _fill_detail as it is ready."""
+        d = self._diary_screen
         try:
-            with timed("diary.render"):
-                self._diary_screen.show_session_detail(session)
-                self._diary_screen.set_metrics_threshold(float(session.get("threshold_used", 50)))
-                self._diary_screen.set_session_formulas(series, names)
-                self._diary_screen.load_metrics_preview(metrics)
-                bv = {}
-                if self._current_user_id:
-                    bv = self._db.get_user_json_setting(
-                        self._current_user_id, "band_breakdown_view", {}
-                    ) or {}
-                self._diary_screen.set_band_view_state(
-                    bv.get("mode", "detailed"), bv.get("sort", "band"),
-                    bool(bv.get("desc", False)),
-                )
-                self._diary_screen.set_band_totals(band_totals or {})
-                self._diary_screen.set_program(session.get("session_program", ""))
-                self._session_detail_back = self._sm.current
-                self._sm.current = "diary"
-        finally:
-            self.hide_loading()
+            with timed("diary.band_totals"):
+                totals = self._db.get_session_band_totals(session_id)
+            self._on_main(lambda: self._fill_detail(token, [lambda: d.set_band_totals(totals)]))
+            with timed("diary.get_metrics"):
+                rows = self._db.get_session_metrics(session_id)
+            with timed("diary.compute_formulas"):
+                series, names = self._compute_session_formulas(session_id, session, rows)
+            with timed("diary.graph_data"):
+                data = detail_graph_data(rows, series)
+        except Exception as e:  # any failure: the sections say so, never "Loading…" for good
+            logger.exception(f"Session detail load failed for session {session_id}")
+
+            def failed(err=e) -> None:
+                d.show_load_failed()
+                report_soft_error("session_detail_load_failed", f"Session {session_id}'s graphs: {err}")
+
+            self._on_main(lambda: self._fill_detail(token, [failed]))
+            return
+
+        def fill(section: str) -> None:
+            if section == "metrics":
+                d.set_session_formulas(series, names)  # the formula lines' names, before their graph
+            d.fill_graph(section, data)
+
+        self._on_main(lambda: self._fill_detail(token, [lambda s=s: fill(s) for s in d.graph_fill_order()]))
+
+    def _fill_detail(self, token: int, steps: list) -> None:
+        """Run one step per frame, so no frame holds them all, while this open is the detail on screen: after Back,
+        another tab or another session's open, the rest is dropped."""
+        if token != self._detail_load or self._sm.current != "diary" or not steps:
+            return
+        steps[0]()
+        if len(steps) > 1:
+            Clock.schedule_once(lambda dt: self._fill_detail(token, steps[1:]), 0)  # 0 from a callback: next frame
 
     def _persist_band_view(self, mode: str, sort_by: str, descending: bool) -> None:
         """Persist the diary band-table view (mode/sort) per user."""
@@ -3113,10 +3122,10 @@ class EEGMeditationApp(App):
             {"mode": mode, "sort": sort_by, "desc": descending},
         )
 
-    def _compute_session_formulas(self, session_id: int, session: dict) -> tuple[dict, dict]:
-        """Recompute the session's recorded formula series + names from its band
-        powers (the snapshot active then, not today's edits). Pure DB + compute,
-        no Kivy — safe to call off the main thread."""
+    @staticmethod
+    def _recorded_formulas(session: dict) -> tuple[dict, dict]:
+        """The session's recorded formulas (the snapshot active then, not today's edits): ({series key: evaluator} for
+        each valid one, {series key: name} for every slot). Parsing only, no DB."""
         cf_raw = session.get("custom_formulas") or ""
         evaluators: dict[str, CustomFormulaEvaluator] = {}
         # Reset every custom key to its default name so a session without a given
@@ -3139,7 +3148,14 @@ class EEGMeditationApp(App):
                 if ev.is_valid:
                     evaluators[key] = ev
                     names[key] = d.get("name") or f"Custom {slot + 1}"
-        series = self._db.recompute_formula_series(session_id, evaluators) if evaluators else {}
+        return evaluators, names
+
+    def _compute_session_formulas(self, session_id: int, session: dict,
+                                  rows: list[dict] | None = None) -> tuple[dict, dict]:
+        """Recompute the session's recorded formula series + names from its band powers, over `rows` when already
+        read. Pure DB + compute, no Kivy — safe to call off the main thread."""
+        evaluators, names = self._recorded_formulas(session)
+        series = self._db.recompute_formula_series(session_id, evaluators, rows) if evaluators else {}
         return series, names
 
     def _inject_session_formulas(self, session_id: int, session: dict) -> None:

@@ -1015,14 +1015,15 @@ class HistoryScreen(Screen):
         if self._rename_row.parent is None:
             self._rename_input.focus = False
 
-    def _session_by_id(self, sid) -> dict | None:
+    def session_by_id(self, sid) -> dict | None:
+        """A listed session's row, as History holds it (kept current by in-place updates)."""
         return next((s for s in self._shown if s.get("id") == sid), None)
 
     def _toggle_rename(self, sid) -> None:
         """Open the editor on this session's row, or close it if it is already open there."""
         reopen = self._renaming_sid != sid
         self._close_rename()
-        session = self._session_by_id(sid)
+        session = self.session_by_id(sid)
         if not reopen or session is None:
             return
         self._renaming_sid = sid
@@ -1047,7 +1048,7 @@ class HistoryScreen(Screen):
 
     def _do_rename(self) -> None:
         sid = self._renaming_sid
-        session = self._session_by_id(sid)
+        session = self.session_by_id(sid)
         txt = self._rename_input.text.strip()
         if txt and session is not None and txt != session_label(session):  # unchanged: the stored name stays
             session["session_name"] = txt  # the model row this list shows
