@@ -1807,6 +1807,14 @@ class EEGMeditationApp(App):
                 saved = None
             self._live_screen.show_summary(session_id, stats, title=session_title(saved) if saved else "")
 
+    def _refused_while_session_runs(self, doing: str) -> bool:
+        """True, after telling the user, while a session runs or connects: until it stops it owns its profile, the
+        database it saves to and the metric it is scored on."""
+        if not self._session_pipeline_live():
+            return False
+        self._info_popup("Session in progress", f"Stop the current session before {doing}.")
+        return True
+
     def _session_pipeline_live(self) -> bool:
         """True if a session is RUNNING/PAUSED *or* still in the BT-connect wait
         (tick thread started, state still IDLE). This is the full window in which a
@@ -2565,11 +2573,13 @@ class EEGMeditationApp(App):
         return key
 
     def _on_audio_metric_change(self, key: str) -> None:
-        """Switch which metric drives the audio threshold feedback."""
-        if key == "custom_formula":
-            self._audio_metric_key = FORMULA_KEYS[self._audio_formula_index]
-        else:
-            self._audio_metric_key = key
+        """Switch which metric drives the audio threshold feedback: a running session keeps the one it is scored on
+        (#51 scores it on the drive key every tick, so a switch mixed both metrics into one average and streak)."""
+        new_key = FORMULA_KEYS[self._audio_formula_index] if key == "custom_formula" else key
+        if new_key != self._audio_metric_key and self._refused_while_session_runs("changing the metric it is scored on"):
+            self._show_audio_metric()
+            return
+        self._audio_metric_key = new_key
         self._persist_user_setting("audio_metric")
         logger.info(f"Audio threshold metric changed to: {self._audio_metric_key}")
 
@@ -2593,12 +2603,23 @@ class EEGMeditationApp(App):
         """Pick which formula slot drives audio. Only rebinds the live key when a
         custom-formula slot is the selected driver — tapping it while another metric
         is selected just remembers the choice for when custom-formula is picked."""
-        self._audio_formula_index = max(0, min(idx, _MAX_FORMULAS - 1))
+        idx = max(0, min(idx, _MAX_FORMULAS - 1))
+        if (self._audio_metric_key in FORMULA_KEYS and FORMULA_KEYS[idx] != self._audio_metric_key
+                and self._refused_while_session_runs("changing the metric it is scored on")):
+            self._show_audio_metric()
+            return
+        self._audio_formula_index = idx
         if self._audio_metric_key in FORMULA_KEYS:
             # Load derives the index from audio_metric, so persist both or a reload reverts the switch.
             self._audio_metric_key = FORMULA_KEYS[self._audio_formula_index]
             self._persist_user_setting("audio_metric")
         self._persist_user_setting("audio_formula_index")
+
+    def _show_audio_metric(self) -> None:
+        """Settings' audio-metric choice and formula-slot buttons show the metric in force."""
+        key = self._audio_metric_key
+        self._settings_screen.audio_metric = "custom_formula" if key in FORMULA_KEYS else key
+        self._settings_screen.audio_formula_index = self._audio_formula_index
 
     def _on_theme_change(self, theme_name: str) -> None:
         """Persist the theme per user; the selector already applied it to C."""
@@ -2615,6 +2636,11 @@ class EEGMeditationApp(App):
         """
         ev = self._formula_slots[idx]
         key = FORMULA_KEYS[idx]
+        # The slot the sound is set to is what a running session is scored on (or its shamatha fallback, while empty).
+        if (key == self._audio_metric_key and formula != ev.formula
+                and self._refused_while_session_runs("changing the formula it is scored on")):
+            self._settings_screen.set_formula_slot(idx, self._formula_names[idx], ev.formula)
+            return
         self._formula_names[idx] = name or f"Custom {idx + 1}"
         self._live_screen.graph.set_series_name(key, self._formula_names[idx])
         if not formula:
@@ -3249,12 +3275,8 @@ class EEGMeditationApp(App):
 
     def _on_user_switch(self, user_id: Optional[int]) -> None:
         """Switch the active user profile."""
-        if user_id != self._current_user_id and self._session_pipeline_live():
-            # The running session owns the loaded settings and saves under its own profile.
-            self._info_popup(
-                "Session in progress",
-                "Stop the current session before switching profiles.",
-            )
+        # The running session owns the loaded settings and saves under its own profile.
+        if user_id != self._current_user_id and self._refused_while_session_runs("switching profiles"):
             self._refresh_profile()  # snap the picker back to the active profile
             return
         # Save current user's settings before switching
@@ -3368,14 +3390,8 @@ class EEGMeditationApp(App):
 
     def _on_restore_pressed(self) -> None:
         """Pick a backup file and restore it."""
-        if self._session_pipeline_live():
-            # A restore closes the DB and force-relaunches — a running (or
-            # connecting) session would be silently dropped. Refuse with an
-            # explanation instead.
-            self._info_popup(
-                "Session in progress",
-                "Stop the current session before restoring a backup.",
-            )
+        # A restore closes the DB and force-relaunches: a running (or connecting) session would be silently dropped.
+        if self._refused_while_session_runs("restoring a backup"):
             return
         if self._is_android():
             self._run_restore_saf()
@@ -3478,13 +3494,8 @@ class EEGMeditationApp(App):
     def _do_restore_and_restart(self, source_path: str) -> None:
 
 
-        if self._session_pipeline_live():
-            # Defense for the async picker flow (a session may have started — or
-            # begun connecting — since _on_restore_pressed's check).
-            self._info_popup(
-                "Session in progress",
-                "Stop the current session before restoring a backup.",
-            )
+        # Defense for the async picker flow: a session may have started, or begun connecting, since _on_restore_pressed.
+        if self._refused_while_session_runs("restoring a backup"):
             return
         try:
             # No-op every DB access during the restore + relaunch window so nothing
@@ -3703,8 +3714,7 @@ class EEGMeditationApp(App):
             self._audio_metric_key = v
             if v in FORMULA_KEYS:
                 self._audio_formula_index = FORMULA_KEYS.index(v)
-            ss.audio_metric = "custom_formula" if v in FORMULA_KEYS else v
-            ss.audio_formula_index = self._audio_formula_index
+            self._show_audio_metric()
 
         def set_feedback_source(v):
             self._feedback_source = v; ss.set_feedback_source(v, self._feedback_sound_path)

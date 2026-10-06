@@ -14,7 +14,8 @@
 8. "Time above threshold" and "Streak" count the
    metric that drives the sound (Settings >
    Threshold > Audio control metric), marked » in
-   the graph legend when that line is shown
+   the graph legend when that line is shown. It
+   can't change while a session runs
 
 ## Connection Troubleshooting
 
