@@ -1,6 +1,7 @@
 """Change-callbacks persist through the settings registry; a settings save never touches the live timer."""
 from unittest.mock import MagicMock
 
+from app.session.manager import SessionManager
 from app.session.timer_state import TimerState
 from app.settings.registry import BOOL, INT, STR, Setting, SettingsStore
 from app.ui.app_manager import EEGMeditationApp
@@ -25,6 +26,7 @@ def _app(uid=7):
     app._current_user_id = uid
     app._loading_settings = False
     app._db = _FakeDB()
+    app._session_manager = SessionManager()  # idle: nothing running owns the settings
     return app
 
 

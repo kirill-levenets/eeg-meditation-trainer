@@ -45,7 +45,7 @@ from app.storage.csv_export import build_sessions_zip
 from app.storage.database import DatabaseManager, UserExistsError
 from app.storage.fileops import discard_file
 from app.ui import render_stats
-from app.ui.diary_screen import DiaryScreen
+from app.ui.diary_screen import DiaryScreen, detail_graph_data
 from app.ui.history_screen import HistoryScreen
 from app.ui.live_session import METRICS_COLORS, SERIES_NAMES, LiveSessionScreen
 from app.ui.profile_screen import ProfileScreen
@@ -1529,6 +1529,7 @@ class EEGMeditationApp(App):
             return False
         self._wait_attempt = self._start_attempt
         self._waiting_for_bt = True
+        self._bt_drops = 0
         self._pending_threshold = threshold
         self._live_screen.update_device_status(False, device_name=name, connecting=True)
         self._live_screen.show_overlay(f"Connecting to {name}...")
@@ -1807,6 +1808,14 @@ class EEGMeditationApp(App):
                 saved = None
             self._live_screen.show_summary(session_id, stats, title=session_title(saved) if saved else "")
 
+    def _refused_while_session_runs(self, doing: str) -> bool:
+        """True, after telling the user, while a session runs or connects: until it stops it owns its profile, the
+        database it saves to and the metric it is scored on."""
+        if not self._session_pipeline_live():
+            return False
+        self._info_popup("Session in progress", f"Stop the current session before {doing}.")
+        return True
+
     def _session_pipeline_live(self) -> bool:
         """True if a session is RUNNING/PAUSED *or* still in the BT-connect wait
         (tick thread started, state still IDLE). This is the full window in which a
@@ -1872,6 +1881,9 @@ class EEGMeditationApp(App):
 
     _BT_CONNECT_TIMEOUT = 30.0  # seconds before BT socket gives up
     _BT_SIGNAL_TIMEOUT = 8.0   # seconds to wait for EEG packets after connected
+    _bt_dropped_at: float = 0.0  # monotonic: when the wait saw the link drop; earlier packets don't count after it
+    _BT_MAX_DROPS = 2  # the third drop of the link in one wait ends it: the headset keeps closing it
+    _bt_drops: int = 0  # drops the current wait has seen
     _STALE_DATA_THRESHOLD = 10.0  # seconds with no new packets before warning
 
     def _check_stale_data(self) -> None:
@@ -1899,14 +1911,36 @@ class EEGMeditationApp(App):
         else:
             self._stale_data_warned = False
 
+    def _give_up_bt_wait(self, name: str, message: str) -> None:
+        """End the wait from the tick thread with a retry screen (queued for this attempt only)."""
+        self._abort_bt_wait()
+        self._on_main_for_wait(lambda: (
+            self._undo_session_setup(),
+            self._live_screen.update_device_status(False, device_name=name),
+            self._live_screen.show_overlay_retry(message),
+        ))
+
     def _handle_bt_wait(self) -> None:
         """Handle the BT connection wait phase (called from _update_tick).
 
         Runs on the background tick thread — all Kivy UI calls are dispatched
         via _on_main so they execute safely on the main thread.
         """
-        elapsed = time.time() - self._bt_connect_start
         name = self._real_stream._device_name or "Real EEG"
+        if not self._real_stream.is_connected and self._bt_signal_start is not None:
+            # The link dropped and the reader reconnects: the next connection gets its own connect and no-data windows,
+            # and only its own packets count (one that inherited the old windows was given up 0.4 s after it
+            # connected). A headset that keeps closing it ends the wait instead.
+            self._bt_signal_start = None
+            self._bt_dropped_at = time.monotonic()
+            self._bt_connect_start = time.time()
+            self._bt_drops += 1
+            if self._bt_drops > self._BT_MAX_DROPS:
+                self._give_up_bt_wait(name, f"{name} keeps closing the connection.\n"
+                                            "Switch the headset off and on, then retry.")
+                logger.error(f"BT wait: {name} closed the connection {self._bt_drops} times, giving up")
+                return
+        elapsed = time.time() - self._bt_connect_start
 
         if self._real_stream.is_connected:
                 # BT socket connected — waiting for actual EEG data
@@ -1921,10 +1955,11 @@ class EEGMeditationApp(App):
                             ("delta", "theta", "alpha1", "alpha2",
                              "beta1", "beta2", "gamma1", "gamma2"))
 
-                # Check if headset is actually streaming packets
-                has_packets = self._real_stream.seconds_since_last_packet > 0
+                # Is the headset streaming packets on this connection?
+                since_packet = self._real_stream.seconds_since_last_packet
+                has_packets = 0 < since_packet < time.monotonic() - self._bt_dropped_at
 
-                if total > 0:
+                if total > 0 and has_packets:  # data on this connection: band values outlive a drop
                     self._waiting_for_bt = False
                     self._bt_signal_start = None
                     self._session_manager.start(
@@ -1943,16 +1978,7 @@ class EEGMeditationApp(App):
                     # Don't try RFCOMM reconnect: closing the socket triggers
                     # EBUSY that blocks reconnection for 60+ seconds.
                     # The only reliable fix is a headset power cycle.
-                    self._abort_bt_wait()
-                    _n = name
-                    self._on_main_for_wait(lambda n=_n: (
-                        self._undo_session_setup(),
-                        self._live_screen.update_device_status(False, device_name=n),
-                        self._live_screen.show_overlay_retry(
-                            "No EEG data received.\n"
-                            "Check battery or restart headset."
-                        ),
-                    ))
+                    self._give_up_bt_wait(name, "No EEG data received.\nCheck battery or restart headset.")
                     logger.error("No ThinkGear packets — likely low battery or needs power cycle")
                 else:
                     # Show signal quality feedback (keep waiting if packets arrive)
@@ -2558,11 +2584,13 @@ class EEGMeditationApp(App):
         return key
 
     def _on_audio_metric_change(self, key: str) -> None:
-        """Switch which metric drives the audio threshold feedback."""
-        if key == "custom_formula":
-            self._audio_metric_key = FORMULA_KEYS[self._audio_formula_index]
-        else:
-            self._audio_metric_key = key
+        """Switch which metric drives the audio threshold feedback: a running session keeps the one it is scored on
+        (#51 scores it on the drive key every tick, so a switch mixed both metrics into one average and streak)."""
+        new_key = FORMULA_KEYS[self._audio_formula_index] if key == "custom_formula" else key
+        if new_key != self._audio_metric_key and self._scoring_locked("changing the metric it is scored on"):
+            self._show_audio_metric()
+            return
+        self._audio_metric_key = new_key
         self._persist_user_setting("audio_metric")
         logger.info(f"Audio threshold metric changed to: {self._audio_metric_key}")
 
@@ -2586,12 +2614,29 @@ class EEGMeditationApp(App):
         """Pick which formula slot drives audio. Only rebinds the live key when a
         custom-formula slot is the selected driver — tapping it while another metric
         is selected just remembers the choice for when custom-formula is picked."""
-        self._audio_formula_index = max(0, min(idx, _MAX_FORMULAS - 1))
+        idx = max(0, min(idx, _MAX_FORMULAS - 1))
+        if (self._audio_metric_key in FORMULA_KEYS and FORMULA_KEYS[idx] != self._audio_metric_key
+                and self._scoring_locked("changing the metric it is scored on")):
+            self._show_audio_metric()
+            return
+        self._audio_formula_index = idx
         if self._audio_metric_key in FORMULA_KEYS:
             # Load derives the index from audio_metric, so persist both or a reload reverts the switch.
             self._audio_metric_key = FORMULA_KEYS[self._audio_formula_index]
             self._persist_user_setting("audio_metric")
         self._persist_user_setting("audio_formula_index")
+
+    def _scoring_locked(self, doing: str) -> bool:
+        """True (after telling the user) while a simple session runs: it is scored on the audio control metric (#51)
+        until it stops. A program session is scored on its segments' metrics, so the control stays free."""
+        return (not getattr(self, "_session_program_active", False)
+                and self._refused_while_session_runs(doing))
+
+    def _show_audio_metric(self) -> None:
+        """Settings' audio-metric choice and formula-slot buttons show the metric in force."""
+        key = self._audio_metric_key
+        self._settings_screen.audio_metric = "custom_formula" if key in FORMULA_KEYS else key
+        self._settings_screen.audio_formula_index = self._audio_formula_index
 
     def _on_theme_change(self, theme_name: str) -> None:
         """Persist the theme per user; the selector already applied it to C."""
@@ -2608,6 +2653,11 @@ class EEGMeditationApp(App):
         """
         ev = self._formula_slots[idx]
         key = FORMULA_KEYS[idx]
+        # The slot the sound is set to is what a running session is scored on (or its shamatha fallback, while empty).
+        if (key == self._audio_metric_key and formula != ev.formula
+                and self._scoring_locked("changing the formula it is scored on")):
+            self._settings_screen.set_formula_slot(idx, self._formula_names[idx], ev.formula)
+            return
         self._formula_names[idx] = name or f"Custom {idx + 1}"
         self._live_screen.graph.set_series_name(key, self._formula_names[idx])
         if not formula:
@@ -2997,62 +3047,71 @@ class EEGMeditationApp(App):
 
         report_soft_error("user_diagnostics", detail, app=self, force=True)
 
+    _detail_load: int = 0  # the session-detail open in progress; a result for an earlier one is dropped
+
     def _on_session_select(self, session_id: int) -> None:
-        """Load a session into the diary off the UI thread, behind a spinner.
+        """Open the session detail at once (#59): title, stats and notes from the row History holds, so they can be read
+        and edited at once; the band totals and graphs load on a worker and fill in, one section per frame."""
+        session = self._history_screen.session_by_id(session_id)
+        if session is None:  # not in History's list: nothing was tapped
+            logger.warning(f"Session detail: session {session_id} isn't listed")
+            return
+        self._detail_load += 1
+        token = self._detail_load
+        d = self._diary_screen
+        with timed("diary.open"):
+            d.set_session_formulas({}, self._recorded_formulas(session)[1])  # the legend's names from the first frame
+            d.show_session_detail(session)
+            d.set_metrics_threshold(float(session.get("threshold_used", 50)))
+            d.set_program(session.get("session_program", ""))
+            bv = {}
+            if self._current_user_id:
+                bv = self._db.get_user_json_setting(self._current_user_id, "band_breakdown_view", {}) or {}
+            d.set_band_view_state(bv.get("mode", "detailed"), bv.get("sort", "band"), bool(bv.get("desc", False)))
+            self._session_detail_back = self._sm.current
+            self._sm.current = "diary"
+        threading.Thread(target=self._load_session_detail, args=(token, session_id, session), daemon=True,
+                         name="DiaryLoad").start()
 
-        The heavy work (metrics fetch + formula recompute) runs on a worker
-        thread; the Kivy render is dispatched back to the main thread. The
-        worker is deferred one frame so the loading overlay paints first.
-        """
-        self.show_loading("Loading session…")
-        Clock.schedule_once(lambda dt: self._load_session_async(session_id), 0)
-
-    def _load_session_async(self, session_id: int) -> None:
-        def _worker():
-            try:
-                with timed("diary.total"):
-                    with timed("diary.get_session"):
-                        session = self._db.get_session(session_id)
-                    if not session:
-                        self._on_main(self.hide_loading)
-                        return
-                    with timed("diary.compute_formulas"):
-                        series, names = self._compute_session_formulas(session_id, session)
-                    with timed("diary.get_metrics"):
-                        metrics = self._db.get_session_metrics(session_id)
-                    band_totals = self._db.get_session_band_totals(session_id)
-            except Exception:
-                logger.exception("Diary session load failed")
-                self._on_main(self.hide_loading)
-                return
-            self._on_main(
-                lambda: self._render_session_detail(session, series, names, metrics, band_totals)
-            )
-        threading.Thread(target=_worker, daemon=True, name="DiaryLoad").start()
-
-    def _render_session_detail(self, session, series, names, metrics, band_totals=None) -> None:
-        """Main-thread render of a loaded session (Kivy mutations only)."""
+    def _load_session_detail(self, token: int, session_id: int, session: dict) -> None:
+        """Worker: the band totals (one query) first, then the metric rows, read once for the graphs and the formula
+        replay, built into each graph's data off the main thread; each result goes to _fill_detail as it is ready."""
+        d = self._diary_screen
         try:
-            with timed("diary.render"):
-                self._diary_screen.show_session_detail(session)
-                self._diary_screen.set_metrics_threshold(float(session.get("threshold_used", 50)))
-                self._diary_screen.set_session_formulas(series, names)
-                self._diary_screen.load_metrics_preview(metrics)
-                bv = {}
-                if self._current_user_id:
-                    bv = self._db.get_user_json_setting(
-                        self._current_user_id, "band_breakdown_view", {}
-                    ) or {}
-                self._diary_screen.set_band_view_state(
-                    bv.get("mode", "detailed"), bv.get("sort", "band"),
-                    bool(bv.get("desc", False)),
-                )
-                self._diary_screen.set_band_totals(band_totals or {})
-                self._diary_screen.set_program(session.get("session_program", ""))
-                self._session_detail_back = self._sm.current
-                self._sm.current = "diary"
-        finally:
-            self.hide_loading()
+            with timed("diary.band_totals"):
+                totals = self._db.get_session_band_totals(session_id)
+            self._on_main(lambda: self._fill_detail(token, [lambda: d.set_band_totals(totals)]))
+            with timed("diary.get_metrics"):
+                rows = self._db.get_session_metrics(session_id)
+            with timed("diary.compute_formulas"):
+                series, names = self._compute_session_formulas(session_id, session, rows)
+            with timed("diary.graph_data"):
+                data = detail_graph_data(rows, series)
+        except Exception as e:  # any failure: the sections say so, never "Loading…" for good
+            logger.exception(f"Session detail load failed for session {session_id}")
+
+            def failed(err=e) -> None:
+                d.show_load_failed()
+                report_soft_error("session_detail_load_failed", f"Session {session_id}'s graphs: {err}")
+
+            self._on_main(lambda: self._fill_detail(token, [failed]))
+            return
+
+        def fill(section: str) -> None:
+            if section == "metrics":
+                d.set_session_formulas(series, names)  # the formula lines' names, before their graph
+            d.fill_graph(section, data)
+
+        self._on_main(lambda: self._fill_detail(token, [lambda s=s: fill(s) for s in d.graph_fill_order()]))
+
+    def _fill_detail(self, token: int, steps: list) -> None:
+        """Run one step per frame, so no frame holds them all, while this open is the detail on screen: after Back,
+        another tab or another session's open, the rest is dropped."""
+        if token != self._detail_load or self._sm.current != "diary" or not steps:
+            return
+        steps[0]()
+        if len(steps) > 1:
+            Clock.schedule_once(lambda dt: self._fill_detail(token, steps[1:]), 0)  # 0 from a callback: next frame
 
     def _persist_band_view(self, mode: str, sort_by: str, descending: bool) -> None:
         """Persist the diary band-table view (mode/sort) per user."""
@@ -3063,10 +3122,10 @@ class EEGMeditationApp(App):
             {"mode": mode, "sort": sort_by, "desc": descending},
         )
 
-    def _compute_session_formulas(self, session_id: int, session: dict) -> tuple[dict, dict]:
-        """Recompute the session's recorded formula series + names from its band
-        powers (the snapshot active then, not today's edits). Pure DB + compute,
-        no Kivy — safe to call off the main thread."""
+    @staticmethod
+    def _recorded_formulas(session: dict) -> tuple[dict, dict]:
+        """The session's recorded formulas (the snapshot active then, not today's edits): ({series key: evaluator} for
+        each valid one, {series key: name} for every slot). Parsing only, no DB."""
         cf_raw = session.get("custom_formulas") or ""
         evaluators: dict[str, CustomFormulaEvaluator] = {}
         # Reset every custom key to its default name so a session without a given
@@ -3089,7 +3148,14 @@ class EEGMeditationApp(App):
                 if ev.is_valid:
                     evaluators[key] = ev
                     names[key] = d.get("name") or f"Custom {slot + 1}"
-        series = self._db.recompute_formula_series(session_id, evaluators) if evaluators else {}
+        return evaluators, names
+
+    def _compute_session_formulas(self, session_id: int, session: dict,
+                                  rows: list[dict] | None = None) -> tuple[dict, dict]:
+        """Recompute the session's recorded formula series + names from its band powers, over `rows` when already
+        read. Pure DB + compute, no Kivy — safe to call off the main thread."""
+        evaluators, names = self._recorded_formulas(session)
+        series = self._db.recompute_formula_series(session_id, evaluators, rows) if evaluators else {}
         return series, names
 
     def _inject_session_formulas(self, session_id: int, session: dict) -> None:
@@ -3242,12 +3308,8 @@ class EEGMeditationApp(App):
 
     def _on_user_switch(self, user_id: Optional[int]) -> None:
         """Switch the active user profile."""
-        if user_id != self._current_user_id and self._session_pipeline_live():
-            # The running session owns the loaded settings and saves under its own profile.
-            self._info_popup(
-                "Session in progress",
-                "Stop the current session before switching profiles.",
-            )
+        # The running session owns the loaded settings and saves under its own profile.
+        if user_id != self._current_user_id and self._refused_while_session_runs("switching profiles"):
             self._refresh_profile()  # snap the picker back to the active profile
             return
         # Save current user's settings before switching
@@ -3361,14 +3423,8 @@ class EEGMeditationApp(App):
 
     def _on_restore_pressed(self) -> None:
         """Pick a backup file and restore it."""
-        if self._session_pipeline_live():
-            # A restore closes the DB and force-relaunches — a running (or
-            # connecting) session would be silently dropped. Refuse with an
-            # explanation instead.
-            self._info_popup(
-                "Session in progress",
-                "Stop the current session before restoring a backup.",
-            )
+        # A restore closes the DB and force-relaunches: a running (or connecting) session would be silently dropped.
+        if self._refused_while_session_runs("restoring a backup"):
             return
         if self._is_android():
             self._run_restore_saf()
@@ -3471,13 +3527,8 @@ class EEGMeditationApp(App):
     def _do_restore_and_restart(self, source_path: str) -> None:
 
 
-        if self._session_pipeline_live():
-            # Defense for the async picker flow (a session may have started — or
-            # begun connecting — since _on_restore_pressed's check).
-            self._info_popup(
-                "Session in progress",
-                "Stop the current session before restoring a backup.",
-            )
+        # Defense for the async picker flow: a session may have started, or begun connecting, since _on_restore_pressed.
+        if self._refused_while_session_runs("restoring a backup"):
             return
         try:
             # No-op every DB access during the restore + relaunch window so nothing
@@ -3696,8 +3747,7 @@ class EEGMeditationApp(App):
             self._audio_metric_key = v
             if v in FORMULA_KEYS:
                 self._audio_formula_index = FORMULA_KEYS.index(v)
-            ss.audio_metric = "custom_formula" if v in FORMULA_KEYS else v
-            ss.audio_formula_index = self._audio_formula_index
+            self._show_audio_metric()
 
         def set_feedback_source(v):
             self._feedback_source = v; ss.set_feedback_source(v, self._feedback_sound_path)

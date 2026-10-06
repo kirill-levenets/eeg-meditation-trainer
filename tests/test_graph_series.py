@@ -60,6 +60,7 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         self.app._settings_screen = settings
         self.app._init_formula_slots()
         self.app._formula_slots[0] = types.SimpleNamespace(is_valid=False)
+        self.app._audio_metric_key = "shamatha_score"  # the app's default: no formula slot drives the sound
 
     def tearDown(self):
         self.app._db.close()

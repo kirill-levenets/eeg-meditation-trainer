@@ -229,6 +229,7 @@ class TestAssignSavedToSlot(unittest.TestCase):
         app = EEGMeditationApp.__new__(EEGMeditationApp)
         app._init_formula_slots()
         app._current_user_id = None
+        app._audio_metric_key = "shamatha_score"  # the app's default: no formula slot drives the sound
         app._live_screen = types.SimpleNamespace(graph=_FakeGraph())
         app._settings_screen = types.SimpleNamespace(
             set_formula_slot=lambda *a, **k: None,

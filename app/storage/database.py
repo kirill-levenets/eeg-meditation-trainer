@@ -773,13 +773,14 @@ class DatabaseManager:
         return fvars
 
     def recompute_formula_series(
-        self, session_id: int, evaluators: "dict[str, CustomFormulaEvaluator]"
+        self, session_id: int, evaluators: "dict[str, CustomFormulaEvaluator]", rows: list[dict] | None = None,
     ) -> dict[str, list[float]]:
-        """Recompute each {series_key: evaluator} over a session's stored rows.
+        """Recompute each {series_key: evaluator} over a session's stored rows (`rows` when already read).
 
         Skips invalid evaluators. Returns {series_key: [value per tick]}.
         """
-        rows = self.get_session_metrics(session_id)
+        if rows is None:
+            rows = self.get_session_metrics(session_id)
         valid = {k: e for k, e in evaluators.items() if getattr(e, "is_valid", False)}
         out: dict[str, list[float]] = {k: [] for k in valid}
         for row in rows:

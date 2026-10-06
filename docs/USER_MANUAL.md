@@ -122,7 +122,7 @@ Tap a session row to view full details (graphs, notes, tags, mood).
 
 ### Session Detail
 
-Titled like its row. Shows Duration, **Metric**, **Average** and **Threshold** (what the session was scored on, that metric's average, and what Time Above Threshold and Longest Streak were measured against; for a program, its name and "Per segment", with no average; sessions from before this was saved show **Avg Shamatha** and **Threshold Used** instead), Time Above Threshold, Longest Streak and Mood Rating, a **Band Power (whole session)** breakdown, notes/tags/mood editor, and three graph tabs (the Metrics legend marks the scored series with **»**):
+Opens as soon as you tap the session: its stats and notes are there at once, and the band power and graphs show "Loading…" until their data is in. Titled like its row. Shows Duration, **Metric**, **Average** and **Threshold** (what the session was scored on, that metric's average, and what Time Above Threshold and Longest Streak were measured against; for a program, its name and "Per segment", with no average; sessions from before this was saved show **Avg Shamatha** and **Threshold Used** instead), Time Above Threshold, Longest Streak and Mood Rating, a **Band Power (whole session)** breakdown, notes/tags/mood editor, and three graph tabs (the Metrics legend marks the scored series with **»**):
 - **Metrics** — all computed metrics
 - **Raw EEG** — synthesized waveform from stored band powers
 - **Frequencies** — band power chart
@@ -221,7 +221,7 @@ When Program mode is off, the Simple timer behaves exactly as before.
 - Slider (20-180) with presets: 50, 80, 100, 130, 160
 - Sets the dashed line on graphs, "time above threshold" stats, and audio feedback target
 - **Time above threshold** and **Longest streak** are measured on the **audio control metric** below — the same metric that drives the feedback sound — and the live graph legend marks it with **»** when that line is shown. Each session records which metric it was scored on. (Sessions recorded before this change were measured on Meditation.)
-- **Audio control metric** — choose which metric drives the audio: Shamatha, NS Meditation, NS Attention, or Custom Formula (slot 1, 2, or 3 selected via the `[1][2][3]` buttons). If the selected custom slot has no valid formula the audio falls back to shamatha.
+- **Audio control metric** — choose which metric drives the audio: Shamatha, NS Meditation, NS Attention, or Custom Formula (slot 1, 2, or 3 selected via the `[1][2][3]` buttons). If the selected custom slot has no valid formula the audio falls back to shamatha. While a session runs (or connects) this choice is locked, and so is the formula in the selected slot: a session is scored on one metric from start to stop. The other formula slots and the threshold stay editable, and a program session, scored on its segments' metrics, leaves all of it free.
 
 ### Audio
 
