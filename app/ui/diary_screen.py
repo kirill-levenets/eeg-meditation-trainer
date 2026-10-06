@@ -17,7 +17,7 @@ from app.session.scoring import recorded_score
 from app.session.session_program import SessionProgram
 from app.ui.live_session import SERIES_NAMES
 from app.ui.raw_eeg_screen import GraphAwareScrollView, ScrollableGraphWidget
-from app.ui.session_labels import session_threshold_rows, session_title
+from app.ui.session_labels import session_score_rows, session_title
 from app.ui.theme import (
     C,
     CenteredTextInput,
@@ -485,7 +485,7 @@ class DiaryScreen(Screen):
 
         self._set_detail_rows([
             ("Duration", _time("duration")),
-            *session_threshold_rows(session),  # what Time Above Threshold and Longest Streak were measured against
+            *session_score_rows(session),  # the scored metric, its average and threshold
             ("Time Above Threshold", _time("time_above_threshold")),
             ("Longest Streak", _time("longest_streak")),
             ("Mood Rating", str(session.get("mood_rating", "-"))),

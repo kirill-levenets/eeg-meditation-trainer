@@ -39,6 +39,11 @@ def session_title(session: dict) -> str:
     return f"{when} - {label}" if label else when
 
 
+def _average(value) -> str:
+    """An average as History's row, the session detail and the end card all show it."""
+    return f"{value or 0:.0f}"
+
+
 def session_stats_line(session: dict) -> str:
     """The metric the session was scored on and its average, the duration, the longest streak. A session that saved
     no metric (before #51) keeps its old line, average shamatha and the duration: its streak was measured on
@@ -46,10 +51,10 @@ def session_stats_line(session: dict) -> str:
     duration = format_duration(int(session.get("duration", 0) or 0))
     score = recorded_score(session)
     if score is None:
-        return f"Shamatha {session.get('avg_shamatha', 0) or 0:.0f} · {duration}"
+        return f"Shamatha {_average(session.get('avg_shamatha'))} · {duration}"
     _key, name, avg = score
     # No average for a program (one metric per segment, on different scales) or a session with no scored tick.
-    parts = [name if avg is None else f"{name} {avg:.0f}", duration]
+    parts = [name if avg is None else f"{name} {_average(avg)}", duration]
     streak = int(session.get("longest_streak", 0) or 0)
     if streak:
         parts.append(f"Streak {format_duration(streak)}")
@@ -61,15 +66,16 @@ def session_notes_line(session: dict) -> str:
     return next((line.strip() for line in (session.get("notes") or "").splitlines() if line.strip()), "")
 
 
-def session_threshold_rows(session: dict) -> list[tuple[str, str]]:
-    """(label, value) rows above Time Above Threshold and Longest Streak: what they were measured against — the saved
-    metric and its threshold, or a program, whose segments have their own. A session that saved no metric keeps its
-    old Threshold Used row."""
+def session_score_rows(session: dict) -> list[tuple[str, str]]:
+    """(label, value) rows above Time Above Threshold and Longest Streak: the saved metric, its average and the
+    threshold they were measured against, or a program, whose segments have their own (and no one average). A session
+    that saved no metric keeps its old rows: the average shamatha its History row shows, and Threshold Used."""
     threshold = session.get("threshold_used", 0) or 0
     score = recorded_score(session)
     if score is None:
-        return [("Threshold Used", str(threshold))]
-    key, name, _avg = score
+        return [("Avg Shamatha", _average(session.get("avg_shamatha"))), ("Threshold Used", str(threshold))]
+    key, name, avg = score
     if key == "program":
         return [("Metric", name if name == "Program" else f"{name} (program)"), ("Threshold", "Per segment")]
-    return [("Metric", name), ("Threshold", str(threshold))]
+    average = [] if avg is None else [("Average", _average(avg))]  # None: no tick was scored
+    return [("Metric", name), *average, ("Threshold", str(threshold))]

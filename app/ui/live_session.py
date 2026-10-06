@@ -20,7 +20,7 @@ from app.ui.raw_eeg_screen import (
     RawEEGScreen,
     ScrollableGraphWidget,
 )
-from app.ui.session_labels import session_threshold_rows
+from app.ui.session_labels import session_score_rows
 from app.ui.theme import (
     ICONS_AVAILABLE,
     C,
@@ -1151,7 +1151,7 @@ class LiveSessionScreen(Screen):
         self._fit_summary_title()
         self._set_summary_rows([
             ("Duration", format_duration(int(stats.get("duration", 0) or 0))),
-            *session_threshold_rows(stats),  # what Time Above Threshold and Longest Streak were measured against
+            *session_score_rows(stats),  # the scored metric, its average and threshold
             ("Time Above Threshold", format_duration(int(stats.get("time_above_threshold", 0) or 0))),
             ("Longest Streak", format_duration(int(stats.get("longest_streak", 0) or 0))),
         ])

@@ -189,7 +189,7 @@ def test_the_session_end_card_fits_a_landscape_phone_above_the_bottom_bar(end_ca
     # a landscape phone has 360 dp less the bar: OK and Save notes show without scrolling.
     from app.ui.theme import S
     screen = end_card(_LANDSCAPE)
-    assert len(screen._summary_rows) == 5
+    assert len(screen._summary_rows) == 6
     panel = next(w for w in screen._summary.walk(restrict=True) if isinstance(w, ModalPanel))
     pad = screen._summary.padding
     assert panel.height + pad[1] + pad[3] <= dp(360) - S.NAV_H, panel.height
@@ -216,7 +216,7 @@ def _text_width(text: str, label) -> float:
 def test_the_end_cards_title_names_the_session(end_card, size, name, title):
     screen = end_card(size, title=name)
     assert screen._summary_title.text == title
-    assert screen._summary_stats_card.children == [box for box, _l, _v in screen._summary_row_pool[:5]][::-1]
+    assert screen._summary_stats_card.children == [box for box, _l, _v in screen._summary_row_pool[:6]][::-1]
 
 
 @pytest.mark.parametrize("size, lines", [(_LANDSCAPE, 1), (_PORTRAIT, 2)])
