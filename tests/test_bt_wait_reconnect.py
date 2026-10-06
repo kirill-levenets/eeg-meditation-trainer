@@ -204,3 +204,15 @@ def test_the_next_wait_starts_with_no_drops(wait):
     tick(30.0, connected=True)
     tick(35.5, connected=False)  # this wait's first drop, not the third
     assert not _gave_up(stream)
+
+
+def test_band_values_from_before_a_drop_dont_start_the_session_on_the_new_socket(wait):
+    # The reader keeps the last band values across a reconnect: a band packet just before the drop must not start the
+    # session on a new socket that hasn't sent anything yet.
+    app, stream, tick = wait
+    tick(6.0, connected=True)
+    tick(6.5, connected=False, bands=5.0, packet=True)  # bands and a packet arrived, then the link dropped
+    tick(12.0, connected=True, bands=5.0)  # reconnected: the old bands are still there, nothing new yet
+    assert app._session_manager.state != SessionState.RUNNING
+    tick(12.5, connected=True, bands=5.0, packet=True)  # the new socket's first data
+    assert app._session_manager.state == SessionState.RUNNING

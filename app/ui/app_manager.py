@@ -1959,7 +1959,7 @@ class EEGMeditationApp(App):
                 since_packet = self._real_stream.seconds_since_last_packet
                 has_packets = 0 < since_packet < time.monotonic() - self._bt_dropped_at
 
-                if total > 0:
+                if total > 0 and has_packets:  # data on this connection: band values outlive a drop
                     self._waiting_for_bt = False
                     self._bt_signal_start = None
                     self._session_manager.start(
