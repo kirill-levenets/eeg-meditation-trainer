@@ -1872,6 +1872,7 @@ class EEGMeditationApp(App):
 
     _BT_CONNECT_TIMEOUT = 30.0  # seconds before BT socket gives up
     _BT_SIGNAL_TIMEOUT = 8.0   # seconds to wait for EEG packets after connected
+    _bt_dropped_at: float = 0.0  # monotonic: when the wait saw the link drop; earlier packets don't count after it
     _STALE_DATA_THRESHOLD = 10.0  # seconds with no new packets before warning
 
     def _check_stale_data(self) -> None:
@@ -1907,6 +1908,11 @@ class EEGMeditationApp(App):
         """
         elapsed = time.time() - self._bt_connect_start
         name = self._real_stream._device_name or "Real EEG"
+        if not self._real_stream.is_connected and self._bt_signal_start is not None:
+            # The link dropped and the reader reconnects: the next connection gets its own no-data window, and only
+            # its own packets count (one that inherited the old window was given up 0.4 s after it connected).
+            self._bt_signal_start = None
+            self._bt_dropped_at = time.monotonic()
 
         if self._real_stream.is_connected:
                 # BT socket connected — waiting for actual EEG data
@@ -1921,8 +1927,9 @@ class EEGMeditationApp(App):
                             ("delta", "theta", "alpha1", "alpha2",
                              "beta1", "beta2", "gamma1", "gamma2"))
 
-                # Check if headset is actually streaming packets
-                has_packets = self._real_stream.seconds_since_last_packet > 0
+                # Is the headset streaming packets on this connection?
+                since_packet = self._real_stream.seconds_since_last_packet
+                has_packets = 0 < since_packet < time.monotonic() - self._bt_dropped_at
 
                 if total > 0:
                     self._waiting_for_bt = False
