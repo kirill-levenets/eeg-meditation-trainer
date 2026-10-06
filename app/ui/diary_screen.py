@@ -17,7 +17,7 @@ from app.session.scoring import recorded_score
 from app.session.session_program import SessionProgram
 from app.ui.live_session import SERIES_NAMES
 from app.ui.raw_eeg_screen import GraphAwareScrollView, ScrollableGraphWidget
-from app.ui.session_labels import session_threshold_row, session_title
+from app.ui.session_labels import session_score_rows, session_title
 from app.ui.theme import (
     C,
     CenteredTextInput,
@@ -216,49 +216,12 @@ class DiaryScreen(Screen):
         self._detail_title.bind(size=self._detail_title.setter("text_size"))
         self._detail_layout.add_widget(self._detail_title)
 
-        # Stats grid
-        self._detail_stats: dict[str, ThemedLabel] = {}
-        stat_keys = [
-            ("duration", "Duration"),
-            ("scored_on", "Scored on"),  # what Time Above Threshold and Longest Streak were measured against
-            ("time_above_threshold", "Time Above Threshold"),
-            ("longest_streak", "Longest Streak"),
-            ("mood_rating", "Mood Rating"),
-        ]
-        self._stats_grid = GridLayout(
-            cols=2,
-            size_hint_y=None,
-            height=len(stat_keys) * dp(20) + (len(stat_keys) - 1) * dp(4) + 2 * dp(4),
-            spacing=dp(4),
-            padding=dp(4),
-        )
-        for key, display in stat_keys:
-            # A title takes its text's width (the column, its widest title) and the value the rest of the row.
-            lbl_title = ThemedLabel(
-                text=display,
-                font_size=F.SMALL,
-                color=C.TEXT_SECONDARY,
-                size_hint=(None, None),
-                height=dp(20),
-            )
-            lbl_title.bind(texture_size=lambda w, ts: setattr(w, "width", ts[0] + S.GAP))
-            lbl_value = ThemedLabel(
-                text="-",
-                font_size=F.H3,
-                bold=True,
-                color=C.TEXT,
-                halign="left",
-                size_hint_y=None,
-                height=dp(20),
-                shorten=True,
-                shorten_from="right",
-            )
-            lbl_value.bind(size=lbl_value.setter("text_size"))
-            self._stats_grid.add_widget(lbl_title)
-            self._stats_grid.add_widget(lbl_value)
-            self._detail_stats[key] = lbl_value
-            if key == "scored_on":
-                self._scored_on_title = lbl_title  # "Threshold Used" for a session that saved no metric
+        # Stats grid: one (title, value) row per stat, set by show_session_detail — a session that saved no metric has one
+        # threshold row where the others have Metric and Threshold.
+        self._stats_grid = GridLayout(cols=2, size_hint_y=None, spacing=dp(4), padding=dp(4))
+        self._detail_row_pool: list[tuple[ThemedLabel, ThemedLabel]] = []
+        self._detail_rows: list[tuple[ThemedLabel, ThemedLabel]] = []  # (title, value) of the rows shown, in order
+        self._set_detail_rows([])
         self._detail_layout.add_widget(self._stats_grid)
 
         # Per-band total power over the whole session
@@ -406,7 +369,7 @@ class DiaryScreen(Screen):
         self._metrics_graph = ScrollableGraphWidget(
             colors=METRICS_PREVIEW_COLORS,
             scales=METRICS_PREVIEW_SCALES,
-            names=SERIES_NAMES,  # the live graph's names: a session's Scored on is saved under them
+            names=SERIES_NAMES,  # the live graph's names: a session's Metric is saved under them
             viewport_seconds=60,
             show_value_labels=True,
             show_timestamps=True,
@@ -485,6 +448,30 @@ class DiaryScreen(Screen):
         if self.band_view_persist_cb:
             self.band_view_persist_cb(mode, sort_by, descending)
 
+    @staticmethod
+    def _make_detail_row() -> tuple[ThemedLabel, ThemedLabel]:
+        # A title takes its text's width (the column, its widest title) and the value the rest of the row.
+        title = ThemedLabel(text="", font_size=F.SMALL, color=C.TEXT_SECONDARY, size_hint=(None, None), height=dp(20))
+        title.bind(texture_size=lambda w, ts: setattr(w, "width", ts[0] + S.GAP))
+        value = ThemedLabel(text="-", font_size=F.H3, bold=True, color=C.TEXT, halign="left", size_hint_y=None,
+                            height=dp(20), shorten=True, shorten_from="right")
+        value.bind(size=value.setter("text_size"))
+        return title, value
+
+    def _set_detail_rows(self, rows: list[tuple[str, str]]) -> None:
+        """Show these (title, value) rows in the stats grid, which is as tall as they are."""
+        while len(self._detail_row_pool) < len(rows):
+            self._detail_row_pool.append(self._make_detail_row())
+        grid = self._stats_grid
+        grid.clear_widgets()
+        self._detail_rows = self._detail_row_pool[:len(rows)]
+        for (text, shown), (title, value) in zip(rows, self._detail_rows):
+            title.text, value.text = text, shown
+            grid.add_widget(title)
+            grid.add_widget(value)
+        n = len(rows)
+        grid.height = n * dp(20) + max(n - 1, 0) * grid.spacing[1] + grid.padding[1] + grid.padding[3]
+
     def show_session_detail(self, session: dict) -> None:
         """Display detail for a selected session."""
         self._selected_session_id = session.get("id")
@@ -492,14 +479,17 @@ class DiaryScreen(Screen):
         score = recorded_score(session)
         self._scored_key = score[0] if score is not None else None  # a program's "program" is no series: unmarked
 
-        _time_keys = {"duration", "time_above_threshold", "longest_streak"}
-        self._scored_on_title.text, scored_on = session_threshold_row(session)
-        for key, label in self._detail_stats.items():
-            val = scored_on if key == "scored_on" else session.get(key, "-")
-            if key in _time_keys and isinstance(val, (int, float)):
-                label.text = format_duration(int(val))
-            else:
-                label.text = str(val)
+        def _time(key: str) -> str:
+            val = session.get(key, "-")
+            return format_duration(int(val)) if isinstance(val, (int, float)) else str(val)
+
+        self._set_detail_rows([
+            ("Duration", _time("duration")),
+            *session_score_rows(session),  # the scored metric, its average and threshold
+            ("Time Above Threshold", _time("time_above_threshold")),
+            ("Longest Streak", _time("longest_streak")),
+            ("Mood Rating", str(session.get("mood_rating", "-"))),
+        ])
 
         self._notes_input.text = session.get("notes", "")
         self._tags_input.text = session.get("tags", "")
