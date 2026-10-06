@@ -1529,6 +1529,7 @@ class EEGMeditationApp(App):
             return False
         self._wait_attempt = self._start_attempt
         self._waiting_for_bt = True
+        self._bt_drops = 0
         self._pending_threshold = threshold
         self._live_screen.update_device_status(False, device_name=name, connecting=True)
         self._live_screen.show_overlay(f"Connecting to {name}...")
@@ -1881,6 +1882,8 @@ class EEGMeditationApp(App):
     _BT_CONNECT_TIMEOUT = 30.0  # seconds before BT socket gives up
     _BT_SIGNAL_TIMEOUT = 8.0   # seconds to wait for EEG packets after connected
     _bt_dropped_at: float = 0.0  # monotonic: when the wait saw the link drop; earlier packets don't count after it
+    _BT_MAX_DROPS = 2  # the third drop of the link in one wait ends it: the headset keeps closing it
+    _bt_drops: int = 0  # drops the current wait has seen
     _STALE_DATA_THRESHOLD = 10.0  # seconds with no new packets before warning
 
     def _check_stale_data(self) -> None:
@@ -1908,19 +1911,36 @@ class EEGMeditationApp(App):
         else:
             self._stale_data_warned = False
 
+    def _give_up_bt_wait(self, name: str, message: str) -> None:
+        """End the wait from the tick thread with a retry screen (queued for this attempt only)."""
+        self._abort_bt_wait()
+        self._on_main_for_wait(lambda: (
+            self._undo_session_setup(),
+            self._live_screen.update_device_status(False, device_name=name),
+            self._live_screen.show_overlay_retry(message),
+        ))
+
     def _handle_bt_wait(self) -> None:
         """Handle the BT connection wait phase (called from _update_tick).
 
         Runs on the background tick thread — all Kivy UI calls are dispatched
         via _on_main so they execute safely on the main thread.
         """
-        elapsed = time.time() - self._bt_connect_start
         name = self._real_stream._device_name or "Real EEG"
         if not self._real_stream.is_connected and self._bt_signal_start is not None:
-            # The link dropped and the reader reconnects: the next connection gets its own no-data window, and only
-            # its own packets count (one that inherited the old window was given up 0.4 s after it connected).
+            # The link dropped and the reader reconnects: the next connection gets its own connect and no-data windows,
+            # and only its own packets count (one that inherited the old windows was given up 0.4 s after it
+            # connected). A headset that keeps closing it ends the wait instead.
             self._bt_signal_start = None
             self._bt_dropped_at = time.monotonic()
+            self._bt_connect_start = time.time()
+            self._bt_drops += 1
+            if self._bt_drops > self._BT_MAX_DROPS:
+                self._give_up_bt_wait(name, f"{name} keeps closing the connection.\n"
+                                            "Switch the headset off and on, then retry.")
+                logger.error(f"BT wait: {name} closed the connection {self._bt_drops} times, giving up")
+                return
+        elapsed = time.time() - self._bt_connect_start
 
         if self._real_stream.is_connected:
                 # BT socket connected — waiting for actual EEG data
@@ -1958,16 +1978,7 @@ class EEGMeditationApp(App):
                     # Don't try RFCOMM reconnect: closing the socket triggers
                     # EBUSY that blocks reconnection for 60+ seconds.
                     # The only reliable fix is a headset power cycle.
-                    self._abort_bt_wait()
-                    _n = name
-                    self._on_main_for_wait(lambda n=_n: (
-                        self._undo_session_setup(),
-                        self._live_screen.update_device_status(False, device_name=n),
-                        self._live_screen.show_overlay_retry(
-                            "No EEG data received.\n"
-                            "Check battery or restart headset."
-                        ),
-                    ))
+                    self._give_up_bt_wait(name, "No EEG data received.\nCheck battery or restart headset.")
                     logger.error("No ThinkGear packets — likely low battery or needs power cycle")
                 else:
                     # Show signal quality feedback (keep waiting if packets arrive)

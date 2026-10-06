@@ -58,6 +58,7 @@ def wait(monkeypatch):
     app._live_screen = MagicMock()
     app._on_main_for_wait = MagicMock()
     app._report_bt_connect_failure = MagicMock()
+    app._undo_session_setup = MagicMock()
     app._start_attempt = 1
     stream.start = MagicMock(return_value=True)
     app._bt_connect_start = clock.now  # set by the session start that precedes the wait
@@ -104,6 +105,7 @@ def test_the_new_socket_still_times_out_when_it_sends_nothing(wait):
     tick(26.5, connected=True)  # its own 8 s, from 18 s
     assert _gave_up(stream)
     assert app._waiting_for_bt is False
+    assert _retry_message(app).startswith("No EEG data received.")
 
 
 def test_packets_from_before_a_drop_do_not_count_for_the_new_socket(wait):
@@ -137,3 +139,68 @@ def test_packets_without_contact_keep_the_wait_open(wait):
     assert not _gave_up(stream)
     tick(29.5, connected=True, bands=5.0, packet=True)
     assert app._session_manager.state == SessionState.RUNNING
+
+
+def _retry_message(app) -> str:
+    """The retry screen the last wait exit queued."""
+    app._on_main_for_wait.call_args.args[0]()
+    return app._live_screen.show_overlay_retry.call_args.args[0]
+
+
+def test_a_drop_after_the_connect_timeout_still_gets_its_reconnect(wait):
+    # The headset streams but the sensor isn't on yet, so the wait stays open past the 30 s connect timeout; then the
+    # link drops. The reconnect has its own connect window: the 30 s from Start used to end the wait at the drop.
+    app, stream, tick = wait
+    for at in (6.0, 15.0, 30.0, 34.0):
+        tick(at, connected=True, packet=True)
+    tick(35.0, connected=False)
+    tick(38.0, connected=False)
+    tick(40.0, connected=True)
+    assert not _gave_up(stream)
+    tick(41.0, connected=True, bands=5.0, packet=True)
+    assert app._session_manager.state == SessionState.RUNNING
+
+
+def test_a_late_first_connect_that_drops_gets_its_reconnect(wait):
+    app, stream, tick = wait
+    tick(20.0, connected=True)
+    tick(25.6, connected=False)
+    tick(30.5, connected=False)
+    tick(32.0, connected=True)
+    assert not _gave_up(stream)
+    tick(32.5, connected=True, bands=5.0, packet=True)
+    assert app._session_manager.state == SessionState.RUNNING
+
+
+def test_a_headset_that_keeps_dropping_ends_the_wait(wait):
+    # Each reconnect gets its own windows, so a headset that keeps closing the link needs its own end: the third drop.
+    app, stream, tick = wait
+    for connect, drop in ((6.0, 11.5), (18.0, 23.5), (30.0, 35.5)):
+        assert not _gave_up(stream)
+        tick(connect, connected=True)
+        tick(drop, connected=False)
+    assert _gave_up(stream)
+    assert "keeps closing the connection" in _retry_message(app)
+
+
+def test_two_drops_then_data_start_the_session(wait):
+    app, stream, tick = wait
+    for connect, drop in ((6.0, 11.5), (18.0, 23.5)):
+        tick(connect, connected=True)
+        tick(drop, connected=False)
+    tick(30.0, connected=True)
+    tick(30.5, connected=True, bands=5.0, packet=True)
+    assert not _gave_up(stream)
+    assert app._session_manager.state == SessionState.RUNNING
+
+
+def test_the_next_wait_starts_with_no_drops(wait):
+    app, stream, tick = wait
+    for connect, drop in ((6.0, 11.5), (18.0, 23.5)):
+        tick(connect, connected=True)
+        tick(drop, connected=False)
+    stream.start = MagicMock(return_value=True)
+    assert app._begin_bt_wait(70)  # a Retry
+    tick(30.0, connected=True)
+    tick(35.5, connected=False)  # this wait's first drop, not the third
+    assert not _gave_up(stream)
