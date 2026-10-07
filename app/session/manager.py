@@ -1,8 +1,9 @@
+import json
 import time
 from enum import Enum
 
 from app.logger import logger
-from app.session.scoring import GoalAccrual
+from app.session.scoring import GoalAccrual, extend_steps
 
 
 class SessionState(Enum):
@@ -26,7 +27,9 @@ class SessionManager:
         self._score_sum: float = 0.0  # the scored metric's per-tick values, for avg_score
         self._score_ticks: int = 0
         self._time_shamatha_90: float = 0.0
-        self._threshold_used: int = 50
+        self._threshold_used: int = 50  # at Start: the session row's threshold_used
+        self._threshold: float = 50  # in force: the Settings threshold, which can change mid-session
+        self._target_steps: list[tuple[int, float]] = []  # (first tick, target) of each target the ticks were scored on
         self._active_metric: str = "meditation_score"
         self._active_target: float | None = None
         self._audio = None
@@ -39,6 +42,15 @@ class SessionManager:
         """Score the session on this metric from now on: against `target` (a program segment), else the threshold."""
         self._active_metric = metric_key
         self._active_target = target
+
+    @property
+    def threshold(self) -> float:
+        """The threshold in force: what a tick without a program segment's target is scored against."""
+        return self._threshold
+
+    def set_threshold(self, value: float) -> None:
+        """The threshold in force from the next tick: the target, unless a program segment sets its own."""
+        self._threshold = value
 
     @property
     def _time_above_threshold(self) -> float:
@@ -76,8 +88,11 @@ class SessionManager:
     def metrics_count(self) -> int:
         return len(self._metrics_accumulator)
 
-    def start(self, threshold: int = 50) -> None:
+    def start(self, threshold: float | None = None) -> None:
+        """Start scored against `threshold`, or without one against the threshold in force (set_threshold)."""
         if self._state in (SessionState.IDLE, SessionState.FINISHED):
+            if threshold is not None:
+                self._threshold = threshold
             self._state = SessionState.RUNNING
             self._start_time = time.time()
             self._elapsed = 0.0
@@ -85,7 +100,7 @@ class SessionManager:
             self._metrics_accumulator = []
             self._reset_scoring()
             self._time_shamatha_90 = 0.0
-            self._threshold_used = threshold
+            self._threshold_used = self._threshold
             self._active_metric = "meditation_score"
             self._active_target = None
             logger.info("Session started")
@@ -122,17 +137,20 @@ class SessionManager:
             return stats
         return {}
 
-    def add_metric(self, metric: dict[str, float]) -> None:
-        """Accumulate a processed metric tick for end-of-session stats."""
-        if self._state == SessionState.RUNNING:
-            self._metrics_accumulator.append(metric)
-            goal = self._active_target if self._active_target is not None else self._threshold_used
-            value = metric.get(self._active_metric, 0)
-            self._goal.add(value, goal)
-            self._score_sum += value
-            self._score_ticks += 1
-            if metric.get("shamatha_score", 0) >= 90:
-                self._time_shamatha_90 += 0.5
+    def add_metric(self, metric: dict[str, float]) -> dict:
+        """Score a tick; what it was scored on (metric, value, target) for its stored row, or {} if not running."""
+        if self._state != SessionState.RUNNING:
+            return {}
+        self._metrics_accumulator.append(metric)
+        goal = self._active_target if self._active_target is not None else self._threshold
+        value = metric.get(self._active_metric, 0)
+        self._goal.add(value, goal)
+        extend_steps(self._target_steps, self._score_ticks, goal)
+        self._score_sum += value
+        self._score_ticks += 1
+        if metric.get("shamatha_score", 0) >= 90:
+            self._time_shamatha_90 += 0.5
+        return {"score_key": self._active_metric, "score_value": value, "score_target": goal}
 
     def compute_statistics(self) -> dict:
         """Compute end-of-session statistics."""
@@ -150,6 +168,7 @@ class SessionManager:
                 "sinking_rate": 0.0,
                 "score_metric_key": None,  # nothing scored yet
                 "avg_score": None,
+                "score_targets": "",
             }
 
         n = len(self._metrics_accumulator)
@@ -176,12 +195,14 @@ class SessionManager:
             "sinking_rate": round(sinking_count / n * 100, 1),
             "score_metric_key": self._active_metric if self._score_ticks else None,
             "avg_score": round(self._score_sum / self._score_ticks, 2) if self._score_ticks else None,
+            "score_targets": json.dumps([target for _tick, target in self._target_steps]) if self._target_steps else "",
         }
 
     def _reset_scoring(self) -> None:
         self._goal = GoalAccrual()
         self._score_sum = 0.0
         self._score_ticks = 0
+        self._target_steps = []
 
     def reset(self) -> None:
         self._state = SessionState.IDLE

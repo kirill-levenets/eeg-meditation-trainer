@@ -1,5 +1,6 @@
 """How a stored session is named and summarized on screen: History's rows and the session detail share it (#49)."""
 
+import json
 from datetime import datetime
 
 from app.session.scoring import recorded_score
@@ -66,6 +67,23 @@ def session_notes_line(session: dict) -> str:
     return next((line.strip() for line in (session.get("notes") or "").splitlines() if line.strip()), "")
 
 
+_THEN = " › "  # Roboto has no arrow glyph (→ renders as a box)
+
+
+def _targets_text(session: dict) -> str:
+    """The targets scored against, in order ('70 › 85', over three '70 › … › 80'), else the session's threshold."""
+    try:
+        targets = json.loads(session.get("score_targets") or "[]")
+    except (ValueError, TypeError):
+        targets = []
+    if not isinstance(targets, list) or not all(isinstance(t, (int, float)) for t in targets):
+        targets = []
+    shown = [f"{t:g}" for t in targets] or [str(session.get("threshold_used", 0) or 0)]
+    if len(shown) > 3:
+        shown = [shown[0], "…", shown[-1]]
+    return _THEN.join(shown)
+
+
 def session_score_rows(session: dict) -> list[tuple[str, str]]:
     """(label, value) rows above Time Above Threshold and Longest Streak: the saved metric, its average and the
     threshold they were measured against, or a program, whose segments have their own (and no one average). A session
@@ -78,4 +96,4 @@ def session_score_rows(session: dict) -> list[tuple[str, str]]:
     if key == "program":
         return [("Metric", name if name == "Program" else f"{name} (program)"), ("Threshold", "Per segment")]
     average = [] if avg is None else [("Average", _average(avg))]  # None: no tick was scored
-    return [("Metric", name), *average, ("Threshold", str(threshold))]
+    return [("Metric", name), *average, ("Threshold", _targets_text(session))]

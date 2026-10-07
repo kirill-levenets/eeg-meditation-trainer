@@ -671,6 +671,9 @@ class SettingsScreen(Screen):
             callback=lambda v: setattr(self._threshold_slider, 'value', v),
         )
         threshold_section.add_widget(threshold_presets)
+        self._threshold_controls = (slider_row, threshold_presets)
+        for controls in self._threshold_controls:
+            controls.fbind("on_touch_down", self._on_threshold_controls_touch)
 
         # Audio threshold metric picker
         audio_metric_label = ThemedLabel(
@@ -1365,6 +1368,24 @@ class SettingsScreen(Screen):
     @property
     def threshold(self) -> int:
         return int(self._threshold_slider.value)
+
+    @threshold.setter
+    def threshold(self, value: int) -> None:
+        self._threshold_slider.value = value
+
+    _threshold_lock: Callable[[], bool] | None = None
+
+    def lock_threshold(self, on_touch: Callable[[], bool] | None) -> None:
+        """Dim the threshold controls; a touch on them goes to `on_touch` instead, whenever that refuses it."""
+        self._threshold_lock = on_touch
+        for controls in self._threshold_controls:
+            controls.opacity = 0.5 if on_touch else 1.0
+
+    def _on_threshold_controls_touch(self, controls, touch) -> bool:
+        if self._threshold_lock is None or not controls.collide_point(*touch.pos):
+            return False
+        # True: the slider, the -/+ buttons and the presets never see it, a mouse wheel included (it steps the slider)
+        return bool(self._threshold_lock())
 
     @property
     def use_mock_device(self) -> bool:

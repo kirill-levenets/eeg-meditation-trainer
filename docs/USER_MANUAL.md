@@ -66,7 +66,7 @@ Tap **Mark** to place a vertical line on the graph. Use this to tag events ("hea
 ### Session End Summary
 
 Every ending (Stop, timer, lost signal) shows the same **Session saved** card, its title naming the session (date, start time and device). With the phone held sideways the stats are on the left and the notes on the right:
-- Duration, **Metric** (the metric that drove the feedback sound, e.g. "Shamatha"; for a program, its name), **Average** (that metric's average over the session; none for a program) and **Threshold** (e.g. "50"; for a program, "Per segment"), Time Above Threshold and Longest Streak
+- Duration, **Metric** (the metric that drove the feedback sound, e.g. "Shamatha"; for a program, its name), **Average** (that metric's average over the session; none for a program) and **Threshold** (e.g. "50"; "50 › 65" when you moved the threshold during the session, and with more than three values the first and the last, "50 › … › 70"; for a program, "Per segment"), Time Above Threshold and Longest Streak
 - Quick notes field with **Save notes** next to it — saves them ("Notes saved") and keeps the card open
 - **OK** — closes the card; notes you typed but didn't save are saved automatically (also if the app goes to the background or is closed)
 - **Delete session** — permanently deletes the session after a confirmation ("This can't be undone"); Cancel keeps it
@@ -122,8 +122,8 @@ Tap a session row to view full details (graphs, notes, tags, mood).
 
 ### Session Detail
 
-Opens as soon as you tap the session: its stats and notes are there at once, and the band power and graphs show "Loading…" until their data is in. Titled like its row. Shows Duration, **Metric**, **Average** and **Threshold** (what the session was scored on, that metric's average, and what Time Above Threshold and Longest Streak were measured against; for a program, its name and "Per segment", with no average; sessions from before this was saved show **Avg Shamatha** and **Threshold Used** instead), Time Above Threshold, Longest Streak and Mood Rating, a **Band Power (whole session)** breakdown, notes/tags/mood editor, and three graph tabs (the Metrics legend marks the scored series with **»**):
-- **Metrics** — all computed metrics
+Opens as soon as you tap the session: its stats and notes are there at once, and the band power and graphs show "Loading…" until their data is in. Titled like its row. Shows Duration, **Metric**, **Average** and **Threshold** (what the session was scored on, that metric's average, and what Time Above Threshold and Longest Streak were measured against — "50 › 65" when the threshold was moved during the session, as on the Session saved card; for a program, its name and "Per segment", with no average; sessions from before this was saved show **Avg Shamatha** and **Threshold Used** instead), Time Above Threshold, Longest Streak and Mood Rating, a **Band Power (whole session)** breakdown, notes/tags/mood editor, and three graph tabs (the Metrics legend marks the scored series with **»**):
+- **Metrics** — all computed metrics; the dashed threshold line steps where the threshold changed (a moved slider, a program's segments)
 - **Raw EEG** — synthesized waveform from stored band powers
 - **Frequencies** — band power chart
 
@@ -131,7 +131,7 @@ Opens as soon as you tap the session: its stats and notes are there at once, and
 
 **Band Power (whole session)** is a sortable table of total power per frequency band — colored bars scaled by each band's share of the session total, plus Power and % columns — a quick read of where your brainwave energy was concentrated. A **Detailed / Grouped** toggle switches between the 8 sub-bands (delta / theta / alpha1 / alpha2 / beta1 / beta2 / gamma1 / gamma2) and 5 collapsed bands (alpha = alpha1+alpha2, beta = beta1+beta2, gamma = gamma1+gamma2). Tap a column header to sort (tap again to reverse). Your chosen view and sort are remembered per profile.
 
-Tap **Export CSV** to save session data. On Android, saves to `/sdcard/EEGMeditation/exports/`. On desktop, a file chooser opens.
+Tap **Export CSV** to save session data. On Android, saves to `/sdcard/EEGMeditation/exports/`. On desktop, a file chooser opens. Each row also says what it was scored on: `score_key` (the metric), `score_value` (its value) and `score_target` (the threshold in force); these are empty for sessions recorded before the app saved them.
 
 ---
 
@@ -220,8 +220,9 @@ When Program mode is off, the Simple timer behaves exactly as before.
 
 - Slider (20-180) with presets: 50, 80, 100, 130, 160
 - Sets the dashed line on graphs, "time above threshold" stats, and audio feedback target
+- Moving it during a session changes the threshold once the slider stays put for half a second (a drag is one change, at the value it stops on): the feedback sound, Time Above Threshold, Longest Streak and the **SHAMATHA** badge all follow it, and the graph's dashed line steps at the change (live and later in History). The session keeps each threshold it ran with. With no session running, a new threshold clears the last session's graphs from the Session screen (it stays in History) and shows the new line. During a program session the segments set the targets, so the threshold can't be changed until it stops: the slider, the −/+ buttons and the presets are dimmed and don't move, and each touch on them shows **Session in progress** saying why.
 - **Time above threshold** and **Longest streak** are measured on the **audio control metric** below — the same metric that drives the feedback sound — and the live graph legend marks it with **»** when that line is shown. Each session records which metric it was scored on. (Sessions recorded before this change were measured on Meditation.)
-- **Audio control metric** — choose which metric drives the audio: Shamatha, NS Meditation, NS Attention, or Custom Formula (slot 1, 2, or 3 selected via the `[1][2][3]` buttons). If the selected custom slot has no valid formula the audio falls back to shamatha. While a session runs (or connects) this choice is locked, and so is the formula in the selected slot: a session is scored on one metric from start to stop. The other formula slots and the threshold stay editable, and a program session, scored on its segments' metrics, leaves all of it free.
+- **Audio control metric** — choose which metric drives the audio: Shamatha, NS Meditation, NS Attention, or Custom Formula (slot 1, 2, or 3 selected via the `[1][2][3]` buttons). If the selected custom slot has no valid formula the audio falls back to shamatha. While a session runs (or connects) this choice is locked, and so is the formula in the selected slot: a session is scored on one metric from start to stop. The other formula slots and the threshold stay editable, and a program session, scored on its segments' metrics, leaves the metric and the formula slots free (its threshold is locked, see above).
 
 ### Audio
 

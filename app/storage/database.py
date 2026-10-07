@@ -225,6 +225,10 @@ class DatabaseManager:
             "native_attention": "REAL DEFAULT 0",
             "native_meditation": "REAL DEFAULT 0",
             "marker": "INTEGER DEFAULT 0",
+            # What the tick was scored on; NULL in rows from before it was recorded.
+            "score_key": "TEXT DEFAULT NULL",
+            "score_value": "REAL DEFAULT NULL",
+            "score_target": "REAL DEFAULT NULL",
         }
         for col, col_type in new_columns.items():
             if col not in existing:
@@ -256,7 +260,8 @@ class DatabaseManager:
             logger.info("Migrated: added column sessions.engine_version")
         # Which metric the session was scored on (#51); '' marks rows from before, scored on meditation.
         for col, col_type in (("score_metric_key", "TEXT DEFAULT ''"), ("score_metric_name", "TEXT DEFAULT ''"),
-                              ("avg_score", "REAL DEFAULT NULL")):
+                              ("avg_score", "REAL DEFAULT NULL"),
+                              ("score_targets", "TEXT DEFAULT ''")):  # the targets in force, in order
             if col not in sess_cols:
                 self._conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {col_type}")
                 logger.info(f"Migrated: added column sessions.{col}")
@@ -291,8 +296,8 @@ class DatabaseManager:
             (user_id, date_time, duration, threshold_used, avg_meditation, avg_shamatha,
              max_meditation, time_above_threshold, longest_streak, session_name,
              time_shamatha_90, custom_formulas, session_program, engine_version,
-             score_metric_key, score_metric_name, avg_score)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             score_metric_key, score_metric_name, avg_score, score_targets)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -312,6 +317,7 @@ class DatabaseManager:
                 stats.get("score_metric_key", ""),
                 stats.get("score_metric_name", ""),
                 stats.get("avg_score"),
+                stats.get("score_targets", ""),
             ),
         )
         return cursor.lastrowid
@@ -355,6 +361,9 @@ class DatabaseManager:
                 m.get("native_attention", 0),
                 m.get("native_meditation", 0),
                 m.get("marker", 0),
+                m.get("score_key"),
+                m.get("score_value"),
+                m.get("score_target"),
             )
             for m in metrics_list
         ]
@@ -366,8 +375,8 @@ class DatabaseManager:
              alpha_norm, beta_norm, theta_norm, delta_norm, gamma_norm,
              meditation_score, distraction, subtle_distraction, sinking,
              shamatha_score, stability, calmness,
-             native_attention, native_meditation, marker)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             native_attention, native_meditation, marker, score_key, score_value, score_target)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
@@ -528,7 +537,7 @@ class DatabaseManager:
         cols = ["duration = ?", "threshold_used = ?", "avg_meditation = ?",
                 "avg_shamatha = ?", "max_meditation = ?", "time_above_threshold = ?",
                 "longest_streak = ?", "time_shamatha_90 = ?",
-                "score_metric_key = ?", "score_metric_name = ?", "avg_score = ?"]
+                "score_metric_key = ?", "score_metric_name = ?", "avg_score = ?", "score_targets = ?"]
         vals: list = [
             stats.get("duration", 0),
             stats.get("threshold_used", 50),
@@ -541,6 +550,7 @@ class DatabaseManager:
             stats.get("score_metric_key", ""),
             stats.get("score_metric_name", ""),
             stats.get("avg_score"),
+            stats.get("score_targets", ""),
         ]
         if custom_formulas is not None:
             cols.append("custom_formulas = ?")

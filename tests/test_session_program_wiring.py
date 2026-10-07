@@ -196,10 +196,10 @@ def test_program_shows_exactly_its_metric_set_whole_session():
     assert graph.series_name("program_formula") == "Program: Alpha"
 
     # A built-in segment KEEPS the program line visible — only the marker moves.
-    app._apply_program_segment_ui(50, "shamatha_score", None)
+    app._apply_program_segment_ui("shamatha_score", None)
     assert graph.is_visible("program_formula") is True
     # The custom segment relabels and keeps it visible.
-    app._apply_program_segment_ui(80, "program_formula", "Program: Alpha")
+    app._apply_program_segment_ui("program_formula", "Program: Alpha")
     assert graph.is_visible("program_formula") is True
     assert graph.series_name("program_formula") == "Program: Alpha"
 

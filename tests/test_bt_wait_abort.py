@@ -28,6 +28,7 @@ def _make_waiting_app() -> tuple[EEGMeditationApp, list]:
     app._release_wake_lock = MagicMock()
     app._stop_session_keep_alive_service = MagicMock()
     app._live_screen = MagicMock()
+    app._settings_screen = MagicMock()
     app._timer_state = MagicMock()
     app._session_manager = SessionManager()  # idle: the session starts only when data arrives
     return app, events
@@ -63,6 +64,7 @@ def test_app_init_defines_bt_wait_state(monkeypatch):
     assert app._bt_signal_start is None
 
     app._live_screen = MagicMock()  # built by build(), which runs before any UI action
+    app._settings_screen = MagicMock()
     app._timer_state = MagicMock()
     app._on_connect_cancel()  # must not raise
 
@@ -91,7 +93,7 @@ def test_refused_start_undoes_setup_without_entering_the_wait():
     app._real_stream._last_connect_error = "Previous connection is still closing."
     app._report_bt_connect_failure = MagicMock()
 
-    assert app._begin_bt_wait(70) is False
+    assert app._begin_bt_wait() is False
 
     assert app._waiting_for_bt is False
     app._release_wake_lock.assert_called_once()
@@ -107,7 +109,7 @@ def test_started_stream_enters_the_wait():
     app._real_stream.start.return_value = True
     app._real_stream._device_name = "MindWave"
 
-    assert app._begin_bt_wait(70) is True
+    assert app._begin_bt_wait() is True
 
     assert app._waiting_for_bt is True
     app._live_screen.show_overlay.assert_called_once()

@@ -24,6 +24,7 @@ def _app() -> EEGMeditationApp:
     app._db.get_session.return_value = None
     app._audio = MagicMock()
     app._live_screen = MagicMock()
+    app._settings_screen = MagicMock()
     app._live_screen.summary_session_id = SID
     app._live_screen.summary_notes = ""
     app._summary_saved_notes = ""
@@ -107,7 +108,7 @@ def _recorded_session(db) -> EEGMeditationApp:
     app._waiting_for_bt = False
     app._tick_thread = None
     app._eeg_stream = MagicMock()
-    for name in ("_stop_tick_thread", "_audio", "_live_screen", "_timer_state", "_confirm_action",
+    for name in ("_stop_tick_thread", "_audio", "_live_screen", "_settings_screen", "_timer_state", "_confirm_action",
                  "_release_wake_lock", "_stop_session_keep_alive_service", "_reload_live_graphs_from_mirror",
                  "_mark_history_dirty", "_restore_program_series"):
         setattr(app, name, MagicMock())
