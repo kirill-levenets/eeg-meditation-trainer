@@ -13,7 +13,7 @@ from kivy.uix.slider import Slider
 
 from app.config import APP
 from app.logger import logger, timed
-from app.session.scoring import recorded_score
+from app.session.scoring import recorded_score, target_steps
 from app.session.session_program import SessionProgram
 from app.ui.live_session import SERIES_NAMES
 from app.ui.raw_eeg_screen import GraphAwareScrollView, ScrollableGraphWidget
@@ -155,7 +155,8 @@ FREQ_PREVIEW_SCALES = {
 
 def detail_graph_data(rows: list[dict], formula_series: dict[str, list[float]]) -> dict:
     """Each detail graph's series and markers from a session's stored rows: pure Python, so the open runs it on its
-    worker and the main thread only loads it. {"metrics" | "raw" | "freq": (series by key, marker indices)}."""
+    worker and the main thread only loads it. {"metrics" | "raw" | "freq": (series by key, marker indices),
+    "threshold_steps": the metrics graph's [(tick, target), ...] from the rows' targets, or None}."""
     metrics_series: dict[str, list[float]] = {k: [] for k in METRICS_PREVIEW_COLORS}
     for row in rows:
         for key in metrics_series:
@@ -180,7 +181,8 @@ def detail_graph_data(rows: list[dict], formula_series: dict[str, list[float]]) 
     markers = [i for i, row in enumerate(rows) if row.get("marker", 0)]
     # The raw graph holds only the tail (from raw_start): its markers are offset to it.
     raw_markers = [(i - raw_start) * _SAMPLES_PER_TICK for i in markers if i >= raw_start]
-    return {"metrics": (metrics_series, markers), "raw": ({"eeg": synth}, raw_markers), "freq": (freq_series, markers)}
+    return {"metrics": (metrics_series, markers), "raw": ({"eeg": synth}, raw_markers), "freq": (freq_series, markers),
+            "threshold_steps": target_steps(row.get("score_target") for row in rows)}  # None: rows without targets
 
 
 class DiaryScreen(Screen):
@@ -595,6 +597,8 @@ class DiaryScreen(Screen):
         with timed(f"diary.fill_{section}"):
             graph.load_static_data(series)
             graph.set_markers(markers)
+            if section == "metrics" and data["threshold_steps"]:  # else the line the open drew from the session row
+                graph.set_threshold_steps(data["threshold_steps"])
             graph.set_scroll_offset(0)  # at the end, so the user sees the latest data and can drag back
         self._ready.add(section)
         if section == self._active_graph_tab:

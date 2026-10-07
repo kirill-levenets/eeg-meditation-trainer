@@ -390,7 +390,6 @@ def _make_btwait_app() -> EEGMeditationApp:
     app._real_stream.seconds_since_last_packet = 1.0
     app._bt_signal_start = None
     app._bt_connect_start = time.time()
-    app._pending_threshold = 50
     app._waiting_for_bt = True
 
     app._eeg_stream = MagicMock()
@@ -421,7 +420,7 @@ def test_btwait_arms_countdown_synchronously_on_connect():
 
     assert app._waiting_for_bt is False
     assert app._timer_state.remaining_seconds == 15 * 60
-    app._session_manager.start.assert_called_once_with(threshold=50)
+    app._session_manager.start.assert_called_once_with()  # against the threshold in force
     app._on_main.assert_called_once()  # UI/audio still deferred to main thread
 
 

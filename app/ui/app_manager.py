@@ -35,6 +35,7 @@ from app.metrics.custom_formula import CustomFormulaEvaluator
 from app.metrics.engine import MetricsEngine
 from app.metrics.noise_detector import PowerLineDetector
 from app.session.manager import SessionManager, SessionState
+from app.session.scoring import target_steps
 from app.session.session_program import SessionProgram
 from app.session.timer_state import TimerState
 from app.settings.registry import BOOL, FLOAT, INT, STR, Setting, SettingsStore
@@ -196,7 +197,7 @@ class EEGMeditationApp(App):
         self._current_user_id: Optional[int] = None
         # True while _load_user_settings applies values, so its change callbacks don't re-persist them.
         self._loading_settings: bool = False
-        self._persist_triggers: dict = {}  # setting key -> debounced persist (continuous inputs)
+        self._settle_triggers: dict = {}  # input name -> its settle trigger (_after_settle)
         # True only for the deliberate "Show All Users" aggregate history view,
         # distinct from _current_user_id=None (unset). Keeps the unset state from
         # ever querying all profiles' sessions (cross-profile leak).
@@ -252,14 +253,20 @@ class EEGMeditationApp(App):
         """Persist a continuous input (slider drag, typing) once it settles, not on every step."""
         if self._loading_settings:
             return
-        triggers = getattr(self, "_persist_triggers", None)
+        self._after_settle(key, lambda: self._persist_user_setting(key))
+
+    def _after_settle(self, name: str, fn) -> None:
+        """Run the latest `fn` given for input `name` once it has stopped changing for _PERSIST_SETTLE_S."""
+        triggers = getattr(self, "_settle_triggers", None)
         if triggers is None:
-            triggers = self._persist_triggers = {}
-        ev = triggers.get(key)
+            triggers = self._settle_triggers = {}
+        fns = getattr(self, "_settle_fns", None)
+        if fns is None:
+            fns = self._settle_fns = {}
+        fns[name] = fn
+        ev = triggers.get(name)
         if ev is None:
-            ev = triggers[key] = Clock.create_trigger(
-                lambda _dt: self._persist_user_setting(key), self._PERSIST_SETTLE_S
-            )
+            ev = triggers[name] = Clock.create_trigger(lambda _dt: fns[name](), self._PERSIST_SETTLE_S)
         ev.cancel()  # restart the settle window on every change
         ev()
 
@@ -577,13 +584,12 @@ class EEGMeditationApp(App):
         fb_ids = getattr(self, "_program_segment_feedback_ids", None)
         if fb_ids and 0 <= idx < len(fb_ids):
             self._audio.set_active_feedback(fb_ids[idx])
-        self._on_main(lambda t=target, k=metric_key, nm=prog_name:
-                      self._apply_program_segment_ui(t, k, nm))
+        self._on_main(lambda k=metric_key, nm=prog_name: self._apply_program_segment_ui(k, nm))
         logger.info(f"Program segment {idx}: metric={metric_key} target={target}")
 
-    def _apply_program_segment_ui(self, target: int, metric_key: str, prog_name) -> None:
+    def _apply_program_segment_ui(self, metric_key: str, prog_name) -> None:
         """Main-thread UI for a segment switch: ensure a custom segment's line is labelled
-        + visible, update the threshold, and move the legend marker. Program lines'
+        + visible, and move the legend marker (the ticks step the threshold line). Program lines'
         visibility is owned by `_show_program_series` (shown the whole program), so a
         built-in segment no longer hides anything — only the » marker moves."""
         graph = self._live_screen.graph
@@ -591,7 +597,6 @@ class EEGMeditationApp(App):
             # Custom segment: label this segment's program line with the formula's name.
             graph.set_series_name(metric_key, prog_name)
             graph.set_visible(metric_key, True)
-        graph.set_threshold(float(target), metric_key)
         self._live_screen.set_training_series(metric_key)  # bold + » on the trained series
 
     def _play_segment_end_sound(self, sound_id) -> None:
@@ -1419,6 +1424,10 @@ class EEGMeditationApp(App):
         self._program_segment_feedback_ids = []
         self._program_audio_key = ""
         self._session_program_active = self._timer_mode == "program" and bool(prog)
+        self._told_program_targets = False
+        pending = getattr(self, "_settle_triggers", {}).get("apply_threshold")
+        if pending is not None:
+            pending.cancel()  # a slider move just before Start: the start applies the slider itself
         self._active_program = prog if self._session_program_active else None
         if self._session_program_active:
             # Program total drives the timer so auto-stop reuses the proven
@@ -1433,8 +1442,7 @@ class EEGMeditationApp(App):
             # prior program session's enabled/duration can't leak into a simple one.
             self._timer_state.set_enabled(self._settings_screen.timer_enabled)
             self._timer_state.set_duration(self._settings_screen.timer_minutes)
-        self._metrics_engine.meditation_threshold = threshold
-        self._audio.set_threshold(threshold)
+        self._apply_threshold(threshold)
         self._metrics_engine.reset()
         self._noise_detector = PowerLineDetector() if not APP.USE_MOCK_DEVICE else None
         self._metrics_buffer = []
@@ -1454,14 +1462,9 @@ class EEGMeditationApp(App):
         self._live_screen.graph.clear_data()
         self._live_screen.raw_graph.clear_data()
         self._live_screen.band_graph.clear_data()
+        self._live_screen.graph.set_threshold_steps(None)  # each tick's target steps it, a program's too
         if self._session_program_active:
-            self._live_screen.graph.set_threshold_steps(
-                prog.threshold_steps(self._live_screen.graph._sample_rate)
-            )
             self._show_program_series(prog)
-        else:
-            self._live_screen.graph.set_threshold_steps(None)
-            self._live_screen.graph.set_threshold(float(threshold), "shamatha_score")
         gid = self._global_feedback_id()
         if self._session_program_active:
             fb_sources, self._program_segment_feedback_ids, fb_initial = \
@@ -1481,7 +1484,6 @@ class EEGMeditationApp(App):
         self._scored_key = None  # a simple session marks its scored series on the first tick
         self._shamatha_active = False
         self._shamatha_streak = 0
-        self._shamatha_threshold = threshold
         self._live_screen.set_shamatha(False)
         self._live_screen.hide_alert()
         self._live_screen.set_controls_running()
@@ -1508,14 +1510,14 @@ class EEGMeditationApp(App):
             self._timer_state.start_countdown()
             self._on_session_connected(name)
             logger.info(f"Reusing existing BT connection to {name}")
-        elif not self._begin_bt_wait(threshold):
+        elif not self._begin_bt_wait():
             return
 
         self._start_tick_thread()
         self._tick_count = 0
         logger.info("Session started via UI")
 
-    def _begin_bt_wait(self, threshold: float) -> bool:
+    def _begin_bt_wait(self) -> bool:
         """Start the reader and show the connect overlay; False, with the session setup undone, if refused."""
         name = self._real_stream._device_name or "Real EEG"
         if not self._real_stream.start():
@@ -1530,7 +1532,6 @@ class EEGMeditationApp(App):
         self._wait_attempt = self._start_attempt
         self._waiting_for_bt = True
         self._bt_drops = 0
-        self._pending_threshold = threshold
         self._live_screen.update_device_status(False, device_name=name, connecting=True)
         self._live_screen.show_overlay(f"Connecting to {name}...")
         logger.info(f"Waiting for BT connection to {name}")
@@ -1744,11 +1745,15 @@ class EEGMeditationApp(App):
                 return
             self._current_session_id = sid
 
-    def _record_tick(self, metrics: dict, full_record: dict) -> None:
-        """Add one tick to the session's stats and the buffer of rows still to write, as one step for a checkpoint."""
+    def _record_tick(self, metrics: dict, full_record: dict) -> float | None:
+        """Score a tick and buffer its stamped row, as one step for a checkpoint: its target, or None if not scored."""
         with self._checkpoint_lock:
-            self._session_manager.add_metric(metrics)
+            score = self._session_manager.add_metric(metrics)
+            if not score:
+                return None
+            full_record.update(score)
             self._metrics_buffer.append(full_record)
+        return score["score_target"]
 
     def _flush_tick(self) -> None:
         """Every FLUSH_INTERVAL_SECONDS of ticks, checkpoint the session: its row as well as its data."""
@@ -1771,6 +1776,7 @@ class EEGMeditationApp(App):
                 for key in METRICS_COLORS
             }
             self._live_screen.graph.load_static_data(metric_series)
+            self._live_screen.graph.set_threshold_steps(target_steps(d.get("score_target") for d in metrics_snapshot))
         if band_snapshot:
             band_keys = ("alpha", "beta", "gamma", "theta", "delta")
             band_series = {
@@ -1962,9 +1968,7 @@ class EEGMeditationApp(App):
                 if total > 0 and has_packets:  # data on this connection: band values outlive a drop
                     self._waiting_for_bt = False
                     self._bt_signal_start = None
-                    self._session_manager.start(
-                        threshold=self._pending_threshold
-                    )
+                    self._session_manager.start()  # against the threshold in force, which may have moved
                     # Arm the countdown on THIS thread before the next tick()
                     # reads it. Deferring it via _on_main let a stalled main
                     # thread leave remaining_seconds=0, so the very next tick
@@ -2150,7 +2154,10 @@ class EEGMeditationApp(App):
         if _marker_pending:
             self._pending_marker = False
             full_record["marker"] = 1
-        self._record_tick(metrics, full_record)
+        target = self._record_tick(metrics, full_record)
+        if target is None:  # the session paused or stopped while this tick was read: it isn't part of it
+            self._pending_marker |= _marker_pending  # the marker goes on the next recorded tick
+            return
         self._raw_buffer.append(raw_sample)
 
         # Audio is thread-safe — update directly
@@ -2165,7 +2172,7 @@ class EEGMeditationApp(App):
         # the graphs from these mirrors instead of replaying N per-tick
         # Clock callbacks (which previously flooded the main loop and
         # caused a black screen).
-        self._ui_metrics_history.append(dict(metrics))
+        self._ui_metrics_history.append({**metrics, "score_target": target})
         _band_record = {
             "alpha": raw_sample.get("alpha1", 0.0) + raw_sample.get("alpha2", 0.0),
             "beta": raw_sample.get("beta1", 0.0) + raw_sample.get("beta2", 0.0),
@@ -2197,9 +2204,9 @@ class EEGMeditationApp(App):
 
         def _ui_update(
             m=metrics, rs=raw_sample, ef=_elapsed_fmt, mp=_marker_pending,
-            sa=self._shamatha_active, sc=_sham_changed, sk=self._scored_mark(_scored),
+            sa=self._shamatha_active, sc=_sham_changed, sk=self._scored_mark(_scored), tg=target,
         ) -> None:
-            self._live_screen.graph.add_point(m)
+            self._live_screen.graph.add_point(m, threshold=tg)
             self._live_screen.update_stats(m)
             self._live_screen.update_state(m.get("state", "Neutral"))
             if sc:
@@ -2387,11 +2394,31 @@ class EEGMeditationApp(App):
         self._refresh_live_program_series()  # idle preview of the program's metric set
 
     def _on_threshold_change(self, value: int) -> None:
-        self._metrics_engine.meditation_threshold = value
-        self._audio.set_threshold(value)
-        self._live_screen.graph.set_threshold(float(value), "shamatha_score")
+        # A drag is one change of the threshold in force, at the value it settles on, not one per slider step.
+        self._after_settle("apply_threshold", self._apply_slider_threshold)
         self._persist_user_setting_later("threshold")
         logger.debug(f"Threshold changed to {value}")
+
+    _told_program_targets: bool = False  # this program session has said the slider waits for the next session
+
+    def _apply_slider_threshold(self) -> None:
+        """Put the slider's settled value in force; a running program keeps its targets and says so, once."""
+        if self._apply_threshold(self._settings_screen.threshold) or self._told_program_targets:
+            return
+        self._told_program_targets = True
+        self._info_popup("Saved for your next session",
+                         "This program sets its own targets, so the new threshold applies from your next session.")
+
+    def _apply_threshold(self, value: int) -> bool:
+        """Put the Settings threshold in force: False during a running program, whose segments own its targets."""
+        if self._session_program_active and self._session_pipeline_live():
+            return False
+        self._metrics_engine.meditation_threshold = value
+        self._audio.set_threshold(value)
+        self._shamatha_threshold = value
+        self._session_manager.set_threshold(value)  # also what a session waiting for the headset starts with
+        self._live_screen.graph.set_threshold(float(value), "shamatha_score")  # drawn until ticks step the line
+        return True
 
     def _present_series_picker(self, graph) -> None:
         """Open the shared multi-select series popup for `graph`.
@@ -3721,9 +3748,7 @@ class EEGMeditationApp(App):
 
         def set_threshold(v):
             ss._threshold_slider.value = v
-            self._metrics_engine.meditation_threshold = v
-            self._audio.set_threshold(v)
-            graph.set_threshold(float(v), "shamatha_score")
+            self._apply_threshold(v)
 
         def set_use_mock(v):
             APP.USE_MOCK_DEVICE = v; ss._device_mode_cb.active = v

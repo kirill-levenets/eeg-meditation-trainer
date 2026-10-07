@@ -62,7 +62,7 @@ def wait(monkeypatch):
     app._start_attempt = 1
     stream.start = MagicMock(return_value=True)
     app._bt_connect_start = clock.now  # set by the session start that precedes the wait
-    assert app._begin_bt_wait(70)  # the wait as Start enters it, at T0
+    assert app._begin_bt_wait()  # the wait as Start enters it, at T0
 
     def tick(at: float, *, connected: bool, bands: float = 0.0, packet: bool = False) -> None:
         clock.now = T0 + at
@@ -200,7 +200,7 @@ def test_the_next_wait_starts_with_no_drops(wait):
         tick(connect, connected=True)
         tick(drop, connected=False)
     stream.start = MagicMock(return_value=True)
-    assert app._begin_bt_wait(70)  # a Retry
+    assert app._begin_bt_wait()  # a Retry
     tick(30.0, connected=True)
     tick(35.5, connected=False)  # this wait's first drop, not the third
     assert not _gave_up(stream)

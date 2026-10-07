@@ -53,7 +53,7 @@ def _waiting(app) -> EEGMeditationApp:
     """In the BT wait, connected, the first band data arriving on this tick."""
     app._start_attempt += 1  # as _on_start does
     app._real_stream.start.return_value = True
-    assert app._begin_bt_wait(50)
+    assert app._begin_bt_wait()
     app._tick_thread = MagicMock()
     app._bt_connect_start = time.time()
     app._real_stream.is_connected = True

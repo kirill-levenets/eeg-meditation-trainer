@@ -91,7 +91,7 @@ def test_refused_start_undoes_setup_without_entering_the_wait():
     app._real_stream._last_connect_error = "Previous connection is still closing."
     app._report_bt_connect_failure = MagicMock()
 
-    assert app._begin_bt_wait(70) is False
+    assert app._begin_bt_wait() is False
 
     assert app._waiting_for_bt is False
     app._release_wake_lock.assert_called_once()
@@ -107,7 +107,7 @@ def test_started_stream_enters_the_wait():
     app._real_stream.start.return_value = True
     app._real_stream._device_name = "MindWave"
 
-    assert app._begin_bt_wait(70) is True
+    assert app._begin_bt_wait() is True
 
     assert app._waiting_for_bt is True
     app._live_screen.show_overlay.assert_called_once()

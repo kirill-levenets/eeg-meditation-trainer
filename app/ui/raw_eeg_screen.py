@@ -16,6 +16,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
 from app.config import APP
+from app.session.scoring import extend_steps
 from app.ui import render_stats
 from app.ui.theme import C as TC
 from app.ui.theme import ThemedLabel
@@ -297,12 +298,17 @@ class ScrollableGraphWidget(Widget):
         self._start_wall_time = epoch
         self._redraw()
 
-    def add_point(self, values: dict[str, float]) -> None:
+    def add_point(self, values: dict[str, float], threshold: float | None = None) -> None:
+        """Append one point; `threshold` is the one in force at it, and a change steps the threshold line there."""
         for key in self._data:
             val = values.get(key, 0.0)
             self._data[key].append(val)
         first_key = next(iter(self._data))
         self._total_points = len(self._data[first_key])
+        if threshold is not None:
+            steps = self._threshold_steps or []
+            extend_steps(steps, self._total_points - 1, threshold)
+            self._threshold_steps = steps
         self._redraw()
 
     def add_points_batch(self, key: str, values: list[float]) -> None:
