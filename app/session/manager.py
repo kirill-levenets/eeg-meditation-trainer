@@ -43,6 +43,11 @@ class SessionManager:
         self._active_metric = metric_key
         self._active_target = target
 
+    @property
+    def threshold(self) -> float:
+        """The threshold in force: what a tick without a program segment's target is scored against."""
+        return self._threshold
+
     def set_threshold(self, value: float) -> None:
         """The threshold in force from the next tick: the target, unless a program segment sets its own."""
         self._threshold = value

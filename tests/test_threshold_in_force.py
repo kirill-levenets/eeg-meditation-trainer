@@ -8,6 +8,9 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from kivy.base import EventLoop
+from kivy.core.window import Window
+from kivy.tests.common import UnitTestTouch
 
 import app.ui.app_manager as am
 from app.config import APP
@@ -17,6 +20,7 @@ from app.session.session_program import SessionProgram
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.diary_screen import detail_graph_data
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
+from app.ui.settings_screen import SettingsScreen
 from tests.test_bt_wait_reconnect import wait  # noqa: F401  (fixture)
 from tests.test_resume_mirror import _drive_tick, _make_tick_app, _metrics, _raw_sample
 from tests.test_session_detail_open import _frames, app, db  # noqa: F401  (fixtures)
@@ -28,7 +32,9 @@ def _threshold_app(*, program: bool = False, state: SessionState = SessionState.
     a._audio = MagicMock()
     a._live_screen = MagicMock()
     a._persist_user_setting_later = MagicMock()
+    a._loading_settings = False
     a._session_program_active = program
+    a._ui_metrics_history, a._ui_band_history, a._ui_raw_waveform = deque(), deque(), deque()
     a._shamatha_threshold = 70
     a._metrics_engine.meditation_threshold = 70
     sm = SessionManager()
@@ -54,15 +60,17 @@ def test_a_new_threshold_moves_a_simple_sessions_sound_scoring_and_pill_together
     assert a._shamatha_threshold == 85 and a._metrics_engine.meditation_threshold == 85
 
 
-def test_a_new_threshold_during_a_program_keeps_the_segments_target():
+def test_a_new_threshold_never_reaches_a_running_program():
+    # A settle that lands late, or the profile's settings reloaded (re-picking the active profile), mid-program.
     a = _threshold_app(program=True)
+    a._tick_thread = MagicMock()  # the program session is live
     a._apply_threshold(85)
     a._audio.set_threshold.assert_not_called()  # the sound kept the segment's 70 (it used to switch to 85)
     assert _next_target(a) == 70
     assert a._shamatha_threshold == 70 and a._metrics_engine.meditation_threshold == 70
 
 
-def test_after_a_program_session_the_threshold_applies_again():
+def test_after_a_program_session_the_slider_applies_again():
     a = _threshold_app(program=True, state=SessionState.IDLE)  # _session_program_active stays set after the session
     a._apply_threshold(85)
     a._audio.set_threshold.assert_called_with(85)
@@ -306,34 +314,81 @@ def test_a_settle_runs_the_latest_function_given_for_its_input(monkeypatch):
     assert ran == [2]
 
 
-def _settled_slider(a, value: int) -> None:
-    a._settings_screen = MagicMock(threshold=value)
-    a._apply_slider_threshold()
-
-
-def test_moving_the_slider_during_a_program_says_once_that_it_is_for_the_next_session():
+def test_a_touch_on_the_locked_controls_says_why_while_the_program_runs():
     a = _threshold_app(program=True)
-    a._tick_thread = MagicMock()  # the program session is live
+    a._tick_thread = MagicMock()
     a._info_popup = MagicMock()
-    _settled_slider(a, 85)
-    title, message = a._info_popup.call_args.args
-    assert title == "Saved for your next session" and "next session" in message
-    _settled_slider(a, 90)
-    a._info_popup.assert_called_once()  # not on every move
-    assert _next_target(a) == 70
+    assert a._refuse_program_threshold() is True
+    assert a._info_popup.call_args.args == (
+        "Session in progress", "This program sets its own targets. Stop the current session before changing the "
+                               "threshold.")
 
 
-def test_moving_the_slider_in_a_simple_session_says_nothing():
-    a = _threshold_app()
+def test_a_touch_after_the_program_ended_is_not_refused():
+    # The timer ended it on the tick thread; the unlock is still queued for the main thread.
+    a = _threshold_app(program=True, state=SessionState.FINISHED)
     a._info_popup = MagicMock()
-    _settled_slider(a, 85)
+    assert a._refuse_program_threshold() is False
     a._info_popup.assert_not_called()
-    assert _next_target(a) == 85
 
 
-def test_the_next_program_session_says_it_again(monkeypatch):
-    a = _start(True, monkeypatch, _told_program_targets=True)  # the last program session said it
-    assert a._told_program_targets is False
+def test_a_session_start_applies_its_threshold_whatever_the_last_one_left_running(monkeypatch):
+    a = _start(True, monkeypatch, _tick_thread=MagicMock())  # the last session's tick thread hasn't exited yet
+    a._audio.set_threshold.assert_called_with(60)
+
+
+@pytest.mark.parametrize("program", [False, True])
+def test_a_program_session_locks_the_threshold_controls_and_its_end_unlocks_them(program, monkeypatch):
+    a = _start(program, monkeypatch)
+    a._settings_screen.lock_threshold.assert_called_with(a._refuse_program_threshold if program else None)
+    a._settings_screen.lock_threshold.reset_mock()
+    for name in ("_restore_program_series", "_release_wake_lock", "_stop_session_keep_alive_service"):
+        setattr(a, name, MagicMock())
+    a._start_attempt = 1
+    a._undo_session_setup()  # every ending
+    a._settings_screen.lock_threshold.assert_called_with(None)
+
+
+def test_the_locked_controls_take_no_touch_and_each_touch_says_why():
+    # During a program: a drag, a -/+ click or a preset used to move the slider; several of them could change the
+    # threshold with one easily missed message. Now nothing moves, and every touch says why.
+    screen = SettingsScreen()
+    EventLoop.ensure_window()
+    Window.add_widget(screen)
+    try:
+        next(x for x in screen.walk() if type(x).__name__ == "_AccordionSection"
+             and x._header.text == "Threshold").open()
+        for _ in range(8):
+            EventLoop.idle()
+        slider_row, presets = screen._threshold_controls
+        minus, slider, _label, plus = reversed(slider_row.children)
+        preset = presets.children[0]
+
+        def tap(widget, dx=0.0):
+            x, y = widget.to_window(widget.center_x + dx, widget.center_y)
+            touch = UnitTestTouch(x, y)
+            touch.touch_down()
+            touch.touch_up()
+            for _ in range(2):
+                EventLoop.idle()
+
+        screen.threshold = 70
+        refused = []
+        screen.lock_threshold(lambda: refused.append(1) or True)
+        for widget, dx in ((minus, 0), (plus, 0), (slider, slider.width / 3), (preset, 0)):
+            tap(widget, dx)
+        assert screen.threshold == 70 and len(refused) == 4
+        assert slider_row.opacity == presets.opacity == 0.5
+        wheel = SimpleNamespace(is_mouse_scrolling=True, pos=slider.center)  # a mouse wheel steps a slider
+        assert screen._on_threshold_controls_touch(slider_row, wheel) is True and len(refused) == 5
+        screen.lock_threshold(lambda: False)  # the program has just ended: the touch goes through
+        tap(plus)
+        assert screen.threshold == 75
+        screen.lock_threshold(None)
+        tap(plus)
+        assert screen.threshold == 80 and slider_row.opacity == 1.0
+    finally:
+        Window.remove_widget(screen)
 
 
 def test_a_slider_move_just_before_starting_a_program_is_not_applied_during_it(monkeypatch):
@@ -351,3 +406,58 @@ def test_a_running_session_ignores_another_start():
     sm.start(threshold=70)
     sm.start(threshold=40)
     assert sm.add_metric({"shamatha_score": 60.0})["score_target"] == 70
+
+
+def test_a_program_start_that_fails_in_its_setup_leaves_the_controls_unlocked(monkeypatch):
+    started = {}
+
+    def prepare(app_):
+        app_._show_program_series.side_effect = RuntimeError("bad custom sound file")
+        started["app"] = app_
+
+    with pytest.raises(RuntimeError):
+        _start(True, monkeypatch, prepare=prepare)
+    started["app"]._settings_screen.lock_threshold.assert_not_called()
+
+
+def _idle_app() -> EEGMeditationApp:
+    a = _threshold_app(state=SessionState.FINISHED)  # the last session ended; its graphs are still on screen
+    a._ui_metrics_history, a._ui_band_history, a._ui_raw_waveform = deque([{}]), deque([{}]), deque([0.0])
+    a._after_settle = MagicMock()
+    return a
+
+
+def test_moving_the_slider_while_idle_clears_the_last_sessions_graphs():
+    a = _idle_app()
+    a._on_threshold_change(85)  # Kivy calls it only when the slider's value changes
+    for graph in (a._live_screen.graph, a._live_screen.raw_graph, a._live_screen.band_graph):
+        graph.clear_data.assert_called_once()
+    a._live_screen.graph.set_threshold_steps.assert_called_with(None)
+    assert not a._ui_metrics_history and not a._ui_band_history and not a._ui_raw_waveform
+    a._apply_threshold(85)  # the settled value
+    a._live_screen.graph.set_threshold.assert_called_with(85.0, "shamatha_score")
+
+
+def test_reapplying_the_settings_threshold_keeps_the_graphs():
+    # After a program, the threshold in force is a segment's target (85) while Settings shows 70: re-picking the
+    # profile reloads its settings and applies 70, which is no change of the Settings threshold.
+    a = _idle_app()
+    a._session_manager.set_threshold(85)
+    a._apply_threshold(70)
+    a._live_screen.graph.clear_data.assert_not_called()
+
+
+def test_nothing_to_clear_before_any_session():
+    a = _idle_app()
+    a._ui_metrics_history.clear()
+    a._on_threshold_change(85)
+    a._live_screen.graph.clear_data.assert_not_called()
+
+
+def test_moving_the_slider_during_a_simple_session_keeps_its_graphs():
+    a = _threshold_app()
+    a._after_settle = MagicMock()
+    a._ui_metrics_history.append({})
+    a._on_threshold_change(85)
+    a._live_screen.graph.clear_data.assert_not_called()
+    a._live_screen.graph.set_threshold_steps.assert_not_called()

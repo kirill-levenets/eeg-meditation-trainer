@@ -198,6 +198,7 @@ class EEGMeditationApp(App):
         # True while _load_user_settings applies values, so its change callbacks don't re-persist them.
         self._loading_settings: bool = False
         self._settle_triggers: dict = {}  # input name -> its settle trigger (_after_settle)
+        self._settle_fns: dict = {}  # input name -> the function its trigger runs (the latest one given)
         # True only for the deliberate "Show All Users" aggregate history view,
         # distinct from _current_user_id=None (unset). Keeps the unset state from
         # ever querying all profiles' sessions (cross-profile leak).
@@ -269,6 +270,11 @@ class EEGMeditationApp(App):
             ev = triggers[name] = Clock.create_trigger(lambda _dt: fns[name](), self._PERSIST_SETTLE_S)
         ev.cancel()  # restart the settle window on every change
         ev()
+
+    def _cancel_settle(self, name: str) -> None:
+        ev = getattr(self, "_settle_triggers", {}).get(name)
+        if ev is not None:
+            ev.cancel()
 
     def _persist_active_formulas(self, user_id: int) -> None:
         """Serialize all slots (names + formulas) to a single JSON key."""
@@ -487,7 +493,6 @@ class EEGMeditationApp(App):
         # Debounced "in shamatha" zone state (drives the live status chip).
         self._shamatha_active = False
         self._shamatha_streak = 0
-        self._shamatha_threshold = 50
 
     @staticmethod
     def _program_transition(prev_idx: int, elapsed: float, program):
@@ -1424,10 +1429,7 @@ class EEGMeditationApp(App):
         self._program_segment_feedback_ids = []
         self._program_audio_key = ""
         self._session_program_active = self._timer_mode == "program" and bool(prog)
-        self._told_program_targets = False
-        pending = getattr(self, "_settle_triggers", {}).get("apply_threshold")
-        if pending is not None:
-            pending.cancel()  # a slider move just before Start: the start applies the slider itself
+        self._cancel_settle("apply_threshold")  # a slider move just before Start: the start applies the slider itself
         self._active_program = prog if self._session_program_active else None
         if self._session_program_active:
             # Program total drives the timer so auto-stop reuses the proven
@@ -1442,14 +1444,11 @@ class EEGMeditationApp(App):
             # prior program session's enabled/duration can't leak into a simple one.
             self._timer_state.set_enabled(self._settings_screen.timer_enabled)
             self._timer_state.set_duration(self._settings_screen.timer_minutes)
-        self._apply_threshold(threshold)
+        self._put_threshold_in_force(threshold)  # this session's, whatever the last one left running
         self._metrics_engine.reset()
         self._noise_detector = PowerLineDetector() if not APP.USE_MOCK_DEVICE else None
         self._metrics_buffer = []
         self._raw_buffer = []
-        self._ui_metrics_history.clear()
-        self._ui_band_history.clear()
-        self._ui_raw_waveform.clear()
         self._ui_last_metrics = {}
         self._ui_last_state = "Neutral"
         self._flush_counter = 0
@@ -1459,10 +1458,7 @@ class EEGMeditationApp(App):
         self._pending_marker = False
         self._bt_connect_start = time.time()
 
-        self._live_screen.graph.clear_data()
-        self._live_screen.raw_graph.clear_data()
-        self._live_screen.band_graph.clear_data()
-        self._live_screen.graph.set_threshold_steps(None)  # each tick's target steps it, a program's too
+        self._clear_live_graphs()
         if self._session_program_active:
             self._show_program_series(prog)
         gid = self._global_feedback_id()
@@ -1487,6 +1483,7 @@ class EEGMeditationApp(App):
         self._live_screen.set_shamatha(False)
         self._live_screen.hide_alert()
         self._live_screen.set_controls_running()
+        self._settings_screen.lock_threshold(self._refuse_program_threshold if self._session_program_active else None)
 
         self._acquire_wake_lock()
         self._start_session_keep_alive_service()
@@ -1572,6 +1569,7 @@ class EEGMeditationApp(App):
         self._live_screen.set_shamatha(False)
         self._timer_state.reset()
         self._session_manager.reset()
+        self._settings_screen.lock_threshold(None)
         self._release_wake_lock()
         self._stop_session_keep_alive_service()
 
@@ -1814,12 +1812,12 @@ class EEGMeditationApp(App):
                 saved = None
             self._live_screen.show_summary(session_id, stats, title=session_title(saved) if saved else "")
 
-    def _refused_while_session_runs(self, doing: str) -> bool:
+    def _refused_while_session_runs(self, doing: str, why: str = "") -> bool:
         """True, after telling the user, while a session runs or connects: until it stops it owns its profile, the
-        database it saves to and the metric it is scored on."""
+        database it saves to, the metric it is scored on and a program's targets."""
         if not self._session_pipeline_live():
             return False
-        self._info_popup("Session in progress", f"Stop the current session before {doing}.")
+        self._info_popup("Session in progress", f"{why} Stop the current session before {doing}.".lstrip())
         return True
 
     def _session_pipeline_live(self) -> bool:
@@ -2394,31 +2392,43 @@ class EEGMeditationApp(App):
         self._refresh_live_program_series()  # idle preview of the program's metric set
 
     def _on_threshold_change(self, value: int) -> None:
+        if self._ui_metrics_history and not self._session_pipeline_live():
+            self._clear_live_graphs()  # the last session's line is not the threshold the next one runs against
         # A drag is one change of the threshold in force, at the value it settles on, not one per slider step.
-        self._after_settle("apply_threshold", self._apply_slider_threshold)
+        self._after_settle("apply_threshold", lambda: self._apply_threshold(self._settings_screen.threshold))
         self._persist_user_setting_later("threshold")
         logger.debug(f"Threshold changed to {value}")
 
-    _told_program_targets: bool = False  # this program session has said the slider waits for the next session
+    def _program_owns_threshold(self) -> bool:
+        """A running program's segments own its targets: the Settings threshold waits for the next session."""
+        return self._session_program_active and self._session_pipeline_live()
 
-    def _apply_slider_threshold(self) -> None:
-        """Put the slider's settled value in force; a running program keeps its targets and says so, once."""
-        if self._apply_threshold(self._settings_screen.threshold) or self._told_program_targets:
-            return
-        self._told_program_targets = True
-        self._info_popup("Saved for your next session",
-                         "This program sets its own targets, so the new threshold applies from your next session.")
+    def _refuse_program_threshold(self) -> bool:
+        """A touch on the threshold controls a program locked: True, after saying why, until the session ends."""
+        return self._refused_while_session_runs("changing the threshold", why="This program sets its own targets.")
 
-    def _apply_threshold(self, value: int) -> bool:
-        """Put the Settings threshold in force: False during a running program, whose segments own its targets."""
-        if self._session_program_active and self._session_pipeline_live():
-            return False
+    def _apply_threshold(self, value: int) -> None:
+        """Put the Settings threshold in force, unless a running program owns it (a profile reload, a late settle)."""
+        if not self._program_owns_threshold():
+            self._put_threshold_in_force(value)
+
+    def _clear_live_graphs(self) -> None:
+        """Empty the Session screen's graphs and their mirrors, the threshold line's steps included."""
+        self._ui_metrics_history.clear()
+        self._ui_band_history.clear()
+        self._ui_raw_waveform.clear()
+        self._live_screen.graph.clear_data()
+        self._live_screen.raw_graph.clear_data()
+        self._live_screen.band_graph.clear_data()
+        self._live_screen.graph.set_threshold_steps(None)  # each tick's target steps it, a program's too
+
+    def _put_threshold_in_force(self, value: int) -> None:
+        """The sound, the scoring, the SHAMATHA pill and the engine together; a session start calls it directly."""
         self._metrics_engine.meditation_threshold = value
         self._audio.set_threshold(value)
         self._shamatha_threshold = value
         self._session_manager.set_threshold(value)  # also what a session waiting for the headset starts with
         self._live_screen.graph.set_threshold(float(value), "shamatha_score")  # drawn until ticks step the line
-        return True
 
     def _present_series_picker(self, graph) -> None:
         """Open the shared multi-select series popup for `graph`.
@@ -3747,7 +3757,7 @@ class EEGMeditationApp(App):
             self._audio.disconnect_alert_enabled = v; ss._disconnect_alert_cb.active = v
 
         def set_threshold(v):
-            ss._threshold_slider.value = v
+            ss.threshold = v
             self._apply_threshold(v)
 
         def set_use_mock(v):

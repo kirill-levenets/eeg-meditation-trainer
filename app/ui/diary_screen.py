@@ -154,9 +154,8 @@ FREQ_PREVIEW_SCALES = {
 
 
 def detail_graph_data(rows: list[dict], formula_series: dict[str, list[float]]) -> dict:
-    """Each detail graph's series and markers from a session's stored rows: pure Python, so the open runs it on its
-    worker and the main thread only loads it. {"metrics" | "raw" | "freq": (series by key, marker indices),
-    "threshold_steps": the metrics graph's [(tick, target), ...] from the rows' targets, or None}."""
+    """{"metrics" | "raw" | "freq": (series, marker indices), "threshold_steps": ...} from a session's stored rows: pure
+    Python, so the open builds it on its worker and the main thread only loads it."""
     metrics_series: dict[str, list[float]] = {k: [] for k in METRICS_PREVIEW_COLORS}
     for row in rows:
         for key in metrics_series:

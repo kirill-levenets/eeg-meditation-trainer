@@ -28,6 +28,7 @@ def _make_waiting_app() -> tuple[EEGMeditationApp, list]:
     app._release_wake_lock = MagicMock()
     app._stop_session_keep_alive_service = MagicMock()
     app._live_screen = MagicMock()
+    app._settings_screen = MagicMock()
     app._timer_state = MagicMock()
     app._session_manager = SessionManager()  # idle: the session starts only when data arrives
     return app, events
@@ -63,6 +64,7 @@ def test_app_init_defines_bt_wait_state(monkeypatch):
     assert app._bt_signal_start is None
 
     app._live_screen = MagicMock()  # built by build(), which runs before any UI action
+    app._settings_screen = MagicMock()
     app._timer_state = MagicMock()
     app._on_connect_cancel()  # must not raise
 

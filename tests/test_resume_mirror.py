@@ -239,6 +239,7 @@ def _make_resume_app(running: bool = True) -> EEGMeditationApp:
     )
     app._session_manager.elapsed_formatted = "1:23"
     app._live_screen = MagicMock()
+    app._settings_screen = MagicMock()
     app._ui_metrics_history = deque(maxlen=APP.GRAPH_POINTS_MAX)
     app._ui_band_history = deque(maxlen=APP.GRAPH_POINTS_MAX)
     app._ui_raw_waveform = deque(maxlen=512 * 60)

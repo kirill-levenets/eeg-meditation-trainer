@@ -1,6 +1,7 @@
 """UI-callback settings writes: continuous inputs write once they settle; a DB error is never fatal."""
 
 import sqlite3
+from collections import deque
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -49,6 +50,7 @@ def _make_app(monkeypatch):
     app._session_manager = SessionManager()
     app._session_program_active = False
     app._settings_screen = MagicMock(threshold=180)
+    app._ui_metrics_history, app._ui_band_history, app._ui_raw_waveform = deque(), deque(), deque()
     return app, triggers, reports
 
 

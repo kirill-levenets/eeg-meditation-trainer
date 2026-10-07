@@ -21,8 +21,8 @@
    it once you let go: the sound, the stats and
    the SHAMATHA badge follow it, and the graph's
    dashed line steps there. In a program the
-   segments set the targets: a moved slider is
-   saved for your next session
+   segments set the targets: the threshold is
+   locked until it stops
 
 ## Connection Troubleshooting
 
