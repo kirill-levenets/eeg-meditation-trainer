@@ -223,6 +223,18 @@ Each segment row has a Feedback picker
 uses the global Audio setting. The source
 switches at each segment boundary.
 
+## Try Another Threshold (session detail)
+
+Open a session in History. Under its stats,
+Try another threshold shows the time above
+threshold and the longest streak at another
+threshold: move the slider (or -/+) and both
+are recalculated from the session's recorded
+data; the graph's dashed line follows. Reset
+goes back to the session as recorded. Nothing
+is saved.
+Not yet available for program sessions.
+
 ## Custom Formulas
 
 Settings → Custom Formula has three named slots.

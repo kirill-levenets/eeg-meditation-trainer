@@ -36,6 +36,7 @@ from app.ui.theme import (
 )
 from app.ui.widgets.band_totals import BandTotalsView
 from app.ui.widgets.legend import LegendBar
+from app.ui.widgets.what_if import WhatIfPanel
 
 METRICS_PREVIEW_COLORS = {
     "meditation_score": (0.2, 0.6, 1.0, 1.0),
@@ -254,6 +255,11 @@ class DiaryScreen(Screen):
         self._detail_rows: list[tuple[ThemedLabel, ThemedLabel]] = []  # (title, value) of the rows shown, in order
         self._set_detail_rows([])
         self._detail_layout.add_widget(self._stats_grid)
+
+        # What if the session had run against another threshold (#50): view only.
+        self._what_if = WhatIfPanel(on_threshold=self._on_what_if_threshold)
+        self._recorded_steps = None  # the metrics graph's line as recorded, which Reset puts back
+        self._detail_layout.add_widget(self._what_if)
 
         # Per-band total power over the whole session
         band_header = ThemedLabel(
@@ -499,6 +505,27 @@ class DiaryScreen(Screen):
         self._load_failed = True
         self._show_band_section()
         self._switch_graph_tab(self._active_graph_tab)
+        if "what_if" not in self._ready:
+            self._what_if.show_load_failed()
+
+    def set_what_if(self, ticks, session: dict) -> None:
+        """Give the what-if panel the session's scored ticks (None: it can't rescore it), once its graphs are in: the
+        metrics graph's line is then the recorded one, which Reset puts back."""
+        recorded = dict(session_score_rows(session))
+        self._recorded_steps = self._metrics_graph.threshold_steps
+        unavailable = ("Not available for program sessions yet." if session.get("session_program")
+                       else "This session's formula can't be replayed.")
+        self._what_if.set_session(ticks, float(session.get("threshold_used") or 0),
+                                  recorded.get("Threshold") or recorded.get("Threshold Used", ""), unavailable)
+        self._ready.add("what_if")
+
+    def show_what_if_failed(self) -> None:
+        self._what_if.show_load_failed()
+        self._ready.add("what_if")
+
+    def _on_what_if_threshold(self, value: float | None) -> None:
+        """The metrics graph's dashed line follows the what-if, and goes back to the recorded one on Reset."""
+        self._metrics_graph.set_threshold_steps([(0, value)] if value is not None else self._recorded_steps)
 
     def set_band_totals(self, totals: dict[str, float]) -> None:
         """Populate the per-band session power breakdown."""
@@ -569,6 +596,7 @@ class DiaryScreen(Screen):
         self._session_formula_series = {}
         self._ready = set()  # graphs and band totals: "Loading…" until their data arrives
         self._load_failed = False
+        self._what_if.show_loading()
         self._show_band_section()
         self._switch_graph_tab("metrics")
 

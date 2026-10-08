@@ -209,3 +209,32 @@ def test_threshold_value_at_steps():
     assert g.threshold_value_at(5000) == 90.0
     g.set_threshold_steps(None)
     assert g.threshold_value_at(0) is None
+
+
+def _threshold_ys(g) -> tuple[list[float], float, float]:
+    """The y of every threshold dash the graph drew, and its plot area's bottom and top (its outer grid lines)."""
+    from app.ui.theme import C
+    ys, grid, colour = [], [], None
+    for ins in g._gfx.children:
+        if ins.__class__.__name__ in ("Color", "ThemedColor"):
+            colour = tuple(round(v, 3) for v in ins.rgba)
+        elif ins.__class__.__name__ == "Line":
+            pts = list(ins.points)[1::2]
+            if colour == tuple(round(v, 3) for v in C.THRESHOLD_LINE):
+                ys += pts
+            elif colour == tuple(round(v, 3) for v in C.GRAPH_GRID):
+                grid += pts
+    return ys, min(grid), max(grid)
+
+
+def test_a_threshold_below_zero_is_drawn_on_the_graphs_floor_like_its_values():
+    # Values below 0 are drawn on the floor; a threshold there must not fall under the graph.
+    from app.ui.raw_eeg_screen import ScrollableGraphWidget
+    g = ScrollableGraphWidget(colors={"a": (1, 1, 1, 1)}, scales={"a": 100}, size=(400, 200), pos=(0, 0))
+    for v in (-40.0, 10.0, 60.0):
+        g.add_point({"a": v})
+    for draw in (lambda: g.set_threshold(-30.0), lambda: g.set_threshold_steps([(0, -30.0)])):
+        draw()
+        ys, bottom, top = _threshold_ys(g)
+        assert ys
+        assert all(bottom <= y <= top for y in ys), (ys, bottom)

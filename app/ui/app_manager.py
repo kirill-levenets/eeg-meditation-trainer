@@ -38,6 +38,7 @@ from app.session.manager import SessionManager, SessionState
 from app.session.scoring import target_steps
 from app.session.session_program import SessionProgram
 from app.session.timer_state import TimerState
+from app.session.what_if import scored_ticks
 from app.settings.registry import BOOL, FLOAT, INT, STR, Setting, SettingsStore
 from app.storage import android_saf as _saf
 from app.storage import backup as _backup
@@ -3141,7 +3142,15 @@ class EEGMeditationApp(App):
                 d.set_session_formulas(series, names)  # the formula lines' names, before their graph
             d.fill_graph(section, data)
 
-        self._on_main(lambda: self._fill_detail(token, [lambda s=s: fill(s) for s in d.graph_fill_order()]))
+        try:
+            ticks = scored_ticks(session, rows, series)
+            what_if = lambda: d.set_what_if(ticks, session)
+        except Exception:  # broad on purpose: a row it can't score must not take the graphs down with it
+            logger.exception(f"What-if scoring failed for session {session_id}")
+            what_if = d.show_what_if_failed
+
+        self._on_main(lambda: self._fill_detail(token, [*(lambda s=s: fill(s) for s in d.graph_fill_order()),
+                                                        what_if]))
 
     def _fill_detail(self, token: int, steps: list) -> None:
         """Run one step per frame, so no frame holds them all, while this open is the detail on screen: after Back,
