@@ -871,6 +871,20 @@ def paint_panel(widget) -> None:
     widget.bind(pos=_place, size=_place)
 
 
+class FoldChevron(StyledButton):
+    """The chevron that folds a section away: down open, right folded (the accordion's), "Hide"/"Show" with no icon font.
+    40 dp wide: an icon-only StyledButton narrower than ~36 dp crops its glyph to a tick."""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(text="" if ICONS_AVAILABLE else "Hide", icon=Icons.CHEVRON_DOWN, bg_color=C.BG_CARD,
+                         text_color=C.TEXT_SECONDARY, font_size=F.SMALL, size_hint_x=None, width=dp(40), **kwargs)
+
+    def show_folded(self, folded: bool) -> None:
+        self.set_icon(Icons.CHEVRON_RIGHT if folded else Icons.CHEVRON_DOWN)
+        if not ICONS_AVAILABLE:
+            self.text = "Show" if folded else "Hide"
+
+
 class Card(ThemedMixin, BoxLayout):
     """Rounded card container with subtle background."""
 

@@ -98,7 +98,7 @@ The History tab has a segmented toggle at the top: **Calendar** / **14-Day**.
 
 The selected mode is persisted per user.
 
-The chevron to the right of the **History** title folds the chart and the totals away, so the session list takes the whole screen (useful with the phone held sideways); tap it again to bring them back. A tapped day stays selected while folded, and each profile remembers whether it was folded.
+The chevron right after the **History** title folds the chart and the totals away, so the session list takes the whole screen (useful with the phone held sideways); tap it again to bring them back. A tapped day stays selected while folded, and each profile remembers whether it was folded.
 
 ### Totals
 
