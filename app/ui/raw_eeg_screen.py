@@ -194,6 +194,11 @@ class ScrollableGraphWidget(Widget):
         self._threshold_steps = list(steps) if steps else None
         self._redraw()
 
+    @property
+    def threshold_steps(self) -> list[tuple[int, float]] | None:
+        """The threshold line's steps, or None when it is one value."""
+        return list(self._threshold_steps) if self._threshold_steps else None
+
     def threshold_value_at(self, tick: int):
         """Active step value at a tick index, or None if no steps set."""
         if not self._threshold_steps:
@@ -456,7 +461,7 @@ class ScrollableGraphWidget(Widget):
             self._draw_threshold_steps(graph_x, graph_y, graph_w, graph_h,
                                        max_scale, start_idx, end_idx)
         elif self._threshold_value is not None and not self._bipolar:
-            frac_t = min(self._threshold_value / max_scale, 1.0) if max_scale > 0 else 0.0
+            frac_t = min(max(self._threshold_value, 0.0) / max_scale, 1.0) if max_scale > 0 else 0.0
             y_thresh = graph_y + frac_t * graph_h
             self._gfx.add(Color(*TC.THRESHOLD_LINE))
             dash_w = dp(6)
@@ -711,7 +716,7 @@ class ScrollableGraphWidget(Widget):
             x_right = tick_to_x(seg_end)
             if x_right <= x_left:
                 continue
-            frac = min(value / max_scale, 1.0)
+            frac = min(max(value, 0.0) / max_scale, 1.0)  # on the graph's floor and ceiling, as its values are
             y = graph_y + frac * graph_h
             self._gfx.add(Color(*TC.THRESHOLD_LINE))
             x_cur = x_left
