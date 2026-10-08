@@ -508,24 +508,32 @@ class DiaryScreen(Screen):
         if "what_if" not in self._ready:
             self._what_if.show_load_failed()
 
+    @property
+    def what_if(self) -> WhatIfPanel:
+        return self._what_if
+
     def set_what_if(self, ticks, session: dict) -> None:
         """Give the what-if panel the session's scored ticks (None: it can't rescore it), once its graphs are in: the
         metrics graph's line is then the recorded one, which Reset puts back."""
-        recorded = dict(session_score_rows(session))
         self._recorded_steps = self._metrics_graph.threshold_steps
-        unavailable = ("Not available for program sessions yet." if session.get("session_program")
-                       else "This session's formula can't be replayed.")
-        self._what_if.set_session(ticks, float(session.get("threshold_used") or 0),
-                                  recorded.get("Threshold") or recorded.get("Threshold Used", ""), unavailable)
+        if ticks is not None and session.get("session_program"):
+            note = "Each segment starts at its recorded target · nothing is saved"
+            titles = [f"{s.index + 1} · {s.name or SERIES_NAMES.get(s.key, s.key)} · recorded {s.target:g}"
+                      for s in ticks.segments]
+        else:
+            recorded = dict(session_score_rows(session))
+            note = f"Recorded at {recorded.get('Threshold') or recorded.get('Threshold Used', '')} · nothing is saved"
+            titles = None
+        self._what_if.set_session(ticks, note, titles, "This session can't be replayed.")
         self._ready.add("what_if")
 
     def show_what_if_failed(self) -> None:
         self._what_if.show_load_failed()
         self._ready.add("what_if")
 
-    def _on_what_if_threshold(self, value: float | None) -> None:
+    def _on_what_if_threshold(self, steps: list[tuple[int, float]] | None) -> None:
         """The metrics graph's dashed line follows the what-if, and goes back to the recorded one on Reset."""
-        self._metrics_graph.set_threshold_steps([(0, value)] if value is not None else self._recorded_steps)
+        self._metrics_graph.set_threshold_steps(steps if steps is not None else self._recorded_steps)
 
     def set_band_totals(self, totals: dict[str, float]) -> None:
         """Populate the per-band session power breakdown."""
