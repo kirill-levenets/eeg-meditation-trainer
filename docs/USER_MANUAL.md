@@ -98,7 +98,7 @@ The History tab has a segmented toggle at the top: **Calendar** / **14-Day**.
 
 The selected mode is persisted per user.
 
-The chevron to the right of the **History** title folds the chart and the totals away, so the session list takes the whole screen (useful with the phone held sideways); tap it again to bring them back. A tapped day stays selected while folded, and each profile remembers whether it was folded.
+The chevron right after the **History** title folds the chart and the totals away, so the session list takes the whole screen (useful with the phone held sideways); tap it again to bring them back. A tapped day stays selected while folded, and each profile remembers whether it was folded.
 
 ### Totals
 
@@ -138,7 +138,7 @@ Opens as soon as you tap the session: its stats and notes are there at once, and
 - **Raw EEG** — synthesized waveform from stored band powers
 - **Frequencies** — band power chart
 
-**Try another threshold** (under the stats): what Time Above Threshold and Longest Streak would have been at another threshold. Move the slider (or −/+ by 5) and both are recalculated from the session's own recorded data, and the Metrics graph's dashed line moves with it; **Reset** goes back to the session as recorded — the line under the title says what that was ("Recorded at 70", or "70 › 85" when the threshold was moved during it). One threshold applies to the whole session. It's only a view: nothing about the session changes, and reopening it starts as recorded again. Not yet available for program sessions.
+**Try another threshold** (under the stats): what Time Above Threshold and Longest Streak would have been at another threshold. Move the slider (or −/+ by 5) and both are recalculated from the session's own recorded data, and the Metrics graph's dashed line moves with it; **Reset** goes back to the session as recorded — the line under the title says what that was ("Recorded at 70", or "70 › 85" when the threshold was moved during it). One threshold applies to the whole session. A **program** session gets one slider per segment instead, each titled with its number, metric and recorded target and followed by that segment's own time above threshold and streak; the **Whole session** totals come after them, and a streak running from one segment into the next counts there as one, as it did live. Moving a segment's slider changes only that segment (and the totals) and only its part of the graph's line. It's only a view: nothing about the session changes, and reopening it starts as recorded again. The chevron right after its title folds it away (Reset stays beside it); the app remembers that for each profile.
 
 **Notes, tags and mood** save with **Save Notes** ("Notes saved"). An edit you don't save is saved for you when you leave the session — **Back**, another tab, or the app going to the background — with the same "Notes saved". Opening a session and leaving without a change writes nothing, and leaving saves only what you changed, so it never rates a session you haven't rated — **Save Notes** saves what the screen shows, mood included.
 

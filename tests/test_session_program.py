@@ -1,4 +1,8 @@
-from app.session.session_program import SessionProgram
+from app.session.session_program import (
+    SessionProgram,
+    program_evaluators,
+    segment_target,
+)
 
 
 def _prog():
@@ -63,3 +67,16 @@ def test_time_above_threshold_follows_active_goal():
     assert sm.compute_statistics()["time_above_threshold"] == 0  # 0.5s rounds to int 0
     sm.add_metric({"meditation_score": 0, "shamatha_score": 0, "custom_formula": 90})
     assert sm._time_above_threshold == 1.0  # two ticks @ 0.5s above goal
+
+
+def test_program_evaluators_arm_one_per_valid_custom_formula():
+    prog = SessionProgram([{"minutes": 1, "target": 50, "formula": {"name": "ok", "formula": "100 * s_alpha1"}},
+                           {"minutes": 1, "target": 50, "formula": {"name": "bad", "formula": "100 *"}},
+                           {"minutes": 1, "target": 50, "formula": "shamatha_score"}])
+    assert list(program_evaluators(prog)) == ["program_formula"]  # "bad" is a slot with no evaluator
+
+
+def test_a_segments_target_is_a_whole_number_50_when_missing():
+    assert [segment_target(s) for s in ({"target": 72.5}, {"target": "80"}, {})] == [72, 80, 50]
+    assert [segment_target({"target": t}) for t in (None, "", "high")] == [50, 50, 50]  # unreadable: as missing
+    assert SessionProgram([{"minutes": 1, "target": 72.5}, {"minutes": 1}]).threshold_steps(2) == [(0, 72), (120, 50)]

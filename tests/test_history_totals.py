@@ -235,3 +235,8 @@ def test_resuming_onto_history_moves_today_on(history, monkeypatch):
     monkeypatch.setattr(history_screen, "_today", lambda: datetime.date(2026, 10, 12))
     a._refresh_ui_after_resume()
     assert _table(history)[0][0] == "Mon 12 Oct"
+
+
+def test_the_chevron_sits_right_after_the_title(history):
+    title, chevron = history._title, history._btn_collapse
+    assert title.width == title.texture_size[0] and 0 <= chevron.x - title.right <= dp(8)  # not pushed to the far side

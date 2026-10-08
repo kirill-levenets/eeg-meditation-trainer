@@ -36,7 +36,13 @@ from app.metrics.engine import MetricsEngine
 from app.metrics.noise_detector import PowerLineDetector
 from app.session.manager import SessionManager, SessionState
 from app.session.scoring import target_steps
-from app.session.session_program import SessionProgram
+from app.session.session_program import (
+    PROGRAM_FORMULA_KEYS,
+    SessionProgram,
+    program_evaluators,
+    program_plan,
+    segment_target,
+)
 from app.session.timer_state import TimerState
 from app.session.what_if import scored_ticks
 from app.settings.registry import BOOL, FLOAT, INT, STR, Setting, SettingsStore
@@ -80,8 +86,6 @@ from app.ui.widgets.user_picker import UserPickerForm
 from app.ui.wizard_screen import WizardScreen
 
 FORMULA_KEYS: tuple[str, ...] = ("custom_formula", "custom_formula_2", "custom_formula_3")
-# Program-driven custom-formula lines: one per distinct custom formula in a program.
-PROGRAM_FORMULA_KEYS: tuple[str, ...] = ("program_formula", "program_formula_2", "program_formula_3")
 _MAX_FORMULAS = len(FORMULA_KEYS)
 _BACKUP_SOUND_NOTE = "Custom sound files are not included in a backup."
 
@@ -334,37 +338,6 @@ class EEGMeditationApp(App):
         return SessionProgram(self._session_program_segments)
 
     @staticmethod
-    def _program_plan(prog):
-        """Map a program to its live series. Returns (program_keys, custom_slots,
-        segment_keys): the set of series to show, an ordered list of (slot_key,
-        custom_dict) for each DISTINCT custom formula (capped at PROGRAM_FORMULA_KEYS),
-        and the metric key driven by each segment (built-in key or its custom's slot)."""
-        builtins: set[str] = set()
-        custom_slots: list[tuple] = []         # (slot_key, custom_dict)
-        ident_to_slot: dict[tuple, str] = {}   # (name, formula) -> slot_key
-        segment_keys: list[str] = []
-        for seg in prog.segments:
-            f = seg.get("formula")
-            if isinstance(f, dict):
-                ident = (f.get("name"), f.get("formula"))
-                if ident in ident_to_slot:
-                    segment_keys.append(ident_to_slot[ident])
-                elif len(custom_slots) < len(PROGRAM_FORMULA_KEYS):
-                    slot = PROGRAM_FORMULA_KEYS[len(custom_slots)]
-                    custom_slots.append((slot, f))
-                    ident_to_slot[ident] = slot
-                    segment_keys.append(slot)
-                else:  # > 3 distinct customs (implausible): reuse the last slot
-                    segment_keys.append(custom_slots[-1][0])
-            elif isinstance(f, str) and f:
-                builtins.add(f)
-                segment_keys.append(f)
-            else:
-                segment_keys.append("shamatha_score")
-        keys = set(builtins) | {s for s, _ in custom_slots}
-        return keys, custom_slots, segment_keys
-
-    @staticmethod
     def _source_spec(source_id: str) -> tuple[str, str]:
         """Map a feedback source id to (kind, custom_path); non-builtin ids are custom file paths.
         "" / "none" -> the silent sentinel (no player is instantiated for it)."""
@@ -427,7 +400,7 @@ class EEGMeditationApp(App):
         custom line `Program: <name>`. Returns the (slot_key, custom_dict) list. Shared by
         the running session (`_show_program_series`) and the idle preview."""
         graph = self._live_screen.graph
-        keys, custom_slots, _ = self._program_plan(prog)
+        keys, custom_slots, _ = program_plan(prog)
         for slot, cust in custom_slots:
             nm = cust.get("name")
             graph.set_series_name(slot, f"Program: {nm}" if nm else "Program")
@@ -443,14 +416,9 @@ class EEGMeditationApp(App):
         graph = self._live_screen.graph
         # Snapshot every catalog key's visibility so stop restores exactly.
         self._program_prev_visibility = {k: graph.is_visible(k) for k in graph.series_keys()}
-        custom_slots = self._apply_program_visibility(prog)
-        _, _, self._program_segment_keys = self._program_plan(prog)
-        self._program_formula_evs = {}
-        for slot, cust in custom_slots:
-            ev = CustomFormulaEvaluator()
-            ok, _ = ev.set_formula(cust.get("formula", "") or "")
-            if ok and ev.is_valid:
-                self._program_formula_evs[slot] = ev
+        self._apply_program_visibility(prog)
+        _, _, self._program_segment_keys = program_plan(prog)
+        self._program_formula_evs = program_evaluators(prog)
 
     def _program_governs_live_series(self) -> bool:
         """True when the live metrics graph's visibility is program-driven (program mode
@@ -583,7 +551,7 @@ class EEGMeditationApp(App):
         if isinstance(formula, dict) and metric_key in PROGRAM_FORMULA_KEYS:
             nm = formula.get("name")
             prog_name = f"Program: {nm}" if nm else "Program"
-        target = int(seg.get("target", 50))
+        target = segment_target(seg)
         self._program_audio_key = metric_key  # transient; never clobber the user's baseline
         self._session_manager.set_active_goal(metric_key, target)
         self._audio.set_threshold(target)
@@ -1008,6 +976,8 @@ class EEGMeditationApp(App):
         )
         self._history_screen.set_chart_collapse_callback(
             lambda _collapsed: self._persist_user_setting("history_chart_collapsed"))
+        self._diary_screen.what_if.set_collapse_callback(
+            lambda _collapsed: self._persist_user_setting("what_if_collapsed"))
         self._history_screen.set_export_sessions_callback(self._on_export_sessions_csv)
 
         self._settings_screen.set_test_timer_sound_callback(self._on_test_timer_sound)
@@ -1437,7 +1407,7 @@ class EEGMeditationApp(App):
         if self._session_program_active:
             # Program total drives the timer so auto-stop reuses the proven
             # timer-expiry path; the first segment's target seeds the threshold.
-            threshold = int(prog.segments[0].get("target", threshold))
+            threshold = segment_target(prog.segments[0])
             self._timer_state.set_enabled(True)
             self._timer_state.set_duration(max(1, int(round(prog.total_seconds / 60))))
             logger.info(f"Program session: {len(prog.segments)} segments, "
@@ -3143,7 +3113,8 @@ class EEGMeditationApp(App):
             d.fill_graph(section, data)
 
         try:
-            ticks = scored_ticks(session, rows, series)
+            ticks = scored_ticks(session, rows, series,
+                                 lambda evaluators: self._db.recompute_formula_series(session_id, evaluators, rows))
             what_if = lambda: d.set_what_if(ticks, session)
         except Exception:  # broad on purpose: a row it can't score must not take the graphs down with it
             logger.exception(f"What-if scoring failed for session {session_id}")
@@ -3816,6 +3787,8 @@ class EEGMeditationApp(App):
         add("sinking_alert", BOOL, lambda: self._audio.sinking_alert_enabled, set_sinking)
         hs = self._history_screen
         add("history_chart_collapsed", BOOL, lambda: hs.chart_collapsed, hs.set_chart_collapsed)
+        what_if = self._diary_screen.what_if
+        add("what_if_collapsed", BOOL, lambda: what_if.collapsed, what_if.set_collapsed)
         add("subtle_alert", BOOL, lambda: self._audio.subtle_alert_enabled, set_subtle)
         add("disconnect_alert", BOOL, lambda: self._audio.disconnect_alert_enabled, set_disconnect)
         add("threshold", INT, lambda: int(ss.threshold), set_threshold)

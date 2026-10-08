@@ -233,7 +233,15 @@ are recalculated from the session's recorded
 data; the graph's dashed line follows. Reset
 goes back to the session as recorded. Nothing
 is saved.
-Not yet available for program sessions.
+
+A program session has a slider per segment,
+each with its own time above and streak; the
+Whole session totals follow them. A streak
+that runs on into the next segment counts as
+one there, as it did live.
+
+The chevron after the title folds the section
+away; it stays folded for your profile.
 
 ## Custom Formulas
 

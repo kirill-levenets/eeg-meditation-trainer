@@ -36,6 +36,7 @@ from app.ui.theme import (
     CenteredTextInput,
     Divider,
     F,
+    FoldChevron,
     Icons,
     RevealBox,
     S,
@@ -567,23 +568,14 @@ class HistoryScreen(Screen):
         root = self._root
         fill_background(root, C.BG)
 
-        # Title, and the chevron that folds the chart and the totals away (the list gets their room)
-        self._title_row = BoxLayout(size_hint_y=None, height=dp(32))
-        title = ThemedLabel(
-            text="History",
-            font_size=F.H1,
-            bold=True,
-            color=C.TEXT,
-            halign="left",
-            valign="middle",
-        )
-        title.bind(size=title.setter("text_size"))
-        self._title_row.add_widget(title)
-        self._btn_collapse = StyledButton(text="" if ICONS_AVAILABLE else "Hide", icon=Icons.CHEVRON_DOWN,
-                                          bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY, font_size=F.SMALL,
-                                          size_hint_x=None, width=dp(40))
+        # Title, and right after it the chevron that folds the chart and the totals away (the list gets their room)
+        self._title_row = BoxLayout(size_hint_y=None, height=dp(32), spacing=S.GAP_SM)
+        self._title = ThemedLabel(text="History", font_size=F.H1, bold=True, color=C.TEXT, size_hint_x=None)
+        self._title.bind(texture_size=lambda w, ts: setattr(w, "width", ts[0]))
+        self._btn_collapse = FoldChevron()
         self._btn_collapse.bind(on_release=lambda *a: self._toggle_chart())
-        self._title_row.add_widget(self._btn_collapse)
+        for w in (self._title, self._btn_collapse):
+            self._title_row.add_widget(w)
         root.add_widget(self._title_row)
 
         # Graph row: graph (calendar OR bars) on the left, narrow toggle
@@ -788,9 +780,7 @@ class HistoryScreen(Screen):
                 self._root.remove_widget(self._chart_area)
             else:
                 self._root.add_widget(self._chart_area, index=self._root.children.index(self._title_row))
-        self._btn_collapse.set_icon(Icons.CHEVRON_RIGHT if collapsed else Icons.CHEVRON_DOWN)  # the accordion's
-        if not ICONS_AVAILABLE:
-            self._btn_collapse.text = "Show" if collapsed else "Hide"
+        self._btn_collapse.show_folded(collapsed)
 
     def set_chart_collapse_callback(self, cb: Callable) -> None:
         self._on_chart_collapse = cb
