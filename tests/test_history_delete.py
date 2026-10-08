@@ -97,7 +97,11 @@ def test_a_full_rebuild_starts_at_the_top(start):
         _frames(2)
         h.load_sessions(_sessions(39))
         _frames(20)
-        assert sv.scroll_y == 1 and abs(sv.effect_y.velocity) < 1 and sv.effect_y.overscroll == 0
+        # At the top: Kivy's scroll effect rounds a resting value to a whole pixel (round_value), so with a list of a
+        # fractional height the top is within a pixel of it.
+        assert abs(sv.effect_y.value - sv.effect_y.max) < 1
+        assert (1 - sv.scroll_y) * abs(sv.effect_y.max) < 1  # scroll_y agrees with the effect
+        assert abs(sv.effect_y.velocity) < 1 and sv.effect_y.overscroll == 0
     finally:
         Window.remove_widget(h)
 

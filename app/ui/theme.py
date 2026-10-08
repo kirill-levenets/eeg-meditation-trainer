@@ -663,6 +663,12 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
         card/app bg it's drawn onto. Same rule as the graph expand glyph."""
         return list(C.TEXT)[:3]
 
+    def set_icon(self, glyph: str) -> None:
+        """Swap the icon glyph (a chevron's open/folded state); a button built without an icon font shows none."""
+        self.icon = glyph
+        if self._icon_label is not None:
+            self._icon_label.text = glyph
+
     def flash_confirm(self, text="Saved", icon=None, confirm_color=None, duration=1.1):
         """Briefly morph the label/icon (and optionally the fill) to a success cue, then
         revert. Main-thread only. Reentrant: a repeat tap restarts the timer but keeps the
@@ -1135,14 +1141,14 @@ class _AccordionSection(BoxLayout):
             self._scroll.height = 0
             self._scroll.opacity = 0
             if not self._header_icon_text:
-                self._header._icon_label.text = Icons.CHEVRON_RIGHT
+                self._header.set_icon(Icons.CHEVRON_RIGHT)
         else:
             if self._content.parent is not self._scroll:
                 self._scroll.add_widget(self._content)
             self._scroll.opacity = 1
             self._update_height()
             if not self._header_icon_text:
-                self._header._icon_label.text = Icons.CHEVRON_DOWN
+                self._header.set_icon(Icons.CHEVRON_DOWN)
 
     def _recalc_height(self, *args):
         """Set section height = header + scroll content height."""
