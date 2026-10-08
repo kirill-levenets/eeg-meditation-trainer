@@ -13,6 +13,7 @@ from kivy.clock import Clock
 from kivy.graphics import Color, Line, Rectangle, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.gridlayout import GridLayout
 from kivy.uix.recycleboxlayout import RecycleBoxLayout
 from kivy.uix.recycleview import RecycleView
 from kivy.uix.recycleview.views import RecycleDataViewBehavior
@@ -21,6 +22,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
 from app.logger import logger
+from app.ui.period_totals import ALL_TIME, period_totals, periods_around, session_day
 from app.ui.session_labels import (
     session_label,
     session_notes_line,
@@ -41,7 +43,12 @@ from app.ui.theme import (
     ThemedLabel,
     confirm_popup,
     fill_background,
+    format_duration,
 )
+
+
+def _today() -> datetime.date:
+    return datetime.date.today()
 
 
 def _lerp_color(t: float):
@@ -118,7 +125,7 @@ class CalendarHeatmap(Widget):
     def _redraw(self, *args):
         self.canvas.clear()
         self._cell_positions = {}
-        today = datetime.date.today()
+        today = _today()
         # Start from WEEKS_VISIBLE weeks ago, aligned to Monday
         start = today - datetime.timedelta(days=today.weekday(), weeks=self.WEEKS_VISIBLE - 1)
         cell = self._compute_cell_size()
@@ -201,7 +208,7 @@ class CalendarHeatmap(Widget):
                 self.add_widget(lbl)
 
         # Month labels
-        today = datetime.date.today()
+        today = _today()
         current = start
         col = 0
         prev_month = -1
@@ -279,7 +286,7 @@ class Last14DaysBars(Widget):
         if self.width < 10 or self.height < 10:
             return
 
-        today = datetime.date.today()
+        today = _today()
         days = [today - datetime.timedelta(days=i) for i in range(self.DAYS - 1, -1, -1)]
 
         avail_w = max(self.width - self.PAD_LEFT - self.PAD_RIGHT, dp(10))
@@ -560,19 +567,24 @@ class HistoryScreen(Screen):
         root = self._root
         fill_background(root, C.BG)
 
-        # Title
+        # Title, and the chevron that folds the chart and the totals away (the list gets their room)
+        self._title_row = BoxLayout(size_hint_y=None, height=dp(32))
         title = ThemedLabel(
             text="History",
             font_size=F.H1,
             bold=True,
             color=C.TEXT,
-            size_hint_y=None,
-            height=dp(32),
             halign="left",
             valign="middle",
         )
         title.bind(size=title.setter("text_size"))
-        root.add_widget(title)
+        self._title_row.add_widget(title)
+        self._btn_collapse = StyledButton(text="" if ICONS_AVAILABLE else "Hide", icon=Icons.CHEVRON_DOWN,
+                                          bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY, font_size=F.SMALL,
+                                          size_hint_x=None, width=dp(40))
+        self._btn_collapse.bind(on_release=lambda *a: self._toggle_chart())
+        self._title_row.add_widget(self._btn_collapse)
+        root.add_widget(self._title_row)
 
         # Graph row: graph (calendar OR bars) on the left, narrow toggle
         # column (Cal / 14d) on the right. Row height matches the active
@@ -629,8 +641,17 @@ class HistoryScreen(Screen):
         toggle_col.add_widget(self._btn_calendar)
         toggle_col.add_widget(self._btn_bars)
         self._graph_row.add_widget(toggle_col)
+        self._toggle_col = toggle_col
 
-        root.add_widget(self._graph_row)
+        # The chart and the totals fold away together: one block, detached when folded.
+        self._chart_area = BoxLayout(orientation="vertical", size_hint_y=None, spacing=S.GAP)
+        self._chart_area.bind(minimum_height=self._chart_area.setter("height"))
+        self._chart_area.add_widget(self._graph_row)
+        self._build_totals()
+        self._chart_area.add_widget(self._totals)
+        root.add_widget(self._chart_area)
+        root.bind(width=self._place_totals)
+        self._place_totals()
 
         # Date label + Show All button
         date_row = BoxLayout(size_hint_y=None, height=dp(28), spacing=S.GAP)
@@ -702,6 +723,88 @@ class HistoryScreen(Screen):
         root.add_widget(self._list_area)
 
         self.add_widget(root)
+        self._update_totals()
+
+    _TOTALS_ROW_H = dp(20)
+    _TOTALS_BESIDE_W = dp(290)  # its widest texts: "September 2025" and three "Best streak" columns
+    # Beside the chart once the page fits the heatmap at its smallest cells next to the table and the Cal / 14d
+    # buttons: ~670 dp, which a landscape phone of ~730 has; narrower, under the chart.
+    _TOTALS_BESIDE_FROM = (2 * S.PAGE_PAD + CalendarHeatmap.LEFT_MARGIN
+                           + CalendarHeatmap.WEEKS_VISIBLE * (CalendarHeatmap.CELL_SIZE + CalendarHeatmap.CELL_GAP)
+                           + _TOTALS_BESIDE_W + dp(40) + 2 * dp(4))
+
+    def _build_totals(self) -> None:
+        """The Day / Week / Month / All time totals table, built once: _update_totals fills its cells."""
+        def cell(text: str = "", first: bool = False, muted: bool = False) -> ThemedLabel:
+            label = ThemedLabel(text=text, font_size=F.SMALL, color=C.TEXT_SECONDARY if muted else C.TEXT,
+                                halign="left" if first else "right", valign="middle", shorten=True,
+                                shorten_from="right", size_hint_x=1.5 if first else 1.0)
+            label.bind(size=label.setter("text_size"))
+            return label
+
+        self._totals = GridLayout(cols=4, size_hint_y=None, height=5 * self._TOTALS_ROW_H, spacing=(dp(6), 0),
+                                  row_default_height=self._TOTALS_ROW_H, row_force_default=True, pos_hint={"top": 1})
+        self._totals_header = [cell(text, first=not text, muted=True)
+                               for text in ("", "Total", "On target", "Best streak")]
+        self._totals_rows = [[cell(first=True), cell(), cell(), cell()] for _ in range(4)]
+        for label in self._totals_header + [label for row in self._totals_rows for label in row]:
+            self._totals.add_widget(label)
+
+    def _update_totals(self) -> None:
+        """The rows: the tapped day's day, week and month (today's when no day is tapped), then all time."""
+        today = _today()
+        day = datetime.date.fromisoformat(self._filtered_date) if self._filtered_date else today
+        for row, (label, start, end) in zip(self._totals_rows, [*periods_around(day, today), ALL_TIME]):
+            totals = period_totals(self._sessions, start, end)
+            row[0].text = label
+            for cell, seconds in zip(row[1:], (totals.seconds, totals.on_target, totals.best_streak)):
+                cell.text = format_duration(seconds) if totals.sessions else "–"
+
+    def _place_totals(self, *_a) -> None:
+        """Under the chart on a phone held upright; beside it held sideways, where under it the list had no room."""
+        beside = self._root.width >= self._TOTALS_BESIDE_FROM
+        parent = self._graph_row if beside else self._chart_area
+        if self._totals.parent is parent:
+            return
+        if self._totals.parent is not None:
+            self._totals.parent.remove_widget(self._totals)
+        if beside:
+            self._totals.size_hint_x, self._totals.width = None, self._TOTALS_BESIDE_W
+            self._graph_row.add_widget(self._totals, index=1)  # between the chart and the Cal / 14d buttons
+        else:
+            self._totals.size_hint_x = 1
+            self._chart_area.add_widget(self._totals)  # under the chart
+
+    _on_chart_collapse: Optional[Callable] = None
+
+    @property
+    def chart_collapsed(self) -> bool:
+        return self._chart_area.parent is None
+
+    def set_chart_collapsed(self, collapsed: bool) -> None:
+        """Fold the chart and the totals away, detached, or bring them back under the title."""
+        if collapsed != self.chart_collapsed:
+            if collapsed:
+                self._root.remove_widget(self._chart_area)
+            else:
+                self._root.add_widget(self._chart_area, index=self._root.children.index(self._title_row))
+        self._btn_collapse.set_icon(Icons.CHEVRON_RIGHT if collapsed else Icons.CHEVRON_DOWN)  # the accordion's
+        if not ICONS_AVAILABLE:
+            self._btn_collapse.text = "Show" if collapsed else "Hide"
+
+    def set_chart_collapse_callback(self, cb: Callable) -> None:
+        self._on_chart_collapse = cb
+
+    def _toggle_chart(self) -> None:
+        self.set_chart_collapsed(not self.chart_collapsed)
+        if self._on_chart_collapse:
+            self._on_chart_collapse(self.chart_collapsed)
+
+    _drawn_for: datetime.date | None = None  # the "today" the chart and the totals were last drawn for
+
+    def on_pre_enter(self, *_a) -> None:
+        if _today() != self._drawn_for:  # the day moved on since the list was drawn: the chart and the totals follow
+            self._set_day_data()
 
     def set_callbacks(
         self,
@@ -796,6 +899,7 @@ class HistoryScreen(Screen):
         """
         if self._root.parent is not None:
             self._root.do_layout()
+        self._chart_area.do_layout()
         self._graph_row.do_layout()
         self._graph_wrap.do_layout()
 
@@ -891,12 +995,14 @@ class HistoryScreen(Screen):
         """Calendar and bars both show each day's average shamatha over the model's sessions."""
         day_scores: dict[str, list[float]] = {}
         for s in self._sessions:
-            dt_str = s.get("date_time", "")
-            if len(dt_str) >= 10:
-                day_scores.setdefault(dt_str[:10], []).append(s.get("avg_shamatha", 0) or 0)
+            day = session_day(s)
+            if len(day) == 10:
+                day_scores.setdefault(day, []).append(s.get("avg_shamatha", 0) or 0)
         day_avg = {day: sum(scores) / len(scores) for day, scores in day_scores.items()}
+        self._drawn_for = _today()
         self._heatmap.set_data(day_avg)
         self._bars.set_data(day_avg)
+        self._update_totals()
 
     def _on_day_tap(self, date_str: str) -> None:
         """Filter sessions to the tapped day. Tap again to reset."""
@@ -914,9 +1020,10 @@ class HistoryScreen(Screen):
             view._redraw()
         self._btn_show_all.opacity = 1 if date_str else 0
         self._btn_show_all.disabled = not date_str
+        self._update_totals()
 
     def _show_day(self, date_str: str) -> None:
-        day_sessions = [s for s in self._sessions if s.get("date_time", "")[:10] == date_str]
+        day_sessions = [s for s in self._sessions if session_day(s) == date_str]
         try:
             nice_date = datetime.date.fromisoformat(date_str).strftime("%B %d, %Y")
         except (ValueError, TypeError):
@@ -986,7 +1093,8 @@ class HistoryScreen(Screen):
         logger.info(
             f"History list {tag}: sessions={len(rv.data)} row_widgets={views} list_h={rv.layout_manager.height:.0f} "
             f"viewport_h={rv.height:.0f} scroll_y={rv.scroll_y:.3f} effect={ey.value:.1f} "
-            f"bounds=({ey.min:.1f},{ey.max:.1f}) v={ey.velocity:.1f}"
+            f"bounds=({ey.min:.1f},{ey.max:.1f}) v={ey.velocity:.1f} chart_h={self._graph_row.height:.0f} "
+            f"chart_w={self._heatmap.width:.0f} page_h={self._root.height:.0f}"
         )
 
     # ── Inline rename: one editor, shown under the row of the session being renamed ──
@@ -1063,7 +1171,7 @@ class HistoryScreen(Screen):
         if len(session_ids) == 1:
             what = f'Delete session\n"{session_title(sessions[0])}"?' if sessions else "Delete this session?"
         else:
-            days = sorted({s.get("date_time", "")[:10] for s in sessions})
+            days = sorted({session_day(s) for s in sessions})
             span = "" if not days else f" on {days[0]}" if len(days) == 1 else f" from {days[0]} to {days[-1]}"
             what = f"Delete {len(session_ids)} sessions{span}?"
             profiles = {s.get("user_id") for s in sessions} - {None}

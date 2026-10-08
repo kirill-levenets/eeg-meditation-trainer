@@ -1005,6 +1005,8 @@ class EEGMeditationApp(App):
         self._history_screen.set_view_mode_callback(
             self._on_history_view_mode_change,
         )
+        self._history_screen.set_chart_collapse_callback(
+            lambda _collapsed: self._persist_user_setting("history_chart_collapsed"))
         self._history_screen.set_export_sessions_callback(self._on_export_sessions_csv)
 
         self._settings_screen.set_test_timer_sound_callback(self._on_test_timer_sound)
@@ -3803,6 +3805,8 @@ class EEGMeditationApp(App):
         add("timer_minutes", INT, lambda: ss.timer_minutes, set_timer_minutes)
         add("timer_sound", STR, lambda: ss.timer_sound_path, set_timer_sound)
         add("sinking_alert", BOOL, lambda: self._audio.sinking_alert_enabled, set_sinking)
+        hs = self._history_screen
+        add("history_chart_collapsed", BOOL, lambda: hs.chart_collapsed, hs.set_chart_collapsed)
         add("subtle_alert", BOOL, lambda: self._audio.subtle_alert_enabled, set_subtle)
         add("disconnect_alert", BOOL, lambda: self._audio.disconnect_alert_enabled, set_disconnect)
         add("threshold", INT, lambda: int(ss.threshold), set_threshold)
@@ -4044,6 +4048,8 @@ class EEGMeditationApp(App):
         refresh the stats/state/timer labels from the latest sample.
         """
         t_start = time.monotonic()
+        if getattr(getattr(self, "_sm", None), "current", None) == "history":
+            self._history_screen.on_pre_enter()  # resumed onto it on another day: the chart and the totals move on
         if self._session_manager.state != SessionState.RUNNING:
             logger.info("on_resume: session not RUNNING → skipping graph reload")
             return

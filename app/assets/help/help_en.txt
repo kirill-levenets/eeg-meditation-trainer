@@ -107,6 +107,24 @@ Configure in Audio section above
 Change in Theme section above.
 Takes effect immediately.
 
+## History
+
+Tap a day in the calendar (or the 14-day bars)
+to list its sessions; tap it again or Show All
+to list every session.
+
+The table under the chart sums the day, its
+week (Monday to Sunday) and its month - today's,
+or the day you tapped - and all time:
+- Total: how long you meditated
+- On target: time at or above the threshold,
+  each session against its own target
+- Best streak: the longest run above it
+
+The chevron next to the History title folds
+the chart and the table away, so the list gets
+the whole screen; tap it again to unfold.
+
 ## About
 
 EEG Meditation Trainer v1.4.0

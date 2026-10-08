@@ -98,6 +98,17 @@ The History tab has a segmented toggle at the top: **Calendar** / **14-Day**.
 
 The selected mode is persisted per user.
 
+The chevron to the right of the **History** title folds the chart and the totals away, so the session list takes the whole screen (useful with the phone held sideways); tap it again to bring them back. A tapped day stays selected while folded, and each profile remembers whether it was folded.
+
+### Totals
+
+Under the chart (beside it with the phone held sideways), a small table sums your sessions for the **day**, its **week** (Monday to Sunday, as in the calendar) and its **month**, for today or for the day you tapped, and for **All time** (every session, whichever day is shown):
+- **Total**: how long you meditated.
+- **On target**: time at or above the threshold, each session against its own target (a program's segments, or a threshold you moved, included). Sessions recorded before the app saved which metric they were scored on measured it on Meditation.
+- **Best streak**: the longest unbroken run above the threshold in any one session of the period.
+
+A period without sessions shows "–". Tap another day to see its periods; tap it again or **Show All** to go back to today.
+
 ### Day Filter
 
 In either view, tap a day (cell or bar) to filter the session list below to that date. Tap the same day again (or **Show All**) to reset.
