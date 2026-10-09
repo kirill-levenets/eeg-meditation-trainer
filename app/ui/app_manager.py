@@ -2412,8 +2412,9 @@ class EEGMeditationApp(App):
         is_live = graph is self._live_screen.graph
         rows = []
         for key in graph.series_keys():
-            if key in PROGRAM_FORMULA_KEYS and not (is_live and self._session_program_active):
-                continue  # program-controlled: only listed while its program runs
+            if key in PROGRAM_FORMULA_KEYS and not (is_live and self._session_program_active
+                                                     and key in self._program_formula_evs):
+                continue  # program-controlled: listed only while its program runs and computes it
             vis = graph.is_visible(key)
             btn = StyledButton(
                 text=graph.series_name(key), height=dp(44),

@@ -1,5 +1,6 @@
 
 import time
+from types import MappingProxyType
 
 from kivy.app import App
 from kivy.clock import Clock
@@ -102,8 +103,8 @@ METRICS_SCALES = {
     "program_formula_3": 200.0,
 }
 
-# Friendly labels for the on-graph series picker (combobox).
-SERIES_NAMES = {
+# Friendly labels for the on-graph series picker (combobox): the defaults every metrics graph starts from.
+SERIES_NAMES = MappingProxyType({
     "shamatha_score": "Shamatha",
     "meditation_score": "Meditation",
     "distraction": "Distraction",
@@ -117,7 +118,7 @@ SERIES_NAMES = {
     "program_formula": "Program",
     "program_formula_2": "Program 2",
     "program_formula_3": "Program 3",
-}
+})
 
 
 def _compute_graph_height(viewport_h: float, floor_dp: float) -> float:
@@ -434,7 +435,7 @@ class LiveSessionScreen(Screen):
             auto_scale=True,
             size_hint_y=0.5,
             graph_id="live_band",
-            names=dict(GROUP_NAMES),  # its own copy: a rename never reaches the shared table
+            names=GROUP_NAMES,
         )
         self._raw_container.add_widget(self._band_graph)
 

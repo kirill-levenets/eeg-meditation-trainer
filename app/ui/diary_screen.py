@@ -444,7 +444,7 @@ class DiaryScreen(Screen):
             auto_scale=True,
             size_hint_y=1,
             graph_id="diary_freq",
-            names=dict(GROUP_NAMES),  # its own copy: a rename never reaches the shared table
+            names=GROUP_NAMES,
         )
         # Legend tracks the active graph's visible set; a picker toggle (or a
         # restore) on the displayed graph rebuilds it.

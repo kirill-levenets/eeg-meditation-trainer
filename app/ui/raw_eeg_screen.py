@@ -149,7 +149,7 @@ class ScrollableGraphWidget(Widget):
         # Stable identity for per-graph persistence (graph_series_<graph_id>)
         # and friendly labels for the series picker / legends.
         self._graph_id: str = graph_id
-        self._names: dict[str, str] = names or {}
+        self._names: dict[str, str] = dict(names or {})  # its own: a rename never reaches another graph
         self._bipolar: bool = bipolar
         self._auto_scale: bool = auto_scale
         self._grid_step: float = grid_step
