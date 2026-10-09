@@ -9,6 +9,7 @@ import struct
 import types
 import weakref
 import zlib
+from collections.abc import Callable
 
 from kivy.animation import Animation
 from kivy.clock import Clock
@@ -883,6 +884,42 @@ class FoldChevron(StyledButton):
         self.set_icon(Icons.CHEVRON_RIGHT if folded else Icons.CHEVRON_DOWN)
         if not ICONS_AVAILABLE:
             self.text = "Show" if folded else "Hide"
+
+
+class RenameRow(BoxLayout):
+    """The inline name editor under a list's row: a field and Save (or Enter) calling `on_save`; its owner places it.
+    `max_length` stops the field there while typing."""
+
+    def __init__(self, on_save: Callable[[], None], max_length: int = 0, **kwargs) -> None:
+        kwargs.setdefault("size_hint_y", None)
+        kwargs.setdefault("height", dp(40))
+        kwargs.setdefault("spacing", S.GAP_SM)
+        kwargs.setdefault("padding", [0, dp(2)])
+        super().__init__(**kwargs)
+        self.input = CenteredTextInput(font_size=F.BODY, foreground_color=C.TEXT, background_color=C.BG_INPUT,
+                                       cursor_color=C.PRIMARY, multiline=False, write_tab=False, size_hint_x=1)
+        if max_length:
+            self.input.input_filter = lambda text, _undo: text[:max(0, max_length - len(self.input.text))]
+        # 84 dp: the button's 2 x 12 dp padding and 26 dp icon leave 34 dp, room for "Save" on one line.
+        save = StyledButton(text="Save", icon=Icons.CHECK, bg_color=C.ACCENT, font_size=F.SMALL,
+                            size_hint_x=None, width=dp(84), size_hint_y=1)
+        self.add_widget(self.input)
+        self.add_widget(save)
+        save.bind(on_release=lambda *_a: on_save())
+        self.input.bind(on_text_validate=lambda *_a: on_save())
+
+    def focus_soon(self) -> None:
+        # A tap's own touch-up unfocuses every input it didn't land on (the pencil's tap too): focus a frame later.
+        Clock.schedule_once(self._focus_if_shown)
+
+    def _focus_if_shown(self, _dt) -> None:
+        if self.parent is not None:  # closed in between: a keyboard for a field nobody sees
+            self.input.focus = True
+
+    def close(self) -> None:
+        self.input.focus = False
+        if self.parent is not None:
+            self.parent.remove_widget(self)
 
 
 class Card(ThemedMixin, BoxLayout):

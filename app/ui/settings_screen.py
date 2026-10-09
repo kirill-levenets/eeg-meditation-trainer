@@ -14,6 +14,7 @@ from kivy.uix.slider import Slider
 
 from app.config import APP, METRICS
 from app.logger import logger
+from app.ui.device_labels import MAX_DEVICE_ALIAS, device_row_text
 from app.ui.theme import (
     THEMES,
     C,
@@ -22,6 +23,7 @@ from app.ui.theme import (
     F,
     Icons,
     PresetRow,
+    RenameRow,
     S,
     StyledButton,
     ThemedAccordion,
@@ -143,6 +145,12 @@ class SettingsScreen(Screen):
         self._on_device_mode_toggle: Optional[Callable] = None
         self._on_scan_devices: Optional[Callable] = None
         self._on_device_select: Optional[Callable] = None
+        self._device_state: Callable[[], tuple[str | None, str | None]] | None = None  # (selected, connected) addresses
+        self._on_device_rename: Optional[Callable] = None
+        self._bt_devices: dict[str, dict] = {}  # address -> the listed device, with the alias its user gave it
+        self._bt_rows: dict[str, StyledButton] = {}
+        self._bt_pencils: dict[str, StyledButton] = {}
+        self._bt_renaming: str | None = None
         self._on_copy_diagnostics: Optional[Callable] = None
         self._on_timer_sound_change: Optional[Callable] = None
         self._on_test_timer_sound: Optional[Callable] = None
@@ -574,6 +582,7 @@ class SettingsScreen(Screen):
         )
         self._bt_section.add_widget(self._bt_device_list)
         device_section.add_widget(self._bt_section)
+        self._build_device_rename_row()
 
         # On-demand diagnostics button — useful for users we can't reach in
         # person. Builds a copy-pasteable report with platform/device/audio
@@ -1908,6 +1917,13 @@ class SettingsScreen(Screen):
     def set_device_select_callback(self, callback: Callable) -> None:
         self._on_device_select = callback
 
+    def set_device_state_callback(self, callback: Callable[[], tuple[str | None, str | None]]) -> None:
+        self._device_state = callback
+
+    def set_device_rename_callback(self, callback: Callable) -> None:
+        """callback(address, bluetooth_name, text)"""
+        self._on_device_rename = callback
+
     def set_copy_diagnostics_callback(self, callback: Callable) -> None:
         self._on_copy_diagnostics = callback
 
@@ -1961,8 +1977,12 @@ class SettingsScreen(Screen):
         open_audio_file_chooser(lambda p: setattr(self._timer_sound_input, "text", p))
 
     def populate_bt_devices(self, devices: list) -> None:
-        """Populate the BT device list with scan results."""
+        """Populate the BT device list with scan results, each with the `alias` its user gave it."""
+        self._close_device_rename()
         self._bt_device_list.clear_widgets()
+        self._bt_devices = {dev["address"]: dict(dev) for dev in devices}
+        self._bt_rows = {}
+        self._bt_pencils = {}
         if not devices:
             lbl = ThemedLabel(
                 text="No paired devices found",
@@ -1974,18 +1994,77 @@ class SettingsScreen(Screen):
             self._bt_device_list.add_widget(lbl)
             return
         for dev in devices:
+            address = dev["address"]
+            row = BoxLayout(size_hint_y=None, height=dp(32), spacing=S.GAP_SM)
+            # Built with the link glyph so its slot exists; _mark_bt_devices shows it on the connected row only.
             btn = StyledButton(
-                text=f"{dev['name']}  ({dev['address']})",
+                text=device_row_text(dev.get("alias") or dev["name"], address),
+                icon=Icons.BLUETOOTH,
                 font_size=F.SMALL,
                 bg_color=C.BG_CARD,
-                text_color=C.TEXT,
-                size_hint_y=None,
                 height=dp(32),
             )
-            btn.bt_address = dev["address"]
+            btn.bt_address = address
             btn.bt_name = dev["name"]
             btn.bind(on_release=self._on_bt_device_pressed)
-            self._bt_device_list.add_widget(btn)
+            pencil = StyledButton(icon=Icons.PENCIL, bg_color=C.BG_CARD, text_color=C.PRIMARY, size_hint_x=None,
+                                  width=dp(40), height=dp(32))
+            pencil.bind(on_release=lambda _b, a=address: self._toggle_device_rename(a))
+            row.add_widget(btn)
+            row.add_widget(pencil)
+            self._bt_rows[address] = btn
+            self._bt_pencils[address] = pencil
+            self._bt_device_list.add_widget(row)
+        self._mark_bt_devices()
+
+    def _mark_bt_devices(self) -> None:
+        """Fill the selected headset's row and show the link on the connected one's."""
+        selected, connected = self._device_state() if self._device_state else (None, None)
+        for address, btn in self._bt_rows.items():
+            btn.bg_color = C.ACCENT if address == selected else C.BG_CARD
+            btn.set_icon(Icons.BLUETOOTH if address == connected else "")
+
+    def on_pre_enter(self, *args) -> None:
+        # The link may have dropped between sessions, with nothing on screen to report it.
+        self._mark_bt_devices()
+
+    def relabel_bt_device(self, address: str, alias: str) -> None:
+        dev = self._bt_devices.get(address)
+        if dev is None:
+            return
+        dev["alias"] = alias
+        self._bt_rows[address].text = device_row_text(alias or dev["name"], address)
+
+    def _build_device_rename_row(self) -> None:
+        self._bt_rename_row = RenameRow(self._save_device_rename, max_length=MAX_DEVICE_ALIAS)
+        self._bt_rename_input = self._bt_rename_row.input
+
+    def _toggle_device_rename(self, address: str) -> None:
+        """Open the name editor under this headset's row, or close it if it is open there."""
+        reopen = self._bt_renaming != address
+        self._close_device_rename()
+        if not reopen:
+            return
+        dev = self._bt_devices[address]
+        self._bt_renaming = address
+        self._bt_rename_input.text = dev.get("alias", "")
+        self._bt_rename_input.hint_text = dev["name"]  # blank goes back to the Bluetooth name
+        row = self._bt_rows[address].parent
+        self._bt_device_list.add_widget(self._bt_rename_row, index=self._bt_device_list.children.index(row))
+        self._bt_rename_row.focus_soon()
+
+    def _close_device_rename(self) -> None:
+        self._bt_renaming = None
+        self._bt_rename_row.close()
+
+    def _save_device_rename(self) -> None:
+        address = self._bt_renaming
+        if address is None:
+            return
+        text = self._bt_rename_input.text
+        self._close_device_rename()
+        if self._on_device_rename:
+            self._on_device_rename(address, self._bt_devices[address]["name"], text)
 
     def update_device_status(
         self, connected: bool, name: str = "", meta: str = ""
@@ -1999,6 +2078,7 @@ class SettingsScreen(Screen):
         else:
             self._device_status_label.text = "Not connected"
             self._device_status_label.color = C.DISCONNECTED
+        self._mark_bt_devices()
         if meta:
             self._device_meta_label.text = meta
         elif self._device_mode_cb.active:

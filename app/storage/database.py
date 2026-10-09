@@ -630,9 +630,9 @@ class DatabaseManager:
                 [(f"user_{user_id}_{k}", v) for k, v in items.items()],
             )
 
-    def get_user_json_setting(self, user_id: int, key: str, default=None):
-        """Get a per-user setting decoded from JSON, or `default` if absent/corrupt."""
-        raw = self.get_user_setting(user_id, key)
+    def get_json_setting(self, key: str, default=None):
+        """Get a setting decoded from JSON, or `default` if absent/corrupt."""
+        raw = self.get_setting(key)
         if not raw:
             return default
         try:
@@ -640,9 +640,17 @@ class DatabaseManager:
         except (json.JSONDecodeError, TypeError):
             return default
 
+    def set_json_setting(self, key: str, value) -> None:
+        """Persist a setting as a JSON string."""
+        self.set_setting(key, json.dumps(value))
+
+    def get_user_json_setting(self, user_id: int, key: str, default=None):
+        """Get a per-user setting decoded from JSON, or `default` if absent/corrupt."""
+        return self.get_json_setting(f"user_{user_id}_{key}", default)
+
     def set_user_json_setting(self, user_id: int, key: str, value) -> None:
         """Persist a per-user setting as a JSON string."""
-        self.set_user_setting(user_id, key, json.dumps(value))
+        self.set_json_setting(f"user_{user_id}_{key}", value)
 
     # ---- Saved formulas (per-user, max 50) ----
 

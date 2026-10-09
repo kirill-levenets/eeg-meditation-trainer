@@ -48,6 +48,17 @@ If the device won't connect:
 8. Test with manufacturer's app — if it also
    can't connect, the headset may be faulty
 
+## Several Headsets
+
+Every MindWave has the same Bluetooth name.
+In Settings > Device > Scan, each row shows the
+headset's address too: the one in use is filled
+and the connected one shows a Bluetooth sign.
+Tap the pencil on a row to name the headset;
+the Session screen and new sessions use the
+name. Switching headsets waits until the
+session stops.
+
 ## Supported Devices
 
 Any headset with NeuroSky TGAM module:

@@ -27,6 +27,7 @@ class _Stream:
         self._clock = clock
         self.is_connected = False
         self._running = True
+        self._device_address = "00:11:22:33:44:01"
         self._device_name = "MindWave Mobile"
         self._last_connect_error = ""
         self.last_packet = 0.0
