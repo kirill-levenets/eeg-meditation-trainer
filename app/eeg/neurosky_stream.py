@@ -21,6 +21,7 @@ import time
 from collections.abc import Callable
 from typing import Any, Optional
 
+from app.eeg.band_spec import BAND_KEYS
 from app.logger import logger
 
 _IS_ANDROID: bool = hasattr(sys, "getandroidapilevel")
@@ -37,7 +38,7 @@ CODE_RAW_WAVE = 0x80
 CODE_EEG_POWER_FLOAT = 0x81
 CODE_ASIC_EEG_POWER = 0x83
 
-BAND_NAMES = ("delta", "theta", "alpha1", "alpha2", "beta1", "beta2", "gamma1", "gamma2")
+BAND_NAMES = BAND_KEYS  # the order ASIC_EEG_POWER sends them
 
 NEUROSKY_SPP_UUID = "00001101-0000-1000-8000-00805F9B34FB"
 

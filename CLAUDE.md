@@ -50,7 +50,7 @@ How each subsystem works and why lives in [`docs/architecture/`](docs/architectu
 
 ### Module map
 
-- `app/eeg/` — `neurosky_stream.py` (real headset: Bluetooth RFCOMM / pyserial, ThinkGear protocol), `mock_stream_v2.py` (active mock), `mock_stream.py` (legacy), `buffer.py` (rolling buffers). → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md)
+- `app/eeg/` — `neurosky_stream.py` (real headset: Bluetooth RFCOMM / pyserial, ThinkGear protocol), `band_spec.py` (the 8 bands and 5 groups: key, name, Hz range, in protocol order), `mock_stream_v2.py` (active mock), `mock_stream.py` (legacy), `buffer.py` (rolling buffers). → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md)
 - `app/metrics/` — `engine.py` `MetricsEngine` (meditation, shamatha, distraction/sinking ported from the original Vernihor app, subtle distraction; `ENGINE_VERSION` stamped on sessions), `custom_formula.py` (AST-parsed user formulas, `avg(expr, N)`), `noise_detector.py`. → [metrics-scoring](docs/architecture/metrics-scoring.md)
 - `app/session/` — `manager.py` `SessionManager` (Start/Pause/Resume/Stop, accrual), `scoring.py` `GoalAccrual`, `session_program.py` (timed segments), `timer_state.py`, `what_if.py` (threshold recompute). → [session](docs/architecture/session.md), [programs](docs/architecture/programs.md), [metrics-scoring](docs/architecture/metrics-scoring.md)
 - `app/audio_feedback/noise.py` — `AudioEngine`: below and reward feedback channels, bell/chime/warble, timer gong; `MediaPlayer` on Android. → [audio](docs/architecture/audio.md)

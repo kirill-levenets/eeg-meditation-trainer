@@ -12,6 +12,7 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.slider import Slider
 
 from app.config import APP
+from app.eeg.band_spec import GROUP_NAMES, group_powers
 from app.logger import logger, timed
 from app.session.scoring import recorded_score, target_steps
 from app.session.session_program import SessionProgram
@@ -172,11 +173,8 @@ def detail_graph_data(rows: list[dict], formula_series: dict[str, list[float]]) 
 
     freq_series: dict[str, list[float]] = {k: [] for k in FREQ_PREVIEW_COLORS}
     for row in rows:
-        freq_series["alpha"].append(row.get("alpha1_raw", 0.0) + row.get("alpha2_raw", 0.0))
-        freq_series["beta"].append(row.get("beta1_raw", 0.0) + row.get("beta2_raw", 0.0))
-        freq_series["gamma"].append(row.get("gamma1_raw", 0.0) + row.get("gamma2_raw", 0.0))
-        freq_series["theta"].append(row.get("theta_raw", 0.0))
-        freq_series["delta"].append(row.get("delta_raw", 0.0))
+        for key, power in group_powers(lambda k: row.get(f"{k}_raw", 0.0)).items():
+            freq_series[key].append(power)
 
     markers = [i for i, row in enumerate(rows) if row.get("marker", 0)]
     # The raw graph holds only the tail (from raw_start): its markers are offset to it.
@@ -444,6 +442,7 @@ class DiaryScreen(Screen):
             auto_scale=True,
             size_hint_y=1,
             graph_id="diary_freq",
+            names=dict(GROUP_NAMES),  # its own copy: a rename never reaches the shared table
         )
         # Legend tracks the active graph's visible set; a picker toggle (or a
         # restore) on the displayed graph rebuilds it.

@@ -15,6 +15,7 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
+from app.eeg.band_spec import BAND_KEYS, GROUP_NAMES, group_powers
 from app.ui.raw_eeg_screen import (
     GraphAwareScrollView,
     RawEEGScreen,
@@ -433,6 +434,7 @@ class LiveSessionScreen(Screen):
             auto_scale=True,
             size_hint_y=0.5,
             graph_id="live_band",
+            names=dict(GROUP_NAMES),  # its own copy: a rename never reaches the shared table
         )
         self._raw_container.add_widget(self._band_graph)
 
@@ -815,23 +817,8 @@ class LiveSessionScreen(Screen):
         if waveform:
             self._raw_graph.add_points_batch("eeg", waveform)
         else:
-            eeg_sum = sum(
-                sample.get(k, 0.0)
-                for k in ("delta", "theta", "alpha1", "alpha2",
-                          "beta1", "beta2", "gamma1", "gamma2")
-            )
-            self._raw_graph.add_point({"eeg": eeg_sum})
-
-        alpha = sample.get("alpha1", 0.0) + sample.get("alpha2", 0.0)
-        beta = sample.get("beta1", 0.0) + sample.get("beta2", 0.0)
-        gamma = sample.get("gamma1", 0.0) + sample.get("gamma2", 0.0)
-        self._band_graph.add_point({
-            "alpha": alpha,
-            "beta": beta,
-            "gamma": gamma,
-            "theta": sample.get("theta", 0.0),
-            "delta": sample.get("delta", 0.0),
-        })
+            self._raw_graph.add_point({"eeg": sum(sample.get(k, 0.0) for k in BAND_KEYS)})
+        self._band_graph.add_point(group_powers(lambda k: sample.get(k, 0.0)))
 
     def update_timer(self, text: str) -> None:
         if self._start_time_str:
