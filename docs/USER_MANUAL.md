@@ -215,7 +215,7 @@ When Program mode is active, the small button next to **Start** shows a large **
 **During a session:**
 
 - The session timer is set to the program's total duration and auto-stops at the end (the timer-end gong plays).
-- The metrics graph automatically shows each segment's target metric or custom-formula line. The **legend marks the currently active metric in bold with a "»" indicator**, switching at each segment boundary.
+- The metrics graph automatically shows each segment's target metric or custom-formula line. Other lines are hidden while the program runs (switch any back on in the series picker; that isn't saved) and come back as they were when it stops; in Program mode the Session screen shows the program's lines before Start too. The **legend marks the currently active metric in bold with a "»" indicator**, switching at each segment boundary.
 - At each segment boundary a **chime** plays and the active target and audio-driver formula switch to the next segment's settings. "Time above target" accrues against each segment's own target while that segment is active.
 - A **stepped dashed target line** tracks each segment's target over its time range on both the live session graph and the diary graph.
 - The **gong** plays at the end of the program.
