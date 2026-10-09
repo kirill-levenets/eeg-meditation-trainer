@@ -228,8 +228,9 @@ When Program mode is off, the Simple timer behaves exactly as before.
 
 - Device status and connection info
 - **Use Mock Data** checkbox — uncheck for real device
-- **Scan Paired Devices** — finds paired Bluetooth headsets
-- Tap a device to select it
+- **Scan Paired Devices** — finds paired Bluetooth headsets. Each row shows the headset's name and its address: every MindWave has the same Bluetooth name
+- Tap a device to select it. The row of the headset in use is filled; the connected one shows a Bluetooth sign (with Mock Data on, none is marked). You can't switch headsets while a session runs or connects
+- **Name a headset** — tap the pencil on its row, type a name and tap **Save** (or Enter). The name is the same for every profile on the phone and shows in the device status, on the Session screen and in the names of new sessions. Leave it blank to go back to the Bluetooth name
 
 ### Threshold
 

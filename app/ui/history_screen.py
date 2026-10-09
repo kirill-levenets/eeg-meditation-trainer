@@ -33,11 +33,11 @@ from app.ui.theme import (
     ICONS_AVAILABLE,
     C,
     Card,
-    CenteredTextInput,
     Divider,
     F,
     FoldChevron,
     Icons,
+    RenameRow,
     RevealBox,
     S,
     StyledButton,
@@ -1090,23 +1090,8 @@ class HistoryScreen(Screen):
     # ── Inline rename: one editor, shown under the row of the session being renamed ──
 
     def _build_rename_row(self) -> None:
-        self._rename_row = BoxLayout(size_hint_y=None, height=_RENAME_H, spacing=S.GAP_SM, padding=[dp(10), dp(2)])
-        self._rename_input = CenteredTextInput(
-            font_size=F.BODY,
-            foreground_color=C.TEXT,
-            background_color=C.BG_INPUT,
-            cursor_color=C.PRIMARY,
-            multiline=False,
-            write_tab=False,
-            size_hint_x=1,
-        )
-        # 84 dp: the button's 2 x 12 dp padding and 26 dp icon leave 34 dp, room for "Save" on one line.
-        rename_save = StyledButton(text="Save", icon=Icons.CHECK, bg_color=C.ACCENT, font_size=F.SMALL,
-                                   size_hint_x=None, width=dp(84), size_hint_y=1)
-        self._rename_row.add_widget(self._rename_input)
-        self._rename_row.add_widget(rename_save)
-        rename_save.bind(on_release=lambda *a: self._do_rename())
-        self._rename_input.bind(on_text_validate=lambda *a: self._do_rename())
+        self._rename_row = RenameRow(self._do_rename, height=_RENAME_H, padding=[dp(10), dp(2)])
+        self._rename_input = self._rename_row.input
         self._rename_focus_check = Clock.create_trigger(self._drop_rename_focus_if_hidden)
 
     def _drop_rename_focus_if_hidden(self, _dt) -> None:
@@ -1128,20 +1113,13 @@ class HistoryScreen(Screen):
         self._rename_input.text = session_label(session)
         self._update_item(sid)
         self._sync_rows()
-        Clock.schedule_once(self._focus_rename_input)
-
-    def _focus_rename_input(self, _dt) -> None:
-        # A tap's own touch-up unfocuses every input it didn't land on (the pencil's tap too): focus a frame later.
-        if self._renaming_sid is not None and self._rename_row.parent is not None:
-            self._rename_input.focus = True
+        self._rename_row.focus_soon()
 
     def _close_rename(self) -> None:
         sid, self._renaming_sid = self._renaming_sid, None
         if sid is None:
             return
-        self._rename_input.focus = False
-        if self._rename_row.parent is not None:
-            self._rename_row.parent.remove_widget(self._rename_row)
+        self._rename_row.close()
         self._update_item(sid)
 
     def _do_rename(self) -> None:

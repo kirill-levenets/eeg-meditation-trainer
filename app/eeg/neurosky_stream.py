@@ -211,7 +211,9 @@ class NeuroSkyStream:
         self._close_lock = threading.Lock()
 
     def set_device(self, address: str, name: str = "") -> None:
-        """Set the target Bluetooth device address."""
+        """Set the target Bluetooth device address; a link to another one closes, so the next start reaches this one."""
+        if self._running and address != self._device_address:
+            self.stop()
         self._device_address = address
         self._device_name = name or address
         logger.info(f"NeuroSky device set: {self._device_name} ({address})")

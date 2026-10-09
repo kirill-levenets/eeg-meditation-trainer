@@ -141,6 +141,32 @@ class TestReaderLifecycle:
         assert s.sockets[0].closed
         assert s.is_connected is False
 
+    def test_a_new_target_closes_the_link_to_the_old_one(self):
+        """The next start must reach the new headset: a kept link would carry its sessions under the new one's name."""
+        s = SlowConnectStream(delay=0.0)
+        s.set_device("00:11:22:33:44:01", "MindWave Mobile")
+        s.start()
+        assert s._connected_event.wait(2.0)
+        assert _wait_until(lambda: s.is_connected)
+
+        s.set_device("00:11:22:33:44:02", "MindWave Mobile")
+        assert s.sockets[0].closed
+        assert s.is_connected is False
+        assert s._thread is None
+        assert s._device_address == "00:11:22:33:44:02"
+
+    def test_the_same_target_keeps_the_link(self):
+        s = SlowConnectStream(delay=0.0)
+        s.set_device("00:11:22:33:44:01", "MindWave Mobile")
+        s.start()
+        assert _wait_until(lambda: s.is_connected)
+        try:
+            s.set_device("00:11:22:33:44:01", "MindWave Mobile")
+            assert not s.sockets[0].closed
+            assert s.is_connected is True
+        finally:
+            s.stop()
+
     def test_epoch_advances_on_every_start_and_stop(self):
         s = SlowConnectStream(delay=0.0)
         s.set_device("AA:BB:CC:DD:EE:FF", "Fake")

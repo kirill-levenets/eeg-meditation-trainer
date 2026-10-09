@@ -58,7 +58,7 @@ How each subsystem works and why lives in [`docs/architecture/`](docs/architectu
 - `app/ui/app_manager.py` — `EEGMeditationApp`: wiring, session start/stop, BT wait, user gate, settings load/save.
 - `app/ui/theme.py`, `app/ui/widgets/` — palette `C`/`F`/`S`, themed widgets, modals, legends, overlays. → [ui-theme](docs/architecture/ui-theme.md)
 - `app/ui/raw_eeg_screen.py` — `ScrollableGraphWidget`, the one time-series graph class; `touch_utils.py`, `render_stats.py`. → [graphs](docs/architecture/graphs.md)
-- `app/ui/live_session.py`, `settings_screen.py`, `wizard_screen.py` → [live-session-and-settings](docs/architecture/live-session-and-settings.md); `history_screen.py`, `period_totals.py` → [history](docs/architecture/history.md); `diary_screen.py` (session detail) → [session-detail](docs/architecture/session-detail.md); `session_labels.py` → [session](docs/architecture/session.md)
+- `app/ui/live_session.py`, `settings_screen.py`, `wizard_screen.py`, `device_labels.py` → [live-session-and-settings](docs/architecture/live-session-and-settings.md); `history_screen.py`, `period_totals.py` → [history](docs/architecture/history.md); `diary_screen.py` (session detail) → [session-detail](docs/architecture/session-detail.md); `session_labels.py` → [session](docs/architecture/session.md)
 - `app/crash_handler.py`, `app/logger.py`, `app/android_jni.py` → [app-platform](docs/architecture/app-platform.md)
 - `service/session_keep_alive.py` — Android foreground service for locked-screen sessions. `tools/` — BT diagnostics (`bt_test.py`, `ble_battery_scan.py`).
 
@@ -71,6 +71,7 @@ Each rule exists because breaking it caused a real defect. The linked file expla
 ### Threads and concurrency
 
 - **At most one Bluetooth reader thread.** The MindWave serves one RFCOMM channel and a connected socket nobody drains stalls it until the headset is power-cycled. `NeuroSkyStream.start()` returns a bool and refuses while a previous reader is alive; `stop()` closes the socket before joining. → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md)
+- **The Bluetooth link is always to the selected headset**: `NeuroSkyStream.set_device` to another address closes it (the link outlives sessions), and `_on_device_select` refuses a switch while a session runs. → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md#connection)
 - **A session start is one attempt** (`_start_attempt`): a callback queued for an earlier attempt does nothing. Every BT-wait exit goes through `_abort_bt_wait()` (tick watcher stopped before the stream); every ending undoes the start's setup through `_undo_session_setup()`. → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md)
 - **At most one tick thread.** `_start_tick_thread` is a no-op while one is alive; each thread gets its own stop event. → [session](docs/architecture/session.md)
 - **No Kivy from the tick thread**: UI goes through `_on_main`. **No `AudioEngine.stop()`, `MediaPlayer.release()`/`stop()` on the tick thread**: they deadlock against the main Looper paused during screen lock. On the tick thread, silence with `AudioEngine.mute()` (setVolume only) and defer teardown to the main thread; on timer expiry, persist first and ring the gong last. → [audio](docs/architecture/audio.md)
@@ -114,7 +115,7 @@ Each rule exists because breaking it caused a real defect. The linked file expla
 
 ### Shared paths — reuse, don't add a second
 
-Session delete `_delete_sessions(ids)` · notes `_save_session_notes` · confirm `theme.confirm_popup` (via `_confirm_action`) · message `make_message_popup` / `_info_popup` · list picker `make_scroll_popup` · Cancel/Close `cancel_button()` · toast `_toast` · modal surface `paint_panel` · screen background `fill_background` · fold button `theme.FoldChevron` · debounced change `_after_settle` · session titles and stats lines `app/ui/session_labels.py` · scoring `scoring.GoalAccrual` · graph glyphs `_wire_graph_affordances` · legends `LegendBar` · file copy `copy_file_atomic` · temp removal `discard_file`.
+Session delete `_delete_sessions(ids)` · notes `_save_session_notes` · confirm `theme.confirm_popup` (via `_confirm_action`) · message `make_message_popup` / `_info_popup` · list picker `make_scroll_popup` · Cancel/Close `cancel_button()` · toast `_toast` · modal surface `paint_panel` · screen background `fill_background` · fold button `theme.FoldChevron` · inline rename `theme.RenameRow` · debounced change `_after_settle` · session titles and stats lines `app/ui/session_labels.py` · scoring `scoring.GoalAccrual` · graph glyphs `_wire_graph_affordances` · headset names `_device_name()` / `device_labels.py` · legends `LegendBar` · file copy `copy_file_atomic` · temp removal `discard_file`.
 
 ## Documentation Rules
 

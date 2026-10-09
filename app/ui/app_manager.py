@@ -5,8 +5,9 @@ import sys
 import threading
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime as _dt
+from types import MappingProxyType
 from typing import Optional
 
 from kivy.animation import Animation
@@ -53,6 +54,7 @@ from app.storage.csv_export import build_sessions_zip
 from app.storage.database import DatabaseManager, UserExistsError
 from app.storage.fileops import discard_file
 from app.ui import render_stats
+from app.ui.device_labels import MAX_DEVICE_ALIAS, device_label
 from app.ui.diary_screen import DiaryScreen, detail_graph_data
 from app.ui.history_screen import HistoryScreen
 from app.ui.live_session import METRICS_COLORS, SERIES_NAMES, LiveSessionScreen
@@ -152,6 +154,8 @@ class EEGMeditationApp(App):
 
     title = APP.APP_NAME
     _PERSIST_SETTLE_S: float = 0.5  # quiet time before a slider/text change is written
+    # address -> the name its user gave the headset; replaced, never changed in place (the tick thread reads it)
+    _device_aliases: Mapping[str, str] = MappingProxyType({})
     icon = os.path.join(
         os.path.dirname(os.path.dirname(__file__)),
         "assets", "icons", "icon_128.png",
@@ -684,6 +688,7 @@ class EEGMeditationApp(App):
 
         self._theme_seed = theme_seed(self._db)
         C.set_theme(startup_theme(self._db))
+        self._load_device_aliases()
 
         # Apply --serial override if provided
         if self.serial_device_override:
@@ -904,6 +909,8 @@ class EEGMeditationApp(App):
         self._settings_screen.set_device_mode_callback(self._on_device_mode_toggle)
         self._settings_screen.set_scan_devices_callback(self._on_scan_devices)
         self._settings_screen.set_device_select_callback(self._on_device_select)
+        self._settings_screen.set_device_state_callback(self._device_state)
+        self._settings_screen.set_device_rename_callback(self._on_device_rename)
         self._settings_screen.set_copy_diagnostics_callback(self._on_copy_diagnostics)
         self._settings_screen.set_line_width_callback(self._on_line_width_change)
         self._settings_screen.set_rotate_screen_callback(self._on_rotate_screen)
@@ -1136,7 +1143,7 @@ class EEGMeditationApp(App):
                 self._db.set_user_setting(self._current_user_id, "bt_device_name", device_name or "")
                 self._db.set_user_setting(self._current_user_id, "use_mock", "False")
             self._settings_screen._device_mode_cb.active = False
-            self._live_screen.update_device_status(False, device_name=device_name or device_addr)
+            self._live_screen.update_device_status(False, device_name=self._device_name())
             logger.info(f"Wizard: device set to {device_name} ({device_addr})")
         else:
             APP.USE_MOCK_DEVICE = True
@@ -1160,7 +1167,7 @@ class EEGMeditationApp(App):
 
         def _run():
             devices = NeuroSkyStream.scan_paired_devices()
-            Clock.schedule_once(lambda dt: self._wizard_screen.populate_devices(devices))
+            Clock.schedule_once(lambda dt: self._wizard_screen.populate_devices(self._with_aliases(devices)))
 
         threading.Thread(target=_run, daemon=True).start()
 
@@ -1198,7 +1205,7 @@ class EEGMeditationApp(App):
                 logger.info(
                     f"Found {len(matches)} MindWave devices — routing to settings picker"
                 )
-                self._settings_screen.populate_bt_devices(matches)
+                self._list_bt_devices(matches)
                 self._switch_screen("settings")
                 self._settings_screen.focus_device_section(
                     f"Found {len(matches)} MindWave devices.\n"
@@ -1206,7 +1213,7 @@ class EEGMeditationApp(App):
                 )
                 return
             # No MindWave found — populate settings list for manual pick
-            self._settings_screen.populate_bt_devices(devices)
+            self._list_bt_devices(devices)
 
 
         def _run():
@@ -1281,13 +1288,11 @@ class EEGMeditationApp(App):
                     mindwave = matches[0]
                     self._on_device_select(mindwave["address"], mindwave["name"])
                     self._eeg_stream = self._real_stream
-                    self._live_screen.update_overlay(
-                        f"Found {mindwave['name']}\nConnecting..."
-                    )
+                    self._live_screen.update_overlay(f"Found {self._device_name()}\nConnecting...")
                     self._start_session_common()
                 elif len(matches) > 1:
                     # Multiple NeuroSky devices paired — user must pick.
-                    self._settings_screen.populate_bt_devices(matches)
+                    self._list_bt_devices(matches)
                     self._live_screen.set_controls_idle()
                     self._live_screen.hide_overlay()
                     self._switch_screen("settings")
@@ -1297,7 +1302,7 @@ class EEGMeditationApp(App):
                     )
                 elif devices:
                     # Found BT devices but no MindWave
-                    self._settings_screen.populate_bt_devices(devices)
+                    self._list_bt_devices(devices)
                     self._live_screen.set_controls_idle()
                     self._live_screen.show_overlay_retry(
                         "No MindWave found among paired devices.\n"
@@ -1468,7 +1473,7 @@ class EEGMeditationApp(App):
             # BT still connected from previous session — reuse it
             self._real_stream.reset_sample_state()
             self._waiting_for_bt = False
-            name = self._real_stream._device_name or "Real EEG"
+            name = self._device_name()
             self._session_manager.start(threshold=threshold)
             self._timer_state.start_countdown()
             self._on_session_connected(name)
@@ -1482,7 +1487,7 @@ class EEGMeditationApp(App):
 
     def _begin_bt_wait(self) -> bool:
         """Start the reader and show the connect overlay; False, with the session setup undone, if refused."""
-        name = self._real_stream._device_name or "Real EEG"
+        name = self._device_name()
         if not self._real_stream.start():
             # Nothing is connecting: entering the wait would misreport a refusal as a failed connect.
             self._undo_session_setup()
@@ -1651,9 +1656,7 @@ class EEGMeditationApp(App):
 
     def _make_session_name(self) -> str:
         """Generate default session name including device type."""
-        device = "Mock" if APP.USE_MOCK_DEVICE else (
-            self._real_stream._device_name or "Real EEG"
-        )
+        device = "Mock" if APP.USE_MOCK_DEVICE else self._device_name()
         started = self._session_manager.started_at
         ts = start_stamp(_dt.fromtimestamp(started) if started else _dt.now())
         return f"{ts} - {device}"
@@ -1896,7 +1899,7 @@ class EEGMeditationApp(App):
         Runs on the background tick thread — all Kivy UI calls are dispatched
         via _on_main so they execute safely on the main thread.
         """
-        name = self._real_stream._device_name or "Real EEG"
+        name = self._device_name()
         if not self._real_stream.is_connected and self._bt_signal_start is not None:
             # The link dropped and the reader reconnects: the next connection gets its own connect and no-data windows,
             # and only its own packets count (one that inherited the old windows was given up 0.4 s after it
@@ -2033,7 +2036,7 @@ class EEGMeditationApp(App):
                 and not APP.USE_MOCK_DEVICE
                 and self._real_stream.is_connected):
             self._bt_connected_notified = True
-            name = self._real_stream._device_name or "Real EEG"
+            name = self._device_name()
             _n = name
             self._on_main(lambda n=_n: self._settings_screen.update_device_status(True, name=n))
             logger.info(f"Settings updated: {name} connected")
@@ -2043,7 +2046,7 @@ class EEGMeditationApp(App):
                 and self._bt_connected_notified
                 and not self._real_stream.is_connected):
             self._bt_connected_notified = False
-            name = self._real_stream._device_name or "Real EEG"
+            name = self._device_name()
             _n = name
             self._on_main(lambda n=_n: self._live_screen.update_device_status(
                 False, device_name=n, connecting=True
@@ -2962,10 +2965,9 @@ class EEGMeditationApp(App):
             self._settings_screen.update_device_status(False, meta="Mode: Mock Data")
             self._live_screen.update_device_status(False, device_name="Mock EEG")
         else:
-            name = self._real_stream._device_name or ""
             addr = self._real_stream._device_address or "none"
             self._settings_screen.update_device_status(False, meta=f"Mode: Real Device ({addr})")
-            self._live_screen.update_device_status(False, device_name=name or "Real EEG")
+            self._live_screen.update_device_status(False, device_name=self._device_name())
         if self._current_user_id:
             self._db.set_user_setting(self._current_user_id, "use_mock", str(use_mock))
         logger.info(f"Device mode: {'Mock' if use_mock else 'Real'}")
@@ -2973,20 +2975,70 @@ class EEGMeditationApp(App):
     def _on_scan_devices(self) -> None:
         """Scan for paired Bluetooth devices and send to settings screen."""
         devices = NeuroSkyStream.scan_paired_devices()
-        self._settings_screen.populate_bt_devices(devices)
+        self._list_bt_devices(devices)
         logger.info(f"BT scan found {len(devices)} paired devices")
 
     def _on_device_select(self, address: str, name: str) -> None:
         """User selected a BT device from the list."""
+        if address != self._real_stream._device_address and self._refused_while_session_runs("switching headsets"):
+            return
         self._real_stream.set_device(address, name)
         # Auto-switch to real device mode
         APP.USE_MOCK_DEVICE = False
         self._settings_screen._device_mode_cb.active = False
-        self._settings_screen.update_device_status(False, meta=f"Selected: {name}")
+        self._show_selected_device()
         logger.info(f"BT device selected: {name} ({address}), switched to real mode")
         if self._current_user_id:
             self._db.set_user_setting(self._current_user_id, "bt_device_address", address)
             self._db.set_user_setting(self._current_user_id, "bt_device_name", name)
+
+    def _load_device_aliases(self) -> None:
+        aliases = self._db.get_json_setting("bt_device_aliases", {})
+        valid = isinstance(aliases, dict) and all(isinstance(v, str) for v in aliases.values())
+        self._device_aliases = MappingProxyType(aliases if valid else {})
+
+    def _device_name(self) -> str:
+        """The selected headset as its user calls it."""
+        stream = self._real_stream
+        return device_label(stream._device_address or "", stream._device_name, self._device_aliases) or "Real EEG"
+
+    def _with_aliases(self, devices: list[dict]) -> list[dict]:
+        return [{**dev, "alias": self._device_aliases.get(dev["address"], "")} for dev in devices]
+
+    def _list_bt_devices(self, devices: list[dict]) -> None:
+        self._settings_screen.populate_bt_devices(self._with_aliases(devices))
+
+    def _device_state(self) -> tuple[str | None, str | None]:
+        """(selected, connected) headset addresses, none in mock mode: the stream's link is always to the selected one."""
+        stream = self._real_stream
+        if APP.USE_MOCK_DEVICE:
+            return None, None
+        return stream._device_address, stream._device_address if stream.is_connected else None
+
+    def _show_selected_device(self) -> None:
+        """The selected headset's name and link, on the Session screen and in Settings."""
+        connected = self._real_stream.is_connected
+        label = self._device_name()
+        self._live_screen.update_device_status(connected, device_name=label,
+                                               connecting=self._waiting_for_bt and not connected)
+        if connected:
+            self._settings_screen.update_device_status(True, name=label)
+        else:
+            self._settings_screen.update_device_status(False, meta=f"Selected: {label}")
+
+    def _on_device_rename(self, address: str, name: str, text: str) -> None:
+        """Name a headset (`name` is its Bluetooth one) for every profile: it is the same headset whoever uses it.
+        Blank, or its Bluetooth name, drops the alias."""
+        alias = text.strip()[:MAX_DEVICE_ALIAS]
+        aliases = {k: v for k, v in self._device_aliases.items() if k != address}
+        if alias and alias != name:
+            aliases[address] = alias
+        self._db.set_json_setting("bt_device_aliases", aliases)
+        self._device_aliases = MappingProxyType(aliases)
+        self._settings_screen.relabel_bt_device(address, aliases.get(address, ""))
+        logger.info(f"BT device {address} named {aliases.get(address)!r}")
+        if address == self._device_state()[0]:
+            self._show_selected_device()
 
     def _report_bt_connect_failure(self, device_name: str, hint: str) -> None:
         """Fire a soft-error dialog for a failed BT connect (cooldown-gated).
@@ -3912,16 +3964,14 @@ class EEGMeditationApp(App):
             bt_name = g(user_id, "bt_device_name")
             if bt_addr:
                 self._real_stream.set_device(bt_addr, bt_name or bt_addr)
-                self._settings_screen.update_device_status(
-                    False, meta=f"Saved device: {bt_name or bt_addr}"
-                )
+                self._settings_screen.update_device_status(False, meta=f"Saved device: {self._device_name()}")
             # use_mock is applied by the settings registry (store.load) above.
 
         # Update live screen device label to match current mode
         if APP.USE_MOCK_DEVICE:
             self._live_screen.update_device_status(False, device_name="Mock EEG")
         elif self._real_stream._device_address:
-            name = self._real_stream._device_name or "Real EEG"
+            name = self._device_name()
             self._live_screen.update_device_status(False, device_name=name)
 
         history_mode = g(user_id, "history_view_mode") or "calendar"

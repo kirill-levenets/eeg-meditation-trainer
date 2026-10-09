@@ -8,6 +8,7 @@ from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.screenmanager import Screen
 
+from app.ui.device_labels import device_row_text
 from app.ui.theme import (
     ICONS_AVAILABLE,
     C,
@@ -289,7 +290,7 @@ class WizardScreen(Screen):
             name = dev.get("name", "Unknown")
             addr = dev.get("address", "")
             btn = StyledButton(
-                text=name,
+                text=device_row_text(dev.get("alias") or name, addr),
                 bg_color=C.BG_CARD,
                 text_color=C.TEXT,
                 font_size=F.BODY,
