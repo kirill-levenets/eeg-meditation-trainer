@@ -978,6 +978,8 @@ class EEGMeditationApp(App):
             lambda _collapsed: self._persist_user_setting("history_chart_collapsed"))
         self._diary_screen.what_if.set_collapse_callback(
             lambda _collapsed: self._persist_user_setting("what_if_collapsed"))
+        self._diary_screen.set_band_collapse_callback(
+            lambda _collapsed: self._persist_user_setting("band_power_collapsed"))
         self._history_screen.set_export_sessions_callback(self._on_export_sessions_csv)
 
         self._settings_screen.set_test_timer_sound_callback(self._on_test_timer_sound)
@@ -3831,6 +3833,8 @@ class EEGMeditationApp(App):
         add("history_chart_collapsed", BOOL, lambda: hs.chart_collapsed, hs.set_chart_collapsed)
         what_if = self._diary_screen.what_if
         add("what_if_collapsed", BOOL, lambda: what_if.collapsed, what_if.set_collapsed)
+        ds = self._diary_screen
+        add("band_power_collapsed", BOOL, lambda: ds.band_collapsed, ds.set_band_collapsed)
         add("subtle_alert", BOOL, lambda: self._audio.subtle_alert_enabled, set_subtle)
         add("disconnect_alert", BOOL, lambda: self._audio.disconnect_alert_enabled, set_disconnect)
         add("threshold", INT, lambda: int(ss.threshold), set_threshold)

@@ -10,6 +10,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.screenmanager import Screen
 from kivy.uix.slider import Slider
+from kivy.uix.widget import Widget
 
 from app.config import APP
 from app.eeg.band_spec import GROUP_NAMES, group_powers
@@ -23,6 +24,7 @@ from app.ui.theme import (
     C,
     CenteredTextInput,
     F,
+    FoldChevron,
     Icons,
     S,
     StyledButton,
@@ -259,17 +261,17 @@ class DiaryScreen(Screen):
         self._recorded_steps = None  # the metrics graph's line as recorded, which Reset puts back
         self._detail_layout.add_widget(self._what_if)
 
-        # Per-band total power over the whole session
-        band_header = ThemedLabel(
-            text="Band Power (whole session)",
-            font_size=F.SMALL,
-            color=C.TEXT_SECONDARY,
-            halign="left",
-            size_hint_y=None,
-            height=dp(22),
-        )
-        band_header.bind(size=band_header.setter("text_size"))
-        self._detail_layout.add_widget(band_header)
+        # Per-band total power over the whole session; the chevron right after its title folds the table away.
+        self._band_header = BoxLayout(size_hint_y=None, height=dp(28), spacing=S.GAP_SM)
+        band_title = ThemedLabel(text="Band Power (whole session)", font_size=F.SMALL, color=C.TEXT_SECONDARY,
+                                 size_hint_x=None)
+        band_title.bind(texture_size=lambda w, ts: setattr(w, "width", ts[0]))
+        self._btn_band_fold = FoldChevron(size_hint_y=None, height=dp(28))
+        self._btn_band_fold.bind(on_release=lambda *_a: self.toggle_band_collapsed())
+        self._on_band_collapse: Callable[[bool], None] | None = None
+        for w in (band_title, self._btn_band_fold, Widget()):
+            self._band_header.add_widget(w)
+        self._detail_layout.add_widget(self._band_header)
         self.band_view_persist_cb = None  # set by AppManager to persist per-user
         self._band_totals = BandTotalsView(on_change=self._on_band_view_change)
         self._band_placeholder = ThemedLabel(text="", font_size=F.BODY, color=C.TEXT_SECONDARY,
@@ -486,6 +488,28 @@ class DiaryScreen(Screen):
     def _fit_band_holder(self, *_a) -> None:
         if self._band_holder.children:
             self._band_holder.height = self._band_holder.children[0].height
+
+    @property
+    def band_collapsed(self) -> bool:
+        return self._band_holder.parent is None
+
+    def set_band_collapsed(self, collapsed: bool) -> None:
+        """Fold the table (or its placeholder) away, detached, or bring it back under its title; the title stays."""
+        if collapsed != self.band_collapsed:
+            if collapsed:
+                self._detail_layout.remove_widget(self._band_holder)
+            else:
+                self._detail_layout.add_widget(self._band_holder,
+                                               index=self._detail_layout.children.index(self._band_header))
+        self._btn_band_fold.show_folded(collapsed)
+
+    def set_band_collapse_callback(self, cb: Callable[[bool], None]) -> None:
+        self._on_band_collapse = cb
+
+    def toggle_band_collapsed(self) -> None:
+        self.set_band_collapsed(not self.band_collapsed)
+        if self._on_band_collapse:
+            self._on_band_collapse(self.band_collapsed)
 
     def _show_band_section(self) -> None:
         """The totals table once its data is in, else the placeholder (loading, or the load failed)."""
