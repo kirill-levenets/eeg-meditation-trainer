@@ -73,3 +73,18 @@ def test_label_cache_is_bounded(monkeypatch):
         g._make_text_texture(str(i))
     assert len(rg._LABEL_CACHE) == 5
     assert [k[0] for k in rg._LABEL_CACHE] == ["7", "8", "9", "10", "11"]
+
+
+def test_a_fixed_grid_step_far_below_the_scale_draws_a_bounded_grid():
+    # A 200000 scale at the default 20-unit step drew 10,000 grid lines with a label each: seconds per redraw.
+    g = ScrollableGraphWidget(colors={"a": (1, 1, 1, 1)}, scales={"a": 200000.0}, size=(dp(400), dp(300)))
+    labels = []
+    real = ScrollableGraphWidget._make_text_texture
+    g._make_text_texture = lambda text, **kw: labels.append(text) or real(g, text, **kw)
+    g._draw()
+    assert len([t for t in labels if t.isdigit()]) <= rg._MAX_Y_GRID_LINES + 1
+    metrics = _live_graph(60, 120)  # a 0-200 axis at its 20-unit step keeps it
+    labels.clear()
+    metrics._make_text_texture = lambda text, **kw: labels.append(text) or real(metrics, text, **kw)
+    metrics._draw()
+    assert {str(v) for v in range(0, 201, 20)} <= set(labels)

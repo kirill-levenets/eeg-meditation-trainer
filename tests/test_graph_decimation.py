@@ -103,7 +103,9 @@ def test_a_graph_folds_only_where_folding_is_cheaper():
         g = _metrics_graph(n, keys=keys, width=1000)
         g._draw()
         return _drawn_points(g)
-    graph_w = 1000 - rg.dp(48) - rg.dp(60)
+    probe = _metrics_graph(2, keys=["shamatha_score"], width=1000)
+    probe._draw()
+    graph_w = probe._plot_rect()[2]  # the plot's width, short of what the labels need
     n = int(5 * graph_w)  # 5 samples per pixel
     assert drawn(["shamatha_score"], n) <= 4 * graph_w + 8
     assert drawn(["distraction"], n) >= n - 1
@@ -116,7 +118,7 @@ def test_a_graph_folds_only_where_folding_is_cheaper():
 def test_a_zoomed_out_graph_draws_at_most_four_points_per_pixel_column(n):
     g = _metrics_graph(n)
     g._draw()
-    graph_w = g.width - rg.dp(48) - rg.dp(60)
+    graph_w = g._plot_rect()[2]
     assert _drawn_points(g) <= len(SIX) * (4 * graph_w + 8), (_drawn_points(g), graph_w)
 
 
@@ -190,8 +192,7 @@ def test_markers_keep_their_real_positions():
     g = _metrics_graph(21600, keys=["shamatha_score"])
     g.add_marker(12345)
     g._draw()
-    graph_x = g.x + rg.dp(48)
-    graph_w = g.width - rg.dp(48) - rg.dp(60)
+    graph_x, _y, graph_w, _h = g._plot_rect()
     vp = max(g._viewport_points, g._total_points)
     want = graph_x + (vp - g._total_points + 12345) / (vp - 1) * graph_w
     marker_xs = [i.points[0] for i in g._gfx.children if isinstance(i, Line) and len(i.points) == 4

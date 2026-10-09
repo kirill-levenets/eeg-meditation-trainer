@@ -52,7 +52,7 @@ The header shows device status, elapsed time, and current state (color-coded: gr
 
 **Stats row** below the graph: Shamatha, Distraction, Sinking, NS Attn, NS Med.
 
-**Scrolling and zooming:** Press and drag left/right on the graph to scroll through up to 3 hours of history (works on both desktop and Android). Mouse wheel (desktop) or pinch (Android) to zoom in/out on the time axis.
+**Scrolling and zooming:** Press and drag left/right on the graph to scroll through up to 3 hours of history (works on both desktop and Android). Mouse wheel (desktop) or pinch (Android) to zoom in/out on the time axis. The **|↔|** button in a graph's bottom-right corner shows the whole session so far on all three Session graphs and keeps up as it grows; tap **→|←** to go back. The zoom remembered for your next session is the one you had before fitting. A graph's buttons sit inside it, in its corners: the series list top-left, full screen top-right (in full screen, the ✕ that closes it), fit bottom-right. A drag that starts on a button still scrolls the graph.
 
 ### Markers
 
@@ -137,6 +137,8 @@ Opens as soon as you tap the session: its stats and notes are there at once, and
 - **Metrics** — all computed metrics; the dashed threshold line steps where the threshold changed (a moved slider, a program's segments)
 - **Raw EEG** — synthesized waveform from stored band powers
 - **Frequencies** — band power chart
+
+The **|↔|** button in a graph's bottom-right corner shows the whole session at once, on all three of its graphs (Raw EEG keeps only the session's last minute, so it shows that; a session over 3 hours shows its last 3); tap it again (**→|←**) to go back to the window you had. It stays on as you open other sessions, and pinching or the mouse wheel zooms on from there. Zooming a session's graphs no longer changes the Session screen's graph, and the reverse. Past an hour the time axis reads hours (1:15:00).
 
 **Try another threshold** (under the stats): what Time Above Threshold and Longest Streak would have been at another threshold. Move the slider (or −/+ by 5) and both are recalculated from the session's own recorded data, and the Metrics graph's dashed line moves with it; **Reset** goes back to the session as recorded — the line under the title says what that was ("Recorded at 70", or "70 › 85" when the threshold was moved during it). One threshold applies to the whole session. A **program** session gets one slider per segment instead, each titled with its number, metric and recorded target and followed by that segment's own time above threshold and streak; the **Whole session** totals come after them, and a streak running from one segment into the next counts there as one, as it did live. Moving a segment's slider changes only that segment (and the totals) and only its part of the graph's line. It's only a view: nothing about the session changes, and reopening it starts as recorded again. The chevron right after its title folds it away (Reset stays beside it); the app remembers that for each profile.
 

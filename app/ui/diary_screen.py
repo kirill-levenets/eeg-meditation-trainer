@@ -679,13 +679,15 @@ class DiaryScreen(Screen):
                 btn.bg_color = C.BG_CARD
                 btn.text_color = C.TEXT_SECONDARY
 
+        shown = None
         if tab not in self._ready:
             self._graph_placeholder.text = self._placeholder_text()
             self._graph_container.add_widget(self._graph_placeholder)
         else:
-            graph = self._graph_for_tab(tab)
-            self._graph_container.add_widget(graph)
-            graph._redraw()
+            shown = self._graph_for_tab(tab)
+            self._graph_container.add_widget(shown)
+        for g in (self._metrics_graph, self._raw_eeg_graph, self._freq_graph):
+            g.set_drawing_enabled(g is shown)  # a hidden tab's graph draws once it is shown (enabling redraws it)
         self._rebuild_legend(tab)
 
     def _graph_for_tab(self, tab: str) -> ScrollableGraphWidget:

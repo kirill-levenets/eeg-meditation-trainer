@@ -83,16 +83,18 @@ class TestGraphExpandAffordance(unittest.TestCase):
         self.assertTrue(point_in_rect(5, 5, (0, 0, 10, 10)))
         self.assertFalse(point_in_rect(20, 5, (0, 0, 10, 10)))
 
-    def test_tap_on_icon_fires_callback_without_grab(self):
+    def test_a_tap_on_the_icon_fires_its_callback_on_release(self):
+        # The icon sits over the data: a gesture that starts on it must still pan, so it fires on a clean tap's release.
         g = self._make_graph()
         fired = []
         g.set_expand_callback(lambda src: fired.append(src))
         x, y, w, h = g._expand_icon_rect()
         touch = _FakeTouch(x + w / 2, y + h / 2)
-        result = g.on_touch_down(touch)
-        self.assertTrue(result)
+        self.assertTrue(g.on_touch_down(touch))
+        self.assertEqual(fired, [])
+        touch.grab_current = g
+        g.on_touch_up(touch)
         self.assertEqual(fired, [g])
-        self.assertFalse(touch.grabbed)  # expand must not start a scroll/drag
 
     def test_tap_off_icon_does_not_fire_callback(self):
         g = self._make_graph()
