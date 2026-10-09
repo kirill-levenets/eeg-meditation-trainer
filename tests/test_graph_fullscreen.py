@@ -28,7 +28,8 @@ class TestGraphFullscreen(unittest.TestCase):
         self.assertIsNotNone(app._fullscreen_overlay)
         self.assertIn(app._fullscreen_overlay, app._float_root.children)
         self.assertIsNot(g.parent, parent)                 # reparented out
-        self.assertIsNone(g._expand_callback)              # glyph hidden in fullscreen
+        self.assertTrue(g._expand_closes)                  # the corner glyph is the close cross in fullscreen
+        self.assertFalse(any(isinstance(c, StyledButton) for c in app._fullscreen_overlay.children))  # no other close
         self.assertEqual(tuple(g.size_hint), (1, 1))       # fills the overlay slot
         self.assertEqual(g.pos_hint, {})                   # in a BoxLayout, not positioned
 
@@ -39,8 +40,7 @@ class TestGraphFullscreen(unittest.TestCase):
         g.set_series_picker_callback(lambda _g: None)
         app._present_graph_fullscreen(g)
         self.assertIsNotNone(g._series_callback)           # picker still wired in fullscreen
-        close = next(c for c in app._fullscreen_overlay.children if isinstance(c, StyledButton))
-        close.dispatch("on_release")
+        g._expand_callback(g)                              # the close cross
         self.assertIsNotNone(g._series_callback)           # and after restore
 
     def test_close_restores(self):
@@ -48,11 +48,11 @@ class TestGraphFullscreen(unittest.TestCase):
         orig_size_hint = tuple(g.size_hint)
         app._present_graph_fullscreen(g)
         overlay = app._fullscreen_overlay
-        close = next(c for c in overlay.children if isinstance(c, StyledButton))
-        close.dispatch("on_release")
+        g._expand_callback(g)                              # a tap on the close cross in the plot's corner
         self.assertIsNone(app._fullscreen_overlay)
         self.assertIs(g.parent, parent)                    # back in original parent
-        self.assertIsNotNone(g._expand_callback)           # glyph restored
+        self.assertFalse(g._expand_closes)                 # the expand glyph again
+        self.assertEqual(g._expand_callback, app._present_graph_fullscreen)
         self.assertEqual(tuple(g.size_hint), orig_size_hint)
         self.assertNotIn(overlay, app._float_root.children)
 

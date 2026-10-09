@@ -125,6 +125,13 @@ The chevron next to the History title folds
 the chart and the table away, so the list gets
 the whole screen; tap it again to unfold.
 
+The |<->| button in a graph's bottom-right
+corner shows the whole session on it and the
+graphs beside it (Raw EEG: its last minute);
+tap it again to go back to the window you had.
+In full screen the X in the top-right corner
+closes it.
+
 ## About
 
 EEG Meditation Trainer v1.4.0

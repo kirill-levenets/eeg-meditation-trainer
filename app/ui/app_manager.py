@@ -67,7 +67,6 @@ from app.ui.theme import (
     C,
     CenteredTextInput,
     F,
-    Icons,
     S,
     StyledButton,
     ThemedFileChooser,
@@ -772,19 +771,17 @@ class EEGMeditationApp(App):
             self._loading_overlay.hide()
 
     def _all_graphs(self) -> tuple:
-        """Every mounted ScrollableGraphWidget — the single source of truth for
-        the cross-graph affordances (expand, series picker, zoom-link, restore)."""
-        return (
-            self._live_screen.graph,
-            self._live_screen.raw_graph,
-            self._live_screen.band_graph,
-            self._diary_screen._metrics_graph,
-            self._diary_screen._raw_eeg_graph,
-            self._diary_screen._freq_graph,
-        )
+        """Every mounted graph, for the cross-graph affordances (expand, picker, fit, restore); zoom links per group."""
+        return self._live_graphs() + self._detail_graphs()
+
+    def _live_graphs(self) -> tuple:
+        return self._live_screen.graph, self._live_screen.raw_graph, self._live_screen.band_graph
+
+    def _detail_graphs(self) -> tuple:
+        return self._diary_screen._metrics_graph, self._diary_screen._raw_eeg_graph, self._diary_screen._freq_graph
 
     def _wire_graph_affordances(self) -> None:
-        """Give every mounted graph the shared fullscreen-expand and series-picker
+        """Give every mounted graph the shared fullscreen-expand, series-picker and fit
         glyphs, driven by one presenter each. The picker is wired only where there
         is more than one series to choose from — a single-series graph's picker
         could only blank the line."""
@@ -792,6 +789,15 @@ class EEGMeditationApp(App):
             g.set_expand_callback(self._present_graph_fullscreen)
             if len(g.series_keys()) > 1:
                 g.set_series_picker_callback(self._present_series_picker)
+            g.set_fit_callback(ScrollableGraphWidget.toggle_fit)  # its zoom group, together
+
+    def _saved_zoom_seconds(self) -> float:
+        return self._live_screen.graph.zoom_seconds
+
+    def _apply_saved_zoom(self, seconds: float) -> None:
+        """The saved zoom starts both groups; only the live one's is saved, so a detail's zoom never comes back."""
+        self._live_screen.graph.set_zoom_seconds(seconds)
+        self._diary_screen._metrics_graph.set_zoom_seconds(seconds)
 
     def _present_graph_fullscreen(self, graph) -> None:
         """Reparent `graph` into a full-window overlay; restore it on close.
@@ -814,9 +820,6 @@ class EEGMeditationApp(App):
         overlay = FloatLayout(size_hint=(1, 1), pos_hint={"x": 0, "y": 0})
         fill_background(overlay, C.BG_DARK)
 
-        # Hide only the expand glyph while fullscreen (already fullscreen); keep
-        # the series picker so the user can change series here too.
-        graph.set_expand_callback(None)
         parent.remove_widget(graph)
         graph.size_hint = (1, 1)
         graph.pos_hint = {}
@@ -827,18 +830,6 @@ class EEGMeditationApp(App):
         self._fullscreen_legend = self._build_fullscreen_legend(graph)
         content.add_widget(self._fullscreen_legend)
         overlay.add_widget(content)
-
-        close_btn = StyledButton(
-            icon=Icons.CLOSE_CIRCLE_OUTLINE, font_size=dp(30),
-            size_hint=(None, None), size=(dp(48), dp(48)),
-            pos_hint={"right": 0.99, "top": 0.99},
-            bg_color=[0, 0, 0, 0], bg_pressed=[0, 0, 0, 0],
-            text_color=C.TEXT,
-        )
-        # StyledButton hard-sets horizontal padding (12dp) which would crop the
-        # circular glyph; the icon needs the button's full width.
-        close_btn.padding = [0, 0]
-        overlay.add_widget(close_btn)
         self._float_root.add_widget(overlay)
         self._fullscreen_overlay = overlay
         self._fullscreen_graph = graph
@@ -860,7 +851,8 @@ class EEGMeditationApp(App):
             self._fullscreen_graph = None
 
         self._fullscreen_close = _restore
-        close_btn.bind(on_release=_restore)
+        # The expand glyph's corner becomes the close cross (the series picker and fit stay usable here too).
+        graph.set_expand_callback(_restore, closes=True)
 
     def _build_fullscreen_legend(self, graph):
         """A wrapping legend (colored names) for the currently visible series."""
@@ -872,8 +864,9 @@ class EEGMeditationApp(App):
         return legend
 
     def _link_graph_zoom(self) -> None:
-        """Link zoom across all graph widgets so they share the same time scale."""
-        ScrollableGraphWidget.link_zoom(*self._all_graphs())
+        """Two zoom groups: a detail zoomed out over a long session must not reach the live graphs' saved zoom."""
+        ScrollableGraphWidget.link_zoom(*self._live_graphs())
+        ScrollableGraphWidget.link_zoom(*self._detail_graphs())
 
     def _bind_callbacks(self) -> None:
         # Wizard
@@ -1746,7 +1739,7 @@ class EEGMeditationApp(App):
                 key: [d.get(key, 0.0) for d in metrics_snapshot]
                 for key in METRICS_COLORS
             }
-            self._live_screen.graph.load_static_data(metric_series)
+            self._live_screen.graph.load_static_data(metric_series, new_session=False)
             self._live_screen.graph.set_threshold_steps(target_steps(d.get("score_target") for d in metrics_snapshot))
         if band_snapshot:
             band_keys = ("alpha", "beta", "gamma", "theta", "delta")
@@ -1754,9 +1747,9 @@ class EEGMeditationApp(App):
                 key: [d.get(key, 0.0) for d in band_snapshot]
                 for key in band_keys
             }
-            self._live_screen.band_graph.load_static_data(band_series)
+            self._live_screen.band_graph.load_static_data(band_series, new_session=False)
         if waveform_snapshot:
-            self._live_screen.raw_graph.load_static_data({"eeg": waveform_snapshot})
+            self._live_screen.raw_graph.load_static_data({"eeg": waveform_snapshot}, new_session=False)
 
     def _finalize_stop_ui(self, stats: dict, session_id: Optional[int]) -> None:
         """Main-thread UI teardown after a session has been persisted."""
@@ -3753,9 +3746,6 @@ class EEGMeditationApp(App):
             ss._rotate_btn.text = f"Rotate Screen ({v}°)"
             Window.rotation = v
 
-        def set_zoom(v):
-            graph._set_viewport(int(v * graph._sample_rate))
-
         def set_audio_index(v):
             self._audio_formula_index = max(0, min(int(v), _MAX_FORMULAS - 1))
 
@@ -3795,8 +3785,7 @@ class EEGMeditationApp(App):
         add("use_mock", BOOL, lambda: APP.USE_MOCK_DEVICE, set_use_mock)
         add("line_width", FLOAT, lambda: ss._line_width_slider.value, set_line_width)
         add("rotation", INT, lambda: ss._current_rotation, set_rotation)
-        add("graph_zoom_seconds", FLOAT,
-            lambda: graph.viewport_points / graph._sample_rate, set_zoom)
+        add("graph_zoom_seconds", FLOAT, self._saved_zoom_seconds, self._apply_saved_zoom)
         # audio_formula_index BEFORE audio_metric: metric reconciles the index when it's a slot.
         add("audio_formula_index", INT, lambda: self._audio_formula_index, set_audio_index)
         add("audio_metric", STR,
