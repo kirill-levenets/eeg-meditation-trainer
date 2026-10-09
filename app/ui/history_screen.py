@@ -6,6 +6,7 @@ to see sessions for that date; tap a session to see full detail.
 """
 
 import datetime
+import math
 from collections.abc import Callable
 from typing import Optional
 
@@ -22,7 +23,14 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
 from app.logger import logger
-from app.ui.period_totals import ALL_TIME, period_totals, periods_around, session_day
+from app.ui.period_totals import (
+    ALL_TIME,
+    day_month,
+    day_range,
+    period_totals,
+    periods_around,
+    session_day,
+)
 from app.ui.session_labels import (
     session_label,
     session_notes_line,
@@ -46,6 +54,7 @@ from app.ui.theme import (
     fill_background,
     format_duration,
 )
+from app.ui.touch_utils import point_in_rect
 
 
 def _today() -> datetime.date:
@@ -64,7 +73,109 @@ def _lerp_color(t: float):
     return (r, g, b, 1.0)
 
 
-class CalendarHeatmap(Widget):
+def _iso_date(text: str) -> datetime.date | None:
+    try:
+        return datetime.date.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def period_text(first: datetime.date, last: datetime.date) -> str:
+    """The chart's period as the totals write a week, with the year wherever it isn't this one (no row under it says)."""
+    if first.year != last.year:
+        return f"{day_month(first)} {first.year} – {day_month(last)} {last.year}"
+    return day_range(first, last) + ("" if last.year == _today().year else f" {last.year}")
+
+
+_SWIPE = dp(40)  # a sideways move this long pages the chart
+_TAP_SLOP = dp(20)  # a fingertip's drift: a press that moves less is still a tap
+
+
+class _DayChart(Widget):
+    """Days, one period at a time: a tap picks a day on the lift (so a swipe that starts on a day picks none) and a
+    sideways swipe pages. Subclasses `_draw` `window(end)` for the period end their owner gives, and record each day's
+    rect; a chart off screen doesn't draw until it is back."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.size_hint_y = None
+        self._day_values: dict[str, float] = {}  # "YYYY-MM-DD" -> avg_shamatha
+        self._cell_positions: dict[str, tuple] = {}
+        self._on_day_tap: Callable | None = None
+        self._on_swipe: Callable[[int], None] | None = None
+        self._period_source: Callable[[], datetime.date] | None = None  # the owner's period end; today without one
+        self._selected_date: str | None = None
+        self.bind(size=self._redraw, pos=self._redraw)
+        C.add_listener(self._redraw)
+
+    @classmethod
+    def window(cls, end: datetime.date) -> tuple[datetime.date, datetime.date]:
+        """(first, last) day shown for a period ending at `end`."""
+        raise NotImplementedError
+
+    @classmethod
+    def step(cls, end: datetime.date, direction: int) -> datetime.date:
+        """The period end one window later (1) or earlier (-1)."""
+        raise NotImplementedError
+
+    def _shown_window(self) -> tuple[datetime.date, datetime.date]:
+        return self.window((self._period_source or _today)())
+
+    def set_period_source(self, source: Callable[[], datetime.date]) -> None:
+        self._period_source = source
+
+    def set_data(self, day_values: dict[str, float]) -> None:
+        self._day_values = day_values
+        self._redraw()
+
+    def set_day_tap_callback(self, cb: Callable) -> None:
+        self._on_day_tap = cb
+
+    def set_swipe_callback(self, cb: Callable[[int], None]) -> None:
+        """cb(-1) for a swipe that brings earlier days in, cb(1) for later ones."""
+        self._on_swipe = cb
+
+    def on_touch_down(self, touch):
+        if touch.is_mouse_scrolling or not self.collide_point(*touch.pos):  # a wheel tick is no tap
+            return super().on_touch_down(touch)
+        touch.grab(self)
+        return True
+
+    def on_touch_move(self, touch):
+        if touch.grab_current is self:
+            return True
+        return super().on_touch_move(touch)
+
+    def on_touch_up(self, touch):
+        if touch.grab_current is not self:
+            return super().on_touch_up(touch)
+        touch.ungrab(self)
+        dx, dy = touch.x - touch.ox, touch.y - touch.oy
+        if abs(dx) >= _SWIPE and abs(dx) > abs(dy):
+            if self._on_swipe:
+                self._on_swipe(-1 if dx > 0 else 1)  # dragging the days right brings earlier ones in
+        elif math.hypot(dx, dy) <= _TAP_SLOP:
+            self._tap_day(touch.ox, touch.oy)  # where the finger came down: it aimed there
+        return True
+
+    def _tap_day(self, x: float, y: float) -> None:
+        day = next((d for d, rect in self._cell_positions.items() if point_in_rect(x, y, rect)), None)
+        if day is None:
+            return
+        self._selected_date = day
+        self._redraw()
+        if self._on_day_tap:
+            self._on_day_tap(day)
+
+    def _redraw(self, *args) -> None:
+        if self.parent is not None:
+            self._draw()
+
+    def _draw(self) -> None:
+        raise NotImplementedError
+
+
+class CalendarHeatmap(_DayChart):
     """GitHub-style grid of day cells, colored by value.
 
     Shows WEEKS_VISIBLE weeks of data. Cell size adapts to the widget's
@@ -80,14 +191,18 @@ class CalendarHeatmap(Widget):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.size_hint_y = None
         self.height = 7 * (self.CELL_SIZE + self.CELL_GAP) + self.TOP_MARGIN
-        self._day_values: dict[str, float] = {}  # "YYYY-MM-DD" -> avg_shamatha
-        self._cell_positions: dict[str, tuple] = {}
-        self._on_day_tap: Optional[Callable] = None
-        self._selected_date: Optional[str] = None
-        self.bind(size=self._redraw, pos=self._redraw)
-        C.add_listener(self._redraw)
+
+    @classmethod
+    def window(cls, end: datetime.date) -> tuple[datetime.date, datetime.date]:
+        """WEEKS_VISIBLE whole weeks from a Monday, the last one `end`'s, but never past today: pages meet."""
+        monday = end - datetime.timedelta(days=end.weekday())
+        return monday - datetime.timedelta(weeks=cls.WEEKS_VISIBLE - 1), min(monday + datetime.timedelta(days=6),
+                                                                              _today())
+
+    @classmethod
+    def step(cls, end: datetime.date, direction: int) -> datetime.date:
+        return end + datetime.timedelta(weeks=cls.WEEKS_VISIBLE * direction)
 
     def _compute_cell_size(self) -> float:
         """Cell size that fills the available width given WEEKS_VISIBLE columns,
@@ -96,39 +211,11 @@ class CalendarHeatmap(Widget):
         avail = max(self.width - self.LEFT_MARGIN, dp(10))
         cell = avail / self.WEEKS_VISIBLE - self.CELL_GAP
         return max(self.CELL_SIZE, min(cell, self.CELL_MAX))
-        self._day_values: dict[str, float] = {}  # "YYYY-MM-DD" -> avg_shamatha
-        self._day_rects: dict[str, object] = {}
-        self._on_day_tap: Optional[Callable] = None
-        self._selected_date: Optional[str] = None
-        self.bind(size=self._redraw, pos=self._redraw)
 
-    def set_data(self, day_values: dict[str, float]) -> None:
-        """Set day→score mapping and redraw."""
-        self._day_values = day_values
-        self._redraw()
-
-    def set_day_tap_callback(self, cb: Callable) -> None:
-        self._on_day_tap = cb
-
-    def on_touch_down(self, touch):
-        if not self.collide_point(*touch.pos):
-            return super().on_touch_down(touch)
-        # Find which cell was tapped
-        for date_str, (rx, ry, rw, rh) in self._cell_positions.items():
-            if rx <= touch.x <= rx + rw and ry <= touch.y <= ry + rh:
-                self._selected_date = date_str
-                self._redraw()
-                if self._on_day_tap:
-                    self._on_day_tap(date_str)
-                return True
-        return super().on_touch_down(touch)
-
-    def _redraw(self, *args):
+    def _draw(self) -> None:
         self.canvas.clear()
         self._cell_positions = {}
-        today = _today()
-        # Start from WEEKS_VISIBLE weeks ago, aligned to Monday
-        start = today - datetime.timedelta(days=today.weekday(), weeks=self.WEEKS_VISIBLE - 1)
+        start, last = self._shown_window()
         cell = self._compute_cell_size()
         gap = self.CELL_GAP
         # Update self.height to match the (possibly resized) cell so the
@@ -140,19 +227,9 @@ class CalendarHeatmap(Widget):
         y_top = self.top - dp(18)  # leave space for month labels
 
         with self.canvas:
-            # Day-of-week labels (M, W, F)
-            for i, label_text in enumerate(["M", "", "W", "", "F", "", "S"]):
-                if label_text:
-                    lx = self.x
-                    ly = y_top - i * (cell + gap) - cell
-                    Color(*C.TEXT_MUTED)
-                    # We'll use rectangles for cells; labels via texture below
-
-            # Month labels and cells
-            prev_month = -1
             current = start
             col = 0
-            while current <= today:
+            while current <= last:
                 dow = current.weekday()  # 0=Mon, 6=Sun
                 cx = x0 + col * (cell + gap)
                 cy = y_top - dow * (cell + gap) - cell
@@ -169,14 +246,8 @@ class CalendarHeatmap(Widget):
                     )
 
                 Color(*color)
-                rect = RoundedRectangle(pos=(cx, cy), size=(cell, cell), radius=[dp(2)])
+                RoundedRectangle(pos=(cx, cy), size=(cell, cell), radius=[dp(2)])
                 self._cell_positions[date_str] = (cx, cy, cell, cell)
-
-                # Month label at column top when month changes
-                if current.month != prev_month and dow <= 3:
-                    Color(*C.TEXT_MUTED)
-                    # Month text rendered as small rect indicator
-                    prev_month = current.month
 
                 if dow == 6:
                     col += 1
@@ -184,9 +255,9 @@ class CalendarHeatmap(Widget):
 
         # Render text labels using Label textures
         # (Kivy canvas can't render text directly; we overlay labels)
-        self._render_labels(x0, y_top, start, cell, gap)
+        self._render_labels(x0, y_top, start, last, cell, gap)
 
-    def _render_labels(self, x0, y_top, start, cell, gap):
+    def _render_labels(self, x0, y_top, start, last, cell, gap):
         """Add day-of-week and month text labels."""
         # Remove old label widgets
         for child in list(self.children):
@@ -209,11 +280,10 @@ class CalendarHeatmap(Widget):
                 self.add_widget(lbl)
 
         # Month labels
-        today = _today()
         current = start
         col = 0
         prev_month = -1
-        while current <= today:
+        while current <= last:
             dow = current.weekday()
             if current.day <= 7 and current.month != prev_month and dow <= 3:
                 month_name = current.strftime("%b")
@@ -236,7 +306,7 @@ class CalendarHeatmap(Widget):
             current += datetime.timedelta(days=1)
 
 
-class Last14DaysBars(Widget):
+class Last14DaysBars(_DayChart):
     """14-day bar chart of avg shamatha — alternative to the calendar heatmap.
 
     Public API mirrors CalendarHeatmap so HistoryScreen can swap them.
@@ -247,54 +317,37 @@ class Last14DaysBars(Widget):
     DAYS = 14
     MIN_BAR_HEIGHT = dp(2)
     BASELINE_HEIGHT = dp(20)  # space for date labels under bars
+    PAD_TOP = dp(12)          # a score label over a full bar, and the 100 label's upper half, stay inside
     PAD_LEFT = dp(24)         # space for y-axis labels
     PAD_RIGHT = dp(4)
     GRID_VALUES = (0, 25, 50, 75, 100)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.size_hint_y = None
         self.height = dp(132)
-        self._day_values: dict[str, float] = {}
-        self._cell_positions: dict[str, tuple] = {}
-        self._on_day_tap: Optional[Callable] = None
-        self._selected_date: Optional[str] = None
-        self.bind(size=self._redraw, pos=self._redraw)
-        C.add_listener(self._redraw)
 
-    def set_data(self, day_values: dict[str, float]) -> None:
-        self._day_values = day_values
-        self._redraw()
+    @classmethod
+    def window(cls, end: datetime.date) -> tuple[datetime.date, datetime.date]:
+        return end - datetime.timedelta(days=cls.DAYS - 1), end
 
-    def set_day_tap_callback(self, cb: Callable) -> None:
-        self._on_day_tap = cb
+    @classmethod
+    def step(cls, end: datetime.date, direction: int) -> datetime.date:
+        return end + datetime.timedelta(days=cls.DAYS * direction)
 
-    def on_touch_down(self, touch):
-        if not self.collide_point(*touch.pos):
-            return super().on_touch_down(touch)
-        for date_str, (rx, ry, rw, rh) in self._cell_positions.items():
-            if rx <= touch.x <= rx + rw and ry <= touch.y <= ry + rh:
-                self._selected_date = date_str
-                self._redraw()
-                if self._on_day_tap:
-                    self._on_day_tap(date_str)
-                return True
-        return super().on_touch_down(touch)
-
-    def _redraw(self, *args):
+    def _draw(self) -> None:
         self.canvas.clear()
         self._cell_positions = {}
         if self.width < 10 or self.height < 10:
             return
 
-        today = _today()
-        days = [today - datetime.timedelta(days=i) for i in range(self.DAYS - 1, -1, -1)]
+        start, _last = self._shown_window()
+        days = [start + datetime.timedelta(days=i) for i in range(self.DAYS)]
 
         avail_w = max(self.width - self.PAD_LEFT - self.PAD_RIGHT, dp(10))
         slot_w = avail_w / self.DAYS
         bar_w = max(slot_w - dp(4), dp(4))
 
-        graph_h = self.height - self.BASELINE_HEIGHT
+        graph_h = self.height - self.BASELINE_HEIGHT - self.PAD_TOP
         graph_y = self.y + self.BASELINE_HEIGHT
         graph_x_left = self.x + self.PAD_LEFT
         graph_x_right = self.x + self.width - self.PAD_RIGHT
@@ -561,6 +614,8 @@ class HistoryScreen(Screen):
         self._select_mode: bool = False
         self._selected_ids: set[int] = set()
         self._on_export_sessions: Optional[Callable] = None
+        self._period_offset = 0  # days from today to the chart's period end: 0 is today's page, a page back below it
+        self._first_day: datetime.date | None = None  # the first session's: paging back stops once it is shown
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -587,23 +642,23 @@ class HistoryScreen(Screen):
         self._graph_row = BoxLayout(
             orientation="horizontal",
             size_hint_y=None,
-            height=dp(132),
+            height=dp(132) + self._PERIOD_H,
             spacing=dp(4),
         )
 
+        # The chart, under the period row it shows when upright (_place_totals).
         self._graph_wrap = BoxLayout(orientation="vertical", size_hint_x=1)
+        self._build_period_row()
 
         # Calendar heatmap (initial active widget).
         self._heatmap = CalendarHeatmap()
-        self._heatmap.set_day_tap_callback(self._on_day_tap)
-        self._heatmap.bind(height=self._on_active_widget_height)
+        self._bars = Last14DaysBars()  # built but NOT parented until the user toggles to the bars view
+        for chart in (self._heatmap, self._bars):
+            chart.set_day_tap_callback(self._on_day_tap)
+            chart.set_swipe_callback(self.shift_period)
+            chart.set_period_source(lambda: self.period_end)
+            chart.bind(height=self._on_active_widget_height)
         self._graph_wrap.add_widget(self._heatmap)
-
-        # Bar-chart view — built but NOT parented yet. Added when user
-        # toggles to bars view.
-        self._bars = Last14DaysBars()
-        self._bars.set_day_tap_callback(self._on_day_tap)
-        self._bars.bind(height=self._on_active_widget_height)
 
         self._graph_row.add_widget(self._graph_wrap)
 
@@ -640,7 +695,10 @@ class HistoryScreen(Screen):
         self._chart_area.bind(minimum_height=self._chart_area.setter("height"))
         self._chart_area.add_widget(self._graph_row)
         self._build_totals()
-        self._chart_area.add_widget(self._totals)
+        # Sideways: the period row and the table beside the chart, the row over the table.
+        self._side_col = BoxLayout(orientation="vertical", size_hint=(None, None), width=self._TOTALS_BESIDE_W,
+                                   pos_hint={"top": 1})
+        self._side_col.bind(minimum_height=self._side_col.setter("height"))
         root.add_widget(self._chart_area)
         root.bind(width=self._place_totals)
         self._place_totals()
@@ -715,7 +773,63 @@ class HistoryScreen(Screen):
         root.add_widget(self._list_area)
 
         self.add_widget(root)
+        self._update_period_row()
         self._update_totals()
+
+    _PERIOD_H = dp(28)
+
+    def _build_period_row(self) -> None:
+        self._period_row = BoxLayout(size_hint_y=None, height=self._PERIOD_H, spacing=dp(4))
+        # 40 dp: an icon-only StyledButton narrower than ~36 dp crops its glyph (see FoldChevron). The glyph is the
+        # rows' pencil blue: a disabled button greys it, where a grey one would look the same either way.
+        self._btn_prev, self._btn_next = (
+            StyledButton(text="" if ICONS_AVAILABLE else fallback, icon=icon, bg_color=C.BG_CARD,
+                         text_color=C.PRIMARY, font_size=F.SMALL, size_hint_x=None, width=dp(40),
+                         height=self._PERIOD_H)
+            for icon, fallback in ((Icons.CHEVRON_LEFT, "‹"), (Icons.CHEVRON_RIGHT, "›")))
+        self._period_label = StyledButton(text="", bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY,
+                                          font_size=F.SMALL, bold=False, height=self._PERIOD_H)
+        self._btn_prev.bind(on_release=lambda *a: self.shift_period(-1))
+        self._btn_next.bind(on_release=lambda *a: self.shift_period(1))
+        self._period_label.bind(on_release=lambda *a: self._set_period(0))  # back to today
+        for w in (self._btn_prev, self._period_label, self._btn_next):
+            self._period_row.add_widget(w)
+
+    def _fit_graph_row(self) -> None:
+        """The chart's height, plus the period row's where it sits over the chart."""
+        height = self._active_chart().height + (self._PERIOD_H if self._period_row.parent is self._graph_wrap else 0)
+        if height != self._graph_row.height:
+            self._graph_row.height = height
+            self._cascade_layout()
+
+    @property
+    def period_end(self) -> datetime.date:
+        return _today() + datetime.timedelta(days=self._period_offset)
+
+    def _active_chart(self) -> _DayChart:
+        return self._heatmap if self._view_mode == "calendar" else self._bars
+
+    def _can_page_back(self) -> bool:
+        return self._first_day is not None and self._active_chart().window(self.period_end)[0] > self._first_day
+
+    def shift_period(self, direction: int) -> None:
+        """Page the chart one window earlier (-1) or later (1): back as far as the first session, on as far as today."""
+        if direction < 0 and not self._can_page_back():
+            return
+        end = self._active_chart().step(self.period_end, direction)
+        self._set_period(min((end - _today()).days, 0))
+
+    def _set_period(self, offset: int) -> None:
+        """Days back from today: a page stays as far back as the day moves on, still meeting today's."""
+        self._period_offset = offset
+        for chart in (self._heatmap, self._bars):  # the one off screen draws when it is back
+            chart._redraw()
+        self._update_period_row()
+
+    def _update_period_row(self) -> None:
+        self._period_label.text = period_text(*self._active_chart().window(self.period_end))
+        self._btn_prev.disabled = not self._can_page_back()
+        self._btn_next.disabled = self._period_offset == 0
 
     _TOTALS_ROW_H = dp(20)
     _TOTALS_BESIDE_W = dp(290)  # its widest texts: "September 2025" and three "Best streak" columns
@@ -753,19 +867,22 @@ class HistoryScreen(Screen):
                 cell.text = format_duration(seconds) if totals.sessions else "–"
 
     def _place_totals(self, *_a) -> None:
-        """Under the chart on a phone held upright; beside it held sideways, where under it the list had no room."""
+        """Upright, the period row over the chart and the table under it. Sideways, where under the chart the list had
+        no room, both beside it: the chart is taller than the table, which leaves the row the room over it."""
         beside = self._root.width >= self._TOTALS_BESIDE_FROM
-        parent = self._graph_row if beside else self._chart_area
-        if self._totals.parent is parent:
+        if self._totals.parent is (self._side_col if beside else self._chart_area):
             return
-        if self._totals.parent is not None:
-            self._totals.parent.remove_widget(self._totals)
+        for w in (self._totals, self._period_row, self._side_col):
+            if w.parent is not None:
+                w.parent.remove_widget(w)
         if beside:
-            self._totals.size_hint_x, self._totals.width = None, self._TOTALS_BESIDE_W
-            self._graph_row.add_widget(self._totals, index=1)  # between the chart and the Cal / 14d buttons
+            self._side_col.add_widget(self._period_row)
+            self._side_col.add_widget(self._totals)
+            self._graph_row.add_widget(self._side_col, index=1)  # between the chart and the Cal / 14d buttons
         else:
-            self._totals.size_hint_x = 1
+            self._graph_wrap.add_widget(self._period_row, index=len(self._graph_wrap.children))  # over the chart
             self._chart_area.add_widget(self._totals)  # under the chart
+        self._fit_graph_row()
 
     _on_chart_collapse: Optional[Callable] = None
 
@@ -872,9 +989,7 @@ class HistoryScreen(Screen):
         """
         if instance.parent is None or value <= 0:
             return
-        if value != self._graph_row.height:
-            self._graph_row.height = value
-            self._cascade_layout()
+        self._fit_graph_row()
 
     def _cascade_layout(self):
         """Synchronous layout pass: root → graph_row → graph_wrap.
@@ -892,6 +1007,8 @@ class HistoryScreen(Screen):
         self._chart_area.do_layout()
         self._graph_row.do_layout()
         self._graph_wrap.do_layout()
+        if self._side_col.parent is not None:
+            self._side_col.do_layout()
 
     def set_view_mode(self, mode: str) -> None:
         """Switch between 'calendar' and 'bars'.
@@ -908,13 +1025,15 @@ class HistoryScreen(Screen):
         if mode not in ("calendar", "bars"):
             return
         self._view_mode = mode
-        self._graph_wrap.clear_widgets()
+        for chart in (self._heatmap, self._bars):  # the period row above stays
+            if chart.parent is not None:
+                self._graph_wrap.remove_widget(chart)
+        self._update_period_row()  # the same period end, the other view's window
         if mode == "calendar":
             cell = self._heatmap._compute_cell_size()
             cal_h = 7 * (cell + self._heatmap.CELL_GAP) + self._heatmap.TOP_MARGIN
             self._heatmap.height = cal_h
             self._graph_wrap.add_widget(self._heatmap)
-            self._graph_row.height = cal_h
             self._btn_calendar.bg_color = C.PRIMARY
             self._btn_calendar.text_color = None
             self._btn_calendar.bold = True
@@ -924,13 +1043,14 @@ class HistoryScreen(Screen):
         else:
             self._bars.height = dp(132)
             self._graph_wrap.add_widget(self._bars)
-            self._graph_row.height = dp(132)
             self._btn_calendar.bg_color = C.BG_CARD
             self._btn_calendar.text_color = C.TEXT_SECONDARY
             self._btn_calendar.bold = False
             self._btn_bars.bg_color = C.PRIMARY
             self._btn_bars.text_color = None
             self._btn_bars.bold = True
+        self._active_chart()._redraw()  # it didn't draw while off screen
+        self._fit_graph_row()
         # Force the synchronous layout cascade so the user sees the new
         # geometry immediately.
         self._cascade_layout()
@@ -950,8 +1070,9 @@ class HistoryScreen(Screen):
         # A selection holds only this list's sessions: another profile's would be exported with it.
         self._selected_ids &= {s.get("id") for s in sessions}
         self._update_selection_buttons()
-        if not keep_filter:
+        if not keep_filter:  # another profile or the All Users view: its own history, from today
             self._set_filter(None)
+            self._set_period(0)
         self._set_day_data()
         if self._filtered_date:  # a reload of the same view keeps the user's day filter, as a delete does
             self._show_day(self._filtered_date)
@@ -989,9 +1110,11 @@ class HistoryScreen(Screen):
             if len(day) == 10:
                 day_scores.setdefault(day, []).append(s.get("avg_shamatha", 0) or 0)
         day_avg = {day: sum(scores) / len(scores) for day, scores in day_scores.items()}
+        self._first_day = min(filter(None, map(_iso_date, day_avg)), default=None)
         self._drawn_for = _today()
         self._heatmap.set_data(day_avg)
         self._bars.set_data(day_avg)
+        self._update_period_row()
         self._update_totals()
 
     def _on_day_tap(self, date_str: str) -> None:
