@@ -10,8 +10,10 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.screenmanager import Screen
 from kivy.uix.slider import Slider
+from kivy.uix.widget import Widget
 
 from app.config import APP
+from app.eeg.band_spec import GROUP_NAMES, group_powers
 from app.logger import logger, timed
 from app.session.scoring import recorded_score, target_steps
 from app.session.session_program import SessionProgram
@@ -22,6 +24,7 @@ from app.ui.theme import (
     C,
     CenteredTextInput,
     F,
+    FoldChevron,
     Icons,
     S,
     StyledButton,
@@ -172,11 +175,8 @@ def detail_graph_data(rows: list[dict], formula_series: dict[str, list[float]]) 
 
     freq_series: dict[str, list[float]] = {k: [] for k in FREQ_PREVIEW_COLORS}
     for row in rows:
-        freq_series["alpha"].append(row.get("alpha1_raw", 0.0) + row.get("alpha2_raw", 0.0))
-        freq_series["beta"].append(row.get("beta1_raw", 0.0) + row.get("beta2_raw", 0.0))
-        freq_series["gamma"].append(row.get("gamma1_raw", 0.0) + row.get("gamma2_raw", 0.0))
-        freq_series["theta"].append(row.get("theta_raw", 0.0))
-        freq_series["delta"].append(row.get("delta_raw", 0.0))
+        for key, power in group_powers(lambda k: row.get(f"{k}_raw", 0.0)).items():
+            freq_series[key].append(power)
 
     markers = [i for i, row in enumerate(rows) if row.get("marker", 0)]
     # The raw graph holds only the tail (from raw_start): its markers are offset to it.
@@ -261,17 +261,17 @@ class DiaryScreen(Screen):
         self._recorded_steps = None  # the metrics graph's line as recorded, which Reset puts back
         self._detail_layout.add_widget(self._what_if)
 
-        # Per-band total power over the whole session
-        band_header = ThemedLabel(
-            text="Band Power (whole session)",
-            font_size=F.SMALL,
-            color=C.TEXT_SECONDARY,
-            halign="left",
-            size_hint_y=None,
-            height=dp(22),
-        )
-        band_header.bind(size=band_header.setter("text_size"))
-        self._detail_layout.add_widget(band_header)
+        # Per-band total power over the whole session; the chevron right after its title folds the table away.
+        self._band_header = BoxLayout(size_hint_y=None, height=dp(28), spacing=S.GAP_SM)
+        band_title = ThemedLabel(text="Band Power (whole session)", font_size=F.SMALL, color=C.TEXT_SECONDARY,
+                                 size_hint_x=None)
+        band_title.bind(texture_size=lambda w, ts: setattr(w, "width", ts[0]))
+        self._btn_band_fold = FoldChevron(size_hint_y=None, height=dp(28))
+        self._btn_band_fold.bind(on_release=lambda *_a: self.toggle_band_collapsed())
+        self._on_band_collapse: Callable[[bool], None] | None = None
+        for w in (band_title, self._btn_band_fold, Widget()):
+            self._band_header.add_widget(w)
+        self._detail_layout.add_widget(self._band_header)
         self.band_view_persist_cb = None  # set by AppManager to persist per-user
         self._band_totals = BandTotalsView(on_change=self._on_band_view_change)
         self._band_placeholder = ThemedLabel(text="", font_size=F.BODY, color=C.TEXT_SECONDARY,
@@ -444,6 +444,7 @@ class DiaryScreen(Screen):
             auto_scale=True,
             size_hint_y=1,
             graph_id="diary_freq",
+            names=GROUP_NAMES,
         )
         # Legend tracks the active graph's visible set; a picker toggle (or a
         # restore) on the displayed graph rebuilds it.
@@ -487,6 +488,28 @@ class DiaryScreen(Screen):
     def _fit_band_holder(self, *_a) -> None:
         if self._band_holder.children:
             self._band_holder.height = self._band_holder.children[0].height
+
+    @property
+    def band_collapsed(self) -> bool:
+        return self._band_holder.parent is None
+
+    def set_band_collapsed(self, collapsed: bool) -> None:
+        """Fold the table (or its placeholder) away, detached, or bring it back under its title; the title stays."""
+        if collapsed != self.band_collapsed:
+            if collapsed:
+                self._detail_layout.remove_widget(self._band_holder)
+            else:
+                self._detail_layout.add_widget(self._band_holder,
+                                               index=self._detail_layout.children.index(self._band_header))
+        self._btn_band_fold.show_folded(collapsed)
+
+    def set_band_collapse_callback(self, cb: Callable[[bool], None]) -> None:
+        self._on_band_collapse = cb
+
+    def toggle_band_collapsed(self) -> None:
+        self.set_band_collapsed(not self.band_collapsed)
+        if self._on_band_collapse:
+            self._on_band_collapse(self.band_collapsed)
 
     def _show_band_section(self) -> None:
         """The totals table once its data is in, else the placeholder (loading, or the load failed)."""

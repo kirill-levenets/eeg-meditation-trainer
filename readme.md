@@ -72,6 +72,7 @@ app/
 ├── eeg/                    # EEG data sources
 │   ├── mock_stream_v2.py       # Frequency-based EEG synthesis (active mock)
 │   ├── neurosky_stream.py      # Real Bluetooth RFCOMM + ThinkGear parser
+│   ├── band_spec.py            # The 8 bands and 5 groups: key, name, Hz range
 │   └── buffer.py               # Rolling average and variance buffers
 ├── metrics/                # Signal processing
 │   ├── engine.py               # Shamatha formula, sinking, distraction, state classification

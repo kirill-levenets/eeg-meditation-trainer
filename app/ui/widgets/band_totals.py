@@ -9,31 +9,12 @@ from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.widget import Widget
 
+from app.eeg import band_spec
+from app.eeg.band_spec import range_text
 from app.ui.theme import ICONS_AVAILABLE, C, F, Icons, S, StyledButton, ThemedLabel
 
-BANDS = ["delta", "theta", "alpha1", "alpha2", "beta1", "beta2", "gamma1", "gamma2"]
-GROUPS = ["delta", "theta", "alpha", "beta", "gamma"]
-
-# (key, display name, color group) — sub-bands share their group's colour,
-# mirroring the frequency-band chart palette.
-_BAND_META = [
-    ("delta", "Delta", "delta"),
-    ("theta", "Theta", "theta"),
-    ("alpha1", "Alpha 1", "alpha"),
-    ("alpha2", "Alpha 2", "alpha"),
-    ("beta1", "Beta 1", "beta"),
-    ("beta2", "Beta 2", "beta"),
-    ("gamma1", "Gamma 1", "gamma"),
-    ("gamma2", "Gamma 2", "gamma"),
-]
-_GROUP_META = [
-    ("delta", "Delta", "delta"),
-    ("theta", "Theta", "theta"),
-    ("alpha", "Alpha", "alpha"),
-    ("beta", "Beta", "beta"),
-    ("gamma", "Gamma", "gamma"),
-]
-_GROUP_OF = {b: g for b, _n, g in _BAND_META}
+BANDS = list(band_spec.BAND_KEYS)
+GROUPS = list(band_spec.GROUP_KEYS)
 _GROUP_COLORS = {
     "alpha": (0.1, 0.8, 0.4, 1.0),
     "beta": (0.9, 0.7, 0.1, 1.0),
@@ -42,6 +23,7 @@ _GROUP_COLORS = {
     "delta": (0.4, 0.2, 0.8, 1.0),
 }
 _ROW_H = dp(22)
+_BAND_ROW_H = dp(32)  # the name, and its range in a smaller line under it
 _W_NAME = dp(58)
 _W_POWER = dp(60)
 _W_PCT = dp(44)
@@ -58,32 +40,29 @@ def band_shares(totals: dict[str, float]) -> dict[str, float]:
 
 def grouped_totals(totals: dict[str, float]) -> dict[str, float]:
     """Collapse the 8 sub-bands into 5 groups (alpha1+alpha2 -> alpha, etc.)."""
-    out = dict.fromkeys(GROUPS, 0.0)
-    for sub in BANDS:
-        out[_GROUP_OF[sub]] += float(totals.get(sub, 0.0))
-    return out
+    return band_spec.group_powers(lambda k: float(totals.get(k, 0.0)))
 
 
 def band_rows(
     totals: dict[str, float], *, mode: str = "detailed",
     sort_by: str = "band", descending: bool = False,
 ) -> list[dict]:
-    """Ordered rows (key, name, group, total, share) for the table view.
+    """Ordered rows (key, name, range, group, total, share) for the table view.
 
     `mode`: detailed|grouped. `sort_by`: band (frequency order) | power | percent
     (power and percent order identically, by magnitude).
     """
     if mode == "grouped":
-        meta, vals, order = _GROUP_META, grouped_totals(totals), GROUPS
+        spec, vals, order = band_spec.GROUPS, grouped_totals(totals), GROUPS
     else:
-        meta = _BAND_META
+        spec = band_spec.BANDS
         vals = {b: float(totals.get(b, 0.0)) for b in BANDS}
         order = BANDS
     grand = sum(vals.values())
     rows = [
-        {"key": k, "name": n, "group": g, "total": vals[k],
-         "share": (vals[k] / grand) if grand > 0 else 0.0}
-        for k, n, g in meta
+        {"key": b.key, "name": b.name, "range": range_text(b), "group": b.group, "total": vals[b.key],
+         "share": (vals[b.key] / grand) if grand > 0 else 0.0}
+        for b in spec
     ]
     if sort_by in ("power", "percent"):
         rows.sort(key=lambda r: r["total"], reverse=descending)
@@ -144,6 +123,7 @@ class BandTotalsView(BoxLayout):
         self._descending = False
         self._rows: list[dict] = []
         self._value_labels: dict[str, ThemedLabel] = {}
+        self._range_labels: dict[str, ThemedLabel] = {}
         self._bars: dict[str, Bar] = {}
         C.add_listener(self._render)
         self._render()
@@ -188,6 +168,7 @@ class BandTotalsView(BoxLayout):
     def _render(self, *_a) -> None:
         self.clear_widgets()
         self._value_labels.clear()
+        self._range_labels.clear()
         self._bars.clear()
         self._rows = band_rows(
             self._totals, mode=self._mode, sort_by=self._sort_by,
@@ -197,7 +178,8 @@ class BandTotalsView(BoxLayout):
         self.add_widget(self._build_header())
         for r in self._rows:
             self.add_widget(self._build_row(r))
-        self.height = (_ROW_H + dp(4)) * (len(self._rows) + 1) + dp(28)
+        self.height = (sum(child.height for child in self.children) + self.spacing * (len(self.children) - 1)
+                       + self.padding[1] + self.padding[3])
 
     def _build_toggle(self) -> BoxLayout:
         box = BoxLayout(orientation="horizontal", size_hint_y=None, height=dp(24),
@@ -240,11 +222,16 @@ class BandTotalsView(BoxLayout):
         return row
 
     def _build_row(self, r: dict) -> BoxLayout:
-        row = BoxLayout(orientation="horizontal", size_hint_y=None, height=_ROW_H,
+        row = BoxLayout(orientation="horizontal", size_hint_y=None, height=_BAND_ROW_H,
                         spacing=S.GAP_SM)
-        name_lbl = ThemedLabel(text=r["name"], font_size=F.SMALL, color=C.TEXT_SECONDARY,
-                         halign="left", valign="middle", size_hint_x=None, width=_W_NAME)
-        name_lbl.bind(size=name_lbl.setter("text_size"))
+        name_lbl = BoxLayout(orientation="vertical", size_hint_x=None, width=_W_NAME)
+        for text, size, color, key in ((r["name"], F.SMALL, C.TEXT_SECONDARY, None),
+                                       (r["range"], F.TINY, C.TEXT_MUTED, r["key"])):
+            line = ThemedLabel(text=text, font_size=size, color=color, halign="left", valign="middle")
+            line.bind(size=line.setter("text_size"))
+            name_lbl.add_widget(line)
+            if key:
+                self._range_labels[key] = line
 
         track = BoxLayout(orientation="horizontal")
         bar = Bar(_GROUP_COLORS[r["group"]], size_hint_x=r["share"])
