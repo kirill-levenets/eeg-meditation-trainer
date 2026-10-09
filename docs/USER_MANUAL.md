@@ -98,6 +98,8 @@ The History tab has a segmented toggle at the top: **Calendar** / **14-Day**.
 
 The selected mode is persisted per user.
 
+**Earlier periods.** The dates above the chart show the period it covers, between **‹** and **›**: they move it a whole window back or forward (14 days in the bars, 18 weeks in the calendar), and a sideways swipe on the chart does the same (swipe right for earlier days). It goes back as far as your first session and forward up to today; an arrow that can go no further turns grey. Tap the dates to come back to today. Calendar and 14-Day show the same period when you switch between them, and the day you tapped stays selected whichever period is shown. A day is picked when your finger lifts, so a swipe that starts on a day doesn't pick it.
+
 The chevron right after the **History** title folds the chart and the totals away, so the session list takes the whole screen (useful with the phone held sideways); tap it again to bring them back. A tapped day stays selected while folded, and each profile remembers whether it was folded.
 
 ### Totals

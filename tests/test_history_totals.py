@@ -117,8 +117,8 @@ def test_upright_the_table_is_under_the_chart_and_sideways_beside_it(history):
     assert h._totals.parent is h._chart_area
     h._root.width = dp(732)
     h._place_totals()
-    assert h._totals.parent is h._graph_row
-    assert list(reversed(h._graph_row.children)) == [h._graph_wrap, h._totals, h._toggle_col]
+    assert h._totals.parent is h._side_col  # under the chart's period row, beside the chart
+    assert list(reversed(h._graph_row.children)) == [h._graph_wrap, h._side_col, h._toggle_col]
     h._root.width = dp(360)
     h._place_totals()
     assert h._totals.parent is h._chart_area

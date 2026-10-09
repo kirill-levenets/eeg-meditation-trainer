@@ -32,8 +32,15 @@ def period_totals(sessions: list[dict], start: datetime.date, end: datetime.date
 ALL_TIME = ("All time", datetime.date.min, datetime.date.max)  # every session, whichever day is shown
 
 
-def _day_month(day: datetime.date) -> str:
+def day_month(day: datetime.date) -> str:
     return f"{day.day} {day:%b}"
+
+
+def day_range(first: datetime.date, last: datetime.date) -> str:
+    """'5 – 11 Oct', '28 Sep – 4 Oct': day first, the month once when both days share it."""
+    if (first.year, first.month) == (last.year, last.month):
+        return f"{first.day} – {day_month(last)}"
+    return f"{day_month(first)} – {day_month(last)}"
 
 
 def periods_around(day: datetime.date, today: datetime.date) -> list[tuple[str, datetime.date, datetime.date]]:
@@ -41,9 +48,8 @@ def periods_around(day: datetime.date, today: datetime.date) -> list[tuple[str, 
     another year than today's says which."""
     monday = day - datetime.timedelta(days=day.weekday())
     sunday = monday + datetime.timedelta(days=6)
-    week = (f"{monday.day} – {_day_month(sunday)}" if monday.month == sunday.month
-            else f"{_day_month(monday)} – {_day_month(sunday)}")
+    week = day_range(monday, sunday)
     first = day.replace(day=1)
     last = (first + datetime.timedelta(days=32)).replace(day=1) - datetime.timedelta(days=1)
-    return [(f"{day:%a} {_day_month(day)}", day, day), (week, monday, sunday),
+    return [(f"{day:%a} {day_month(day)}", day, day), (week, monday, sunday),
             (f"{day:%B}" if day.year == today.year else f"{day:%B %Y}", first, last)]

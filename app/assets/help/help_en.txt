@@ -124,6 +124,11 @@ Tap a day in the calendar (or the 14-day bars)
 to list its sessions; tap it again or Show All
 to list every session.
 
+The arrows above the chart (or a sideways
+swipe on it) show earlier or later days, back
+to your first session; tap the dates between
+them to return to today.
+
 The table under the chart sums the day, its
 week (Monday to Sunday) and its month - today's,
 or the day you tapped - and all time:
