@@ -44,6 +44,7 @@ from app.ui.theme import (
     ThemedTextInput,
     fit_height_to_text,
     fit_row_to_text,
+    text_width,
 )
 from app.ui.widgets.band_totals import _BAND_ROW_H, _W_NAME, BandTotalsView
 from app.ui.wizard_screen import WizardScreen
@@ -192,6 +193,17 @@ def test_an_icon_only_button_leaves_room_for_its_glyph():
     glyph = CoreLabel(text=chevron.icon, font_name="Icons", font_size=chevron._icon_label.font_size)
     glyph.refresh()
     assert glyph.texture.size[0] <= chevron.width - 2 * chevron.padding[0]
+
+
+@pytest.mark.parametrize("scale", [1.0, LARGEST])
+def test_the_timer_pill_holds_every_timer_on_one_line(scale):
+    """Every length the slider sets (1 to 120 min), no timer and a program's P: the pill is as wide as its text."""
+    F.set_scale(scale)
+    screen = LiveSessionScreen()
+    pill, label = screen._btn_duration_expand, screen._btn_duration_expand._text_label
+    for timer in [(False, 20, False), (True, 20, True), *((True, minutes, False) for minutes in range(1, 121))]:
+        screen.refresh_duration_preset(*timer)
+        assert text_width(label.text, label.font_size, label.bold, label.font_name) <= pill.width - dp(1), label.text
 
 
 def test_a_swapped_icon_is_measured_for_the_padding():
@@ -365,7 +377,7 @@ def _frames(n: int = 6) -> None:
 
 def _session_states(screen):
     yield "", None
-    yield " a 30 min timer", lambda: screen.refresh_duration_preset(True, 30)
+    yield " a 105 min timer", lambda: screen.refresh_duration_preset(True, 105)
     yield " saved card", lambda: screen.show_summary(
         1, {"duration": 1500, "threshold_used": 60, "avg_shamatha": 72, "time_above_threshold": 610,
             "longest_streak": 270}, title="2026-10-10 07:30 - Mock with a name too long for one line")
@@ -541,7 +553,8 @@ def test_the_largest_size_also_fits_at_a_phones_pixel_density():
     """Text is drawn in whole pixels: a text that just fits at 1 px per dp can wrap at 2.75 (History's Cal, the 14-day
     chart's 100). The density is fixed when Kivy starts, so the checks run again in a process of their own."""
     checks = [f"{__file__}::{name}" for name in ("test_no_text_outgrows_a_box_at_the_largest_size_that_it_fits_at_normal",
-                                                 "test_narrow_buttons_keep_their_text_on_one_line_at_the_largest_size")]
+                                                 "test_narrow_buttons_keep_their_text_on_one_line_at_the_largest_size",
+                                                 "test_the_timer_pill_holds_every_timer_on_one_line")]
     # On this run's display (no second Xvfb to start); only the density differs.
     run = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-p", "no:xvfb", *checks],
                          env={**os.environ, "KIVY_METRICS_DENSITY": PHONE_DENSITY}, capture_output=True, text=True,
