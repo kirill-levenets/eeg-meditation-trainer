@@ -4,7 +4,6 @@ from types import MappingProxyType
 
 from kivy.app import App
 from kivy.clock import Clock
-from kivy.core.text import Label as CoreLabel
 from kivy.core.window import Window
 from kivy.graphics import Color, RoundedRectangle
 from kivy.metrics import dp
@@ -40,6 +39,7 @@ from app.ui.theme import (
     format_duration,
     make_scroll_popup,
     readable_fg,
+    text_width,
 )
 from app.ui.widgets.legend import LegendBar
 
@@ -162,14 +162,10 @@ def _format_stats_slots(
     return titles, values
 
 
-# Duration picker responsive sizing — below narrow threshold the button
-# collapses to an icon-only pill so the Start button can claim the width.
 def _cut_to_width(text: str, label) -> str:
     """`text`, or its longest start plus an ellipsis, no wider than `label` at its font."""
     def width(s: str) -> float:
-        core = CoreLabel(text=s, font_size=label.font_size, bold=label.bold)
-        core.refresh()
-        return core.texture.size[0]
+        return text_width(s, label.font_size, label.bold)
 
     if width(text) <= label.width:
         return text
@@ -183,14 +179,9 @@ def _cut_to_width(text: str, label) -> str:
     return text[:lo].rstrip() + "\u2026"
 
 
-_DURATION_PICKER_WIDTH = dp(20)
-
-
 class _DurationPickerButton(BoxLayout):
     """Compact 2-row duration picker: text on top, chevron on bottom.
 
-    Built as a custom widget rather than StyledButton because StyledButton
-    enforces dp(12) horizontal padding, which clips contents on narrow widths.
     Press feedback via on_touch_down/up; uses a callback for activation.
     """
 
@@ -296,6 +287,20 @@ class LiveSessionScreen(Screen):
         Window.bind(on_resize=self._reflow, on_rotate=self._reflow)
         self._reflow()
 
+    @staticmethod
+    def _header_h() -> float:
+        return F.box(10, F.CAPPED_MAX)  # its text is capped (a status line), and spills a little past it at normal
+
+    def _fit_header(self) -> None:
+        self._header.height = self._header_h()
+
+    @staticmethod
+    def _duration_picker_w() -> float:
+        return F.box(20)  # "30m" on one line
+
+    def _fit_duration_picker(self) -> None:
+        self._btn_duration_expand.width = self._duration_picker_w()
+
     def _build_ui(self) -> None:
         float_root = FloatLayout()
 
@@ -306,17 +311,19 @@ class LiveSessionScreen(Screen):
         fill_background(root, C.BG)
 
         # ── Header ──
-        header = BoxLayout(size_hint_y=None, height=dp(10), spacing=S.GAP_SM)
+        header = BoxLayout(size_hint_y=None, height=self._header_h(), spacing=S.GAP_SM)
+        self._header = header
+        F.add_listener(self._fit_header)
         self._device_label = ThemedLabel(
             text="[Mock EEG]",
             size_hint_x=1 / 3,
             color=C.DEVICE_IDLE,
-            font_size=F.SMALL,
+            font_size=F.capped(F.SMALL),  # a 10 dp status line
         )
         self._timer_label = ThemedLabel(
             text="00:00",
             size_hint_x=1 / 3,
-            font_size=F.BODY,
+            font_size=F.capped(F.BODY),
             bold=True,
             color=C.TEXT,
         )
@@ -327,7 +334,7 @@ class LiveSessionScreen(Screen):
         self._state_label = ThemedLabel(
             text="IDLE",
             size_hint_x=1 / 3,
-            font_size=F.BODY,
+            font_size=F.capped(F.BODY),
             color=C.TEXT_SECONDARY,
         )
         # "In shamatha" chip — a rounded pill drawn behind the status text, sized to
@@ -472,7 +479,7 @@ class LiveSessionScreen(Screen):
         for key, title in stat_items:
             box = BoxLayout(orientation="vertical")
             title_lbl = ThemedLabel(
-                text=title, font_size=F.TINY, color=C.TEXT_MUTED,
+                text=title, font_size=F.capped(F.TINY, 1.1), color=C.TEXT_MUTED,  # "Distraction" in a fifth of 360 dp
                 size_hint_y=0.4,
             )
             value_lbl = ThemedLabel(
@@ -492,7 +499,7 @@ class LiveSessionScreen(Screen):
         self._btn_stats_toggle = StyledButton(
             text="LIVE",
             size_hint_y=0.6,
-            font_size=F.SMALL,
+            font_size=F.capped(F.SMALL),  # the stat strip's toggle, as short as its titles
             bg_color=C.BG_CARD,
         )
         toggle_box.add_widget(self._btn_stats_toggle)
@@ -538,10 +545,11 @@ class LiveSessionScreen(Screen):
         self._btn_duration_expand = _DurationPickerButton(
             size_hint_x=None,
             size_hint_y=None,
-            width=_DURATION_PICKER_WIDTH,
+            width=self._duration_picker_w(),
             height=S.BTN_H,
             on_release=self._open_duration_popup,
         )
+        F.add_listener(self._fit_duration_picker)
         self._btn_duration_expand.text = "\u221e"  # updated by refresh_duration_preset
         start_cluster = BoxLayout(
             orientation="horizontal",
@@ -585,7 +593,7 @@ class LiveSessionScreen(Screen):
         self._summary_panel = summary_panel
         self._summary_title = summary_panel.title_label
         self._summary_session_title = ""
-        self._summary_title.bind(width=self._fit_summary_title)
+        self._summary_title.bind(width=self._fit_summary_title, font_size=self._fit_summary_title)
 
         # Stats card: one (label, value) row per stat, set by show_summary — a session that saved no metric has one
         # threshold row where the others have Metric and Threshold. Lines are 22 dp with no gap between them.
@@ -623,6 +631,7 @@ class LiveSessionScreen(Screen):
         summary_panel.add_widget(self._summary_body)
         self._set_summary_rows([])
         summary_panel.bind(width=self._layout_summary)
+        F.add_listener(self._layout_summary)  # the notes field's height follows its text
 
         # Delete is low-emphasis and kept apart from OK: it is the one destructive action here.
         summary_btns = BoxLayout(size_hint_y=None, height=S.BTN_H, spacing=S.GAP)
@@ -680,7 +689,7 @@ class LiveSessionScreen(Screen):
 
         self._overlay_dots = ThemedLabel(
             text="",
-            font_size=dp(24),
+            font_size=F.px(24),
             color=C.PRIMARY,
             size_hint_y=None,
             height=dp(30),
@@ -1045,7 +1054,7 @@ class LiveSessionScreen(Screen):
         self._apply_duration_picker_label()
 
     def _apply_duration_picker_label(self) -> None:
-        """Update duration picker text. Width stays fixed at the compact size."""
+        """Update duration picker text."""
         # Program mode owns the timer (its total drives the countdown) — show a
         # large "P" instead of a duration so the user sees a program will run.
         if self._program_active:
@@ -1205,9 +1214,13 @@ class LiveSessionScreen(Screen):
             box.orientation, box.height = "vertical", card.height
             holder.size_hint_x = 1
         else:
-            body.orientation, body.height = "vertical", card.height + S.GAP + S.BTN_H
-            box.orientation, box.height = "horizontal", S.BTN_H
+            body.orientation, body.height = "vertical", card.height + S.GAP + self._notes_h()
+            box.orientation, box.height = "horizontal", self._notes_h()
             holder.size_hint_x, holder.width = None, self._summary_save_notes_btn.width
+
+    @staticmethod
+    def _notes_h() -> float:
+        return F.box(44)  # two lines of the notes field's text, at any text size
 
     def hide_summary(self) -> None:
         if self._summary.parent is not None:

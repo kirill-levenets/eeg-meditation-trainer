@@ -16,6 +16,7 @@ from app.config import APP, METRICS
 from app.logger import logger
 from app.ui.device_labels import MAX_DEVICE_ALIAS, device_row_text
 from app.ui.theme import (
+    TEXT_SIZES,
     THEMES,
     C,
     CenteredTextInput,
@@ -32,6 +33,8 @@ from app.ui.theme import (
     ThemedPopup,
     cancel_button,
     fill_background,
+    fit_height_to_text,
+    fit_row_to_text,
     make_message_popup,
     make_scroll_popup,
 )
@@ -416,17 +419,17 @@ class SettingsScreen(Screen):
                 "End cue = sound when the stage ends   Feedback = per-stage sound"
             ),
             font_size=F.SMALL, color=C.TEXT_SECONDARY,
-            size_hint_y=None, height=dp(58),
+            size_hint_y=None,
             halign="left", valign="top",
         )
-        program_intro.bind(size=program_intro.setter("text_size"))
+        fit_height_to_text(program_intro)
 
         # Column header aligned to the segment-row cells (same size_hint_x ratios).
         segments_header = BoxLayout(size_hint_y=None, height=dp(20), spacing=S.GAP_SM)
         for _lbl, _w in (("Min", 0.16), ("Metric", 0.3), ("Target", 0.14),
                          ("End cue", 0.16), ("Feedback", 0.16), ("", 0.1)):
             col = ThemedLabel(
-                text=_lbl, font_size=F.TINY, bold=True, color=C.TEXT_MUTED,
+                text=_lbl, font_size=F.capped(F.TINY), bold=True, color=C.TEXT_MUTED,
                 size_hint_x=_w, halign="center", valign="middle",
             )
             col.bind(size=col.setter("text_size"))
@@ -553,9 +556,9 @@ class SettingsScreen(Screen):
             size_hint_x=0.85,
             halign="left", valign="middle",
         )
-        device_mode_lbl.bind(size=device_mode_lbl.setter("text_size"))
         device_mode_row.add_widget(self._device_mode_cb)
         device_mode_row.add_widget(device_mode_lbl)
+        fit_row_to_text(device_mode_row, device_mode_lbl, dp(36))
         device_section.add_widget(device_mode_row)
 
         # Scan + device list (visible when mock is off)
@@ -767,11 +770,10 @@ class SettingsScreen(Screen):
             ),
             font_size=F.SMALL,
             size_hint_y=None,
-            height=dp(50),
             color=C.TEXT_SECONDARY,
             halign="left",
         )
-        audio_desc.bind(size=audio_desc.setter("text_size"))
+        fit_height_to_text(audio_desc)
         audio_section.add_widget(audio_desc)
 
         # Test Audio button
@@ -870,13 +872,25 @@ class SettingsScreen(Screen):
             size_hint_x=0.85,
             halign="left", valign="middle",
         )
-        disconnect_lbl.bind(size=disconnect_lbl.setter("text_size"))
         disconnect_row.add_widget(self._disconnect_alert_cb)
         disconnect_row.add_widget(disconnect_lbl)
+        fit_row_to_text(disconnect_row, disconnect_lbl, dp(36))
         audio_section.add_widget(disconnect_row)
 
         # --- Display section ---
         display_section = accordion.add_section("Display", collapsed=True)
+
+        # Text size: every font in the app, applied at once (F.set_scale).
+        ts_label = ThemedLabel(text="Text size:", font_size=F.BODY, color=C.TEXT, halign="left", size_hint_y=None,
+                               height=dp(28))
+        ts_label.bind(size=ts_label.setter("text_size"))
+        display_section.add_widget(ts_label)
+        self._on_text_size: Callable[[float], None] | None = None
+        self._text_size_presets = PresetRow(items=[(name, scale) for scale, name in TEXT_SIZES],
+                                            callback=self._on_text_size_pressed)
+        display_section.add_widget(self._text_size_presets)
+        self._show_text_size()
+        F.add_listener(self._show_text_size)
 
         # Line width slider
         lw_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
@@ -922,9 +936,8 @@ class SettingsScreen(Screen):
         marker_lbl = ThemedLabel(
             text="Marker Hotkey:", font_size=F.BODY,
             color=C.TEXT,
-            size_hint_x=0.35, halign="left",
+            size_hint_x=0.35, halign="left", valign="middle",
         )
-        marker_lbl.bind(size=marker_lbl.setter("text_size"))
         self._marker_hotkey_btn = StyledButton(
             text="m",
             font_size=F.BODY,
@@ -949,6 +962,7 @@ class SettingsScreen(Screen):
         marker_row.add_widget(marker_lbl)
         marker_row.add_widget(self._marker_hotkey_btn)
         marker_row.add_widget(self._marker_hotkey_clear)
+        fit_row_to_text(marker_row, marker_lbl, dp(36))
         display_section.add_widget(marker_row)
         self._marker_hotkey: str = "m"
         self._waiting_for_hotkey: bool = False
@@ -967,11 +981,10 @@ class SettingsScreen(Screen):
             ),
             font_size=F.SMALL,
             size_hint_y=None,
-            height=dp(32),
             color=C.TEXT_SECONDARY,
             halign="left",
         )
-        formula_desc.bind(size=formula_desc.setter("text_size"))
+        fit_height_to_text(formula_desc)
         formula_section.add_widget(formula_desc)
 
         # Three named formula slots, each with name + formula inputs,
@@ -1008,7 +1021,7 @@ class SettingsScreen(Screen):
 
             formula_input = CenteredTextInput(
                 text="",
-                hint_text="e.g. (alpha1 + alpha2) / (beta1 + beta2 + 1)",
+                hint_text="e.g. alpha1 / (beta1 + 1)",  # one line on a 360 dp phone at the largest text size
                 font_size=F.BODY,
                 size_hint_y=None,
                 height=dp(40),
@@ -1103,12 +1116,11 @@ class SettingsScreen(Screen):
             ),
             font_size=F.BODY,
             size_hint_y=None,
-            height=dp(130),
             color=C.TEXT_MUTED,
             halign="left",
             valign="top",
         )
-        examples.bind(size=examples.setter("text_size"))
+        fit_height_to_text(examples)
         formula_section.add_widget(examples)
 
         ref = ThemedLabel(
@@ -1131,12 +1143,11 @@ class SettingsScreen(Screen):
             ),
             font_size=F.SMALL,
             size_hint_y=None,
-            height=dp(225),
             color=C.TEXT_MUTED,
             halign="left",
             valign="top",
         )
-        ref.bind(size=ref.setter("text_size"))
+        fit_height_to_text(ref)
         formula_section.add_widget(ref)
 
         # --- Theme section ---
@@ -1163,11 +1174,10 @@ class SettingsScreen(Screen):
             text="Trigger unhandled exceptions to verify crash-handler hooks.",
             font_size=F.SMALL,
             size_hint_y=None,
-            height=dp(20),
             color=C.TEXT_SECONDARY,
             halign="left",
         )
-        dev_desc.bind(size=dev_desc.setter("text_size"))
+        fit_height_to_text(dev_desc)
         dev_section.add_widget(dev_desc)
 
         def _trigger_kivy_crash(_btn):
@@ -1240,8 +1250,7 @@ class SettingsScreen(Screen):
                 halign="left",
                 valign="top",
             )
-            body.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
-            body.bind(texture_size=lambda w, v: setattr(w, "height", v[1] + dp(8)))
+            fit_height_to_text(body, extra=dp(8))
             help_section.add_widget(body)
 
             help_section.add_widget(Divider())
@@ -1676,35 +1685,36 @@ class SettingsScreen(Screen):
 
         row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP_SM)
 
+        cell_font = F.capped(F.SMALL)  # six fixed columns across a phone
         duration_in = CenteredTextInput(
             text=str(minutes), input_filter="int", multiline=False,
-            font_size=F.SMALL, foreground_color=C.TEXT,
+            font_size=cell_font, foreground_color=C.TEXT,
             background_color=C.BG_INPUT,
             size_hint_x=0.16,
         )
         formula_btn = StyledButton(
             text=self._formula_label(formula),
-            font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT,
+            font_size=cell_font, bg_color=C.BG_CARD, text_color=C.TEXT,
             size_hint_x=0.3, size_hint_y=None, height=dp(36),
         )
         target_in = CenteredTextInput(
             text=str(target), input_filter="int", multiline=False,
-            font_size=F.SMALL, foreground_color=C.TEXT,
+            font_size=cell_font, foreground_color=C.TEXT,
             background_color=C.BG_INPUT,
             size_hint_x=0.14,
         )
         end_sound_btn = StyledButton(
             text="Warble" if end_sound == "warble" else "Chime",
-            font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT,
+            font_size=cell_font, bg_color=C.BG_CARD, text_color=C.TEXT,
             size_hint_x=0.16, size_hint_y=None, height=dp(36),
         )
         feedback_btn = StyledButton(
-            text=self._feedback_seg_label(feedback_sound), font_size=F.SMALL,
+            text=self._feedback_seg_label(feedback_sound), font_size=cell_font,
             bg_color=C.BG_CARD, text_color=C.TEXT, size_hint_x=0.16,
             size_hint_y=None, height=dp(36),
         )
         delete_btn = StyledButton(
-            text="X", font_size=F.SMALL, bg_color=C.BG_CARD,
+            text="X", font_size=cell_font, bg_color=C.BG_CARD,
             text_color=C.DANGER, size_hint_x=0.1, size_hint_y=None,
             height=dp(36),
         )
@@ -1913,6 +1923,18 @@ class SettingsScreen(Screen):
 
     def set_scan_devices_callback(self, callback: Callable) -> None:
         self._on_scan_devices = callback
+
+    def _show_text_size(self) -> None:
+        """Select the size in use, whoever applied it (this picker or a profile's settings load)."""
+        self._text_size_presets.set_selected(F.SCALE)
+
+    def set_text_size_callback(self, callback: Callable[[float], None]) -> None:
+        self._on_text_size = callback
+
+    def _on_text_size_pressed(self, size: float) -> None:
+        F.set_scale(size)
+        if self._on_text_size:
+            self._on_text_size(size)
 
     def set_device_select_callback(self, callback: Callable) -> None:
         self._on_device_select = callback

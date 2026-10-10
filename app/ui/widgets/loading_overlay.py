@@ -25,7 +25,7 @@ class LoadingOverlay(ModalScrim):
         panel.add_widget(self._status)
 
         self._dots = ThemedLabel(
-            text="", font_size=dp(24), color=C.PRIMARY,
+            text="", font_size=F.px(24), color=C.PRIMARY,
             size_hint_y=None, height=dp(30),
         )
         panel.add_widget(self._dots)

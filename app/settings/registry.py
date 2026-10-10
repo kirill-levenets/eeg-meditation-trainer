@@ -23,6 +23,18 @@ FLOAT = (lambda s: float(s), lambda v: str(float(v)))
 STR = (lambda s: s, lambda v: "" if v is None else str(v))
 
 
+def stored_value(db, uid: int | None, s: Setting) -> Any:
+    """`s` for `uid`: its stored value if present and valid, else its default."""
+    raw = db.get_user_setting(uid, s.key) if uid else None
+    if raw is None:
+        return s.default
+    try:
+        return s.parse(raw)
+    except (ValueError, TypeError):
+        logger.warning(f"settings: invalid {s.key!r}={raw!r}; using default")
+        return s.default
+
+
 class SettingsStore:
     """Generic load/save/persist over a list of Setting descriptors."""
 
@@ -41,14 +53,7 @@ class SettingsStore:
         self._loading = True
         try:
             for s in self._settings:
-                raw = self._db.get_user_setting(uid, s.key)
-                value = s.default
-                if raw is not None:
-                    try:
-                        value = s.parse(raw)
-                    except (ValueError, TypeError):
-                        logger.warning(f"settings: invalid {s.key!r}={raw!r}; using default")
-                s.set(value)
+                s.set(stored_value(self._db, uid, s))
         finally:
             self._loading = False
 

@@ -22,11 +22,12 @@ _GROUP_COLORS = {
     "theta": (0.2, 0.5, 0.9, 1.0),
     "delta": (0.4, 0.2, 0.8, 1.0),
 }
-_ROW_H = dp(22)
-_BAND_ROW_H = dp(32)  # the name, and its range in a smaller line under it
-_W_NAME = dp(58)
-_W_POWER = dp(60)
-_W_PCT = dp(44)
+# Sizes that hold text, in dp at the normal text size; the view takes them through F.box as it renders.
+_ROW_H = 22
+_BAND_ROW_H = 32  # the name, and its range in a smaller line under it
+_W_NAME = 58
+_W_POWER = 60
+_W_PCT = 44
 
 
 def band_shares(totals: dict[str, float]) -> dict[str, float]:
@@ -126,6 +127,7 @@ class BandTotalsView(BoxLayout):
         self._range_labels: dict[str, ThemedLabel] = {}
         self._bars: dict[str, Bar] = {}
         C.add_listener(self._render)
+        F.add_listener(self._render)
         self._render()
 
     # ── public API ──
@@ -213,18 +215,18 @@ class BandTotalsView(BoxLayout):
         return cell
 
     def _build_header(self) -> BoxLayout:
-        row = BoxLayout(orientation="horizontal", size_hint_y=None, height=_ROW_H,
+        row = BoxLayout(orientation="horizontal", size_hint_y=None, height=F.box(_ROW_H),
                         spacing=S.GAP_SM)
-        row.add_widget(self._header_cell("Band", "band", _W_NAME, "left"))
+        row.add_widget(self._header_cell("Band", "band", F.box(_W_NAME), "left"))
         row.add_widget(Widget())  # share-bar column header (blank)
-        row.add_widget(self._header_cell("Power", "power", _W_POWER, "right"))
-        row.add_widget(self._header_cell("%", "percent", _W_PCT, "right"))
+        row.add_widget(self._header_cell("Power", "power", F.box(_W_POWER), "right"))
+        row.add_widget(self._header_cell("%", "percent", F.box(_W_PCT), "right"))
         return row
 
     def _build_row(self, r: dict) -> BoxLayout:
-        row = BoxLayout(orientation="horizontal", size_hint_y=None, height=_BAND_ROW_H,
+        row = BoxLayout(orientation="horizontal", size_hint_y=None, height=F.box(_BAND_ROW_H),
                         spacing=S.GAP_SM)
-        name_lbl = BoxLayout(orientation="vertical", size_hint_x=None, width=_W_NAME)
+        name_lbl = BoxLayout(orientation="vertical", size_hint_x=None, width=F.box(_W_NAME))
         for text, size, color, key in ((r["name"], F.SMALL, C.TEXT_SECONDARY, None),
                                        (r["range"], F.TINY, C.TEXT_MUTED, r["key"])):
             line = ThemedLabel(text=text, font_size=size, color=color, halign="left", valign="middle")
@@ -239,10 +241,10 @@ class BandTotalsView(BoxLayout):
         track.add_widget(Widget(size_hint_x=max(0.0, 1.0 - r["share"])))
 
         power_lbl = ThemedLabel(text=format_power(r["total"]), font_size=F.SMALL, color=C.TEXT,
-                          halign="right", valign="middle", size_hint_x=None, width=_W_POWER)
+                          halign="right", valign="middle", size_hint_x=None, width=F.box(_W_POWER))
         power_lbl.bind(size=power_lbl.setter("text_size"))
         pct_lbl = ThemedLabel(text=f"{round(r['share'] * 100)}%", font_size=F.SMALL, color=C.TEXT,
-                        halign="right", valign="middle", size_hint_x=None, width=_W_PCT)
+                        halign="right", valign="middle", size_hint_x=None, width=F.box(_W_PCT))
         pct_lbl.bind(size=pct_lbl.setter("text_size"))
 
         row.add_widget(name_lbl)

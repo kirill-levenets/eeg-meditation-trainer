@@ -36,6 +36,11 @@ def day_month(day: datetime.date) -> str:
     return f"{day.day} {day:%b}"
 
 
+def day_text(day: datetime.date, today: datetime.date) -> str:
+    """'Fri 9 Oct', and the year when it isn't today's."""
+    return f"{day:%a} {day_month(day)}" + ("" if day.year == today.year else f" {day.year}")
+
+
 def day_range(first: datetime.date, last: datetime.date) -> str:
     """'5 – 11 Oct', '28 Sep – 4 Oct': day first, the month once when both days share it."""
     if (first.year, first.month) == (last.year, last.month):
@@ -44,12 +49,12 @@ def day_range(first: datetime.date, last: datetime.date) -> str:
 
 
 def periods_around(day: datetime.date, today: datetime.date) -> list[tuple[str, datetime.date, datetime.date]]:
-    """(label, first day, last day) of the day, its Monday-to-Sunday week (the calendar's) and its month; a month of
-    another year than today's says which."""
+    """(label, first day, last day) of the day, its Monday-to-Sunday week (the calendar's) and its month; a day or month
+    of another year than today's says which."""
     monday = day - datetime.timedelta(days=day.weekday())
     sunday = monday + datetime.timedelta(days=6)
     week = day_range(monday, sunday)
     first = day.replace(day=1)
     last = (first + datetime.timedelta(days=32)).replace(day=1) - datetime.timedelta(days=1)
-    return [(f"{day:%a} {day_month(day)}", day, day), (week, monday, sunday),
+    return [(day_text(day, today), day, day), (week, monday, sunday),
             (f"{day:%B}" if day.year == today.year else f"{day:%B %Y}", first, last)]

@@ -118,6 +118,13 @@ Configure in Audio section above
 Change in Theme section above.
 Takes effect immediately.
 
+## Text Size
+
+Settings > Display > Text size makes every
+text larger: Normal, Large (125%) or Larger
+(150%). Each profile keeps its own. Takes
+effect immediately.
+
 ## History
 
 Tap a day in the calendar (or the 14-day bars)

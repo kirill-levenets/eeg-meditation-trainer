@@ -148,10 +148,11 @@ def test_a_day_tap_highlights_the_day_in_both_views_and_reset_clears_both():
     h = _loaded(6)
     h._on_day_tap("2026-09-27")
     assert h._heatmap._selected_date == h._bars._selected_date == "2026-09-27"
-    assert h._btn_show_all.opacity == 1 and not h._btn_show_all.disabled
+    row = h._date_row.children  # right to left: Select, Show All, the heading
+    assert row[1] is h._btn_show_all and row[0] is h._btn_select
     h._reset_filter()
     assert h._heatmap._selected_date is None and h._bars._selected_date is None
-    assert h._btn_show_all.opacity == 0 and h._btn_show_all.disabled
+    assert h._btn_show_all.parent is None  # detached, not hidden in place: it would still take the row's room and taps
 
 
 def test_a_reload_for_another_view_clears_the_day_filter():
@@ -160,7 +161,7 @@ def test_a_reload_for_another_view_clears_the_day_filter():
     h.load_sessions(_sessions(4), keep_filter=False)  # another profile, or the All-Users view
     assert h._filtered_date is None and h._heatmap._selected_date is None and h._bars._selected_date is None
     assert h._date_label.text == "All sessions (4 sessions)"
-    assert h._btn_show_all.disabled
+    assert h._btn_show_all.parent is None
 
 
 def test_history_keeps_the_day_filter_only_for_the_same_profile_and_view():
@@ -269,7 +270,7 @@ def test_a_reload_keeps_the_active_day_filter():
     h.load_sessions(_sessions(6))  # e.g. History marked dirty by a notes save, rebuilt on return
     assert h._filtered_date == "2026-09-27"
     assert set(_listed(h)) == {2, 3}
-    assert h._date_label.text.startswith("September 27, 2026")
+    assert h._date_label.text.startswith("Sun 27 Sep")  # as the totals name the day
 
 
 def test_picking_a_profile_marks_history_for_a_rebuild():

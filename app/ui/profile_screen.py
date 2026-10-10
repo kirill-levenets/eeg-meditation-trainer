@@ -3,11 +3,10 @@ from typing import Optional
 
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.button import Button
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 
-from app.ui.theme import CenteredTextInput, ThemedLabel
+from app.ui.theme import CenteredTextInput, F, ThemedButton, ThemedLabel
 
 
 class ProfileScreen(Screen):
@@ -27,7 +26,7 @@ class ProfileScreen(Screen):
 
         title = ThemedLabel(
             text="User Profiles",
-            font_size=dp(20),
+            font_size=F.px(20),
             bold=True,
             size_hint_y=None,
             height=dp(36),
@@ -37,7 +36,7 @@ class ProfileScreen(Screen):
         # --- Current user indicator ---
         self._current_user_label = ThemedLabel(
             text="Current: All Users",
-            font_size=dp(14),
+            font_size=F.H3,
             color=(0.3, 0.8, 1.0, 1.0),
             size_hint_y=None,
             height=dp(28),
@@ -50,13 +49,13 @@ class ProfileScreen(Screen):
         self._name_input = CenteredTextInput(
             hint_text="Enter user name...",
             multiline=False,
-            font_size=dp(14),
+            font_size=F.H3,
             size_hint_x=0.6,
         )
-        self._create_btn = Button(
+        self._create_btn = ThemedButton(
             text="Create User",
             background_color=(0.2, 0.7, 0.3, 1.0),
-            font_size=dp(14),
+            font_size=F.H3,
             bold=True,
             size_hint_x=0.4,
         )
@@ -67,7 +66,7 @@ class ProfileScreen(Screen):
 
         self._status_label = ThemedLabel(
             text="",
-            font_size=dp(11),
+            font_size=F.SMALL,
             color=(0.8, 0.4, 0.4, 1.0),
             size_hint_y=None,
             height=dp(20),
@@ -75,11 +74,11 @@ class ProfileScreen(Screen):
         root.add_widget(self._status_label)
 
         # --- "All Users" button ---
-        all_btn = Button(
+        all_btn = ThemedButton(
             text="Show All Users (no filter)",
             size_hint_y=None,
             height=dp(36),
-            font_size=dp(13),
+            font_size=F.BODY,
             background_color=(0.3, 0.3, 0.5, 1.0),
             bold=True,
         )
@@ -89,7 +88,7 @@ class ProfileScreen(Screen):
         # --- User list ---
         list_label = ThemedLabel(
             text="Select user to switch:",
-            font_size=dp(13),
+            font_size=F.BODY,
             size_hint_y=None,
             height=dp(24),
             color=(0.6, 0.6, 0.6, 1.0),
@@ -135,7 +134,7 @@ class ProfileScreen(Screen):
         if not users:
             lbl = ThemedLabel(
                 text="No users yet. Create one above.",
-                font_size=dp(13),
+                font_size=F.BODY,
                 color=(0.5, 0.5, 0.5, 1.0),
                 size_hint_y=None,
                 height=dp(40),
@@ -147,18 +146,18 @@ class ProfileScreen(Screen):
             row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(4))
             is_active = u["id"] == current_user_id
             bg = (0.2, 0.5, 0.3, 1.0) if is_active else (0.15, 0.15, 0.2, 1.0)
-            btn = Button(
+            btn = ThemedButton(
                 text=f"{u['name']}  {'(active)' if is_active else ''}",
-                font_size=dp(13),
+                font_size=F.BODY,
                 background_color=bg,
                 size_hint_x=0.75,
             )
             btn.user_id = u["id"]
             btn.bind(on_release=self._on_user_btn)
 
-            del_btn = Button(
+            del_btn = ThemedButton(
                 text="X",
-                font_size=dp(13),
+                font_size=F.BODY,
                 background_color=(0.7, 0.2, 0.2, 1.0),
                 size_hint_x=0.25,
             )
