@@ -35,6 +35,7 @@ from app.ui.theme import (
     fill_background,
     fit_height_to_text,
     fit_row_to_text,
+    format_count,
     make_message_popup,
     make_scroll_popup,
 )
@@ -2236,7 +2237,7 @@ class SettingsScreen(Screen):
         """Show confirmation before deleting a user."""
         n = self._count_user_sessions(user_id)
         message = (f'Delete profile "{user_name}"?\n\n'
-                   f"Its {n} session(s) and all its settings will be permanently deleted.\n"
+                   f"Its {format_count(n, 'session')} and all its settings will be permanently deleted.\n"
                    "This cannot be undone.")
         btn_cancel = cancel_button()
         btn_confirm = StyledButton(text="Delete", icon=Icons.DELETE, bg_color=C.DANGER)

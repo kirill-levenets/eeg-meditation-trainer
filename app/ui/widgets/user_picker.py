@@ -9,7 +9,15 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
 
 from app.logger import logger
-from app.ui.theme import C, CenteredTextInput, F, S, StyledButton, ThemedLabel
+from app.ui.theme import (
+    C,
+    CenteredTextInput,
+    F,
+    S,
+    StyledButton,
+    ThemedLabel,
+    format_count,
+)
 
 
 class UserPickerForm(BoxLayout):
@@ -210,7 +218,7 @@ class UserPickerForm(BoxLayout):
         uid = user["id"]
         name = user["name"]
         count = self._on_count(uid) if self._on_count else None
-        label_text = f"{name} ({count} sessions)" if count is not None else name
+        label_text = f"{name} ({format_count(count, 'session')})" if count is not None else name
 
         row = BoxLayout(size_hint_y=None, height=height, spacing=dp(4))
         btn = StyledButton(

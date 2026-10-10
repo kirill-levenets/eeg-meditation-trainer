@@ -22,6 +22,7 @@ from app.ui.theme import (
     cancel_button,
     fill_background,
     fit_height_to_text,
+    format_count,
 )
 from app.ui.widgets.user_picker import UserPickerForm
 
@@ -284,7 +285,7 @@ class WizardScreen(Screen):
             self._scan_status.text = "No paired devices found"
             return
 
-        self._scan_status.text = f"Found {len(devices)} device(s)"
+        self._scan_status.text = f"Found {format_count(len(devices), 'device')}"
         for dev in devices:
             name = dev.get("name", "Unknown")
             addr = dev.get("address", "")

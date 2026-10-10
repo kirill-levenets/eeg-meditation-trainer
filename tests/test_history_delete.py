@@ -55,7 +55,7 @@ def test_removing_inside_a_day_filter_keeps_the_filter():
     h.remove_sessions([2])
     assert h._filtered_date == "2026-09-27"
     assert set(_listed(h)) == {3}
-    assert h._date_label.text.endswith("(1 sessions)")
+    assert h._date_label.text.endswith("(1 session)")
     h.remove_sessions([3])
     assert h._filtered_date == "2026-09-27"
     assert _listed(h) == {}

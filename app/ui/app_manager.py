@@ -86,6 +86,7 @@ from app.ui.theme import (
     cancel_button,
     confirm_popup,
     fill_background,
+    format_count,
     make_message_popup,
     make_scroll_popup,
     paint_panel,
@@ -418,7 +419,7 @@ class EEGMeditationApp(App):
         missing = [path for kind, path in feedback_sources.values()
                    if kind == "custom" and not (path and os.path.isfile(path))]
         if missing:
-            problems.append("Custom feedback file(s) not found: "
+            problems.append(f"{format_count(len(missing), 'custom feedback file')} not found: "
                             + ", ".join(repr(p) for p in missing) + " - using rain noise instead.")
         if timer_path and not os.path.isfile(timer_path):
             problems.append(f"Custom timer sound not found: {timer_path!r} - using the default gong instead.")
@@ -1439,7 +1440,7 @@ class EEGMeditationApp(App):
             threshold = segment_target(prog.segments[0])
             self._timer_state.set_enabled(True)
             self._timer_state.set_duration(max(1, int(round(prog.total_seconds / 60))))
-            logger.info(f"Program session: {len(prog.segments)} segments, "
+            logger.info(f"Program session: {format_count(len(prog.segments), 'segment')}, "
                         f"{prog.total_seconds:.0f}s total drives the end gong")
         else:
             # Session start is authoritative: re-sync the timer from Settings so a
@@ -2787,7 +2788,7 @@ class EEGMeditationApp(App):
             for entry in formulas:
                 f.write(f"{entry['formula']}\n")
         self._settings_screen.set_formula_slot_status(0, f"Exported to {os.path.basename(path)}")
-        logger.info(f"Exported {len(formulas)} formulas to {path}")
+        logger.info(f"Exported {format_count(len(formulas), 'formula')} to {path}")
 
     def _on_timer_mode_change(self, mode: str) -> None:
         self._timer_mode = mode
@@ -3288,16 +3289,17 @@ class EEGMeditationApp(App):
             done(False)
             return
         # Modal at once, so a tap can't reach the rows or the end card being deleted; painted only if it takes a while.
-        self.show_loading(f"Deleting {len(ids)} session(s)\u2026", delay=0.15)
+        self.show_loading(f"Deleting {format_count(len(ids), 'session')}\u2026", delay=0.15)
         t0 = time.monotonic()
 
         def _finish(error) -> None:
             self.hide_loading()
             if error is not None:
-                report_soft_error("session_delete_failed", f"{len(ids)} session(s) were not deleted: {error}")
+                report_soft_error("session_delete_failed",
+                                  f"{format_count(len(ids), 'session')} could not be deleted: {error}")
                 done(False)
                 return
-            logger.info(f"Deleted session(s) {ids} in {(time.monotonic() - t0) * 1000:.0f} ms")
+            logger.info(f"Deleted {format_count(len(ids), 'session')} {ids} in {(time.monotonic() - t0) * 1000:.0f} ms")
             if self._live_screen.summary_session_id in ids:  # the end card shows a session that's gone
                 self._audio.stop_timer_bell()
                 self._live_screen.hide_summary()
@@ -3342,7 +3344,7 @@ class EEGMeditationApp(App):
         copy_to_documents path (Documents on Android, a Documents folder on desktop)."""
         if not session_ids:
             return
-        self.show_loading(f"Exporting {len(session_ids)} sessions…")
+        self.show_loading(f"Exporting {format_count(len(session_ids), 'session')}…")
 
         def _worker():
             try:
@@ -3378,7 +3380,7 @@ class EEGMeditationApp(App):
     def _finish_bulk_export(self, count: int, dest: str) -> None:
         self.hide_loading()
         self._history_screen.set_select_mode(False)
-        self._info_popup("Export complete", f"Exported {count} session(s) to:\n{dest}")
+        self._info_popup("Export complete", f"Exported {format_count(count, 'session')} to:\n{dest}")
 
     # A tick (session stats + buffered row) and a checkpoint's snapshot of both, one at a time; one app per process.
     _checkpoint_lock = threading.Lock()
@@ -3613,8 +3615,8 @@ class EEGMeditationApp(App):
         self._confirm_action(
             "Restore database",
             f"Replace the ENTIRE database with this backup?\n\n"
-            f"All {counts['users']} profile(s) on this device, with their "
-            f"{counts['sessions']} session(s), settings, programs and formulas, "
+            f"Everything on this device ({format_count(counts['users'], 'profile')}, "
+            f"{format_count(counts['sessions'], 'session')}, settings, programs and formulas) "
             f"will be replaced by the backup's.\n"
             f"{_BACKUP_SOUND_NOTE}\n"
             f"This cannot be undone.",
