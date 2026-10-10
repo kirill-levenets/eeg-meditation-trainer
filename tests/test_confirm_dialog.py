@@ -9,8 +9,8 @@ from app.ui.app_manager import _BACKUP_SOUND_NOTE, EEGMeditationApp
 
 RESTORE_TEXT = (
     "Replace the ENTIRE database with this backup?\n\n"
-    "All 3 profile(s) on this device, with their 120 session(s), settings, programs "
-    "and formulas, will be replaced by the backup's.\n"
+    "Everything on this device (3 profiles, 120 sessions, settings, programs "
+    "and formulas) will be replaced by the backup's.\n"
     f"{_BACKUP_SOUND_NOTE}\n"
     "This cannot be undone."
 )
@@ -20,7 +20,7 @@ BACKUP_SAVED_TEXT = (
 )
 PROFILE_DELETE_TEXT = (
     'Delete profile "test"?\n\n'
-    "Its 12 session(s) and all its settings will be permanently deleted.\n"
+    "Its 12 sessions and all its settings will be permanently deleted.\n"
     "This cannot be undone."
 )
 

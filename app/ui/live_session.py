@@ -195,7 +195,7 @@ class _DurationPickerButton(BoxLayout):
 
         self._text_label = ThemedLabel(
             text="",
-            font_size=F.TINY,
+            font_size=F.capped(F.TINY),  # the bottom bar's width is fixed
             bold=True,
             color=C.TEXT,
             halign="center",
@@ -203,6 +203,8 @@ class _DurationPickerButton(BoxLayout):
             size_hint_y=0.55,
         )
         self._text_label.bind(size=self._text_label.setter("text_size"))
+        F.add_listener(self._fit_width)
+        self._fit_width()
 
         self._chevron_label = ThemedLabel(
             text=Icons.MENU_DOWN if ICONS_AVAILABLE else "v",
@@ -229,11 +231,19 @@ class _DurationPickerButton(BoxLayout):
     @text.setter
     def text(self, value: str) -> None:
         self._text_label.text = value
+        self._fit_width()
+
+    def _fit_width(self, *_args) -> None:
+        """As wide as its text on one line ("105m"), at least 20 dp at the text size in use."""
+        label = self._text_label
+        self.width = max(F.box(20, F.CAPPED_MAX),
+                         text_width(label.text, label.font_size, label.bold, label.font_name) + dp(4))
 
     def set_label(self, text: str, large: bool = False) -> None:
         """Set the button text; `large` bumps the font (used for the program 'P')."""
+        self._text_label.font_size = F.capped(F.H3 if large else F.TINY)
         self._text_label.text = text
-        self._text_label.font_size = F.H3 if large else F.TINY
+        self._fit_width()
 
     def _redraw(self, *args) -> None:
         self.canvas.before.clear()
@@ -293,13 +303,6 @@ class LiveSessionScreen(Screen):
 
     def _fit_header(self) -> None:
         self._header.height = self._header_h()
-
-    @staticmethod
-    def _duration_picker_w() -> float:
-        return F.box(20)  # "30m" on one line
-
-    def _fit_duration_picker(self) -> None:
-        self._btn_duration_expand.width = self._duration_picker_w()
 
     def _build_ui(self) -> None:
         float_root = FloatLayout()
@@ -545,11 +548,9 @@ class LiveSessionScreen(Screen):
         self._btn_duration_expand = _DurationPickerButton(
             size_hint_x=None,
             size_hint_y=None,
-            width=self._duration_picker_w(),
             height=S.BTN_H,
             on_release=self._open_duration_popup,
         )
-        F.add_listener(self._fit_duration_picker)
         self._btn_duration_expand.text = "\u221e"  # updated by refresh_duration_preset
         start_cluster = BoxLayout(
             orientation="horizontal",

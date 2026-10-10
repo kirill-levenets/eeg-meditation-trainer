@@ -71,6 +71,11 @@ def format_duration(seconds: int) -> str:
     return f"{h}h {m:02d}m"
 
 
+def format_count(n: int, noun: str) -> str:
+    """'1 session', '3 sessions': a count with its noun (a regular one, plural + s), singular for one."""
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
 def make_scroll_popup(title, rows, footer=None, *, width_hint=0.85, row_h=None,
                       est_rows=None, max_height_hint=0.85, auto_dismiss=True):
     """Popup with a vertically-scrolling list of fixed-height `rows` and an optional

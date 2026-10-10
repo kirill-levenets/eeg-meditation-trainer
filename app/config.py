@@ -3,7 +3,7 @@ import sys
 
 from app.storage.fileops import copy_file_atomic
 
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.5.0"
 
 
 def _resolve_android_base_dir() -> str:

@@ -54,6 +54,7 @@ from app.ui.theme import (
     confirm_popup,
     fill_background,
     fit_row_to_text,
+    format_count,
     format_duration,
 )
 from app.ui.touch_utils import point_in_rect
@@ -1104,7 +1105,7 @@ class HistoryScreen(Screen):
         self._update_selection_buttons()
         self._show_items()
         self._set_day_data()
-        self._date_label.text = f"{self._current_header} ({len(self._shown)} sessions)"
+        self._date_label.text = f"{self._current_header} ({format_count(len(self._shown), 'session')})"
 
     def update_session(self, sid, **fields) -> None:
         """Apply a saved edit (the fields not None) to that session in the model, in place: no reload."""
@@ -1181,7 +1182,7 @@ class HistoryScreen(Screen):
         self._rv.effect_y.reset(self._rv.effect_y.max)
         self._rv.scroll_y = 1
         self._current_header = header
-        self._date_label.text = f"{header} ({len(sessions)} sessions)"
+        self._date_label.text = f"{header} ({format_count(len(sessions), 'session')})"
         self._close_rename()
         self._shown = sessions
         self._show_items()
@@ -1287,10 +1288,10 @@ class HistoryScreen(Screen):
         else:
             days = sorted({session_day(s) for s in sessions})
             span = "" if not days else f" on {days[0]}" if len(days) == 1 else f" from {days[0]} to {days[-1]}"
-            what = f"Delete {len(session_ids)} sessions{span}?"
+            what = f"Delete {format_count(len(session_ids), 'session')}{span}?"
             profiles = {s.get("user_id") for s in sessions} - {None}
             if len(profiles) > 1:
-                what += f"\nThey are from {len(profiles)} profiles."
+                what += f"\nThey are from {format_count(len(profiles), 'profile')}."
         def _deleted(ok: bool) -> None:
             if ok and self._select_mode:
                 self.set_select_mode(False)
