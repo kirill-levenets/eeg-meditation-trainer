@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-10
+
 ### Added
 
 - **Text size** (#76): Settings → Display → **Text size** makes every text in the app larger: **Normal**, **Large** (125 %) or **Larger** (150 %). Each profile keeps its own, and it applies at once, as a theme does, to every screen. Every screen was checked at Larger on a phone 360 dp wide, at a phone's pixel density: rows that hold text grow with it (help and description texts, Settings rows whose label wraps, History's list heading, the band table, the Session saved card's notes field), and the few texts in a box that can't grow stop at 120 % (the Session screen's status line and timer length, its stat titles at 110 %, a program's segment rows). History's day heading now reads like the totals beside it ("Fri 9 Oct (3 sessions)", the year only for another year's day).
@@ -428,6 +430,7 @@ Initial public release.
 - Power line noise detection at 50/60 Hz.
 - Multi-platform builds (PyInstaller for desktop, Buildozer for Android).
 
+[1.5.0]: https://github.com/kirill-levenets/eeg-meditation-trainer/releases/tag/v1.5.0
 [1.4.0]: https://github.com/kirill-levenets/eeg-meditation-trainer/releases/tag/v1.4.0
 [1.3.0]: https://github.com/kirill-levenets/eeg-meditation-trainer/releases/tag/v1.3.0
 [1.2.0]: https://github.com/kirill-levenets/eeg-meditation-trainer/releases/tag/v1.2.0

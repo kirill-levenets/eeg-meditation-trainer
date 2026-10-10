@@ -157,7 +157,7 @@ closes it.
 
 ## About
 
-EEG Meditation Trainer v1.4.0
+EEG Meditation Trainer v1.5.0
 Shamatha meditation with neurofeedback
 
 Open source — contributions welcome
