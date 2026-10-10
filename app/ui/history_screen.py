@@ -27,6 +27,7 @@ from app.ui.period_totals import (
     ALL_TIME,
     day_month,
     day_range,
+    day_text,
     period_totals,
     periods_around,
     session_day,
@@ -52,6 +53,7 @@ from app.ui.theme import (
     ThemedLabel,
     confirm_popup,
     fill_background,
+    fit_row_to_text,
     format_duration,
 )
 from app.ui.touch_utils import point_in_rect
@@ -107,6 +109,7 @@ class _DayChart(Widget):
         self._selected_date: str | None = None
         self.bind(size=self._redraw, pos=self._redraw)
         C.add_listener(self._redraw)
+        F.add_listener(self._redraw)
 
     @classmethod
     def window(cls, end: datetime.date) -> tuple[datetime.date, datetime.date]:
@@ -316,11 +319,21 @@ class Last14DaysBars(_DayChart):
 
     DAYS = 14
     MIN_BAR_HEIGHT = dp(2)
-    BASELINE_HEIGHT = dp(20)  # space for date labels under bars
-    PAD_TOP = dp(12)          # a score label over a full bar, and the 100 label's upper half, stay inside
-    PAD_LEFT = dp(24)         # space for y-axis labels
     PAD_RIGHT = dp(4)
     GRID_VALUES = (0, 25, 50, 75, 100)
+
+    # Room for its labels, at the text size in use (F.box).
+    @staticmethod
+    def _baseline_h() -> float:
+        return F.box(20)  # the day labels under the bars
+
+    @staticmethod
+    def _pad_top() -> float:
+        return F.box(12)  # a score label over a full bar, and the 100 label's upper half, stay inside
+
+    @staticmethod
+    def _pad_left() -> float:
+        return F.box(24)  # the y-axis labels
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -343,13 +356,13 @@ class Last14DaysBars(_DayChart):
         start, _last = self._shown_window()
         days = [start + datetime.timedelta(days=i) for i in range(self.DAYS)]
 
-        avail_w = max(self.width - self.PAD_LEFT - self.PAD_RIGHT, dp(10))
+        avail_w = max(self.width - self._pad_left() - self.PAD_RIGHT, dp(10))
         slot_w = avail_w / self.DAYS
         bar_w = max(slot_w - dp(4), dp(4))
 
-        graph_h = self.height - self.BASELINE_HEIGHT - self.PAD_TOP
-        graph_y = self.y + self.BASELINE_HEIGHT
-        graph_x_left = self.x + self.PAD_LEFT
+        graph_h = self.height - self._baseline_h() - self._pad_top()
+        graph_y = self.y + self._baseline_h()
+        graph_x_left = self.x + self._pad_left()
         graph_x_right = self.x + self.width - self.PAD_RIGHT
 
         # Track bar-top centers so we can stitch a trend polyline below
@@ -413,8 +426,8 @@ class Last14DaysBars(_DayChart):
                 font_size=F.TINY,
                 color=C.TEXT_MUTED,
                 size_hint=(None, None),
-                size=(self.PAD_LEFT - dp(2), dp(14)),
-                pos=(self.x, gy - dp(7)),
+                size=(self._pad_left() - dp(2), F.box(14)),
+                pos=(self.x, gy - F.box(7)),
                 halign="right",
                 valign="middle",
             )
@@ -434,7 +447,7 @@ class Last14DaysBars(_DayChart):
                 font_size=F.TINY,
                 color=C.TEXT_MUTED,
                 size_hint=(None, None),
-                size=(bar_w + dp(8), dp(16)),
+                size=(bar_w + dp(8), F.box(16)),
                 pos=(cx - dp(4), self.y),
                 halign="center",
                 valign="middle",
@@ -451,7 +464,7 @@ class Last14DaysBars(_DayChart):
                     font_size=F.TINY,
                     color=C.TEXT,
                     size_hint=(None, None),
-                    size=(bar_w + dp(12), dp(12)),
+                    size=(bar_w + dp(12), F.box(12)),
                     pos=(cx - dp(6), graph_y + bar_h),
                     halign="center",
                     valign="bottom",
@@ -703,8 +716,9 @@ class HistoryScreen(Screen):
         root.bind(width=self._place_totals)
         self._place_totals()
 
-        # Date label + Show All button
+        # The list heading, then Show All while a day is picked and Select outside select mode (_sync_date_row)
         date_row = BoxLayout(size_hint_y=None, height=dp(28), spacing=S.GAP)
+        self._date_row = date_row
         self._date_label = ThemedLabel(
             text="Tap a day to see sessions",
             font_size=F.BODY,
@@ -712,7 +726,6 @@ class HistoryScreen(Screen):
             halign="left",
             valign="middle",
         )
-        self._date_label.bind(size=self._date_label.setter("text_size"))
         date_row.add_widget(self._date_label)
         self._btn_show_all = StyledButton(
             text="Show All",
@@ -725,15 +738,15 @@ class HistoryScreen(Screen):
             bold=False,
         )
         self._btn_show_all.bind(on_release=lambda *a: self._reset_filter())
-        self._btn_show_all.opacity = 0
-        self._btn_show_all.disabled = True
-        date_row.add_widget(self._btn_show_all)
         self._btn_select = StyledButton(
             text="Select", bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY,
             font_size=F.SMALL, size_hint_x=None, width=dp(72), height=dp(28), bold=False,
         )
         self._btn_select.bind(on_release=lambda *a: self.set_select_mode(True))
+        date_row.add_widget(self._btn_show_all)
         date_row.add_widget(self._btn_select)
+        fit_row_to_text(date_row, self._date_label, dp(28))  # centres both buttons, attached or not
+        self._sync_date_row()
         root.add_widget(date_row)
 
         # Multi-select export action bar (issue #7) — RevealBox detaches its
@@ -943,8 +956,7 @@ class HistoryScreen(Screen):
         self._select_mode = bool(on)
         if not on:
             self._selected_ids = set()
-        self._btn_select.opacity = 0 if on else 1
-        self._btn_select.disabled = on
+        self._sync_date_row()
         self._select_bar.reveal(on)
         self._close_rename()
         self._update_selection_buttons()
@@ -1131,14 +1143,25 @@ class HistoryScreen(Screen):
         for view in (self._heatmap, self._bars):
             view._selected_date = date_str
             view._redraw()
-        self._btn_show_all.opacity = 1 if date_str else 0
-        self._btn_show_all.disabled = not date_str
+        self._sync_date_row()
         self._update_totals()
+
+    def _sync_date_row(self) -> None:
+        """Show All while a day is picked, Select outside select mode, each detached otherwise: hidden in place, a button
+        kept its room beside the heading (which wrapped) and its taps."""
+        shown = [(self._btn_show_all, self._filtered_date is not None),
+                 (self._btn_select, not self._select_mode)]
+        for btn, _show in shown:
+            if btn.parent is not None:
+                self._date_row.remove_widget(btn)
+        for btn, show in shown:
+            if show:
+                self._date_row.add_widget(btn)
 
     def _show_day(self, date_str: str) -> None:
         day_sessions = [s for s in self._sessions if session_day(s) == date_str]
         try:
-            nice_date = datetime.date.fromisoformat(date_str).strftime("%B %d, %Y")
+            nice_date = day_text(datetime.date.fromisoformat(date_str), _today())
         except (ValueError, TypeError):
             nice_date = date_str
         self._show_sessions(day_sessions, nice_date)

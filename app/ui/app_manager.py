@@ -46,7 +46,15 @@ from app.session.session_program import (
 )
 from app.session.timer_state import TimerState
 from app.session.what_if import scored_ticks
-from app.settings.registry import BOOL, FLOAT, INT, STR, Setting, SettingsStore
+from app.settings.registry import (
+    BOOL,
+    FLOAT,
+    INT,
+    STR,
+    Setting,
+    SettingsStore,
+    stored_value,
+)
 from app.storage import android_saf as _saf
 from app.storage import backup as _backup
 from app.storage.backup import restore_backup, validate_backup
@@ -64,6 +72,7 @@ from app.ui.session_labels import session_title, start_stamp
 from app.ui.settings_screen import SettingsScreen
 from app.ui.theme import (
     DEFAULT_THEME,
+    TEXT_SIZES,
     THEMES,
     BottomNav,
     C,
@@ -129,12 +138,30 @@ def theme_setting(seed: str) -> Setting:
     return Setting("theme", seed, _parse_theme, STR[1], lambda: C.theme_name, C.set_theme)
 
 
+def _parse_text_size(raw: str) -> float:
+    size = float(raw)
+    if size not in {scale for scale, _name in TEXT_SIZES}:
+        raise ValueError(f"text size {raw!r} isn't on offer")
+    return size
+
+
+def text_size_setting() -> Setting:
+    """The per-user text size: loading a profile applies its size to every screen at once."""
+    return Setting("text_size", 1.0, _parse_text_size, FLOAT[1], lambda: F.SCALE, F.set_scale)
+
+
+def startup_value(db, setting: Setting):
+    """The startup profile's value, to build the UI in: its settings load then re-applies it as a no-op."""
+    return stored_value(db, resolve_startup_user(db), setting)
+
+
+def startup_text_size(db) -> float:
+    return startup_value(db, text_size_setting())
+
+
 def startup_theme(db) -> str:
-    """The palette to build the UI in: the startup profile's theme, else the seed. The profile load then applies the
-    same theme (a no-op) instead of repainting everything the build just drew."""
-    uid = resolve_startup_user(db)
-    theme = db.get_user_setting(uid, "theme") if uid else None
-    return theme if theme in THEMES else theme_seed(db)
+    """The startup profile's theme, else the seed."""
+    return startup_value(db, theme_setting(theme_seed(db)))
 
 
 def sessions_for_view(db, current_uid: Optional[int], show_all: bool) -> list:
@@ -688,6 +715,7 @@ class EEGMeditationApp(App):
 
         self._theme_seed = theme_seed(self._db)
         C.set_theme(startup_theme(self._db))
+        F.set_scale(startup_text_size(self._db))
         self._load_device_aliases()
 
         # Apply --serial override if provided
@@ -911,6 +939,7 @@ class EEGMeditationApp(App):
         self._settings_screen.set_device_select_callback(self._on_device_select)
         self._settings_screen.set_device_state_callback(self._device_state)
         self._settings_screen.set_device_rename_callback(self._on_device_rename)
+        self._settings_screen.set_text_size_callback(self._on_text_size_change)
         self._settings_screen.set_copy_diagnostics_callback(self._on_copy_diagnostics)
         self._settings_screen.set_line_width_callback(self._on_line_width_change)
         self._settings_screen.set_rotate_screen_callback(self._on_rotate_screen)
@@ -2647,6 +2676,10 @@ class EEGMeditationApp(App):
         self._settings_screen.audio_metric = "custom_formula" if key in FORMULA_KEYS else key
         self._settings_screen.audio_formula_index = self._audio_formula_index
 
+    def _on_text_size_change(self, size: float) -> None:
+        self._persist_user_setting("text_size")
+        logger.info(f"Text size set to {size:g}")
+
     def _on_theme_change(self, theme_name: str) -> None:
         """Persist the theme per user; the selector already applied it to C."""
         self._persist_user_setting("theme")
@@ -3857,6 +3890,7 @@ class EEGMeditationApp(App):
             self._apply_stats_mode)
         # Its default is the seed, not the startup profile's theme the UI was built in.
         settings.append(theme_setting(self._theme_seed))
+        settings.append(text_size_setting())
 
         self._settings_store = SettingsStore(self._db, settings)
 

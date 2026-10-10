@@ -26,7 +26,7 @@ from app.config import APP
 from app.session.scoring import extend_steps
 from app.ui import render_stats
 from app.ui.theme import C as TC
-from app.ui.theme import ThemedLabel
+from app.ui.theme import F, ThemedLabel
 from app.ui.touch_utils import point_in_rect
 
 # Labels by (text, font_size, color); the CoreLabel is kept since it re-renders its texture after a GL context loss.
@@ -209,6 +209,7 @@ class ScrollableGraphWidget(Widget):
         self.canvas.add(self._gfx)
         self.bind(size=self._redraw, pos=self._redraw)
         TC.add_listener(self._redraw)
+        F.add_listener(self._redraw)  # its labels, and the margins they take
         # Bind Window scroll for zoom (bypasses ScrollView interception)
         Window.bind(on_mouse_down=self._on_window_mouse_down)
 
@@ -379,13 +380,13 @@ class ScrollableGraphWidget(Widget):
             self._follow_fit()
         self._redraw()
 
-    def _make_text_texture(self, text: str, font_size: int = 10,
-                           color: tuple = (1, 1, 1, 1)):
-        """Render text string to a texture for canvas drawing."""
+    def _make_text_texture(self, text: str, size: float = 10, color: tuple = (1, 1, 1, 1)):
+        """Render text to a texture for canvas drawing; `size` in dp at the normal text size."""
+        font_size = F.px(size)
         key = (text, font_size, tuple(color))
         cl = _LABEL_CACHE.get(key)
         if cl is None:
-            cl = CoreLabel(text=text, font_size=dp(font_size), color=color)
+            cl = CoreLabel(text=text, font_size=font_size, color=color)
             cl.refresh()
             _LABEL_CACHE[key] = cl
             if len(_LABEL_CACHE) > _LABEL_CACHE_MAX:
@@ -457,7 +458,7 @@ class ScrollableGraphWidget(Widget):
                 self._gfx.add(Line(points=[graph_x, y_pos, graph_x + graph_w, y_pos], width=0.5))
                 if self._show_value_labels:
                     val = max_scale * (frac * 2.0 - 1.0)
-                    tex = self._make_text_texture(f"{val:.0f}", font_size=8,
+                    tex = self._make_text_texture(f"{val:.0f}", size=8,
                                                   color=(0.5, 0.5, 0.5, 1))
                     self._gfx.add(Color(*TC.TEXT))
                     self._gfx.add(Rectangle(
@@ -475,7 +476,7 @@ class ScrollableGraphWidget(Widget):
                 self._gfx.add(Color(*TC.GRAPH_GRID))
                 self._gfx.add(Line(points=[graph_x, y_pos, graph_x + graph_w, y_pos], width=0.5))
                 if self._show_value_labels:
-                    tex = self._make_text_texture(f"{val:.0f}", font_size=8,
+                    tex = self._make_text_texture(f"{val:.0f}", size=8,
                                                   color=(0.5, 0.5, 0.5, 1))
                     self._gfx.add(Color(*TC.TEXT))
                     self._gfx.add(Rectangle(
@@ -506,7 +507,7 @@ class ScrollableGraphWidget(Widget):
                 x_cur = x_end + gap_w
             if self._show_value_labels:
                 tex = self._make_text_texture(
-                    f"{self._threshold_value:.0f}", font_size=8,
+                    f"{self._threshold_value:.0f}", size=8,
                     color=(1.0, 0.4, 0.2, 1),
                 )
                 self._gfx.add(Color(*TC.TEXT))
@@ -553,7 +554,7 @@ class ScrollableGraphWidget(Widget):
                     self._gfx.add(Color(*TC.GRAPH_GRID))
                     self._gfx.add(Line(points=[x_pos, graph_y, x_pos, graph_y + graph_h], width=0.5))
                     # Relative timestamp label
-                    tex = self._make_text_texture(_elapsed_label(t_mark), font_size=8,
+                    tex = self._make_text_texture(_elapsed_label(t_mark), size=8,
                                                   color=(0.5, 0.5, 0.5, 1))
                     self._gfx.add(Color(*TC.TEXT))
                     self._gfx.add(Rectangle(
@@ -566,7 +567,7 @@ class ScrollableGraphWidget(Widget):
                         wall = self._start_wall_time + t_mark
                         lt = _time.localtime(wall)
                         wall_str = f"{lt.tm_hour:02d}:{lt.tm_min:02d}:{lt.tm_sec:02d}"
-                        tex2 = self._make_text_texture(wall_str, font_size=7,
+                        tex2 = self._make_text_texture(wall_str, size=7,
                                                        color=(0.4, 0.6, 0.4, 1))
                         self._gfx.add(Color(*TC.TEXT))
                         self._gfx.add(Rectangle(
@@ -630,7 +631,7 @@ class ScrollableGraphWidget(Widget):
                 label_y_positions.append(last_y)
                 short_name = key.replace("_score", "").replace("_", " ")
                 tex = self._make_text_texture(
-                    f"{last_val:.0f}", font_size=9, color=color,
+                    f"{last_val:.0f}", size=9, color=color,
                 )
                 self._gfx.add(Color(*TC.TEXT))
                 self._gfx.add(Rectangle(
@@ -760,7 +761,7 @@ class ScrollableGraphWidget(Widget):
                 x_cur = x_end + gap_w
             if self._show_value_labels:
                 tex = self._make_text_texture(
-                    f"{value:.0f}", font_size=8, color=(1.0, 0.4, 0.2, 1),
+                    f"{value:.0f}", size=8, color=(1.0, 0.4, 0.2, 1),
                 )
                 self._gfx.add(Color(*TC.TEXT))
                 self._gfx.add(Rectangle(
@@ -1038,24 +1039,24 @@ class ScrollableGraphWidget(Widget):
         gap = dp(4)
         if self._show_value_labels:
             axis = f"{-max_scale:.0f}" if self._bipolar else f"{max_scale:.0f}"
-            axis_w = self._make_text_texture(axis, font_size=8, color=(0.5, 0.5, 0.5, 1)).width
+            axis_w = self._make_text_texture(axis, size=8, color=(0.5, 0.5, 0.5, 1)).width
             left = axis_w + gap + dp(2)
-            ends = [self._make_text_texture(f"{v[-1]:.0f}", font_size=9, color=self.series_color(k)).width
+            ends = [self._make_text_texture(f"{v[-1]:.0f}", size=9, color=self.series_color(k)).width
                     for k, v in slices.items() if v]
             if self._threshold_value is not None and not self._threshold_steps and not self._bipolar:
-                ends.append(self._make_text_texture(f"{self._threshold_value:.0f}", font_size=8,
+                ends.append(self._make_text_texture(f"{self._threshold_value:.0f}", size=8,
                                                     color=(1.0, 0.4, 0.2, 1)).width)
             right = max([axis_w, *ends]) + gap + dp(3)
-            top = self._make_text_texture("0", font_size=8, color=(0.5, 0.5, 0.5, 1)).height / 2 + dp(2)
+            top = self._make_text_texture("0", size=8, color=(0.5, 0.5, 0.5, 1)).height / 2 + dp(2)
         else:
             left = right = top = gap
         bottom = gap
         if self._show_timestamps:  # a time mark at either edge centres its label on it: half of one past the plot
-            half = self._make_text_texture("0:00:00", font_size=8, color=(0.5, 0.5, 0.5, 1)).width / 2
+            half = self._make_text_texture("0:00:00", size=8, color=(0.5, 0.5, 0.5, 1)).width / 2
             left, right = max(left, half), max(right, half)
-            bottom += self._make_text_texture("0:00", font_size=8, color=(0.5, 0.5, 0.5, 1)).height + dp(2)
+            bottom += self._make_text_texture("0:00", size=8, color=(0.5, 0.5, 0.5, 1)).height + dp(2)
             if self._start_wall_time is not None:
-                bottom += self._make_text_texture("00:00:00", font_size=7, color=(0.4, 0.6, 0.4, 1)).height + dp(1)
+                bottom += self._make_text_texture("00:00:00", size=7, color=(0.4, 0.6, 0.4, 1)).height + dp(1)
         return left, right, bottom, top
 
     def _corner_rect(self, right: bool, top: bool):
@@ -1313,7 +1314,7 @@ class RawEEGScreen(Screen):
 
         title = ThemedLabel(
             text="Raw EEG Data",
-            font_size=dp(18),
+            font_size=F.px(18),
             bold=True,
             size_hint_y=None,
             height=dp(32),
@@ -1323,7 +1324,7 @@ class RawEEGScreen(Screen):
         # --- Raw EEG signal graph (composite waveform) ---
         raw_label = ThemedLabel(
             text="Raw EEG Signal",
-            font_size=dp(12),
+            font_size=F.px(12),
             size_hint_y=None,
             height=dp(20),
             color=(0.3, 0.8, 1.0, 1.0),
@@ -1348,7 +1349,7 @@ class RawEEGScreen(Screen):
         # --- Frequency bands graph ---
         band_label = ThemedLabel(
             text="Frequency Bands",
-            font_size=dp(12),
+            font_size=F.px(12),
             size_hint_y=None,
             height=dp(20),
             color=(0.6, 0.6, 0.6, 1.0),
@@ -1370,7 +1371,7 @@ class RawEEGScreen(Screen):
         # Band legend
         band_legend = BoxLayout(size_hint_y=None, height=dp(20), spacing=dp(2))
         for band, color in self.BAND_COLORS.items():
-            lbl = ThemedLabel(text=band, font_size=dp(9), color=color)
+            lbl = ThemedLabel(text=band, font_size=F.TINY, color=color)
             band_legend.add_widget(lbl)
         root.add_widget(band_legend)
 

@@ -21,6 +21,7 @@ from app.ui.theme import (
     ThemedPopup,
     cancel_button,
     fill_background,
+    fit_height_to_text,
 )
 from app.ui.widgets.user_picker import UserPickerForm
 
@@ -49,7 +50,7 @@ class WizardScreen(Screen):
         # Welcome header
         self._title = ThemedLabel(
             text="Welcome",
-            font_size=dp(28),
+            font_size=F.px(28),
             bold=True,
             color=C.PRIMARY,
             size_hint_y=None,
@@ -109,10 +110,9 @@ class WizardScreen(Screen):
             font_size=F.SMALL,
             color=C.TEXT_MUTED,
             size_hint_y=None,
-            height=dp(20),
             halign="left",
         )
-        name_hint.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
+        fit_height_to_text(name_hint)
         self._step1.add_widget(name_hint)
 
         root.add_widget(self._step1)
@@ -136,10 +136,9 @@ class WizardScreen(Screen):
             font_size=F.SMALL,
             color=C.TEXT_MUTED,
             size_hint_y=None,
-            height=dp(34),
             halign="left",
         )
-        device_hint.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
+        fit_height_to_text(device_hint)
         self._step2.add_widget(device_hint)
 
         self._scan_btn = StyledButton(

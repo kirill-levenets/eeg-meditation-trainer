@@ -34,6 +34,7 @@ from app.ui.theme import (
     ThemedTextInput,
     cancel_button,
     fill_background,
+    fit_height_to_text,
     format_duration,
     make_message_popup,
 )
@@ -288,12 +289,11 @@ class DiaryScreen(Screen):
             font_size=F.BODY,
             color=C.TEXT_SECONDARY,
             size_hint_y=None,
-            height=dp(26),
             halign="left",
             valign="bottom",
             padding=[0, dp(4)],
         )
-        notes_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
+        fit_height_to_text(notes_label)
         self._detail_layout.add_widget(notes_label)
 
         self._notes_input = ThemedTextInput(
@@ -314,12 +314,11 @@ class DiaryScreen(Screen):
             font_size=F.BODY,
             color=C.TEXT_SECONDARY,
             size_hint_y=None,
-            height=dp(26),
             halign="left",
             valign="bottom",
             padding=[0, dp(4)],
         )
-        tags_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
+        fit_height_to_text(tags_label)
         self._detail_layout.add_widget(tags_label)
 
         self._tags_input = CenteredTextInput(
@@ -452,7 +451,7 @@ class DiaryScreen(Screen):
             g.set_visibility_callback(lambda gr=g: self._on_graph_visibility(gr))
 
         # Legend container (wrapping flow layout — handles many series)
-        self._legend_container = LegendBar(font_size=dp(9))
+        self._legend_container = LegendBar()
         self._detail_layout.add_widget(self._legend_container)
 
         self._active_graph_tab: str = "metrics"
@@ -794,11 +793,10 @@ class DiaryScreen(Screen):
                 font_size=F.SMALL,
                 color=C.TEXT_SECONDARY,
                 size_hint_y=None,
-                height=dp(40),
                 halign="left",
                 valign="middle",
             )
-            loc_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
+            fit_height_to_text(loc_label)
             content.add_widget(loc_label)
         else:
             # Desktop: FileChooser

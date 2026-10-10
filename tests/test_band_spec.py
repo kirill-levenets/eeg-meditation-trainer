@@ -12,7 +12,7 @@ from app.metrics.custom_formula import ALLOWED_VARIABLES
 from app.ui.diary_screen import DiaryScreen, detail_graph_data
 from app.ui.live_session import LiveSessionScreen
 from app.ui.theme import F
-from app.ui.widgets.band_totals import _W_NAME, BandTotalsView
+from app.ui.widgets.band_totals import BandTotalsView
 
 # NeuroSky's ThinkGear Communications Protocol, ASIC_EEG_POWER (0x83): "delta (0.5 - 2.75Hz), theta (3.5 - 6.75Hz),
 # low-alpha (7.5 - 9.25Hz), high-alpha (10 - 11.75Hz), low-beta (13 - 16.75Hz), high-beta (18 - 29.75Hz),
@@ -74,12 +74,19 @@ def test_each_row_shows_its_range_under_its_name():
     assert {k: lbl.text for k, lbl in view._range_labels.items()} == {g.key: range_text(g) for g in GROUPS}
 
 
-def test_names_and_ranges_fit_the_name_column():
-    for band in (*BANDS, *GROUPS):
-        for text, size in ((band.name, F.SMALL), (range_text(band), F.TINY)):
-            label = CoreLabel(text=text, font_size=size)
-            label.refresh()
-            assert label.texture.size[0] <= _W_NAME, text
+@pytest.mark.parametrize("scale", [1.0, 1.2])
+def test_names_and_ranges_fit_the_name_column_at_every_text_size(scale):
+    F.set_scale(scale)
+    try:
+        view = BandTotalsView()
+        column = next(iter(view._range_labels.values())).parent.width  # as the table builds it
+        for band in (*BANDS, *GROUPS):
+            for text, size in ((band.name, F.SMALL), (range_text(band), F.TINY)):
+                label = CoreLabel(text=text, font_size=size)
+                label.refresh()
+                assert label.texture.size[0] <= column, text
+    finally:
+        F.set_scale(1.0)
 
 
 @pytest.mark.parametrize("mode", ["detailed", "grouped"])

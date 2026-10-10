@@ -7,6 +7,7 @@ import pytest
 
 from app.ui.period_totals import (
     PeriodTotals,
+    day_text,
     period_totals,
     periods_around,
     session_day,
@@ -77,6 +78,12 @@ def test_each_row_is_labelled_with_its_dates(day, labels):
 def test_a_month_of_another_year_says_which():
     assert periods_around(D(2025, 12, 30), TODAY)[2][0] == "December 2025"
     assert periods_around(D(2026, 1, 5), TODAY)[2][0] == "January"
+
+
+def test_a_day_of_another_year_says_which():
+    assert day_text(D(2025, 12, 30), TODAY) == "Tue 30 Dec 2025"
+    assert day_text(D(2026, 1, 5), TODAY) == "Mon 5 Jan"
+    assert periods_around(D(2025, 12, 30), TODAY)[0][0] == "Tue 30 Dec 2025"
 
 
 def test_a_session_belongs_to_the_day_its_start_is_dated():

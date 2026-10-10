@@ -13,6 +13,7 @@ from collections.abc import Callable
 
 from kivy.animation import Animation
 from kivy.clock import Clock
+from kivy.core.text import Label as CoreLabel
 from kivy.core.text import LabelBase
 from kivy.core.window import Window
 from kivy.graphics import Color, Line, Rectangle, RoundedRectangle
@@ -26,6 +27,7 @@ from kivy.properties import (
 from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.button import Button
 from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
@@ -108,8 +110,7 @@ def make_message_popup(title, message, buttons, *, width_hint=0.85, auto_dismiss
     label.text_size = (Window.width * width_hint - dp(48), None)
     label.texture_update()
     label.height = label.texture_size[1]
-    label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)),
-               texture_size=lambda w, v: setattr(w, "height", v[1]))
+    fit_height_to_text(label)
     btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
     for btn in buttons:
         btn_row.add_widget(btn)
@@ -340,6 +341,30 @@ class ThemeColor(tuple):
         return color
 
 
+class _Listeners(dict):
+    """Callbacks run after a change, once each; a bound method is held weakly so it never keeps its widget alive."""
+
+    def add(self, callback) -> None:
+        if isinstance(callback, types.MethodType):
+            ref = weakref.WeakMethod(callback, self._forget)
+            self[ref] = ref
+        else:
+            self[callback] = lambda: callback
+
+    def _forget(self, ref) -> None:
+        self.pop(ref, None)
+
+    def notify(self, change: str) -> None:
+        for get in list(self.values()):
+            callback = get()
+            if callback is None:
+                continue
+            try:
+                callback()
+            except Exception:
+                logger.exception("%s listener %r failed", change, callback)
+
+
 class _ColorAccessor:
     """The active palette as attributes (C.PRIMARY, C.BG, ...), swappable at runtime.
 
@@ -348,7 +373,7 @@ class _ColorAccessor:
     """
 
     def __init__(self):
-        self._listeners: dict = {}  # key -> getter of the callback, in registration order; a dead widget's entry drops itself
+        self._listeners = _Listeners()
         self._roles = weakref.WeakKeyDictionary()  # themed widget -> {colour property: role}
         self._canvas_colors = weakref.WeakSet()
         self._use(DEFAULT_THEME)
@@ -378,26 +403,11 @@ class _ColorAccessor:
                 logger.exception("Theme repaint of %r failed", widget)
         for instr in list(self._canvas_colors):
             instr.rgba = self._rgba(instr.role, instr.pinned_alpha)
-        for get in list(self._listeners.values()):
-            callback = get()
-            if callback is None:
-                continue
-            try:
-                callback()
-            except Exception:
-                logger.exception("Theme listener %r failed", callback)
+        self._listeners.notify("Theme")
 
     def add_listener(self, callback) -> None:
-        """Call back after every theme switch, once however often it is registered. A bound method is held weakly, so
-        it never keeps its widget alive."""
-        if isinstance(callback, types.MethodType):
-            ref = weakref.WeakMethod(callback, self._forget_listener)
-            self._listeners[ref] = ref
-        else:
-            self._listeners[callback] = lambda: callback
-
-    def _forget_listener(self, ref) -> None:
-        self._listeners.pop(ref, None)
+        """Call back after every theme switch (_Listeners)."""
+        self._listeners.add(callback)
 
     def resolve(self, color):
         """A colour to draw now: a palette colour in the current palette (even one read before a switch, e.g. a
@@ -432,15 +442,93 @@ C = _ColorAccessor()
 
 # ── Typography ───────────────────────────────────────────────────────
 
+class FontSize(float):
+    """A size from F that keeps its normal-size base and cap, so a themed widget given it follows the text size."""
+
+    def __new__(cls, base: float, cap: float | None = None):
+        size = super().__new__(cls, base * (F.SCALE if cap is None else min(F.SCALE, cap)))
+        size.base = base
+        size.cap = cap
+        return size
+
+
 class F:
-    """Font sizes (dp)."""
-    DISPLAY = dp(48)    # timer countdown
-    H1 = dp(22)         # screen title
-    H2 = dp(16)         # section header
-    H3 = dp(14)         # subsection / important label
-    BODY = dp(13)       # standard text
-    SMALL = dp(11)      # secondary info
-    TINY = dp(9)        # axis labels, metadata
+    """Font sizes at the text size in use; a change re-applies them to themed widgets, then runs the listeners."""
+    _BASE = {
+        "DISPLAY": 48,  # timer countdown
+        "H1": 22,       # screen title
+        "H2": 16,       # section header
+        "H3": 14,       # subsection / important label
+        "BODY": 13,     # standard text
+        "SMALL": 11,    # secondary info
+        "TINY": 9,      # axis labels, metadata
+    }
+    SCALE = 1.0
+    CAPPED_MAX = 1.2  # the most a capped text grows: one in a box that can't (a fixed bar, a small toggle)
+    _sized = weakref.WeakKeyDictionary()  # themed widget -> {font property: (its size at the normal text size, cap)}
+    _listeners = _Listeners()
+
+    @classmethod
+    def px(cls, size: float) -> FontSize:
+        """A size off the roles (a graph's labels, Kivy's own defaults) at the text size in use."""
+        return FontSize(dp(size))
+
+    @classmethod
+    def capped(cls, size: FontSize, cap: float | None = None) -> FontSize:
+        """`size` growing only up to `cap` (CAPPED_MAX): for text in a box that can't grow with it."""
+        return FontSize(size.base, cls.CAPPED_MAX if cap is None else cap)
+
+    @classmethod
+    def box(cls, size: float, cap: float | None = None) -> float:
+        """A box sized for its text, as a plain float: its owner re-reads it in an F.add_listener."""
+        return dp(size) * (cls.SCALE if cap is None else min(cls.SCALE, cap))
+
+    @staticmethod
+    def glyph(size: float) -> float:
+        """An icon in fixed chrome (the bottom nav): not text, so it keeps its size whatever the text size."""
+        return dp(size)
+
+    @classmethod
+    def set_scale(cls, scale: float) -> None:
+        """Use another text size; the size in use is a no-op, as a profile load applying it at startup is."""
+        if scale == cls.SCALE:
+            return
+        cls.SCALE = scale
+        cls._set_roles()
+        for widget, sized in list(cls._sized.items()):
+            try:
+                for prop, (base, cap) in list(sized.items()):
+                    setattr(widget, prop, FontSize(base, cap))
+            except Exception:
+                logger.exception("Text size change of %r failed", widget)
+        cls._listeners.notify("Text size")
+
+    @classmethod
+    def _set_roles(cls) -> None:
+        for role, size in cls._BASE.items():
+            setattr(cls, role, cls.px(size))
+
+    @classmethod
+    def add_listener(cls, callback) -> None:
+        """Call back after every text size change (_Listeners)."""
+        cls._listeners.add(callback)
+
+    @classmethod
+    def _sized_value(cls, widget, prop: str, value):
+        """A size from F is recorded and stored at the size in use (even one read before a change); any other is fixed."""
+        if not isinstance(value, FontSize):
+            sized = cls._sized.get(widget)
+            if sized:
+                sized.pop(prop, None)
+            return value
+        cls._sized.setdefault(widget, {})[prop] = (value.base, value.cap)
+        return float(FontSize(value.base, value.cap))
+
+
+F._set_roles()
+
+# The text sizes on offer: (scale, name). The largest is the one every screen is checked at.
+TEXT_SIZES: tuple[tuple[float, str], ...] = ((1.0, "Normal"), (1.25, "Large"), (1.5, "Larger"))
 
 
 # ── Spacing ──────────────────────────────────────────────────────────
@@ -448,6 +536,8 @@ class F:
 class S:
     """Spacing and sizing constants (dp)."""
     PAGE_PAD = dp(12)     # screen edge padding
+    BTN_PAD = dp(12)        # a StyledButton's sides, when it is wide enough for its text on one line
+    BTN_PAD_NARROW = dp(2)  # ... and the least they shrink to when it isn't (a narrow button at a larger text size)
     CARD_PAD = dp(10)     # inside card padding
     GAP = dp(8)           # default spacing between elements
     GAP_SM = dp(4)        # compact spacing
@@ -469,13 +559,18 @@ _THEMED_PROPS = frozenset({
 })
 
 
+_FONT_PROPS = frozenset({"font_size", "title_size"})
+
+
 class ThemedMixin:
-    """Mixed in ahead of a Kivy widget: a colour property given a palette colour (C.X) follows theme switches;
-    any other colour stays fixed."""
+    """Mixed in ahead of a Kivy widget: a colour property given a palette colour (C.X) follows theme switches, and a
+    font given a size from F follows text size changes; any other colour or size stays fixed."""
 
     def __setattr__(self, name, value):
         if name in _THEMED_PROPS:
             value = C._themed_value(self, name, value)
+        elif name in _FONT_PROPS:
+            value = F._sized_value(self, name, value)
         super().__setattr__(name, value)
 
     def assigned_color(self, prop: str):
@@ -485,8 +580,39 @@ class ThemedMixin:
         return getattr(C, role) if role else list(getattr(self, prop))
 
 
+def text_width(text: str, font_size: float, bold: bool = False, font_name: str = "Roboto") -> float:
+    """The width `text` takes on one line at this font."""
+    core = CoreLabel(text=text, font_size=font_size, bold=bold, font_name=font_name)
+    core.refresh()
+    return core.texture.size[0]
+
+
+def fit_height_to_text(label, extra: float = 0) -> None:
+    """The label wraps at its width and is as tall as its text (plus `extra`): a fixed height cuts a larger text off."""
+    label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)),
+               texture_size=lambda w, v: setattr(w, "height", v[1] + extra))
+
+
+def fit_row_to_text(row, label, min_height: float) -> None:
+    """The row grows with its wrapping label (at least `min_height`), the label and fixed-height controls centred on it."""
+    label.size_hint_y = None
+    fit_height_to_text(label)
+    label.bind(height=lambda _w, h: setattr(row, "height", max(min_height, h)))
+    for child in row.children:
+        if child is label or child.size_hint_y is None:
+            child.pos_hint = {**child.pos_hint, "center_y": 0.5}
+
+
 class ThemedLabel(ThemedMixin, Label):
     """The app's Label: its colours follow theme switches."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("font_size", F.px(15))  # Kivy's own default size, at the text size in use
+        super().__init__(**kwargs)
+
+
+class ThemedButton(ThemedMixin, Button):
+    """Kivy's Button: its colours follow theme switches and its font the text size."""
 
 
 class ThemedTextInput(ThemedMixin, TextInput):
@@ -496,6 +622,7 @@ class ThemedTextInput(ThemedMixin, TextInput):
         kwargs.setdefault("foreground_color", C.TEXT)
         kwargs.setdefault("background_color", C.BG_INPUT)
         kwargs.setdefault("cursor_color", C.PRIMARY)
+        kwargs.setdefault("font_size", F.px(15))  # Kivy's own default size, at the text size in use
         super().__init__(**kwargs)
 
 
@@ -564,7 +691,7 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
     bg_color = ListProperty(list(C.PRIMARY))
     bg_pressed = ListProperty([0, 0, 0, 0])  # auto-derived if left empty
     text_color = ListProperty(list(C.TEXT))
-    font_size = NumericProperty(F.BODY)
+    font_size = NumericProperty(0)  # F.BODY unless given; its text and icon follow it (_follow_font_size)
     bold = BooleanProperty(True)
     icon = StringProperty("")  # optional left-side icon text
     outline = BooleanProperty(False)  # draw border instead of fill
@@ -577,7 +704,9 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
         kwargs.setdefault("size_hint_y", None)
         kwargs.setdefault("height", S.BTN_H)
         kwargs.setdefault("bg_color", C.PRIMARY)
+        kwargs.setdefault("font_size", F.BODY)
         vertical = kwargs.pop("vertical", False)
+        padding = kwargs.pop("padding", None)  # fixed sides; by default they fit the text (_fit_padding)
         # AUTO while text_color is None (the default; assign None to return to it): the light or dark glyph with the
         # higher contrast against THIS button's bg, re-picked whenever the bg changes. A palette text_color (C.X)
         # follows the theme through ThemedMixin; any other is fixed. A selected state is an accent fill + AUTO.
@@ -585,14 +714,16 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
         super().__init__(**kwargs)
         self._apply_role_text()
         self.orientation = "vertical" if vertical else "horizontal"
-        self.padding = [dp(2), dp(2)] if vertical else [dp(12), 0]
+        self.padding = padding if padding is not None else ([dp(2), dp(2)] if vertical else [S.BTN_PAD, 0])
+        self._fits_padding = padding is None and not vertical
+        self._fit_measure: tuple = ((), 0.0)  # (what was measured, its one-line width)
+        self._vertical = vertical
+        self._icon_extra = 0.0  # the icon's size over the button's font
 
-        # Text-only label sizing depends on layout direction.
-        text_font = (F.TINY if vertical and self.icon else self.font_size)
         self._label = Label(
             text=self.text,
             color=self.text_color,
-            font_size=text_font,
+            font_size=self._text_font(),
             bold=self.bold,
             halign="center",
             valign="middle",
@@ -603,9 +734,10 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
         if self.icon and ICONS_AVAILABLE:
             icon_kwargs = {"font_name": "Icons"}
             if not self.text:
+                self._icon_extra = dp(6)
                 self._icon_label = Label(
                     text=self.icon,
-                    font_size=self.font_size + dp(6),
+                    font_size=self.font_size + self._icon_extra,
                     color=self.text_color,
                     halign="center",
                     valign="middle",
@@ -615,9 +747,10 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
                 self.add_widget(self._icon_label)
             elif vertical:
                 # Icon on top, text on bottom — mobile tab-bar convention.
+                self._icon_extra = dp(2)
                 self._icon_label = Label(
                     text=self.icon,
-                    font_size=self.font_size + dp(2),
+                    font_size=self.font_size + self._icon_extra,
                     color=self.text_color,
                     halign="center",
                     valign="middle",
@@ -629,9 +762,10 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
                 self.add_widget(self._icon_label)
                 self.add_widget(self._label)
             else:
+                self._icon_extra = dp(4)
                 self._icon_label = Label(
                     text=self.icon,
-                    font_size=self.font_size + dp(4),
+                    font_size=self.font_size + self._icon_extra,
                     color=self.text_color,
                     size_hint_x=None,
                     width=dp(26),
@@ -648,15 +782,52 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
 
         self.bind(
             text=self._update_label,
+            bold=self._update_label,
             text_color=self._update_colors,
             bg_color=self._on_bg_change,
             size=self._redraw,
             pos=self._redraw,
             disabled=self._on_disabled,
             _ring_alpha=self._redraw,
+            font_size=self._follow_font_size,
         )
+        if self._fits_padding:
+            self.bind(width=self._fit_padding, text=self._fit_padding, bold=self._fit_padding, icon=self._fit_padding)
+            self._fit_padding()
         self._redraw()
         C.add_listener(self._on_theme_change)
+
+    def _text_font(self) -> float:
+        return float(F.TINY) if self._vertical and self.icon else self.font_size  # a plain Label takes a plain size
+
+    def _follow_font_size(self, *_args) -> None:
+        """The text and icon take the button's font, as a text size change re-applies it."""
+        self._label.font_size = self._text_font()
+        if self._icon_label is not None:
+            self._icon_label.font_size = self.font_size + self._icon_extra
+        if self._fits_padding:
+            self._fit_padding()
+
+    def _one_line_width(self) -> float:
+        """The width the text (and icon) take on one line, measured once per text, icon and size."""
+        text_shown = self._label.parent is not None and bool(self._label.text) and not self._label.markup
+        key = (self._label.text, self.icon, self._label.font_size, self.bold, text_shown, self.spacing)
+        if key != self._fit_measure[0]:
+            width = 0.0
+            if text_shown:
+                width += text_width(self._label.text, self._label.font_size, self.bold)
+            if self._icon_label is not None:
+                if self._icon_label.size_hint_x is None:
+                    width += self._icon_label.width + (self.spacing if text_shown else 0)
+                else:  # an icon-only button: the glyph's own width
+                    width += text_width(self._icon_label.text, self._icon_label.font_size, font_name="Icons")
+            self._fit_measure = (key, width)
+        return self._fit_measure[1]
+
+    def _fit_padding(self, *_args) -> None:
+        """BTN_PAD sides, narrower (to BTN_PAD_NARROW) on a button too narrow for its text on one line."""
+        side = (self.width - self._one_line_width()) / 2 - dp(1)  # 2 dp spare: a text that just fits wraps on some screens
+        self.padding = [max(S.BTN_PAD_NARROW, min(S.BTN_PAD, side)), 0]
 
     def _ring_rgb(self):
         """Press-ring colour: derived from the SURROUNDING surface (C.TEXT tracks the theme —
@@ -666,9 +837,9 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
 
     def set_icon(self, glyph: str) -> None:
         """Swap the icon glyph (a chevron's open/folded state); a button built without an icon font shows none."""
-        self.icon = glyph
         if self._icon_label is not None:
-            self._icon_label.text = glyph
+            self._icon_label.text = glyph  # before `icon`, whose change re-fits the sides to the glyph shown
+        self.icon = glyph
 
     def flash_confirm(self, text="Saved", icon=None, confirm_color=None, duration=1.1):
         """Briefly morph the label/icon (and optionally the fill) to a success cue, then
@@ -735,6 +906,7 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
 
     def _update_label(self, *args):
         self._label.text = self.text
+        self._label.bold = self.bold
 
     def _update_colors(self, *args):
         self._label.color = self.text_color
@@ -1010,8 +1182,7 @@ class ModalPanel(BoxLayout):
         if title:
             self.title_label = ThemedLabel(text=title, font_size=F.H3, bold=True, color=C.TEXT, halign="center",
                                            size_hint_y=None)
-            self.title_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)),
-                                  texture_size=lambda w, v: setattr(w, "height", v[1] + dp(8)))
+            fit_height_to_text(self.title_label, extra=dp(8))
             self.add_widget(self.title_label)
             self.add_widget(Divider())
 
@@ -1408,7 +1579,7 @@ class _NavTab(ButtonBehavior, BoxLayout):
             self._icon = ThemedLabel(
                 text=icon,
                 font_name="Icons",
-                font_size=dp(20),
+                font_size=F.glyph(20),
                 color=C.TEXT_MUTED,
                 size_hint_y=None,
                 height=dp(22),
