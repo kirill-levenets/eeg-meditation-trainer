@@ -16,21 +16,34 @@ class _Intent:
     ACTION_OPEN_DOCUMENT = "open"
     CATEGORY_OPENABLE = "openable"
     EXTRA_TITLE = "android.intent.extra.TITLE"
+    EXTRA_MIME_TYPES = "android.intent.extra.MIME_TYPES"
     last = None
 
     def __init__(self, action):
         self.action = action
+        self.type = None
         self.extras = {}
         _Intent.last = self
 
     def addCategory(self, _c):
         pass
 
-    def setType(self, _t):
-        pass
+    def setType(self, t):
+        self.type = t
 
     def putExtra(self, key, value):
         self.extras[key] = value
+
+    def putExtras(self, bundle):
+        self.extras.update(bundle.values)
+
+
+class _Bundle:
+    def __init__(self):
+        self.values = {}
+
+    def putStringArray(self, key, value):
+        self.values[key] = value
 
 
 def _install_fake_android(monkeypatch):
@@ -38,6 +51,7 @@ def _install_fake_android(monkeypatch):
     classes = {
         "java.lang.String": _JavaString,
         "android.content.Intent": _Intent,
+        "android.os.Bundle": _Bundle,
         "org.kivy.android.PythonActivity": types.SimpleNamespace(mActivity=activity),
     }
     monkeypatch.setitem(sys.modules, "jnius", types.SimpleNamespace(autoclass=classes.__getitem__))
@@ -49,7 +63,7 @@ def _install_fake_android(monkeypatch):
 
 def test_save_dialog_title_is_a_java_string(monkeypatch):
     _install_fake_android(monkeypatch)
-    android_saf._launch(android_saf._REQ_CREATE, "eeg_backup_carl_2026-09-29_17-49.db")
+    android_saf._launch(android_saf._REQ_CREATE, ("application/octet-stream",), "eeg_backup_carl_2026-09-29_17-49.db")
     title = _Intent.last.extras[_Intent.EXTRA_TITLE]
     assert isinstance(title, _JavaString)
     assert title.text == "eeg_backup_carl_2026-09-29_17-49.db"
@@ -57,5 +71,18 @@ def test_save_dialog_title_is_a_java_string(monkeypatch):
 
 def test_open_dialog_sets_no_title(monkeypatch):
     _install_fake_android(monkeypatch)
-    android_saf._launch(android_saf._REQ_OPEN, None)
+    android_saf._launch(android_saf._REQ_OPEN, ("*/*",), None)
     assert _Intent.EXTRA_TITLE not in _Intent.last.extras
+
+
+def test_an_open_dialog_for_one_type_lists_that_type(monkeypatch):
+    _install_fake_android(monkeypatch)
+    android_saf._launch(android_saf._REQ_OPEN, ("audio/*",), None)
+    assert _Intent.last.type == "audio/*" and _Intent.EXTRA_MIME_TYPES not in _Intent.last.extras
+
+
+def test_an_open_dialog_for_several_types_lists_them_all(monkeypatch):
+    _install_fake_android(monkeypatch)
+    android_saf._launch(android_saf._REQ_OPEN, ("audio/*", "application/ogg"), None)
+    assert _Intent.last.type == "*/*"
+    assert _Intent.last.extras[_Intent.EXTRA_MIME_TYPES] == ["audio/*", "application/ogg"]
