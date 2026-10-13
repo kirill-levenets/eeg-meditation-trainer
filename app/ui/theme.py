@@ -4,6 +4,7 @@ Centralized palette, typography, spacing, and custom styled widgets.
 Design direction: calm, focused, minimal — dark theme with soft accents.
 """
 
+import colorsys
 import os
 import struct
 import types
@@ -346,7 +347,7 @@ class ThemeColor(tuple):
         return color
 
 
-class _Listeners(dict):
+class Listeners(dict):
     """Callbacks run after a change, once each; a bound method is held weakly so it never keeps its widget alive."""
 
     def add(self, callback) -> None:
@@ -378,7 +379,7 @@ class _ColorAccessor:
     """
 
     def __init__(self):
-        self._listeners = _Listeners()
+        self._listeners = Listeners()
         self._roles = weakref.WeakKeyDictionary()  # themed widget -> {colour property: role}
         self._canvas_colors = weakref.WeakSet()
         self._use(DEFAULT_THEME)
@@ -411,7 +412,7 @@ class _ColorAccessor:
         self._listeners.notify("Theme")
 
     def add_listener(self, callback) -> None:
-        """Call back after every theme switch (_Listeners)."""
+        """Call back after every theme switch (Listeners)."""
         self._listeners.add(callback)
 
     def resolve(self, color):
@@ -471,7 +472,7 @@ class F:
     SCALE = 1.0
     CAPPED_MAX = 1.2  # the most a capped text grows: one in a box that can't (a fixed bar, a small toggle)
     _sized = weakref.WeakKeyDictionary()  # themed widget -> {font property: (its size at the normal text size, cap)}
-    _listeners = _Listeners()
+    _listeners = Listeners()
 
     @classmethod
     def px(cls, size: float) -> FontSize:
@@ -515,7 +516,7 @@ class F:
 
     @classmethod
     def add_listener(cls, callback) -> None:
-        """Call back after every text size change (_Listeners)."""
+        """Call back after every text size change (Listeners)."""
         cls._listeners.add(callback)
 
     @classmethod
@@ -683,6 +684,22 @@ def _contrast(a, b):
 def readable_fg(bg):
     """Light or dark glyph colour, whichever has the higher WCAG contrast with bg."""
     return _FG_DARK if _contrast(_FG_DARK, bg) >= _contrast(_FG_LIGHT, bg) else _FG_LIGHT
+
+
+def with_contrast(rgb, bg, floor: float = 3.0) -> tuple[float, float, float]:
+    """rgb, or as close to it as reaches floor:1 (WCAG) on bg: the same hue and saturation, lighter on a dark bg and
+    darker on a light one."""
+    if _contrast(rgb, bg) >= floor:
+        return tuple(rgb[:3])
+    hue, lightness, saturation = colorsys.rgb_to_hls(*rgb[:3])
+    near, far = lightness, (1.0 if _contrast((1.0, 1.0, 1.0), bg) > _contrast((0.0, 0.0, 0.0), bg) else 0.0)
+    for _ in range(24):  # luminance follows lightness, so halving the gap finds the nearest that reads
+        mid = (near + far) / 2
+        if _contrast(colorsys.hls_to_rgb(hue, mid, saturation), bg) >= floor:
+            far = mid
+        else:
+            near = mid
+    return colorsys.hls_to_rgb(hue, far, saturation)
 
 
 class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
@@ -1478,6 +1495,10 @@ class PresetRow(BoxLayout):
                 btn.bind(on_release=lambda b, cb=callback, val=value: cb(val))
             self._buttons[value] = btn
             self.add_widget(btn)
+
+    def buttons(self) -> dict:
+        """Each button by the value it picks."""
+        return dict(self._buttons)
 
     def set_selected(self, value) -> None:
         """Highlight the button whose stored value equals `value`; clear others.

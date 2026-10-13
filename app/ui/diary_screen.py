@@ -620,6 +620,7 @@ class DiaryScreen(Screen):
         # Compared with what the fields show, not the row: an unrated session shows mood 3 and isn't an edit.
         self._saved_notes_state = self._notes_state()
         self._metrics_graph.clear_data()
+        self._metrics_graph.set_gradient_series(self._scored_key)
         self._raw_eeg_graph.clear_data()
         self._freq_graph.clear_data()
         self._cached_metrics_rows = []

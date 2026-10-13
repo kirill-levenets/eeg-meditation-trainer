@@ -125,6 +125,15 @@ text larger: Normal, Large (125%) or Larger
 (150%). Each profile keeps its own. Takes
 effect immediately.
 
+## Scored Line Colours
+
+Settings > Display > Scored line colours sets
+how the line you train on is coloured on the
+graphs: Mono (its own colour) or a gradient by
+its value from 0 to 200 (Blue › Red, Viridis,
+Plasma, Turbo, Red › Green). Each profile keeps
+its own. Takes effect immediately.
+
 ## History
 
 Tap a day in the calendar (or the 14-day bars)

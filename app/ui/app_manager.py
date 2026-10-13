@@ -65,6 +65,9 @@ from app.ui import render_stats
 from app.ui.device_labels import MAX_DEVICE_ALIAS, device_label
 from app.ui.diary_screen import DiaryScreen, detail_graph_data
 from app.ui.history_screen import HistoryScreen
+from app.ui.line_colours import DEFAULT as LINE_DEFAULT
+from app.ui.line_colours import LINE_COLOURS
+from app.ui.line_colours import OPTIONS as LINE_OPTIONS
 from app.ui.live_session import METRICS_COLORS, SERIES_NAMES, LiveSessionScreen
 from app.ui.profile_screen import ProfileScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
@@ -149,6 +152,18 @@ def _parse_text_size(raw: str) -> float:
 def text_size_setting() -> Setting:
     """The per-user text size: loading a profile applies its size to every screen at once."""
     return Setting("text_size", 1.0, _parse_text_size, FLOAT[1], lambda: F.SCALE, F.set_scale)
+
+
+def _parse_line_colours(raw: str) -> str:
+    if raw not in {name for name, _label in LINE_OPTIONS}:
+        raise ValueError(f"line colours {raw!r} aren't on offer")
+    return raw
+
+
+def line_colours_setting() -> Setting:
+    """The per-user scored line colours: loading a profile redraws every graph in its choice."""
+    return Setting("line_colours", LINE_DEFAULT, _parse_line_colours, STR[1], lambda: LINE_COLOURS.name,
+                   LINE_COLOURS.set)
 
 
 def startup_value(db, setting: Setting):
@@ -941,6 +956,7 @@ class EEGMeditationApp(App):
         self._settings_screen.set_device_state_callback(self._device_state)
         self._settings_screen.set_device_rename_callback(self._on_device_rename)
         self._settings_screen.set_text_size_callback(self._on_text_size_change)
+        self._settings_screen.set_line_colours_callback(self._on_line_colours_change)
         self._settings_screen.set_copy_diagnostics_callback(self._on_copy_diagnostics)
         self._settings_screen.set_line_width_callback(self._on_line_width_change)
         self._settings_screen.set_rotate_screen_callback(self._on_rotate_screen)
@@ -2681,6 +2697,10 @@ class EEGMeditationApp(App):
         self._persist_user_setting("text_size")
         logger.info(f"Text size set to {size:g}")
 
+    def _on_line_colours_change(self, name: str) -> None:
+        self._persist_user_setting("line_colours")
+        logger.info(f"Scored line colours set to {name}")
+
     def _on_theme_change(self, theme_name: str) -> None:
         """Persist the theme per user; the selector already applied it to C."""
         self._persist_user_setting("theme")
@@ -3893,6 +3913,7 @@ class EEGMeditationApp(App):
         # Its default is the seed, not the startup profile's theme the UI was built in.
         settings.append(theme_setting(self._theme_seed))
         settings.append(text_size_setting())
+        settings.append(line_colours_setting())
 
         self._settings_store = SettingsStore(self._db, settings)
 

@@ -15,6 +15,8 @@ from kivy.uix.slider import Slider
 from app.config import APP, METRICS
 from app.logger import logger
 from app.ui.device_labels import MAX_DEVICE_ALIAS, device_row_text
+from app.ui.line_colours import LINE_COLOURS, MONO, GradientStrip
+from app.ui.line_colours import OPTIONS as LINE_OPTIONS
 from app.ui.theme import (
     TEXT_SIZES,
     THEMES,
@@ -892,6 +894,23 @@ class SettingsScreen(Screen):
         display_section.add_widget(self._text_size_presets)
         self._show_text_size()
         F.add_listener(self._show_text_size)
+
+        # Scored line colours (#94): the trained series in its own colour or a gradient by value, on every graph at once.
+        lc_label = ThemedLabel(text="Scored line colours:", font_size=F.BODY, color=C.TEXT, halign="left",
+                               size_hint_y=None, height=dp(28))
+        lc_label.bind(size=lc_label.setter("text_size"))
+        display_section.add_widget(lc_label)
+        self._on_line_colours: Callable[[str], None] | None = None
+        self._line_colour_rows = [PresetRow(items=[(label, name) for name, label in LINE_OPTIONS[i:i + 3]],
+                                            callback=self._on_line_colours_pressed, height=dp(34))
+                                  for i in (0, 3)]
+        for row in self._line_colour_rows:
+            for name, btn in row.buttons().items():
+                if name != MONO:
+                    GradientStrip(btn, name)
+            display_section.add_widget(row)
+        self._show_line_colours()
+        LINE_COLOURS.add_listener(self._show_line_colours)
 
         # Line width slider
         lw_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
@@ -1936,6 +1955,19 @@ class SettingsScreen(Screen):
         F.set_scale(size)
         if self._on_text_size:
             self._on_text_size(size)
+
+    def _show_line_colours(self) -> None:
+        """Select the line colours in use, whoever applied them (these rows or a profile's settings load)."""
+        for row in self._line_colour_rows:
+            row.set_selected(LINE_COLOURS.name)
+
+    def set_line_colours_callback(self, callback: Callable[[str], None]) -> None:
+        self._on_line_colours = callback
+
+    def _on_line_colours_pressed(self, name: str) -> None:
+        LINE_COLOURS.set(name)
+        if self._on_line_colours:
+            self._on_line_colours(name)
 
     def set_device_select_callback(self, callback: Callable) -> None:
         self._on_device_select = callback
