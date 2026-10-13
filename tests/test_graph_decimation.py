@@ -11,7 +11,7 @@ import app.ui.raw_eeg_screen as rg
 from app.ui.live_session import METRICS_COLORS, METRICS_SCALES
 from app.ui.raw_eeg_screen import ScrollableGraphWidget, _column_bounds, _fold_columns
 from app.ui.theme import C
-from tests.test_graph_heatmap import _graph, _shot
+from tests.test_graph_gradient import _graph, _shot
 
 
 @pytest.fixture(autouse=True)
@@ -36,7 +36,7 @@ def _metrics_graph(n: int, keys=SIX, width=1000, spiky=False) -> ScrollableGraph
                               size_hint=(None, None), size=(width, 500))
     for k in METRICS_COLORS:
         g._visible[k] = k in keys
-    g.set_heatmap_color("shamatha_score")
+    g.set_gradient_series("shamatha_score")
     for j, k in enumerate(METRICS_COLORS):
         if spiky:
             vals = [95.0 if i % 997 == 0 else (5.0 if i % 1009 == 0 else 50.0) for i in range(n)]
@@ -48,7 +48,7 @@ def _metrics_graph(n: int, keys=SIX, width=1000, spiky=False) -> ScrollableGraph
 
 
 def _drawn_points(g: ScrollableGraphWidget) -> int:
-    """Line points plus heatmap vertices (2 quads + 1 patch per point, 16 floats each, ~2 quads per point)."""
+    """Line points plus gradient vertices (2 quads + 1 patch per point, 16 floats each, ~2 quads per point)."""
     pts = 0
     for instr in g._gfx.children:
         if isinstance(instr, Line) and len(instr.points) > 8:
@@ -98,7 +98,7 @@ def test_fold_columns_are_exactly_the_viewports_pixel_columns():
 
 
 def test_a_graph_folds_only_where_folding_is_cheaper():
-    # A heatmap point costs several times a line point, so a line folds from 8 samples per pixel, a heatmap from 4.
+    # A gradient point costs several times a line point, so a line folds from 8 samples per pixel, a gradient from 4.
     def drawn(keys, n):
         g = _metrics_graph(n, keys=keys, width=1000)
         g._draw()
@@ -156,7 +156,7 @@ def test_redraw_cost_follows_the_width_not_the_zoom():
 
 
 def test_a_folded_graph_looks_like_the_unfolded_one(tmp_path, monkeypatch):
-    # The same pixels within 1 px (a thick stroke's half-width), spikes and dips included, heatmap and plain lines.
+    # The same pixels within 1 px (a thick stroke's half-width), spikes and dips included, gradient and plain lines.
     def columns(img):
         px = img.load()
         w, h = img.size
@@ -168,7 +168,7 @@ def test_a_folded_graph_looks_like_the_unfolded_one(tmp_path, monkeypatch):
 
     folded = columns(_shot(_metrics_graph(21600, keys=["shamatha_score", "distraction"], spiky=True,
                                           width=800), tmp_path, "folded"))
-    monkeypatch.setattr(rg, "_FOLD_MIN_PER_PX_HEATMAP", float("inf"))
+    monkeypatch.setattr(rg, "_FOLD_MIN_PER_PX_GRADIENT", float("inf"))
     monkeypatch.setattr(rg, "_FOLD_MIN_PER_PX_LINE", float("inf"))
     plain = columns(_shot(_metrics_graph(21600, keys=["shamatha_score", "distraction"], spiky=True,
                                          width=800), tmp_path, "plain"))
@@ -200,7 +200,7 @@ def test_markers_keep_their_real_positions():
     assert any(abs(x - want) < 0.01 for x in marker_xs)
 
 
-def test_heatmap_graph_still_one_mesh_for_a_short_series():
+def test_gradient_graph_still_one_mesh_for_a_short_series():
     g = _graph([10.0 * (i % 11) for i in range(300)])
     g.size = (600, 360)
     g._draw()

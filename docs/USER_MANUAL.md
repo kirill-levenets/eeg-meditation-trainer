@@ -262,6 +262,7 @@ When Program mode is off, the Simple timer behaves exactly as before.
 ### Display
 
 - **Text size** — **Normal**, **Large** (125 %) or **Larger** (150 %): every text in the app, for this profile. It applies at once
+- **Scored line colours** — how the line of the metric you train on is coloured on the graphs (the Session screen's, and a session's in History): **Mono** (its own colour) or a gradient by its value from 0 to 200: **Blue › Red** (the default), **Viridis**, **Plasma**, **Turbo** or **Red › Green**. A gradient keeps every part of the line readable on the current theme. For this profile; it applies at once
 - **Line Width** slider (0.5-4.0) with presets
 - **Rotate Screen** — 0/90/180/270 degrees
 - **Marker Hotkey** — keyboard key for placing markers (desktop)

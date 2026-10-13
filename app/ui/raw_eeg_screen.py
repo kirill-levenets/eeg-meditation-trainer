@@ -1,8 +1,6 @@
-import colorsys
 import math
 import time as _time
 from collections import OrderedDict, deque
-from functools import lru_cache
 from typing import Optional
 
 from kivy.core.text import Label as CoreLabel
@@ -15,7 +13,6 @@ from kivy.graphics import (
     Rectangle,
     RoundedRectangle,
 )
-from kivy.graphics.texture import Texture
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.screenmanager import Screen
@@ -25,6 +22,7 @@ from kivy.uix.widget import Widget
 from app.config import APP
 from app.session.scoring import extend_steps
 from app.ui import render_stats
+from app.ui.line_colours import GRADIENT_TOP, LINE_COLOURS, MONO, gradient_texture
 from app.ui.theme import C as TC
 from app.ui.theme import F, ThemedLabel
 from app.ui.touch_utils import point_in_rect
@@ -62,22 +60,14 @@ def _elapsed_label(seconds: float) -> str:
     return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{s // 60}:{secs:02d}"
 
 
-def _heatmap_rgba(value: float) -> tuple:
-    """Blue (0) → red (100+) via HSV hue 240° → 0°, vivid saturation/value."""
-    t = max(0.0, min(value / 100.0, 1.0))
-    r, g, b = colorsys.hsv_to_rgb((1.0 - t) * (240.0 / 360.0), 0.9, 0.95)
-    return (r, g, b, 1.0)
-
-
-_HEATMAP_TEXELS = 64
 # Kivy caps a Mesh at 65535 indices (GLES2, enforced on Android): 6 per quad, so 10922 quads (43688 vertices).
 _MESH_MAX_QUADS = 65535 // 6
 
 
-# Samples per pixel column from which folding is cheaper than drawing every point. A heatmap point is two quads, a
-# patch and texture coordinates, a plain line point two floats (desktop, 2026-10-02: a heatmap at 4/px 5.2 -> 3.1 ms,
+# Samples per pixel column from which folding is cheaper than drawing every point. A gradient point is two quads, a
+# patch and texture coordinates, a plain line point two floats (desktop, 2026-10-02: a gradient at 4/px 5.2 -> 3.1 ms,
 # a line at 4/px 0.9 -> 1.2 ms but at 8/px 1.9 -> 1.4 ms).
-_FOLD_MIN_PER_PX_HEATMAP = 4
+_FOLD_MIN_PER_PX_GRADIENT = 4
 _FOLD_MIN_PER_PX_LINE = 8
 
 
@@ -110,22 +100,6 @@ def _fold_columns(values: list[float], stops: list[int]) -> list[int]:
         out.extend(start + i for i in sorted({0, col.index(min(col)), col.index(max(col)), len(col) - 1}))
         start = stop
     return out
-
-
-def _fill_heatmap_texture(texture) -> None:
-    """Fill (and on reload re-fill) the gradient; the wrap is set here too so a reload can't revert it to repeat."""
-    texture.wrap = "clamp_to_edge"
-    rgba = (_heatmap_rgba(100.0 * i / (_HEATMAP_TEXELS - 1)) for i in range(_HEATMAP_TEXELS))
-    texture.blit_buffer(bytes(round(c * 255) for px in rgba for c in px), colorfmt="rgba", bufferfmt="ubyte")
-
-
-@lru_cache(maxsize=1)
-def _heatmap_texture() -> Texture:
-    """1×64 blue→red gradient; refilled after a GL context loss (Android pause), clamped beyond 0 and 100."""
-    texture = Texture.create(size=(1, _HEATMAP_TEXELS), colorfmt="rgba")
-    _fill_heatmap_texture(texture)
-    texture.add_reload_observer(_fill_heatmap_texture)
-    return texture
 
 
 class ScrollableGraphWidget(Widget):
@@ -163,9 +137,7 @@ class ScrollableGraphWidget(Widget):
             key: deque(maxlen=effective_max) for key in colors
         }
         self._visible: dict[str, bool] = dict.fromkeys(colors, True)
-        # Series in this set are rendered with per-segment heatmap coloring
-        # (blue at 0 → red at 100+) instead of the per-key fixed color.
-        self._heatmap_keys: set[str] = set()
+        self._gradient_key: str | None = None  # the series drawn in LINE_COLOURS' gradient, not its own colour
         self._scroll_offset: int = 0
         self._total_points: int = 0
         self._show_value_labels: bool = show_value_labels
@@ -210,6 +182,7 @@ class ScrollableGraphWidget(Widget):
         self.bind(size=self._redraw, pos=self._redraw)
         TC.add_listener(self._redraw)
         F.add_listener(self._redraw)  # its labels, and the margins they take
+        LINE_COLOURS.add_listener(self._on_line_colours)
         # Bind Window scroll for zoom (bypasses ScrollView interception)
         Window.bind(on_mouse_down=self._on_window_mouse_down)
 
@@ -252,19 +225,17 @@ class ScrollableGraphWidget(Widget):
         self._reference_value = value
         self._redraw()
 
-    def set_heatmap_color(self, key: str, enabled: bool = True) -> None:
-        """Render `key` series with per-segment heatmap coloring.
+    def _on_line_colours(self) -> None:
+        if self._gradient_key is not None:
+            self._redraw()
 
-        Color gradient: dark blue at value=0, through cyan/green/yellow,
-        to red at value=100+ (clamped). Useful for the shamatha score
-        line so the visual color tracks meditation depth even when the
-        line crosses 100.
-        """
-        if enabled:
-            self._heatmap_keys.add(key)
-        else:
-            self._heatmap_keys.discard(key)
-        self._redraw()
+    def set_gradient_series(self, key: str | None) -> None:
+        """Draw `key` coloured by its value in the profile's line colours (LINE_COLOURS); a key that is no series of this
+        graph (None, a program session's "program") colours none."""
+        key = key if key in self._data else None
+        if key != self._gradient_key:
+            self._gradient_key = key
+            self._redraw()
 
 
     @property
@@ -588,7 +559,7 @@ class ScrollableGraphWidget(Widget):
             color = self.series_color(key)
             scale = self._scales.get(key, 100.0)
             draw_scale = max_scale if not self._bipolar else scale
-            heatmap = key in self._heatmap_keys
+            gradient = key == self._gradient_key and LINE_COLOURS.name != MONO
 
             n = len(slice_data)
             vp = max(self._viewport_points, n)
@@ -598,7 +569,7 @@ class ScrollableGraphWidget(Widget):
             # (x, y) once per drawn point: at most 4 per pixel column (M4) once folding pays, whatever the zoom.
             per_px = span / graph_w
             drawn = range(n)
-            if n >= 3 and per_px >= (_FOLD_MIN_PER_PX_HEATMAP if heatmap else _FOLD_MIN_PER_PX_LINE):
+            if n >= 3 and per_px >= (_FOLD_MIN_PER_PX_GRADIENT if gradient else _FOLD_MIN_PER_PX_LINE):
                 if n not in column_stops:
                     column_stops[n] = _column_bounds(n, x_offset, per_px)
                 drawn = _fold_columns(slice_data, column_stops[n])
@@ -614,8 +585,8 @@ class ScrollableGraphWidget(Widget):
                 xy.append((x, y))
 
             points = [coord for x, y in xy for coord in (x, y)]
-            if heatmap and not self._bipolar:
-                self._add_heatmap_line(points, graph_y, graph_h, draw_scale)
+            if gradient and not self._bipolar:
+                self._add_gradient_line(points, graph_y, graph_h, draw_scale)
             else:
                 self._add_polyline(points, color)
 
@@ -676,10 +647,10 @@ class ScrollableGraphWidget(Widget):
             if len(chunk) >= 4:
                 self._gfx.add(Line(points=chunk, width=width))
 
-    def _add_heatmap_line(self, points: list[float], graph_y: float, graph_h: float, draw_scale: float) -> None:
+    def _add_gradient_line(self, points: list[float], graph_y: float, graph_h: float, draw_scale: float) -> None:
         """Color by value in one Mesh (one draw call per frame): each vertex samples the gradient at its height."""
         hw = dp(self._line_width)  # Kivy Line width is the half-thickness of the stroke
-        v_scale = (draw_scale / 100.0) / graph_h  # texture v (0 = blue at value 0, 1 = red at 100) per pixel of height
+        v_scale = (draw_scale / GRADIENT_TOP) / graph_h  # texture v (0 at value 0, 1 at GRADIENT_TOP) per pixel
         v_off = -graph_y * v_scale
         verts: list[float] = []
         ext = verts.extend
@@ -703,7 +674,7 @@ class ScrollableGraphWidget(Widget):
                 vertices=verts[first * 16:(first + count) * 16],
                 indices=[b + o for b in range(0, 4 * count, 4) for o in (0, 1, 2, 2, 3, 0)],
                 mode="triangles",
-                texture=_heatmap_texture(),
+                texture=gradient_texture(LINE_COLOURS.name, tuple(TC.GRAPH_BG)),
             ))
 
     @staticmethod
