@@ -183,6 +183,7 @@ The Restore replaces your current database and cannot be undone. Use Backup firs
 - Enable/disable toggle
 - Duration slider with presets: 5, 10, 15, 20, 30 minutes
 - When enabled, auto-stops session at the end and plays bell sound
+- **Timer end sound** — the button picks **Default bell** or **Custom file…**, a file of your own picked the same way as a custom feedback sound; it then shows the chosen file. **Test** plays it. Choose **Default bell** to go back to the bell.
 
 #### Session Program
 
@@ -248,7 +249,7 @@ When Program mode is off, the Simple timer behaves exactly as before.
   - **Off** — no sound below the threshold
   - **Rain** — the original rain/white-noise sound
   - **Tone** — a built-in harmonic pad drone (fundamental + a fifth); no file needed
-  - **Custom file…** — opens a file browser to pick a user-supplied audio file (wav, mp3, ogg, flac, m4a); the button then shows the chosen file. The sound loops continuously; its volume is still modulated by the active metric exactly as Rain is.
+  - **Custom file…** — opens a file browser (on Android, the system file picker) to pick a user-supplied audio file (wav, mp3, ogg, flac, m4a); the button then shows the chosen file. On Android the app keeps its own copy, so moving or deleting the original doesn't affect it. The sound loops continuously; its volume is still modulated by the active metric exactly as Rain is.
 
   This sound is loudest when you are far below your threshold and fades to silence as you reach it.
 - **Reward sound (above threshold)** — the button opens a picker to choose a second channel that is **silent until you cross the threshold**, then fades in and grows the further above it you go (full at +30 points). Default **Off**. Options are Off / Rain / Tone / **Crickets** / Custom file…:

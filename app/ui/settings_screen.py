@@ -13,7 +13,9 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.slider import Slider
 
 from app.config import APP, METRICS
+from app.crash_handler import report_soft_error
 from app.logger import logger
+from app.storage import android_saf as _saf
 from app.ui.device_labels import MAX_DEVICE_ALIAS, device_row_text
 from app.ui.line_colours import LINE_COLOURS, MONO, GradientStrip
 from app.ui.line_colours import OPTIONS as LINE_OPTIONS
@@ -66,10 +68,23 @@ _REWARD_SOURCE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("Off", "none"), ("Rain", "noise"), ("Tone", "tone"),
     ("Crickets", "heartbeat"), ("Custom file...", "custom"),
 )
+_TIMER_SOUND_OPTIONS: tuple[tuple[str, str], ...] = (("Default bell", ""), ("Custom file...", "custom"))
+
+
+# Some providers type ogg and flac as application/*, not audio/*.
+_AUDIO_TYPES = ("audio/*", "application/ogg", "application/x-flac")
 
 
 def open_audio_file_chooser(on_select: Callable[[str], None], title: str = "Choose audio file") -> None:
-    """Shared audio-file picker popup for the timer sound, global feedback, and per-segment feedback."""
+    """The one sound picker; on Android the system's, since an app can't browse storage by path."""
+    if _saf.is_available():
+        def _on_uri(uri: str | None) -> None:
+            if uri:
+                _saf.import_document(uri, os.path.join(os.path.dirname(APP.DB_PATH), "sounds"), "sound",
+                                     lambda path: Clock.schedule_once(lambda _dt: _sound_imported(path, on_select)))
+
+        _saf.open_document(_on_uri, _AUDIO_TYPES)
+        return
     chooser = ThemedFileChooser(
         path=os.path.expanduser("~"),
         filters=["*.wav", "*.mp3", "*.ogg", "*.flac", "*.m4a"],
@@ -93,6 +108,13 @@ def open_audio_file_chooser(on_select: Callable[[str], None], title: str = "Choo
     btn_cancel.bind(on_release=popup.dismiss)
     btn_select.bind(on_release=_on_select)
     popup.open()
+
+
+def _sound_imported(path: str | None, on_select: Callable[[str], None]) -> None:
+    if path:
+        on_select(path)
+    else:
+        report_soft_error("sound_pick_failed", "Could not read the selected sound file", force=True)
 
 
 def _load_help_topics(lang: str = "en") -> list[tuple[str, str]]:
@@ -188,6 +210,7 @@ class SettingsScreen(Screen):
         self._on_reward_source_change: Optional[Callable] = None
         self._reward_source: str = "none"   # above-threshold reward (off by default)
         self._reward_sound_path: str = ""
+        self._timer_sound_path: str = ""  # "" is the default bell
         self._reward_source_btn: Optional[StyledButton] = None
         self._graph_toggles: dict[str, bool] = {
             "shamatha_score": True,
@@ -449,8 +472,7 @@ class SettingsScreen(Screen):
         self._program_box.add_widget(saved_programs_label)
         self._program_box.add_widget(self._saved_programs_box)
 
-        # Custom timer-end sound (shared by both modes): path + browse + test.
-        # When empty, the synthesised tingsha bell is used.
+        # Timer-end sound (shared by both modes): picked like the feedback sounds, plus Test.
         timer_sound_lbl = ThemedLabel(
             text="Timer End Sound (optional)",
             font_size=F.SMALL,
@@ -464,26 +486,17 @@ class SettingsScreen(Screen):
         timer_sound_row = BoxLayout(
             size_hint_y=None, height=dp(36), spacing=S.GAP_SM,
         )
-        self._timer_sound_input = CenteredTextInput(
-            hint_text="Default bell",
-            text="",
-            multiline=False,
-            font_size=F.SMALL,
-            foreground_color=C.TEXT,
-            background_color=C.BG_INPUT,
-            size_hint_x=0.5,
-        )
-        self._timer_sound_input.bind(text=self._on_timer_sound_path_change)
-        self._timer_sound_browse_btn = StyledButton(
-            text="Browse",
+        self._timer_sound_btn = StyledButton(
+            text=self._timer_sound_label(self._timer_sound_path),
             font_size=F.SMALL,
             bg_color=C.BG_CARD,
             text_color=C.TEXT,
-            size_hint_x=0.25,
+            size_hint_x=0.75,
             size_hint_y=None,
             height=dp(36),
         )
-        self._timer_sound_browse_btn.bind(on_release=self._on_timer_sound_browse)
+        self._timer_sound_btn.bind(on_release=lambda *_a: self._open_source_picker(
+            "Timer end sound", _TIMER_SOUND_OPTIONS, self._choose_timer_sound))
         self._timer_sound_test_btn = StyledButton(
             text="Test",
             font_size=F.SMALL,
@@ -493,8 +506,7 @@ class SettingsScreen(Screen):
             height=dp(36),
         )
         self._timer_sound_test_btn.bind(on_release=self._on_timer_sound_test)
-        timer_sound_row.add_widget(self._timer_sound_input)
-        timer_sound_row.add_widget(self._timer_sound_browse_btn)
+        timer_sound_row.add_widget(self._timer_sound_btn)
         timer_sound_row.add_widget(self._timer_sound_test_btn)
         timer_section.add_widget(timer_sound_row)
 
@@ -1990,11 +2002,27 @@ class SettingsScreen(Screen):
 
     @property
     def timer_sound_path(self) -> str:
-        return self._timer_sound_input.text.strip()
+        return self._timer_sound_path
 
     @timer_sound_path.setter
     def timer_sound_path(self, value: str) -> None:
-        self._timer_sound_input.text = value or ""
+        """Reflect a loaded timer sound on its button (no callback)."""
+        self._timer_sound_path = value or ""
+        self._timer_sound_btn.text = self._timer_sound_label(self._timer_sound_path)
+
+    def _timer_sound_label(self, path: str) -> str:
+        return self._source_label("custom", path) if path else "Default bell"
+
+    def _choose_timer_sound(self, value: str) -> None:
+        if value == "custom":
+            open_audio_file_chooser(self._apply_timer_sound, title="Timer end sound file")
+            return
+        self._apply_timer_sound("")
+
+    def _apply_timer_sound(self, path: str) -> None:
+        self.timer_sound_path = path
+        if self._on_timer_sound_change:
+            self._on_timer_sound_change(path)
 
     def set_timer_sound_change_callback(self, callback: Callable) -> None:
         self._on_timer_sound_change = callback
@@ -2004,10 +2032,6 @@ class SettingsScreen(Screen):
 
     def set_stop_timer_sound_callback(self, callback: Callable) -> None:
         self._on_stop_timer_sound = callback
-
-    def _on_timer_sound_path_change(self, _instance, value: str) -> None:
-        if self._on_timer_sound_change:
-            self._on_timer_sound_change(value.strip())
 
     def _on_timer_sound_test(self, *_args) -> None:
         """Toggle play/stop for the test sound — long custom files would
@@ -2027,9 +2051,6 @@ class SettingsScreen(Screen):
         (Sound.on_stop fires) so the button text reverts."""
         self._timer_sound_test_playing = False
         self._timer_sound_test_btn.text = "Test"
-
-    def _on_timer_sound_browse(self, *_args) -> None:
-        open_audio_file_chooser(lambda p: setattr(self._timer_sound_input, "text", p))
 
     def populate_bt_devices(self, devices: list) -> None:
         """Populate the BT device list with scan results, each with the `alias` its user gave it."""

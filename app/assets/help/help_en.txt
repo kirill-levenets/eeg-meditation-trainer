@@ -84,8 +84,9 @@ For good EEG signal:
 ## Audio Feedback
 
 Two feedback channels in Settings → Audio. Tap a
-channel to open a picker; Custom file... browses for
-your own audio (wav/mp3/ogg/flac/m4a):
+channel to open a picker; Custom file... picks your
+own audio (wav/mp3/ogg/flac/m4a; on Android in the
+system file picker, and the app keeps a copy):
 - Feedback sound (below threshold): Off / Rain / Tone
   / Custom. Plays while you are below your threshold
   and fades out as you approach it. Default Rain.
@@ -106,6 +107,10 @@ Alert sounds:
 - Warble = device disconnected
 
 Configure in Audio section above
+
+The timer's end sound (Settings → Timer) is picked
+the same way: Default bell or Custom file...; Test
+plays it.
 
 ## Themes
 

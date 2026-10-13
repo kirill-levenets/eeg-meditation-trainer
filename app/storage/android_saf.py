@@ -8,10 +8,15 @@ the result survives app uninstall. Desktop uses Kivy's own FileChooser instead.
 All jnius imports are function-local so this module imports cleanly off-Android.
 """
 
+import hashlib
+import os
+import queue
 import sys
+import threading
 
 from app.android_jni import java_string
 from app.logger import logger
+from app.storage.fileops import discard_file
 
 _IS_ANDROID = hasattr(sys, "getandroidapilevel")
 
@@ -22,6 +27,10 @@ _REQ_OPEN = 9012
 _pending: dict[int, object] = {}  # request_code -> on_result(uri_str | None)
 _bound = False
 
+_imports: queue.SimpleQueue = queue.SimpleQueue()
+_importer: threading.Thread | None = None
+_importer_lock = threading.Lock()
+
 
 def is_available() -> bool:
     return _IS_ANDROID
@@ -31,14 +40,14 @@ def create_document(display_name: str, on_result) -> None:
     """Launch the system 'Save as' dialog. `on_result(uri_str | None)` later."""
     _ensure_bound()
     _pending[_REQ_CREATE] = on_result
-    _launch(_REQ_CREATE, display_name)
+    _launch(_REQ_CREATE, ("application/octet-stream",), display_name)
 
 
-def open_document(on_result) -> None:
-    """Launch the system 'Open' dialog. `on_result(uri_str | None)` later."""
+def open_document(on_result, mime_types: tuple[str, ...] = ("*/*",)) -> None:
+    """Launch the system 'Open' dialog, listing documents of these types. `on_result(uri_str | None)` later."""
     _ensure_bound()
     _pending[_REQ_OPEN] = on_result
-    _launch(_REQ_OPEN, None)
+    _launch(_REQ_OPEN, mime_types, None)
 
 
 def write_file_to_uri(uri_str: str, src_path: str) -> bool:
@@ -98,6 +107,92 @@ def read_uri_to_file(uri_str: str, dst_path: str) -> bool:
     return True
 
 
+def query_display_name(uri_str: str) -> str | None:
+    """The document's file name as its provider shows it."""
+    from jnius import autoclass
+
+    PythonActivity = autoclass("org.kivy.android.PythonActivity")
+    Uri = autoclass("android.net.Uri")
+    OpenableColumns = autoclass("android.provider.OpenableColumns")
+    cursor = PythonActivity.mActivity.getContentResolver().query(Uri.parse(uri_str), None, None, None, None)
+    if cursor is None:
+        return None
+    try:
+        column = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+        return cursor.getString(column) if column >= 0 and cursor.moveToFirst() else None
+    finally:
+        cursor.close()
+
+
+def query_extension(uri_str: str) -> str | None:
+    """The usual file extension for the document's type, as its provider reports it."""
+    from jnius import autoclass
+
+    PythonActivity = autoclass("org.kivy.android.PythonActivity")
+    Uri = autoclass("android.net.Uri")
+    MimeTypeMap = autoclass("android.webkit.MimeTypeMap")
+    mime = PythonActivity.mActivity.getContentResolver().getType(Uri.parse(uri_str))
+    return MimeTypeMap.getSingleton().getExtensionFromMimeType(mime) if mime else None
+
+
+def import_document(uri_str: str, dest_dir: str, fallback_name: str, on_done) -> None:
+    """Copy into dest_dir off the main thread; each on_done runs in the order asked, so the last one asked stays."""
+    global _importer
+    _imports.put((uri_str, dest_dir, fallback_name, on_done))
+    with _importer_lock:
+        if _importer is None:
+            _importer = threading.Thread(target=_run_imports, name="saf-import", daemon=True)
+            _importer.start()
+
+
+def _run_imports() -> None:
+    while True:
+        uri_str, dest_dir, fallback_name, on_done = _imports.get()
+        try:
+            on_done(_copy_in(uri_str, dest_dir, fallback_name))
+        except Exception:
+            logger.exception("A document import's callback failed")
+
+
+def _copy_in(uri_str: str, dest_dir: str, fallback_name: str) -> str | None:
+    """dest_dir/<content hash>/<its name>: one picked twice is stored once, two sharing a name keep their own bytes."""
+    part = os.path.join(dest_dir, ".incoming.part")  # one at a time: a copy cut off by a kill is overwritten next time
+    try:
+        os.makedirs(dest_dir, exist_ok=True)
+        if not read_uri_to_file(uri_str, part):
+            return None
+        with open(part, "rb") as f:
+            folder = os.path.join(dest_dir, hashlib.file_digest(f, "sha256").hexdigest()[:12])
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, _document_name(uri_str, fallback_name))
+        os.replace(part, path)
+        return path
+    except Exception:
+        logger.exception("Could not copy the picked document")
+        return None
+    finally:
+        discard_file(part)
+
+
+def _document_name(uri_str: str, fallback_name: str) -> str:
+    """Its provider's file name, kept to one path segment, with an extension from its type when it has none."""
+    try:
+        name = os.path.basename((query_display_name(uri_str) or "").replace("\\", "/")).strip()
+    except Exception:
+        logger.exception("Could not read the picked document's name")
+        name = ""
+    if name in ("", ".", ".."):
+        name = fallback_name
+    if os.path.splitext(name)[1]:
+        return name
+    try:
+        extension = query_extension(uri_str)
+    except Exception:
+        logger.exception("Could not read the picked document's type")
+        extension = None
+    return f"{name}.{extension}" if extension else name
+
+
 def _ensure_bound() -> None:
     global _bound
     if _bound:
@@ -124,7 +219,7 @@ def _on_activity_result(request_code, result_code, intent):
         cb(None)
 
 
-def _launch(request_code: int, display_name: str | None) -> None:
+def _launch(request_code: int, mime_types: tuple[str, ...], title: str | None) -> None:
     from android.runnable import run_on_ui_thread
 
     @run_on_ui_thread
@@ -136,9 +231,13 @@ def _launch(request_code: int, display_name: str | None) -> None:
                   else Intent.ACTION_OPEN_DOCUMENT)
         intent = Intent(action)
         intent.addCategory(Intent.CATEGORY_OPENABLE)
-        intent.setType("application/octet-stream" if display_name else "*/*")
-        if display_name:
-            intent.putExtra(Intent.EXTRA_TITLE, java_string(display_name))
+        intent.setType(mime_types[0] if len(mime_types) == 1 else "*/*")
+        if len(mime_types) > 1:
+            extras = autoclass("android.os.Bundle")()
+            extras.putStringArray(Intent.EXTRA_MIME_TYPES, list(mime_types))  # not overloaded, unlike putExtra
+            intent.putExtras(extras)
+        if title:
+            intent.putExtra(Intent.EXTRA_TITLE, java_string(title))
         PythonActivity.mActivity.startActivityForResult(intent, request_code)
 
     _run()

@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 from kivy.metrics import dp
 
@@ -357,25 +358,42 @@ class TestScrollableGraphSetSeriesName(unittest.TestCase):
 
 
 class TestSettingsTimerSoundRow(unittest.TestCase):
-    """Custom timer-sound row was moved from the orphan TimerScreen
-    into the Settings → Timer accordion. It must round-trip through the
-    `timer_sound_path` property and notify the change callback so
-    TimerState stays in sync."""
+    """The timer end sound is picked the way the feedback sounds are: one button, Default bell or Custom file...; a
+    loaded path shows on it without counting as a change, and a pick reaches TimerState through the change callback."""
 
     def setUp(self):
         from app.ui.settings_screen import SettingsScreen
         self.screen = SettingsScreen()
+        self.captured = []
+        self.screen.set_timer_sound_change_callback(self.captured.append)
 
-    def test_timer_sound_path_round_trip(self):
+    def test_a_loaded_path_shows_on_the_button_without_a_change(self):
         self.screen.timer_sound_path = "/tmp/bell.wav"
         self.assertEqual(self.screen.timer_sound_path, "/tmp/bell.wav")
-        self.assertEqual(self.screen._timer_sound_input.text, "/tmp/bell.wav")
+        self.assertEqual(self.screen._timer_sound_btn.text, "Custom: bell.wav")
+        self.assertEqual(self.captured, [])
 
-    def test_path_change_callback_fires_with_stripped_value(self):
-        captured = []
-        self.screen.set_timer_sound_change_callback(captured.append)
-        self.screen._timer_sound_input.text = "  /tmp/foo.mp3  "
-        self.assertEqual(captured, ["/tmp/foo.mp3"])
+    def test_default_bell_clears_the_custom_file(self):
+        self.screen.timer_sound_path = "/tmp/bell.wav"
+        self.screen._choose_timer_sound("")
+        self.assertEqual(self.screen.timer_sound_path, "")
+        self.assertEqual(self.screen._timer_sound_btn.text, "Default bell")
+        self.assertEqual(self.captured, [""])
+
+    def test_custom_file_takes_the_picked_file(self):
+        import app.ui.settings_screen as ss
+        with mock.patch.object(ss, "open_audio_file_chooser", lambda on_select, **_k: on_select("/tmp/gong.mp3")):
+            self.screen._choose_timer_sound("custom")
+        self.assertEqual(self.screen.timer_sound_path, "/tmp/gong.mp3")
+        self.assertEqual(self.screen._timer_sound_btn.text, "Custom: gong.mp3")
+        self.assertEqual(self.captured, ["/tmp/gong.mp3"])
+
+    def test_the_button_offers_default_bell_and_a_custom_file(self):
+        import app.ui.settings_screen as ss
+        offered = []
+        with mock.patch.object(ss, "make_scroll_popup", lambda title, rows, **_k: offered.extend(rows) or mock.Mock()):
+            self.screen._timer_sound_btn.dispatch("on_release")
+        self.assertEqual([b.text for b in offered], ["Default bell", "Custom file..."])
 
     def test_test_button_invokes_callback(self):
         called = []

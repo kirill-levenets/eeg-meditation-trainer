@@ -2982,7 +2982,7 @@ class EEGMeditationApp(App):
         logger.info(f"Disconnect alert {'enabled' if active else 'disabled'}")
 
     def _on_timer_sound_change(self, path: str) -> None:
-        """Set the custom timer-gong path; persist it once typing settles."""
+        """Set the custom timer-gong path ("" for the default bell) and persist it."""
         self._timer_state.set_custom_sound_path(path)
         self._persist_user_setting_later("timer_sound")
 

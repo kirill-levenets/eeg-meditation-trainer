@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Choose how the line you train on is coloured** (#94): Settings → Display → **Scored line colours** draws the line of the metric being trained, on the Session screen and in a session's detail in History, in **Mono** (its own colour) or a gradient by its value: **Blue › Red** (as before, the default), **Viridis**, **Plasma**, **Turbo** or **Red › Green**. Each profile keeps its own, and it applies at once to every graph. The line coloured is now the one the session trains (the metric that drives the feedback: Shamatha, a custom formula, or a program segment's), not always Shamatha, and History colours the metric a session was scored on. The gradient now spans the graph's whole 0 to 200 axis (it ran 0 to 100), and every part of it reads at least 3:1 on the current theme: Blue › Red's yellow nearly vanished on the light themes.
 
+### Fixed
+
+- **Custom sound files can be picked on Android** (#96): **Custom file…** (feedback, reward, a program segment's feedback) and the timer's **Browse** opened a file browser at a folder the app can't read, showing only `../`, and tapping it did nothing. On Android they now open the system file picker, listing audio files, and the app keeps its own copy of the picked file, so the sound still plays if the original is moved or deleted. The timer's end sound is now picked like the feedback sounds, with one button offering **Default bell** or **Custom file…**: it was a path field with a Browse button, and going back to the bell meant erasing the path by hand.
+
 ## [1.5.0] - 2026-10-10
 
 ### Added
