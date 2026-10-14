@@ -3470,10 +3470,7 @@ class EEGMeditationApp(App):
             )
         finally:
             if tmp_path:
-                try:
-                    os.remove(tmp_path)
-                except OSError:
-                    logger.warning(f"Could not remove temp backup {tmp_path}")
+                discard_file(tmp_path)
 
     def _run_backup_async(self, target_path: str) -> None:
 

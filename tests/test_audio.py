@@ -385,3 +385,19 @@ class TestFeedbackChannel(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+def test_cleanup_reports_a_sound_file_it_cannot_remove(monkeypatch):
+    import app.storage.fileops as fileops
+    eng = AudioEngine()
+    warned = []
+    monkeypatch.setattr(fileops.logger, "warning", lambda msg: warned.append(msg))
+
+    def refuse(path):
+        raise PermissionError(13, "Permission denied", path)
+
+    monkeypatch.setattr(fileops.os, "remove", refuse)
+    eng.cleanup()
+    assert warned and all("Could not remove" in m for m in warned)
+    monkeypatch.undo()
+    eng.cleanup()  # the sounds it couldn't remove above

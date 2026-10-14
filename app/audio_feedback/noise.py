@@ -10,6 +10,7 @@ from typing import Optional
 
 from app.config import APP
 from app.logger import logger
+from app.storage.fileops import discard_file
 
 # ---------------------------------------------------------------------------
 # Noise-player abstraction
@@ -929,16 +930,15 @@ class AudioEngine:
             self._chime_path,
             self._disconnect_path,
         ):
+            if path:
+                discard_file(path)
+        if self._tmpdir:
             try:
-                if path and os.path.exists(path):
-                    os.remove(path)
-            except OSError:
-                pass
-        try:
-            if self._tmpdir and os.path.isdir(self._tmpdir):
                 os.rmdir(self._tmpdir)
-        except OSError:
-            pass
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                logger.warning(f"Could not remove the sound folder {self._tmpdir}: {e}")
 
 
 if __name__ == "__main__":
