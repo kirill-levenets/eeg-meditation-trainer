@@ -55,6 +55,7 @@ from app.ui.theme import (
     confirm_popup,
     fill_background,
     fit_row_to_text,
+    fit_width_to_text,
     fold_away,
     format_count,
     format_duration,
@@ -642,7 +643,7 @@ class HistoryScreen(Screen):
         # Title, and right after it the chevron that folds the chart and the totals away (the list gets their room)
         self._title_row = BoxLayout(size_hint_y=None, height=dp(32), spacing=S.GAP_SM)
         self._title = ThemedLabel(text="History", font_size=F.H1, bold=True, color=C.TEXT, size_hint_x=None)
-        self._title.bind(texture_size=lambda w, ts: setattr(w, "width", ts[0]))
+        fit_width_to_text(self._title)
         self._btn_collapse = FoldChevron()
         self._chart_fold = Fold(self._btn_collapse,
                                 lambda folded: fold_away(self._root, self._chart_area, self._title_row, folded))

@@ -546,6 +546,11 @@ def fit_height_to_text(label, extra: float = 0) -> None:
                texture_size=lambda w, v: setattr(w, "height", v[1] + extra))
 
 
+def fit_width_to_text(label, extra: float = 0) -> None:
+    """The label is as wide as its one-line text (plus `extra`), following a text size change."""
+    label.bind(texture_size=lambda w, ts: setattr(w, "width", ts[0] + extra))
+
+
 def fit_row_to_text(row, label, min_height: float) -> None:
     """The row grows with its wrapping label (at least `min_height`), the label and fixed-height controls centred on it."""
     label.size_hint_y = None

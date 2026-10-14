@@ -36,6 +36,7 @@ from app.ui.theme import (
     ThemedTextInput,
     cancel_button,
     fill_background,
+    fit_width_to_text,
     format_duration,
     make_scroll_popup,
     readable_fg,
@@ -1181,7 +1182,7 @@ class LiveSessionScreen(Screen):
         row = BoxLayout(size_hint_y=None, height=self._summary_line_h)
         # The label takes its text's width and the value the rest: a Metric value can be longer than its label.
         label = ThemedLabel(text="", font_size=F.BODY, color=C.TEXT_SECONDARY, size_hint_x=None)
-        label.bind(texture_size=lambda w, ts: setattr(w, "width", ts[0] + S.GAP))
+        fit_width_to_text(label, S.GAP)
         value = ThemedLabel(text="-", font_size=F.BODY, bold=True, color=C.TEXT, halign="right", valign="middle",
                             shorten=True, shorten_from="right")
         value.bind(size=value.setter("text_size"))

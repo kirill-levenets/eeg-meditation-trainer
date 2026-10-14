@@ -36,6 +36,7 @@ from app.ui.theme import (
     cancel_button,
     fill_background,
     fit_height_to_text,
+    fit_width_to_text,
     fold_away,
     format_duration,
     make_message_popup,
@@ -256,7 +257,7 @@ class DiaryScreen(Screen):
         self._band_header = BoxLayout(size_hint_y=None, height=dp(28), spacing=S.GAP_SM)
         band_title = ThemedLabel(text="Band Power (whole session)", font_size=F.SMALL, color=C.TEXT_SECONDARY,
                                  size_hint_x=None)
-        band_title.bind(texture_size=lambda w, ts: setattr(w, "width", ts[0]))
+        fit_width_to_text(band_title)
         self._btn_band_fold = FoldChevron(size_hint_y=None, height=dp(28))
         self._band_fold = Fold(self._btn_band_fold, lambda folded: fold_away(
             self._detail_layout, self._band_holder, self._band_header, folded))
@@ -553,7 +554,7 @@ class DiaryScreen(Screen):
     def _make_detail_row() -> tuple[ThemedLabel, ThemedLabel]:
         # A title takes its text's width (the column, its widest title) and the value the rest of the row.
         title = ThemedLabel(text="", font_size=F.SMALL, color=C.TEXT_SECONDARY, size_hint=(None, None), height=dp(20))
-        title.bind(texture_size=lambda w, ts: setattr(w, "width", ts[0] + S.GAP))
+        fit_width_to_text(title, S.GAP)
         value = ThemedLabel(text="-", font_size=F.H3, bold=True, color=C.TEXT, halign="left", size_hint_y=None,
                             height=dp(20), shorten=True, shorten_from="right")
         value.bind(size=value.setter("text_size"))

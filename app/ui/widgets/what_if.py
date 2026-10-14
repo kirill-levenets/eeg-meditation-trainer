@@ -22,6 +22,7 @@ from app.ui.theme import (
     S,
     StyledButton,
     ThemedLabel,
+    fit_width_to_text,
     format_duration,
 )
 
@@ -101,7 +102,7 @@ class WhatIfPanel(BoxLayout):
         header = BoxLayout(size_hint_y=None, height=dp(28), spacing=S.GAP_SM)
         self._title = ThemedLabel(text="Try another threshold", font_size=F.SMALL, bold=True,
                                   color=C.TEXT_SECONDARY, size_hint_x=None)
-        self._title.bind(texture_size=lambda w, ts: setattr(w, "width", ts[0]))
+        fit_width_to_text(self._title)
         self._btn_collapse = FoldChevron(size_hint_y=None, height=dp(28))
         self._fold = Fold(self._btn_collapse, lambda _folded: self._show(self._content))
         self._btn_reset = StyledButton(text="Reset", font_size=F.SMALL, bg_color=C.BG_CARD,
@@ -124,7 +125,7 @@ class WhatIfPanel(BoxLayout):
             # As the session detail's stats rows: the title takes its text's width, the value the rest.
             label = ThemedLabel(text=text, font_size=F.SMALL, color=C.TEXT_SECONDARY, size_hint=(None, None),
                                 height=_ROW_H)
-            label.bind(texture_size=lambda w, ts: setattr(w, "width", ts[0] + S.GAP))
+            fit_width_to_text(label, S.GAP)
             value = ThemedLabel(text="", font_size=F.H3, bold=True, color=C.TEXT, halign="left", valign="middle",
                                 size_hint_y=None, height=_ROW_H)
             value.bind(size=value.setter("text_size"))
