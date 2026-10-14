@@ -777,13 +777,8 @@ class LiveSessionScreen(Screen):
         The program's currently-training series (if it's a plotted metric) is
         bolded with a » marker via active_text.
         """
-        active = (self._graph.series_name(self._training_key)
-                  if self._training_key in METRICS_COLORS else None)
-        self._legend.set_items(
-            [(self._graph.series_name(m), self._graph.series_color(m))
-             for m in METRICS_COLORS if m in enabled_keys],
-            active_text=active,
-        )
+        self._legend.show_graph(self._graph, [m for m in METRICS_COLORS if m in enabled_keys],
+                                active_key=self._training_key if self._training_key in METRICS_COLORS else None)
 
     def set_training_series(self, key) -> None:
         """Mark the series currently driving the program target (bold + »), or
@@ -964,10 +959,7 @@ class LiveSessionScreen(Screen):
 
     def _rebuild_band_legend(self) -> None:
         """Repopulate the band legend with only the band graph's visible series."""
-        self._band_legend.set_items([
-            (self._band_graph.series_name(k), self._band_graph.series_color(k))
-            for k in self._band_graph.visible_keys()
-        ])
+        self._band_legend.show_graph(self._band_graph)
 
     def _open_duration_popup(self, *_args) -> None:
         """Open a modal Popup to pick a session duration preset.

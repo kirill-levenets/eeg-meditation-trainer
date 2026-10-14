@@ -706,10 +706,7 @@ class DiaryScreen(Screen):
         """Rebuild legend labels for the active graph tab's visible series."""
         graph = self._graph_for_tab(tab)
         scored = self._scored_key if tab == "metrics" and self._scored_key in graph.visible_keys() else None
-        self._legend_container.set_items([
-            (graph.series_name(key), graph.series_color(key))
-            for key in graph.visible_keys()
-        ], active_text=graph.series_name(scored) if scored else None)  # » on the series it was scored on
+        self._legend_container.show_graph(graph, active_key=scored)  # » on the series it was scored on
 
     def _on_save_pressed(self, *args) -> None:
         notes, tags, mood = self._notes_state()

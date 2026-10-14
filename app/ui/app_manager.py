@@ -890,10 +890,7 @@ class EEGMeditationApp(App):
     def _build_fullscreen_legend(self, graph):
         """A wrapping legend (colored names) for the currently visible series."""
         legend = LegendBar()
-        legend.set_items([
-            (graph.series_name(key), graph.series_color(key))
-            for key in graph.visible_keys()
-        ])
+        legend.show_graph(graph)
         return legend
 
     def _link_graph_zoom(self) -> None:
