@@ -8,10 +8,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import app.ui.app_manager as am
+import app.ui.backup_flow as bf
 from app.config import APP
 from app.session.manager import SessionManager
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
+from tests._backup_flow import make_flow
 
 
 @pytest.fixture
@@ -134,16 +137,15 @@ def test_leaving_the_app_without_a_session_writes_nothing(db):
 
 
 def test_a_backup_holds_the_running_session_as_of_the_backup(db, monkeypatch):
-    import app.ui.app_manager as am
     app = _app(db)
-    app._settings_screen = MagicMock()
+    flow = make_flow(db, checkpoint=app._checkpoint_or_report)
     _ticks(app, 40)
     _run_for(app, 20)
     seen = []
-    monkeypatch.setattr(am._backup, "make_backup", lambda d, path: seen.append(_row(d, app._current_session_id)))
-    monkeypatch.setattr(am.threading, "Thread", lambda target, **k: MagicMock(start=target))
-    monkeypatch.setattr(am.Clock, "schedule_once", lambda *a, **k: None)
-    app._run_backup_async("/tmp/unused.db")
+    monkeypatch.setattr(bf._backup, "make_backup", lambda d, path: seen.append(_row(d, app._current_session_id)))
+    monkeypatch.setattr(bf.threading, "Thread", lambda target, **k: MagicMock(start=target))
+    monkeypatch.setattr(bf.Clock, "schedule_once", lambda *a, **k: None)
+    flow._run_backup_async("/tmp/unused.db")
     assert seen == [(20, 40)]
 
 
@@ -174,8 +176,8 @@ def test_a_tick_recorded_during_a_checkpoint_waits_for_it_and_is_kept(db):
 
 
 def test_an_android_backup_holds_the_running_session_as_of_the_backup(db, monkeypatch):
-    import app.ui.app_manager as am
     app = _app(db)
+    flow = make_flow(db, checkpoint=app._checkpoint_or_report)
     _ticks(app, 30)
     _run_for(app, 15)
     seen = []
@@ -184,9 +186,9 @@ def test_an_android_backup_holds_the_running_session_as_of_the_backup(db, monkey
         seen.append(_row(d, app._current_session_id))
         raise OSError("stop here")  # the copy itself isn't under test
 
-    monkeypatch.setattr(am._backup, "online_backup_to_tempfile", snapshot)
-    monkeypatch.setattr(am.Clock, "schedule_once", lambda *a, **k: None)
-    app._backup_to_uri_worker("content://unused")
+    monkeypatch.setattr(bf._backup, "online_backup_to_tempfile", snapshot)
+    monkeypatch.setattr(bf.Clock, "schedule_once", lambda *a, **k: None)
+    flow._backup_to_uri_worker("content://unused")
     assert seen == [(15, 30)]
 
 
@@ -231,7 +233,6 @@ def test_leaving_the_app_while_paused_checkpoints_the_length_before_the_pause(db
 
 
 def test_a_failing_checkpoint_on_leave_still_saves_the_settings(db, monkeypatch):
-    import app.ui.app_manager as am
     reported = []
     monkeypatch.setattr(am, "report_soft_error", lambda label, detail, **k: reported.append(label))
     app = _app(db)
@@ -245,17 +246,17 @@ def test_a_failing_checkpoint_on_leave_still_saves_the_settings(db, monkeypatch)
 
 
 def test_a_failing_checkpoint_does_not_stop_a_backup(db, monkeypatch):
-    import app.ui.app_manager as am
     reported, copied = [], []
     monkeypatch.setattr(am, "report_soft_error", lambda label, detail, **k: reported.append(label))
-    monkeypatch.setattr(am._backup, "make_backup", lambda d, path: copied.append(path))
-    monkeypatch.setattr(am.threading, "Thread", lambda target, **k: MagicMock(start=target))
-    monkeypatch.setattr(am.Clock, "schedule_once", lambda cb, *a, **k: cb(0))
+    monkeypatch.setattr(bf, "report_soft_error", lambda label, detail, **k: reported.append(label))
+    monkeypatch.setattr(bf._backup, "make_backup", lambda d, path: copied.append(path))
+    monkeypatch.setattr(bf.threading, "Thread", lambda target, **k: MagicMock(start=target))
+    monkeypatch.setattr(bf.Clock, "schedule_once", lambda cb, *a, **k: cb(0))
     app = _app(db)
-    app._settings_screen = MagicMock()
-    app._report_backup_saved = MagicMock()
+    flow = make_flow(db, checkpoint=app._checkpoint_or_report)
+    flow._report_backup_saved = MagicMock()
     monkeypatch.setattr(app, "_with_score", lambda stats: (_ for _ in ()).throw(KeyError("graph")))
-    app._run_backup_async("/tmp/unused.db")
+    flow._run_backup_async("/tmp/unused.db")
     assert copied == ["/tmp/unused.db"]  # the rest of the database is still backed up
     assert reported == ["session_checkpoint_failed"]
-    app._report_backup_saved.assert_called_once()
+    flow._report_backup_saved.assert_called_once()

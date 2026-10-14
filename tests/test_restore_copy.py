@@ -8,10 +8,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import app.ui.app_manager as am
+import app.ui.backup_flow as bf
 from app.storage.backup import make_backup, restore_backup
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
+from tests._backup_flow import make_flow
 
 
 @pytest.fixture
@@ -105,14 +106,13 @@ def test_db_migration_copies_without_reporting_where_the_label_cannot_be_copied(
 
 # --- the temp copy of the picked file (_restore_candidate.db) never outlives the restore ---------------------
 
-def _restore_app(tmp_path, monkeypatch) -> EEGMeditationApp:
-    monkeypatch.setattr(am.APP, "DB_PATH", str(tmp_path / "meditation.db"))
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._db = MagicMock()
-    app._db.get_record_counts.return_value = {"users": 1, "sessions": 3}
-    app._confirm_action = MagicMock()
-    app._do_restore_and_restart = MagicMock()
-    return app
+def _restore_flow(tmp_path, monkeypatch):
+    monkeypatch.setattr(bf.APP, "DB_PATH", str(tmp_path / "meditation.db"))
+    db = MagicMock()
+    db.get_record_counts.return_value = {"users": 1, "sessions": 3}
+    flow = make_flow(db)
+    flow._do_restore_and_restart = MagicMock()
+    return flow
 
 
 def _candidate(tmp_path, valid: bool = True):
@@ -125,47 +125,47 @@ def _candidate(tmp_path, valid: bool = True):
 
 
 def test_an_invalid_picked_file_discards_the_temp_copy(tmp_path, monkeypatch):
-    monkeypatch.setattr(am, "report_soft_error", MagicMock())
-    app = _restore_app(tmp_path, monkeypatch)
+    monkeypatch.setattr(bf, "report_soft_error", MagicMock())
+    flow = _restore_flow(tmp_path, monkeypatch)
     cand = _candidate(tmp_path, valid=False)
-    app._confirm_restore(str(cand), discard_after=True)
+    flow._confirm_restore(str(cand), discard_after=True)
     assert not cand.exists()
-    am.report_soft_error.assert_called_once()
+    bf.report_soft_error.assert_called_once()
 
 
 def test_cancelling_the_restore_confirm_discards_the_temp_copy(tmp_path, monkeypatch):
-    app = _restore_app(tmp_path, monkeypatch)
+    flow = _restore_flow(tmp_path, monkeypatch)
     cand = _candidate(tmp_path)
-    app._confirm_restore(str(cand), discard_after=True)
-    app._confirm_action.call_args.kwargs["on_cancel"]()
+    flow._confirm_restore(str(cand), discard_after=True)
+    flow._confirm.call_args.kwargs["on_cancel"]()
     assert not cand.exists()
-    app._do_restore_and_restart.assert_not_called()
+    flow._do_restore_and_restart.assert_not_called()
 
 
 def test_confirming_the_restore_restores_then_discards_the_temp_copy(tmp_path, monkeypatch):
-    app = _restore_app(tmp_path, monkeypatch)
+    flow = _restore_flow(tmp_path, monkeypatch)
     cand = _candidate(tmp_path)
     present_during_restore = []
-    app._do_restore_and_restart.side_effect = lambda path: present_during_restore.append(os.path.exists(path))
-    app._confirm_restore(str(cand), discard_after=True)
-    app._confirm_action.call_args.args[3]()  # the user confirms
-    app._do_restore_and_restart.assert_called_once_with(str(cand))
+    flow._do_restore_and_restart.side_effect = lambda path: present_during_restore.append(os.path.exists(path))
+    flow._confirm_restore(str(cand), discard_after=True)
+    flow._confirm.call_args.args[3]()  # the user confirms
+    flow._do_restore_and_restart.assert_called_once_with(str(cand))
     assert present_during_restore == [True]
     assert not cand.exists()
 
 
 def test_a_desktop_restore_never_deletes_the_users_own_file(tmp_path, monkeypatch):
-    app = _restore_app(tmp_path, monkeypatch)
+    flow = _restore_flow(tmp_path, monkeypatch)
     picked = tmp_path / "my_backup.db"
     _db_with_user(picked, "from-backup")
-    app._confirm_restore(str(picked))
-    app._confirm_action.call_args.args[3]()
-    app._confirm_action.call_args.kwargs["on_cancel"]()
+    flow._confirm_restore(str(picked))
+    flow._confirm.call_args.args[3]()
+    flow._confirm.call_args.kwargs["on_cancel"]()
     assert picked.exists()
 
 
 def test_a_failed_read_of_the_picked_file_discards_the_partial_temp_copy(tmp_path, monkeypatch):
-    app = _restore_app(tmp_path, monkeypatch)
+    flow = _restore_flow(tmp_path, monkeypatch)
     cand = tmp_path / "_restore_candidate.db"
 
     def _partial_read(uri, dest):
@@ -173,12 +173,12 @@ def test_a_failed_read_of_the_picked_file_discards_the_partial_temp_copy(tmp_pat
             f.write(b"half a file")
         return False
 
-    monkeypatch.setattr(am._saf, "read_uri_to_file", _partial_read)
-    monkeypatch.setattr(am, "report_soft_error", MagicMock())
-    monkeypatch.setattr(am.Clock, "schedule_once", lambda fn, *a: fn(0))
-    app._restore_from_uri_worker("content://picked/backup")
+    monkeypatch.setattr(bf._saf, "read_uri_to_file", _partial_read)
+    monkeypatch.setattr(bf, "report_soft_error", MagicMock())
+    monkeypatch.setattr(bf.Clock, "schedule_once", lambda fn, *a: fn(0))
+    flow._restore_from_uri_worker("content://picked/backup")
     assert not cand.exists()
-    am.report_soft_error.assert_called_once()
+    bf.report_soft_error.assert_called_once()
 
 
 # --- review round: the copy keeps copy2's useful semantics; a failed restore keeps one live DB --------------------
@@ -231,23 +231,43 @@ def test_a_backup_onto_the_live_database_is_refused(tmp_path):
 
 
 def test_a_failed_restore_keeps_the_same_live_db_for_everything_holding_it(tmp_path, monkeypatch):
-    monkeypatch.setattr(am.APP, "DB_PATH", str(tmp_path / "meditation.db"))
+    monkeypatch.setattr(bf.APP, "DB_PATH", str(tmp_path / "meditation.db"))
     db = DatabaseManager(db_path=str(tmp_path / "meditation.db"))
     uid = db.create_user("someone")
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._db = db
-    app._session_pipeline_live = lambda: False
-    monkeypatch.setattr(am, "report_soft_error", MagicMock())
+    flow = make_flow(db)
+    monkeypatch.setattr(bf, "report_soft_error", MagicMock())
 
     def _disk_full(*_a):
         raise OSError(errno.ENOSPC, "No space left on device")
 
-    monkeypatch.setattr(am, "restore_backup", _disk_full)
+    monkeypatch.setattr(bf, "restore_backup", _disk_full)
     try:
-        app._do_restore_and_restart(str(tmp_path / "backup.db"))
-        assert app._db is db  # the settings store and any other holder keep a working reference
+        flow._do_restore_and_restart(str(tmp_path / "backup.db"))
+        assert flow._db is db  # the settings store and any other holder keep a working reference
         db.set_user_setting(uid, "threshold", "70")
         assert db.get_user_setting(uid, "threshold") == "70"
     finally:
         db.close()
-    am.report_soft_error.assert_called_once()
+    bf.report_soft_error.assert_called_once()
+
+
+def test_a_restore_replaces_the_file_then_hands_the_app_to_a_relaunch(tmp_path, monkeypatch):
+    live = tmp_path / "meditation.db"
+    monkeypatch.setattr(bf.APP, "DB_PATH", str(live))
+    db = DatabaseManager(db_path=str(live))
+    db.create_user("live")
+    backup = tmp_path / "backup.db"
+    _db_with_user(backup, "from-backup")
+    replaced = MagicMock()
+    flow = make_flow(db, on_db_replaced=replaced)
+    flow._do_restore_and_restart(str(backup))
+    replaced.assert_called_once()
+    assert _users(live) == ["from-backup"]
+
+
+def test_the_app_stops_flushing_and_asks_for_a_relaunch_once_the_db_is_replaced():
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._show_relaunch_popup = MagicMock()
+    app._on_db_replaced()
+    assert app._restoring is True
+    app._show_relaunch_popup.assert_called_once()

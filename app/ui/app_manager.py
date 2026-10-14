@@ -56,13 +56,10 @@ from app.settings.registry import (
     SettingsStore,
     stored_value,
 )
-from app.storage import android_saf as _saf
-from app.storage import backup as _backup
-from app.storage.backup import restore_backup, validate_backup
 from app.storage.csv_export import build_sessions_zip
 from app.storage.database import DatabaseManager, UserExistsError
-from app.storage.fileops import discard_file
 from app.ui import render_stats
+from app.ui.backup_flow import BackupFlow
 from app.ui.device_labels import MAX_DEVICE_ALIAS, device_label
 from app.ui.diary_screen import DiaryScreen, detail_graph_data
 from app.ui.history_screen import HistoryScreen
@@ -83,11 +80,9 @@ from app.ui.theme import (
     THEMES,
     BottomNav,
     C,
-    CenteredTextInput,
     F,
     S,
     StyledButton,
-    ThemedFileChooser,
     ThemedLabel,
     ThemedPopup,
     cancel_button,
@@ -104,7 +99,6 @@ from app.ui.widgets.user_picker import UserPickerForm
 
 FORMULA_KEYS: tuple[str, ...] = ("custom_formula", "custom_formula_2", "custom_formula_3")
 _MAX_FORMULAS = len(FORMULA_KEYS)
-_BACKUP_SOUND_NOTE = "Custom sound files are not included in a backup."
 
 
 def resolve_startup_user(db) -> Optional[int]:
@@ -1018,8 +1012,14 @@ class EEGMeditationApp(App):
         self._settings_screen.set_session_counter(self._count_sessions_for_user)
 
         # Data Backup section
-        self._settings_screen.set_backup_callback(self._on_backup_pressed)
-        self._settings_screen.set_restore_callback(self._on_restore_pressed)
+        self._backup_flow = BackupFlow(
+            self._db, self._settings_screen, user_name=self._current_user_name,
+            save_settings=self._save_user_settings, checkpoint=self._checkpoint_or_report,
+            refused_while_session_runs=self._refused_while_session_runs, confirm=self._confirm_action,
+            info=self._info_popup, on_db_replaced=self._on_db_replaced,
+        )
+        self._settings_screen.set_backup_callback(self._backup_flow.on_backup_pressed)
+        self._settings_screen.set_restore_callback(self._backup_flow.on_restore_pressed)
 
     def _activate_user(self, uid: int) -> None:
         """Make `uid` the active profile and load its settings; every path that picks a user goes here."""
@@ -3414,221 +3414,14 @@ class EEGMeditationApp(App):
     def _count_sessions_for_user(self, user_id: int) -> int:
         return len(self._db.get_all_sessions(user_id=user_id))
 
-    # --- Data Backup ---
+    # --- Data Backup (app/ui/backup_flow.py) ---
 
-    def _is_android(self) -> bool:
-        return hasattr(sys, "getandroidapilevel")
-
-    def _on_backup_pressed(self) -> None:
-        """Backup the live DB to a user-visible location."""
-        # Flush first so a mid-session backup holds current settings, not the last pause snapshot.
-        self._save_user_settings()
-
+    def _current_user_name(self) -> str | None:
         user = self._db.get_user(self._current_user_id) if self._current_user_id else None
-        filename = _backup.backup_filename(user["name"] if user else None, _dt.now())
+        return user["name"] if user else None
 
-        if self._is_android():
-            self._run_backup_saf(filename)
-        else:
-            self._open_backup_save_picker(filename)
-
-    def _run_backup_saf(self, filename: str) -> None:
-        """Android: let the user pick the destination via the SAF save dialog.
-
-        Scoped storage forbids direct /sdcard writes, so the bytes go through the
-        content:// URI the picker returns.
-        """
-        def _on_uri(uri_str):
-            if not uri_str:
-                Clock.schedule_once(lambda dt: self._settings_screen.show_backup_status(
-                    "Backup canceled"))
-                return
-            Clock.schedule_once(lambda dt: self._settings_screen.show_backup_status(
-                "Backing up…"))
-            threading.Thread(
-                target=self._backup_to_uri_worker, args=(uri_str,), daemon=True,
-            ).start()
-
-        _saf.create_document(filename, _on_uri)
-
-    def _backup_to_uri_worker(self, uri_str: str) -> None:
-        tmp_path = None
-        try:
-            self._checkpoint_or_report()  # a running session is in the backup as of now
-            tmp_path = _backup.online_backup_to_tempfile(self._db)
-            if _saf.write_file_to_uri(uri_str, tmp_path):
-                Clock.schedule_once(lambda dt: self._report_backup_saved(uri_str, show_location=False))
-            else:
-                Clock.schedule_once(lambda dt: report_soft_error(
-                    "backup_failed", "Could not write backup to that location"))
-        except Exception as exc:
-            logger.exception("SAF backup failed")
-            Clock.schedule_once(
-                lambda dt, _m=str(exc): report_soft_error("backup_failed", f"Backup failed: {_m}"),
-            )
-        finally:
-            if tmp_path:
-                discard_file(tmp_path)
-
-    def _run_backup_async(self, target_path: str) -> None:
-
-
-
-        self._settings_screen.show_backup_status("Backing up…")
-
-        def _worker():
-            try:
-                self._checkpoint_or_report()  # a running session is in the backup as of now
-                _backup.make_backup(self._db, target_path)
-            except (OSError, sqlite3.Error) as exc:
-                err_msg = f"Backup to {target_path} failed: {exc}"
-                Clock.schedule_once(
-                    lambda dt, _msg=err_msg: report_soft_error("backup_failed", _msg),
-                )
-                return
-            Clock.schedule_once(lambda dt: self._report_backup_saved(target_path))
-
-        threading.Thread(target=_worker, daemon=True).start()
-
-    def _report_backup_saved(self, location: str, *, show_location: bool = True) -> None:
-        """Success also pops up: the status line is small and sits at the bottom of a collapsed section."""
-        logger.info(f"Backup saved to {location}")
-        self._settings_screen.show_backup_status("Backup saved")
-        body = f"Saved to:\n{location}\n\n{_BACKUP_SOUND_NOTE}" if show_location else _BACKUP_SOUND_NOTE
-        self._info_popup("Backup saved", body)
-
-    def _on_restore_pressed(self) -> None:
-        """Pick a backup file and restore it."""
-        # A restore closes the DB and force-relaunches: a running (or connecting) session would be silently dropped.
-        if self._refused_while_session_runs("restoring a backup"):
-            return
-        if self._is_android():
-            self._run_restore_saf()
-        else:
-            self._open_restore_picker_desktop()
-
-    def _run_restore_saf(self) -> None:
-        """Android: pick a backup via the SAF open dialog, stream it to an internal
-        temp file (SQLite can't open a content:// URI), then run the normal restore."""
-        def _on_uri(uri_str):
-            if not uri_str:
-                return
-            threading.Thread(
-                target=self._restore_from_uri_worker, args=(uri_str,), daemon=True,
-            ).start()
-
-        _saf.open_document(_on_uri)
-
-    def _restore_from_uri_worker(self, uri_str: str) -> None:
-        candidate = os.path.join(os.path.dirname(APP.DB_PATH), "_restore_candidate.db")
-        try:
-            ok = _saf.read_uri_to_file(uri_str, candidate)
-        except Exception:
-            logger.exception("SAF restore read failed")
-            ok = False
-        if not ok:
-            discard_file(candidate)
-            Clock.schedule_once(
-                lambda dt: report_soft_error(
-                    "restore_failed", "Could not read the selected file", force=True),
-            )
-            return
-        Clock.schedule_once(lambda dt: self._confirm_restore(candidate, discard_after=True))
-
-    def _open_restore_picker_desktop(self) -> None:
-
-
-        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
-        chooser = ThemedFileChooser(
-            path=os.path.dirname(APP.DB_PATH),
-            filters=["*.db"],
-            size_hint_y=0.85,
-        )
-        btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
-        ok = StyledButton(text="Restore", bg_color=C.PRIMARY)
-        cancel = cancel_button()
-        btn_row.add_widget(ok)
-        btn_row.add_widget(cancel)
-        content.add_widget(chooser)
-        content.add_widget(btn_row)
-        popup = ThemedPopup(title="Pick a backup", content=content, size_hint=(0.9, 0.9))
-
-        def _do_pick(*_a):
-            if not chooser.selection:
-                return
-            popup.dismiss()
-            self._confirm_restore(chooser.selection[0])
-
-        ok.bind(on_release=_do_pick)
-        cancel.bind(on_release=popup.dismiss)
-        popup.open()
-
-    def _confirm_restore(self, source_path: str, discard_after: bool = False) -> None:
-        """Validate, then show confirm dialog → on OK, replace + restart. `discard_after`: source is our temp copy."""
-        def _done():
-            if discard_after:
-                discard_file(source_path)
-
-        ok, msg = validate_backup(source_path)
-        if not ok:
-            _done()
-            report_soft_error(
-                "restore_invalid",
-                f"Selected file is not a valid backup: {msg}",
-                force=True,
-            )
-            return
-
-        def _restore():
-            try:
-                self._do_restore_and_restart(source_path)
-            finally:
-                _done()
-
-        counts = self._db.get_record_counts()
-        self._confirm_action(
-            "Restore database",
-            f"Replace the ENTIRE database with this backup?\n\n"
-            f"Everything on this device ({format_count(counts['users'], 'profile')}, "
-            f"{format_count(counts['sessions'], 'session')}, settings, programs and formulas) "
-            f"will be replaced by the backup's.\n"
-            f"{_BACKUP_SOUND_NOTE}\n"
-            f"This cannot be undone.",
-            "Restore",
-            _restore,
-            ok_color=C.DANGER,
-            on_cancel=_done,
-        )
-
-    def _do_restore_and_restart(self, source_path: str) -> None:
-
-
-        # Defense for the async picker flow: a session may have started, or begun connecting, since _on_restore_pressed.
-        if self._refused_while_session_runs("restoring a backup"):
-            return
-        try:
-            # No-op every DB access during the restore + relaunch window so nothing
-            # reopens the connection and clobbers the freshly-imported file. Error
-            # paths below reopen the same manager, so every holder (the settings
-            # store, …) is live again; a replaced manager left them on the null connection.
-            self._db.mark_shutting_down()
-            self._db.close()
-        except Exception as e:
-            logger.exception("DB close before restore failed")
-            report_soft_error("restore_failed", f"Could not close the database to restore: {e}")
-            self._db.reopen()
-            return
-
-        try:
-            restore_backup(source_path, APP.DB_PATH)
-        except Exception as e:
-            # restore_backup replaces the file atomically, so a failure means the live DB is untouched.
-            report_soft_error("restore_failed", f"Restore from {source_path} failed: {e}")
-            self._db.reopen()
-            return
-
-        # DB is now closed and the file replaced. Tell on_stop/on_pause to skip
-        # the settings flush (it would clobber the freshly-restored state).
+    def _on_db_replaced(self) -> None:
+        """A restore replaced the database file: on_stop/on_pause must not flush settings over it; relaunch."""
         self._restoring = True
         self._show_relaunch_popup()
 
@@ -3649,40 +3442,6 @@ class EEGMeditationApp(App):
             App.get_running_app().stop()
 
         ok.bind(on_release=_quit)
-        popup.open()
-
-    def _open_backup_save_picker(self, default_filename: str) -> None:
-
-
-        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
-        chooser = ThemedFileChooser(
-            path=os.path.dirname(APP.DB_PATH),
-            filters=["*.db"],
-            size_hint_y=0.7,
-        )
-        name_input = CenteredTextInput(
-            text=default_filename,
-            multiline=False,
-            size_hint_y=None,
-            height=dp(40),
-        )
-        btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
-        ok = StyledButton(text="Save", bg_color=C.ACCENT)
-        cancel = cancel_button()
-        btn_row.add_widget(ok)
-        btn_row.add_widget(cancel)
-        content.add_widget(chooser)
-        content.add_widget(name_input)
-        content.add_widget(btn_row)
-        popup = ThemedPopup(title="Save backup", content=content, size_hint=(0.9, 0.9))
-
-        def _do_save(*_a):
-            target = os.path.join(chooser.path, name_input.text.strip())
-            popup.dismiss()
-            self._run_backup_async(target)
-
-        ok.bind(on_release=_do_save)
-        cancel.bind(on_release=popup.dismiss)
         popup.open()
 
     def _on_pick_existing_user(self, user_id: int) -> None:

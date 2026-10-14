@@ -8,6 +8,7 @@ import pytest
 
 from app.metrics.custom_formula import CustomFormulaEvaluator
 from app.ui.app_manager import FORMULA_KEYS, EEGMeditationApp
+from tests._backup_flow import make_flow
 
 
 @pytest.fixture
@@ -127,7 +128,8 @@ def test_loading_a_saved_formula_into_the_driving_slot_is_refused(app, monkeypat
 
 @pytest.mark.parametrize("call, doing", [
     (lambda a: a._on_user_switch(7), "switching profiles"),
-    (lambda a: a._on_restore_pressed(), "restoring a backup"),
+    (lambda a: make_flow(refused_while_session_runs=a._refused_while_session_runs).on_restore_pressed(),
+     "restoring a backup"),
 ])
 def test_the_other_session_locks_say_the_same(app, call, doing):
     app._current_user_id = 3

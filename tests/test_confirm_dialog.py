@@ -5,18 +5,19 @@ from kivy.base import EventLoop
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 
-from app.ui.app_manager import _BACKUP_SOUND_NOTE, EEGMeditationApp
+from app.ui.app_manager import EEGMeditationApp
+from app.ui.backup_flow import BACKUP_SOUND_NOTE
 
 RESTORE_TEXT = (
     "Replace the ENTIRE database with this backup?\n\n"
     "Everything on this device (3 profiles, 120 sessions, settings, programs "
     "and formulas) will be replaced by the backup's.\n"
-    f"{_BACKUP_SOUND_NOTE}\n"
+    f"{BACKUP_SOUND_NOTE}\n"
     "This cannot be undone."
 )
 BACKUP_SAVED_TEXT = (
     "Saved to:\n/home/someone/.local/share/EEGMeditation/backups/eeg_backup_carl_2026-09-29_17-49.db"
-    f"\n\n{_BACKUP_SOUND_NOTE}"
+    f"\n\n{BACKUP_SOUND_NOTE}"
 )
 PROFILE_DELETE_TEXT = (
     'Delete profile "test"?\n\n'

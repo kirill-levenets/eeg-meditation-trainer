@@ -14,8 +14,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import app.ui.backup_flow as bf
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp, resolve_startup_user, sessions_for_view
+from tests._backup_flow import make_flow
 
 _TMP_DIRS: list[str] = []
 
@@ -203,7 +205,7 @@ def test_discard_running_session_deletes_partial_row_and_resets_ui():
     app._finalize_stop_ui.assert_called_once_with(None, None)  # shared teardown
 
 
-def test_restore_refused_while_session_running():
+def test_restore_refused_while_session_running(monkeypatch):
     # #3: a restore closes the DB and relaunches — a running session would be
     # silently dropped. The entry point must refuse with an explanation.
     from app.session.manager import SessionState
@@ -211,13 +213,14 @@ def test_restore_refused_while_session_running():
     app._session_manager = MagicMock()
     app._session_manager.state = SessionState.RUNNING
     app._info_popup = MagicMock()
-    app._is_android = MagicMock()
-    EEGMeditationApp._on_restore_pressed(app)
+    on_android = MagicMock()
+    monkeypatch.setattr(bf, "_on_android", on_android)
+    make_flow(refused_while_session_runs=app._refused_while_session_runs).on_restore_pressed()
     app._info_popup.assert_called_once()      # explained, not silent
-    app._is_android.assert_not_called()        # restore flow never started
+    on_android.assert_not_called()             # restore flow never started
 
 
-def test_restore_refused_during_bt_connect_window():
+def test_restore_refused_during_bt_connect_window(monkeypatch):
     # round-4: state is IDLE while connecting, but the tick thread is live and
     # the session auto-starts on connect — must still refuse.
     from app.session.manager import SessionState
@@ -227,10 +230,11 @@ def test_restore_refused_during_bt_connect_window():
     app._waiting_for_bt = True          # connecting
     app._tick_thread = MagicMock()
     app._info_popup = MagicMock()
-    app._is_android = MagicMock()
-    EEGMeditationApp._on_restore_pressed(app)
+    on_android = MagicMock()
+    monkeypatch.setattr(bf, "_on_android", on_android)
+    make_flow(refused_while_session_runs=app._refused_while_session_runs).on_restore_pressed()
     app._info_popup.assert_called_once()
-    app._is_android.assert_not_called()
+    on_android.assert_not_called()
 
 
 def test_delete_active_profile_discards_during_bt_connect():
