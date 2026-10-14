@@ -5,8 +5,10 @@ creating a user went through _complete_first_run, which set _current_user_id but
 called _load_user_settings — so the deleted/previous user's saved-programs list (and
 other per-user UI) lingered on screen, and delete-by-index silently no-op'd on the
 stale rows. First-run masked it (no prior state)."""
+import sqlite3
 from unittest.mock import MagicMock
 
+import app.ui.app_manager as am
 from app.storage.database import UserExistsError
 from app.ui.app_manager import EEGMeditationApp
 
@@ -61,3 +63,13 @@ def test_a_new_profile_starts_in_mock_mode():
     app = _gate_app(created_uid=5)
     app._complete_first_run("NewUser")
     app._db.set_user_setting.assert_any_call(5, "use_mock", "True")
+
+
+def test_a_database_error_at_first_run_create_is_reported_not_raised(monkeypatch):
+    reported = []
+    monkeypatch.setattr(am, "report_soft_error", lambda label, detail, **k: reported.append(label))
+    app = _gate_app(created_uid=0)
+    app._db.create_user.side_effect = sqlite3.OperationalError("database is locked")
+    app._complete_first_run("NewUser")
+    assert reported == ["user_create_failed"]
+    app._load_user_settings.assert_not_called()

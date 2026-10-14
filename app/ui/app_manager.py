@@ -1152,6 +1152,9 @@ class EEGMeditationApp(App):
             logger.info(f"First run: '{e.name}' exists, picking it (id={e.user_id})")
             self._on_pick_existing_user(e.user_id)
             return
+        except sqlite3.Error as e:  # the popup's caller reopens the gate: no profile was made
+            report_soft_error("user_create_failed", f"The profile '{user_name}' could not be created: {e}")
+            return
         self._activate_user(uid)
         APP.USE_MOCK_DEVICE = True
         self._db.set_user_setting(uid, "use_mock", "True")
