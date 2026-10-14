@@ -201,7 +201,6 @@ class SettingsScreen(Screen):
         self._program_mode: str = "simple"
         self._segment_rows: list = []
         self._saved_formulas_cache: list = []
-        self._suppress_program_cb: bool = False
         self._loading_program: bool = False
         self._on_feedback_source_change: Optional[Callable] = None
         self._feedback_source: str = "noise"
@@ -460,7 +459,6 @@ class SettingsScreen(Screen):
             )
             col.bind(size=col.setter("text_size"))
             segments_header.add_widget(col)
-        self._segments_header = segments_header
 
         self._program_box.add_widget(program_intro)
         self._program_box.add_widget(self._program_loaded_label)
@@ -1437,10 +1435,6 @@ class SettingsScreen(Screen):
         # True: the slider, the -/+ buttons and the presets never see it, a mouse wheel included (it steps the slider)
         return bool(self._threshold_lock())
 
-    @property
-    def use_mock_device(self) -> bool:
-        return self._device_mode_cb.active
-
     def set_threshold_callback(self, callback: Callable) -> None:
         self._on_threshold_change = callback
 
@@ -2227,10 +2221,6 @@ class SettingsScreen(Screen):
 
     def set_theme_callback(self, callback: Callable) -> None:
         self._on_theme_change = callback
-
-    @property
-    def selected_theme(self) -> str:
-        return C.theme_name
 
     def set_audio_metric_callback(self, callback: Callable) -> None:
         self._on_audio_metric_change = callback

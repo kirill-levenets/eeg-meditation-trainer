@@ -46,7 +46,6 @@ class PowerLineDetector:
         self._result = None
 
     def _analyze(self) -> None:
-        n = len(self._samples)
         # Simple DFT at target frequencies (much cheaper than full FFT)
         freqs_to_check = [50, 60]
         magnitudes = {}

@@ -456,7 +456,6 @@ class DiaryScreen(Screen):
 
         self._active_graph_tab: str = "metrics"
         self._show_band_section()
-        self._cached_metrics_rows: list[dict] = []
         self._graph_container.add_widget(self._metrics_graph)
         self._rebuild_legend("metrics")
 
@@ -623,7 +622,6 @@ class DiaryScreen(Screen):
         self._metrics_graph.set_gradient_series(self._scored_key)
         self._raw_eeg_graph.clear_data()
         self._freq_graph.clear_data()
-        self._cached_metrics_rows = []
         self._session_formula_series = {}
         self._ready = set()  # graphs and band totals: "Loading…" until their data arrives
         self._load_failed = False
@@ -639,7 +637,6 @@ class DiaryScreen(Screen):
 
     def load_metrics_preview(self, metrics_rows: list[dict]) -> None:
         """Load session metrics into all three preview graphs at once (the async open fills them one per frame)."""
-        self._cached_metrics_rows = metrics_rows
         data = detail_graph_data(metrics_rows, self._session_formula_series)
         for section in self.graph_fill_order():
             self.fill_graph(section, data)
@@ -664,7 +661,7 @@ class DiaryScreen(Screen):
 
     def set_metrics_threshold(self, value: float) -> None:
         """Set threshold line on the metrics preview graph."""
-        self._metrics_graph.set_threshold(value, "meditation_score")
+        self._metrics_graph.set_threshold(value)
 
     def set_program(self, program_json: str) -> None:
         """Draw the recorded program's stepped threshold on the metrics graph.
@@ -787,7 +784,6 @@ class DiaryScreen(Screen):
             # Android: save directly to app's writable dir (no FileChooser —
             # it can't browse /sdcard on Android 11+ without special permission)
             self._file_chooser = None
-            export_dir = self._get_android_export_dir()
 
             loc_label = ThemedLabel(
                 text="Will appear in:\nDocuments/EEGMeditation/",
@@ -839,7 +835,6 @@ class DiaryScreen(Screen):
             content=content,
             size_hint=(0.9, None) if is_android else (0.95, 0.85),
         )
-        self._export_popup = popup
         btn_cancel.bind(on_release=popup.dismiss)
         btn_save.bind(on_release=lambda x: self._do_export(popup))
         popup.open()

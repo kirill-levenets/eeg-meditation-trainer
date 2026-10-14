@@ -435,14 +435,6 @@ class DatabaseManager:
             cur = c.execute(f"UPDATE sessions SET {assignments} WHERE id = ?", (*given.values(), session_id))
         return cur.rowcount > 0
 
-    def get_sessions_in_range(self, start_date: str, end_date: str) -> list[dict]:
-        """Return sessions within a date range for analytics."""
-        cursor = self._conn.execute(
-            "SELECT * FROM sessions WHERE date_time BETWEEN ? AND ? ORDER BY date_time",
-            (start_date, end_date),
-        )
-        return [dict(row) for row in cursor.fetchall()]
-
     def delete_session(self, session_id: int) -> None:
         """Delete a session and its metrics."""
         self.delete_sessions([session_id])
@@ -678,13 +670,6 @@ class DatabaseManager:
         formulas.append({"name": name, "formula": formula})
         self._save_formulas_list(user_id, formulas)
         return True
-
-    def update_saved_formula(self, user_id: int, index: int, name: str, formula: str) -> None:
-        """Update a saved formula by index."""
-        formulas = self.get_saved_formulas(user_id)
-        if 0 <= index < len(formulas):
-            formulas[index] = {"name": name, "formula": formula}
-            self._save_formulas_list(user_id, formulas)
 
     def remove_saved_formula(self, user_id: int, index: int) -> None:
         """Remove a saved formula by index."""

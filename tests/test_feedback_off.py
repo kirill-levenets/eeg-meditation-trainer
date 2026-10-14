@@ -22,4 +22,3 @@ def test_start_noise_loop_stays_silent_when_all_feedback_off(monkeypatch):
 
     assert not calls, "start must not force a rain player when all feedback is Off"
     assert eng._active_feedback == ""
-    assert eng._noise_sound is None

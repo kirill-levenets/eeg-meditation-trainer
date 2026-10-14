@@ -29,7 +29,6 @@ def run_linux(bt_addr: str, channel: int = 1, use_socat: bool = False,
     Without: uses simple PTYs (fine for apps that just read raw bytes).
     """
     import select
-    import signal
     import socket
     import subprocess
 
@@ -71,7 +70,6 @@ def run_linux(bt_addr: str, channel: int = 1, use_socat: bool = False,
             sys.exit(1)
 
         # Open the master side for writing (non-blocking to avoid stalling)
-        import fcntl
         master1_fd = os.open(pairs[0][0], os.O_WRONLY | os.O_NOCTTY | os.O_NONBLOCK)
         master2_fd = os.open(pairs[1][0], os.O_WRONLY | os.O_NOCTTY | os.O_NONBLOCK)
         name1 = pairs[0][1]

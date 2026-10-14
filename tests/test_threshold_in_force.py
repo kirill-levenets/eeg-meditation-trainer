@@ -280,7 +280,7 @@ def test_a_session_start_clears_the_last_sessions_steps(program, first_target, m
     a = _start(program, monkeypatch)
     graph = a._live_screen.graph
     assert graph.set_threshold_steps.call_args_list[-1].args == (None,)
-    graph.set_threshold.assert_called_with(float(first_target), "shamatha_score")
+    graph.set_threshold.assert_called_with(float(first_target))
     a._audio.set_threshold.assert_called_with(first_target)
     assert a._shamatha_threshold == first_target
     assert a._session_manager.state == SessionState.RUNNING
@@ -435,7 +435,7 @@ def test_moving_the_slider_while_idle_clears_the_last_sessions_graphs():
     a._live_screen.graph.set_threshold_steps.assert_called_with(None)
     assert not a._ui_metrics_history and not a._ui_band_history and not a._ui_raw_waveform
     a._apply_threshold(85)  # the settled value
-    a._live_screen.graph.set_threshold.assert_called_with(85.0, "shamatha_score")
+    a._live_screen.graph.set_threshold.assert_called_with(85.0)
 
 
 def test_reapplying_the_settings_threshold_keeps_the_graphs():

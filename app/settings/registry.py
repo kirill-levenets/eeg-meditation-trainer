@@ -44,10 +44,6 @@ class SettingsStore:
         self._by_key = {s.key: s for s in self._settings}
         self._loading = False
 
-    @property
-    def loading(self) -> bool:
-        return self._loading
-
     def load(self, uid: int) -> None:
         """Apply each setting for `uid`: stored value if present+valid, else its default."""
         self._loading = True

@@ -156,7 +156,6 @@ class ScrollableGraphWidget(Widget):
         # Sync group: linked graphs zoom together
         self._sync_group: list["ScrollableGraphWidget"] = []
         self._threshold_value: Optional[float] = None
-        self._threshold_scale_key: Optional[str] = None
         self._threshold_steps: Optional[list[tuple[int, float]]] = None
         # Reference line: solid horizontal line at a fixed value, drawn
         # distinctly from the (dashed) threshold line. Used on the metrics
@@ -183,10 +182,9 @@ class ScrollableGraphWidget(Widget):
         # Bind Window scroll for zoom (bypasses ScrollView interception)
         Window.bind(on_mouse_down=self._on_window_mouse_down)
 
-    def set_threshold(self, value: Optional[float], scale_key: Optional[str] = None) -> None:
-        """Set a horizontal threshold line. scale_key picks which series scale to use."""
+    def set_threshold(self, value: Optional[float]) -> None:
+        """Set a horizontal threshold line."""
         self._threshold_value = value
-        self._threshold_scale_key = scale_key
         self._redraw()
 
     def set_threshold_steps(self, steps) -> None:
@@ -592,7 +590,6 @@ class ScrollableGraphWidget(Widget):
                     last_y = graph_y + min(max(last_val, 0.0) / draw_scale, 1.0) * graph_h
                 last_y = _free_label_y(last_y, label_y_positions, graph_y, self.top - dp(6))
                 label_y_positions.append(last_y)
-                short_name = key.replace("_score", "").replace("_", " ")
                 tex = self._make_text_texture(
                     f"{last_val:.0f}", size=9, color=color,
                 )
@@ -822,10 +819,6 @@ class ScrollableGraphWidget(Widget):
     def zoom_out(self) -> None:
         """Zoom out (show more points = wider view)."""
         self._set_viewport(int(self._zoom_base() * self._zoom_factor))
-
-    def zoom_reset(self) -> None:
-        """Reset to default viewport."""
-        self._set_viewport(self._default_viewport)
 
     def _on_window_mouse_down(self, window, x, y, button, modifiers):
         """Handle mouse scroll at Window level (bypasses ScrollView)."""

@@ -336,9 +336,6 @@ class LiveSessionScreen(Screen):
             bold=True,
             color=C.TEXT,
         )
-        # Deprecated alias kept so reset_display can reference it
-        # without branching; both point to the same single label now.
-        self._start_time_label = self._timer_label
         self._start_time_str: str = ""  # wall-clock string cached for combined display
         self._state_label = ThemedLabel(
             text="IDLE",
@@ -1133,20 +1130,6 @@ class LiveSessionScreen(Screen):
     def hide_alert(self) -> None:
         self._alert_label.text = ""
         self._alert_label.height = dp(0)
-
-    def reset_display(self) -> None:
-        self._graph.clear_data()
-        self._graph.set_start_wall_time(None)
-        self._start_time_str = ""
-        self._timer_label.text = "00:00"
-        self._state_label.text = "IDLE"
-        self._state_label.color = C.STATE_NEUTRAL
-        self.hide_alert()
-        self.hide_overlay()
-        self.hide_summary()
-        for label in self._stat_labels.values():
-            label.text = "0"
-        self.set_controls_idle()
 
     def show_summary(self, session_id: int, stats: dict, title: str = "") -> None:
         """Show the post-session card: the session's name, its duration and scored stats, and a notes field."""

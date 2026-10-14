@@ -594,24 +594,6 @@ class NeuroSkyStream:
 
     # ---- Desktop Linux backend ----
 
-    @staticmethod
-    def _bluez_disconnect(address: str) -> None:
-        """Ask BlueZ to drop any existing connection to this device.
-
-        Clears stale RFCOMM state that causes EBUSY / silent connection
-        failures even after the headset has been power-cycled.
-        """
-        try:
-            result = subprocess.run(
-                ["bluetoothctl", "disconnect", address],
-                capture_output=True, text=True, timeout=5,
-            )
-            out = (result.stdout + result.stderr).strip()
-            if out:
-                logger.info(f"bluetoothctl disconnect: {out}")
-        except Exception as e:
-            logger.debug(f"bluetoothctl disconnect skipped: {e}")
-
     def _connect_desktop(self) -> None:
         """Open RFCOMM socket via Python socket module (Linux desktop).
 

@@ -6,10 +6,8 @@ Design direction: calm, focused, minimal — dark theme with soft accents.
 
 import colorsys
 import os
-import struct
 import types
 import weakref
-import zlib
 from collections.abc import Callable
 
 from kivy.animation import Animation
@@ -156,56 +154,6 @@ class Icons:
     PLUS = "\U000F0415"
     REFRESH = "\U000F0450"
     SWAP_HORIZONTAL = "\U000F01B6"
-
-
-# ── Color palette ────────────────────────────────────────────────────
-
-# ── Accordion styling via kv ──────────────────────────────────────────
-
-def _create_solid_png(rgba, path):
-    """Write a 1x1 solid-color PNG file for use as accordion background."""
-    r = int(rgba[0] * 255)
-    g = int(rgba[1] * 255)
-    b = int(rgba[2] * 255)
-    a = int(rgba[3] * 255) if len(rgba) > 3 else 255
-
-    def _chunk(ctype, data):
-        c = ctype + data
-        return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xFFFFFFFF)
-
-    raw = zlib.compress(bytes([0, r, g, b, a]))
-    png = b'\x89PNG\r\n\x1a\n'
-    png += _chunk(b'IHDR', struct.pack('>IIBBBBB', 1, 1, 8, 6, 0, 0, 0))
-    png += _chunk(b'IDAT', raw)
-    png += _chunk(b'IEND', b'')
-    with open(path, 'wb') as f:
-        f.write(png)
-
-
-# Generate solid-color PNGs for accordion backgrounds
-import tempfile as _tempfile
-
-_ACCORDION_DIR = _tempfile.mkdtemp(prefix="eeg_theme_")
-
-
-def get_accordion_bg(color_key="BG_CARD"):
-    """Return path to a solid-color PNG for accordion backgrounds."""
-    color = getattr(C, color_key)
-    name = f"acc_{color_key}.png"
-    path = os.path.join(_ACCORDION_DIR, name)
-    if not os.path.exists(path):
-        _create_solid_png(color, path)
-    return path
-
-
-def style_accordion(accordion):
-    """Apply theme colors to all AccordionItems."""
-    bg_normal = get_accordion_bg("BG_CARD")
-    bg_selected = get_accordion_bg("PRIMARY_DIM")
-    for item in accordion.children:
-        if hasattr(item, 'background_normal'):
-            item.background_normal = bg_normal
-            item.background_selected = bg_selected
 
 
 # ── Theme palettes ───────────────────────────────────────────────────
@@ -1223,7 +1171,6 @@ class ThemedPopup(ThemedMixin, Popup):
         paint_panel(frame)
         self._title_label = next(w for w in frame.children if isinstance(w, Label))
         self._title_label.bold = True
-        self._fits_content = fit
         self._fitted = None  # the content whose minimum_height the height follows
         if fit:  # size_hint=(w, None) and no height: as tall as the content, capped like make_scroll_popup
             self._title_label.bind(height=self._fit_height)
@@ -1427,10 +1374,6 @@ class RevealBox(BoxLayout):
         self._revealed = bool(show)
         self._refresh()
 
-    @property
-    def revealed(self) -> bool:
-        return self._revealed
-
     def _refresh(self) -> None:
         self.clear_widgets()
         if self._revealed:
@@ -1567,9 +1510,9 @@ class BottomNav(BoxLayout):
         self.canvas.before.clear()
         with self.canvas.before:
             ThemedColor(C.BG_DARK)
-            self._bg = Rectangle(size=self.size, pos=self.pos)
+            Rectangle(size=self.size, pos=self.pos)
             ThemedColor(C.BORDER)
-            self._border = Rectangle(
+            Rectangle(
                 size=(self.size[0], dp(1)),
                 pos=(self.pos[0], self.pos[1] + self.size[1] - dp(1)),
             )

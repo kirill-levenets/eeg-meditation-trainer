@@ -368,7 +368,6 @@ class AudioEngine:
         self._max_volume: float = APP.MAX_VOLUME
         self._threshold: int = METRICS_THRESHOLD_FALLBACK
         self._is_playing: bool = False
-        self._noise_sound: object = None
         self._feedback_players: dict[str, object] = {}  # source_id -> looping player
         self._active_feedback: str = ""                 # below-threshold (noise) player id
         self._reward_feedback: str = ""                 # above-threshold reward player id ("" = none)
@@ -463,7 +462,6 @@ class AudioEngine:
                 logger.warning(f"Feedback source {sid!r} failed to load ({resolved!r}): {e}")
         self._feedback_players = players
         self._active_feedback = self._resolve_active(active_id, list(players))
-        self._noise_sound = self._feedback_players.get(self._active_feedback)
 
     @staticmethod
     def _resolve_active(active_id: str, player_ids: list[str]) -> str:
@@ -491,7 +489,6 @@ class AudioEngine:
             except Exception:
                 logger.exception("set_active_feedback: zeroing old player failed")
         self._active_feedback = source_id
-        self._noise_sound = player
 
     def set_reward(self, source_id: str) -> None:
         """Designate the above-threshold reward player ("" = none). setVolume-only path;
@@ -514,7 +511,6 @@ class AudioEngine:
         self._active_feedback = ""
         self._reward_feedback = ""
         self._reward_target_volume = 0.0
-        self._noise_sound = None
 
     def _start_noise_loop(self) -> None:
         """Play the prepared feedback players looping (active at current volume, rest
@@ -527,7 +523,6 @@ class AudioEngine:
                 player.play()
             except Exception as e:
                 logger.warning(f"Failed to start feedback player {sid!r}: {e}")
-        self._noise_sound = self._feedback_players.get(self._active_feedback)
 
     def _set_noise_volume(self, volume: float) -> None:
         """Set target volume — the ramp thread interpolates smoothly toward it."""

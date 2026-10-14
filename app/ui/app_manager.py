@@ -202,15 +202,6 @@ class EEGMeditationApp(App):
         "assets", "icons", "icon_128.png",
     )
 
-    # Expose theme colors as app properties for kv language access
-    @property
-    def theme_bg_card(self):
-        return C.BG_CARD
-
-    @property
-    def theme_text_secondary(self):
-        return C.TEXT_SECONDARY
-
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self._mock_stream: MockEEGStream = MockEEGStream()
@@ -261,7 +252,6 @@ class EEGMeditationApp(App):
         self._program_segment_keys: list[str] = []  # metric key driven by each segment
         self._program_segment_feedback_ids: list[str] = []
         self._session_program_active: bool = False
-        self._program_hidden_slots: list[str] = []  # legacy; see _program_prev_visibility
         self._program_prev_visibility: dict[str, bool] = {}  # live-graph visibility before a program
 
     def _init_formula_slots(self) -> None:
@@ -502,7 +492,6 @@ class EEGMeditationApp(App):
         for slot in PROGRAM_FORMULA_KEYS:
             graph.set_visible(slot, False)  # never linger as a user selection
         self._program_prev_visibility = {}
-        self._program_hidden_slots = []
         # Debounced "in shamatha" zone state (drives the live status chip).
         self._shamatha_active = False
         self._shamatha_streak = 0
@@ -1145,9 +1134,6 @@ class EEGMeditationApp(App):
         existing_users = self._db.get_all_users()
         form.populate_users(existing_users)
         content.add_widget(form)
-
-        # Stash form so duplicate-error routing can find it
-        self._first_run_form = form
         popup.open()
 
     def _complete_first_run(self, user_name: str, device_addr, device_name) -> None:
@@ -2416,7 +2402,7 @@ class EEGMeditationApp(App):
         self._audio.set_threshold(value)
         self._shamatha_threshold = value
         self._session_manager.set_threshold(value)  # also what a session waiting for the headset starts with
-        self._live_screen.graph.set_threshold(float(value), "shamatha_score")  # drawn until ticks step the line
+        self._live_screen.graph.set_threshold(float(value))  # drawn until ticks step the line
 
     def _present_series_picker(self, graph) -> None:
         """Open the shared multi-select series popup for `graph`.
@@ -3766,7 +3752,6 @@ class EEGMeditationApp(App):
         """Build the settings registry; call once in build() before any user load, as get() snapshots defaults."""
         ss = self._settings_screen
         ls = self._live_screen
-        graph = ls.graph
         settings: list[Setting] = []
 
         def set_timer_enabled(v):

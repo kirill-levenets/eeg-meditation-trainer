@@ -21,14 +21,13 @@ Output is written to both stdout and a timestamped log file in tools/bt_logs/.
 import argparse
 import datetime
 import json
-import os
 import re
 import subprocess
 import sys
 import textwrap
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 
 LOG_DIR = Path(__file__).parent / "bt_logs"

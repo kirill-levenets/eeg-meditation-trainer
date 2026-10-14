@@ -257,15 +257,14 @@ class TestGraphBipolarAndBatch(unittest.TestCase):
         g = ScrollableGraphWidget(
             colors={"med": (1, 1, 1, 1)}, scales={"med": 200.0},
         )
-        g.set_threshold(100.0, "med")
+        g.set_threshold(100.0)
         self.assertEqual(g._threshold_value, 100.0)
-        self.assertEqual(g._threshold_scale_key, "med")
 
     def test_set_threshold_none_clears(self):
         g = ScrollableGraphWidget(
             colors={"med": (1, 1, 1, 1)}, scales={"med": 200.0},
         )
-        g.set_threshold(100.0, "med")
+        g.set_threshold(100.0)
         g.set_threshold(None)
         self.assertIsNone(g._threshold_value)
 

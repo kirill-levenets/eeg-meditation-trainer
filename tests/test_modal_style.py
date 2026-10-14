@@ -546,7 +546,7 @@ def test_the_in_screen_modals_block_taps_on_the_screen_behind():
 def test_a_popup_given_no_size_keeps_kivys_full_size():
     content = ModalPanel()
     popup = ThemedPopup(title="x", content=content)
-    assert tuple(popup.size_hint) == (1, 1) and not popup._fits_content
+    assert tuple(popup.size_hint) == (1, 1) and popup._fitted is None
 
 
 @pytest.mark.parametrize("theme", list(THEMES))

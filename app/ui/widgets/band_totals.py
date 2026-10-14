@@ -88,7 +88,7 @@ class Bar(Widget):
     def __init__(self, color, **kwargs):
         super().__init__(**kwargs)
         with self.canvas:
-            self._col = Color(*color)
+            Color(*color)
             self._rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(3)])
         self.bind(pos=self._sync, size=self._sync)
 
