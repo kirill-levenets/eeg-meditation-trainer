@@ -1122,7 +1122,7 @@ class EEGMeditationApp(App):
         def _on_create(name: str) -> None:
             self._gate_popup = None
             popup.dismiss()
-            self._complete_first_run(name, None, None)
+            self._complete_first_run(name)
             self._reopen_gate_if_unresolved()
 
         def _on_pick(user_id: int) -> None:
@@ -1140,47 +1140,35 @@ class EEGMeditationApp(App):
         content.add_widget(form)
         popup.open()
 
-    def _complete_first_run(self, user_name: str, device_addr, device_name) -> None:
-        """First-run popup done: create or adopt the user, set its headset (or the mock), go to session."""
+    def _complete_first_run(self, user_name: str) -> None:
+        """First-run popup: a typed name creates that profile, in mock mode until a headset is picked; a name that
+        exists picks that profile instead."""
         if not user_name or len(user_name.strip()) < 2:
             logger.warning(f"First run with invalid name: '{user_name}', ignoring")
             return
-        # Create user (or adopt an existing one with the same name)
-
         try:
             uid = self._db.create_user(user_name)
         except UserExistsError as e:
-            uid = e.user_id
-            logger.info(f"First run: adopting existing user {e.name} (id={e.user_id})")
+            logger.info(f"First run: '{e.name}' exists, picking it (id={e.user_id})")
+            self._on_pick_existing_user(e.user_id)
+            return
         self._activate_user(uid)
+        APP.USE_MOCK_DEVICE = True
+        self._db.set_user_setting(uid, "use_mock", "True")
+        self._settings_screen._device_mode_cb.active = True
+        self._live_screen.update_device_status(False, device_name="Mock EEG")
+        logger.info("First run: using mock device")
+        self._finish_first_run(f"user '{user_name}' created")
 
-        # Set device
-        if device_addr:
-            self._real_stream.set_device(device_addr, device_name or device_addr)
-            APP.USE_MOCK_DEVICE = False
-            if self._current_user_id:
-                self._db.set_user_setting(self._current_user_id, "bt_device_address", device_addr)
-                self._db.set_user_setting(self._current_user_id, "bt_device_name", device_name or "")
-                self._db.set_user_setting(self._current_user_id, "use_mock", "False")
-            self._settings_screen._device_mode_cb.active = False
-            self._live_screen.update_device_status(False, device_name=self._device_name())
-            logger.info(f"First run: device set to {device_name} ({device_addr})")
-        else:
-            APP.USE_MOCK_DEVICE = True
-            if self._current_user_id:
-                self._db.set_user_setting(self._current_user_id, "use_mock", "True")
-            self._settings_screen._device_mode_cb.active = True
-            self._live_screen.update_device_status(False, device_name="Mock EEG")
-            logger.info("First run: using mock device")
-
-        # Show nav and go to session
+    def _finish_first_run(self, what: str) -> None:
+        """Leave the first-run popup for the Session screen, the nav usable again."""
         self._bottom_nav.opacity = 1
         self._bottom_nav.disabled = False
         self._refresh_profile()
         self._sm.current = "live_session"
         self._bottom_nav.active_tab = "session"
         self._auto_scan_bt()
-        logger.info(f"First run complete: user '{user_name}' created")
+        logger.info(f"First run complete: {what}")
 
     @staticmethod
     def _filter_mindwave(devices: list) -> list:
@@ -3688,15 +3676,12 @@ class EEGMeditationApp(App):
         popup.open()
 
     def _on_pick_existing_user(self, user_id: int) -> None:
-        """First-run popup: an existing profile picked; complete first run with its saved headset, if any."""
-        user = self._db.get_user(user_id)
-        if not user:
+        """First-run popup: an existing profile picked, activated as it is (its own headset and mode)."""
+        if not self._db.get_user(user_id):
             logger.warning(f"_on_pick_existing_user: user {user_id} not found")
             return
-        name = user["name"]
-        addr = self._db.get_user_setting(user_id, "bt_device_address")
-        dev_name = self._db.get_user_setting(user_id, "bt_device_name") or name
-        self._complete_first_run(name, addr, dev_name)
+        self._activate_user(user_id)
+        self._finish_first_run(f"user {user_id} picked")
 
     def _on_user_create(self, name: str) -> None:
         """Create a new user and refresh the profile list.
