@@ -36,7 +36,7 @@ from app.logger import logger, timed
 from app.metrics.custom_formula import CustomFormulaEvaluator
 from app.metrics.engine import MetricsEngine
 from app.metrics.noise_detector import PowerLineDetector
-from app.session.manager import SessionManager, SessionState
+from app.session.manager import SessionManager, SessionState, elapsed_clock
 from app.session.scoring import target_steps
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
@@ -1791,8 +1791,7 @@ class EEGMeditationApp(App):
         self._live_screen.update_state("FINISHED")
         # Sync the header timer to the final duration (it froze at lock time).
         if stats:
-            secs = int(stats.get("duration", 0))
-            self._live_screen.update_timer(f"{secs // 60:02d}:{secs % 60:02d}")
+            self._live_screen.update_timer(elapsed_clock(stats.get("duration", 0)))
         self._mark_history_dirty()
         if stats and session_id:
             self._summary_saved_notes = ""

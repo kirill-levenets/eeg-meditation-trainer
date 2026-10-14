@@ -18,6 +18,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
 from app.config import APP
+from app.session.manager import elapsed_clock
 from app.session.scoring import extend_steps
 from app.ui import render_stats
 from app.ui.line_colours import GRADIENT_TOP, LINE_COLOURS, MONO, gradient_texture
@@ -49,13 +50,6 @@ def _free_label_y(y: float, taken: list[float], low: float, high: float) -> floa
 def _x_grid_step(graph_w: float, visible_seconds: float) -> float:
     px_per_s = graph_w / max(visible_seconds, 1e-9)
     return next((s for s in _X_GRID_STEPS_S if s * px_per_s >= dp(_MIN_X_LABEL_GAP_DP)), _X_GRID_STEPS_S[-1])
-
-
-def _elapsed_label(seconds: float) -> str:
-    """M:SS under an hour, H:MM:SS from an hour: an hour and a quarter as M:SS read 75:00."""
-    s = int(seconds)
-    hours, minutes, secs = s // 3600, s // 60 % 60, s % 60
-    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{s // 60}:{secs:02d}"
 
 
 # Kivy caps a Mesh at 65535 indices (GLES2, enforced on Android): 6 per quad, so 10922 quads (43688 vertices).
@@ -503,7 +497,7 @@ class ScrollableGraphWidget(Widget):
                     self._gfx.add(Color(*TC.GRAPH_GRID))
                     self._gfx.add(Line(points=[x_pos, graph_y, x_pos, graph_y + graph_h], width=0.5))
                     # Relative timestamp label
-                    tex = self._make_text_texture(_elapsed_label(t_mark), size=8,
+                    tex = self._make_text_texture(elapsed_clock(t_mark), size=8,
                                                   color=(0.5, 0.5, 0.5, 1))
                     self._gfx.add(Color(*TC.TEXT))
                     self._gfx.add(Rectangle(

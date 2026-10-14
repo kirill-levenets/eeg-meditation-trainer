@@ -8,9 +8,10 @@ from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.tests.common import UnitTestTouch
 
+from app.session.manager import elapsed_clock
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.diary_screen import DiaryScreen
-from app.ui.raw_eeg_screen import ScrollableGraphWidget, _elapsed_label
+from app.ui.raw_eeg_screen import ScrollableGraphWidget
 
 HOUR = 7200  # ticks at 2 a second
 
@@ -31,8 +32,8 @@ def _frames(n: int = 3) -> None:
 
 
 def test_elapsed_labels_read_as_minutes_then_hours():
-    assert [_elapsed_label(s) for s in (0, 70, 3599, 3600, 4500, 3 * 3600 + 5)] == [
-        "0:00", "1:10", "59:59", "1:00:00", "1:15:00", "3:00:05"]
+    assert [elapsed_clock(s) for s in (0, 70, 3599, 3600, 4500, 3 * 3600 + 5)] == [
+        "00:00", "01:10", "59:59", "1:00:00", "1:15:00", "3:00:05"]
 
 
 def test_a_fitted_long_session_labels_its_hours(monkeypatch):
