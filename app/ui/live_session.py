@@ -42,6 +42,7 @@ from app.ui.theme import (
     readable_fg,
     text_width,
 )
+from app.ui.widgets.band_totals import BAND_COLORS
 from app.ui.widgets.legend import LegendBar
 
 _DURATION_PRESETS = [
@@ -56,14 +57,7 @@ _DURATION_PRESETS = [
     ("Free", None),
 ]
 
-# Band colors/scales for inline raw EEG view
-_BAND_COLORS = {
-    "alpha": (0.15, 0.75, 0.45, 1.0),
-    "beta": (0.85, 0.70, 0.15, 1.0),
-    "gamma": (0.90, 0.35, 0.35, 1.0),
-    "theta": (0.25, 0.55, 0.85, 1.0),
-    "delta": (0.45, 0.25, 0.75, 1.0),
-}
+# Band scales for the inline raw EEG view and the session detail's band graph
 BAND_SCALES = {
     "alpha": 200000.0,
     "beta": 100000.0,
@@ -434,7 +428,7 @@ class LiveSessionScreen(Screen):
         self._raw_container.add_widget(self._raw_graph)
 
         self._band_graph = ScrollableGraphWidget(
-            colors=_BAND_COLORS,
+            colors=BAND_COLORS,
             scales=BAND_SCALES,
             viewport_seconds=60,
             show_value_labels=True,

@@ -11,13 +11,13 @@ from app.ui.diary_screen import (
     METRICS_PREVIEW_SCALES,
 )
 from app.ui.live_session import (
-    _BAND_COLORS,
     BAND_SCALES,
     METRICS_COLORS,
     METRICS_SCALES,
     SERIES_NAMES,
 )
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
+from app.ui.widgets.band_totals import BAND_COLORS
 
 
 def _g(colors, scales, graph_id, names=None):
@@ -28,7 +28,7 @@ class _FakeLive:
     def __init__(self):
         self.graph = _g(METRICS_COLORS, METRICS_SCALES, "live_metrics", SERIES_NAMES)
         self.raw_graph = _g({"eeg": (1, 1, 1, 1)}, {"eeg": 500.0}, "live_raw")
-        self.band_graph = _g(_BAND_COLORS, dict.fromkeys(_BAND_COLORS, 1.0), "live_band")
+        self.band_graph = _g(BAND_COLORS, dict.fromkeys(BAND_COLORS, 1.0), "live_band")
 
 
 class _FakeDiary:
@@ -228,3 +228,13 @@ def test_a_threshold_below_zero_is_drawn_on_the_graphs_floor_like_its_values():
         ys, bottom, top = _threshold_ys(g)
         assert ys
         assert all(bottom <= y <= top for y in ys), (ys, bottom)
+
+
+def test_the_live_screen_and_a_sessions_detail_draw_a_series_in_one_colour():
+    from app.ui.diary_screen import DiaryScreen
+    from app.ui.live_session import LiveSessionScreen
+    live, detail = LiveSessionScreen(), DiaryScreen()
+    for key in METRICS_PREVIEW_COLORS:
+        assert detail._metrics_graph.series_color(key) == live.graph.series_color(key), key
+    for key in BAND_COLORS:
+        assert detail._freq_graph.series_color(key) == live.band_graph.series_color(key), key

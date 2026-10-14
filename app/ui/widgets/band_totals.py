@@ -15,7 +15,8 @@ from app.ui.theme import ICONS_AVAILABLE, C, F, Icons, S, StyledButton, ThemedLa
 
 BANDS = list(band_spec.BAND_KEYS)
 GROUPS = list(band_spec.GROUP_KEYS)
-_GROUP_COLORS = {
+# The grouped bands' colours, on every band graph and in this table.
+BAND_COLORS = {
     "alpha": (0.1, 0.8, 0.4, 1.0),
     "beta": (0.9, 0.7, 0.1, 1.0),
     "gamma": (1.0, 0.3, 0.3, 1.0),
@@ -236,7 +237,7 @@ class BandTotalsView(BoxLayout):
                 self._range_labels[key] = line
 
         track = BoxLayout(orientation="horizontal")
-        bar = Bar(_GROUP_COLORS[r["group"]], size_hint_x=r["share"])
+        bar = Bar(BAND_COLORS[r["group"]], size_hint_x=r["share"])
         track.add_widget(bar)
         track.add_widget(Widget(size_hint_x=max(0.0, 1.0 - r["share"])))
 

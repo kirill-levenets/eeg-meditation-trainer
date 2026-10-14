@@ -16,8 +16,13 @@ from app.config import APP
 from app.eeg.band_spec import BAND_KEYS, GROUP_NAMES, group_powers
 from app.logger import logger, timed
 from app.session.scoring import recorded_score, target_steps
-from app.session.session_program import SessionProgram
-from app.ui.live_session import BAND_SCALES, SERIES_NAMES
+from app.session.session_program import PROGRAM_FORMULA_KEYS, SessionProgram
+from app.ui.live_session import (
+    BAND_SCALES,
+    METRICS_COLORS,
+    METRICS_SCALES,
+    SERIES_NAMES,
+)
 from app.ui.raw_eeg_screen import GraphAwareScrollView, ScrollableGraphWidget
 from app.ui.session_labels import session_score_rows, session_title
 from app.ui.theme import (
@@ -41,35 +46,14 @@ from app.ui.theme import (
     format_duration,
     make_message_popup,
 )
-from app.ui.widgets.band_totals import BandTotalsView
+from app.ui.widgets.band_totals import BAND_COLORS, BandTotalsView
 from app.ui.widgets.legend import LegendBar
 from app.ui.widgets.what_if import WhatIfPanel
 
-METRICS_PREVIEW_COLORS = {
-    "meditation_score": (0.2, 0.6, 1.0, 1.0),
-    "shamatha_score": (0.0, 0.9, 0.4, 1.0),
-    "distraction": (1.0, 0.3, 0.3, 1.0),
-    "sinking": (0.8, 0.5, 0.0, 1.0),
-    "subtle_distraction": (0.9, 0.9, 0.2, 1.0),
-    "native_attention": (0.6, 0.3, 0.9, 1.0),
-    "native_meditation": (0.3, 0.9, 0.9, 1.0),
-    "custom_formula": (1.0, 0.4, 0.8, 1.0),
-    "custom_formula_2": (1.0, 0.50, 0.0, 1.0),
-    "custom_formula_3": (0.40, 0.75, 0.95, 1.0),
-}
+# A session's series: the live ones without a running program's (its formula lines are recomputed apart).
+METRICS_PREVIEW_COLORS = {k: c for k, c in METRICS_COLORS.items() if k not in PROGRAM_FORMULA_KEYS}
 
-METRICS_PREVIEW_SCALES = {
-    "meditation_score": 100.0,
-    "shamatha_score": 100.0,
-    "distraction": 100.0,
-    "sinking": 100.0,
-    "subtle_distraction": 100.0,
-    "native_attention": 100.0,
-    "native_meditation": 100.0,
-    "custom_formula": 200.0,
-    "custom_formula_2": 200.0,
-    "custom_formula_3": 200.0,
-}
+METRICS_PREVIEW_SCALES = {k: METRICS_SCALES[k] for k in METRICS_PREVIEW_COLORS}
 
 RAW_EEG_PREVIEW_COLORS = {
     "eeg": (0.3, 0.8, 1.0, 1.0),
@@ -139,13 +123,7 @@ def _synthesize_waveform(rows: list[dict]) -> tuple[list[float], int]:
     scale_factor = (500.0 * 0.8) / peak
     return [v * scale_factor for v in waveform], start
 
-FREQ_PREVIEW_COLORS = {
-    "alpha": (0.1, 0.8, 0.4, 1.0),
-    "beta": (0.9, 0.7, 0.1, 1.0),
-    "gamma": (1.0, 0.3, 0.3, 1.0),
-    "theta": (0.2, 0.5, 0.9, 1.0),
-    "delta": (0.4, 0.2, 0.8, 1.0),
-}
+FREQ_PREVIEW_COLORS = BAND_COLORS
 
 
 
