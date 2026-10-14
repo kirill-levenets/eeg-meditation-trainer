@@ -1021,6 +1021,8 @@ class EEGMeditationApp(App):
 
     def _activate_user(self, uid: int) -> None:
         """Make `uid` the active profile and load its settings; every path that picks a user goes here."""
+        if self._live_display_uid not in (None, uid):  # the Session screen shows another profile's session
+            self._drop_shown_session(keep_notes=True)
         self._current_user_id = uid
         self._view_all_users = False
         self._db.set_setting("last_user_id", str(uid))
@@ -1425,7 +1427,6 @@ class EEGMeditationApp(App):
         self._noise_detector = PowerLineDetector() if not APP.USE_MOCK_DEVICE else None
         self._metrics_buffer = []
         self._raw_buffer = []
-        self._ui_last_metrics = {}
         self._ui_last_state = "Neutral"
         self._flush_counter = 0
         self._tick_count = 0
@@ -1434,7 +1435,8 @@ class EEGMeditationApp(App):
         self._pending_marker = False
         self._bt_connect_start = time.time()
 
-        self._clear_live_graphs()
+        self._clear_live_display()
+        self._live_display_uid = self._current_user_id
         if self._session_program_active:
             self._show_program_series(prog)
         gid = self._global_feedback_id()
@@ -1456,8 +1458,6 @@ class EEGMeditationApp(App):
         self._scored_key = None  # a simple session marks its scored series on the first tick
         self._shamatha_active = False
         self._shamatha_streak = 0
-        self._live_screen.set_shamatha(False)
-        self._live_screen.hide_alert()
         self._live_screen.set_controls_running()
         self._settings_screen.lock_threshold(self._refuse_program_threshold if self._session_program_active else None)
 
@@ -1518,6 +1518,7 @@ class EEGMeditationApp(App):
         self._real_stream.stop()
         self._release_wake_lock()
         self._stop_session_keep_alive_service()
+        self._live_display_uid = None  # no session came of the start, which emptied the display
 
     def _on_connect_cancel(self, *args) -> None:
         """Cancel button on connection overlay."""
@@ -1557,6 +1558,7 @@ class EEGMeditationApp(App):
 
     # The session-end card: the session is already saved on every ending; the card only adds notes or deletes it.
     _summary_saved_notes: str = ""  # notes last written from the card for the session it shows
+    _live_display_uid: int | None = None  # the profile whose session the Session screen shows: set at Start
 
     def _on_summary_save_notes(self, *args) -> None:
         if self._live_screen.summary_notes == self._summary_saved_notes:
@@ -1596,9 +1598,21 @@ class EEGMeditationApp(App):
             report_soft_error("session_checkpoint_failed", f"The running session could not be saved: {exc}")
 
     def _on_summary_ok(self, *args) -> None:
-        self._flush_summary_notes()
+        self._close_summary(keep_notes=True)
+
+    def _close_summary(self, keep_notes: bool) -> None:
+        """Close the end card and stop its bell; its notes are saved only while its session still exists."""
+        if keep_notes:
+            self._flush_summary_notes()
         self._audio.stop_timer_bell()
         self._live_screen.hide_summary()
+
+    def _drop_shown_session(self, keep_notes: bool) -> None:
+        """Take the shown session off the Session screen: its end card, if open, and its display."""
+        if self._live_screen.summary_session_id is not None:
+            self._close_summary(keep_notes)
+        self._clear_live_display()
+        self._live_display_uid = None
 
     def _on_summary_delete(self, *args) -> None:
         sid = self._live_screen.summary_session_id
@@ -1770,6 +1784,7 @@ class EEGMeditationApp(App):
             self._reload_live_graphs_from_mirror()
         except Exception:
             logger.exception("graph reload on stop failed")
+        self._live_screen.update_stats(self._ui_last_metrics)  # the whole session's averages: no tick ran while locked
         self._undo_session_setup()
         self._live_screen.update_state("FINISHED")
         # Sync the header timer to the final duration (it froze at lock time).
@@ -2367,7 +2382,7 @@ class EEGMeditationApp(App):
 
     def _on_threshold_change(self, value: int) -> None:
         if self._ui_metrics_history and not self._session_pipeline_live():
-            self._clear_live_graphs()  # the last session's line is not the threshold the next one runs against
+            self._clear_live_display()  # the last session's line is not the threshold the next one runs against
         # A drag is one change of the threshold in force, at the value it settles on, not one per slider step.
         self._after_settle("apply_threshold", lambda: self._apply_threshold(self._settings_screen.threshold))
         self._persist_user_setting_later("threshold")
@@ -2386,8 +2401,9 @@ class EEGMeditationApp(App):
         if not self._program_owns_threshold():
             self._put_threshold_in_force(value)
 
-    def _clear_live_graphs(self) -> None:
-        """Empty the Session screen's graphs and their mirrors, the threshold line's steps included."""
+    def _clear_live_display(self) -> None:
+        """Empty the Session screen of its session: graphs, their mirrors, threshold steps and the readout."""
+        self._ui_last_metrics = {}
         self._ui_metrics_history.clear()
         self._ui_band_history.clear()
         self._ui_raw_waveform.clear()
@@ -2395,6 +2411,7 @@ class EEGMeditationApp(App):
         self._live_screen.raw_graph.clear_data()
         self._live_screen.band_graph.clear_data()
         self._live_screen.graph.set_threshold_steps(None)  # each tick's target steps it, a program's too
+        self._live_screen.clear_readout()
 
     def _put_threshold_in_force(self, value: int) -> None:
         """The sound, the scoring, the SHAMATHA pill and the engine together; a session start calls it directly."""
@@ -3277,9 +3294,8 @@ class EEGMeditationApp(App):
                 done(False)
                 return
             logger.info(f"Deleted {format_count(len(ids), 'session')} {ids} in {(time.monotonic() - t0) * 1000:.0f} ms")
-            if self._live_screen.summary_session_id in ids:  # the end card shows a session that's gone
-                self._audio.stop_timer_bell()
-                self._live_screen.hide_summary()
+            if self._current_session_id in ids or self._live_screen.summary_session_id in ids:
+                self._drop_shown_session(keep_notes=False)  # the Session screen shows a session that's gone
             self._history_screen.remove_sessions(ids)
             done(True)
 
@@ -3731,6 +3747,8 @@ class EEGMeditationApp(App):
             # under a profile that's about to be deleted just orphans it anyway.
             self._discard_running_session()
         self._db.delete_user(user_id)
+        if user_id == self._live_display_uid:  # its session went with it: the card has nothing left to save
+            self._drop_shown_session(keep_notes=False)
         self._mark_history_dirty()  # its sessions are gone (the All-Users view lists them)
         remaining = self._db.get_all_users()
         # Re-enter the gate when no usable active user is left: the active profile
@@ -3849,8 +3867,7 @@ class EEGMeditationApp(App):
         self._settings_store = SettingsStore(self._db, settings)
 
     def _apply_stats_mode(self, mode: str) -> None:
-        self._live_screen._stats_mode = mode if mode in ("live", "aggregate") else "live"
-        self._live_screen._apply_stats_mode_styling()
+        self._live_screen.set_stats_mode(mode)
 
     def _save_user_settings(self) -> None:
         """Persist current UI settings for the active user."""

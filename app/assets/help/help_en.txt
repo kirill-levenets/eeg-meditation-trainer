@@ -223,6 +223,9 @@ offered a "Use existing" / "Change name" choice.
 
 You can't switch profiles while a session is
 running or connecting — stop the session first.
+Switching to another profile clears the last
+session from the Session screen; it stays in
+History.
 
 ## Session Program
 

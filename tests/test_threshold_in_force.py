@@ -28,6 +28,7 @@ from tests.test_session_detail_open import _frames, app, db  # noqa: F401  (fixt
 
 def _threshold_app(*, program: bool = False, state: SessionState = SessionState.RUNNING) -> EEGMeditationApp:
     a = EEGMeditationApp.__new__(EEGMeditationApp)
+    a._current_user_id = 1
     a._metrics_engine = MagicMock()
     a._audio = MagicMock()
     a._live_screen = MagicMock()

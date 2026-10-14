@@ -201,6 +201,7 @@ def _app() -> EEGMeditationApp:
     app._history_screen = MagicMock()
     app._session_manager = SessionManager()  # idle: nothing running to protect
     app._live_screen = MagicMock(summary_session_id=None)
+    app._current_session_id = None
     app._audio = MagicMock()
     app._on_main = lambda fn: fn()
     for name in ("_refresh_history", "show_loading", "hide_loading"):

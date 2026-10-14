@@ -134,7 +134,7 @@ Tap a session row to view full details (graphs, notes, tags, mood).
 
 **Export multiple sessions:** tap **Select** (top right of the list) to enter selection mode — checkboxes appear, tap rows to select them (or **Select all**), then **Export N** bundles the chosen sessions into one **ZIP** containing one CSV per session. On Android the ZIP is saved to `Documents/EEGMeditation/`; on desktop to a Documents folder. **Cancel** leaves selection mode.
 
-**Delete multiple sessions:** in selection mode, **Delete N** deletes the chosen sessions after one confirmation, which states how many and over which days (and how many profiles, in the All Users view). It can't be undone. The list keeps your place, and selection mode ends once they are deleted. A session that is still running isn't listed in History; it appears there once it ends.
+**Delete multiple sessions:** in selection mode, **Delete N** deletes the chosen sessions after one confirmation, which states how many and over which days (and how many profiles, in the All Users view). It can't be undone. The list keeps your place, and selection mode ends once they are deleted. A session that is still running isn't listed in History; it appears there once it ends. Deleting the session the Session screen still shows clears it from there too.
 
 ### Session Detail
 
@@ -167,6 +167,7 @@ Settings uses collapsible accordion sections. Tap a section header to expand/col
 - If the name you typed already exists, an inline message offers two buttons: **Use existing 'X'** (switch to that profile) or **Change name** (back to the input). Names are unique and case-sensitive.
 - Each user has separate sessions, settings, and formulas. The **X** button on a row deletes that profile after a confirmation — together with all its sessions and settings; the dialog shows how many sessions will go.
 - Switching profiles is refused while a session is running or connecting ("Session in progress") — a running session keeps the settings it started with. Stop the session first.
+- Switching to another profile clears the last session from the Session screen (it stays in History); if its saved card is still open, it closes and keeps the notes you typed.
 
 ### Data Backup
 
@@ -242,7 +243,7 @@ When Program mode is off, the Simple timer behaves exactly as before.
 
 - Slider (20-180) with presets: 50, 80, 100, 130, 160
 - Sets the dashed line on graphs, "time above threshold" stats, and audio feedback target
-- Moving it during a session changes the threshold once the slider stays put for half a second (a drag is one change, at the value it stops on): the feedback sound, Time Above Threshold, Longest Streak and the **SHAMATHA** badge all follow it, and the graph's dashed line steps at the change (live and later in History). The session keeps each threshold it ran with. With no session running, a new threshold clears the last session's graphs from the Session screen (it stays in History) and shows the new line. During a program session the segments set the targets, so the threshold can't be changed until it stops: the slider, the −/+ buttons and the presets are dimmed and don't move, and each touch on them shows **Session in progress** saying why.
+- Moving it during a session changes the threshold once the slider stays put for half a second (a drag is one change, at the value it stops on): the feedback sound, Time Above Threshold, Longest Streak and the **SHAMATHA** badge all follow it, and the graph's dashed line steps at the change (live and later in History). The session keeps each threshold it ran with. With no session running, a new threshold clears the last session from the Session screen — its graphs, numbers, timer and state (it stays in History) — and shows the new line. During a program session the segments set the targets, so the threshold can't be changed until it stops: the slider, the −/+ buttons and the presets are dimmed and don't move, and each touch on them shows **Session in progress** saying why.
 - **Time above threshold** and **Longest streak** are measured on the **audio control metric** below — the same metric that drives the feedback sound — and the live graph legend marks it with **»** when that line is shown. Each session records which metric it was scored on. (Sessions recorded before this change were measured on Meditation.)
 - **Audio control metric** — choose which metric drives the audio: Shamatha, NS Meditation, NS Attention, or Custom Formula (slot 1, 2, or 3 selected via the `[1][2][3]` buttons). If the selected custom slot has no valid formula the audio falls back to shamatha. While a session runs (or connects) this choice is locked, and so is the formula in the selected slot: a session is scored on one metric from start to stop. The other formula slots and the threshold stay editable, and a program session, scored on its segments' metrics, leaves the metric and the formula slots free (its threshold is locked, see above).
 

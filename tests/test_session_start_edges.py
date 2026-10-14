@@ -23,6 +23,7 @@ BANDS = {"delta": 10.0, "theta": 10.0, "alpha1": 10.0, "alpha2": 10.0, "beta1": 
 def _app() -> EEGMeditationApp:
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._current_user_id = 1
+    app._ui_last_metrics = {}
     app._waiting_for_bt = False
     app._bt_signal_start = None
     app._tick_thread = None

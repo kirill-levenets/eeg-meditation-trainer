@@ -28,6 +28,9 @@ def _app() -> EEGMeditationApp:
     app._live_screen.summary_session_id = SID
     app._live_screen.summary_notes = ""
     app._summary_saved_notes = ""
+    app._current_session_id = None
+    app._ui_last_metrics = {}
+    app._ui_metrics_history, app._ui_band_history, app._ui_raw_waveform = [], [], []
     app._toast = MagicMock()
     app._history_screen = MagicMock()
     app._refresh_history = MagicMock()
@@ -97,6 +100,7 @@ def _recorded_session(db) -> EEGMeditationApp:
     app._db = db
     app._current_user_id = db.create_user("t")
     app._current_session_id = None
+    app._ui_last_metrics = {}
     app._metrics_buffer = []
     app._flush_counter = 0
     app._session_manager = SessionManager()

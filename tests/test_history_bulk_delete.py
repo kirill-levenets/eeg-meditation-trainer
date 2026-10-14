@@ -125,6 +125,9 @@ def _app(db, monkeypatch) -> tuple[EEGMeditationApp, _Deferred, list]:
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._db = db
     app._history_screen = MagicMock()
+    app._current_session_id = None
+    app._ui_last_metrics = {}
+    app._ui_metrics_history, app._ui_band_history, app._ui_raw_waveform = [], [], []
     app._live_screen = MagicMock()
     app._live_screen.summary_session_id = None
     app._audio = MagicMock()

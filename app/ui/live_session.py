@@ -16,6 +16,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
 from app.eeg.band_spec import BAND_KEYS, GROUP_NAMES, group_powers
+from app.logger import logger
 from app.ui.raw_eeg_screen import (
     GraphAwareScrollView,
     ScrollableGraphWidget,
@@ -295,6 +296,8 @@ class LiveSessionScreen(Screen):
         super().__init__(**kwargs)
         self.name = "live_session"
         self._last_metrics: dict = {}
+        self._last_stats: dict = {}  # the session averages shown with them, for the AVG toggle
+        self._stats_failing = False
         self._build_ui()
         # Scroll height tracking is persistent (the widget itself lives for the screen's lifetime)
         self._scroll.bind(height=self._reflow)
@@ -338,18 +341,15 @@ class LiveSessionScreen(Screen):
         )
         self._start_time_str: str = ""  # wall-clock string cached for combined display
         self._state_label = ThemedLabel(
-            text="IDLE",
             size_hint_x=1 / 3,
             font_size=F.capped(F.BODY),
-            color=C.TEXT_SECONDARY,
         )
         # "In shamatha" chip — a rounded pill drawn behind the status text, sized to
         # the text and toggled via set_shamatha(). Alpha 0 = hidden.
-        self._shamatha_active = False
-        self._last_state = "IDLE"
         with self._state_label.canvas.before:
             self._shamatha_bg = Color(*C.SHAMATHA[:3], 0)
             self._shamatha_rect = RoundedRectangle(radius=[dp(9)])
+        self._show_idle_state()
         self._state_label.bind(
             pos=self._position_shamatha_chip,
             size=self._position_shamatha_chip,
@@ -840,6 +840,26 @@ class LiveSessionScreen(Screen):
         else:
             self._timer_label.text = text
 
+    def clear_readout(self) -> None:
+        """Back to the readout a fresh screen shows: no session's numbers, timer, start time, state or alert."""
+        self._last_metrics = {}
+        self._last_stats = {}
+        self._render_stats({}, {})
+        self._start_time_str = ""
+        self._graph.set_start_wall_time(None)
+        self._timer_label.text = "00:00"
+        self._show_idle_state()
+        self.hide_alert()
+
+    def _show_idle_state(self) -> None:
+        """The state a fresh screen shows: IDLE in the secondary text colour, no shamatha chip."""
+        self._last_state = "IDLE"
+        self._shamatha_active = False
+        self._shamatha_bg.a = 0
+        self._state_label.text = "IDLE"
+        self._state_label.bold = False
+        self._state_label.color = C.TEXT_SECONDARY
+
     def set_start_time(self, epoch: float) -> None:
         """Cache session start wall-clock time, update combined timer, and pass to graph."""
         lt = time.localtime(epoch)
@@ -890,12 +910,16 @@ class LiveSessionScreen(Screen):
 
     def update_stats(self, metrics: dict[str, float]) -> None:
         self._last_metrics = metrics
-        stats = {}
+        app = App.get_running_app()
         try:
-            stats = App.get_running_app()._session_manager.compute_statistics()
+            self._last_stats = app._session_manager.compute_statistics() if app is not None else {}
+            self._stats_failing = False
         except Exception:
-            pass
-        self._render_stats(metrics, stats)
+            if not self._stats_failing:  # once until it recovers: this runs at 2 Hz
+                logger.exception("Session averages could not be computed")
+            self._stats_failing = True
+            self._last_stats = {}
+        self._render_stats(metrics, self._last_stats)
 
     def update_device_status(
         self, connected: bool, device_name: str = "", connecting: bool = False
@@ -1238,21 +1262,17 @@ class LiveSessionScreen(Screen):
         return self._summary_session_id
 
     def _toggle_stats_mode(self, *_args) -> None:
-        self._stats_mode = "aggregate" if self._stats_mode == "live" else "live"
-        self._apply_stats_mode_styling()
-        # Force immediate refresh using last known values
-        metrics = getattr(self, "_last_metrics", {}) or {}
-        stats = {}
-        try:
-            stats = App.get_running_app()._session_manager.compute_statistics()
-        except Exception:
-            pass
-        self._render_stats(metrics, stats)
-        # Persist
+        self.set_stats_mode("aggregate" if self._stats_mode == "live" else "live")
         try:
             App.get_running_app()._save_user_settings()
         except Exception:
-            pass
+            logger.exception("The stats view could not be saved")
+
+    def set_stats_mode(self, mode: str) -> None:
+        """Show the stats strip as live values or session averages, redrawn at once."""
+        self._stats_mode = mode if mode in ("live", "aggregate") else "live"
+        self._apply_stats_mode_styling()
+        self._render_stats(self._last_metrics, self._last_stats)
 
     def _apply_stats_mode_styling(self) -> None:
         active = self._stats_mode == "aggregate"
