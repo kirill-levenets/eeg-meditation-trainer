@@ -252,3 +252,11 @@ def test_deleting_the_shown_session_in_history_drops_it_from_the_session_screen(
         setattr(app, name, MagicMock(return_value=False))
     app._delete_sessions([7, 9])
     app._drop_shown_session.assert_called_once_with(keep_notes=False)
+
+
+def test_idle_looks_the_same_however_it_is_reached():
+    fresh = LiveSessionScreen()
+    cancelled = LiveSessionScreen()
+    cancelled.update_state("Running")
+    cancelled.update_state("IDLE")  # a start cancelled before any tick
+    assert tuple(cancelled._state_label.color) == tuple(fresh._state_label.color)

@@ -837,13 +837,9 @@ class LiveSessionScreen(Screen):
         self.hide_alert()
 
     def _show_idle_state(self) -> None:
-        """The state a fresh screen shows: IDLE in the secondary text colour, no shamatha chip."""
+        """The state a fresh screen shows: IDLE, no shamatha chip."""
         self._last_state = "IDLE"
-        self._shamatha_active = False
-        self._shamatha_bg.a = 0
-        self._state_label.text = "IDLE"
-        self._state_label.bold = False
-        self._state_label.color = C.TEXT_SECONDARY
+        self.set_shamatha(False)
 
     def set_start_time(self, epoch: float) -> None:
         """Cache session start wall-clock time, update combined timer, and pass to graph."""
@@ -860,6 +856,7 @@ class LiveSessionScreen(Screen):
             "Gross Distraction": C.STATE_DISTRACTED,
             "Sinking": C.STATE_SINKING,
             "Neutral": C.STATE_NEUTRAL,
+            "IDLE": C.TEXT_SECONDARY,
         }
         self._state_label.color = color_map.get(state, C.STATE_NEUTRAL)
 
