@@ -62,6 +62,7 @@ from app.ui import render_stats
 from app.ui.backup_flow import BackupFlow
 from app.ui.device_labels import MAX_DEVICE_ALIAS, device_label
 from app.ui.diary_screen import DiaryScreen, detail_graph_data
+from app.ui.graph_fullscreen import GraphFullscreen
 from app.ui.history_screen import HistoryScreen
 from app.ui.line_colours import DEFAULT as LINE_DEFAULT
 from app.ui.line_colours import LINE_COLOURS
@@ -93,7 +94,6 @@ from app.ui.theme import (
     make_scroll_popup,
     paint_panel,
 )
-from app.ui.widgets.legend import LegendBar
 from app.ui.widgets.loading_overlay import LoadingOverlay
 from app.ui.widgets.user_picker import UserPickerForm
 
@@ -761,9 +761,7 @@ class EEGMeditationApp(App):
         # fullscreen graph) can sit on top of every screen.
         float_root = FloatLayout()
         self._float_root = float_root
-        self._fullscreen_overlay = None
-        self._fullscreen_graph = None
-        self._fullscreen_close = None  # _restore closure, set while fullscreen
+        self._fullscreen = GraphFullscreen(float_root)
         self._last_back_time = 0.0  # for double-back-to-exit on the root screen
         float_root.add_widget(root)
         self._loading_overlay = LoadingOverlay()
@@ -817,7 +815,7 @@ class EEGMeditationApp(App):
         is more than one series to choose from — a single-series graph's picker
         could only blank the line."""
         for g in self._all_graphs():
-            g.set_expand_callback(self._present_graph_fullscreen)
+            g.set_expand_callback(self._fullscreen.present)
             if len(g.series_keys()) > 1:
                 g.set_series_picker_callback(self._present_series_picker)
             g.set_fit_callback(ScrollableGraphWidget.toggle_fit)  # its zoom group, together
@@ -829,67 +827,6 @@ class EEGMeditationApp(App):
         """The saved zoom starts both groups; only the live one's is saved, so a detail's zoom never comes back."""
         self._live_screen.graph.set_zoom_seconds(seconds)
         self._diary_screen._metrics_graph.set_zoom_seconds(seconds)
-
-    def _present_graph_fullscreen(self, graph) -> None:
-        """Reparent `graph` into a full-window overlay; restore it on close.
-
-        Reparenting (not cloning) keeps the widget's single Window bind and its
-        live add_point feed, so a live graph keeps updating in fullscreen. A
-        plain root overlay (not a Popup) is used so the graph reaches every
-        edge — a Popup insets its content with title/border chrome.
-        """
-        parent = graph.parent
-        if parent is None or getattr(self, "_fullscreen_overlay", None) is not None:
-            return
-        index = parent.children.index(graph)
-        # Copy these — size_hint/size are live ReferenceListProperties; a bare
-        # reference would track the (1,1) we set below and break restore.
-        orig_size_hint = list(graph.size_hint)
-        orig_pos_hint = dict(graph.pos_hint)
-        orig_size = list(graph.size)
-
-        overlay = FloatLayout(size_hint=(1, 1), pos_hint={"x": 0, "y": 0})
-        fill_background(overlay, C.BG_DARK)
-
-        parent.remove_widget(graph)
-        graph.size_hint = (1, 1)
-        graph.pos_hint = {}
-        # graph + legend stacked, so the fullscreen view keeps its legend.
-        content = BoxLayout(orientation="vertical", spacing=dp(4))
-        content.add_widget(graph)
-        self._fullscreen_content = content
-        self._fullscreen_legend = self._build_fullscreen_legend(graph)
-        content.add_widget(self._fullscreen_legend)
-        overlay.add_widget(content)
-        self._float_root.add_widget(overlay)
-        self._fullscreen_overlay = overlay
-        self._fullscreen_graph = graph
-
-        def _restore(*_a):
-            self._fullscreen_close = None
-            self._float_root.remove_widget(overlay)
-            if graph.parent is not None:
-                graph.parent.remove_widget(graph)
-            graph.size_hint = orig_size_hint
-            graph.pos_hint = orig_pos_hint
-            graph.size = orig_size
-            parent.add_widget(graph, index=index)
-            graph.set_expand_callback(self._present_graph_fullscreen)
-            graph._redraw()
-            self._fullscreen_overlay = None
-            self._fullscreen_content = None
-            self._fullscreen_legend = None
-            self._fullscreen_graph = None
-
-        self._fullscreen_close = _restore
-        # The expand glyph's corner becomes the close cross (the series picker and fit stay usable here too).
-        graph.set_expand_callback(_restore, closes=True)
-
-    def _build_fullscreen_legend(self, graph):
-        """A wrapping legend (colored names) for the currently visible series."""
-        legend = LegendBar()
-        legend.show_graph(graph)
-        return legend
 
     def _link_graph_zoom(self) -> None:
         """Two zoom groups: a detail zoomed out over a long session must not reach the live graphs' saved zoom."""
@@ -2274,8 +2211,7 @@ class EEGMeditationApp(App):
         if any(isinstance(c, ModalView) for c in Window.children):
             return False
         # Fullscreen graph overlay → close it (it's not a ModalView).
-        if self._fullscreen_overlay is not None and self._fullscreen_close is not None:
-            self._fullscreen_close()
+        if self._fullscreen.close():
             return True
         current = self._sm.current
         if current == "diary":
@@ -2488,19 +2424,11 @@ class EEGMeditationApp(App):
         if ev is not None and graph is self._live_screen.graph:
             visible = visible and ev.is_valid
         graph.set_visible(key, visible)  # fires the owning screen's legend refresh
-        self._refresh_fullscreen_legend()
+        self._fullscreen.refresh_legend()
         vis = graph.is_visible(key)
         btn.bg_color = C.ACCENT if vis else C.BG_CARD
         btn.text_color = None if vis else C.TEXT_SECONDARY
         btn.bold = vis
-
-    def _refresh_fullscreen_legend(self) -> None:
-        """Rebuild the fullscreen legend after a series toggle (if fullscreen)."""
-        if self._fullscreen_overlay is None or self._fullscreen_graph is None:
-            return
-        self._fullscreen_content.remove_widget(self._fullscreen_legend)
-        self._fullscreen_legend = self._build_fullscreen_legend(self._fullscreen_graph)
-        self._fullscreen_content.add_widget(self._fullscreen_legend)
 
     def _persist_graph_series(self, graph) -> None:
         """Persist `graph`'s visible series under its per-graph key on picker close.

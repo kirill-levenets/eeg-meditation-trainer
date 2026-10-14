@@ -3,12 +3,15 @@ import tempfile
 import types
 import unittest
 
+from kivy.uix.floatlayout import FloatLayout
+
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.diary_screen import (
     METRICS_PREVIEW_COLORS,
     METRICS_PREVIEW_SCALES,
 )
+from app.ui.graph_fullscreen import GraphFullscreen
 from app.ui.live_session import (
     METRICS_COLORS,
     METRICS_SCALES,
@@ -45,8 +48,7 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         self.app._db = DatabaseManager(db_path=self.db_path)
         self.uid = self.app._db.create_user("Alice")
         self.app._current_user_id = self.uid
-        self.app._fullscreen_overlay = None
-        self.app._fullscreen_graph = None
+        self.app._fullscreen = GraphFullscreen(FloatLayout())
 
         self.app._live_screen = _FakeLive()
         self.app._diary_screen = _FakeDiary()
