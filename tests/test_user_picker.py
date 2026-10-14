@@ -31,8 +31,7 @@ def test_form_existing_panel_hidden_when_no_users():
         on_pick_existing=lambda uid: None,
     )
     form.populate_users([])
-    assert form._existing_panel.opacity == 0
-    assert form._existing_panel.disabled is True
+    assert not form._existing_panel.children and form._existing_panel.height == 0
 
 
 def test_form_existing_panel_shown_when_users_exist():
@@ -41,8 +40,7 @@ def test_form_existing_panel_shown_when_users_exist():
         on_pick_existing=lambda uid: None,
     )
     form.populate_users([{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}])
-    assert form._existing_panel.opacity == 1
-    assert form._existing_panel.disabled is False
+    assert form._existing_panel.children and form._existing_panel.height > 0
 
 
 def test_form_pick_existing_callback_fires():
@@ -62,7 +60,7 @@ def test_show_duplicate_error_populates_inline_region():
         on_pick_existing=lambda uid: None,
     )
     form.show_duplicate_error(user_id=42, name="Alice")
-    assert form._error_row.opacity == 1
+    assert form._error_row.children and form._error_row.height > 0
     assert "Alice" in form._error_label.text
 
 
@@ -83,10 +81,9 @@ def test_use_existing_clears_error_region():
         on_pick_existing=lambda uid: None,
     )
     form.show_duplicate_error(user_id=42, name="Alice")
-    assert form._error_row.opacity == 1
+    assert form._error_row.children and form._error_row.height > 0
     form._btn_use_existing.dispatch("on_release")
-    assert form._error_row.opacity == 0
-    assert form._error_row.disabled is True
+    assert not form._error_row.children and form._error_row.height == 0
 
 
 def test_change_name_button_clears_error_region():
@@ -96,8 +93,7 @@ def test_change_name_button_clears_error_region():
     )
     form.show_duplicate_error(user_id=1, name="X")
     form._btn_change_name.dispatch("on_release")
-    assert form._error_row.opacity == 0
-    assert form._error_row.disabled is True
+    assert not form._error_row.children and form._error_row.height == 0
 
 
 def test_clear_resets_input_and_error():
@@ -109,7 +105,7 @@ def test_clear_resets_input_and_error():
     form.show_duplicate_error(user_id=1, name="X")
     form.clear()
     assert form._name_input.text == ""
-    assert form._error_row.opacity == 0
+    assert not form._error_row.children and form._error_row.height == 0
 
 
 def test_typing_filters_existing_profiles_list():
@@ -128,7 +124,7 @@ def test_typing_filters_existing_profiles_list():
     form._name_input.text = "al"  # case-insensitive substring
     # Two matches: "Alice", "Alfred"
     assert "(2)" in form._existing_header.text
-    assert form._existing_panel.opacity == 1
+    assert form._existing_panel.children and form._existing_panel.height > 0
     assert "matches" in form._existing_header.text.lower()
 
 
@@ -140,8 +136,7 @@ def test_typing_unique_name_collapses_dropdown():
     form.populate_users([{"id": 1, "name": "Alice"}])
     form._name_input.text = "Bob"
     # No matches → panel hidden
-    assert form._existing_panel.opacity == 0
-    assert form._existing_panel.disabled is True
+    assert not form._existing_panel.children and form._existing_panel.height == 0
 
 
 def test_clearing_input_restores_full_list():
@@ -154,7 +149,7 @@ def test_clearing_input_restores_full_list():
         {"id": 2, "name": "Bob"},
     ])
     form._name_input.text = "xyz"
-    assert form._existing_panel.opacity == 0
+    assert not form._existing_panel.children and form._existing_panel.height == 0
     form._name_input.text = ""
-    assert form._existing_panel.opacity == 1
+    assert form._existing_panel.children and form._existing_panel.height > 0
     assert "(2)" in form._existing_header.text

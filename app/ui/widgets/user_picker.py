@@ -20,6 +20,14 @@ from app.ui.theme import (
 )
 
 
+def _show_only(panel, *widgets, height: float = 0) -> None:
+    """Show exactly `widgets` in `panel` at `height`, the rest detached: never hidden in place, which eats taps."""
+    panel.clear_widgets()
+    for w in widgets:
+        panel.add_widget(w)
+    panel.height = height
+
+
 class UserPickerForm(BoxLayout):
     """Pick an existing user or create a new one. Used in wizard, first-run popup, and Settings."""
 
@@ -53,17 +61,8 @@ class UserPickerForm(BoxLayout):
 
     def _build_ui(self) -> None:
         # --- (1) Existing users panel ---
-        # Height is set explicitly in populate_users so the empty-state
-        # collapse to 0 sticks (a minimum_height bind would auto-restore
-        # it to the header's height = ~22dp).
-        self._existing_panel = BoxLayout(
-            orientation="vertical",
-            size_hint_y=None,
-            height=0,
-            spacing=dp(2),
-            opacity=0,
-            disabled=True,
-        )
+        # Shown and hidden by attaching its children (_show_only), its height set with them.
+        self._existing_panel = BoxLayout(orientation="vertical", size_hint_y=None, height=0, spacing=dp(2))
 
         self._existing_header = ThemedLabel(
             text="Existing profiles (0)",
@@ -75,7 +74,6 @@ class UserPickerForm(BoxLayout):
             valign="middle",
         )
         self._existing_header.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
-        self._existing_panel.add_widget(self._existing_header)
 
         self._existing_scroll = ScrollView(size_hint_y=None, height=dp(0))
         self._existing_list = BoxLayout(
@@ -85,7 +83,6 @@ class UserPickerForm(BoxLayout):
         )
         self._existing_list.bind(minimum_height=self._existing_list.setter("height"))
         self._existing_scroll.add_widget(self._existing_list)
-        self._existing_panel.add_widget(self._existing_scroll)
         self.add_widget(self._existing_panel)
 
         # --- (2) Name input + Create ---
@@ -125,14 +122,7 @@ class UserPickerForm(BoxLayout):
         self.add_widget(input_row)
 
         # --- (3) Inline duplicate-error region ---
-        self._error_row = BoxLayout(
-            orientation="vertical",
-            size_hint_y=None,
-            height=0,
-            spacing=dp(4),
-            opacity=0,
-            disabled=True,
-        )
+        self._error_row = BoxLayout(orientation="vertical", size_hint_y=None, height=0, spacing=dp(4))
         self._error_label = ThemedLabel(
             text="",
             font_size=F.SMALL,
@@ -143,7 +133,6 @@ class UserPickerForm(BoxLayout):
             valign="middle",
         )
         self._error_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
-        self._error_row.add_widget(self._error_label)
 
         btn_row = BoxLayout(size_hint_y=None, height=dp(38), spacing=S.GAP_SM)
         self._btn_use_existing = StyledButton(
@@ -162,7 +151,7 @@ class UserPickerForm(BoxLayout):
         self._btn_change_name.bind(on_release=lambda *a: self._on_change_name_pressed())
         btn_row.add_widget(self._btn_use_existing)
         btn_row.add_widget(self._btn_change_name)
-        self._error_row.add_widget(btn_row)
+        self._duplicate_buttons = btn_row
         self.add_widget(self._error_row)
 
     def _on_input_focus_change(self, instance, focused):
@@ -192,13 +181,9 @@ class UserPickerForm(BoxLayout):
 
         n = len(filtered)
         if n == 0:
-            self._existing_panel.opacity = 0
-            self._existing_panel.disabled = True
-            self._existing_panel.height = 0
+            _show_only(self._existing_panel)
             return
 
-        self._existing_panel.opacity = 1
-        self._existing_panel.disabled = False
         if q:
             self._existing_header.text = f"Matches ({n})"
         else:
@@ -208,7 +193,7 @@ class UserPickerForm(BoxLayout):
         row_h = dp(40)
         scroll_h = min(n, max_visible) * (row_h + dp(2))
         self._existing_scroll.height = scroll_h
-        self._existing_panel.height = dp(22) + scroll_h + dp(4)
+        _show_only(self._existing_panel, self._existing_header, self._existing_scroll, height=dp(22) + scroll_h + dp(4))
 
         for u in filtered:
             row = self._make_user_row(u, row_h)
@@ -275,14 +260,9 @@ class UserPickerForm(BoxLayout):
         if len(name) < 2:
             self._error_label.color = C.DANGER
             self._error_label.text = "Name must be at least 2 characters"
-            self._error_row.opacity = 1
-            self._error_row.disabled = False
-            self._error_row.height = dp(22)
+            _show_only(self._error_row, self._error_label, height=dp(22))
             return
-        # Hide buttons (this isn't the duplicate case)
-        self._error_row.opacity = 0
-        self._error_row.disabled = True
-        self._error_row.height = 0
+        self._hide_error()
         self._on_create(name)
 
     def _on_existing_row_tap(self, user_id: int) -> None:
@@ -292,18 +272,13 @@ class UserPickerForm(BoxLayout):
         if self._duplicate_user_id is None:
             return
         uid = self._duplicate_user_id
-        # Hide the inline error region — user is picking the existing
-        # profile, the duplicate prompt no longer applies.
-        self._error_row.opacity = 0
-        self._error_row.disabled = True
-        self._error_row.height = 0
+        # The user is picking the existing profile: the duplicate prompt no longer applies.
+        self._hide_error()
         self._duplicate_user_id = None
         self._on_pick_existing(uid)
 
     def _on_change_name_pressed(self) -> None:
-        self._error_row.opacity = 0
-        self._error_row.disabled = True
-        self._error_row.height = 0
+        self._hide_error()
         self._duplicate_user_id = None
         self._name_input.focus = True
 
@@ -313,14 +288,13 @@ class UserPickerForm(BoxLayout):
         self._duplicate_user_id = user_id
         self._error_label.text = f"User '{name}' already exists"
         self._btn_use_existing.text = f"Use existing '{name}'"
-        self._error_row.opacity = 1
-        self._error_row.disabled = False
-        self._error_row.height = dp(22) + dp(38) + dp(4)
+        _show_only(self._error_row, self._error_label, self._duplicate_buttons, height=dp(22) + dp(38) + dp(4))
+
+    def _hide_error(self) -> None:
+        _show_only(self._error_row)
 
     def clear(self) -> None:
         self._name_input.text = ""
         self._error_label.text = ""
-        self._error_row.opacity = 0
-        self._error_row.disabled = True
-        self._error_row.height = 0
+        self._hide_error()
         self._duplicate_user_id = None

@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A too-short profile name covered the name field with buttons**: in Settings → User Profile (and the first-run popup), Create with a one-letter name showed "Name must be at least 2 characters" with the **Use existing** / **Change name** buttons of a duplicate name spilling over the field and Create. Only the message shows now.
 - **A series changed colour between the Session screen and a session's detail**: the detail drew its metrics in colours of its own, which also didn't follow a theme switch, and the live band graph drew the bands in colours slightly off the detail's and the band table's. Each series now has one colour everywhere.
 - **The Session timer past an hour read 75:00**: it now reads 1:15:00, like the graphs' time axis, which in turn keeps the leading zero under an hour (05:00, was 5:00), as the timer does.
 - **The sound pickers had no Cancel**: Settings → Audio's **Feedback sound** and **Reward sound** and the timer's end sound opened a list without the Cancel every other list has; they have it now.
