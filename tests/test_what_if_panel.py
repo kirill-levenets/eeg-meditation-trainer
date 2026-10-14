@@ -376,14 +376,14 @@ def test_folding_detaches_the_body_and_unfolding_brings_back_what_it_shows():
     p = _panel(lines)
     states = []
     p.set_collapse_callback(states.append)
-    p.toggle_collapsed()
+    p._btn_collapse.dispatch("on_release")
     assert p.collapsed and p._controls.parent is None and p._message.parent is None and states == [True]
     assert p._btn_collapse._icon_label.text == Icons.CHEVRON_RIGHT
     p.show_loading()  # the next session, while folded
     assert p._message.parent is None
     p.set_session(_ticks(), NOTE)
     assert p._controls.parent is None
-    p.toggle_collapsed()
+    p._btn_collapse.dispatch("on_release")
     assert not p.collapsed and p._controls.parent is p and p._message.parent is None and states == [True, False]
     assert p._btn_collapse._icon_label.text == Icons.CHEVRON_DOWN
 
@@ -421,7 +421,7 @@ def test_the_folded_panel_is_saved_per_profile(app):  # noqa: F811
     a._settings_store = SettingsStore(store, [Setting("what_if_collapsed", False, BOOL[0], BOOL[1],
                                                       lambda: panel.collapsed, panel.set_collapsed)])
     panel.set_collapse_callback(lambda _c: a._persist_user_setting("what_if_collapsed"))
-    panel.toggle_collapsed()  # "me" folds it
+    panel._btn_collapse.dispatch("on_release")  # "me" folds it
     assert store.get_user_setting(me, "what_if_collapsed") == "True"
     a._settings_store.load(other)
     assert not panel.collapsed  # the other profile's own state

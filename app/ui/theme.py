@@ -1023,6 +1023,35 @@ class FoldChevron(StyledButton):
             self.text = "Show" if folded else "Hide"
 
 
+class Fold:
+    """A section's fold: whether it's folded, its chevron showing it, and a user's toggle reported to `on_change`."""
+
+    def __init__(self, chevron: FoldChevron, apply: Callable[[bool], None]) -> None:
+        self.folded = False
+        self.on_change: Callable[[bool], None] | None = None
+        self._chevron = chevron
+        self._apply = apply
+        chevron.bind(on_release=lambda *_a: self.toggle())
+
+    def set(self, folded: bool) -> None:
+        self.folded = folded
+        self._apply(folded)
+        self._chevron.show_folded(folded)
+
+    def toggle(self) -> None:
+        self.set(not self.folded)
+        if self.on_change:
+            self.on_change(self.folded)
+
+
+def fold_away(parent, body, anchor, folded: bool) -> None:
+    """Detach `body` from `parent` (never hidden in place), or put it back right below `anchor`."""
+    if folded and body.parent is parent:
+        parent.remove_widget(body)
+    elif not folded and body.parent is None:
+        parent.add_widget(body, index=parent.children.index(anchor))
+
+
 class RenameRow(BoxLayout):
     """The inline name editor under a list's row: a field and Save (or Enter) calling `on_save`; its owner places it.
     `max_length` stops the field there while typing."""

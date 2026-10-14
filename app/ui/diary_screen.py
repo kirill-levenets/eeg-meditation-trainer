@@ -24,6 +24,7 @@ from app.ui.theme import (
     C,
     CenteredTextInput,
     F,
+    Fold,
     FoldChevron,
     Icons,
     S,
@@ -35,6 +36,7 @@ from app.ui.theme import (
     cancel_button,
     fill_background,
     fit_height_to_text,
+    fold_away,
     format_duration,
     make_message_popup,
 )
@@ -256,8 +258,8 @@ class DiaryScreen(Screen):
                                  size_hint_x=None)
         band_title.bind(texture_size=lambda w, ts: setattr(w, "width", ts[0]))
         self._btn_band_fold = FoldChevron(size_hint_y=None, height=dp(28))
-        self._btn_band_fold.bind(on_release=lambda *_a: self.toggle_band_collapsed())
-        self._on_band_collapse: Callable[[bool], None] | None = None
+        self._band_fold = Fold(self._btn_band_fold, lambda folded: fold_away(
+            self._detail_layout, self._band_holder, self._band_header, folded))
         for w in (band_title, self._btn_band_fold, Widget()):
             self._band_header.add_widget(w)
         self._detail_layout.add_widget(self._band_header)
@@ -477,25 +479,14 @@ class DiaryScreen(Screen):
 
     @property
     def band_collapsed(self) -> bool:
-        return self._band_holder.parent is None
+        return self._band_fold.folded
 
     def set_band_collapsed(self, collapsed: bool) -> None:
         """Fold the table (or its placeholder) away, detached, or bring it back under its title; the title stays."""
-        if collapsed != self.band_collapsed:
-            if collapsed:
-                self._detail_layout.remove_widget(self._band_holder)
-            else:
-                self._detail_layout.add_widget(self._band_holder,
-                                               index=self._detail_layout.children.index(self._band_header))
-        self._btn_band_fold.show_folded(collapsed)
+        self._band_fold.set(collapsed)
 
     def set_band_collapse_callback(self, cb: Callable[[bool], None]) -> None:
-        self._on_band_collapse = cb
-
-    def toggle_band_collapsed(self) -> None:
-        self.set_band_collapsed(not self.band_collapsed)
-        if self._on_band_collapse:
-            self._on_band_collapse(self.band_collapsed)
+        self._band_fold.on_change = cb
 
     def _show_band_section(self) -> None:
         """The totals table once its data is in, else the placeholder (loading, or the load failed)."""

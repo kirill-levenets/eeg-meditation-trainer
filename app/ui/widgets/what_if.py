@@ -17,6 +17,7 @@ from app.session.what_if import ScoredTicks, Segment, Stats, line_steps, rescore
 from app.ui.theme import (
     C,
     F,
+    Fold,
     FoldChevron,
     S,
     StyledButton,
@@ -95,8 +96,6 @@ class WhatIfPanel(BoxLayout):
         self._overrides: list[float | None] = []  # per segment; None: as recorded
         self._seg_controls: list[_SegmentControl] = []
         self._per_segment = False  # a program's segments show their own stats
-        self._collapsed = False
-        self._on_collapse: Callable[[bool], None] | None = None
 
         # The title, its chevron right after it (History's fold), and Reset, which stays in reach while folded.
         header = BoxLayout(size_hint_y=None, height=dp(28), spacing=S.GAP_SM)
@@ -104,7 +103,7 @@ class WhatIfPanel(BoxLayout):
                                   color=C.TEXT_SECONDARY, size_hint_x=None)
         self._title.bind(texture_size=lambda w, ts: setattr(w, "width", ts[0]))
         self._btn_collapse = FoldChevron(size_hint_y=None, height=dp(28))
-        self._btn_collapse.bind(on_release=lambda *_a: self.toggle_collapsed())
+        self._fold = Fold(self._btn_collapse, lambda _folded: self._show(self._content))
         self._btn_reset = StyledButton(text="Reset", font_size=F.SMALL, bg_color=C.BG_CARD,
                                        text_color=C.TEXT_SECONDARY, size_hint=(None, None), width=dp(64),
                                        height=dp(28))
@@ -153,28 +152,21 @@ class WhatIfPanel(BoxLayout):
         while folded."""
         self._content = content
         for w in (self._controls, self._message):
-            if (w is not content or self._collapsed) and w.parent is self:
+            if (w is not content or self._fold.folded) and w.parent is self:
                 self.remove_widget(w)
-        if not self._collapsed and content.parent is None:
+        if not self._fold.folded and content.parent is None:
             self.add_widget(content)
 
     @property
     def collapsed(self) -> bool:
-        return self._collapsed
+        return self._fold.folded
 
     def set_collapsed(self, collapsed: bool) -> None:
         """Fold the body away, detached, or bring back what it shows; the header stays."""
-        self._collapsed = collapsed
-        self._show(self._content)
-        self._btn_collapse.show_folded(collapsed)
+        self._fold.set(collapsed)
 
     def set_collapse_callback(self, cb: Callable[[bool], None]) -> None:
-        self._on_collapse = cb
-
-    def toggle_collapsed(self) -> None:
-        self.set_collapsed(not self._collapsed)
-        if self._on_collapse:
-            self._on_collapse(self._collapsed)
+        self._fold.on_change = cb
 
     def _show_message(self, text: str) -> None:
         """A message in place of the controls: no session to rescore, so Reset has nothing to do either."""
