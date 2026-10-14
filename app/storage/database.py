@@ -645,47 +645,14 @@ class DatabaseManager:
         """Persist a per-user setting as a JSON string."""
         self.set_json_setting(f"user_{user_id}_{key}", value)
 
-    # ---- Saved formulas (per-user, max 50) ----
+    # ---- Saved lists: a profile's saved formulas (max 50) and programs (max 20) ----
 
     _MAX_SAVED_FORMULAS = 50
-
-    def get_saved_formulas(self, user_id: int) -> list[dict[str, str]]:
-        """Return saved formulas for a user as [{name, formula}, ...]."""
-        raw = self.get_user_setting(user_id, "saved_formulas")
-        if not raw:
-            return []
-        try:
-            data = json.loads(raw)
-            return data if isinstance(data, list) else []
-        except (json.JSONDecodeError, TypeError):
-            return []
-
-    def _save_formulas_list(self, user_id: int, formulas: list[dict[str, str]]) -> None:
-        self.set_user_setting(user_id, "saved_formulas", json.dumps(formulas))
-
-    def add_saved_formula(self, user_id: int, name: str, formula: str) -> bool:
-        """Save a formula. Returns False if limit reached."""
-        formulas = self.get_saved_formulas(user_id)
-        if len(formulas) >= self._MAX_SAVED_FORMULAS:
-            return False
-        formulas.append({"name": name, "formula": formula})
-        self._save_formulas_list(user_id, formulas)
-        return True
-
-    def remove_saved_formula(self, user_id: int, index: int) -> None:
-        """Remove a saved formula by index."""
-        formulas = self.get_saved_formulas(user_id)
-        if 0 <= index < len(formulas):
-            formulas.pop(index)
-            self._save_formulas_list(user_id, formulas)
-
-    # ---- Saved programs (per-user, max 20) ----
-
     _MAX_SAVED_PROGRAMS = 20
 
-    def get_saved_programs(self, user_id: int) -> list[dict]:
-        """Return saved programs for a user as [{name, segments}, ...]."""
-        raw = self.get_user_setting(user_id, "saved_programs")
+    def _saved_list(self, user_id: int, key: str) -> list[dict]:
+        """The JSON list stored under the profile setting `key`; [] when absent or unreadable."""
+        raw = self.get_user_setting(user_id, key)
         if not raw:
             return []
         try:
@@ -694,33 +661,51 @@ class DatabaseManager:
         except (json.JSONDecodeError, TypeError):
             return []
 
-    def _save_programs_list(self, user_id: int, programs: list[dict]) -> None:
-        self.set_user_setting(user_id, "saved_programs", json.dumps(programs))
+    def _add_saved(self, user_id: int, key: str, entry: dict, cap: int) -> bool:
+        """Append `entry`; False if the list already holds `cap`."""
+        entries = self._saved_list(user_id, key)
+        if len(entries) >= cap:
+            return False
+        self.set_user_setting(user_id, key, json.dumps([*entries, entry]))
+        return True
+
+    def _replace_saved(self, user_id: int, key: str, index: int, entry: dict) -> bool:
+        """Put `entry` at `index`; False if the index is out of range."""
+        entries = self._saved_list(user_id, key)
+        if not (0 <= index < len(entries)):
+            return False
+        entries[index] = entry
+        self.set_user_setting(user_id, key, json.dumps(entries))
+        return True
+
+    def _remove_saved(self, user_id: int, key: str, index: int) -> None:
+        entries = self._saved_list(user_id, key)
+        if 0 <= index < len(entries):
+            entries.pop(index)
+            self.set_user_setting(user_id, key, json.dumps(entries))
+
+    def get_saved_formulas(self, user_id: int) -> list[dict[str, str]]:
+        """[{name, formula}, ...]."""
+        return self._saved_list(user_id, "saved_formulas")
+
+    def add_saved_formula(self, user_id: int, name: str, formula: str) -> bool:
+        return self._add_saved(user_id, "saved_formulas", {"name": name, "formula": formula}, self._MAX_SAVED_FORMULAS)
+
+    def remove_saved_formula(self, user_id: int, index: int) -> None:
+        self._remove_saved(user_id, "saved_formulas", index)
+
+    def get_saved_programs(self, user_id: int) -> list[dict]:
+        """[{name, segments}, ...]."""
+        return self._saved_list(user_id, "saved_programs")
 
     def add_saved_program(self, user_id: int, name: str, segments: list[dict]) -> bool:
-        """Save a program. Returns False if the limit is reached."""
-        programs = self.get_saved_programs(user_id)
-        if len(programs) >= self._MAX_SAVED_PROGRAMS:
-            return False
-        programs.append({"name": name, "segments": segments})
-        self._save_programs_list(user_id, programs)
-        return True
+        return self._add_saved(user_id, "saved_programs", {"name": name, "segments": segments}, self._MAX_SAVED_PROGRAMS)
 
     def update_saved_program(self, user_id: int, index: int, name: str, segments: list[dict]) -> bool:
-        """Update a saved program by index. Returns False if the index is out of range."""
-        programs = self.get_saved_programs(user_id)
-        if not (0 <= index < len(programs)):
-            return False
-        programs[index] = {"name": name, "segments": segments}
-        self._save_programs_list(user_id, programs)
-        return True
+        return self._replace_saved(user_id, "saved_programs", index, {"name": name, "segments": segments})
 
     def remove_saved_program(self, user_id: int, index: int) -> None:
-        """Remove a saved program by index."""
-        programs = self.get_saved_programs(user_id)
-        if 0 <= index < len(programs):
-            programs.pop(index)
-            self._save_programs_list(user_id, programs)
+        self._remove_saved(user_id, "saved_programs", index)
 
     def get_db_size_bytes(self) -> int:
         """Return the database file size in bytes."""

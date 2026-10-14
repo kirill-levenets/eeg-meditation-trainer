@@ -1545,55 +1545,37 @@ class SettingsScreen(Screen):
         if self._on_export_formulas:
             self._on_export_formulas()
 
-    def _on_load_formula_pressed(self, btn) -> None:
-        idx = getattr(btn, "formula_index", -1)
-        if idx >= 0 and self._on_load_formula:
+    def _on_load_formula_pressed(self, idx: int) -> None:
+        if self._on_load_formula:
             self._on_load_formula(idx)
 
-    def _on_delete_formula_pressed(self, btn) -> None:
-        idx = getattr(btn, "formula_index", -1)
-        if idx >= 0 and self._on_delete_formula:
+    def _on_delete_formula_pressed(self, idx: int) -> None:
+        if self._on_delete_formula:
             self._on_delete_formula(idx)
 
     def populate_saved_formulas(self, formulas) -> None:
         """Update the saved formulas list. formulas: [{name, formula}, ...]"""
         # Cache for the program segment formula picker (no separate callback).
         self._saved_formulas_cache = list(formulas)
-        box = self._saved_formulas_box
+        self._fill_saved_list(self._saved_formulas_box, formulas,
+                              lambda i, e: e.get("name", e.get("formula", "")[:30]),
+                              self._on_load_formula_pressed, self._on_delete_formula_pressed)
+
+    def _fill_saved_list(self, box, entries, label: Callable, on_load: Callable, on_delete: Callable) -> None:
+        """One row per saved formula or program: its name loads it, X deletes it."""
         box.clear_widgets()
         row_height = dp(30)
-        box.height = row_height * len(formulas) if formulas else dp(0)
-
-        for i, entry in enumerate(formulas):
+        box.height = row_height * len(entries) if entries else dp(0)
+        for i, entry in enumerate(entries):
             row = BoxLayout(size_hint_y=None, height=row_height, spacing=S.GAP_SM)
-
-            load_btn = StyledButton(
-                text=entry.get("name", entry.get("formula", "")[:30]),
-                font_size=F.SMALL,
-                bg_color=C.BG_CARD,
-                text_color=C.TEXT,
-                size_hint_x=0.65,
-                size_hint_y=None,
-                height=row_height,
-                bold=False,
-            )
-            load_btn.formula_index = i
-            load_btn.bind(on_release=self._on_load_formula_pressed)
+            load_btn = StyledButton(text=label(i, entry), font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT,
+                                    size_hint_x=0.85, size_hint_y=None, height=row_height, bold=False)
+            load_btn.bind(on_release=lambda *_a, i=i: on_load(i))
             row.add_widget(load_btn)
-
-            del_btn = StyledButton(
-                text="X",
-                font_size=F.SMALL,
-                bg_color=C.BG_CARD,
-                text_color=C.DANGER,
-                size_hint_x=0.12,
-                size_hint_y=None,
-                height=row_height,
-            )
-            del_btn.formula_index = i
-            del_btn.bind(on_release=self._on_delete_formula_pressed)
+            del_btn = StyledButton(text="X", font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.DANGER,
+                                   size_hint_x=0.15, size_hint_y=None, height=row_height)
+            del_btn.bind(on_release=lambda *_a, i=i: on_delete(i))
             row.add_widget(del_btn)
-
             box.add_widget(row)
 
     # --- Session program (Timer → Program mode) -------------------------
@@ -1649,56 +1631,20 @@ class SettingsScreen(Screen):
         if btn is not None:
             btn.flash_confirm("Saved", icon=Icons.CHECK, confirm_color=C.SHAMATHA)
 
-    def _on_program_load_pressed(self, btn) -> None:
-        idx = getattr(btn, "program_index", -1)
+    def _on_program_load_pressed(self, idx: int) -> None:
         logger.info(f"Load saved program #{idx}")
-        if idx >= 0 and self._on_program_load_cb:
+        if self._on_program_load_cb:
             self._on_program_load_cb(idx)
 
-    def _on_program_delete_pressed(self, btn) -> None:
-        idx = getattr(btn, "program_index", -1)
+    def _on_program_delete_pressed(self, idx: int) -> None:
         logger.info(f"Delete saved program #{idx}")
-        if idx >= 0 and self._on_program_delete_cb:
+        if self._on_program_delete_cb:
             self._on_program_delete_cb(idx)
 
     def set_saved_programs(self, programs: list[dict]) -> None:
         """Populate the Load list. programs: [{name, segments}, ...]."""
-        box = self._saved_programs_box
-        box.clear_widgets()
-        row_height = dp(30)
-        box.height = row_height * len(programs) if programs else dp(0)
-
-        for i, entry in enumerate(programs):
-            row = BoxLayout(size_hint_y=None, height=row_height, spacing=S.GAP_SM)
-
-            load_btn = StyledButton(
-                text=entry.get("name", f"Program {i + 1}"),
-                font_size=F.SMALL,
-                bg_color=C.BG_CARD,
-                text_color=C.TEXT,
-                size_hint_x=0.85,
-                size_hint_y=None,
-                height=row_height,
-                bold=False,
-            )
-            load_btn.program_index = i
-            load_btn.bind(on_release=self._on_program_load_pressed)
-            row.add_widget(load_btn)
-
-            del_btn = StyledButton(
-                text="X",
-                font_size=F.SMALL,
-                bg_color=C.BG_CARD,
-                text_color=C.DANGER,
-                size_hint_x=0.15,
-                size_hint_y=None,
-                height=row_height,
-            )
-            del_btn.program_index = i
-            del_btn.bind(on_release=self._on_program_delete_pressed)
-            row.add_widget(del_btn)
-
-            box.add_widget(row)
+        self._fill_saved_list(self._saved_programs_box, programs, lambda i, e: e.get("name", f"Program {i + 1}"),
+                              self._on_program_load_pressed, self._on_program_delete_pressed)
 
     def _add_segment_row(self, segment: Optional[dict] = None) -> None:
         """Append one editor row (used by Add button and load_program)."""
