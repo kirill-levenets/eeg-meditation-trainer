@@ -157,6 +157,16 @@ def _load_help_topics(lang: str = "en") -> list[tuple[str, str]]:
     return topics
 
 
+def saved_formula_label(index: int, entry: dict) -> str:
+    """A saved formula as its list row and its delete confirmation name it."""
+    return entry.get("name", entry.get("formula", "")[:30])
+
+
+def saved_program_label(index: int, entry: dict) -> str:
+    """A saved program as its list row and its delete confirmation name it."""
+    return entry.get("name", f"Program {index + 1}")
+
+
 def _checkbox_row(text: str, height: float, **checkbox_kwargs) -> tuple[BoxLayout, CheckBox]:
     """A checkbox and its label on one row, which grows if the label wraps at a larger text size."""
     row = BoxLayout(size_hint_y=None, height=height, spacing=S.GAP)
@@ -1490,8 +1500,7 @@ class SettingsScreen(Screen):
         """Update the saved formulas list. formulas: [{name, formula}, ...]"""
         # Cache for the program segment formula picker (no separate callback).
         self._saved_formulas_cache = list(formulas)
-        self._fill_saved_list(self._saved_formulas_box, formulas,
-                              lambda i, e: e.get("name", e.get("formula", "")[:30]),
+        self._fill_saved_list(self._saved_formulas_box, formulas, saved_formula_label,
                               self._on_load_formula_pressed, self._on_delete_formula_pressed)
 
     def _fill_saved_list(self, box, entries, label: Callable, on_load: Callable, on_delete: Callable) -> None:
@@ -1576,7 +1585,7 @@ class SettingsScreen(Screen):
 
     def set_saved_programs(self, programs: list[dict]) -> None:
         """Populate the Load list. programs: [{name, segments}, ...]."""
-        self._fill_saved_list(self._saved_programs_box, programs, lambda i, e: e.get("name", f"Program {i + 1}"),
+        self._fill_saved_list(self._saved_programs_box, programs, saved_program_label,
                               self._on_program_load_pressed, self._on_program_delete_pressed)
 
     def _add_segment_row(self, segment: Optional[dict] = None) -> None:

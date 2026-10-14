@@ -22,9 +22,10 @@ from app.ui.theme import (
 
 def _show_only(panel, *widgets, height: float = 0) -> None:
     """Show exactly `widgets` in `panel` at `height`, the rest detached: never hidden in place, which eats taps."""
-    panel.clear_widgets()
-    for w in widgets:
-        panel.add_widget(w)
+    if list(reversed(panel.children)) != list(widgets):  # it runs per keystroke: attach only on a change
+        panel.clear_widgets()
+        for w in widgets:
+            panel.add_widget(w)
     panel.height = height
 
 

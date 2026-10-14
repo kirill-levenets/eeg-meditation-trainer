@@ -15,7 +15,14 @@ from app.ui.theme import ICONS_AVAILABLE, C, F, Icons, S, StyledButton, ThemedLa
 
 BANDS = list(band_spec.BAND_KEYS)
 GROUPS = list(band_spec.GROUP_KEYS)
-# The grouped bands' colours, on every band graph and in this table.
+# The grouped bands' colours and graph scales: every band graph's, and the colours of this table's bars.
+BAND_SCALES = {
+    "alpha": 200000.0,
+    "beta": 100000.0,
+    "gamma": 50000.0,
+    "theta": 200000.0,
+    "delta": 1500000.0,
+}
 BAND_COLORS = {
     "alpha": (0.1, 0.8, 0.4, 1.0),
     "beta": (0.9, 0.7, 0.1, 1.0),

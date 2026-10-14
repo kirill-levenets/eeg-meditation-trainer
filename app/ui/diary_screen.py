@@ -18,7 +18,6 @@ from app.logger import logger, timed
 from app.session.scoring import recorded_score, target_steps
 from app.session.session_program import PROGRAM_FORMULA_KEYS, SessionProgram
 from app.ui.live_session import (
-    BAND_SCALES,
     METRICS_COLORS,
     METRICS_SCALES,
     SERIES_NAMES,
@@ -46,7 +45,7 @@ from app.ui.theme import (
     format_duration,
     make_message_popup,
 )
-from app.ui.widgets.band_totals import BAND_COLORS, BandTotalsView
+from app.ui.widgets.band_totals import BAND_COLORS, BAND_SCALES, BandTotalsView
 from app.ui.widgets.legend import LegendBar
 from app.ui.widgets.what_if import WhatIfPanel
 
@@ -123,7 +122,6 @@ def _synthesize_waveform(rows: list[dict]) -> tuple[list[float], int]:
     scale_factor = (500.0 * 0.8) / peak
     return [v * scale_factor for v in waveform], start
 
-FREQ_PREVIEW_COLORS = BAND_COLORS
 
 
 
@@ -143,7 +141,7 @@ def detail_graph_data(rows: list[dict], formula_series: dict[str, list[float]]) 
     with timed("diary.synth_waveform"):
         synth, raw_start = _synthesize_waveform(rows)  # tail only, see _synthesize_waveform
 
-    freq_series: dict[str, list[float]] = {k: [] for k in FREQ_PREVIEW_COLORS}
+    freq_series: dict[str, list[float]] = {k: [] for k in BAND_COLORS}
     for row in rows:
         for key, power in group_powers(lambda k: row.get(f"{k}_raw", 0.0)).items():
             freq_series[key].append(power)
@@ -404,7 +402,7 @@ class DiaryScreen(Screen):
             graph_id="diary_raw",
         )
         self._freq_graph = ScrollableGraphWidget(
-            colors=FREQ_PREVIEW_COLORS,
+            colors=BAND_COLORS,
             scales=BAND_SCALES,
             viewport_seconds=60,
             show_value_labels=True,

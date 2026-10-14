@@ -42,7 +42,7 @@ from app.ui.theme import (
     readable_fg,
     text_width,
 )
-from app.ui.widgets.band_totals import BAND_COLORS
+from app.ui.widgets.band_totals import BAND_COLORS, BAND_SCALES
 from app.ui.widgets.legend import LegendBar
 
 _DURATION_PRESETS = [
@@ -56,15 +56,6 @@ _DURATION_PRESETS = [
     ("2 h", 120),
     ("Free", None),
 ]
-
-# Band scales for the inline raw EEG view and the session detail's band graph
-BAND_SCALES = {
-    "alpha": 200000.0,
-    "beta": 100000.0,
-    "gamma": 50000.0,
-    "theta": 200000.0,
-    "delta": 1500000.0,
-}
 
 _RAW_SIGNAL_COLORS = {"eeg": C.MEDITATION}
 _RAW_SIGNAL_SCALES = {"eeg": 500.0}

@@ -75,7 +75,7 @@ class MetricsEngine:
 
     @staticmethod
     def total_power(groups: dict[str, float]) -> float:
-        """The grouped bands' summed power, +1 so a silent sample doesn't divide by zero; the replay uses it too."""
+        """The grouped bands' summed power, +1 so a silent sample doesn't divide by zero."""
         return sum(groups[g] for g in GROUP_KEYS) + 1.0
 
     @classmethod

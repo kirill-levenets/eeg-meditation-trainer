@@ -72,7 +72,11 @@ from app.ui.line_colours import OPTIONS as LINE_OPTIONS
 from app.ui.live_session import METRICS_COLORS, SERIES_NAMES, LiveSessionScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.session_labels import session_title, start_stamp
-from app.ui.settings_screen import SettingsScreen
+from app.ui.settings_screen import (
+    SettingsScreen,
+    saved_formula_label,
+    saved_program_label,
+)
 from app.ui.theme import (
     DEFAULT_THEME,
     TEXT_SIZES,
@@ -2739,17 +2743,16 @@ class EEGMeditationApp(App):
         """Delete a saved formula, after a confirmation as a saved program's delete asks."""
         if self._require_user("delete a formula") is None:
             return
-        formulas = self._db.get_saved_formulas(self._current_user_id)
-        if not (0 <= index < len(formulas)):
+        self._confirm_saved_delete("formula", self._db.get_saved_formulas(self._current_user_id), index,
+                                   saved_formula_label, self._delete_formula)
+
+    def _confirm_saved_delete(self, kind: str, entries: list[dict], index: int, label: Callable,
+                              delete: Callable[[int], None]) -> None:
+        """Ask before deleting a saved formula or program, named as its list row names it."""
+        if not (0 <= index < len(entries)):
             return
-        name = formulas[index].get("name") or formulas[index].get("formula", "")
-        self._confirm_action(
-            "Delete formula",
-            f"Delete saved formula '{name}'?",
-            "Delete",
-            lambda i=index: self._delete_formula(i),
-            ok_color=C.DANGER,
-        )
+        self._confirm_action(f"Delete {kind}", f"Delete saved {kind} '{label(index, entries[index])}'?", "Delete",
+                             lambda: delete(index), ok_color=C.DANGER)
 
     def _delete_formula(self, index: int) -> None:
         self._db.remove_saved_formula(self._current_user_id, index)
@@ -2888,17 +2891,8 @@ class EEGMeditationApp(App):
     def _on_program_delete(self, index: int) -> None:
         if self._require_user("delete a program") is None:
             return
-        progs = self._db.get_saved_programs(self._current_user_id)
-        if not (0 <= index < len(progs)):
-            return
-        name = progs[index].get("name", "")
-        self._confirm_action(
-            "Delete program",
-            f"Delete saved program '{name}'?",
-            "Delete",
-            lambda i=index: self._delete_program(i),
-            ok_color=C.DANGER,
-        )
+        self._confirm_saved_delete("program", self._db.get_saved_programs(self._current_user_id), index,
+                                   saved_program_label, self._delete_program)
 
     def _delete_program(self, index: int) -> None:
         self._db.remove_saved_program(self._current_user_id, index)

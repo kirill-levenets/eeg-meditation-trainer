@@ -6,18 +6,16 @@ import unittest
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.diary_screen import (
-    FREQ_PREVIEW_COLORS,
     METRICS_PREVIEW_COLORS,
     METRICS_PREVIEW_SCALES,
 )
 from app.ui.live_session import (
-    BAND_SCALES,
     METRICS_COLORS,
     METRICS_SCALES,
     SERIES_NAMES,
 )
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
-from app.ui.widgets.band_totals import BAND_COLORS
+from app.ui.widgets.band_totals import BAND_COLORS, BAND_SCALES
 
 
 def _g(colors, scales, graph_id, names=None):
@@ -35,7 +33,7 @@ class _FakeDiary:
     def __init__(self):
         self._metrics_graph = _g(METRICS_PREVIEW_COLORS, METRICS_PREVIEW_SCALES, "diary_metrics")
         self._raw_eeg_graph = _g({"eeg": (1, 1, 1, 1)}, {"eeg": 500.0}, "diary_raw")
-        self._freq_graph = _g(FREQ_PREVIEW_COLORS, BAND_SCALES, "diary_freq")
+        self._freq_graph = _g(BAND_COLORS, BAND_SCALES, "diary_freq")
 
 
 class TestGraphSeriesPersistence(unittest.TestCase):
