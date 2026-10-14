@@ -13,11 +13,11 @@ from kivy.uix.slider import Slider
 from kivy.uix.widget import Widget
 
 from app.config import APP
-from app.eeg.band_spec import GROUP_NAMES, group_powers
+from app.eeg.band_spec import BAND_KEYS, GROUP_NAMES, group_powers
 from app.logger import logger, timed
 from app.session.scoring import recorded_score, target_steps
 from app.session.session_program import SessionProgram
-from app.ui.live_session import SERIES_NAMES
+from app.ui.live_session import BAND_SCALES, SERIES_NAMES
 from app.ui.raw_eeg_screen import GraphAwareScrollView, ScrollableGraphWidget
 from app.ui.session_labels import session_score_rows, session_title
 from app.ui.theme import (
@@ -94,12 +94,7 @@ _BAND_FREQS = {
 _AMPLITUDE_SCALE: float = 0.0004
 
 
-_RAW_KEYS = {
-    "delta": "delta_raw", "theta": "theta_raw",
-    "alpha1": "alpha1_raw", "alpha2": "alpha2_raw",
-    "beta1": "beta1_raw", "beta2": "beta2_raw",
-    "gamma1": "gamma1_raw", "gamma2": "gamma2_raw",
-}
+_RAW_KEYS = {k: f"{k}_raw" for k in BAND_KEYS}
 # The raw-EEG preview graph's deque is capped at sample_rate*60 (last 60s), so
 # synthesizing the whole session then discarding all but the tail cost ~3.6s on
 # a 47-min session. Synthesize only the retained tail.
@@ -149,13 +144,6 @@ FREQ_PREVIEW_COLORS = {
     "delta": (0.4, 0.2, 0.8, 1.0),
 }
 
-FREQ_PREVIEW_SCALES = {
-    "alpha": 200000.0,
-    "beta": 100000.0,
-    "gamma": 50000.0,
-    "theta": 200000.0,
-    "delta": 1500000.0,
-}
 
 
 def detail_graph_data(rows: list[dict], formula_series: dict[str, list[float]]) -> dict:
@@ -436,7 +424,7 @@ class DiaryScreen(Screen):
         )
         self._freq_graph = ScrollableGraphWidget(
             colors=FREQ_PREVIEW_COLORS,
-            scales=FREQ_PREVIEW_SCALES,
+            scales=BAND_SCALES,
             viewport_seconds=60,
             show_value_labels=True,
             show_timestamps=True,

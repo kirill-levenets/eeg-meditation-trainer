@@ -63,7 +63,7 @@ _BAND_COLORS = {
     "theta": (0.25, 0.55, 0.85, 1.0),
     "delta": (0.45, 0.25, 0.75, 1.0),
 }
-_BAND_SCALES = {
+BAND_SCALES = {
     "alpha": 200000.0,
     "beta": 100000.0,
     "gamma": 50000.0,
@@ -434,7 +434,7 @@ class LiveSessionScreen(Screen):
 
         self._band_graph = ScrollableGraphWidget(
             colors=_BAND_COLORS,
-            scales=_BAND_SCALES,
+            scales=BAND_SCALES,
             viewport_seconds=60,
             show_value_labels=True,
             show_timestamps=True,

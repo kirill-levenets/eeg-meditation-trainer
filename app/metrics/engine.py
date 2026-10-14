@@ -2,6 +2,7 @@ import math
 from collections import deque
 
 from app.config import METRICS, SIGMOID
+from app.eeg.band_spec import BAND_KEYS, GROUP_KEYS, group_powers
 from app.eeg.buffer import RollingBuffer, VarianceBuffer
 
 
@@ -69,37 +70,19 @@ class MetricsEngine:
 
     @staticmethod
     def derive_bands(sample: dict[str, float]) -> dict[str, float]:
-        """Compute derived bands: alpha, beta, gamma from sub-bands."""
-        alpha = sample.get("alpha1", 0.0) + sample.get("alpha2", 0.0)
-        beta = sample.get("beta1", 0.0) + sample.get("beta2", 0.0)
-        gamma = sample.get("gamma1", 0.0) + sample.get("gamma2", 0.0)
-        return {
-            "alpha": alpha,
-            "beta": beta,
-            "gamma": gamma,
-            "theta": sample.get("theta", 0.0),
-            "delta": sample.get("delta", 0.0),
-        }
+        """The 5 grouped bands' powers from a sample's sub-bands."""
+        return group_powers(lambda k: sample.get(k, 0.0))
 
     @staticmethod
-    def normalize_bands(bands: dict[str, float]) -> dict[str, float]:
-        """Normalize bands by total power."""
-        total_power = (
-            bands["alpha"]
-            + bands["beta"]
-            + bands["gamma"]
-            + bands["theta"]
-            + bands["delta"]
-            + 1.0
-        )
-        return {
-            "alpha_norm": bands["alpha"] / total_power,
-            "beta_norm": bands["beta"] / total_power,
-            "gamma_norm": bands["gamma"] / total_power,
-            "theta_norm": bands["theta"] / total_power,
-            "delta_norm": bands["delta"] / total_power,
-            "total_power": total_power,
-        }
+    def total_power(groups: dict[str, float]) -> float:
+        """The grouped bands' summed power, +1 so a silent sample doesn't divide by zero; the replay uses it too."""
+        return sum(groups[g] for g in GROUP_KEYS) + 1.0
+
+    @classmethod
+    def normalize_bands(cls, bands: dict[str, float]) -> dict[str, float]:
+        """Each grouped band's share of the total power."""
+        total = cls.total_power(bands)
+        return {**{f"{g}_norm": bands[g] / total for g in GROUP_KEYS}, "total_power": total}
 
     def compute_calmness(self, norms: dict[str, float]) -> float:
         """calmness = alpha_norm / (beta_norm + gamma_norm + eps)"""
@@ -121,9 +104,6 @@ class MetricsEngine:
             return dict.fromkeys(keys, 0.0)
         return {k: math.sqrt(v / total) for k, v in values.items()}
 
-    _PCT8_BANDS: tuple[str, ...] = (
-        "delta", "theta", "alpha1", "alpha2", "beta1", "beta2", "gamma1", "gamma2"
-    )
     _PCT8_OUT: tuple[str, ...] = ("alpha1", "alpha2", "gamma1", "gamma2")
 
     @classmethod
@@ -133,7 +113,7 @@ class MetricsEngine:
         round(sqrt(raw_band / P8) * 100), P8 = sum of all 8 raw bands. Integer
         0-100. Half-away-from-zero rounding; values are >=0 so int(x+0.5) matches.
         """
-        vals = {k: max(sample.get(k, 0.0), 0.0) for k in cls._PCT8_BANDS}
+        vals = {k: max(sample.get(k, 0.0), 0.0) for k in BAND_KEYS}
         p8 = sum(vals.values())
         if p8 <= 0.0:
             return dict.fromkeys(cls._PCT8_OUT, 0)

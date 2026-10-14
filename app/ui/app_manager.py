@@ -29,6 +29,7 @@ from app.crash_handler import (
     install_crash_handler,
     report_soft_error,
 )
+from app.eeg.band_spec import BAND_KEYS, group_powers
 from app.eeg.mock_stream_v2 import MockEEGStream
 from app.eeg.neurosky_stream import NeuroSkyStream
 from app.logger import logger, timed
@@ -1944,9 +1945,7 @@ class EEGMeditationApp(App):
 
                 raw_sample = self._eeg_stream.read_sample()
                 sq = raw_sample.get("signal_quality", 200)
-                total = sum(raw_sample.get(k, 0.0) for k in
-                            ("delta", "theta", "alpha1", "alpha2",
-                             "beta1", "beta2", "gamma1", "gamma2"))
+                total = sum(raw_sample.get(k, 0.0) for k in BAND_KEYS)
 
                 # Is the headset streaming packets on this connection?
                 since_packet = self._real_stream.seconds_since_last_packet
@@ -2107,8 +2106,7 @@ class EEGMeditationApp(App):
         # Log raw sample every 10 ticks (~5s at 2Hz)
         self._tick_count = getattr(self, '_tick_count', 0) + 1
         if self._tick_count % 10 == 0:
-            bands = {k: f"{raw_sample.get(k, 0):.0f}" for k in
-                     ("delta", "theta", "alpha1", "alpha2", "beta1", "beta2", "gamma1", "gamma2")}
+            bands = {k: f"{raw_sample.get(k, 0):.0f}" for k in BAND_KEYS}
             logger.debug(f"Raw sample #{self._tick_count}: {bands}")
             native_med = raw_sample.get("meditation", -1)
             bat = raw_sample.get("battery", -1)
@@ -2160,13 +2158,7 @@ class EEGMeditationApp(App):
         # Clock callbacks (which previously flooded the main loop and
         # caused a black screen).
         self._ui_metrics_history.append({**metrics, "score_target": target})
-        _band_record = {
-            "alpha": raw_sample.get("alpha1", 0.0) + raw_sample.get("alpha2", 0.0),
-            "beta": raw_sample.get("beta1", 0.0) + raw_sample.get("beta2", 0.0),
-            "gamma": raw_sample.get("gamma1", 0.0) + raw_sample.get("gamma2", 0.0),
-            "theta": raw_sample.get("theta", 0.0),
-            "delta": raw_sample.get("delta", 0.0),
-        }
+        _band_record = group_powers(lambda k: raw_sample.get(k, 0.0))
         self._ui_band_history.append(_band_record)
         _waveform = raw_sample.get("raw_eeg_waveform")
         if _waveform:

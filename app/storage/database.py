@@ -1,7 +1,6 @@
 import csv
 import io
 import json
-import math
 import os
 import sqlite3
 import threading
@@ -10,7 +9,9 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 from app.config import APP
+from app.eeg.band_spec import BAND_KEYS, group_powers
 from app.logger import logger
+from app.metrics.engine import MetricsEngine
 
 if TYPE_CHECKING:
     from app.metrics.custom_formula import CustomFormulaEvaluator
@@ -412,7 +413,7 @@ class DatabaseManager:
 
     def get_session_band_totals(self, session_id: int) -> dict[str, float]:
         """Summed raw power per frequency band over the whole session (0.0 if no rows)."""
-        bands = ["delta", "theta", "alpha1", "alpha2", "beta1", "beta2", "gamma1", "gamma2"]
+        bands = BAND_KEYS
         cols = ", ".join(f"SUM({b}_raw)" for b in bands)
         row = self._conn.execute(
             f"SELECT {cols} FROM metrics WHERE session_id = ?", (session_id,)
@@ -740,27 +741,10 @@ class DatabaseManager:
     @staticmethod
     def formula_vars_from_row(row: dict) -> dict[str, float]:
         """Shared var namespace so CSV export and diary recompute see identical inputs."""
-        raw_bands = {
-            "delta": row.get("delta_raw", 0),
-            "theta": row.get("theta_raw", 0),
-            "alpha1": row.get("alpha1_raw", 0),
-            "alpha2": row.get("alpha2_raw", 0),
-            "beta1": row.get("beta1_raw", 0),
-            "beta2": row.get("beta2_raw", 0),
-            "gamma1": row.get("gamma1_raw", 0),
-            "gamma2": row.get("gamma2_raw", 0),
-        }
-        alpha = raw_bands["alpha1"] + raw_bands["alpha2"]
-        beta = raw_bands["beta1"] + raw_bands["beta2"]
-        gamma = raw_bands["gamma1"] + raw_bands["gamma2"]
-        fvars: dict[str, float] = {
-            **raw_bands,
-            "alpha": alpha,
-            "beta": beta,
-            "gamma": gamma,
-            # Matches MetricsEngine.normalize_bands so total_power replays identically.
-            "total_power": alpha + beta + gamma + raw_bands["theta"] + raw_bands["delta"] + 1.0,
-        }
+        raw_bands = {k: row.get(f"{k}_raw", 0) for k in BAND_KEYS}
+        groups = group_powers(lambda k: raw_bands[k])
+        # The live tick's own band functions, so a replayed formula sees the inputs it saw live.
+        fvars: dict[str, float] = {**raw_bands, **groups, "total_power": MetricsEngine.total_power(groups)}
         # The stored columns for normalized bands + scores feed formulas directly,
         # so diary replay sees the same namespace as the live tick (not silent zeros).
         for k in ("alpha_norm", "beta_norm", "gamma_norm", "theta_norm", "delta_norm",
@@ -768,11 +752,7 @@ class DatabaseManager:
                   "subtle_distraction", "stability", "calmness",
                   "native_attention", "native_meditation"):
             fvars[k] = row.get(k, 0.0)
-        sqrt_keys = ("delta", "theta", "alpha1", "alpha2", "beta1", "beta2")
-        sqrt_vals = {k: max(raw_bands.get(k, 0.0), 0.0) for k in sqrt_keys}
-        total = sum(sqrt_vals.values())
-        for k in sqrt_keys:
-            fvars[f"s_{k}"] = math.sqrt(sqrt_vals[k] / total) if total >= 1.0 else 0.0
+        fvars.update({f"s_{k}": v for k, v in MetricsEngine.compute_sqrt_relative_bands(raw_bands).items()})
         return fvars
 
     def recompute_formula_series(
