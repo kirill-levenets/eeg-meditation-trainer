@@ -157,6 +157,17 @@ def _load_help_topics(lang: str = "en") -> list[tuple[str, str]]:
     return topics
 
 
+def _checkbox_row(text: str, height: float, **checkbox_kwargs) -> tuple[BoxLayout, CheckBox]:
+    """A checkbox and its label on one row, which grows if the label wraps at a larger text size."""
+    row = BoxLayout(size_hint_y=None, height=height, spacing=S.GAP)
+    checkbox = CheckBox(size_hint_x=0.15, size_hint_y=None, height=height, **checkbox_kwargs)
+    label = ThemedLabel(text=text, font_size=F.BODY, color=C.TEXT, size_hint_x=0.85, halign="left", valign="middle")
+    row.add_widget(checkbox)
+    row.add_widget(label)
+    fit_row_to_text(row, label, height)
+    return row, checkbox
+
+
 class SettingsScreen(Screen):
     """Settings screen with threshold, audio controls, device info, and toggles."""
 
@@ -264,21 +275,7 @@ class SettingsScreen(Screen):
 
         # "Enable Timer" is a simple-mode concept (program mode forces the timer
         # on), so it lives inside _simple_box below and hides in program mode.
-        timer_toggle_row = BoxLayout(size_hint_y=None, height=S.ROW_SM, spacing=S.GAP)
-        self._timer_enable_cb = CheckBox(
-            active=False, size_hint_x=0.15,
-            size_hint_y=None, height=S.ROW_SM,
-        )
-        timer_enable_lbl = ThemedLabel(
-            text="Enable Timer",
-            font_size=F.BODY,
-            color=C.TEXT,
-            size_hint_x=0.85,
-            halign="left", valign="middle",
-        )
-        timer_enable_lbl.bind(size=timer_enable_lbl.setter("text_size"))
-        timer_toggle_row.add_widget(self._timer_enable_cb)
-        timer_toggle_row.add_widget(timer_enable_lbl)
+        timer_toggle_row, self._timer_enable_cb = _checkbox_row("Enable Timer", S.ROW_SM, active=False)
 
         # Mode: Simple | Program segmented toggle (placed before the mode-specific
         # content so the layout reads top-down: mode -> content -> sound).
@@ -560,22 +557,9 @@ class SettingsScreen(Screen):
         device_section.add_widget(self._device_meta_label)
 
         # Mock / Real device switch
-        device_mode_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
-        self._device_mode_cb = CheckBox(
-            active=APP.USE_MOCK_DEVICE, size_hint_x=0.15,
-            size_hint_y=None, height=dp(36),
-        )
+        device_mode_row, self._device_mode_cb = _checkbox_row(
+            "Use Mock Data (uncheck for real device)", dp(36), active=APP.USE_MOCK_DEVICE)
         self._device_mode_cb.bind(active=self._on_device_mode_change)
-        device_mode_lbl = ThemedLabel(
-            text="Use Mock Data (uncheck for real device)",
-            font_size=F.BODY,
-            color=C.TEXT,
-            size_hint_x=0.85,
-            halign="left", valign="middle",
-        )
-        device_mode_row.add_widget(self._device_mode_cb)
-        device_mode_row.add_widget(device_mode_lbl)
-        fit_row_to_text(device_mode_row, device_mode_lbl, dp(36))
         device_section.add_widget(device_mode_row)
 
         # Scan + device list (visible when mock is off)
@@ -729,25 +713,9 @@ class SettingsScreen(Screen):
             "custom_formula": "Custom Formula",
         }
         for key, display_name in audio_metric_options.items():
-            row = BoxLayout(size_hint_y=None, height=dp(32), spacing=S.GAP)
-            rb = CheckBox(
-                group="audio_metric",
-                active=(key == "shamatha_score"),
-                size_hint_x=0.15,
-                size_hint_y=None, height=dp(32),
-            )
+            row, rb = _checkbox_row(display_name, dp(32), group="audio_metric", active=(key == "shamatha_score"))
             rb.audio_metric_key = key
             rb.bind(active=self._on_audio_metric_radio)
-            lbl = ThemedLabel(
-                text=display_name,
-                font_size=F.BODY,
-                color=C.TEXT,
-                size_hint_x=0.85,
-                halign="left", valign="middle",
-            )
-            lbl.bind(size=lbl.setter("text_size"))
-            row.add_widget(rb)
-            row.add_widget(lbl)
             threshold_section.add_widget(row)
             self._audio_metric_radios[key] = rb
 
@@ -838,60 +806,19 @@ class SettingsScreen(Screen):
         audio_section.add_widget(self._reward_source_btn)
 
         # Sinking alert toggle
-        sinking_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
-        self._sinking_alert_cb = CheckBox(
-            active=False, size_hint_x=0.15,
-            size_hint_y=None, height=dp(36),
-        )
+        sinking_row, self._sinking_alert_cb = _checkbox_row("Enable Sinking Alert Bell", dp(36), active=False)
         self._sinking_alert_cb.bind(active=self._on_sinking_alert_change)
-        sinking_lbl = ThemedLabel(
-            text="Enable Sinking Alert Bell",
-            font_size=F.BODY,
-            color=C.TEXT,
-            size_hint_x=0.85,
-            halign="left", valign="middle",
-        )
-        sinking_lbl.bind(size=sinking_lbl.setter("text_size"))
-        sinking_row.add_widget(self._sinking_alert_cb)
-        sinking_row.add_widget(sinking_lbl)
         audio_section.add_widget(sinking_row)
 
         # Subtle distraction alert toggle
-        subtle_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
-        self._subtle_alert_cb = CheckBox(
-            active=False, size_hint_x=0.15,
-            size_hint_y=None, height=dp(36),
-        )
+        subtle_row, self._subtle_alert_cb = _checkbox_row("Enable Distraction Chime", dp(36), active=False)
         self._subtle_alert_cb.bind(active=self._on_subtle_alert_change)
-        subtle_lbl = ThemedLabel(
-            text="Enable Distraction Chime",
-            font_size=F.BODY,
-            color=C.TEXT,
-            size_hint_x=0.85,
-            halign="left", valign="middle",
-        )
-        subtle_lbl.bind(size=subtle_lbl.setter("text_size"))
-        subtle_row.add_widget(self._subtle_alert_cb)
-        subtle_row.add_widget(subtle_lbl)
         audio_section.add_widget(subtle_row)
 
         # Disconnect alert toggle
-        disconnect_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
-        self._disconnect_alert_cb = CheckBox(
-            active=APP.DISCONNECT_ALERT_ENABLED, size_hint_x=0.15,
-            size_hint_y=None, height=dp(36),
-        )
+        disconnect_row, self._disconnect_alert_cb = _checkbox_row(
+            "Audio alert on disconnect / signal loss", dp(36), active=APP.DISCONNECT_ALERT_ENABLED)
         self._disconnect_alert_cb.bind(active=self._on_disconnect_alert_change)
-        disconnect_lbl = ThemedLabel(
-            text="Audio alert on disconnect / signal loss",
-            font_size=F.BODY,
-            color=C.TEXT,
-            size_hint_x=0.85,
-            halign="left", valign="middle",
-        )
-        disconnect_row.add_widget(self._disconnect_alert_cb)
-        disconnect_row.add_widget(disconnect_lbl)
-        fit_row_to_text(disconnect_row, disconnect_lbl, dp(36))
         audio_section.add_widget(disconnect_row)
 
         # --- Display section ---

@@ -1058,6 +1058,10 @@ class EEGMeditationApp(App):
         """Back/Esc while gated: never fall through into the app, but the user must
         still be able to LEAVE — double-press exits the app (a gate with no exit
         traps a fresh-install user who declines to create a profile)."""
+        return self._exit_on_second_back()
+
+    def _exit_on_second_back(self) -> bool:
+        """A second back press within 2 s exits the app; the first says so."""
         now = time.time()
         if now - self._last_back_time < 2.0:
             App.get_running_app().stop()
@@ -2290,13 +2294,7 @@ class EEGMeditationApp(App):
             self._switch_screen("live_session")
             return True
         # Root (Session): require two presses within 2s to exit.
-        now = time.time()
-        if now - self._last_back_time < 2.0:
-            App.get_running_app().stop()
-            return True
-        self._last_back_time = now
-        self._toast("Press back again to exit")
-        return True
+        return self._exit_on_second_back()
 
     _leaving = False  # set while _flush_on_leave runs: nothing the app draws is seen any more
 
