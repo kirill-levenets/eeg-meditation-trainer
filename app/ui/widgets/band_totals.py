@@ -38,13 +38,10 @@ _W_POWER = 60
 _W_PCT = 44
 
 
-def band_shares(totals: dict[str, float]) -> dict[str, float]:
-    """Each sub-band's share (0..1) of the summed power; zero total -> all zero."""
-    vals = {b: float(totals.get(b, 0.0)) for b in BANDS}
+def band_shares(vals: dict[str, float]) -> dict[str, float]:
+    """Each band's share (0..1) of their summed power; zero total -> all zero."""
     grand = sum(vals.values())
-    if grand <= 0:
-        return dict.fromkeys(BANDS, 0.0)
-    return {b: v / grand for b, v in vals.items()}
+    return {b: (v / grand) if grand > 0 else 0.0 for b, v in vals.items()}
 
 
 def grouped_totals(totals: dict[str, float]) -> dict[str, float]:
@@ -67,10 +64,10 @@ def band_rows(
         spec = band_spec.BANDS
         vals = {b: float(totals.get(b, 0.0)) for b in BANDS}
         order = BANDS
-    grand = sum(vals.values())
+    shares = band_shares(vals)
     rows = [
         {"key": b.key, "name": b.name, "range": range_text(b), "group": b.group, "total": vals[b.key],
-         "share": (vals[b.key] / grand) if grand > 0 else 0.0}
+         "share": shares[b.key]}
         for b in spec
     ]
     if sort_by in ("power", "percent"):
