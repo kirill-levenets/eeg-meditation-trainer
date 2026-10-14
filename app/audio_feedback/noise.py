@@ -192,10 +192,7 @@ def _generate_noise_wav(volume: float, rate: int, duration: float) -> bytes:
     leak = 0.98  # higher = deeper rumble
     # Low-pass filter state (smooths the final mix)
     lp = 0.0
-    cutoff = 2500.0  # Hz — tame harsh highs
-    rc = 1.0 / (2.0 * math.pi * cutoff)
-    dt = 1.0 / rate
-    alpha = dt / (rc + dt)
+    alpha = _lowpass_alpha(2500.0, rate)  # tames harsh highs
 
     raw = []
     for _ in range(n_samples):
@@ -208,22 +205,29 @@ def _generate_noise_wav(volume: float, rate: int, duration: float) -> bytes:
         lp += alpha * (sample - lp)
         raw.append(lp)
 
-    # Normalize to [-1, 1]
-    peak = max(abs(s) for s in raw) or 1.0
-    raw = [int((s / peak) * volume * 32767) for s in raw]
+    return _loop_pcm(raw, volume)
 
-    # Crossfade: blend tail into head so loop boundary is seamless
+
+def _lowpass_alpha(cutoff: float, rate: int) -> float:
+    """The one-pole low-pass coefficient for `cutoff` Hz at `rate` samples per second."""
+    rc = 1.0 / (2.0 * math.pi * cutoff)
+    dt = 1.0 / rate
+    return dt / (rc + dt)
+
+
+def _loop_pcm(raw: list[float], gain: float) -> bytes:
+    """Float samples as 16-bit PCM peaking at `gain` of full scale, ends crossfaded so the loop repeats without a click."""
+    n_samples = len(raw)
+    peak = max(abs(s) for s in raw) or 1.0
+    pcm = [int((s / peak) * gain * 32767) for s in raw]
     for i in range(_FADE_SAMPLES):
         t = i / _FADE_SAMPLES  # 0 → 1
-        head = raw[i]
-        tail = raw[n_samples - _FADE_SAMPLES + i]
-        raw[i] = int(head * t + tail * (1 - t))
-        raw[n_samples - _FADE_SAMPLES + i] = int(tail * t + head * (1 - t))
-
-    # Clamp to 16-bit range
-    raw = [max(-32767, min(32767, s)) for s in raw]
-
-    return struct.pack(f"<{n_samples}h", *raw)
+        head = pcm[i]
+        tail = pcm[n_samples - _FADE_SAMPLES + i]
+        pcm[i] = int(head * t + tail * (1 - t))
+        pcm[n_samples - _FADE_SAMPLES + i] = int(tail * t + head * (1 - t))
+    pcm = [max(-32767, min(32767, s)) for s in pcm]
+    return struct.pack(f"<{n_samples}h", *pcm)
 
 
 def _generate_tone_wav(rate: int, freq: float, duration: float) -> bytes:
@@ -231,10 +235,7 @@ def _generate_tone_wav(rate: int, freq: float, duration: float) -> bytes:
     n_samples = int(rate * duration)
     fifth = freq * 1.5
     lp = 0.0
-    cutoff = 3000.0
-    rc = 1.0 / (2.0 * math.pi * cutoff)
-    dt = 1.0 / rate
-    alpha = dt / (rc + dt)
+    alpha = _lowpass_alpha(3000.0, rate)
 
     raw = []
     for i in range(n_samples):
@@ -245,18 +246,7 @@ def _generate_tone_wav(rate: int, freq: float, duration: float) -> bytes:
         lp += alpha * (value - lp)
         raw.append(lp)
 
-    peak = max(abs(s) for s in raw) or 1.0
-    raw = [int((s / peak) * 0.9 * 32767) for s in raw]  # 10% headroom below the 16-bit ceiling
-
-    for i in range(_FADE_SAMPLES):
-        t = i / _FADE_SAMPLES
-        head = raw[i]
-        tail = raw[n_samples - _FADE_SAMPLES + i]
-        raw[i] = int(head * t + tail * (1 - t))
-        raw[n_samples - _FADE_SAMPLES + i] = int(tail * t + head * (1 - t))
-
-    raw = [max(-32767, min(32767, s)) for s in raw]
-    return struct.pack(f"<{n_samples}h", *raw)
+    return _loop_pcm(raw, 0.9)  # 10% headroom below the 16-bit ceiling
 
 
 def _generate_heartbeat_wav(rate: int, duration: float, pulse_seconds: float) -> bytes:
@@ -376,7 +366,7 @@ class AudioEngine:
         self._timer_bell_player: object = None  # Android MediaPlayer gong (lock-through)
         self._noise_path: str = ""
         self._bell_path: str = ""
-        self._sinking_cooldown_until: float = 0.0
+        self._alert_until: dict[str, float] = {"sinking": 0.0, "subtle": 0.0}  # each alert's next allowed time
         self._sinking_alert_enabled: bool = False
         self._subtle_alert_enabled: bool = False
         self._disconnect_alert_enabled: bool = APP.DISCONNECT_ALERT_ENABLED
@@ -392,7 +382,6 @@ class AudioEngine:
         self._disconnect_path = os.path.join(self._tmpdir, "disconnect.wav")
         self._chime_sound: object = None
         self._disconnect_sound: object = None
-        self._subtle_cooldown_until: float = 0.0
         self._lock = threading.Lock()
         self._ramp_thread: Optional[threading.Thread] = None
         self._ramp_running: bool = False
@@ -575,10 +564,7 @@ class AudioEngine:
         """
         if meditation_score >= self._threshold:
             return 0.0
-        t = (self._threshold - meditation_score) / self._threshold  # 0..1 linear
-        k = 9.0
-        scaled = math.log(1.0 + t * k) / math.log(1.0 + k)  # 0..1 log-curved
-        return min(scaled * self._max_volume, self._max_volume)
+        return self._log_rise((self._threshold - meditation_score) / self._threshold)
 
     def compute_reward_volume(self, meditation_score: float) -> float:
         """Above-threshold reward volume: silent at/below threshold, log-rising to
@@ -587,9 +573,12 @@ class AudioEngine:
         if meditation_score <= self._threshold:
             return 0.0
         span = max(1, APP.REWARD_SPAN)
-        t = min(1.0, (meditation_score - self._threshold) / span)  # 0..1 linear
+        return self._log_rise(min(1.0, (meditation_score - self._threshold) / span))
+
+    def _log_rise(self, t: float) -> float:
+        """Volume for t in 0..1, log-curved (log(1 + 9t) / log 10): quick at first, slower toward max."""
         k = 9.0
-        scaled = math.log(1.0 + t * k) / math.log(1.0 + k)  # 0..1 log-curved
+        scaled = math.log(1.0 + t * k) / math.log(1.0 + k)
         return min(scaled * self._max_volume, self._max_volume)
 
     def update(self, meditation_score: float) -> None:
@@ -607,27 +596,27 @@ class AudioEngine:
 
     def update_sinking(self, sinking_score: float) -> None:
         """Check sinking score and trigger bell alert if needed."""
-        if not self._sinking_alert_enabled:
-            return
-        if not self._is_playing:
-            return
-        now = time.time()
-        if sinking_score > APP.SINKING_ALERT_THRESHOLD and now >= self._sinking_cooldown_until:
+        if self._alert_due("sinking", self._sinking_alert_enabled, sinking_score,
+                           APP.SINKING_ALERT_THRESHOLD, APP.SINKING_ALERT_COOLDOWN):
             self._play_bell()
-            self._sinking_cooldown_until = now + APP.SINKING_ALERT_COOLDOWN
             logger.info(f"Sinking alert triggered (score={sinking_score:.0f})")
 
     def update_subtle_distraction(self, subtle_score: float) -> None:
         """Check subtle distraction score and play gentle chime if needed."""
-        if not self._subtle_alert_enabled:
-            return
-        if not self._is_playing:
-            return
-        now = time.time()
-        if subtle_score > APP.SUBTLE_ALERT_THRESHOLD and now >= self._subtle_cooldown_until:
+        if self._alert_due("subtle", self._subtle_alert_enabled, subtle_score,
+                           APP.SUBTLE_ALERT_THRESHOLD, APP.SUBTLE_ALERT_COOLDOWN):
             self._play_chime()
-            self._subtle_cooldown_until = now + APP.SUBTLE_ALERT_COOLDOWN
             logger.info(f"Subtle distraction chime (score={subtle_score:.0f})")
+
+    def _alert_due(self, kind: str, enabled: bool, score: float, threshold: float, cooldown: float) -> bool:
+        """An alert sounds while feedback plays, above its threshold, at most once per cooldown."""
+        if not enabled or not self._is_playing:
+            return False
+        now = time.time()
+        if score > threshold and now >= self._alert_until[kind]:
+            self._alert_until[kind] = now + cooldown
+            return True
+        return False
 
     def _play_sound(self, path: str, volume: float = 0.8) -> object:
         """Play a WAV file once via SoundLoader. Returns the Sound object."""
