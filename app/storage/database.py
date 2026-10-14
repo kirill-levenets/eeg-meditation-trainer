@@ -67,6 +67,14 @@ class _NullConnection:
 _NULL_CONN = _NullConnection()
 
 
+# A session row's stats columns and their defaults: the same for its insert and every checkpoint's update.
+_SESSION_STAT_DEFAULTS: tuple[tuple[str, object], ...] = (
+    ("duration", 0), ("threshold_used", 50), ("avg_meditation", 0), ("avg_shamatha", 0), ("max_meditation", 0),
+    ("time_above_threshold", 0), ("longest_streak", 0), ("time_shamatha_90", 0),
+    ("score_metric_key", ""), ("score_metric_name", ""), ("avg_score", None), ("score_targets", ""),
+)
+
+
 class UserExistsError(Exception):
     """Raised by DatabaseManager.create_user when the name already exists."""
 
@@ -291,36 +299,17 @@ class DatabaseManager:
                         session_program: str, engine_version: str, started_at: float | None = None) -> Optional[int]:
         """The session-row INSERT inside the caller's transaction: its id, or None from the null connection.
         `started_at` (epoch seconds) dates the row; without it, now."""
+        row = {
+            "user_id": user_id,
+            "date_time": (datetime.fromtimestamp(started_at) if started_at else datetime.now()).isoformat(),
+            **{col: stats.get(col, default) for col, default in _SESSION_STAT_DEFAULTS},
+            "session_name": session_name,
+            "custom_formulas": custom_formulas,
+            "session_program": session_program,
+            "engine_version": engine_version,
+        }
         cursor = c.execute(
-            """
-            INSERT INTO sessions
-            (user_id, date_time, duration, threshold_used, avg_meditation, avg_shamatha,
-             max_meditation, time_above_threshold, longest_streak, session_name,
-             time_shamatha_90, custom_formulas, session_program, engine_version,
-             score_metric_key, score_metric_name, avg_score, score_targets)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                user_id,
-                (datetime.fromtimestamp(started_at) if started_at else datetime.now()).isoformat(),
-                stats.get("duration", 0),
-                stats.get("threshold_used", 50),
-                stats.get("avg_meditation", 0),
-                stats.get("avg_shamatha", 0),
-                stats.get("max_meditation", 0),
-                stats.get("time_above_threshold", 0),
-                stats.get("longest_streak", 0),
-                session_name,
-                stats.get("time_shamatha_90", 0),
-                custom_formulas,
-                session_program,
-                engine_version,
-                stats.get("score_metric_key", ""),
-                stats.get("score_metric_name", ""),
-                stats.get("avg_score"),
-                stats.get("score_targets", ""),
-            ),
-        )
+            f"INSERT INTO sessions ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})", tuple(row.values()))
         return cursor.lastrowid
 
     def save_metrics_batch(self, session_id: int, metrics_list: list[dict]) -> None:
@@ -527,24 +516,8 @@ class DatabaseManager:
     def _update_session_row(c, session_id: int, stats: dict, custom_formulas: str | None,
                             session_program: str | None, engine_version: str | None) -> None:
         """The session-row UPDATE inside the caller's transaction."""
-        cols = ["duration = ?", "threshold_used = ?", "avg_meditation = ?",
-                "avg_shamatha = ?", "max_meditation = ?", "time_above_threshold = ?",
-                "longest_streak = ?", "time_shamatha_90 = ?",
-                "score_metric_key = ?", "score_metric_name = ?", "avg_score = ?", "score_targets = ?"]
-        vals: list = [
-            stats.get("duration", 0),
-            stats.get("threshold_used", 50),
-            stats.get("avg_meditation", 0),
-            stats.get("avg_shamatha", 0),
-            stats.get("max_meditation", 0),
-            stats.get("time_above_threshold", 0),
-            stats.get("longest_streak", 0),
-            stats.get("time_shamatha_90", 0),
-            stats.get("score_metric_key", ""),
-            stats.get("score_metric_name", ""),
-            stats.get("avg_score"),
-            stats.get("score_targets", ""),
-        ]
+        cols = [f"{col} = ?" for col, _ in _SESSION_STAT_DEFAULTS]
+        vals: list = [stats.get(col, default) for col, default in _SESSION_STAT_DEFAULTS]
         if custom_formulas is not None:
             cols.append("custom_formulas = ?")
             vals.append(custom_formulas)
