@@ -410,9 +410,8 @@ def test_no_screen_draws_a_fixed_glyph_colour_on_an_accent_fill(theme):
     from app.ui.history_screen import HistoryScreen
     from app.ui.live_session import LiveSessionScreen
     from app.ui.settings_screen import SettingsScreen
-    from app.ui.wizard_screen import WizardScreen
     C.set_theme(theme)
-    live, hist, diary, sett, wiz = LiveSessionScreen(), HistoryScreen(), DiaryScreen(), SettingsScreen(), WizardScreen()
+    live, hist, diary, sett = LiveSessionScreen(), HistoryScreen(), DiaryScreen(), SettingsScreen()
     live._set_view("raw")
     live._set_view("metrics")
     hist.set_view_mode("bars")
@@ -424,7 +423,7 @@ def test_no_screen_draws_a_fixed_glyph_colour_on_an_accent_fill(theme):
         sec.open()
         bad += _accent_buttons_with_unreadable_text(sett)
     sett.set_program_mode("simple")
-    for root in (live, hist, diary, sett, wiz):
+    for root in (live, hist, diary, sett):
         bad += _accent_buttons_with_unreadable_text(root)
     assert not sorted(set(bad)), sorted(set(bad))
 

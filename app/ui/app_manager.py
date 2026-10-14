@@ -69,7 +69,6 @@ from app.ui.line_colours import DEFAULT as LINE_DEFAULT
 from app.ui.line_colours import LINE_COLOURS
 from app.ui.line_colours import OPTIONS as LINE_OPTIONS
 from app.ui.live_session import METRICS_COLORS, SERIES_NAMES, LiveSessionScreen
-from app.ui.profile_screen import ProfileScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.session_labels import session_title, start_stamp
 from app.ui.settings_screen import SettingsScreen
@@ -97,7 +96,6 @@ from app.ui.theme import (
 from app.ui.widgets.legend import LegendBar
 from app.ui.widgets.loading_overlay import LoadingOverlay
 from app.ui.widgets.user_picker import UserPickerForm
-from app.ui.wizard_screen import WizardScreen
 
 FORMULA_KEYS: tuple[str, ...] = ("custom_formula", "custom_formula_2", "custom_formula_3")
 _MAX_FORMULAS = len(FORMULA_KEYS)
@@ -744,22 +742,18 @@ class EEGMeditationApp(App):
         root = BoxLayout(orientation="vertical")
         fill_background(root, C.BG_DARK)
 
-        # --- Screen manager (all screens still exist, routed via nav) ---
+        # --- Screen manager (routed via nav) ---
         self._sm = ScreenManager(transition=SlideTransition())
 
-        self._profile_screen = ProfileScreen()
         self._live_screen = LiveSessionScreen()
         self._settings_screen = SettingsScreen()
         self._history_screen = HistoryScreen()
         self._diary_screen = DiaryScreen()
         self._timer_state = TimerState()
 
-        self._wizard_screen = WizardScreen()
         self._sm.add_widget(self._live_screen)
-        self._sm.add_widget(self._wizard_screen)
         self._sm.add_widget(self._history_screen)
         self._sm.add_widget(self._settings_screen)
-        self._sm.add_widget(self._profile_screen)
         self._sm.add_widget(self._diary_screen)
 
         root.add_widget(self._sm)
@@ -800,7 +794,7 @@ class EEGMeditationApp(App):
         # corrupt last_user_id all leave users present but none current. Disable
         # nav synchronously so there is no cold-start window where the app is
         # tappable with no user; the selection modal re-enables it. The modal
-        # uses a Popup, not the wizard Screen, because a TextInput inside a
+        # is a Popup, not a Screen, because a TextInput inside a
         # Screen doesn't get keyboard focus on some platforms.
         if resolved_user is None:
             self._open_user_gate(0.5)
@@ -918,14 +912,6 @@ class EEGMeditationApp(App):
         ScrollableGraphWidget.link_zoom(*self._detail_graphs())
 
     def _bind_callbacks(self) -> None:
-        # Wizard
-        self._wizard_screen.set_complete_callback(self._on_wizard_complete)
-        self._wizard_screen.set_scan_callback(self._on_wizard_scan)
-        self._wizard_screen.set_pick_existing_callback(
-            lambda uid: self._on_pick_existing_user(uid, source="wizard"),
-        )
-        self._wizard_screen.populate_existing_users(self._db.get_all_users())
-
         self._live_screen.btn_start.bind(on_release=self._on_start)
         self._live_screen.btn_pause.bind(on_release=self._on_pause)
         self._live_screen.btn_stop.bind(on_release=self._on_stop)
@@ -1031,10 +1017,6 @@ class EEGMeditationApp(App):
         self._settings_screen.set_test_timer_sound_callback(self._on_test_timer_sound)
         self._settings_screen.set_stop_timer_sound_callback(self._on_stop_test_timer_sound)
         self._settings_screen.set_timer_sound_change_callback(self._on_timer_sound_change)
-
-        self._profile_screen.set_user_switch_callback(self._on_user_switch)
-        self._profile_screen.set_user_create_callback(self._on_user_create)
-        self._profile_screen.set_user_delete_callback(self._on_user_delete)
 
         # Profile section in settings
         self._settings_screen.set_profile_callbacks(
@@ -1147,13 +1129,13 @@ class EEGMeditationApp(App):
         def _on_create(name: str) -> None:
             self._gate_popup = None
             popup.dismiss()
-            self._on_wizard_complete(name, None, None)
+            self._complete_first_run(name, None, None)
             self._reopen_gate_if_unresolved()
 
         def _on_pick(user_id: int) -> None:
             self._gate_popup = None
             popup.dismiss()
-            self._on_pick_existing_user(user_id, source="first_run")
+            self._on_pick_existing_user(user_id)
             self._reopen_gate_if_unresolved()
 
         form = UserPickerForm(
@@ -1168,10 +1150,10 @@ class EEGMeditationApp(App):
         self._first_run_form = form
         popup.open()
 
-    def _on_wizard_complete(self, user_name: str, device_addr, device_name) -> None:
-        """Wizard finished: create user, optionally set device, go to session."""
+    def _complete_first_run(self, user_name: str, device_addr, device_name) -> None:
+        """First-run popup done: create or adopt the user, set its headset (or the mock), go to session."""
         if not user_name or len(user_name.strip()) < 2:
-            logger.warning(f"Wizard complete with invalid name: '{user_name}', ignoring")
+            logger.warning(f"First run with invalid name: '{user_name}', ignoring")
             return
         # Create user (or adopt an existing one with the same name)
 
@@ -1179,7 +1161,7 @@ class EEGMeditationApp(App):
             uid = self._db.create_user(user_name)
         except UserExistsError as e:
             uid = e.user_id
-            logger.info(f"Wizard: adopting existing user {e.name} (id={e.user_id})")
+            logger.info(f"First run: adopting existing user {e.name} (id={e.user_id})")
         self._activate_user(uid)
 
         # Set device
@@ -1192,14 +1174,14 @@ class EEGMeditationApp(App):
                 self._db.set_user_setting(self._current_user_id, "use_mock", "False")
             self._settings_screen._device_mode_cb.active = False
             self._live_screen.update_device_status(False, device_name=self._device_name())
-            logger.info(f"Wizard: device set to {device_name} ({device_addr})")
+            logger.info(f"First run: device set to {device_name} ({device_addr})")
         else:
             APP.USE_MOCK_DEVICE = True
             if self._current_user_id:
                 self._db.set_user_setting(self._current_user_id, "use_mock", "True")
             self._settings_screen._device_mode_cb.active = True
             self._live_screen.update_device_status(False, device_name="Mock EEG")
-            logger.info("Wizard: using mock device")
+            logger.info("First run: using mock device")
 
         # Show nav and go to session
         self._bottom_nav.opacity = 1
@@ -1208,16 +1190,7 @@ class EEGMeditationApp(App):
         self._sm.current = "live_session"
         self._bottom_nav.active_tab = "session"
         self._auto_scan_bt()
-        logger.info(f"Wizard complete: user '{user_name}' created")
-
-    def _on_wizard_scan(self) -> None:
-        """Scan for BT devices from wizard."""
-
-        def _run():
-            devices = NeuroSkyStream.scan_paired_devices()
-            Clock.schedule_once(lambda dt: self._wizard_screen.populate_devices(self._with_aliases(devices)))
-
-        threading.Thread(target=_run, daemon=True).start()
+        logger.info(f"First run complete: user '{user_name}' created")
 
     @staticmethod
     def _filter_mindwave(devices: list) -> list:
@@ -1288,8 +1261,6 @@ class EEGMeditationApp(App):
         self._sm.current = name
         if name == "history":
             self._refresh_history()
-        elif name == "profile":
-            self._refresh_profile()
         elif name == "live_session":
             # Reflect any Settings timer/mode change on the Start duration button.
             self._sync_live_timer_picker()
@@ -3731,39 +3702,16 @@ class EEGMeditationApp(App):
         cancel.bind(on_release=popup.dismiss)
         popup.open()
 
-    def _on_pick_existing_user(self, user_id: int, source: str) -> None:
-        """User picked an existing profile from a UserPickerForm.
-
-        source ∈ {'first_run', 'wizard', 'settings'}.
-        - 'settings' → just switch user.
-        - 'first_run' / 'wizard' → if a saved bt_device_address exists,
-          run the full wizard-complete flow with it (skip step 2).
-          Otherwise: wizard advances to step 2; first_run pop falls
-          through to wizard-complete with no device.
-        """
+    def _on_pick_existing_user(self, user_id: int) -> None:
+        """First-run popup: an existing profile picked; complete first run with its saved headset, if any."""
         user = self._db.get_user(user_id)
         if not user:
             logger.warning(f"_on_pick_existing_user: user {user_id} not found")
             return
         name = user["name"]
-
-        if source == "settings":
-            self._on_user_switch(user_id)
-            return
-
         addr = self._db.get_user_setting(user_id, "bt_device_address")
         dev_name = self._db.get_user_setting(user_id, "bt_device_name") or name
-        if addr:
-            logger.info(f"Existing user {name} has saved device — skipping step 2")
-            self._on_wizard_complete(name, addr, dev_name)
-            return
-
-        if source == "wizard":
-            self._activate_user(user_id)
-            self._wizard_screen._user_name = name
-            self._wizard_screen._advance_to_step2()
-        else:  # first_run
-            self._on_wizard_complete(name, None, None)
+        self._complete_first_run(name, addr, dev_name)
 
     def _on_user_create(self, name: str) -> None:
         """Create a new user and refresh the profile list.
@@ -3812,9 +3760,7 @@ class EEGMeditationApp(App):
             self._refresh_profile()
 
     def _refresh_profile(self) -> None:
-        users = self._db.get_all_users()
-        self._profile_screen.populate_users(users, self._current_user_id)
-        self._settings_screen.populate_users(users, self._current_user_id)
+        self._settings_screen.populate_users(self._db.get_all_users(), self._current_user_id)
 
     def _build_settings_store(self) -> None:
         """Build the settings registry; call once in build() before any user load, as get() snapshots defaults."""

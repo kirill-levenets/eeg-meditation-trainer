@@ -4,14 +4,17 @@
 
 ## Getting Started
 
-### First Launch — Setup Wizard
+### First Launch — Choose a Profile
 
-When you open the app for the first time, a **2-step wizard** guides you through setup:
+When you open the app for the first time, it asks you to **create a profile or pick an existing one**: type your name and tap **Create**, or tap a profile that is already there (after restoring a backup, for example). Your profile keeps your sessions and settings.
 
-1. **Step 1: Create Profile** — Enter your name. This creates your user profile for tracking sessions and settings.
-2. **Step 2: Connect Device** — Tap "Scan for Devices" to find your paired MindWave, or tap "Skip (use demo mode)" to try the app with simulated EEG data.
+The app then looks for your headset among the phone's paired Bluetooth devices:
 
-After the wizard, you land on the Session screen ready to meditate.
+- **One MindWave paired** — it is selected for you.
+- **Several** — Settings → Device opens so you can pick the one to use.
+- **None** — the app runs on simulated EEG data (demo mode); pair your MindWave, then pick it in Settings → Device.
+
+A profile that already has a headset saved uses it straight away. You land on the Session screen, ready to meditate.
 
 On subsequent launches, the app restores your last profile and device automatically.
 

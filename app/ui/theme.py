@@ -28,7 +28,6 @@ from kivy.properties import (
 from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.button import Button
 from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
@@ -615,10 +614,6 @@ class ThemedLabel(ThemedMixin, Label):
     def __init__(self, **kwargs):
         kwargs.setdefault("font_size", F.px(15))  # Kivy's own default size, at the text size in use
         super().__init__(**kwargs)
-
-
-class ThemedButton(ThemedMixin, Button):
-    """Kivy's Button: its colours follow theme switches and its font the text size."""
 
 
 class ThemedTextInput(ThemedMixin, TextInput):

@@ -15,7 +15,6 @@ from app.ui.app_manager import EEGMeditationApp
 from app.ui.device_labels import MAX_DEVICE_ALIAS, device_label, device_row_text
 from app.ui.settings_screen import SettingsScreen
 from app.ui.theme import C, Icons
-from app.ui.wizard_screen import WizardScreen
 
 BLUE = "00:11:22:33:44:01"
 GREY = "00:11:22:33:44:02"
@@ -368,14 +367,3 @@ def test_tapping_a_row_selects_its_headset():
     screen.set_device_select_callback(lambda address, name: picked.append((address, name)))
     screen._bt_rows[GREY].dispatch("on_release")
     assert picked == [(GREY, "MindWave Mobile")]
-
-
-# ---- the first-run wizard ----
-
-
-def test_the_wizard_lists_headsets_by_alias_and_address():
-    wizard = WizardScreen()
-    wizard.populate_devices([{**PAIRED[0], "alias": "Blue"}, PAIRED[1]])
-    texts = [btn.text for btn in reversed(wizard._device_list.children)]
-    assert texts == [device_row_text("Blue", BLUE), device_row_text("MindWave Mobile", GREY)]
-

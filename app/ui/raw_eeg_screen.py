@@ -14,8 +14,6 @@ from kivy.graphics import (
     RoundedRectangle,
 )
 from kivy.metrics import dp
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
@@ -24,7 +22,7 @@ from app.session.scoring import extend_steps
 from app.ui import render_stats
 from app.ui.line_colours import GRADIENT_TOP, LINE_COLOURS, MONO, gradient_texture
 from app.ui.theme import C as TC
-from app.ui.theme import F, ThemedLabel
+from app.ui.theme import F
 from app.ui.touch_utils import point_in_rect
 
 # Labels by (text, font_size, color); the CoreLabel is kept since it re-renders its texture after a GL context loss.
@@ -165,7 +163,6 @@ class ScrollableGraphWidget(Widget):
         # graph to mark level 100 — the per-metric maximum.
         self._reference_value: Optional[float] = None
         self._start_wall_time: Optional[float] = None
-        self._scroll_change_callback = None
         self._tap_callback = None
         self._expand_callback = None
         self._expand_closes = False  # in fullscreen the corner glyph is the close cross
@@ -296,11 +293,6 @@ class ScrollableGraphWidget(Widget):
     def set_scroll_offset(self, offset: int) -> None:
         self._scroll_offset = max(0, min(offset, self.max_scroll))
         self._redraw()
-        if self._scroll_change_callback:
-            self._scroll_change_callback(self._scroll_offset)
-
-    def set_scroll_change_callback(self, callback) -> None:
-        self._scroll_change_callback = callback
 
     def set_start_wall_time(self, epoch: Optional[float]) -> None:
         """Set the session start wall-clock time (epoch seconds) for real-time labels."""
@@ -1243,165 +1235,3 @@ class GraphAwareScrollView(ScrollView):
             if graph is not None and self._dispatch_to_graph(graph, touch):
                 return True
         return super().on_touch_down(touch)
-
-
-class RawEEGScreen(Screen):
-    """Screen displaying raw EEG signal and frequency band plots."""
-
-    EEG_SIGNAL_COLORS = {
-        "eeg": (0.3, 0.8, 1.0, 1.0),
-    }
-
-    EEG_SIGNAL_SCALES = {
-        "eeg": 500.0,
-    }
-
-    EEG_WAVEFORM_RATE: float = 512.0
-    EEG_WAVEFORM_MAX: int = 512 * 60  # 60s at 512Hz
-
-    BAND_COLORS = {
-        "alpha": (0.1, 0.8, 0.4, 1.0),
-        "beta": (0.9, 0.7, 0.1, 1.0),
-        "gamma": (1.0, 0.3, 0.3, 1.0),
-        "theta": (0.2, 0.5, 0.9, 1.0),
-        "delta": (0.4, 0.2, 0.8, 1.0),
-    }
-
-    BAND_SCALES = {
-        "alpha": 200000.0,
-        "beta": 100000.0,
-        "gamma": 50000.0,
-        "theta": 200000.0,
-        "delta": 1500000.0,
-    }
-
-    def __init__(self, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.name = "raw_eeg"
-        self._build_ui()
-
-    def _build_ui(self) -> None:
-        root = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(4))
-
-        title = ThemedLabel(
-            text="Raw EEG Data",
-            font_size=F.px(18),
-            bold=True,
-            size_hint_y=None,
-            height=dp(32),
-        )
-        root.add_widget(title)
-
-        # --- Raw EEG signal graph (composite waveform) ---
-        raw_label = ThemedLabel(
-            text="Raw EEG Signal",
-            font_size=F.px(12),
-            size_hint_y=None,
-            height=dp(20),
-            color=(0.3, 0.8, 1.0, 1.0),
-        )
-        root.add_widget(raw_label)
-
-        self._raw_graph = ScrollableGraphWidget(
-            colors=self.EEG_SIGNAL_COLORS,
-            scales=self.EEG_SIGNAL_SCALES,
-            viewport_seconds=10,
-            show_value_labels=True,
-            show_timestamps=True,
-            sample_rate=self.EEG_WAVEFORM_RATE,
-            max_points=self.EEG_WAVEFORM_MAX,
-            bipolar=True,
-            size_hint_y=0.35,
-        )
-        self._raw_graph.set_scroll_change_callback(self._on_raw_graph_touch_scroll)
-        self._syncing_scroll = False
-        root.add_widget(self._raw_graph)
-
-        # --- Frequency bands graph ---
-        band_label = ThemedLabel(
-            text="Frequency Bands",
-            font_size=F.px(12),
-            size_hint_y=None,
-            height=dp(20),
-            color=(0.6, 0.6, 0.6, 1.0),
-        )
-        root.add_widget(band_label)
-
-        self._band_graph = ScrollableGraphWidget(
-            colors=self.BAND_COLORS,
-            scales=self.BAND_SCALES,
-            viewport_seconds=60,
-            show_value_labels=True,
-            show_timestamps=True,
-            auto_scale=True,
-            size_hint_y=0.35,
-        )
-        self._band_graph.set_scroll_change_callback(self._on_band_graph_touch_scroll)
-        root.add_widget(self._band_graph)
-
-        # Band legend
-        band_legend = BoxLayout(size_hint_y=None, height=dp(20), spacing=dp(2))
-        for band, color in self.BAND_COLORS.items():
-            lbl = ThemedLabel(text=band, font_size=F.TINY, color=color)
-            band_legend.add_widget(lbl)
-        root.add_widget(band_legend)
-
-        self.add_widget(root)
-
-    @property
-    def raw_graph(self) -> ScrollableGraphWidget:
-        return self._raw_graph
-
-    @property
-    def band_graph(self) -> ScrollableGraphWidget:
-        return self._band_graph
-
-    def add_raw_sample(self, sample: dict[str, float]) -> None:
-        """Add raw EEG sample: waveform signal + frequency bands."""
-        # Oscillating EEG waveform from sub-sampled burst
-        waveform = sample.get("raw_eeg_waveform", [])
-        if waveform:
-            self._raw_graph.add_points_batch("eeg", waveform)
-        else:
-            # Fallback: sum of band powers (for v1 mock or real device)
-            eeg_sum = sum(
-                sample.get(k, 0.0)
-                for k in ("delta", "theta", "alpha1", "alpha2",
-                          "beta1", "beta2", "gamma1", "gamma2")
-            )
-            self._raw_graph.add_point({"eeg": eeg_sum})
-
-        # Aggregated frequency bands
-        alpha = sample.get("alpha1", 0.0) + sample.get("alpha2", 0.0)
-        beta = sample.get("beta1", 0.0) + sample.get("beta2", 0.0)
-        gamma = sample.get("gamma1", 0.0) + sample.get("gamma2", 0.0)
-        bands = {
-            "alpha": alpha,
-            "beta": beta,
-            "gamma": gamma,
-            "theta": sample.get("theta", 0.0),
-            "delta": sample.get("delta", 0.0),
-        }
-        self._band_graph.add_point(bands)
-
-    def _on_raw_graph_touch_scroll(self, offset: int) -> None:
-        """Sync band graph when raw graph is touch-scrolled."""
-        if self._syncing_scroll:
-            return
-        self._syncing_scroll = True
-        band_offset = int(offset / self.EEG_WAVEFORM_RATE * (1.0 / APP.UPDATE_FREQUENCY))
-        self._band_graph.set_scroll_offset(band_offset)
-        self._syncing_scroll = False
-
-    def _on_band_graph_touch_scroll(self, band_offset: int) -> None:
-        """Sync raw graph when band graph is touch-scrolled."""
-        if self._syncing_scroll:
-            return
-        self._syncing_scroll = True
-        raw_offset = int(band_offset * self.EEG_WAVEFORM_RATE * APP.UPDATE_FREQUENCY)
-        self._raw_graph.set_scroll_offset(raw_offset)
-        self._syncing_scroll = False
-
-
-if __name__ == "__main__":
-    pass

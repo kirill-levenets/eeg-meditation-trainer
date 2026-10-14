@@ -443,22 +443,17 @@ def test_settings_screen_repaints_every_section(old, new):
 
 
 @pytest.mark.parametrize("old, new", PAIRS)
-def test_wizard_and_bottom_nav_repaint(old, new):
-    from app.ui.wizard_screen import WizardScreen
+def test_bottom_nav_repaint(old, new):
     C.set_theme(old)
-    wizard = WizardScreen()
     nav = BottomNav(tabs=[("Session", "session"), ("History", "history"), ("Settings", "settings")])
-    _mount(wizard)
     _mount(nav)
     try:
         C.set_theme(new)
-        _assert_repainted(wizard, old, new, "wizard")
         _assert_repainted(nav, old, new, "bottom nav")
         nav.active_tab = "history"
         _assert_repainted(nav, old, new, "bottom nav, another tab")
     finally:
         _unmount(nav)
-        _unmount(wizard)
 
 
 def test_the_theme_selector_shows_the_active_theme_however_it_was_applied():

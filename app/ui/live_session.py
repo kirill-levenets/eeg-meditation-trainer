@@ -18,7 +18,6 @@ from kivy.uix.widget import Widget
 from app.eeg.band_spec import BAND_KEYS, GROUP_NAMES, group_powers
 from app.ui.raw_eeg_screen import (
     GraphAwareScrollView,
-    RawEEGScreen,
     ScrollableGraphWidget,
 )
 from app.ui.session_labels import session_score_rows
@@ -62,6 +61,13 @@ _BAND_COLORS = {
     "gamma": (0.90, 0.35, 0.35, 1.0),
     "theta": (0.25, 0.55, 0.85, 1.0),
     "delta": (0.45, 0.25, 0.75, 1.0),
+}
+_BAND_SCALES = {
+    "alpha": 200000.0,
+    "beta": 100000.0,
+    "gamma": 50000.0,
+    "theta": 200000.0,
+    "delta": 1500000.0,
 }
 
 _RAW_SIGNAL_COLORS = {"eeg": C.MEDITATION}
@@ -436,7 +442,7 @@ class LiveSessionScreen(Screen):
 
         self._band_graph = ScrollableGraphWidget(
             colors=_BAND_COLORS,
-            scales=RawEEGScreen.BAND_SCALES,
+            scales=_BAND_SCALES,
             viewport_seconds=60,
             show_value_labels=True,
             show_timestamps=True,

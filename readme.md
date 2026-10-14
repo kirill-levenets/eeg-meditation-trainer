@@ -27,8 +27,8 @@ Inspired by the [EEG meditation research and Vernihor formula](https://scripture
 - **User profiles** — Multiple profiles with per-user sessions, settings, and formulas; last user persisted; diary disabled until user selected
 - **Session guards** — Start blocked without user or device; every ending (Stop, timer, lost signal) saves the session; the end card adds notes or deletes the session after a confirmation
 - **Navigation** — 3-tab bottom navigation (Session / History / Settings) with Material Design icons
-- **First-run wizard** — 2-step setup on first launch (create profile, connect device or use demo mode); existing profiles surface in a picker so reinstalls don't lose history
-- **Existing-user picker** — Wizard, first-run popup, and Settings → User Profile share one form: pick an existing profile or type a new name; duplicate names trigger an inline "Use existing 'X'" / "Change name" choice (DB enforces unique names)
+- **First run** — on first launch, create a profile or pick an existing one, so a restored database doesn't lose history; a single paired MindWave is then selected automatically, several open Settings → Device to pick one, and with none the app runs on simulated EEG (demo mode)
+- **Existing-user picker** — The first-run popup and Settings → User Profile share one form: pick an existing profile or type a new name; duplicate names trigger an inline "Use existing 'X'" / "Change name" choice (DB enforces unique names)
 - **Session end summary** — Post-session overlay with stats and quick notes field
 - **History view** — Calendar heatmap (GitHub-style by avg shamatha) **or** 14-day bar chart, toggleable per user, paged back in time with arrows or a sideways swipe (back to the first session, a tap on the dates returns to today); tap a day in either to filter the session list. A totals table under the chart sums the day, week and month around today or the tapped day, and all time: total time, time on target and best streak. A chevron folds the chart and the totals away so the list gets the screen. Each session row shows its date and start time, the metric it was scored on with its average, the duration, the longest streak and the first line of its notes
 - **Theme system** — 4 themes (Dark Blue, Dark Green, Light Cream, Light Green) with live refresh; custom styled widgets with rounded corners
@@ -60,12 +60,10 @@ app/
 │   ├── history_screen.py       # Calendar/14-Day toggle + session list
 │   ├── session_labels.py       # A session's title, score line and notes line (History rows, session detail)
 │   ├── settings_screen.py      # Accordion settings: User Profile, Timer, Device, Data Backup, …
-│   ├── wizard_screen.py        # First-run setup wizard
 │   ├── diary_screen.py         # Session detail view with graphs
 │   ├── raw_eeg_screen.py       # ScrollableGraphWidget
-│   ├── profile_screen.py       # Legacy user profile management (kept for now)
 │   └── widgets/
-│       └── user_picker.py      # Shared UserPickerForm (wizard, popup, settings)
+│       └── user_picker.py      # Shared UserPickerForm (first-run popup, settings)
 ├── assets/
 │   ├── fonts/                   # Material Design Icons font
 │   └── icons/                   # App icon (PNG/ICO/ICNS) + presplash

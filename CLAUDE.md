@@ -50,7 +50,7 @@ How each subsystem works and why lives in [`docs/architecture/`](docs/architectu
 
 ### Module map
 
-- `app/eeg/` — `neurosky_stream.py` (real headset: Bluetooth RFCOMM / pyserial, ThinkGear protocol), `band_spec.py` (the 8 bands and 5 groups: key, name, Hz range, in protocol order), `mock_stream_v2.py` (active mock), `mock_stream.py` (legacy), `buffer.py` (rolling buffers). → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md)
+- `app/eeg/` — `neurosky_stream.py` (real headset: Bluetooth RFCOMM / pyserial, ThinkGear protocol), `band_spec.py` (the 8 bands and 5 groups: key, name, Hz range, in protocol order), `mock_stream_v2.py` (mock headset), `buffer.py` (rolling buffers). → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md)
 - `app/metrics/` — `engine.py` `MetricsEngine` (meditation, shamatha, distraction/sinking ported from the original Vernihor app, subtle distraction; `ENGINE_VERSION` stamped on sessions), `custom_formula.py` (AST-parsed user formulas, `avg(expr, N)`), `noise_detector.py`. → [metrics-scoring](docs/architecture/metrics-scoring.md)
 - `app/session/` — `manager.py` `SessionManager` (Start/Pause/Resume/Stop, accrual), `scoring.py` `GoalAccrual`, `session_program.py` (timed segments), `timer_state.py`, `what_if.py` (threshold recompute). → [session](docs/architecture/session.md), [programs](docs/architecture/programs.md), [metrics-scoring](docs/architecture/metrics-scoring.md)
 - `app/audio_feedback/noise.py` — `AudioEngine`: below and reward feedback channels, bell/chime/warble, timer gong; `MediaPlayer` on Android. → [audio](docs/architecture/audio.md)
@@ -58,7 +58,7 @@ How each subsystem works and why lives in [`docs/architecture/`](docs/architectu
 - `app/ui/app_manager.py` — `EEGMeditationApp`: wiring, session start/stop, BT wait, user gate, settings load/save.
 - `app/ui/theme.py`, `app/ui/widgets/` — palette `C`/`F`/`S`, themed widgets, modals, legends, overlays. → [ui-theme](docs/architecture/ui-theme.md)
 - `app/ui/raw_eeg_screen.py` — `ScrollableGraphWidget`, the one time-series graph class; `line_colours.py` (the scored line's gradient), `touch_utils.py`, `render_stats.py`. → [graphs](docs/architecture/graphs.md)
-- `app/ui/live_session.py`, `settings_screen.py`, `wizard_screen.py`, `device_labels.py` → [live-session-and-settings](docs/architecture/live-session-and-settings.md); `history_screen.py`, `period_totals.py` → [history](docs/architecture/history.md); `diary_screen.py` (session detail) → [session-detail](docs/architecture/session-detail.md); `session_labels.py` → [session](docs/architecture/session.md)
+- `app/ui/live_session.py`, `settings_screen.py`, `device_labels.py` → [live-session-and-settings](docs/architecture/live-session-and-settings.md); `history_screen.py`, `period_totals.py` → [history](docs/architecture/history.md); `diary_screen.py` (session detail) → [session-detail](docs/architecture/session-detail.md); `session_labels.py` → [session](docs/architecture/session.md)
 - `app/crash_handler.py`, `app/logger.py`, `app/android_jni.py` → [app-platform](docs/architecture/app-platform.md)
 - `service/session_keep_alive.py` — Android foreground service for locked-screen sessions. `tools/` — BT diagnostics (`bt_test.py`, `ble_battery_scan.py`).
 
