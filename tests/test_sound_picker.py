@@ -201,3 +201,19 @@ def test_a_failing_callback_does_not_stop_later_imports(phone):
     saf.open_document(lambda uri: saf.import_document(uri, str(_sounds()), "sound", got.append))
     _settle(lambda: got)
     assert [Path(p).read_bytes() for p in got] == [b"ID3 rain"]
+
+
+def test_every_sound_picker_has_a_cancel_that_picks_nothing(monkeypatch):
+    opened = []
+    monkeypatch.setattr(ss, "make_scroll_popup", lambda title, rows, footer=None, **k: opened.append(
+        (title, footer, Mock())) or opened[-1][2])
+    screen = SettingsScreen()
+    changes = []
+    screen.set_feedback_source_callback(lambda *a: changes.append(a))
+    for open_picker in (screen._open_feedback_source_picker, screen._open_reward_source_picker):
+        open_picker()
+    for title, footer, popup in opened:
+        assert footer is not None and footer.text == "Cancel", title
+        footer.dispatch("on_release")
+        popup.dismiss.assert_called_once()
+    assert changes == []

@@ -1457,7 +1457,9 @@ class SettingsScreen(Screen):
             b = StyledButton(text=label, font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT)
             b.bind(on_release=lambda *_a, v=value: (holder["popup"].dismiss(), on_choose(v)))
             rows.append(b)
-        holder["popup"] = make_scroll_popup(title, rows, width_hint=0.8)
+        cancel = cancel_button()
+        holder["popup"] = make_scroll_popup(title, rows, footer=cancel, width_hint=0.8)
+        cancel.bind(on_release=lambda *_a: holder["popup"].dismiss())
         holder["popup"].open()
 
     def set_feedback_source_callback(self, callback: Callable) -> None:
