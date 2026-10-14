@@ -2,6 +2,7 @@ import os
 import tempfile
 import types
 import unittest
+from unittest.mock import MagicMock
 
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import FORMULA_KEYS, EEGMeditationApp
@@ -252,3 +253,20 @@ class TestAssignSavedToSlot(unittest.TestCase):
         for ev in app._formula_slots:
             ev.set_formula("alpha")
         self.assertEqual(app._first_empty_slot(), 0)  # all full → slot 0
+
+
+def test_deleting_a_saved_formula_asks_first_like_a_saved_program():
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._db = MagicMock()
+    app._db.get_saved_formulas.return_value = [{"name": "Ratio", "formula": "alpha / beta"}]
+    app._current_user_id = 1
+    app._require_user = MagicMock(return_value=1)
+    app._refresh_saved_formulas = MagicMock()
+    app._settings_screen = MagicMock()
+    asked = []
+    app._confirm_action = lambda title, message, ok_text, on_ok, **k: asked.append((message, on_ok))
+    app._on_delete_formula(0)
+    app._db.remove_saved_formula.assert_not_called()
+    assert asked and "Ratio" in asked[0][0]
+    asked[0][1]()  # OK
+    app._db.remove_saved_formula.assert_called_once_with(1, 0)

@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A saved formula was deleted without asking**: its **X** in Settings → Custom Formula deleted it at once, while a saved program's asks first. It asks now too.
 - **Picking an existing profile at the first-run popup reset it to mock mode**: a profile without a saved headset came back in mock mode whatever it used before, and a profile named with one letter couldn't be picked at all. A picked profile, or one whose name is typed there, now opens exactly as it was saved.
 - **A too-short profile name covered the name field with buttons**: in Settings → User Profile (and the first-run popup), Create with a one-letter name showed "Name must be at least 2 characters" with the **Use existing** / **Change name** buttons of a duplicate name spilling over the field and Create. Only the message shows now.
 - **A series changed colour between the Session screen and a session's detail**: the detail drew its metrics in colours of its own, which also didn't follow a theme switch, and the live band graph drew the bands in colours slightly off the detail's and the band table's. Each series now has one colour everywhere.

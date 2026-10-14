@@ -2733,9 +2733,22 @@ class EEGMeditationApp(App):
         )
 
     def _on_delete_formula(self, index: int) -> None:
-        """Delete a saved formula."""
+        """Delete a saved formula, after a confirmation as a saved program's delete asks."""
         if self._require_user("delete a formula") is None:
             return
+        formulas = self._db.get_saved_formulas(self._current_user_id)
+        if not (0 <= index < len(formulas)):
+            return
+        name = formulas[index].get("name") or formulas[index].get("formula", "")
+        self._confirm_action(
+            "Delete formula",
+            f"Delete saved formula '{name}'?",
+            "Delete",
+            lambda i=index: self._delete_formula(i),
+            ok_color=C.DANGER,
+        )
+
+    def _delete_formula(self, index: int) -> None:
         self._db.remove_saved_formula(self._current_user_id, index)
         self._refresh_saved_formulas()
         self._settings_screen.set_formula_slot_status(0, "Formula deleted")
