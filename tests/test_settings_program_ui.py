@@ -117,3 +117,21 @@ def test_segment_end_sound_picker_sets_value():
     s._set_segment_end_sound(row, row._formula_btn, None)      # back to default (Chime)
     assert row._end_sound is None
     assert "end_sound" not in s.get_program_segments()[0]
+
+
+def test_a_segments_sound_pickers_set_its_cue_and_feedback(monkeypatch):
+    from unittest.mock import Mock
+
+    import app.ui.settings_screen as ss
+    shown = []
+    monkeypatch.setattr(ss, "make_scroll_popup", lambda title, rows, **k: shown.append(rows) or Mock())
+    s = _screen()
+    s.load_program([{"minutes": 5, "target": 60, "formula": "shamatha_score"}], "program")
+    row = s._segment_rows[0]
+    end_btn, fb_btn = Mock(text=""), Mock(text="")
+    s._open_segment_end_sound_picker(row, end_btn)
+    next(b for b in shown[-1] if b.text == "Warble").dispatch("on_release")
+    s._open_segment_feedback_picker(row, fb_btn)
+    next(b for b in shown[-1] if b.text == "Tone").dispatch("on_release")
+    assert (row._end_sound, end_btn.text) == ("warble", "Warble")
+    assert (row._feedback_sound, fb_btn.text) == ("tone", "Tone")

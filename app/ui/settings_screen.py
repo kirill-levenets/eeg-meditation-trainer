@@ -69,6 +69,10 @@ _REWARD_SOURCE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("Crickets", "heartbeat"), ("Custom file...", "custom"),
 )
 _TIMER_SOUND_OPTIONS: tuple[tuple[str, str], ...] = (("Default bell", ""), ("Custom file...", "custom"))
+# A program segment's feedback: "" inherits the global feedback sound.
+_SEGMENT_FEEDBACK_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("Default (use global)", ""), ("Rain", "noise"), ("Tone", "tone"), ("Custom file...", "custom"),
+)
 
 
 # Some providers type ogg and flac as application/*, not audio/*.
@@ -1750,25 +1754,14 @@ class SettingsScreen(Screen):
 
     def _open_segment_end_sound_picker(self, row, btn) -> None:
         """Pick a segment's end cue: Chime (default) or Warble."""
-        rows = []
-        for label, value in (("Chime", None), ("Warble", "warble")):
-            b = StyledButton(text=label, font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT)
-            b.bind(on_release=lambda *_a, v=value: (
-                self._set_segment_end_sound(row, btn, v), popup.dismiss()))
-            rows.append(b)
-        cancel = cancel_button()
-        popup = make_scroll_popup("Segment end cue", rows, footer=cancel, width_hint=0.8)
-        cancel.bind(on_release=lambda *_a: popup.dismiss())
-        popup.open()
+        self._open_source_picker("Segment end cue", (("Chime", None), ("Warble", "warble")),
+                                 lambda v: self._set_segment_end_sound(row, btn, v))
 
     def _feedback_seg_label(self, value) -> str:
+        """A segment's feedback source as its button shows it: Default (the global one), a source's name, or a file."""
         if not value:
             return "Default"
-        if value == "noise":
-            return "Rain"
-        if value == "tone":
-            return "Tone"
-        return os.path.basename(value)
+        return _SOURCE_LABELS.get(value) or os.path.basename(value)
 
     def _set_segment_feedback(self, row, btn, value: str) -> None:
         row._feedback_sound = value
@@ -1778,23 +1771,14 @@ class SettingsScreen(Screen):
 
     def _open_segment_feedback_picker(self, row, btn) -> None:
         """Pick a segment's feedback source: Default (inherit global), Rain, Tone, or a custom file."""
-        rows = []
-        for label, value in (("Default (use global)", ""), ("Rain", "noise"), ("Tone", "tone")):
-            b = StyledButton(text=label, font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT)
-            b.bind(on_release=lambda *_a, v=value: (
-                self._set_segment_feedback(row, btn, v), popup.dismiss()))
-            rows.append(b)
-        custom = StyledButton(text="Custom file...", font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT)
-        custom.bind(on_release=lambda *_a: (
-            popup.dismiss(),
-            open_audio_file_chooser(
-                lambda p: self._set_segment_feedback(row, btn, p),
-                title="Segment feedback sound file")))
-        rows.append(custom)
-        cancel = cancel_button()
-        popup = make_scroll_popup("Segment feedback sound", rows, footer=cancel, width_hint=0.8)
-        cancel.bind(on_release=lambda *_a: popup.dismiss())
-        popup.open()
+        def choose(value: str) -> None:
+            if value == "custom":
+                open_audio_file_chooser(lambda p: self._set_segment_feedback(row, btn, p),
+                                        title="Segment feedback sound file")
+            else:
+                self._set_segment_feedback(row, btn, value)
+
+        self._open_source_picker("Segment feedback sound", _SEGMENT_FEEDBACK_OPTIONS, choose)
 
     def _formula_label(self, formula) -> str:
         if isinstance(formula, dict):
