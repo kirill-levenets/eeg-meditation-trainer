@@ -128,11 +128,6 @@ SERIES_NAMES = MappingProxyType({
 })
 
 
-def _compute_graph_height(viewport_h: float, floor_dp: float) -> float:
-    """Return the height the graph area should take: fill the viewport, floor at floor_dp."""
-    return max(viewport_h, floor_dp)
-
-
 def _compute_graph_height_adaptive(
     viewport_h: float,
     stats_h: float,

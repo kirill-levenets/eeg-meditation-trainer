@@ -200,7 +200,6 @@ def test_points_with_a_threshold_step_the_line_where_it_changes():
     for t in targets:
         g.add_point({"shamatha_score": 60.0}, threshold=t)
     assert g._threshold_steps == target_steps(targets) == [(0, 70), (2, 85), (4, 72)]
-    assert g.threshold_value_at(1) == 70 and g.threshold_value_at(3) == 85
 
 
 def test_points_without_a_threshold_leave_the_line_as_set():

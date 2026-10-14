@@ -199,16 +199,6 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         self.assertTrue(self.graph.is_visible("custom_formula"))
 
 
-def test_threshold_value_at_steps():
-    from app.ui.raw_eeg_screen import ScrollableGraphWidget
-    g = ScrollableGraphWidget(colors={"a": (1, 1, 1, 1)}, scales={"a": 100})
-    g.set_threshold_steps([(0, 50.0), (1200, 70.0), (2400, 90.0)])
-    assert g.threshold_value_at(0) == 50.0
-    assert g.threshold_value_at(1199) == 50.0
-    assert g.threshold_value_at(1200) == 70.0
-    assert g.threshold_value_at(5000) == 90.0
-    g.set_threshold_steps(None)
-    assert g.threshold_value_at(0) is None
 
 
 def _threshold_ys(g) -> tuple[list[float], float, float]:

@@ -303,10 +303,9 @@ def test_diary_rebuilds_stepped_threshold():
     segs = [{"minutes": 10, "target": 50, "formula": "shamatha_score"},
             {"minutes": 10, "target": 70, "formula": "meditation_score"}]
     screen.set_program(json.dumps(segs))   # parses + pushes steps to the metrics graph
-    assert screen._metrics_graph.threshold_value_at(0) == 50.0
-    assert screen._metrics_graph.threshold_value_at(2400) == 70.0
+    assert screen._metrics_graph.threshold_steps == [(0, 50.0), (1200, 70.0)]
     screen.set_program("")                  # clears the stepped line for non-program sessions
-    assert screen._metrics_graph.threshold_value_at(0) is None
+    assert screen._metrics_graph.threshold_steps is None
 
 
 def test_program_unsaved_changes_detection(tmp_path):

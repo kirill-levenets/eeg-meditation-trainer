@@ -200,18 +200,6 @@ class ScrollableGraphWidget(Widget):
         """The threshold line's steps, or None when it is one value."""
         return list(self._threshold_steps) if self._threshold_steps else None
 
-    def threshold_value_at(self, tick: int):
-        """Active step value at a tick index, or None if no steps set."""
-        if not self._threshold_steps:
-            return None
-        value = self._threshold_steps[0][1]
-        for start_tick, v in self._threshold_steps:
-            if tick >= start_tick:
-                value = v
-            else:
-                break
-        return value
-
     def set_reference_line(self, value: Optional[float]) -> None:
         """Set a solid horizontal reference line at `value` (graph units).
 

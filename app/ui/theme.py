@@ -1099,21 +1099,6 @@ class Divider(ThemedMixin, BoxLayout):
             Rectangle(pos=self.pos, size=self.size)
 
 
-class SectionLabel(ThemedLabel):
-    """Section header label with consistent styling."""
-
-    def __init__(self, **kwargs):
-        kwargs.setdefault("font_size", F.H2)
-        kwargs.setdefault("bold", True)
-        kwargs.setdefault("color", C.TEXT_SECONDARY)
-        kwargs.setdefault("size_hint_y", None)
-        kwargs.setdefault("height", S.ROW_SM)
-        kwargs.setdefault("halign", "left")
-        kwargs.setdefault("valign", "middle")
-        super().__init__(**kwargs)
-        self.bind(size=self.setter("text_size"))
-
-
 _MODAL_PAD = dp(12)  # Popup's frame padding, so in-screen modal cards match it
 
 
@@ -1452,20 +1437,6 @@ class PresetRow(BoxLayout):
                 btn.bg_color = self._default_bg
                 btn.text_color = self._default_text
                 btn.bold = False
-
-
-class IconLabel(ThemedLabel):
-    """Label that renders a text icon character at a given size."""
-
-    def __init__(self, icon="", **kwargs):
-        kwargs.setdefault("font_size", F.H2)
-        kwargs.setdefault("color", C.TEXT_SECONDARY)
-        kwargs.setdefault("size_hint_x", None)
-        kwargs.setdefault("width", dp(28))
-        kwargs.setdefault("halign", "center")
-        kwargs.setdefault("valign", "middle")
-        super().__init__(text=icon, **kwargs)
-        self.bind(size=self.setter("text_size"))
 
 
 class BottomNav(BoxLayout):
