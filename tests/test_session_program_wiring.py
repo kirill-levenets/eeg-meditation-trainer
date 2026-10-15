@@ -141,7 +141,7 @@ def test_program_custom_formula_plots_and_marks():
     app._audio_metric_key = "shamatha_score"
     app._program_run = run = make_run(app)
     run.begin(SessionProgram([{"minutes": 1, "target": 120, "formula": {"name": "AlphaPwr", "formula": "alpha1"}}]),
-              [])  # what a program session's start does
+              [], "")  # what a program session's start does
 
     metrics = {"shamatha_score": 50}
     run.tick(metrics, {"alpha1": 80.0})
@@ -174,7 +174,7 @@ def test_program_shows_exactly_its_metric_set_whole_session():
         {"minutes": 1, "target": 50, "formula": "shamatha_score"},
         {"minutes": 1, "target": 80, "formula": {"name": "Alpha", "formula": "alpha1"}},
     ])
-    run.begin(prog, [])
+    run.begin(prog, [], "")
     # Exactly the program's set, shown the whole program:
     assert graph.is_visible("shamatha_score") is True      # built-in program metric
     assert graph.is_visible("program_formula") is True     # custom line shown all program
@@ -216,7 +216,7 @@ def test_program_with_two_distinct_customs_shows_three_lines():
         {"minutes": 1, "target": 75, "formula": {"name": "A", "formula": "alpha1"}},
         {"minutes": 1, "target": 90, "formula": {"name": "B", "formula": "beta1"}},
     ])
-    run.begin(prog, [])
+    run.begin(prog, [], "")
 
     # Three distinct lines, all visible the whole program.
     assert set(g.visible_keys()) == {"shamatha_score", "program_formula", "program_formula_2"}
@@ -326,7 +326,7 @@ def test_a_running_programs_series_are_not_saved_once_settings_is_switched_to_si
     app._live_screen = LiveSessionScreen()
     app._formulas = FormulaSlots()
     app._program_run = make_run(app)
-    app._program_run.begin(SessionProgram([{"minutes": 1, "target": 50, "formula": "meditation_score"}]), [])
+    app._program_run.begin(SessionProgram([{"minutes": 1, "target": 50, "formula": "meditation_score"}]), [], "")
     app._program_settings = _program_settings(db, uid)  # mode "simple": switched back mid-session
     app._graph_series = make_graph_series(app)
     app._graph_series.persist(app._live_screen.graph)

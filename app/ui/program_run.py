@@ -46,6 +46,7 @@ class ProgramRun:
         self._on_main = on_main
         self._formula_vars = formula_vars
         self.program: SessionProgram | None = None
+        self.name = ""  # the program's name at the start; Settings may load or save another during the session
         self.audio_key = ""  # the active segment's metric; transient, never written to the user's baseline
         self.formula_evs: dict[str, CustomFormulaEvaluator] = {}  # slot key -> evaluator, one per distinct custom
         self.seg_idx = -1
@@ -61,12 +62,13 @@ class ProgramRun:
         """True for a program line the running program evaluates every tick."""
         return self.active and key in self.formula_evs
 
-    def begin(self, prog: SessionProgram | None, feedback_ids: list[str]) -> None:
+    def begin(self, prog: SessionProgram | None, feedback_ids: list[str], name: str) -> None:
         """Session start: a simple session (None) runs none. A program snapshots the graph's visibility, shows EXACTLY
         its metric set for the whole session, and arms one persistent evaluator per distinct custom formula. Each custom
         line is shown the whole program (not per-segment) and evaluated every tick, so only the legend marker changes
         as segments cross."""
         self.program = prog
+        self.name = name if prog is not None else ""
         self.seg_idx = -1
         self.audio_key = ""
         self.formula_evs = {}
@@ -88,6 +90,7 @@ class ProgramRun:
         for slot in PROGRAM_FORMULA_KEYS:
             graph.set_series_name(slot, SERIES_NAMES.get(slot, "Program"))  # drop stale labels
         self.program = None
+        self.name = ""
         self.formula_evs = {}
         self._segment_keys = []
         self._feedback_ids = []

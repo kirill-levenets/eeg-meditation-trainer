@@ -77,7 +77,7 @@ def _picker_rows(app, monkeypatch) -> list[str]:
 
 def _run_program(app, segments) -> None:
     prog = SessionProgram(segments)
-    app._program_run.begin(prog, [])  # as a program session's start does
+    app._program_run.begin(prog, [], "")  # as a program session's start does
 
 
 def test_a_program_of_built_in_metrics_lists_no_program_lines(app, monkeypatch):

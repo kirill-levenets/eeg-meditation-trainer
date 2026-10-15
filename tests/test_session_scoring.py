@@ -128,10 +128,18 @@ def test_the_saved_stats_carry_the_scored_metric_and_its_name():
 @pytest.mark.parametrize("name,recorded", [("Evening program", "Evening program"), ("", "Program")])
 def test_a_program_session_records_program_its_name_and_no_average(name, recorded):
     app = _app()
-    app._program_run = make_run(program=MagicMock(segments=[{"duration": 60}]))
-    app._program_settings.name = name
+    app._program_run = make_run(program=MagicMock(segments=[{"duration": 60}]), name=name)
     stats = app._with_score(_run(app, SHAMATHA_HIGH))
     assert (stats["score_metric_key"], stats["score_metric_name"], stats["avg_score"]) == ("program", recorded, None)
+
+
+def test_a_program_session_keeps_the_name_of_the_program_it_ran():
+    # Settings loads or saves another program during the session: the editor's name changes, not the run's.
+    app = _app()
+    app._program_run = make_run(program=MagicMock(segments=[{"duration": 60}]), name="Evening program")
+    app._program_settings.name = "Morning program"
+    stats = app._with_score(_run(app, SHAMATHA_HIGH))
+    assert stats["score_metric_name"] == "Evening program"
 
 
 def _valid():

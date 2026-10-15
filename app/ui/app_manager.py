@@ -1005,7 +1005,7 @@ class EEGMeditationApp(App):
             fb_sources, fb_ids, fb_initial = self._feedback_plan(program, gid)
         else:
             fb_sources, fb_ids, fb_initial = {gid: self._source_spec(gid)}, [], gid
-        self._program_run.begin(program, fb_ids)
+        self._program_run.begin(program, fb_ids, self._program_settings.name)
         # Above-threshold reward channel (global; "" = none). Add its player to the set.
         reward_id = self._reward_id()
         if reward_id:
@@ -1917,7 +1917,7 @@ class EEGMeditationApp(App):
             return stats
         if self._program_run.active:
             return {**stats, "score_metric_key": "program",
-                    "score_metric_name": self._program_settings.name or "Program", "avg_score": None}
+                    "score_metric_name": self._program_run.name or "Program", "avg_score": None}
         key = stats.get("score_metric_key") or self._audio_drive_key()  # no scored tick yet: what it would score
         return {**stats, "score_metric_key": key, "score_metric_name": self._live_screen.graph.series_name(key)}
 
