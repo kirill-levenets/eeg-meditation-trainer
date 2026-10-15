@@ -15,6 +15,7 @@ from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.live_mirror import LiveMirror
 from tests._program_run import make_run
+from tests._recorder import make_recorder
 
 SID = 42
 
@@ -31,7 +32,7 @@ def _app() -> EEGMeditationApp:
     app._live_screen.summary_session_id = SID
     app._live_screen.summary_notes = ""
     app._summary_saved_notes = ""
-    app._current_session_id = None
+    app._recorder = make_recorder(app)
     app._mirror = LiveMirror()
     app._toast = MagicMock()
     app._history_screen = MagicMock()
@@ -68,7 +69,7 @@ def test_user_stop_restores_program_series_and_clears_the_training_marker():
     app = _app()
     app._ticker = MagicMock(running=False)
     app._persist_session_data = MagicMock(return_value={"duration": 30})
-    app._current_session_id = SID
+    app._recorder.session_id = SID
     for name in ("_program_run", "_release_wake_lock",
                  "_stop_session_keep_alive_service"):
         setattr(app, name, MagicMock())
@@ -101,10 +102,10 @@ def _recorded_session(db) -> EEGMeditationApp:
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._db = db
     app._current_user_id = db.create_user("t")
-    app._current_session_id = None
+    app._recorder = make_recorder(app)
     app._mirror = LiveMirror()
-    app._metrics_buffer = []
-    app._flush_counter = 0
+    app._recorder._buffer = []
+    app._recorder._flush_counter = 0
     app._session_manager = SessionManager()
     app._session_manager.start()
     app._with_score = lambda stats: stats
@@ -120,9 +121,9 @@ def _recorded_session(db) -> EEGMeditationApp:
         setattr(app, name, MagicMock())
     for _ in range(240):
         metrics = {"shamatha_score": 70, "meditation_score": 60}
-        app._record_tick(metrics, {"timestamp": 0.0, **metrics})
+        app._recorder.record(metrics, {"timestamp": 0.0, **metrics})
     app._session_manager._start_time = time.time() - 120
-    app._checkpoint_session()
+    app._recorder.checkpoint()
     return app
 
 
@@ -142,11 +143,11 @@ def test_a_stop_confirmed_after_the_session_ended_another_way_keeps_it(db, ended
     if ended_by == "headset off":  # the stale-data stop queued behind the tap
         app._stop_and_save(reason="stale_data")
     else:  # the tick thread saved the timed session; its UI teardown runs on the main thread
-        app._finalize_stop_ui(app._persist_session_data("timer"), app._current_session_id)
-    saved = _stored(db, app._current_session_id)
+        app._finalize_stop_ui(app._persist_session_data("timer"), app._recorder.session_id)
+    saved = _stored(db, app._recorder.session_id)
     assert saved is not None and saved[0] >= 119 and saved[1] == 240
     on_ok()  # the user confirms the Stop
-    assert _stored(db, app._current_session_id) == saved  # still there, unchanged
+    assert _stored(db, app._recorder.session_id) == saved  # still there, unchanged
 
 
 # --- Delete: only after confirmation, through the shared delete -------------------------------------------------

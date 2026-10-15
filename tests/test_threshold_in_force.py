@@ -23,6 +23,7 @@ from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
 from tests._program_run import make_run
 from tests._program_settings import make_programs
+from tests._recorder import make_recorder
 from tests.test_bt_wait_reconnect import wait  # noqa: F401  (fixture)
 from tests.test_resume_mirror import _drive_tick, _make_tick_app, _metrics, _raw_sample
 from tests.test_session_detail_open import _frames, app, db  # noqa: F401  (fixtures)
@@ -37,6 +38,7 @@ def _threshold_app(*, program: bool = False, state: SessionState = SessionState.
     a._persist_user_setting_later = MagicMock()
     a._loading_settings = False
     a._ticker = MagicMock(running=False)
+    a._recorder = make_recorder(a)
     a._program_run = make_run(a, program=MagicMock() if program else None)
     a._mirror = LiveMirror()
     a._shamatha_threshold = 70
@@ -155,7 +157,7 @@ def test_each_ticks_row_and_mirror_point_record_its_target():
         if i == 2:
             a._apply_threshold(85)
         _drive_tick(a, _raw_sample(), _metrics(seed=80.0))
-    assert [(r["score_key"], r["score_value"], r["score_target"]) for r in a._metrics_buffer] == [
+    assert [(r["score_key"], r["score_value"], r["score_target"]) for r in a._recorder._buffer] == [
         ("shamatha_score", 80.0, 70), ("shamatha_score", 80.0, 70), ("shamatha_score", 80.0, 85)]
     assert [m["score_target"] for m in a._mirror.metrics] == [70, 70, 85]
     assert [c.kwargs["threshold"] for c in _ui_updates(a)] == [70, 70, 85]
@@ -174,7 +176,7 @@ def test_a_tick_the_session_paused_under_is_not_recorded():
     a._session_manager.add_metric = pause_first
     a._pending_marker = True
     _drive_tick(a, _raw_sample(), _metrics())
-    assert a._metrics_buffer == [] and len(a._mirror.metrics) == 0
+    assert a._recorder._buffer == [] and len(a._mirror.metrics) == 0
     a._on_main.assert_not_called()
     assert a._pending_marker  # it goes on the next tick that is recorded
 

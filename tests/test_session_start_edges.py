@@ -17,6 +17,7 @@ from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.live_mirror import LiveMirror
 from tests._program_run import make_run
+from tests._recorder import make_recorder
 
 BANDS = {"delta": 10.0, "theta": 10.0, "alpha1": 10.0, "alpha2": 10.0, "beta1": 10.0, "beta2": 10.0,
          "gamma1": 10.0, "gamma2": 10.0, "signal_quality": 0}
@@ -141,8 +142,8 @@ def test_deleting_the_profile_in_the_frame_the_session_starts_leaves_no_audio_pl
     app = _waiting(_app())
     app._handle_bt_wait()  # data arrived: the "Running" UI + audio are queued
     app._db = MagicMock()
-    app._current_session_id = None
-    app._metrics_buffer = []
+    app._recorder = make_recorder(app)
+    app._recorder._buffer = []
     app._mirror = MagicMock()
     app._mark_history_dirty = MagicMock()
     app._discard_running_session()
@@ -276,15 +277,15 @@ def test_a_session_row_is_dated_and_named_at_the_session_start(monkeypatch):
     try:
         app = _app()
         app._db = db
-        app._current_session_id = None
-        app._metrics_buffer = [{"timestamp": 0.5, "shamatha_score": 70}]
+        app._recorder = make_recorder(app)
+        app._recorder._buffer = [{"timestamp": 0.5, "shamatha_score": 70}]
         app._with_score = lambda stats: stats
         app._session_custom_formulas_json = lambda: ""
         app._session_manager.start()
         started = time.time() - 3 * 3600  # the first checkpoint lands well after the start
         app._session_manager._start_time = started
-        app._checkpoint_session()
-        row = db.get_session(app._current_session_id)
+        app._recorder.checkpoint()
+        row = db.get_session(app._recorder.session_id)
         assert row["date_time"][:19] == datetime.datetime.fromtimestamp(started).isoformat()[:19]
         assert row["session_name"] == time.strftime("%Y-%m-%d %H:%M", time.localtime(started)) + " - Mock"
     finally:

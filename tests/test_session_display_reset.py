@@ -5,6 +5,7 @@ import app.ui.app_manager as am
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.live_mirror import LiveMirror
 from app.ui.live_session import LiveSessionScreen
+from tests._recorder import make_recorder
 
 METRICS = {"shamatha_score": 71, "distraction": 22, "sinking": 9, "native_attention": 55, "native_meditation": 63}
 STATS = {"avg_shamatha": 64.2, "avg_meditation": 58.0, "time_above_threshold": 120, "time_shamatha_90": 30,
@@ -247,7 +248,8 @@ def test_deleting_the_shown_session_in_history_drops_it_from_the_session_screen(
     app._history_screen = MagicMock()
     app._session_manager = MagicMock(state=am.SessionState.IDLE)
     app._live_screen = MagicMock(summary_session_id=None)  # its card was closed with OK; its graphs still show
-    app._current_session_id = 9
+    app._recorder = make_recorder(app)
+    app._recorder.session_id = 9
     app._on_main = lambda fn: fn()
     app._drop_shown_session = MagicMock()
     for name in ("_refresh_history", "show_loading", "hide_loading", "_session_pipeline_live"):

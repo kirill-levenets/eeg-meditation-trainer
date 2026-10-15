@@ -14,6 +14,7 @@ from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from tests._program_run import make_run
 from tests._program_settings import make_programs
+from tests._recorder import make_recorder
 from tests.test_resume_mirror import _drive_tick, _make_tick_app, _metrics, _raw_sample
 
 
@@ -248,9 +249,9 @@ def test_the_partial_flush_saves_the_scored_metric():
     from app.config import APP
     app = _make_tick_app()
     app._program_settings.mode = "simple"
-    app._current_session_id = None
-    app._metrics_buffer = [{"shamatha_score": 1.0}]
-    app._flush_counter = int(APP.FLUSH_INTERVAL_SECONDS / APP.UPDATE_FREQUENCY) - 1  # this tick flushes
+    app._recorder = make_recorder(app)
+    app._recorder._buffer = [{"shamatha_score": 1.0}]
+    app._recorder._flush_counter = int(APP.FLUSH_INTERVAL_SECONDS / APP.UPDATE_FREQUENCY) - 1  # this tick flushes
     app._session_manager.compute_statistics.return_value = {"duration": 60, "score_metric_key": "shamatha_score",
                                                             "avg_score": 52.5}
     app._live_screen.graph.series_name.return_value = "Shamatha"

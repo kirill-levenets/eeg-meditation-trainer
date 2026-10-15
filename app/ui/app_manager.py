@@ -39,6 +39,7 @@ from app.metrics.formula_slots import (
 )
 from app.metrics.noise_detector import PowerLineDetector
 from app.session.manager import SessionManager, SessionState, elapsed_clock
+from app.session.recorder import SessionRecorder
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
     segment_target,
@@ -215,10 +216,10 @@ class EEGMeditationApp(App):
         # doesn't accumulate thousands of Clock callbacks that flood the
         # main loop on resume (which previously caused a black screen).
         self._is_paused: bool = False
-        self._metrics_buffer: list[dict] = []
         self._mirror: LiveMirror = LiveMirror()  # the live graphs' session, kept through a screen lock
-        self._flush_counter: int = 0
-        self._current_session_id: Optional[int] = None
+        self._recorder: SessionRecorder = SessionRecorder(
+            self._db, self._session_manager, with_score=lambda stats: self._with_score(stats),
+            row_fields=lambda: self._session_row_fields())
         self._current_user_id: Optional[int] = None
         # True while _load_user_settings applies values, so its change callbacks don't re-persist them.
         self._loading_settings: bool = False
@@ -1042,10 +1043,8 @@ class EEGMeditationApp(App):
         self._put_threshold_in_force(threshold)  # this session's, whatever the last one left running
         self._metrics_engine.reset()
         self._noise_detector = PowerLineDetector() if not APP.USE_MOCK_DEVICE else None
-        self._metrics_buffer = []
-        self._flush_counter = 0
+        self._recorder.begin()
         self._tick_count = 0
-        self._current_session_id = None
         self._bt_connected_notified = False
         self._pending_marker = False
         self._bt_connect_start = time.time()
@@ -1204,7 +1203,7 @@ class EEGMeditationApp(App):
     def _checkpoint_or_report(self) -> None:
         """Checkpoint a running session where a failure must not stop what follows (leaving the app, a backup)."""
         try:
-            self._checkpoint_session()
+            self._recorder.checkpoint()
         except Exception as exc:
             logger.exception("Session checkpoint failed")
             report_soft_error("session_checkpoint_failed", f"The running session could not be saved: {exc}")
@@ -1308,56 +1307,15 @@ class EEGMeditationApp(App):
             self._eeg_stream.stop()
 
         if stats:
-            self._checkpoint_session(stats)
+            self._recorder.checkpoint(stats)
         return stats
 
-    def _checkpoint_session(self, stats: dict | None = None) -> None:
-        """Bring the session's row and its buffered ticks into the DB in one transaction (any thread, no Kivy).
-
-        Every snapshot point uses it: the 60 s flush, the final save (with the stop's `stats`), leaving the app and a
-        backup. A process killed between checkpoints keeps the row and the data of the last one, which agree.
-        """
-        with self._checkpoint_lock:
-            if stats is None:
-                sm = getattr(self, "_session_manager", None)  # leaving the app may come before build() made it
-                if sm is None or sm.state not in (SessionState.RUNNING, SessionState.PAUSED):
-                    return
-                stats = self._with_score(self._session_manager.compute_statistics())
-            batch, self._metrics_buffer = self._metrics_buffer, []
-            try:
-                sid = self._db.checkpoint_session(
-                    self._current_session_id, stats, batch,
-                    user_id=self._current_user_id,
-                    session_name=self._make_session_name(),
-                    custom_formulas=self._session_custom_formulas_json(),
-                    session_program=self._program_run.segments_json(),
-                    engine_version=MetricsEngine.ENGINE_VERSION,
-                    started_at=self._session_manager.started_at or None,
-                )
-            except Exception:
-                self._metrics_buffer[:0] = batch  # kept for the next checkpoint
-                raise
-            self._flush_counter = 0
-            if sid is None:
-                logger.error("Session checkpoint skipped — DB shutting down; session NOT persisted")
-                return
-            self._current_session_id = sid
-
-    def _record_tick(self, metrics: dict, full_record: dict) -> float | None:
-        """Score a tick and buffer its stamped row, as one step for a checkpoint: its target, or None if not scored."""
-        with self._checkpoint_lock:
-            score = self._session_manager.add_metric(metrics)
-            if not score:
-                return None
-            full_record.update(score)
-            self._metrics_buffer.append(full_record)
-        return score["score_target"]
-
-    def _flush_tick(self) -> None:
-        """Every FLUSH_INTERVAL_SECONDS of ticks, checkpoint the session: its row as well as its data."""
-        self._flush_counter += 1
-        if self._flush_counter >= int(APP.FLUSH_INTERVAL_SECONDS / APP.UPDATE_FREQUENCY) and self._metrics_buffer:
-            self._checkpoint_session()
+    def _session_row_fields(self) -> dict:
+        """The running session's row, apart from its stats and ticks, as a checkpoint writes it."""
+        return {"user_id": self._current_user_id, "session_name": self._make_session_name(),
+                "custom_formulas": self._session_custom_formulas_json(),
+                "session_program": self._program_run.segments_json(), "engine_version": MetricsEngine.ENGINE_VERSION,
+                "started_at": self._session_manager.started_at or None}
 
     def _finalize_stop_ui(self, stats: dict, session_id: Optional[int]) -> None:
         """Main-thread UI teardown after a session has been persisted."""
@@ -1416,11 +1374,7 @@ class EEGMeditationApp(App):
         if APP.USE_MOCK_DEVICE:
             self._eeg_stream.stop()
         self._audio.stop()
-        if self._current_session_id is not None:
-            self._db.delete_session(self._current_session_id)
-            logger.info(f"Session {self._current_session_id} discarded (profile deleted)")
-            self._current_session_id = None
-        self._metrics_buffer = []
+        self._recorder.discard()
         self._finalize_stop_ui(None, None)
 
     def _stop_and_save(self, reason: str = "user") -> None:
@@ -1429,7 +1383,7 @@ class EEGMeditationApp(App):
         self._ticker.stop()
         stats = self._persist_session_data(reason)
         self._audio.stop()
-        self._finalize_stop_ui(stats, self._current_session_id)
+        self._finalize_stop_ui(stats, self._recorder.session_id)
         logger.info(
             f"Session stopped and saved (took {time.monotonic() - t_start:.3f}s)"
         )
@@ -1717,7 +1671,7 @@ class EEGMeditationApp(App):
         if _marker_pending:
             self._pending_marker = False
             full_record["marker"] = 1
-        target = self._record_tick(metrics, full_record)
+        target = self._recorder.record(metrics, full_record)
         if target is None:  # the session paused or stopped while this tick was read: it isn't part of it
             self._pending_marker |= _marker_pending  # the marker goes on the next recorded tick
             return
@@ -1786,7 +1740,7 @@ class EEGMeditationApp(App):
             # event handler on the main Looper, which is PAUSED during lock —
             # so the save never ran and the whole session was lost.)
             stats = self._persist_session_data(reason="timer")
-            session_id = self._current_session_id
+            session_id = self._recorder.session_id
             # Silence the noise with a non-blocking volume→0 (setVolume is a
             # direct native call, safe from this thread even while locked).
             # The real stop()/release() teardown is deferred to the main
@@ -1809,7 +1763,7 @@ class EEGMeditationApp(App):
             self._audio.play_timer_sound(self._timer_state.custom_sound_path)
             return
 
-        self._flush_tick()  # DB opened with check_same_thread=False
+        self._recorder.flush_tick()  # DB opened with check_same_thread=False
 
     def _on_key_down(self, window, key, scancode, codepoint, modifiers) -> bool:
         """Handle keyboard hotkey for marker."""
@@ -2415,7 +2369,7 @@ class EEGMeditationApp(App):
         once deleted; on_done(False) when refused or failed, with nothing deleted."""
         ids = list(session_ids)
         done = on_done or (lambda _ok: None)
-        if self._session_pipeline_live() and self._current_session_id in ids:
+        if self._session_pipeline_live() and self._recorder.session_id in ids:
             # Its row is in History after the first checkpoint; its next checkpoints would write data for no session.
             self._info_popup("Session in progress",
                              "Stop the session first: a running session can't be deleted. Nothing was deleted.")
@@ -2433,7 +2387,7 @@ class EEGMeditationApp(App):
                 done(False)
                 return
             logger.info(f"Deleted {format_count(len(ids), 'session')} {ids} in {(time.monotonic() - t0) * 1000:.0f} ms")
-            if self._current_session_id in ids or self._live_screen.summary_session_id in ids:
+            if self._recorder.session_id in ids or self._live_screen.summary_session_id in ids:
                 self._drop_shown_session(keep_notes=False)  # the Session screen shows a session that's gone
             self._history_screen.remove_sessions(ids)
             done(True)
@@ -2514,8 +2468,6 @@ class EEGMeditationApp(App):
         self._history_screen.set_select_mode(False)
         self._info_popup("Export complete", f"Exported {format_count(count, 'session')} to:\n{dest}")
 
-    # A tick (session stats + buffered row) and a checkpoint's snapshot of both, one at a time; one app per process.
-    _checkpoint_lock = threading.Lock()
     # Each Start and each ending (_undo_session_setup) moves it on: a callback queued for an earlier attempt (the device
     # scan's result, the BT wait's UI and audio) sees it has changed and does nothing.
     _start_attempt: int = 0
@@ -2531,7 +2483,7 @@ class EEGMeditationApp(App):
         if self._session_pipeline_live():
             # The running session's row exists from its first checkpoint, with stats as of that checkpoint: History
             # lists finished sessions only, and the ending marks History dirty so it appears then.
-            sessions = [s for s in sessions if s.get("id") != self._current_session_id]
+            sessions = [s for s in sessions if s.get("id") != self._recorder.session_id]
         view = (self._current_user_id, self._view_all_users)
         self._history_screen.load_sessions(sessions, keep_filter=view == self._history_view)
         self._history_view = view

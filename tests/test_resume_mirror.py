@@ -30,6 +30,7 @@ from app.ui.live_mirror import LiveMirror
 from app.ui.live_session import METRICS_COLORS
 from tests._program_run import make_run
 from tests._program_settings import make_programs
+from tests._recorder import make_recorder
 
 BAND_KEYS = ("alpha", "beta", "gamma", "theta", "delta")
 
@@ -91,8 +92,7 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     app._timer_state = MagicMock()
     app._timer_state.tick.return_value = False  # never expire
 
-    app._metrics_buffer = []
-    app._flush_counter = 0  # 60s flush never triggers within these short tests
+    app._recorder = make_recorder(app)  # its 60s flush never triggers within these short tests
     app._pending_marker = False
     app._on_main = MagicMock()
     app._is_paused = is_paused
@@ -101,7 +101,6 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     # Persistence deps (used by the timer-expiry path via _persist_session_data).
     app._db = MagicMock()
     app._db.checkpoint_session.return_value = 42
-    app._current_session_id = None
     app._current_user_id = 1
     app._make_session_name = MagicMock(return_value="sess")
     app._ticker = TickThread(lambda dt: None)  # as __init__ leaves it: not started
@@ -442,7 +441,7 @@ def test_timer_expiry_persists_on_tick_thread():
     app._timer_state.tick.return_value = True  # expire on this tick
     app._timer_state.custom_sound_path = ""
     app._session_manager.stop.return_value = {"duration": 100}
-    app._metrics_buffer = [{"shamatha_score": 1.0}]
+    app._recorder._buffer = [{"shamatha_score": 1.0}]
 
     _drive_tick(app, _raw_sample(), _metrics())
 
@@ -469,7 +468,7 @@ def test_timer_expiry_leaves_no_live_pipeline_behind():
     app._timer_state.tick.return_value = True
     app._timer_state.custom_sound_path = ""
     app._session_manager.stop.return_value = {"duration": 100}
-    app._metrics_buffer = []
+    app._recorder._buffer = []
     app._waiting_for_bt = False
     app._ticker._thread = MagicMock()  # the running SessionTick thread
 
@@ -493,7 +492,7 @@ def test_timer_expiry_persists_before_muting_audio():
     app._timer_state.tick.return_value = True
     app._timer_state.custom_sound_path = ""
     app._session_manager.stop.return_value = {"duration": 100}
-    app._metrics_buffer = [{"shamatha_score": 1.0}]
+    app._recorder._buffer = [{"shamatha_score": 1.0}]
 
     calls = []
     app._session_manager.stop.side_effect = lambda **k: calls.append("stop") or {"duration": 100}
@@ -510,7 +509,7 @@ def test_timer_expiry_updates_existing_session_row():
     app._timer_state.tick.return_value = True
     app._timer_state.custom_sound_path = ""
     app._session_manager.stop.return_value = {"duration": 100}
-    app._current_session_id = 7  # row already created by a prior flush
+    app._recorder.session_id = 7  # row already created by a prior flush
 
     _drive_tick(app, _raw_sample(), _metrics())
 

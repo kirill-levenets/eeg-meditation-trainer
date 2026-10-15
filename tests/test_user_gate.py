@@ -18,6 +18,7 @@ import app.ui.backup_flow as bf
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp, resolve_startup_user, sessions_for_view
 from tests._backup_flow import make_flow
+from tests._recorder import make_recorder
 
 _TMP_DIRS: list[str] = []
 
@@ -124,6 +125,7 @@ def test_on_pause_flushes_settings_normally():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._restoring = False
     app._save_user_settings = MagicMock()
+    app._recorder = MagicMock()  # no session running
     EEGMeditationApp.on_pause(app)
     app._save_user_settings.assert_called_once()
 
@@ -195,13 +197,14 @@ def test_discard_running_session_deletes_partial_row_and_resets_ui():
     app._eeg_stream = MagicMock()
     app._audio = MagicMock()
     app._db = MagicMock()
-    app._current_session_id = 42     # partial flush happened
-    app._metrics_buffer = [{"t": 1}]
+    app._recorder = make_recorder(app)
+    app._recorder.session_id = 42     # partial flush happened
+    app._recorder._buffer = [{"t": 1}]
     app._finalize_stop_ui = MagicMock()
     EEGMeditationApp._discard_running_session(app)
     app._db.delete_session.assert_called_once_with(42)   # orphan removed
-    assert app._current_session_id is None
-    assert app._metrics_buffer == []
+    assert app._recorder.session_id is None
+    assert app._recorder._buffer == []
     app._finalize_stop_ui.assert_called_once_with(None, None)  # shared teardown
 
 

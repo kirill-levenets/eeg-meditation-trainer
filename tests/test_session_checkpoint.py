@@ -16,6 +16,7 @@ from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from tests._backup_flow import make_flow
 from tests._program_run import make_run
+from tests._recorder import make_recorder
 
 
 @pytest.fixture
@@ -74,9 +75,9 @@ def _app(db) -> EEGMeditationApp:
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._db = db
     app._current_user_id = db.create_user("t")
-    app._current_session_id = None
-    app._metrics_buffer = []
-    app._flush_counter = 0
+    app._recorder = make_recorder(app)
+    app._recorder._buffer = []
+    app._recorder._flush_counter = 0
     app._session_manager = SessionManager()
     app._session_manager.start()
     app._with_score = lambda stats: stats
@@ -89,7 +90,7 @@ def _app(db) -> EEGMeditationApp:
 def _ticks(app, n: int) -> None:
     for _ in range(n):
         metrics = {"shamatha_score": 70, "meditation_score": 60}
-        app._record_tick(metrics, {"timestamp": 0.0, **metrics})
+        app._recorder.record(metrics, {"timestamp": 0.0, **metrics})
 
 
 def _run_for(app, seconds: float) -> None:
@@ -108,9 +109,9 @@ def test_every_tick_flush_brings_the_row_up_to_date():
             _ticks(app, per_flush)
             _run_for(app, 60 * minute)
             for _ in range(per_flush):
-                app._flush_tick()
-        assert _row(db, app._current_session_id) == (120, 2 * per_flush)
-        assert app._metrics_buffer == []
+                app._recorder.flush_tick()
+        assert _row(db, app._recorder.session_id) == (120, 2 * per_flush)
+        assert app._recorder._buffer == []
     finally:
         db.close()
         os.remove(path)
@@ -124,7 +125,7 @@ def test_leaving_the_app_mid_session_checkpoints_it(db):
     _ticks(app, 50)  # under a minute: nothing flushed yet
     _run_for(app, 25)
     app._flush_on_leave()
-    assert _row(db, app._current_session_id) == (25, 50)
+    assert _row(db, app._recorder.session_id) == (25, 50)
 
 
 def test_leaving_the_app_without_a_session_writes_nothing(db):
@@ -143,7 +144,7 @@ def test_a_backup_holds_the_running_session_as_of_the_backup(db, monkeypatch):
     _ticks(app, 40)
     _run_for(app, 20)
     seen = []
-    monkeypatch.setattr(bf._backup, "make_backup", lambda d, path: seen.append(_row(d, app._current_session_id)))
+    monkeypatch.setattr(bf._backup, "make_backup", lambda d, path: seen.append(_row(d, app._recorder.session_id)))
     monkeypatch.setattr(bf.threading, "Thread", lambda target, **k: MagicMock(start=target))
     monkeypatch.setattr(bf.Clock, "schedule_once", lambda *a, **k: None)
     flow._run_backup_async("/tmp/unused.db")
@@ -162,7 +163,7 @@ def test_a_tick_recorded_during_a_checkpoint_waits_for_it_and_is_kept(db):
         return real(*a, **k)
 
     db.checkpoint_session = slow
-    writer = threading.Thread(target=app._checkpoint_session)
+    writer = threading.Thread(target=app._recorder.checkpoint)
     writer.start()
     assert started.wait(2)
     ticker = threading.Thread(target=_ticks, args=(app, 1))
@@ -172,8 +173,8 @@ def test_a_tick_recorded_during_a_checkpoint_waits_for_it_and_is_kept(db):
     release.set()
     writer.join(2)
     ticker.join(2)
-    assert len(app._metrics_buffer) == 1  # recorded after the snapshot, kept for the next checkpoint
-    assert _row(db, app._current_session_id)[1] == 10
+    assert len(app._recorder._buffer) == 1  # recorded after the snapshot, kept for the next checkpoint
+    assert _row(db, app._recorder.session_id)[1] == 10
 
 
 def test_an_android_backup_holds_the_running_session_as_of_the_backup(db, monkeypatch):
@@ -184,7 +185,7 @@ def test_an_android_backup_holds_the_running_session_as_of_the_backup(db, monkey
     seen = []
 
     def snapshot(d):
-        seen.append(_row(d, app._current_session_id))
+        seen.append(_row(d, app._recorder.session_id))
         raise OSError("stop here")  # the copy itself isn't under test
 
     monkeypatch.setattr(bf._backup, "online_backup_to_tempfile", snapshot)
@@ -199,12 +200,12 @@ def test_a_failed_checkpoint_keeps_the_ticks_for_the_next_one(db, monkeypatch):
     real = db.checkpoint_session
     monkeypatch.setattr(db, "checkpoint_session", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("locked")))
     with pytest.raises(RuntimeError):
-        app._checkpoint_session()
-    assert len(app._metrics_buffer) == 20
+        app._recorder.checkpoint()
+    assert len(app._recorder._buffer) == 20
     monkeypatch.setattr(db, "checkpoint_session", real)
     _ticks(app, 5)
-    app._checkpoint_session()
-    assert _row(db, app._current_session_id)[1] == 25
+    app._recorder.checkpoint()
+    assert _row(db, app._recorder.session_id)[1] == 25
 
 
 # ---- review round: a paused session, and a failing checkpoint never blocks the rest ----
@@ -229,7 +230,7 @@ def test_leaving_the_app_while_paused_checkpoints_the_length_before_the_pause(db
     _run_for(app, 300)
     app._session_manager.pause()
     app._flush_on_leave()
-    duration, rows = _row(db, app._current_session_id)
+    duration, rows = _row(db, app._recorder.session_id)
     assert 299 <= duration <= 301 and rows == 600
 
 

@@ -13,6 +13,8 @@ These behaviors are critical for Android screen-lock UX:
 
 from unittest.mock import MagicMock
 
+from tests._recorder import make_recorder
+
 
 def _make_minimal_app():
     """Construct an EEGMeditationApp instance with stubbed dependencies.
@@ -33,6 +35,7 @@ def _make_minimal_app():
     app._session_manager.elapsed_formatted = "0:00"
     app._live_screen = MagicMock()
     app._live_screen.summary_session_id = None  # no session-end card open
+    app._recorder = make_recorder(app)
     return app
 
 
