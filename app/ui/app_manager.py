@@ -216,7 +216,6 @@ class EEGMeditationApp(App):
         # main loop on resume (which previously caused a black screen).
         self._is_paused: bool = False
         self._metrics_buffer: list[dict] = []
-        self._raw_buffer: list[dict] = []
         self._mirror: LiveMirror = LiveMirror()  # the live graphs' session, kept through a screen lock
         self._flush_counter: int = 0
         self._current_session_id: Optional[int] = None
@@ -1044,7 +1043,6 @@ class EEGMeditationApp(App):
         self._metrics_engine.reset()
         self._noise_detector = PowerLineDetector() if not APP.USE_MOCK_DEVICE else None
         self._metrics_buffer = []
-        self._raw_buffer = []
         self._flush_counter = 0
         self._tick_count = 0
         self._current_session_id = None
@@ -1723,7 +1721,6 @@ class EEGMeditationApp(App):
         if target is None:  # the session paused or stopped while this tick was read: it isn't part of it
             self._pending_marker |= _marker_pending  # the marker goes on the next recorded tick
             return
-        self._raw_buffer.append(raw_sample)
 
         # Audio is thread-safe — update directly
         self._audio.update(metrics.get(drive_key, 0))

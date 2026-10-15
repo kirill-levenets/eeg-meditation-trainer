@@ -92,7 +92,6 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     app._timer_state.tick.return_value = False  # never expire
 
     app._metrics_buffer = []
-    app._raw_buffer = []
     app._flush_counter = 0  # 60s flush never triggers within these short tests
     app._pending_marker = False
     app._on_main = MagicMock()
