@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 from app.metrics.formula_slots import FORMULA_KEYS, FormulaSlots, read_active
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
+from tests._formula_settings import make_formula_settings
 from tests._program_run import make_run
 
 
@@ -57,7 +58,7 @@ class TestFormulaPersistence(unittest.TestCase):
             {"name": "Ratio", "formula": "alpha + beta"},
             {"name": "Med", "formula": "meditation_score"},
         ])
-        self.app._persist_active_formulas(self.uid)
+        make_formula_settings(self.app).persist(self.uid)
 
         fresh = EEGMeditationApp.__new__(EEGMeditationApp)
         fresh._formulas = FormulaSlots()
@@ -239,11 +240,12 @@ class TestAssignSavedToSlot(unittest.TestCase):
             set_formula_slot=lambda *a, **k: None,
             set_formula_slot_status=lambda *a, **k: None,
         )
+        app._formula_settings = make_formula_settings(app)
         return app
 
     def test_assign_saved_formula_to_slot(self):
         app = self._app()
-        app._assign_saved_to_slot(0, {"name": "Ratio", "formula": "alpha + beta"})
+        app._formula_settings.assign_saved(0, {"name": "Ratio", "formula": "alpha + beta"})
         self.assertTrue(app._formulas.evaluators[0].is_valid)
         self.assertEqual(app._formulas.names[0], "Ratio")
         self.assertTrue(app._live_screen.graph.is_visible("custom_formula"))
@@ -264,11 +266,11 @@ def test_deleting_a_saved_formula_asks_first_like_a_saved_program():
     app._db.get_saved_formulas.return_value = [{"name": "Ratio", "formula": "alpha / beta"}]
     app._current_user_id = 1
     app._require_user = MagicMock(return_value=1)
-    app._refresh_saved_formulas = MagicMock()
     app._settings_screen = MagicMock()
+    app._formulas = FormulaSlots()
     asked = []
     app._confirm_action = lambda title, message, ok_text, on_ok, **k: asked.append((message, on_ok))
-    app._on_delete_formula(0)
+    make_formula_settings(app).on_delete(0)
     app._db.remove_saved_formula.assert_not_called()
     assert asked and "Ratio" in asked[0][0]
     asked[0][1]()  # OK

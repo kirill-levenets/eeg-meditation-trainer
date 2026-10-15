@@ -9,6 +9,7 @@ import pytest
 from app.metrics.formula_slots import FORMULA_KEYS, FormulaSlots
 from app.ui.app_manager import EEGMeditationApp
 from tests._backup_flow import make_flow
+from tests._formula_settings import make_formula_settings
 from tests._program_run import make_run
 
 
@@ -28,6 +29,7 @@ def app(monkeypatch):
     a._audio_metric_key = "shamatha_score"
     a._audio_formula_index = 0
     a._program_run = make_run(a)
+    a._formula_settings = make_formula_settings(a)
     return a
 
 
@@ -84,7 +86,7 @@ def test_picking_a_slot_while_another_metric_drives_is_only_remembered(app):
 
 def test_the_driving_slots_formula_cant_change_while_a_session_runs(app):
     app._audio_metric_key = FORMULA_KEYS[0]
-    app._on_formula_slot_change(0, "Calm ratio", "alpha2 / beta2 * 100")
+    app._formula_settings.on_slot_change(0, "Calm ratio", "alpha2 / beta2 * 100")
     assert _refused(app)
     assert app._formulas.evaluators[0].formula == "alpha1 / beta1 * 100"
     app._settings_screen.set_formula_slot.assert_called_with(0, "Custom 1", "alpha1 / beta1 * 100")  # inputs restored
@@ -92,21 +94,21 @@ def test_the_driving_slots_formula_cant_change_while_a_session_runs(app):
 
 def test_the_driving_slot_cant_be_cleared_either(app):
     app._audio_metric_key = FORMULA_KEYS[0]
-    app._on_formula_slot_change(0, "", "")
+    app._formula_settings.on_slot_change(0, "", "")
     assert _refused(app)
     assert app._formulas.evaluators[0].is_valid
 
 
 def test_other_slots_stay_editable_during_a_session(app):
     app._audio_metric_key = FORMULA_KEYS[0]
-    app._on_formula_slot_change(1, "Drowsy", "theta / beta1 * 100")
+    app._formula_settings.on_slot_change(1, "Drowsy", "theta / beta1 * 100")
     assert not _refused(app)
     assert app._formulas.evaluators[1].formula == "theta / beta1 * 100"
 
 
 def test_choosing_a_saved_formula_for_the_driving_slot_is_refused(app):
     app._audio_metric_key = FORMULA_KEYS[0]
-    app._assign_saved_to_slot(0, {"name": "Calm ratio", "formula": "alpha2 / beta2 * 100"})
+    app._formula_settings.assign_saved(0, {"name": "Calm ratio", "formula": "alpha2 / beta2 * 100"})
     assert _refused(app)
     assert app._formulas.evaluators[0].formula == "alpha1 / beta1 * 100"
 
@@ -117,10 +119,10 @@ def test_loading_a_saved_formula_into_the_driving_slot_is_refused(app, monkeypat
     app._audio_metric_key = FORMULA_KEYS[2]
     app._current_user_id = 1
     app._require_user = lambda action: 1
-    app._persist_active_formulas = MagicMock()
     app._db = MagicMock()
     app._db.get_saved_formulas.return_value = [{"name": "Calm ratio", "formula": "alpha2 / beta2 * 100"}]
-    app._on_load_formula(0)
+    app._formula_settings = make_formula_settings(app)
+    app._formula_settings.on_load(0)
     assert _refused(app)
     assert not app._formulas.evaluators[2].is_valid
     app._settings_screen.set_formula_slot.assert_called_with(2, "Custom 3", "")  # inputs restored
@@ -143,6 +145,6 @@ def test_a_program_session_leaves_the_audio_metric_free(app):
     app._program_run.program = MagicMock()
     app._audio_metric_key = FORMULA_KEYS[0]
     app._on_audio_metric_change("meditation_score")
-    app._on_formula_slot_change(1, "Drowsy", "theta / beta1 * 100")
+    app._formula_settings.on_slot_change(1, "Drowsy", "theta / beta1 * 100")
     assert not _refused(app)
     assert app._audio_metric_key == "meditation_score"

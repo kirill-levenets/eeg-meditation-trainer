@@ -1,6 +1,8 @@
 """Each graph keeps its own series names: a session opened in History names its own lines, never the Session screen's,
 and a program's labels go when it ends."""
 
+from unittest.mock import MagicMock
+
 import pytest
 
 import app.ui.app_manager as am
@@ -11,6 +13,7 @@ from app.ui.diary_screen import DiaryScreen
 from app.ui.live_session import SERIES_NAMES, LiveSessionScreen
 from app.ui.program_run import show_program_series
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
+from tests._formula_settings import make_formula_settings
 from tests._program_run import make_run
 
 PAST_NAMES = {"custom_formula": "Old beta", "custom_formula_2": "Custom 2", "custom_formula_3": "Custom 3"}
@@ -22,8 +25,9 @@ def app() -> EEGMeditationApp:
     a._live_screen = LiveSessionScreen()
     a._diary_screen = DiaryScreen()
     a._formulas = FormulaSlots()
-    a._formulas.names[0] = "Calm alpha"
-    a._push_formula_names_to_graph()  # the profile's slot names, as loading its settings does
+    a._db = MagicMock()
+    a._db.get_user_json_setting.return_value = [{"name": "Calm alpha", "formula": ""}]
+    make_formula_settings(a).load(1)  # the profile's slot names, as loading its settings does
     a._program_run = make_run(a)
     return a
 

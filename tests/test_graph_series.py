@@ -20,6 +20,7 @@ from app.ui.live_session import (
 )
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.widgets.band_totals import BAND_COLORS, BAND_SCALES
+from tests._formula_settings import make_formula_settings
 from tests._program_settings import make_programs
 
 
@@ -64,6 +65,7 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         self.app._formulas.evaluators[0] = types.SimpleNamespace(is_valid=False)
         self.app._audio_metric_key = "shamatha_score"  # the app's default: no formula slot drives the sound
         self.app._program_settings = make_programs(self.app._db, self.uid)  # simple mode: the user's own series
+        self.app._formula_settings = make_formula_settings(self.app)
 
     def tearDown(self):
         self.app._db.close()
@@ -178,7 +180,7 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         )
         self.app._db.set_user_setting(self.uid, "custom_formula", formula)
 
-        self.app._on_formula_slot_change(0, "", formula, show=False)
+        self.app._formula_settings.on_slot_change(0, "", formula, show=False)
         self.app._restore_graph_series(self.uid)
 
         self.assertTrue(self.app._formulas.evaluators[0].is_valid)  # formula loaded
@@ -196,7 +198,7 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         )
         self.app._db.set_user_setting(self.uid, "custom_formula", formula)
 
-        self.app._on_formula_slot_change(0, "", formula, show=False)
+        self.app._formula_settings.on_slot_change(0, "", formula, show=False)
         self.app._restore_graph_series(self.uid)
 
         self.assertTrue(self.graph.is_visible("custom_formula"))

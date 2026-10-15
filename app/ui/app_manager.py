@@ -36,8 +36,6 @@ from app.metrics.engine import MetricsEngine
 from app.metrics.formula_slots import (
     FORMULA_KEYS,
     FormulaSlots,
-    default_name,
-    read_active,
     recorded_formulas,
 )
 from app.metrics.noise_detector import PowerLineDetector
@@ -64,6 +62,7 @@ from app.ui import render_stats
 from app.ui.backup_flow import BackupFlow
 from app.ui.device_labels import MAX_DEVICE_ALIAS, device_label
 from app.ui.diary_screen import DiaryScreen, detail_graph_data
+from app.ui.formula_settings import FormulaSettings
 from app.ui.graph_fullscreen import GraphFullscreen
 from app.ui.history_screen import HistoryScreen
 from app.ui.line_colours import DEFAULT as LINE_DEFAULT
@@ -76,7 +75,6 @@ from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.session_labels import session_title, start_stamp
 from app.ui.settings_screen import (
     SettingsScreen,
-    saved_formula_label,
 )
 from app.ui.theme import (
     DEFAULT_THEME,
@@ -286,14 +284,6 @@ class EEGMeditationApp(App):
         if ev is not None:
             ev.cancel()
 
-    def _persist_active_formulas(self, user_id: int) -> None:
-        self._db.set_user_json_setting(user_id, "active_formulas", self._formulas.active())
-
-    def _push_formula_names_to_graph(self) -> None:
-        """Propagate slot display names to the live metrics graph's series labels."""
-        for key, name in zip(FORMULA_KEYS, self._formulas.names):
-            self._live_screen.graph.set_series_name(key, name)
-
     def _session_custom_formulas_json(self) -> str:
         return self._formulas.session_record(self._live_screen.graph.is_visible, self._audio_metric_key)
 
@@ -499,6 +489,11 @@ class EEGMeditationApp(App):
             info=self._info_popup, confirm_saved_delete=self._confirm_saved_delete,
             show_saved_series=lambda uid: self._apply_saved_series(self._live_screen.graph, uid),
             save_settings=self._save_user_settings)
+        self._formula_settings = FormulaSettings(
+            self._db, self._settings_screen, self._live_screen.graph, self._formulas,
+            user_id=lambda: self._current_user_id, require_user=self._require_user,
+            scoring_locked=self._scoring_locked, audio_key=lambda: self._audio_metric_key,
+            confirm_saved_delete=self._confirm_saved_delete)
 
         self._sm.add_widget(self._live_screen)
         self._sm.add_widget(self._history_screen)
@@ -629,11 +624,11 @@ class EEGMeditationApp(App):
         self._settings_screen.set_copy_diagnostics_callback(self._on_copy_diagnostics)
         self._settings_screen.set_line_width_callback(self._on_line_width_change)
         self._settings_screen.set_rotate_screen_callback(self._on_rotate_screen)
-        self._settings_screen.set_formula_slot_callback(self._on_formula_slot_change)
-        self._settings_screen.set_save_formula_callback(self._on_save_formula)
-        self._settings_screen.set_load_formula_callback(self._on_load_formula)
-        self._settings_screen.set_delete_formula_callback(self._on_delete_formula)
-        self._settings_screen.set_export_formulas_callback(self._on_export_formulas)
+        self._settings_screen.set_formula_slot_callback(self._formula_settings.on_slot_change)
+        self._settings_screen.set_save_formula_callback(self._formula_settings.on_save)
+        self._settings_screen.set_load_formula_callback(self._formula_settings.on_load)
+        self._settings_screen.set_delete_formula_callback(self._formula_settings.on_delete)
+        self._settings_screen.set_export_formulas_callback(self._formula_settings.on_export)
         self._settings_screen.set_audio_metric_callback(self._on_audio_metric_change)
         self._settings_screen.set_audio_formula_index_callback(self._on_audio_formula_index)
         self._settings_screen.set_feedback_source_callback(self._on_feedback_source_change)
@@ -2100,7 +2095,7 @@ class EEGMeditationApp(App):
 
         def _choose(entry):
             inner_popup.dismiss()
-            self._assign_saved_to_slot(slot_idx, entry)
+            self._formula_settings.assign_saved(slot_idx, entry)
             vis = self._live_screen.graph.is_visible(FORMULA_KEYS[slot_idx])
             toggle_btn.bg_color = C.ACCENT if vis else C.BG_CARD
             toggle_btn.text_color = None if vis else C.TEXT_SECONDARY
@@ -2300,87 +2295,6 @@ class EEGMeditationApp(App):
         self._persist_user_setting("theme")
         logger.info(f"Theme changed to: {theme_name}")
 
-    def _on_formula_slot_change(self, idx: int, name: str, formula: str, *, show: bool = True) -> None:
-        """Apply a slot's name+formula. show=True reveals the series (interactive).
-
-        `show=True` (interactive apply) reveals the line on success — you typed a
-        formula, you want to see it. `show=False` (restore) only sets eligibility;
-        visibility is then decided by the persisted picker selection in
-        _restore_graph_series, so a hidden-but-valid choice survives a reload.
-        """
-        ev = self._formulas.evaluators[idx]
-        key = FORMULA_KEYS[idx]
-        # The slot the sound is set to is what a running session is scored on (or its shamatha fallback, while empty).
-        if (key == self._audio_metric_key and formula != ev.formula
-                and self._scoring_locked("changing the formula it is scored on")):
-            self._settings_screen.set_formula_slot(idx, self._formulas.names[idx], ev.formula)
-            return
-        self._formulas.names[idx] = name or default_name(idx)
-        self._live_screen.graph.set_series_name(key, self._formulas.names[idx])
-        if not formula:
-            ev.set_formula("")
-            self._live_screen.graph.set_visible(key, False)
-            self._settings_screen.set_formula_slot_status(idx, "Formula cleared")
-            logger.info(f"Custom formula slot {idx} cleared")
-        else:
-            ok, err = ev.set_formula(formula)
-            if ok:
-                # set_visible fires the graph's visibility callback → legend rebuilds.
-                if show:
-                    self._live_screen.graph.set_visible(key, True)
-                self._settings_screen.set_formula_slot_status(idx, "Formula active")
-                logger.info(f"Custom formula slot {idx} applied: {formula}")
-            else:
-                self._live_screen.graph.set_visible(key, False)
-                self._settings_screen.set_formula_slot_status(idx, f"Error: {err}", is_error=True)
-        if self._current_user_id:
-            self._persist_active_formulas(self._current_user_id)
-
-    def _on_save_formula(self, idx: int, name: str, formula: str) -> None:
-        """Save a slot's formula to the user's saved library, named by the slot."""
-        if not self._current_user_id:
-            self._settings_screen.set_formula_slot_status(idx, "No user selected", is_error=True)
-            return
-        if not formula:
-            self._settings_screen.set_formula_slot_status(idx, "Nothing to save", is_error=True)
-            return
-        # Fall back to a truncated formula as the display name when none is given.
-        label = name or (formula[:40] + ("..." if len(formula) > 40 else ""))
-        ok = self._db.add_saved_formula(self._current_user_id, label, formula)
-        if ok:
-            self._settings_screen.set_formula_slot_status(idx, "Formula saved")
-            self._refresh_saved_formulas()
-            logger.info(f"Formula saved: {label} = {formula}")
-        else:
-            self._settings_screen.set_formula_slot_status(idx, "Limit reached (50 max)", is_error=True)
-
-    def _on_load_formula(self, index: int) -> None:
-        """Load a saved formula into the first empty slot and apply it."""
-        if self._require_user("load a formula") is None:
-            return
-        formulas = self._db.get_saved_formulas(self._current_user_id)
-        if 0 <= index < len(formulas):
-            entry = formulas[index]
-            formula = entry["formula"]
-            name = entry.get("name", "") or ""
-            slot = self._formulas.first_empty()
-            self._settings_screen.set_formula_slot(slot, name, formula)
-            self._on_formula_slot_change(slot, name, formula)
-
-    def _assign_saved_to_slot(self, idx: int, entry: dict) -> None:
-        """Assign a saved {name, formula} entry to slot idx, show it, and persist."""
-        self._on_formula_slot_change(idx, entry.get("name", ""), entry.get("formula", ""), show=True)
-        self._settings_screen.set_formula_slot(
-            idx, self._formulas.names[idx], self._formulas.evaluators[idx].formula
-        )
-
-    def _on_delete_formula(self, index: int) -> None:
-        """Delete a saved formula, after a confirmation as a saved program's delete asks."""
-        if self._require_user("delete a formula") is None:
-            return
-        self._confirm_saved_delete("formula", self._db.get_saved_formulas(self._current_user_id), index,
-                                   saved_formula_label, self._delete_formula)
-
     def _confirm_saved_delete(self, kind: str, entries: list[dict], index: int, label: Callable,
                               delete: Callable[[int], None]) -> None:
         """Ask before deleting a saved formula or program, named as its list row names it."""
@@ -2388,29 +2302,6 @@ class EEGMeditationApp(App):
             return
         self._confirm_action(f"Delete {kind}", f"Delete saved {kind} '{label(index, entries[index])}'?", "Delete",
                              lambda: delete(index), ok_color=C.DANGER)
-
-    def _delete_formula(self, index: int) -> None:
-        self._db.remove_saved_formula(self._current_user_id, index)
-        self._refresh_saved_formulas()
-        self._settings_screen.set_formula_slot_status(0, "Formula deleted")
-        logger.info(f"Saved formula #{index} deleted")
-
-    def _on_export_formulas(self) -> None:
-        """Export saved formulas to a text file."""
-        if not self._current_user_id:
-            self._settings_screen.set_formula_slot_status(0, "No user selected", is_error=True)
-            return
-        formulas = self._db.get_saved_formulas(self._current_user_id)
-        if not formulas:
-            self._settings_screen.set_formula_slot_status(0, "No formulas to export", is_error=True)
-            return
-        export_dir = os.path.dirname(self._db._db_path)
-        path = os.path.join(export_dir, f"formulas_user_{self._current_user_id}.txt")
-        with open(path, "w") as f:
-            for entry in formulas:
-                f.write(f"{entry['formula']}\n")
-        self._settings_screen.set_formula_slot_status(0, f"Exported to {os.path.basename(path)}")
-        logger.info(f"Exported {format_count(len(formulas), 'formula')} to {path}")
 
     def _require_user(self, action: str) -> Optional[int]:
         """Return the active uid, or explain why the action can't run and return
@@ -2430,14 +2321,6 @@ class EEGMeditationApp(App):
     def _confirm_action(self, title, message, ok_text, on_ok, ok_color=None, on_cancel=None) -> None:
         """on_cancel runs on every close that isn't OK: Cancel, a tap outside, or Android back."""
         confirm_popup(title, message, ok_text, on_ok, ok_color=ok_color, on_cancel=on_cancel)
-
-    def _refresh_saved_formulas(self) -> None:
-        """Refresh the saved formulas list in settings UI."""
-        if not self._current_user_id:
-            self._settings_screen.populate_saved_formulas([])
-            return  # silent-ok: renders empty library; no per-user formulas without a user
-        formulas = self._db.get_saved_formulas(self._current_user_id)
-        self._settings_screen.populate_saved_formulas(formulas)
 
     def _on_sinking_alert_toggle(self, active: bool) -> None:
         self._audio.sinking_alert_enabled = active
@@ -3100,7 +2983,7 @@ class EEGMeditationApp(App):
             return  # silent-ok: batch persistence; no active user = nothing to save
         try:
             self._settings_store.save(uid)          # all scalar per-user settings + theme
-            self._persist_active_formulas(uid)
+            self._formula_settings.persist(uid)
             self._program_settings.persist(uid)
             # Per-graph series selection (the on-graph picker is the source of truth).
             for g in self._all_graphs():
@@ -3180,12 +3063,8 @@ class EEGMeditationApp(App):
 
         # Load formulas BEFORE _restore_graph_series so the per-slot validity gate
         # sees real is_valid; the picker selection (graph_series_*) decides visibility.
-        self._formulas.load(read_active(self._db, user_id))
+        self._formula_settings.load(user_id)
         self._program_settings.load(user_id)  # its saved-programs list goes to both UIs at the end (refresh_saved)
-        self._push_formula_names_to_graph()
-        # Reflect every slot's name+formula into the Settings inputs.
-        for i in range(len(FORMULA_KEYS)):
-            self._settings_screen.set_formula_slot(i, self._formulas.names[i], self._formulas.evaluators[i].formula)
 
         self._restore_graph_series(user_id)
 
@@ -3210,7 +3089,7 @@ class EEGMeditationApp(App):
 
         # Sync live-screen preset highlight (incl. program "P") with loaded state
         self._program_settings.sync_picker()
-        self._refresh_saved_formulas()
+        self._formula_settings.refresh_saved()
         self._program_settings.refresh_saved()
         logger.debug(f"Loaded settings for user {user_id}")
 
