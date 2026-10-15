@@ -1408,108 +1408,121 @@ class EEGMeditationApp(App):
         via _on_main so they execute safely on the main thread.
         """
         name = self._headset.name()
-        if not self._real_stream.is_connected and self._bt_signal_start is not None:
-            # The link dropped and the reader reconnects: the next connection gets its own connect and no-data windows,
-            # and only its own packets count (one that inherited the old windows was given up 0.4 s after it
-            # connected). A headset that keeps closing it ends the wait instead.
-            self._bt_signal_start = None
-            self._bt_dropped_at = time.monotonic()
-            self._bt_connect_start = time.time()
-            self._bt_drops += 1
-            if self._bt_drops > self._BT_MAX_DROPS:
-                self._give_up_bt_wait(name, f"{name} keeps closing the connection.\n"
-                                            "Switch the headset off and on, then retry.")
-                logger.error(f"BT wait: {name} closed the connection {self._bt_drops} times, giving up")
-                return
+        link_dropped = not self._real_stream.is_connected and self._bt_signal_start is not None
+        if link_dropped and self._bt_link_dropped(name):
+            return
         elapsed = time.time() - self._bt_connect_start
 
         if self._real_stream.is_connected:
-                # BT socket connected — waiting for actual EEG data
-                if not getattr(self, '_bt_signal_start', None):
-                    self._bt_signal_start = time.time()
-                signal_elapsed = time.time() - self._bt_signal_start
-                signal_remaining = int(self._BT_SIGNAL_TIMEOUT - signal_elapsed)
-
-                raw_sample = self._eeg_stream.read_sample()
-                sq = raw_sample.get("signal_quality", 200)
-                total = sum(raw_sample.get(k, 0.0) for k in BAND_KEYS)
-
-                # Is the headset streaming packets on this connection?
-                since_packet = self._real_stream.seconds_since_last_packet
-                has_packets = 0 < since_packet < time.monotonic() - self._bt_dropped_at
-
-                if total > 0 and has_packets:  # data on this connection: band values outlive a drop
-                    self._waiting_for_bt = False
-                    self._bt_signal_start = None
-                    self._session_manager.start()  # against the threshold in force, which may have moved
-                    # Arm the countdown on THIS thread before the next tick()
-                    # reads it. Deferring it via _on_main let a stalled main
-                    # thread leave remaining_seconds=0, so the very next tick
-                    # fired the timer instantly — a 0s "timer-ended" session.
-                    self._timer_state.start_countdown()
-                    _n = name
-                    self._on_main_for_wait(lambda n=_n: self._on_session_connected(n))
-                    logger.info(f"BT device {name} connected, session started")
-                elif signal_elapsed > self._BT_SIGNAL_TIMEOUT and not has_packets:
-                    # No packets — ThinkGear didn't start streaming.
-                    # Don't try RFCOMM reconnect: closing the socket triggers
-                    # EBUSY that blocks reconnection for 60+ seconds.
-                    # The only reliable fix is a headset power cycle.
-                    self._give_up_bt_wait(name, "No EEG data received.\nCheck battery or restart headset.")
-                    logger.error("No ThinkGear packets — likely low battery or needs power cycle")
-                else:
-                    # Show signal quality feedback (keep waiting if packets arrive)
-                    if sq == 200:
-                        sensor_info = "Sensor: no contact"
-                    elif sq > 50:
-                        sensor_info = f"Sensor: poor (quality {sq})"
-                    elif sq > 0:
-                        sensor_info = f"Sensor: fair (quality {sq})"
-                    else:
-                        sensor_info = "Sensor: good"
-                    if has_packets:
-                        # Headset streaming — no timeout, wait for contact
-                        wait_msg = "Place sensor on forehead..."
-                    else:
-                        wait_msg = f"Waiting for EEG data... {signal_remaining}s"
-                    logger.debug(
-                        f"BT signal wait: sq={sq} total={total:.0f} "
-                        f"packets={'yes' if has_packets else 'no'} "
-                        f"elapsed={signal_elapsed:.0f}s"
-                    )
-                    _msg = f"Connected to {name}\n{wait_msg}\n{sensor_info}"
-                    self._on_main_for_wait(lambda m=_msg: self._live_screen.update_overlay(m))
+            self._wait_for_data(name)
         elif not self._real_stream._running:
-            # Connection thread ended with error
-            self._abort_bt_wait()
-            hint = self._real_stream._last_connect_error or "Check device is on and paired."
-            _n = name
-            _h = hint
-            self._on_main_for_wait(lambda n=_n, h=_h: (
-                self._undo_session_setup(),
-                self._live_screen.show_overlay_retry(
-                    f"Connection to {n} failed.\n{h}"
-                ),
-            ))
-            logger.error("BT connection failed, session aborted")
-            self._report_bt_connect_failure(name, hint)
+            self._bt_connect_failed(name)
         elif elapsed > self._BT_CONNECT_TIMEOUT:
-            # Timeout waiting for BT socket
-            self._abort_bt_wait()
-            _n = name
-            self._on_main_for_wait(lambda n=_n: (
-                self._undo_session_setup(),
-                self._live_screen.show_overlay_retry(
-                    f"Connection to {n} timed out.\n"
-                    "Make sure the device is turned on\nand in range."
-                ),
-            ))
-            logger.error("BT connection timed out")
+            self._bt_connect_timed_out(name)
         else:
             # Still waiting for BT socket — show countdown
             remaining = int(self._BT_CONNECT_TIMEOUT - elapsed)
-            _msg = f"Connecting to {name}...\nTimeout in {remaining}s"
-            self._on_main_for_wait(lambda m=_msg: self._live_screen.update_overlay(m))
+            msg = f"Connecting to {name}...\nTimeout in {remaining}s"
+            self._on_main_for_wait(lambda m=msg: self._live_screen.update_overlay(m))
+
+    def _bt_link_dropped(self, name: str) -> bool:
+        """Tick thread: the link dropped and the reader reconnects: the next connection gets its own connect and
+        no-data windows, and only its own packets count (one that inherited the old windows was given up 0.4 s after it
+        connected). A headset that keeps closing it ends the wait instead: True."""
+        self._bt_signal_start = None
+        self._bt_dropped_at = time.monotonic()
+        self._bt_connect_start = time.time()
+        self._bt_drops += 1
+        if self._bt_drops > self._BT_MAX_DROPS:
+            self._give_up_bt_wait(name, f"{name} keeps closing the connection.\n"
+                                        "Switch the headset off and on, then retry.")
+            logger.error(f"BT wait: {name} closed the connection {self._bt_drops} times, giving up")
+            return True
+        return False
+
+    def _wait_for_data(self, name: str) -> None:
+        """Tick thread: BT socket connected — waiting for actual EEG data; the first data starts the session."""
+        if not getattr(self, '_bt_signal_start', None):
+            self._bt_signal_start = time.time()
+        signal_elapsed = time.time() - self._bt_signal_start
+        signal_remaining = int(self._BT_SIGNAL_TIMEOUT - signal_elapsed)
+
+        raw_sample = self._eeg_stream.read_sample()
+        sq = raw_sample.get("signal_quality", 200)
+        total = sum(raw_sample.get(k, 0.0) for k in BAND_KEYS)
+
+        # Is the headset streaming packets on this connection?
+        since_packet = self._real_stream.seconds_since_last_packet
+        has_packets = 0 < since_packet < time.monotonic() - self._bt_dropped_at
+
+        if total > 0 and has_packets:  # data on this connection: band values outlive a drop
+            self._waiting_for_bt = False
+            self._bt_signal_start = None
+            self._session_manager.start()  # against the threshold in force, which may have moved
+            # Arm the countdown on THIS thread before the next tick()
+            # reads it. Deferring it via _on_main let a stalled main
+            # thread leave remaining_seconds=0, so the very next tick
+            # fired the timer instantly — a 0s "timer-ended" session.
+            self._timer_state.start_countdown()
+            self._on_main_for_wait(lambda n=name: self._on_session_connected(n))
+            logger.info(f"BT device {name} connected, session started")
+        elif signal_elapsed > self._BT_SIGNAL_TIMEOUT and not has_packets:
+            # No packets — ThinkGear didn't start streaming.
+            # Don't try RFCOMM reconnect: closing the socket triggers
+            # EBUSY that blocks reconnection for 60+ seconds.
+            # The only reliable fix is a headset power cycle.
+            self._give_up_bt_wait(name, "No EEG data received.\nCheck battery or restart headset.")
+            logger.error("No ThinkGear packets — likely low battery or needs power cycle")
+        else:
+            # Show signal quality feedback (keep waiting if packets arrive)
+            if has_packets:
+                # Headset streaming — no timeout, wait for contact
+                wait_msg = "Place sensor on forehead..."
+            else:
+                wait_msg = f"Waiting for EEG data... {signal_remaining}s"
+            logger.debug(
+                f"BT signal wait: sq={sq} total={total:.0f} "
+                f"packets={'yes' if has_packets else 'no'} "
+                f"elapsed={signal_elapsed:.0f}s"
+            )
+            msg = f"Connected to {name}\n{wait_msg}\n{self._sensor_contact(sq)}"
+            self._on_main_for_wait(lambda m=msg: self._live_screen.update_overlay(m))
+
+    @staticmethod
+    def _sensor_contact(signal_quality: int) -> str:
+        """The connect overlay's line on the sensor's contact, from ThinkGear's signal quality (200 = none, 0 = good)."""
+        if signal_quality == 200:
+            return "Sensor: no contact"
+        if signal_quality > 50:
+            return f"Sensor: poor (quality {signal_quality})"
+        if signal_quality > 0:
+            return f"Sensor: fair (quality {signal_quality})"
+        return "Sensor: good"
+
+    def _bt_connect_failed(self, name: str) -> None:
+        """Tick thread: the connection thread ended with an error."""
+        self._abort_bt_wait()
+        hint = self._real_stream._last_connect_error or "Check device is on and paired."
+        self._on_main_for_wait(lambda n=name, h=hint: (
+            self._undo_session_setup(),
+            self._live_screen.show_overlay_retry(
+                f"Connection to {n} failed.\n{h}"
+            ),
+        ))
+        logger.error("BT connection failed, session aborted")
+        self._report_bt_connect_failure(name, hint)
+
+    def _bt_connect_timed_out(self, name: str) -> None:
+        """Tick thread: no BT socket within _BT_CONNECT_TIMEOUT."""
+        self._abort_bt_wait()
+        self._on_main_for_wait(lambda n=name: (
+            self._undo_session_setup(),
+            self._live_screen.show_overlay_retry(
+                f"Connection to {n} timed out.\n"
+                "Make sure the device is turned on\nand in range."
+            ),
+        ))
+        logger.error("BT connection timed out")
 
     def _update_tick(self, dt: float) -> None:
         """Main 2 Hz processing loop.
