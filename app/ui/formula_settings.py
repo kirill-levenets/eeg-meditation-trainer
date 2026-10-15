@@ -43,14 +43,9 @@ class FormulaSettings:
         for i, (name, ev) in enumerate(zip(self._formulas.names, self._formulas.evaluators)):
             self._settings_screen.set_formula_slot(i, name, ev.formula)
 
-    def on_slot_change(self, idx: int, name: str, formula: str, *, show: bool = True) -> None:
-        """Apply a slot's name+formula. show=True reveals the series (interactive).
-
-        `show=True` (interactive apply) reveals the line on success — you typed a
-        formula, you want to see it. `show=False` (restore) only sets eligibility;
-        visibility is then decided by the persisted picker selection in
-        _restore_graph_series, so a hidden-but-valid choice survives a reload.
-        """
+    def on_slot_change(self, idx: int, name: str, formula: str) -> None:
+        """Apply a slot's name+formula; a valid one shows its line (you typed a formula, you want to see it). A
+        profile's load goes through `load`, which leaves visibility to the saved series selection."""
         ev = self._formulas.evaluators[idx]
         key = FORMULA_KEYS[idx]
         # The slot the sound is set to is what a running session is scored on (or its shamatha fallback, while empty).
@@ -68,9 +63,7 @@ class FormulaSettings:
         else:
             ok, err = ev.set_formula(formula)
             if ok:
-                # set_visible fires the graph's visibility callback → legend rebuilds.
-                if show:
-                    self._graph.set_visible(key, True)
+                self._graph.set_visible(key, True)  # fires the graph's visibility callback → legend rebuilds
                 self._settings_screen.set_formula_slot_status(idx, "Formula active")
                 logger.info(f"Custom formula slot {idx} applied: {formula}")
             else:
@@ -115,7 +108,7 @@ class FormulaSettings:
 
     def assign_saved(self, idx: int, entry: dict) -> None:
         """Assign a saved {name, formula} entry to slot idx, show it, and persist."""
-        self.on_slot_change(idx, entry.get("name", ""), entry.get("formula", ""), show=True)
+        self.on_slot_change(idx, entry.get("name", ""), entry.get("formula", ""))
         self._settings_screen.set_formula_slot(idx, self._formulas.names[idx], self._formulas.evaluators[idx].formula)
 
     def on_delete(self, index: int) -> None:

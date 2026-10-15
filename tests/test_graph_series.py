@@ -167,12 +167,12 @@ class TestGraphSeriesPersistence(unittest.TestCase):
     def test_custom_formula_hidden_choice_survives_reload(self):
         # Reload round-trip: a user who HID the live custom_formula line but kept a
         # valid saved formula must not have it force-shown on next launch. Mirrors
-        # the production order in _load_user_settings (formula loaded show=False,
-        # then _restore_graph_series decides visibility).
+        # the production order in _load_user_settings (the profile's formulas
+        # loaded, then _restore_graph_series decides visibility).
         from app.metrics.custom_formula import CustomFormulaEvaluator
 
         self.app._formulas.evaluators[0] = CustomFormulaEvaluator()
-        self.app._settings_screen.set_formula_slot_status = lambda *a, **k: None
+        self.app._settings_screen.set_formula_slot = lambda *a, **k: None
         formula = "alpha + beta"
 
         self.app._db.set_user_json_setting(
@@ -180,7 +180,7 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         )
         self.app._db.set_user_setting(self.uid, "custom_formula", formula)
 
-        self.app._formula_settings.on_slot_change(0, "", formula, show=False)
+        self.app._formula_settings.load(self.uid)
         self.app._restore_graph_series(self.uid)
 
         self.assertTrue(self.app._formulas.evaluators[0].is_valid)  # formula loaded
@@ -190,7 +190,7 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         from app.metrics.custom_formula import CustomFormulaEvaluator
 
         self.app._formulas.evaluators[0] = CustomFormulaEvaluator()
-        self.app._settings_screen.set_formula_slot_status = lambda *a, **k: None
+        self.app._settings_screen.set_formula_slot = lambda *a, **k: None
         formula = "alpha + beta"
 
         self.app._db.set_user_json_setting(
@@ -198,7 +198,7 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         )
         self.app._db.set_user_setting(self.uid, "custom_formula", formula)
 
-        self.app._formula_settings.on_slot_change(0, "", formula, show=False)
+        self.app._formula_settings.load(self.uid)
         self.app._restore_graph_series(self.uid)
 
         self.assertTrue(self.graph.is_visible("custom_formula"))
