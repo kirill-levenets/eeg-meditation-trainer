@@ -258,7 +258,7 @@ def test_idle_program_preview_shows_program_set(tmp_path):
     the user's saved selection (and a program's visible set is never persisted over it)."""
     from unittest.mock import MagicMock
 
-    from app.metrics.custom_formula import CustomFormulaEvaluator
+    from app.metrics.formula_slots import FormulaSlots
     from app.session.manager import SessionState
     from app.ui.live_session import LiveSessionScreen
     db = DatabaseManager(db_path=str(tmp_path / "preview.db"))
@@ -271,7 +271,7 @@ def test_idle_program_preview_shows_program_set(tmp_path):
     app._live_screen = LiveSessionScreen()
     app._session_manager = MagicMock()
     app._session_manager.state = SessionState.IDLE  # not running
-    app._formula_slots = [CustomFormulaEvaluator() for _ in range(3)]
+    app._formulas = FormulaSlots()
     app._timer_mode = "program"
     app._session_program_segments = [
         {"minutes": 1, "target": 50, "formula": "shamatha_score"},

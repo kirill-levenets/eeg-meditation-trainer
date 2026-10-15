@@ -4,35 +4,36 @@ import types
 import unittest
 from unittest.mock import MagicMock
 
+from app.metrics.formula_slots import FORMULA_KEYS, FormulaSlots, read_active
 from app.storage.database import DatabaseManager
-from app.ui.app_manager import FORMULA_KEYS, EEGMeditationApp
+from app.ui.app_manager import EEGMeditationApp
 
 
 class TestMultiFormulaTick(unittest.TestCase):
     def _app(self):
         app = EEGMeditationApp.__new__(EEGMeditationApp)
-        app._init_formula_slots()
+        app._formulas = FormulaSlots()
         return app
 
     def test_three_independent_slots(self):
         app = self._app()
-        self.assertEqual(len(app._formula_slots), 3)
+        self.assertEqual(len(app._formulas.evaluators), 3)
         self.assertEqual(tuple(FORMULA_KEYS), ("custom_formula", "custom_formula_2", "custom_formula_3"))
-        app._formula_slots[0].set_formula("avg(alpha1, 3)")
-        app._formula_slots[1].set_formula("avg(alpha1, 3)")
+        app._formulas.evaluators[0].set_formula("avg(alpha1, 3)")
+        app._formulas.evaluators[1].set_formula("avg(alpha1, 3)")
         for v in (10.0, 20.0, 30.0):
-            app._formula_slots[0].push_variables({"alpha1": v})
-        app._formula_slots[1].push_variables({"alpha1": 99.0})
+            app._formulas.evaluators[0].push_variables({"alpha1": v})
+        app._formulas.evaluators[1].push_variables({"alpha1": 99.0})
         self.assertNotEqual(
-            app._formula_slots[0].evaluate({"alpha1": 0.0}),
-            app._formula_slots[1].evaluate({"alpha1": 0.0}),
+            app._formulas.evaluators[0].evaluate({"alpha1": 0.0}),
+            app._formulas.evaluators[1].evaluate({"alpha1": 0.0}),
         )
 
     def test_formula_for_key(self):
         app = self._app()
-        self.assertIs(app._formula_for_key("custom_formula"), app._formula_slots[0])
-        self.assertIs(app._formula_for_key("custom_formula_3"), app._formula_slots[2])
-        self.assertIsNone(app._formula_for_key("shamatha_score"))
+        self.assertIs(app._formulas.for_key("custom_formula"), app._formulas.evaluators[0])
+        self.assertIs(app._formulas.for_key("custom_formula_3"), app._formulas.evaluators[2])
+        self.assertIsNone(app._formulas.for_key("shamatha_score"))
 
 
 class TestFormulaPersistence(unittest.TestCase):
@@ -41,7 +42,7 @@ class TestFormulaPersistence(unittest.TestCase):
         if os.path.exists(self.path):
             os.remove(self.path)
         self.app = EEGMeditationApp.__new__(EEGMeditationApp)
-        self.app._init_formula_slots()
+        self.app._formulas = FormulaSlots()
         self.app._db = DatabaseManager(db_path=self.path)
         self.uid = self.app._db.create_user("A")
 
@@ -51,26 +52,26 @@ class TestFormulaPersistence(unittest.TestCase):
             os.remove(self.path)
 
     def test_active_formulas_round_trip(self):
-        self.app._apply_active_formulas([
+        self.app._formulas.load([
             {"name": "Ratio", "formula": "alpha + beta"},
             {"name": "Med", "formula": "meditation_score"},
         ])
         self.app._persist_active_formulas(self.uid)
 
         fresh = EEGMeditationApp.__new__(EEGMeditationApp)
-        fresh._init_formula_slots()
+        fresh._formulas = FormulaSlots()
         fresh._db = self.app._db
-        fresh._apply_active_formulas(
+        fresh._formulas.load(
             fresh._db.get_user_json_setting(self.uid, "active_formulas")
         )
-        self.assertEqual(fresh._formula_names[0], "Ratio")
-        self.assertTrue(fresh._formula_slots[0].is_valid)
-        self.assertEqual(fresh._formula_slots[0].formula, "alpha + beta")
-        self.assertFalse(fresh._formula_slots[2].is_valid)
+        self.assertEqual(fresh._formulas.names[0], "Ratio")
+        self.assertTrue(fresh._formulas.evaluators[0].is_valid)
+        self.assertEqual(fresh._formulas.evaluators[0].formula, "alpha + beta")
+        self.assertFalse(fresh._formulas.evaluators[2].is_valid)
 
     def test_legacy_single_formula_migrates_to_slot1(self):
         self.app._db.set_user_setting(self.uid, "custom_formula", "alpha / (beta + 1)")
-        active = self.app._read_active_formulas_with_migration(self.uid)
+        active = read_active(self.app._db, self.uid)
         self.assertEqual(active[0]["formula"], "alpha / (beta + 1)")
         self.assertEqual(active[0]["name"], "Custom 1")
 
@@ -78,7 +79,7 @@ class TestFormulaPersistence(unittest.TestCase):
 class TestAudioDriveKey(unittest.TestCase):
     def _app(self):
         app = EEGMeditationApp.__new__(EEGMeditationApp)
-        app._init_formula_slots()
+        app._formulas = FormulaSlots()
         app._current_user_id = None       # no active user -> _persist_user_setting no-ops
         app._loading_settings = False
         return app
@@ -88,7 +89,7 @@ class TestAudioDriveKey(unittest.TestCase):
         app._audio_metric_key = "custom_formula_2"   # slot 2 bound...
         app._audio_formula_index = 1                  # ...but slot 2 has no formula
         self.assertEqual(app._audio_drive_key(), "shamatha_score")
-        app._formula_slots[1].set_formula("alpha + beta")  # now valid
+        app._formulas.evaluators[1].set_formula("alpha + beta")  # now valid
         self.assertEqual(app._audio_drive_key(), "custom_formula_2")
 
     def test_audio_drive_key_passthrough_for_non_formula(self):
@@ -137,7 +138,7 @@ class TestSessionFormulaSaveAndReplay(unittest.TestCase):
         if os.path.exists(self.path):
             os.remove(self.path)
         self.app = EEGMeditationApp.__new__(EEGMeditationApp)
-        self.app._init_formula_slots()
+        self.app._formulas = FormulaSlots()
         self.app._db = DatabaseManager(db_path=self.path)
         self.app._current_user_id = self.app._db.create_user("A")
         self.app._audio_metric_key = "shamatha_score"
@@ -160,8 +161,8 @@ class TestSessionFormulaSaveAndReplay(unittest.TestCase):
         return sid
 
     def test_record_includes_visible_and_drove_audio(self):
-        self.app._formula_slots[0].set_formula("alpha + beta")
-        self.app._formula_names[0] = "Ratio"
+        self.app._formulas.evaluators[0].set_formula("alpha + beta")
+        self.app._formulas.names[0] = "Ratio"
         self.app._live_screen.graph.set_visible("custom_formula", True)
         self.app._audio_metric_key = "custom_formula"
         import json
@@ -172,11 +173,11 @@ class TestSessionFormulaSaveAndReplay(unittest.TestCase):
         self.assertTrue(rec[0]["drove_audio"])
 
     def test_replay_recomputes_from_stored_defs(self):
-        self.app._formula_slots[0].set_formula("alpha + beta")
-        self.app._formula_names[0] = "Ratio"
+        self.app._formulas.evaluators[0].set_formula("alpha + beta")
+        self.app._formulas.names[0] = "Ratio"
         sid = self._seed_session()
         # Mutate today's slot — replay must ignore it and use the stored def.
-        self.app._formula_slots[0].set_formula("delta")
+        self.app._formulas.evaluators[0].set_formula("delta")
         session = self.app._db.get_session(sid)
         self.app._inject_session_formulas(sid, session)
         injected = self.app._diary_screen.series[FORMULA_KEYS[0]]
@@ -191,8 +192,8 @@ class TestSessionFormulaSaveAndReplay(unittest.TestCase):
     def test_replay_sparse_slots_map_to_correct_keys(self):
         # Slots 0 and 2 valid, slot 1 empty — replay must land on custom_formula
         # and custom_formula_3, NOT pack densely onto custom_formula_2.
-        self.app._formula_slots[0].set_formula("alpha + beta")
-        self.app._formula_slots[2].set_formula("alpha1")
+        self.app._formulas.evaluators[0].set_formula("alpha + beta")
+        self.app._formulas.evaluators[2].set_formula("alpha1")
         sid = self._seed_session()
         session = self.app._db.get_session(sid)
         self.app._inject_session_formulas(sid, session)
@@ -228,7 +229,7 @@ class TestSessionFormulaSaveAndReplay(unittest.TestCase):
 class TestAssignSavedToSlot(unittest.TestCase):
     def _app(self):
         app = EEGMeditationApp.__new__(EEGMeditationApp)
-        app._init_formula_slots()
+        app._formulas = FormulaSlots()
         app._current_user_id = None
         app._audio_metric_key = "shamatha_score"  # the app's default: no formula slot drives the sound
         app._live_screen = types.SimpleNamespace(graph=_FakeGraph())
@@ -241,18 +242,18 @@ class TestAssignSavedToSlot(unittest.TestCase):
     def test_assign_saved_formula_to_slot(self):
         app = self._app()
         app._assign_saved_to_slot(0, {"name": "Ratio", "formula": "alpha + beta"})
-        self.assertTrue(app._formula_slots[0].is_valid)
-        self.assertEqual(app._formula_names[0], "Ratio")
+        self.assertTrue(app._formulas.evaluators[0].is_valid)
+        self.assertEqual(app._formulas.names[0], "Ratio")
         self.assertTrue(app._live_screen.graph.is_visible("custom_formula"))
 
     def test_first_empty_slot(self):
         app = self._app()
-        self.assertEqual(app._first_empty_slot(), 0)
-        app._formula_slots[0].set_formula("alpha")
-        self.assertEqual(app._first_empty_slot(), 1)
-        for ev in app._formula_slots:
+        self.assertEqual(app._formulas.first_empty(), 0)
+        app._formulas.evaluators[0].set_formula("alpha")
+        self.assertEqual(app._formulas.first_empty(), 1)
+        for ev in app._formulas.evaluators:
             ev.set_formula("alpha")
-        self.assertEqual(app._first_empty_slot(), 0)  # all full → slot 0
+        self.assertEqual(app._formulas.first_empty(), 0)  # all full → slot 0
 
 
 def test_deleting_a_saved_formula_asks_first_like_a_saved_program():

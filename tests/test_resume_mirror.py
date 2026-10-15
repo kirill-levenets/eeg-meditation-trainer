@@ -22,6 +22,7 @@ from unittest.mock import MagicMock
 
 from app.config import APP
 from app.metrics.engine import MetricsEngine
+from app.metrics.formula_slots import FormulaSlots
 from app.session.manager import SessionState
 from app.session.timer_state import TimerState
 from app.ui.app_manager import EEGMeditationApp
@@ -78,7 +79,7 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     app._eeg_stream = MagicMock()
     app._metrics_engine = MagicMock()
     app._noise_detector = None  # skip power-line feed branch
-    app._init_formula_slots()
+    app._formulas = FormulaSlots()
     # All slots invalid by default (no formula set)
 
     app._audio = MagicMock()
@@ -164,8 +165,8 @@ def test_tick_writes_three_distinct_custom_formula_series():
     app._metrics_engine.compute_sqrt_relative_bands.return_value = dict.fromkeys(
         ("alpha1", "alpha2", "beta1", "beta2", "theta", "delta"), 0.0
     )
-    app._formula_slots[0].set_formula("alpha + beta")        # 120
-    app._formula_slots[1].set_formula("alpha / (beta + 1)")  # 100/21
+    app._formulas.evaluators[0].set_formula("alpha + beta")        # 120
+    app._formulas.evaluators[1].set_formula("alpha / (beta + 1)")  # 100/21
     # slot 2 left invalid → must not be written
 
     metrics = _metrics()

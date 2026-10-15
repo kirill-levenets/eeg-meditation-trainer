@@ -33,8 +33,15 @@ from app.eeg.band_spec import BAND_KEYS, group_powers
 from app.eeg.mock_stream_v2 import MockEEGStream
 from app.eeg.neurosky_stream import NeuroSkyStream
 from app.logger import logger, timed
-from app.metrics.custom_formula import CustomFormulaEvaluator
+from app.metrics.custom_formula import evaluate_series
 from app.metrics.engine import MetricsEngine
+from app.metrics.formula_slots import (
+    FORMULA_KEYS,
+    FormulaSlots,
+    default_name,
+    read_active,
+    recorded_formulas,
+)
 from app.metrics.noise_detector import PowerLineDetector
 from app.session.manager import SessionManager, SessionState, elapsed_clock
 from app.session.scoring import target_steps
@@ -96,9 +103,6 @@ from app.ui.theme import (
 )
 from app.ui.widgets.loading_overlay import LoadingOverlay
 from app.ui.widgets.user_picker import UserPickerForm
-
-FORMULA_KEYS: tuple[str, ...] = ("custom_formula", "custom_formula_2", "custom_formula_3")
-_MAX_FORMULAS = len(FORMULA_KEYS)
 
 
 def resolve_startup_user(db) -> Optional[int]:
@@ -242,7 +246,8 @@ class EEGMeditationApp(App):
         # distinct from _current_user_id=None (unset). Keeps the unset state from
         # ever querying all profiles' sessions (cross-profile leak).
         self._view_all_users: bool = False
-        self._init_formula_slots()
+        self._formulas: FormulaSlots = FormulaSlots()
+        self._audio_formula_index: int = 0  # the slot that drives the sound when the custom formula does
         self.serial_device_override: Optional[str] = None
         self._wake_lock = None
         self._active_program = None
@@ -252,28 +257,6 @@ class EEGMeditationApp(App):
         self._program_segment_feedback_ids: list[str] = []
         self._session_program_active: bool = False
         self._program_prev_visibility: dict[str, bool] = {}  # live-graph visibility before a program
-
-    def _init_formula_slots(self) -> None:
-        """Three independent formula evaluators (one per slot) + their names."""
-        self._formula_slots: list[CustomFormulaEvaluator] = [
-            CustomFormulaEvaluator() for _ in range(_MAX_FORMULAS)
-        ]
-        self._formula_names: list[str] = [f"Custom {i + 1}" for i in range(_MAX_FORMULAS)]
-        self._audio_formula_index: int = 0
-
-    def _formula_for_key(self, key: str) -> CustomFormulaEvaluator | None:
-        """Map a series key to its slot evaluator, or None for non-formula keys."""
-        if key in FORMULA_KEYS:
-            return self._formula_slots[FORMULA_KEYS.index(key)]
-        return None
-
-    def _apply_active_formulas(self, active: list[dict] | None) -> None:
-        """Load an active_formulas list into the slots (names + formulas)."""
-        active = active or []
-        for i in range(_MAX_FORMULAS):
-            entry = active[i] if i < len(active) and isinstance(active[i], dict) else {}
-            self._formula_names[i] = entry.get("name") or f"Custom {i + 1}"
-            self._formula_slots[i].set_formula(entry.get("formula", "") or "")
 
     def _persist_user_setting(self, key: str) -> None:
         """Persist one setting now via the registry (it reads the live value); no-op mid-load or unbuilt."""
@@ -315,40 +298,15 @@ class EEGMeditationApp(App):
             ev.cancel()
 
     def _persist_active_formulas(self, user_id: int) -> None:
-        """Serialize all slots (names + formulas) to a single JSON key."""
-        active = [
-            {"name": self._formula_names[i], "formula": self._formula_slots[i].formula}
-            for i in range(_MAX_FORMULAS)
-        ]
-        self._db.set_user_json_setting(user_id, "active_formulas", active)
-
-    def _read_active_formulas_with_migration(self, user_id: int) -> list[dict]:
-        """Return active_formulas if present, else seed slot 1 from the legacy scalar."""
-        active = self._db.get_user_json_setting(user_id, "active_formulas")
-        if isinstance(active, list):
-            return active
-        legacy = self._db.get_user_setting(user_id, "custom_formula")
-        return [{"name": "Custom 1", "formula": legacy}] if legacy else []
+        self._db.set_user_json_setting(user_id, "active_formulas", self._formulas.active())
 
     def _push_formula_names_to_graph(self) -> None:
         """Propagate slot display names to the live metrics graph's series labels."""
-        for key, name in zip(FORMULA_KEYS, self._formula_names):
+        for key, name in zip(FORMULA_KEYS, self._formulas.names):
             self._live_screen.graph.set_series_name(key, name)
 
     def _session_custom_formulas_json(self) -> str:
-        """JSON of the valid slots active this session, recorded at save for diary replay.
-
-        `slot` is stored explicitly so a sparse set (e.g. only slots 0 and 2) replays
-        onto the correct series keys instead of being packed densely and misaligned.
-        """
-        return json.dumps([
-            {"slot": i,
-             "name": self._formula_names[i],
-             "formula": self._formula_slots[i].formula,
-             "visible": self._live_screen.graph.is_visible(FORMULA_KEYS[i]),
-             "drove_audio": self._audio_metric_key == FORMULA_KEYS[i]}
-            for i in range(_MAX_FORMULAS) if self._formula_slots[i].is_valid
-        ])
+        return self._formulas.session_record(self._live_screen.graph.is_visible, self._audio_metric_key)
 
     def _persist_session_program(self, uid: int) -> None:
         """Persist the active editable program + its name + timer mode for a user."""
@@ -543,13 +501,7 @@ class EEGMeditationApp(App):
             self._program_seg_idx = idx
         # Every program custom line is evaluated every tick (persistent, shown the whole
         # program) into its own metrics[slot] — so all stages' lines stay live at once.
-        evs = self._program_formula_evs
-        if evs:
-            fvars = self._eval_formula_vars(raw_sample, metrics)
-            for slot, ev in evs.items():
-                if ev.is_valid:
-                    ev.push_variables(fvars)
-                    metrics[slot] = ev.evaluate(fvars)
+        evaluate_series(self._program_formula_evs, metrics, lambda: self._eval_formula_vars(raw_sample, metrics))
 
     def _apply_program_segment(self, prev_idx: int, idx: int, seg: dict) -> None:
         """On a boundary crossing: end-cue for the prior segment + repoint target/audio/marker
@@ -2030,13 +1982,7 @@ class EEGMeditationApp(App):
                          f"dist={metrics.get('distraction', 0):.0f} "
                          f"native_med={native_med:.0f}{bat_str}")
 
-        # Evaluate custom formulas if any slot is active
-        if any(e.is_valid for e in self._formula_slots):
-            formula_vars = self._eval_formula_vars(raw_sample, metrics)
-            for key, ev in zip(FORMULA_KEYS, self._formula_slots):
-                if ev.is_valid:
-                    ev.push_variables(formula_vars)
-                    metrics[key] = ev.evaluate(formula_vars)
+        self._formulas.evaluate_into(metrics, lambda: self._eval_formula_vars(raw_sample, metrics))
 
         # Program vs simple is what the session started as, not the Settings toggle (editable mid-session).
         # The drive key is resolved once: the tick scores and sounds the same metric.
@@ -2401,7 +2347,7 @@ class EEGMeditationApp(App):
         visible = not graph.is_visible(key)
         # The live formula must be valid to plot live custom_formula values;
         # diary custom_formula is recorded data and toggles freely.
-        ev = self._formula_for_key(key)
+        ev = self._formulas.for_key(key)
         if ev is not None and graph is self._live_screen.graph:
             visible = visible and ev.is_valid
         graph.set_visible(key, visible)  # fires the owning screen's legend refresh
@@ -2497,7 +2443,7 @@ class EEGMeditationApp(App):
             key = self._program_audio_key
         else:
             key = self._baseline_audio_metric(self._audio_metric_key)
-        ev = self._formula_for_key(key)
+        ev = self._formulas.for_key(key)
         if ev is not None and not ev.is_valid:
             return "shamatha_score"
         return key
@@ -2533,7 +2479,7 @@ class EEGMeditationApp(App):
         """Pick which formula slot drives audio. Only rebinds the live key when a
         custom-formula slot is the selected driver — tapping it while another metric
         is selected just remembers the choice for when custom-formula is picked."""
-        idx = max(0, min(idx, _MAX_FORMULAS - 1))
+        idx = max(0, min(idx, len(FORMULA_KEYS) - 1))
         if (self._audio_metric_key in FORMULA_KEYS and FORMULA_KEYS[idx] != self._audio_metric_key
                 and self._scoring_locked("changing the metric it is scored on")):
             self._show_audio_metric()
@@ -2578,15 +2524,15 @@ class EEGMeditationApp(App):
         visibility is then decided by the persisted picker selection in
         _restore_graph_series, so a hidden-but-valid choice survives a reload.
         """
-        ev = self._formula_slots[idx]
+        ev = self._formulas.evaluators[idx]
         key = FORMULA_KEYS[idx]
         # The slot the sound is set to is what a running session is scored on (or its shamatha fallback, while empty).
         if (key == self._audio_metric_key and formula != ev.formula
                 and self._scoring_locked("changing the formula it is scored on")):
-            self._settings_screen.set_formula_slot(idx, self._formula_names[idx], ev.formula)
+            self._settings_screen.set_formula_slot(idx, self._formulas.names[idx], ev.formula)
             return
-        self._formula_names[idx] = name or f"Custom {idx + 1}"
-        self._live_screen.graph.set_series_name(key, self._formula_names[idx])
+        self._formulas.names[idx] = name or default_name(idx)
+        self._live_screen.graph.set_series_name(key, self._formulas.names[idx])
         if not formula:
             ev.set_formula("")
             self._live_screen.graph.set_visible(key, False)
@@ -2633,19 +2579,15 @@ class EEGMeditationApp(App):
             entry = formulas[index]
             formula = entry["formula"]
             name = entry.get("name", "") or ""
-            slot = self._first_empty_slot()
+            slot = self._formulas.first_empty()
             self._settings_screen.set_formula_slot(slot, name, formula)
             self._on_formula_slot_change(slot, name, formula)
-
-    def _first_empty_slot(self) -> int:
-        """First slot with no valid formula; slot 0 if all are full."""
-        return next((i for i in range(_MAX_FORMULAS) if not self._formula_slots[i].is_valid), 0)
 
     def _assign_saved_to_slot(self, idx: int, entry: dict) -> None:
         """Assign a saved {name, formula} entry to slot idx, show it, and persist."""
         self._on_formula_slot_change(idx, entry.get("name", ""), entry.get("formula", ""), show=True)
         self._settings_screen.set_formula_slot(
-            idx, self._formula_names[idx], self._formula_slots[idx].formula
+            idx, self._formulas.names[idx], self._formulas.evaluators[idx].formula
         )
 
     def _on_delete_formula(self, index: int) -> None:
@@ -3039,7 +2981,7 @@ class EEGMeditationApp(App):
         token = self._detail_load
         d = self._diary_screen
         with timed("diary.open"):
-            d.set_session_formulas({}, self._recorded_formulas(session)[1])  # the legend's names from the first frame
+            d.set_session_formulas({}, recorded_formulas(session)[1])  # the legend's names from the first frame
             d.show_session_detail(session)
             d.set_metrics_threshold(float(session.get("threshold_used", 50)))
             d.set_program(session.get("session_program", ""))
@@ -3110,39 +3052,11 @@ class EEGMeditationApp(App):
             {"mode": mode, "sort": sort_by, "desc": descending},
         )
 
-    @staticmethod
-    def _recorded_formulas(session: dict) -> tuple[dict, dict]:
-        """The session's recorded formulas (the snapshot active then, not today's edits): ({series key: evaluator} for
-        each valid one, {series key: name} for every slot). Parsing only, no DB."""
-        cf_raw = session.get("custom_formulas") or ""
-        evaluators: dict[str, CustomFormulaEvaluator] = {}
-        # Reset every custom key to its default name so a session without a given
-        # slot doesn't inherit the previous session's label.
-        names: dict[str, str] = {k: f"Custom {i + 1}" for i, k in enumerate(FORMULA_KEYS)}
-        if cf_raw:
-            try:
-                defs = json.loads(cf_raw)
-            except (ValueError, TypeError):
-                defs = []
-            for pos, d in enumerate(defs):
-                if not isinstance(d, dict):
-                    continue
-                slot = d.get("slot", pos)  # explicit slot; fall back to position for old records
-                if not isinstance(slot, int) or not 0 <= slot < _MAX_FORMULAS:
-                    continue
-                key = FORMULA_KEYS[slot]
-                ev = CustomFormulaEvaluator()
-                ev.set_formula(d.get("formula", "") or "")
-                if ev.is_valid:
-                    evaluators[key] = ev
-                    names[key] = d.get("name") or f"Custom {slot + 1}"
-        return evaluators, names
-
     def _compute_session_formulas(self, session_id: int, session: dict,
                                   rows: list[dict] | None = None) -> tuple[dict, dict]:
         """Recompute the session's recorded formula series + names from its band powers, over `rows` when already
         read. Pure DB + compute, no Kivy — safe to call off the main thread."""
-        evaluators, names = self._recorded_formulas(session)
+        evaluators, names = recorded_formulas(session)
         series = self._db.recompute_formula_series(session_id, evaluators, rows) if evaluators else {}
         return series, names
 
@@ -3211,7 +3125,7 @@ class EEGMeditationApp(App):
     def _on_export_csv(self, session_id: int, path: Optional[str] = None) -> Optional[str]:
         """Export session data as CSV file. Returns file path or None."""
         csv_data = self._db.export_session_csv(
-            session_id, custom_formula=self._formula_slots[0]
+            session_id, custom_formula=self._formulas.evaluators[0]
         )
         if not csv_data:
             return None
@@ -3236,7 +3150,7 @@ class EEGMeditationApp(App):
             try:
                 mapping = {}
                 for sid in session_ids:
-                    csv = self._db.export_session_csv(sid, custom_formula=self._formula_slots[0])
+                    csv = self._db.export_session_csv(sid, custom_formula=self._formulas.evaluators[0])
                     if csv:
                         mapping[sid] = csv
                 ts = _dt.now().strftime("%Y%m%d_%H%M%S")
@@ -3452,7 +3366,7 @@ class EEGMeditationApp(App):
             Window.rotation = v
 
         def set_audio_index(v):
-            self._audio_formula_index = max(0, min(int(v), _MAX_FORMULAS - 1))
+            self._audio_formula_index = max(0, min(int(v), len(FORMULA_KEYS) - 1))
 
         def set_audio_metric(v):
             v = self._baseline_audio_metric(v)  # heal a leaked program slot
@@ -3565,7 +3479,7 @@ class EEGMeditationApp(App):
             on = key in sel
             if key in PROGRAM_FORMULA_KEYS:
                 on = False  # program-controlled; never restored as a user selection
-            ev = self._formula_for_key(key)
+            ev = self._formulas.for_key(key)
             if ev is not None and graph is self._live_screen.graph:
                 on = on and ev.is_valid
             graph.set_visible(key, on)
@@ -3602,15 +3516,15 @@ class EEGMeditationApp(App):
 
         # Load formulas BEFORE _restore_graph_series so the per-slot validity gate
         # sees real is_valid; the picker selection (graph_series_*) decides visibility.
-        self._apply_active_formulas(self._read_active_formulas_with_migration(user_id))
+        self._formulas.load(read_active(self._db, user_id))
         self._load_session_program(user_id)
         self._settings_screen.load_program(self._session_program_segments, self._timer_mode)
         self._settings_screen.set_program_name(self._session_program_name)  # show loaded name
         # Saved-programs list pushed to both UIs at the end via _refresh_saved_programs.
         self._push_formula_names_to_graph()
         # Reflect every slot's name+formula into the Settings inputs.
-        for i in range(_MAX_FORMULAS):
-            self._settings_screen.set_formula_slot(i, self._formula_names[i], self._formula_slots[i].formula)
+        for i in range(len(FORMULA_KEYS)):
+            self._settings_screen.set_formula_slot(i, self._formulas.names[i], self._formulas.evaluators[i].formula)
 
         self._restore_graph_series(user_id)
 

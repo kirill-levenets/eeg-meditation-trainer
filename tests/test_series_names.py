@@ -4,6 +4,7 @@ and a program's labels go when it ends."""
 import pytest
 
 import app.ui.app_manager as am
+from app.metrics.formula_slots import FormulaSlots
 from app.session.session_program import SessionProgram, program_evaluators
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.diary_screen import DiaryScreen
@@ -18,7 +19,8 @@ def app() -> EEGMeditationApp:
     a = EEGMeditationApp.__new__(EEGMeditationApp)
     a._live_screen = LiveSessionScreen()
     a._diary_screen = DiaryScreen()
-    a._formula_names = ["Calm alpha", "Custom 2", "Custom 3"]
+    a._formulas = FormulaSlots()
+    a._formulas.names[0] = "Calm alpha"
     a._push_formula_names_to_graph()  # the profile's slot names, as loading its settings does
     return a
 

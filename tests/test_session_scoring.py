@@ -8,9 +8,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.metrics.custom_formula import CustomFormulaEvaluator
+from app.metrics.formula_slots import FormulaSlots
 from app.session.manager import SessionManager, SessionState
 from app.storage.database import DatabaseManager
-from app.ui.app_manager import FORMULA_KEYS, EEGMeditationApp
+from app.ui.app_manager import EEGMeditationApp
 from tests.test_resume_mirror import _drive_tick, _make_tick_app, _metrics, _raw_sample
 
 
@@ -31,7 +32,9 @@ def _app(metric_key: str = "shamatha_score", formulas=()):
     app._program_audio_key = ""
     app._active_program = None
     app._session_program_name = ""
-    app._formula_slots = list(formulas) or [CustomFormulaEvaluator() for _ in FORMULA_KEYS]
+    app._formulas = FormulaSlots()
+    if formulas:
+        app._formulas.evaluators = list(formulas)
     app._live_screen = MagicMock()
     app._live_screen.graph.series_name.side_effect = lambda k: {"shamatha_score": "Shamatha",
                                                                 "meditation_score": "Meditation",

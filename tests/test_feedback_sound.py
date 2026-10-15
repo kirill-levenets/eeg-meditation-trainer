@@ -1,3 +1,4 @@
+from app.metrics.formula_slots import FormulaSlots
 from app.session.session_program import SessionProgram
 from app.ui.app_manager import EEGMeditationApp
 
@@ -77,7 +78,7 @@ def _drive_app(metric_key, program_active=False, program_key=""):
     app._audio_metric_key = metric_key
     app._session_program_active = program_active
     app._program_audio_key = program_key
-    app._formula_slots = []
+    app._formulas = FormulaSlots()
     return app
 
 
