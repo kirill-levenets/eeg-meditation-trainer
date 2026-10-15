@@ -1525,53 +1525,99 @@ class EEGMeditationApp(App):
         if self._session_manager.state != SessionState.RUNNING:
             return
 
-        # Auto-stop when session reaches max duration
-        if self._session_manager.elapsed_seconds >= APP.SESSION_MAX_SECONDS:
-            logger.info(f"Session reached max duration ({APP.SESSION_MAX_SECONDS}s), auto-stopping")
-            self._audio.play_disconnect_alert()
-            _limit_msg = (
-                f"Session recording limit reached ({APP.SESSION_MAX_SECONDS // 3600}h). "
-                "Session saved. Start a new one to continue."
-            )
-            self._on_main(lambda m=_limit_msg: self._live_screen.show_alert(m))
-            self._on_main(lambda: self._stop_and_save())
+        if self._end_at_max_duration():
+            return
+        self._follow_headset_link()
+        self._check_stale_data()
+
+        raw_sample = self._eeg_stream.read_sample()
+        metrics = self._metrics_engine.process_sample(raw_sample)
+        self._warn_from_sample(raw_sample)
+        self._tick_count = getattr(self, '_tick_count', 0) + 1
+        self._log_tick(raw_sample, metrics)
+
+        self._formulas.evaluate_into(metrics, lambda: self._eval_formula_vars(raw_sample, metrics))
+
+        # Program vs simple is what the session started as, not the Settings toggle (editable mid-session).
+        # The drive key is resolved once: the tick scores and sounds the same metric.
+        if self._program_run.active:
+            self._program_run.tick(metrics, raw_sample)
+            drive_key, scored = self._audio_drive_key(), None
+        else:
+            drive_key = scored = self._score_on_drive_key()
+
+        # Merge raw + computed for full storage; a pending marker is in the row before a checkpoint can write it.
+        full_record = {**raw_sample, **metrics}
+        marker_pending = self._pending_marker
+        if marker_pending:
+            self._pending_marker = False
+            full_record["marker"] = 1
+        target = self._recorder.record(metrics, full_record)
+        if target is None:  # the session paused or stopped while this tick was read: it isn't part of it
+            self._pending_marker |= marker_pending  # the marker goes on the next recorded tick
             return
 
-        # Update settings status when real BT device connects
+        # Audio is thread-safe — update directly
+        self._audio.update(metrics.get(drive_key, 0))
+        if self._tick_count > 10:
+            self._audio.update_sinking(metrics.get("sinking", 0))
+            self._audio.update_subtle_distraction(metrics.get("subtle_distraction", 0))
+
+        self._mirror.record(metrics, target, raw_sample)  # kept even while the screen is locked
+        self._show_tick(metrics, raw_sample, target, marker_pending, scored)
+
+        # Timer countdown — tick() is pure counter, no UI
+        if self._timer_state.tick(APP.UPDATE_FREQUENCY):
+            self._end_by_timer()
+            return
+
+        self._recorder.flush_tick()  # DB opened with check_same_thread=False
+
+    def _end_at_max_duration(self) -> bool:
+        """Tick thread: stop and save a session that reached the recording limit; True if it did."""
+        if self._session_manager.elapsed_seconds < APP.SESSION_MAX_SECONDS:
+            return False
+        logger.info(f"Session reached max duration ({APP.SESSION_MAX_SECONDS}s), auto-stopping")
+        self._audio.play_disconnect_alert()
+        limit_msg = (
+            f"Session recording limit reached ({APP.SESSION_MAX_SECONDS // 3600}h). "
+            "Session saved. Start a new one to continue."
+        )
+        self._on_main(lambda m=limit_msg: self._live_screen.show_alert(m))
+        self._on_main(lambda: self._stop_and_save())
+        return True
+
+    def _follow_headset_link(self) -> None:
+        """Tick thread: the headset's link coming up (Settings shows it) and dropping during a session (the Session
+        screen shows it reconnecting, with the disconnect alert)."""
         if (not self._bt_connected_notified
                 and not APP.USE_MOCK_DEVICE
                 and self._real_stream.is_connected):
             self._bt_connected_notified = True
             name = self._headset.name()
-            _n = name
-            self._on_main(lambda n=_n: self._settings_screen.device.update_device_status(True, name=n))
+            self._on_main(lambda n=name: self._settings_screen.device.update_device_status(True, name=n))
             logger.info(f"Settings updated: {name} connected")
 
-        # Detect BT disconnect during session
         if (not APP.USE_MOCK_DEVICE
                 and self._bt_connected_notified
                 and not self._real_stream.is_connected):
             self._bt_connected_notified = False
             name = self._headset.name()
-            _n = name
-            self._on_main(lambda n=_n: self._live_screen.update_device_status(
+            self._on_main(lambda n=name: self._live_screen.update_device_status(
                 False, device_name=n, connecting=True
             ))
             self._audio.play_disconnect_alert()
             logger.warning(f"BT device {name} disconnected during session")
 
-        self._check_stale_data()
-
-        raw_sample = self._eeg_stream.read_sample()
-        metrics = self._metrics_engine.process_sample(raw_sample)
-
+    def _warn_from_sample(self, raw_sample: dict) -> None:
+        """Tick thread: a low headset battery and power-line noise, each warned about once."""
         # Low battery warning (ThinkGear reports 0-127, warn below ~20%)
         battery = raw_sample.get("battery", -1)
         if battery != -1 and battery < 25 and not getattr(self, '_low_battery_warned', False):
             self._low_battery_warned = True
             pct = int(battery / 127 * 100)
-            _bat_msg = f"Low headset battery ({pct}%)."
-            self._on_main(lambda m=_bat_msg: self._live_screen.show_alert(m))
+            bat_msg = f"Low headset battery ({pct}%)."
+            self._on_main(lambda m=bat_msg: self._live_screen.show_alert(m))
             logger.warning(f"Low headset battery: {battery}/127 ({pct}%)")
 
         # Feed raw waveform to power line noise detector
@@ -1583,72 +1629,46 @@ class EEGMeditationApp(App):
             if detector.ready():
                 detected, freq = detector.result()
                 if detected:
-                    _noise_msg = (
+                    noise_msg = (
                         f"Warning: {freq} Hz power line noise detected. "
                         f"Check notch filter setting or move away from electrical equipment."
                     )
-                    self._on_main(lambda m=_noise_msg: self._live_screen.show_alert(m))
+                    self._on_main(lambda m=noise_msg: self._live_screen.show_alert(m))
                     logger.warning(f"Power line noise detected: {freq} Hz")
 
-        # Log raw sample every 10 ticks (~5s at 2Hz)
-        self._tick_count = getattr(self, '_tick_count', 0) + 1
-        if self._tick_count % 10 == 0:
-            bands = {k: f"{raw_sample.get(k, 0):.0f}" for k in BAND_KEYS}
-            logger.debug(f"Raw sample #{self._tick_count}: {bands}")
-            native_med = raw_sample.get("meditation", -1)
-            bat = raw_sample.get("battery", -1)
-            bat_str = f" bat={bat}/127" if bat >= 0 else ""
-            logger.debug(f"Metrics: med={metrics.get('meditation_score', 0):.0f} "
-                         f"sham={metrics.get('shamatha_score', 0):.0f} "
-                         f"sink={metrics.get('sinking', 0):.0f} "
-                         f"dist={metrics.get('distraction', 0):.0f} "
-                         f"native_med={native_med:.0f}{bat_str}")
-
-        self._formulas.evaluate_into(metrics, lambda: self._eval_formula_vars(raw_sample, metrics))
-
-        # Program vs simple is what the session started as, not the Settings toggle (editable mid-session).
-        # The drive key is resolved once: the tick scores and sounds the same metric.
-        if self._program_run.active:
-            self._program_run.tick(metrics, raw_sample)
-            drive_key, _scored = self._audio_drive_key(), None
-        else:
-            drive_key = _scored = self._score_on_drive_key()
-
-        # Merge raw + computed for full storage; a pending marker is in the row before a checkpoint can write it.
-        full_record = {**raw_sample, **metrics}
-        _marker_pending = self._pending_marker
-        if _marker_pending:
-            self._pending_marker = False
-            full_record["marker"] = 1
-        target = self._recorder.record(metrics, full_record)
-        if target is None:  # the session paused or stopped while this tick was read: it isn't part of it
-            self._pending_marker |= _marker_pending  # the marker goes on the next recorded tick
+    def _log_tick(self, raw_sample: dict, metrics: dict) -> None:
+        """Log the raw sample and the metrics every 10 ticks (~5s at 2Hz)."""
+        if self._tick_count % 10 != 0:
             return
+        bands = {k: f"{raw_sample.get(k, 0):.0f}" for k in BAND_KEYS}
+        logger.debug(f"Raw sample #{self._tick_count}: {bands}")
+        native_med = raw_sample.get("meditation", -1)
+        bat = raw_sample.get("battery", -1)
+        bat_str = f" bat={bat}/127" if bat >= 0 else ""
+        logger.debug(f"Metrics: med={metrics.get('meditation_score', 0):.0f} "
+                     f"sham={metrics.get('shamatha_score', 0):.0f} "
+                     f"sink={metrics.get('sinking', 0):.0f} "
+                     f"dist={metrics.get('distraction', 0):.0f} "
+                     f"native_med={native_med:.0f}{bat_str}")
 
-        # Audio is thread-safe — update directly
-        self._audio.update(metrics.get(drive_key, 0))
-        if self._tick_count > 10:
-            self._audio.update_sinking(metrics.get("sinking", 0))
-            self._audio.update_subtle_distraction(metrics.get("subtle_distraction", 0))
-
-        self._mirror.record(metrics, target, raw_sample)  # kept even while the screen is locked
-
-        # UI updates — dispatch to main thread
-        _elapsed_fmt = self._session_manager.elapsed_formatted
+    def _show_tick(self, metrics: dict, raw_sample: dict, target: float, marker_pending: bool,
+                   scored: Optional[str]) -> None:
+        """Tick thread: queue the tick's Session screen update for the main thread, unless the screen is locked."""
+        elapsed_fmt = self._session_manager.elapsed_formatted
 
         # Debounced shamatha-zone crossing (tick thread) — only the change is
         # dispatched, so the chip can't restyle every tick.
-        _sham_prev = self._shamatha_active
+        sham_prev = self._shamatha_active
         self._shamatha_active, self._shamatha_streak = self._shamatha_transition(
-            _sham_prev,
+            sham_prev,
             metrics.get("shamatha_score", 0.0) >= self._shamatha_threshold,
             self._shamatha_streak,
         )
-        _sham_changed = self._shamatha_active != _sham_prev
+        sham_changed = self._shamatha_active != sham_prev
 
         def _ui_update(
-            m=metrics, rs=raw_sample, ef=_elapsed_fmt, mp=_marker_pending,
-            sa=self._shamatha_active, sc=_sham_changed, sk=self._scored_mark(_scored), tg=target,
+            m=metrics, rs=raw_sample, ef=elapsed_fmt, mp=marker_pending,
+            sa=self._shamatha_active, sc=sham_changed, sk=self._scored_mark(scored), tg=target,
         ) -> None:
             self._live_screen.graph.add_point(m, threshold=tg)
             self._live_screen.update_stats(m)
@@ -1672,47 +1692,35 @@ class EEGMeditationApp(App):
         if not self._is_paused:
             self._on_main(_ui_update)
 
-        # Timer countdown — tick() is pure counter, no UI
-        if self._timer_state.tick(APP.UPDATE_FREQUENCY):
-            logger.info("Timer expired, auto-stopping session")
-            # Stop the audio loop on the tick thread directly so the
-            # white-noise actually ends at timer-expiry even when the
-            # screen is locked (the noise channel is MediaPlayer-based
-            # on Android and `AudioEngine.stop()` is thread-safe).
-            # Without this, _on_main below would queue stop() through
-            # Kivy's Clock — paused while the screen is locked — so
-            # the noise kept playing past the timer end.
-            # Persist FIRST, on THIS daemon thread, before any audio teardown.
-            # The finished session must be saved even though the screen may be
-            # locked. (Originally _audio.stop() ran here first and DEADLOCKED
-            # the tick thread: MediaPlayer.release() synchronises with its
-            # event handler on the main Looper, which is PAUSED during lock —
-            # so the save never ran and the whole session was lost.)
-            stats = self._persist_session_data(reason="timer")
-            session_id = self._recorder.session_id
-            # Silence the noise with a non-blocking volume→0 (setVolume is a
-            # direct native call, safe from this thread even while locked).
-            # The real stop()/release() teardown is deferred to the main
-            # thread below, where the Looper is live and release() won't hang.
-            self._audio.mute()
-            # Stop the loop now (safe from this thread); also ends `running`, so idle isn't "live".
-            self._ticker.stop()
-            def _finish_on_main(_dt=None):
-                self._audio.stop()  # full noise teardown on the main thread
-                self._finalize_stop_ui(stats, session_id)
-            self._on_main(_finish_on_main)
-            # Ring the gong LAST, on this thread, so it sounds at the timer end
-            # even with the screen locked: it routes through a MediaPlayer
-            # (USAGE_MEDIA), which plays through lock — SoundLoader is silenced
-            # while locked. Only create/start runs here (release is deferred to
-            # the main thread via stop_timer_bell). Done last on purpose: the
-            # save, mute, and summary dispatch above are all complete, so even
-            # if MediaPlayer setup were to block during lock, nothing critical
-            # is lost.
-            self._audio.play_timer_sound(self._timer_state.custom_sound_path)
-            return
+    def _end_by_timer(self) -> None:
+        """Tick thread: the timer expired. Persist FIRST, before any audio teardown: the finished session must be saved
+        even though the screen may be locked. (Originally _audio.stop() ran here first and DEADLOCKED the tick thread:
+        MediaPlayer.release() synchronises with its event handler on the main Looper, which is PAUSED during lock — so
+        the save never ran and the whole session was lost.)"""
+        logger.info("Timer expired, auto-stopping session")
+        stats = self._persist_session_data(reason="timer")
+        session_id = self._recorder.session_id
+        # Silence the noise with a non-blocking volume→0 (setVolume is a
+        # direct native call, safe from this thread even while locked).
+        # The real stop()/release() teardown is deferred to the main
+        # thread below, where the Looper is live and release() won't hang.
+        self._audio.mute()
+        # Stop the loop now (safe from this thread); also ends `running`, so idle isn't "live".
+        self._ticker.stop()
 
-        self._recorder.flush_tick()  # DB opened with check_same_thread=False
+        def _finish_on_main(_dt=None):
+            self._audio.stop()  # full noise teardown on the main thread
+            self._finalize_stop_ui(stats, session_id)
+        self._on_main(_finish_on_main)
+        # Ring the gong LAST, on this thread, so it sounds at the timer end
+        # even with the screen locked: it routes through a MediaPlayer
+        # (USAGE_MEDIA), which plays through lock — SoundLoader is silenced
+        # while locked. Only create/start runs here (release is deferred to
+        # the main thread via stop_timer_bell). Done last on purpose: the
+        # save, mute, and summary dispatch above are all complete, so even
+        # if MediaPlayer setup were to block during lock, nothing critical
+        # is lost.
+        self._audio.play_timer_sound(self._timer_state.custom_sound_path)
 
     def _on_key_down(self, window, key, scancode, codepoint, modifiers) -> bool:
         """Handle keyboard hotkey for marker."""
