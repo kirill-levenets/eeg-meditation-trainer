@@ -28,6 +28,7 @@ from app.session.timer_state import TimerState
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.live_session import METRICS_COLORS
 from tests._program_run import make_run
+from tests._program_settings import make_programs
 
 BAND_KEYS = ("alpha", "beta", "gamma", "theta", "delta")
 
@@ -107,7 +108,7 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     app._tick_thread = None  # as __init__ leaves it
 
     app._program_run = make_run(app)
-    app._session_program_segments = []
+    app._programs = make_programs(app._db, app._current_user_id)
 
     app._shamatha_active = False
     app._shamatha_streak = 0

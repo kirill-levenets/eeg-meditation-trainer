@@ -22,6 +22,7 @@ from app.ui.diary_screen import detail_graph_data
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
 from tests._program_run import make_run
+from tests._program_settings import make_programs
 from tests.test_bt_wait_reconnect import wait  # noqa: F401  (fixture)
 from tests.test_resume_mirror import _drive_tick, _make_tick_app, _metrics, _raw_sample
 from tests.test_session_detail_open import _frames, app, db  # noqa: F401  (fixtures)
@@ -254,8 +255,9 @@ def _start(program: bool, monkeypatch, prepare=None, **before) -> EEGMeditationA
     a._settings_screen = MagicMock(threshold=70, timer_enabled=False, timer_minutes=20)
     prog = SessionProgram([{"minutes": 5, "formula": "shamatha_score", "target": 60},
                            {"minutes": 5, "formula": "meditation_score", "target": 80}])
-    a._build_session_program = lambda: prog
-    a._timer_mode = "program" if program else "simple"
+    a._programs = make_programs()
+    a._programs.segments = prog.segments
+    a._programs.mode = "program" if program else "simple"
     a._timer_state = MagicMock()
     for name in ("_warn_missing_sound_files", "_acquire_wake_lock",
                  "_start_session_keep_alive_service", "_start_tick_thread"):

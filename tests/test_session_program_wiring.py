@@ -2,35 +2,30 @@ from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.program_run import ProgramRun
 from tests._program_run import make_run
+from tests._program_settings import make_programs
 
 
-def _app(db, uid):
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._db = db
-    app._current_user_id = uid
-    app._session_program_segments = []
-    app._session_program_name = ""
-    app._timer_mode = "simple"
-    return app
+def _programs(db, uid, **kw):
+    return make_programs(db, uid, **kw)
 
 
 def test_program_persist_roundtrip(tmp_path):
     db = DatabaseManager(db_path=str(tmp_path / "sp_wire.db"))
     uid = db.create_user("u")
 
-    app = _app(db, uid)
+    programs = _programs(db, uid)
     segs = [{"minutes": 10, "target": 50, "formula": "shamatha_score"}]
-    app._session_program_segments = segs
-    app._session_program_name = "Ramp"
-    app._timer_mode = "program"
-    app._persist_session_program(uid)
+    programs.segments = segs
+    programs.name = "Ramp"
+    programs.mode = "program"
+    programs.persist(uid)
 
-    # A fresh AppManager on the same DB restores the persisted program + name + mode.
-    fresh = _app(db, uid)
-    fresh._load_session_program(uid)
-    assert fresh._session_program_segments == segs
-    assert fresh._session_program_name == "Ramp"
-    assert fresh._timer_mode == "program"
+    # A fresh profile load on the same DB restores the persisted program + name + mode.
+    fresh = _programs(db, uid)
+    fresh.load(uid)
+    assert fresh.segments == segs
+    assert fresh.name == "Ramp"
+    assert fresh.mode == "program"
     db.close()
 
 
@@ -53,7 +48,8 @@ def test_session_program_json_records_snapshot_not_live_editor():
     snapshot = [{"minutes": 10, "target": 50, "formula": "shamatha_score"}]
     app._program_run = make_run(program=SessionProgram(snapshot))
     # A mid-session edit to the live editor must NOT change what's recorded.
-    app._session_program_segments = [{"minutes": 99, "target": 1, "formula": "meditation_score"}]
+    app._programs = make_programs()
+    app._programs.segments = [{"minutes": 99, "target": 1, "formula": "meditation_score"}]
     assert json.loads(app._program_run.segments_json()) == snapshot
     # A simple session records nothing.
     assert make_run().segments_json() == ""
@@ -98,37 +94,35 @@ class _StubLive:
 
 
 def test_saved_program_unique_upsert_load_delete(tmp_path):
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._db = DatabaseManager(db_path=str(tmp_path / "u.db"))
-    app._current_user_id = app._db.create_user("u")
-    app._settings_screen = _StubSettings()
-    app._live_screen = _StubLive()
-    app._session_program_segments = [{"minutes": 10, "target": 50, "formula": "shamatha_score"}]
-    app._session_program_name = ""
-    app._timer_mode = "program"
+    db = DatabaseManager(db_path=str(tmp_path / "u.db"))
+    uid = db.create_user("u")
+    settings = _StubSettings()
+    programs = _programs(db, uid, settings_screen=settings, live_screen=_StubLive())
+    programs.segments = [{"minutes": 10, "target": 50, "formula": "shamatha_score"}]
+    programs.mode = "program"
 
     # New name -> added directly (no confirm popup path).
-    app._on_program_save("Ramp")
-    progs = app._db.get_saved_programs(app._current_user_id)
+    programs.on_save("Ramp")
+    progs = db.get_saved_programs(uid)
     assert [p["name"] for p in progs] == ["Ramp"]
 
     # Same name, edited segments -> overwrite (simulate the confirmed action).
-    app._session_program_segments = [{"minutes": 5, "target": 90, "formula": "meditation_score"}]
-    app._save_program(0, "Ramp")
-    progs = app._db.get_saved_programs(app._current_user_id)
+    programs.segments = [{"minutes": 5, "target": 90, "formula": "meditation_score"}]
+    programs._save(0, "Ramp")
+    progs = db.get_saved_programs(uid)
     assert len(progs) == 1 and progs[0]["segments"][0]["target"] == 90  # no duplicate
 
     # Load -> sets segments + mode + reflects the name back into the editor.
-    app._timer_mode = "simple"
-    app._load_program(0, "Ramp")
-    assert app._timer_mode == "program"
-    assert app._session_program_segments[0]["target"] == 90
-    assert app._settings_screen.name == "Ramp"
+    programs.mode = "simple"
+    programs._load(0, "Ramp")
+    assert programs.mode == "program"
+    assert programs.segments[0]["target"] == 90
+    assert settings.name == "Ramp"
 
     # Delete -> removed.
-    app._delete_program(0)
-    assert app._db.get_saved_programs(app._current_user_id) == []
-    app._db.close()
+    programs._delete(0)
+    assert db.get_saved_programs(uid) == []
+    db.close()
 
 
 def test_program_custom_formula_plots_and_marks():
@@ -255,14 +249,16 @@ def test_idle_program_preview_shows_program_set(tmp_path):
     app._session_manager = MagicMock()
     app._session_manager.state = SessionState.IDLE  # not running
     app._formulas = FormulaSlots()
-    app._timer_mode = "program"
-    app._session_program_segments = [
+    app._programs = _programs(db, uid, live_screen=app._live_screen, session_manager=app._session_manager,
+                              show_saved_series=lambda u: app._apply_saved_series(app._live_screen.graph, u))
+    app._programs.mode = "program"
+    app._programs.segments = [
         {"minutes": 1, "target": 50, "formula": "shamatha_score"},
         {"minutes": 1, "target": 80, "formula": {"name": "Alpha", "formula": "alpha1"}},
     ]
     g = app._live_screen.graph
 
-    app._refresh_live_program_series()  # idle preview
+    app._programs.refresh_live_series()  # idle preview
     assert set(g.visible_keys()) == {"shamatha_score", "program_formula"}
     assert g.series_name("program_formula") == "Program: Alpha"
 
@@ -271,8 +267,8 @@ def test_idle_program_preview_shows_program_set(tmp_path):
     assert db.get_user_json_setting(uid, "graph_series_live_metrics") == ["shamatha_score"]
 
     # Back to simple mode -> the saved selection (shamatha only) is restored.
-    app._timer_mode = "simple"
-    app._refresh_live_program_series()
+    app._programs.mode = "simple"
+    app._programs.refresh_live_series()
     assert set(g.visible_keys()) == {"shamatha_score"}
     db.close()
 
@@ -295,19 +291,19 @@ def test_program_unsaved_changes_detection(tmp_path):
     db = DatabaseManager(db_path=str(tmp_path / "unsaved.db"))
     uid = db.create_user("u")
     db.add_saved_program(uid, "Ramp", [{"minutes": 10, "target": 50, "formula": "shamatha_score"}])
-    app = _app(db, uid)
+    programs = _programs(db, uid)
 
-    app._session_program_segments = []           # nothing loaded
-    app._session_program_name = ""
-    assert app._program_has_unsaved_changes() is False
+    programs.segments = []           # nothing loaded
+    programs.name = ""
+    assert programs.has_unsaved_changes() is False
 
-    app._session_program_segments = [{"minutes": 10, "target": 50, "formula": "shamatha_score"}]
-    app._session_program_name = "Ramp"           # clean load, matches saved
-    assert app._program_has_unsaved_changes() is False
+    programs.segments = [{"minutes": 10, "target": 50, "formula": "shamatha_score"}]
+    programs.name = "Ramp"           # clean load, matches saved
+    assert programs.has_unsaved_changes() is False
 
-    app._session_program_segments = [{"minutes": 20, "target": 50, "formula": "shamatha_score"}]
-    assert app._program_has_unsaved_changes() is True   # edited
+    programs.segments = [{"minutes": 20, "target": 50, "formula": "shamatha_score"}]
+    assert programs.has_unsaved_changes() is True   # edited
 
-    app._session_program_name = ""               # unnamed but non-empty
-    assert app._program_has_unsaved_changes() is True
+    programs.name = ""               # unnamed but non-empty
+    assert programs.has_unsaved_changes() is True
     db.close()

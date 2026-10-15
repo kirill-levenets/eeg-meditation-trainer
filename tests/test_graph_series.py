@@ -20,6 +20,7 @@ from app.ui.live_session import (
 )
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.widgets.band_totals import BAND_COLORS, BAND_SCALES
+from tests._program_settings import make_programs
 
 
 def _g(colors, scales, graph_id, names=None):
@@ -62,6 +63,7 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         self.app._formulas = FormulaSlots()
         self.app._formulas.evaluators[0] = types.SimpleNamespace(is_valid=False)
         self.app._audio_metric_key = "shamatha_score"  # the app's default: no formula slot drives the sound
+        self.app._programs = make_programs(self.app._db, self.uid)  # simple mode: the user's own series
 
     def tearDown(self):
         self.app._db.close()

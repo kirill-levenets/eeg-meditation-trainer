@@ -45,7 +45,6 @@ from app.session.manager import SessionManager, SessionState, elapsed_clock
 from app.session.scoring import target_steps
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
-    SessionProgram,
     segment_target,
 )
 from app.session.timer_state import TimerState
@@ -71,13 +70,13 @@ from app.ui.line_colours import DEFAULT as LINE_DEFAULT
 from app.ui.line_colours import LINE_COLOURS
 from app.ui.line_colours import OPTIONS as LINE_OPTIONS
 from app.ui.live_session import METRICS_COLORS, LiveSessionScreen
-from app.ui.program_run import ProgramRun, show_program_series
+from app.ui.program_run import ProgramRun
+from app.ui.program_settings import ProgramSettings
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.session_labels import session_title, start_stamp
 from app.ui.settings_screen import (
     SettingsScreen,
     saved_formula_label,
-    saved_program_label,
 )
 from app.ui.theme import (
     DEFAULT_THEME,
@@ -298,26 +297,6 @@ class EEGMeditationApp(App):
     def _session_custom_formulas_json(self) -> str:
         return self._formulas.session_record(self._live_screen.graph.is_visible, self._audio_metric_key)
 
-    def _persist_session_program(self, uid: int) -> None:
-        """Persist the active editable program + its name + timer mode for a user."""
-        if not uid:
-            return  # silent-ok: persistence helper; no active user = nothing to persist
-        self._db.set_user_json_setting(uid, "session_program", self._session_program_segments)
-        self._db.set_user_setting(uid, "timer_mode", self._timer_mode)
-        self._db.set_user_setting(uid, "session_program_name", self._session_program_name)
-
-    def _load_session_program(self, uid: int) -> None:
-        """Restore the active editable program + its name + timer mode for a user."""
-        self._session_program_segments = self._db.get_user_json_setting(
-            uid, "session_program", default=[]
-        ) or []
-        self._timer_mode = self._db.get_user_setting(uid, "timer_mode") or "simple"
-        self._session_program_name = self._db.get_user_setting(uid, "session_program_name") or ""
-
-    def _build_session_program(self) -> SessionProgram:
-        """Build a SessionProgram from the active editable segments."""
-        return SessionProgram(self._session_program_segments)
-
     @staticmethod
     def _source_spec(source_id: str) -> tuple[str, str]:
         """Map a feedback source id to (kind, custom_path); non-builtin ids are custom file paths.
@@ -375,27 +354,6 @@ class EEGMeditationApp(App):
             problems.append(f"Custom timer sound not found: {timer_path!r} - using the default gong instead.")
         if problems:
             report_soft_error("sound_files_missing", "\n".join(problems), app=self, force=force)
-
-    def _program_governs_live_series(self) -> bool:
-        """True when the live metrics graph's visibility is program-driven (program mode
-        with a loaded program) — so it must not be persisted as the manual selection."""
-        return (getattr(self, "_timer_mode", "simple") == "program"
-                and bool(getattr(self, "_session_program_segments", None)))
-
-    def _refresh_live_program_series(self) -> None:
-        """Idle preview: in program mode with a loaded program, show the program's metric
-        set on the live graph (legend + lines) before Start; otherwise restore the user's
-        saved selection. No-op while a session runs (the session owns the graph then)."""
-        sm = getattr(self, "_session_manager", None)
-        if sm is not None and sm.state in (SessionState.RUNNING, SessionState.PAUSED):
-            return
-        if not self._current_user_id:
-            return  # silent-ok: idle live-graph preview; nothing to show without a user
-        if self._program_governs_live_series():
-            show_program_series(self._live_screen.graph, self._build_session_program())
-            self._live_screen.set_training_series(None)  # no active segment in idle
-        else:
-            self._apply_saved_series(self._live_screen.graph, self._current_user_id)
 
     @staticmethod
     def _shamatha_transition(
@@ -535,6 +493,12 @@ class EEGMeditationApp(App):
         self._history_screen = HistoryScreen()
         self._diary_screen = DiaryScreen()
         self._timer_state = TimerState()
+        self._programs = ProgramSettings(
+            self._db, self._settings_screen, self._live_screen, self._session_manager,
+            user_id=lambda: self._current_user_id, require_user=self._require_user, confirm=self._confirm_action,
+            info=self._info_popup, confirm_saved_delete=self._confirm_saved_delete,
+            show_saved_series=lambda uid: self._apply_saved_series(self._live_screen.graph, uid),
+            save_settings=self._save_user_settings)
 
         self._sm.add_widget(self._live_screen)
         self._sm.add_widget(self._history_screen)
@@ -635,8 +599,8 @@ class EEGMeditationApp(App):
         self._live_screen.btn_pause.bind(on_release=self._on_pause)
         self._live_screen.btn_stop.bind(on_release=self._on_stop)
         self._live_screen.btn_marker.bind(on_release=self._on_marker)
-        self._live_screen.on_duration_preset = self._on_duration_preset
-        self._live_screen.on_program_pick = self._on_session_program_pick
+        self._live_screen.on_duration_preset = self._programs.on_duration_preset
+        self._live_screen.on_program_pick = self._programs.on_load
         self._live_screen.overlay_cancel_btn.bind(on_release=self._on_connect_cancel)
         self._live_screen.overlay_retry_btn.bind(on_release=self._on_connect_retry)
         self._live_screen.summary_ok_btn.bind(on_release=self._on_summary_ok)
@@ -674,11 +638,11 @@ class EEGMeditationApp(App):
         self._settings_screen.set_audio_formula_index_callback(self._on_audio_formula_index)
         self._settings_screen.set_feedback_source_callback(self._on_feedback_source_change)
         self._settings_screen.set_reward_source_callback(self._on_reward_source_change)
-        self._settings_screen.set_program_mode_callback(self._on_timer_mode_change)
-        self._settings_screen.set_program_changed_callback(self._on_program_changed)
-        self._settings_screen.set_program_save_callback(self._on_program_save)
-        self._settings_screen.set_program_load_callback(self._on_program_load)
-        self._settings_screen.set_program_delete_callback(self._on_program_delete)
+        self._settings_screen.set_program_mode_callback(self._programs.on_mode_change)
+        self._settings_screen.set_program_changed_callback(self._programs.on_changed)
+        self._settings_screen.set_program_save_callback(self._programs.on_save)
+        self._settings_screen.set_program_load_callback(self._programs.on_load)
+        self._settings_screen.set_program_delete_callback(self._programs.on_delete)
         self._settings_screen.set_theme_callback(self._on_theme_change)
 
         # Keyboard hotkey for marker
@@ -703,9 +667,6 @@ class EEGMeditationApp(App):
         self._feedback_sound_path: str = ""
         self._reward_source: str = "none"   # above-threshold reward channel (off by default)
         self._reward_sound_path: str = ""
-        self._session_program_segments: list[dict] = []
-        self._session_program_name: str = ""  # name of the loaded/saved active program
-        self._timer_mode: str = "simple"
 
         self._diary_screen.set_save_notes_callback(self._on_save_notes)
         self._diary_screen.set_export_csv_callback(self._on_export_csv)
@@ -981,7 +942,7 @@ class EEGMeditationApp(App):
             self._refresh_history()
         elif name == "live_session":
             # Reflect any Settings timer/mode change on the Start duration button.
-            self._sync_live_timer_picker()
+            self._programs.sync_picker()
         # Sync bottom nav highlight
         for tab_key, screen in self._TAB_SCREENS.items():
             if screen == name:
@@ -1130,8 +1091,7 @@ class EEGMeditationApp(App):
         # doesn't overlap with the new session's noise loop.
         self._audio.stop_timer_bell()
         threshold = self._settings_screen.threshold
-        prog = self._build_session_program()
-        program = prog if self._timer_mode == "program" and bool(prog) else None
+        program = self._programs.for_session()
         self._cancel_settle("apply_threshold")  # a slider move just before Start: the start applies the slider itself
         if program:
             # Program total drives the timer so auto-stop reuses the proven
@@ -2049,35 +2009,6 @@ class EEGMeditationApp(App):
             self._pending_marker = True
             logger.info("Marker placed")
 
-    def _on_duration_preset(self, value) -> None:
-        """Handle Live Session duration tap: a fixed duration is a simple-timer
-        choice, so it also leaves program mode."""
-        if value is None:
-            self._settings_screen.timer_enabled = False
-        else:
-            self._settings_screen.timer_enabled = True
-            self._settings_screen.timer_minutes = value
-        self._timer_mode = "simple"
-        self._settings_screen.set_program_mode("simple")
-        self._persist_session_program(self._current_user_id)
-        self._save_user_settings()
-        self._sync_live_timer_picker()
-
-    def _on_session_program_pick(self, index: int) -> None:
-        """In-session 'Programs…' pick: load it (with confirm) and switch to program mode."""
-        self._on_program_load(index)
-
-    def _sync_live_timer_picker(self) -> None:
-        """Refresh the live duration picker: a large 'P' in program mode, else the duration."""
-        program_active = (self._timer_mode == "program"
-                          and bool(self._session_program_segments))
-        self._live_screen.refresh_duration_preset(
-            self._settings_screen.timer_enabled,
-            self._settings_screen.timer_minutes,
-            program_active=program_active,
-        )
-        self._refresh_live_program_series()  # idle preview of the program's metric set
-
     def _on_threshold_change(self, value: int) -> None:
         if self._ui_metrics_history and not self._session_pipeline_live():
             self._clear_live_display()  # the last session's line is not the threshold the next one runs against
@@ -2218,7 +2149,7 @@ class EEGMeditationApp(App):
         uid = self._current_user_id
         if not (uid and graph.graph_id):
             return
-        if graph is self._live_screen.graph and self._program_governs_live_series():
+        if graph is self._live_screen.graph and self._programs.governs_live_series():
             return
         self._db.set_user_json_setting(
             uid, f"graph_series_{graph.graph_id}",
@@ -2284,7 +2215,7 @@ class EEGMeditationApp(App):
             return stats
         if self._program_run.active:
             return {**stats, "score_metric_key": "program",
-                    "score_metric_name": self._session_program_name or "Program", "avg_score": None}
+                    "score_metric_name": self._programs.name or "Program", "avg_score": None}
         key = stats.get("score_metric_key") or self._audio_drive_key()  # no scored tick yet: what it would score
         return {**stats, "score_metric_key": key, "score_metric_name": self._live_screen.graph.series_name(key)}
 
@@ -2481,15 +2412,6 @@ class EEGMeditationApp(App):
         self._settings_screen.set_formula_slot_status(0, f"Exported to {os.path.basename(path)}")
         logger.info(f"Exported {format_count(len(formulas), 'formula')} to {path}")
 
-    def _on_timer_mode_change(self, mode: str) -> None:
-        self._timer_mode = mode
-        self._persist_session_program(self._current_user_id)
-        self._sync_live_timer_picker()
-
-    def _on_program_changed(self, segments: list) -> None:
-        self._session_program_segments = segments
-        self._persist_session_program(self._current_user_id)
-
     def _require_user(self, action: str) -> Optional[int]:
         """Return the active uid, or explain why the action can't run and return
         None. Per-user handlers call this instead of a bare silent `return` — the
@@ -2498,117 +2420,6 @@ class EEGMeditationApp(App):
             return self._current_user_id
         self._info_popup("No profile selected", f"Select a profile before you can {action}.")
         return None
-
-    def _on_program_save(self, name: str) -> None:
-        """Save the active program under `name`. Unique names: an existing name
-        overwrites (after confirm); a new name is added directly."""
-        name = name.strip()
-        if not name:
-            self._info_popup("Name required", "Enter a name for the program before saving.")
-            return
-        if self._require_user("save a program") is None:
-            return
-        progs = self._db.get_saved_programs(self._current_user_id)
-        existing = next((i for i, p in enumerate(progs) if p.get("name") == name), None)
-        if existing is not None:
-            self._confirm_action(
-                "Overwrite program",
-                f"A program named '{name}' already exists.\n"
-                f"Overwrite it with the current segments?",
-                "Overwrite",
-                lambda: self._save_program(existing, name),
-                ok_color=C.WARM,
-            )
-        else:
-            self._save_program(None, name)
-
-    def _save_program(self, index, name: str) -> None:
-        """Add (index=None) or overwrite (index set) a saved program by name."""
-        if index is None:
-            if not self._db.add_saved_program(self._current_user_id, name,
-                                              self._session_program_segments):
-                self._info_popup(
-                    "Program library full",
-                    f"You can keep up to {self._db._MAX_SAVED_PROGRAMS} saved "
-                    f"programs. Delete one before saving another.",
-                )
-                return
-            logger.info(f"Saved new program '{name}'")
-        else:
-            if not self._db.update_saved_program(self._current_user_id, index, name,
-                                                 self._session_program_segments):
-                logger.warning(f"Overwrite skipped: program index {index} out of range")
-                return  # no write happened — don't flash a false 'Saved' confirmation
-            logger.info(f"Overwrote program '{name}'")
-        self._session_program_name = name  # the active program now carries this name
-        self._persist_session_program(self._current_user_id)
-        self._refresh_saved_programs()
-        self._settings_screen.confirm_program_saved()  # issue #33 E: visible save confirmation
-
-    def _program_has_unsaved_changes(self) -> bool:
-        """True when the active program differs from its saved namesake (or is unnamed but
-        non-empty) — i.e. loading another program would actually discard edits."""
-        segs = self._session_program_segments
-        if not segs:
-            return False
-        name = self._session_program_name
-        if not name:
-            return True
-        saved = next((p for p in self._db.get_saved_programs(self._current_user_id)
-                      if p.get("name") == name), None)
-        if saved is None:
-            return True
-        return saved.get("segments") != segs
-
-    def _on_program_load(self, index: int) -> None:
-        if self._require_user("load a program") is None:
-            return
-        progs = self._db.get_saved_programs(self._current_user_id)
-        if not (0 <= index < len(progs)):
-            return
-        name = progs[index].get("name", "")
-        # Only warn when there's something to lose; otherwise load straight away.
-        if not self._program_has_unsaved_changes():
-            self._load_program(index, name)
-            return
-        self._confirm_action(
-            "Load program",
-            f"Load '{name}'?\nUnsaved changes to the current program will be lost.",
-            "Load",
-            lambda i=index, n=name: self._load_program(i, n),
-        )
-
-    def _load_program(self, index: int, name: str) -> None:
-        progs = self._db.get_saved_programs(self._current_user_id)
-        if not (0 <= index < len(progs)):
-            return
-        self._session_program_segments = progs[index]["segments"]
-        self._session_program_name = name
-        self._timer_mode = "program"
-        self._persist_session_program(self._current_user_id)
-        self._settings_screen.load_program(self._session_program_segments, "program")
-        self._settings_screen.set_program_name(name)
-        self._sync_live_timer_picker()
-        self._refresh_saved_programs()  # re-highlight the now-current program in the picker
-        logger.info(f"Loaded program '{name}'")
-
-    def _on_program_delete(self, index: int) -> None:
-        if self._require_user("delete a program") is None:
-            return
-        self._confirm_saved_delete("program", self._db.get_saved_programs(self._current_user_id), index,
-                                   saved_program_label, self._delete_program)
-
-    def _delete_program(self, index: int) -> None:
-        self._db.remove_saved_program(self._current_user_id, index)
-        logger.info(f"Deleted saved program #{index}")
-        self._refresh_saved_programs()
-
-    def _refresh_saved_programs(self) -> None:
-        """Push the current saved-programs list to the settings + session UIs."""
-        progs = (self._db.get_saved_programs(self._current_user_id)
-                 if self._current_user_id else [])
-        self._settings_screen.set_saved_programs(progs)
-        self._live_screen.set_session_programs(progs, self._session_program_name)
 
     def _info_popup(self, title: str, message: str) -> None:
         ok_btn = StyledButton(text="OK", bg_color=C.ACCENT)
@@ -3171,7 +2982,7 @@ class EEGMeditationApp(App):
             self._current_user_id = None
             self._view_all_users = False
             self._refresh_profile()
-            self._refresh_saved_programs()  # drop the deleted user's programs from the UI now
+            self._programs.refresh_saved()  # drop the deleted user's programs from the UI now
             self._open_user_gate(0)
         else:
             self._refresh_profile()
@@ -3290,11 +3101,11 @@ class EEGMeditationApp(App):
         try:
             self._settings_store.save(uid)          # all scalar per-user settings + theme
             self._persist_active_formulas(uid)
-            self._persist_session_program(uid)
+            self._programs.persist(uid)
             # Per-graph series selection (the on-graph picker is the source of truth).
             for g in self._all_graphs():
                 if g.graph_id and len(g.series_keys()) > 1:
-                    if g is self._live_screen.graph and self._program_governs_live_series():
+                    if g is self._live_screen.graph and self._programs.governs_live_series():
                         continue  # program-driven visibility; keep the saved manual selection
                     self._db.set_user_json_setting(
                         uid, f"graph_series_{g.graph_id}",
@@ -3370,10 +3181,7 @@ class EEGMeditationApp(App):
         # Load formulas BEFORE _restore_graph_series so the per-slot validity gate
         # sees real is_valid; the picker selection (graph_series_*) decides visibility.
         self._formulas.load(read_active(self._db, user_id))
-        self._load_session_program(user_id)
-        self._settings_screen.load_program(self._session_program_segments, self._timer_mode)
-        self._settings_screen.set_program_name(self._session_program_name)  # show loaded name
-        # Saved-programs list pushed to both UIs at the end via _refresh_saved_programs.
+        self._programs.load(user_id)  # its saved-programs list goes to both UIs at the end (refresh_saved)
         self._push_formula_names_to_graph()
         # Reflect every slot's name+formula into the Settings inputs.
         for i in range(len(FORMULA_KEYS)):
@@ -3401,9 +3209,9 @@ class EEGMeditationApp(App):
         self._history_screen.set_view_mode(history_mode)
 
         # Sync live-screen preset highlight (incl. program "P") with loaded state
-        self._sync_live_timer_picker()
+        self._programs.sync_picker()
         self._refresh_saved_formulas()
-        self._refresh_saved_programs()
+        self._programs.refresh_saved()
         logger.debug(f"Loaded settings for user {user_id}")
 
     def on_start(self) -> None:

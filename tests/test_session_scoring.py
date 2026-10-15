@@ -13,6 +13,7 @@ from app.session.manager import SessionManager, SessionState
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from tests._program_run import make_run
+from tests._program_settings import make_programs
 from tests.test_resume_mirror import _drive_tick, _make_tick_app, _metrics, _raw_sample
 
 
@@ -30,7 +31,7 @@ def _app(metric_key: str = "shamatha_score", formulas=()):
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._audio_metric_key = metric_key
     app._program_run = make_run()
-    app._session_program_name = ""
+    app._programs = make_programs()
     app._formulas = FormulaSlots()
     if formulas:
         app._formulas.evaluators = list(formulas)
@@ -127,7 +128,7 @@ def test_the_saved_stats_carry_the_scored_metric_and_its_name():
 def test_a_program_session_records_program_its_name_and_no_average(name, recorded):
     app = _app()
     app._program_run = make_run(program=MagicMock(segments=[{"duration": 60}]))
-    app._session_program_name = name
+    app._programs.name = name
     stats = app._with_score(_run(app, SHAMATHA_HIGH))
     assert (stats["score_metric_key"], stats["score_metric_name"], stats["avg_score"]) == ("program", recorded, None)
 
@@ -206,7 +207,7 @@ def test_recomputing_from_the_stored_ticks_reproduces_the_stored_stats():
 
 def test_a_simple_session_tick_scores_on_the_feedback_metric_and_marks_it():
     app = _make_tick_app()
-    app._timer_mode = "simple"
+    app._programs.mode = "simple"
     app._audio_metric_key = "meditation_score"
     _drive_tick(app, _raw_sample(), _metrics())
     app._session_manager.set_active_goal.assert_called_with("meditation_score")
@@ -217,7 +218,7 @@ def test_a_simple_session_tick_scores_on_the_feedback_metric_and_marks_it():
 
 def test_a_program_session_tick_leaves_the_goal_to_the_program():
     app = _make_tick_app()
-    app._timer_mode = "program"
+    app._programs.mode = "program"
     app._program_run = make_run(app, program=MagicMock())
     app._program_run.tick = MagicMock()
     _drive_tick(app, _raw_sample(), _metrics())
@@ -226,7 +227,7 @@ def test_a_program_session_tick_leaves_the_goal_to_the_program():
 
 def test_program_mode_with_no_usable_program_is_scored_like_a_simple_session():
     app = _make_tick_app()
-    app._timer_mode = "program"  # the Settings toggle; the session started without a program
+    app._programs.mode = "program"  # the Settings toggle; the session started without a program
     app._program_run = make_run(app)
     app._audio_metric_key = "shamatha_score"
     _drive_tick(app, _raw_sample(), _metrics())
@@ -235,7 +236,7 @@ def test_program_mode_with_no_usable_program_is_scored_like_a_simple_session():
 
 def test_one_tick_scores_and_sounds_the_same_metric():
     app = _make_tick_app()
-    app._timer_mode = "simple"
+    app._programs.mode = "simple"
     app._audio_drive_key = MagicMock(side_effect=["shamatha_score", "meditation_score"])  # changes mid-tick
     metrics = {**_metrics(), "shamatha_score": 11.0, "meditation_score": 77.0}
     _drive_tick(app, _raw_sample(), metrics)
@@ -246,7 +247,7 @@ def test_one_tick_scores_and_sounds_the_same_metric():
 def test_the_partial_flush_saves_the_scored_metric():
     from app.config import APP
     app = _make_tick_app()
-    app._timer_mode = "simple"
+    app._programs.mode = "simple"
     app._current_session_id = None
     app._metrics_buffer = [{"shamatha_score": 1.0}]
     app._flush_counter = int(APP.FLUSH_INTERVAL_SECONDS / APP.UPDATE_FREQUENCY) - 1  # this tick flushes
