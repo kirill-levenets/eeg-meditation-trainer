@@ -16,6 +16,6 @@ Ordered timed segments: the model, how a program drives the live graph's series,
 
 ## Settings and pickers
 
-- Settings Timer / Program swap — the Enable-Timer checkbox lives in `_simple_box` (hidden in program mode). `_program_loaded_label` shows `"Loaded: <name>"` via `set_program_name(name)` (`SettingsScreen`). `_segments_box` holds segment rows in program insertion order top→bottom.
+- Settings Timer / Program swap — the Enable-Timer checkbox lives in `_simple_box` (hidden in program mode). `_program_loaded_label` shows `"Loaded: <name>"` via `set_program_name(name)` (`TimerSection`). `_segments_box` holds segment rows in program insertion order top→bottom.
 - `ProgramSettings.sync_picker` — syncs the `_DurationPickerButton` label on the session screen: `"P"` (large) in program mode, duration string in simple mode. Re-synced whenever the screen is entered and whenever Settings timer changes. The duration popup includes a `"Programs…"` button wired via `LiveSessionScreen.set_session_programs(programs, current_name)` for quick-loading a saved program and showing the loaded name with the current one highlighted.
 - Per-segment **feedback source picker** (issue #10): each program segment row has a "Feedback" column — a live picker with Default / Rain / Tone / Custom file. "Default" inherits the global Settings → Audio selection. The source switches at each segment boundary via `set_active_feedback` (setVolume-only, tick-/lock-safe). See [audio.md](audio.md) for the engine architecture.

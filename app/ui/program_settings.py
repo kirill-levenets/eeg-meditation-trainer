@@ -14,12 +14,12 @@ class ProgramSettings:
     """The profile's timer mode and the program it edits, with that program's name. A session runs a snapshot of it
     (ProgramRun), so an edit made during a session waits for the next one."""
 
-    def __init__(self, db, settings_screen, live_screen, session_manager, *, user_id: Callable[[], int | None],
+    def __init__(self, db, timer_section, live_screen, session_manager, *, user_id: Callable[[], int | None],
                  require_user: Callable[[str], int | None], confirm: Callable[..., None],
                  info: Callable[[str, str], None], confirm_saved_delete: Callable[..., None],
                  show_saved_series: Callable[[int], None], save_settings: Callable[[], None]) -> None:
         self._db = db
-        self._settings_screen = settings_screen
+        self._timer_section = timer_section
         self._live_screen = live_screen
         self._session_manager = session_manager
         self._user_id = user_id
@@ -49,8 +49,8 @@ class ProgramSettings:
         self._show_in_settings()
 
     def _show_in_settings(self) -> None:
-        self._settings_screen.load_program(self.segments, self.mode)
-        self._settings_screen.set_program_name(self.name)
+        self._timer_section.load_program(self.segments, self.mode)
+        self._timer_section.set_program_name(self.name)
 
     def program(self) -> SessionProgram:
         return SessionProgram(self.segments)
@@ -83,8 +83,8 @@ class ProgramSettings:
     def sync_picker(self) -> None:
         """Refresh the live duration picker: a large 'P' in program mode, else the duration."""
         self._live_screen.refresh_duration_preset(
-            self._settings_screen.timer_enabled,
-            self._settings_screen.timer_minutes,
+            self._timer_section.timer_enabled,
+            self._timer_section.timer_minutes,
             program_active=self.governs_live_series(),
         )
         self.refresh_live_series()  # idle preview of the program's metric set
@@ -93,12 +93,12 @@ class ProgramSettings:
         """Handle Live Session duration tap: a fixed duration is a simple-timer
         choice, so it also leaves program mode."""
         if value is None:
-            self._settings_screen.timer_enabled = False
+            self._timer_section.timer_enabled = False
         else:
-            self._settings_screen.timer_enabled = True
-            self._settings_screen.timer_minutes = value
+            self._timer_section.timer_enabled = True
+            self._timer_section.timer_minutes = value
         self.mode = "simple"
-        self._settings_screen.set_program_mode("simple")
+        self._timer_section.set_program_mode("simple")
         self.persist(self._user_id())
         self._save_settings()
         self.sync_picker()
@@ -156,7 +156,7 @@ class ProgramSettings:
         self.name = name  # the active program now carries this name
         self.persist(uid)
         self.refresh_saved()
-        self._settings_screen.confirm_program_saved()  # issue #33 E: visible save confirmation
+        self._timer_section.confirm_program_saved()  # issue #33 E: visible save confirmation
 
     def has_unsaved_changes(self) -> bool:
         """True when the active program differs from its saved namesake (or is unnamed but
@@ -220,5 +220,5 @@ class ProgramSettings:
         """Push the current saved-programs list to the settings + session UIs."""
         uid = self._user_id()
         progs = self._db.get_saved_programs(uid) if uid else []
-        self._settings_screen.set_saved_programs(progs)
+        self._timer_section.set_saved_programs(progs)
         self._live_screen.set_session_programs(progs, self.name)

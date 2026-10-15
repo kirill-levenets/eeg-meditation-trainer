@@ -78,7 +78,7 @@ def test_saving_settings_mid_program_keeps_the_programs_timer():
     app._timer_state = TimerState()
     app._timer_state.set_enabled(True)   # program force-enables the timer...
     app._timer_state.set_duration(45)    # ...with the program's total
-    app._settings_screen = MagicMock(timer_enabled=False, timer_minutes=20)
+    app._settings_screen = MagicMock(**{"timer.timer_enabled": False, "timer.timer_minutes": 20})
     app._settings_store = MagicMock()
     app._formula_settings = MagicMock()
     app._program_settings = MagicMock()

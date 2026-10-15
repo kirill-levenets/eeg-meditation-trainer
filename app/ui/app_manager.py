@@ -482,7 +482,7 @@ class EEGMeditationApp(App):
         self._diary_screen = DiaryScreen()
         self._timer_state = TimerState()
         self._program_settings = ProgramSettings(
-            self._db, self._settings_screen, self._live_screen, self._session_manager,
+            self._db, self._settings_screen.timer, self._live_screen, self._session_manager,
             user_id=lambda: self._current_user_id, require_user=self._require_user, confirm=self._confirm_action,
             info=self._info_popup, confirm_saved_delete=self._confirm_saved_delete,
             show_saved_series=lambda uid: self._graph_series.apply_saved(self._live_screen.graph, uid),
@@ -636,11 +636,11 @@ class EEGMeditationApp(App):
         self._settings_screen.set_audio_formula_index_callback(self._on_audio_formula_index)
         self._settings_screen.set_feedback_source_callback(self._on_feedback_source_change)
         self._settings_screen.set_reward_source_callback(self._on_reward_source_change)
-        self._settings_screen.set_program_mode_callback(self._program_settings.on_mode_change)
-        self._settings_screen.set_program_changed_callback(self._program_settings.on_changed)
-        self._settings_screen.set_program_save_callback(self._program_settings.on_save)
-        self._settings_screen.set_program_load_callback(self._program_settings.on_load)
-        self._settings_screen.set_program_delete_callback(self._program_settings.on_delete)
+        self._settings_screen.timer.set_program_mode_callback(self._program_settings.on_mode_change)
+        self._settings_screen.timer.set_program_changed_callback(self._program_settings.on_changed)
+        self._settings_screen.timer.set_program_save_callback(self._program_settings.on_save)
+        self._settings_screen.timer.set_program_load_callback(self._program_settings.on_load)
+        self._settings_screen.timer.set_program_delete_callback(self._program_settings.on_delete)
         self._settings_screen.set_theme_callback(self._on_theme_change)
 
         # Keyboard hotkey for marker
@@ -691,9 +691,9 @@ class EEGMeditationApp(App):
             lambda _collapsed: self._persist_user_setting("band_power_collapsed"))
         self._history_screen.set_export_sessions_callback(self._on_export_sessions_csv)
 
-        self._settings_screen.set_test_timer_sound_callback(self._on_test_timer_sound)
-        self._settings_screen.set_stop_timer_sound_callback(self._on_stop_test_timer_sound)
-        self._settings_screen.set_timer_sound_change_callback(self._on_timer_sound_change)
+        self._settings_screen.timer.set_test_timer_sound_callback(self._on_test_timer_sound)
+        self._settings_screen.timer.set_stop_timer_sound_callback(self._on_stop_test_timer_sound)
+        self._settings_screen.timer.set_timer_sound_change_callback(self._on_timer_sound_change)
 
         # Profile section in settings
         self._settings_screen.set_profile_callbacks(
@@ -1102,8 +1102,8 @@ class EEGMeditationApp(App):
         else:
             # Session start is authoritative: re-sync the timer from Settings so a
             # prior program session's enabled/duration can't leak into a simple one.
-            self._timer_state.set_enabled(self._settings_screen.timer_enabled)
-            self._timer_state.set_duration(self._settings_screen.timer_minutes)
+            self._timer_state.set_enabled(self._settings_screen.timer.timer_enabled)
+            self._timer_state.set_duration(self._settings_screen.timer.timer_minutes)
         self._put_threshold_in_force(threshold)  # this session's, whatever the last one left running
         self._metrics_engine.reset()
         self._noise_detector = PowerLineDetector() if not APP.USE_MOCK_DEVICE else None
@@ -2254,7 +2254,7 @@ class EEGMeditationApp(App):
         def _on_natural_end(*_):
             try:
                 Clock.schedule_once(
-                    lambda dt: self._settings_screen.notify_timer_sound_test_ended(),
+                    lambda dt: self._settings_screen.timer.notify_timer_sound_test_ended(),
                     0,
                 )
             except Exception:
@@ -2777,13 +2777,13 @@ class EEGMeditationApp(App):
         settings: list[Setting] = []
 
         def set_timer_enabled(v):
-            self._timer_state.set_enabled(v); ss.timer_enabled = v
+            self._timer_state.set_enabled(v); ss.timer.timer_enabled = v
 
         def set_timer_minutes(v):
-            self._timer_state.set_duration(v); ss.timer_minutes = v
+            self._timer_state.set_duration(v); ss.timer.timer_minutes = v
 
         def set_timer_sound(v):
-            self._timer_state.set_custom_sound_path(v); ss.timer_sound_path = v
+            self._timer_state.set_custom_sound_path(v); ss.timer.timer_sound_path = v
 
         def set_sinking(v):
             self._audio.sinking_alert_enabled = v; ss._sinking_alert_cb.active = v
@@ -2834,9 +2834,9 @@ class EEGMeditationApp(App):
         def add(key, codec, get, set_):
             settings.append(Setting(key, get(), codec[0], codec[1], get, set_))
 
-        add("timer_enabled", BOOL, lambda: ss.timer_enabled, set_timer_enabled)
-        add("timer_minutes", INT, lambda: ss.timer_minutes, set_timer_minutes)
-        add("timer_sound", STR, lambda: ss.timer_sound_path, set_timer_sound)
+        add("timer_enabled", BOOL, lambda: ss.timer.timer_enabled, set_timer_enabled)
+        add("timer_minutes", INT, lambda: ss.timer.timer_minutes, set_timer_minutes)
+        add("timer_sound", STR, lambda: ss.timer.timer_sound_path, set_timer_sound)
         add("sinking_alert", BOOL, lambda: self._audio.sinking_alert_enabled, set_sinking)
         hs = self._history_screen
         add("history_chart_collapsed", BOOL, lambda: hs.chart_collapsed, hs.set_chart_collapsed)

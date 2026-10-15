@@ -364,40 +364,40 @@ class TestSettingsTimerSoundRow(unittest.TestCase):
         from app.ui.settings_screen import SettingsScreen
         self.screen = SettingsScreen()
         self.captured = []
-        self.screen.set_timer_sound_change_callback(self.captured.append)
+        self.screen.timer.set_timer_sound_change_callback(self.captured.append)
 
     def test_a_loaded_path_shows_on_the_button_without_a_change(self):
-        self.screen.timer_sound_path = "/tmp/bell.wav"
-        self.assertEqual(self.screen.timer_sound_path, "/tmp/bell.wav")
-        self.assertEqual(self.screen._timer_sound_btn.text, "Custom: bell.wav")
+        self.screen.timer.timer_sound_path = "/tmp/bell.wav"
+        self.assertEqual(self.screen.timer.timer_sound_path, "/tmp/bell.wav")
+        self.assertEqual(self.screen.timer._timer_sound_btn.text, "Custom: bell.wav")
         self.assertEqual(self.captured, [])
 
     def test_default_bell_clears_the_custom_file(self):
-        self.screen.timer_sound_path = "/tmp/bell.wav"
-        self.screen._choose_timer_sound("")
-        self.assertEqual(self.screen.timer_sound_path, "")
-        self.assertEqual(self.screen._timer_sound_btn.text, "Default bell")
+        self.screen.timer.timer_sound_path = "/tmp/bell.wav"
+        self.screen.timer._choose_timer_sound("")
+        self.assertEqual(self.screen.timer.timer_sound_path, "")
+        self.assertEqual(self.screen.timer._timer_sound_btn.text, "Default bell")
         self.assertEqual(self.captured, [""])
 
     def test_custom_file_takes_the_picked_file(self):
-        import app.ui.settings_screen as ss
-        with mock.patch.object(ss, "open_audio_file_chooser", lambda on_select, **_k: on_select("/tmp/gong.mp3")):
-            self.screen._choose_timer_sound("custom")
-        self.assertEqual(self.screen.timer_sound_path, "/tmp/gong.mp3")
-        self.assertEqual(self.screen._timer_sound_btn.text, "Custom: gong.mp3")
+        import app.ui.settings_sections.timer as timer
+        with mock.patch.object(timer, "open_audio_file_chooser", lambda on_select, **_k: on_select("/tmp/gong.mp3")):
+            self.screen.timer._choose_timer_sound("custom")
+        self.assertEqual(self.screen.timer.timer_sound_path, "/tmp/gong.mp3")
+        self.assertEqual(self.screen.timer._timer_sound_btn.text, "Custom: gong.mp3")
         self.assertEqual(self.captured, ["/tmp/gong.mp3"])
 
     def test_the_button_offers_default_bell_and_a_custom_file(self):
         import app.ui.settings_sections.common as common
         offered = []
         with mock.patch.object(common, "make_scroll_popup", lambda title, rows, **_k: offered.extend(rows) or mock.Mock()):
-            self.screen._timer_sound_btn.dispatch("on_release")
+            self.screen.timer._timer_sound_btn.dispatch("on_release")
         self.assertEqual([b.text for b in offered], ["Default bell", "Custom file..."])
 
     def test_test_button_invokes_callback(self):
         called = []
-        self.screen.set_test_timer_sound_callback(lambda: called.append(True))
-        self.screen._timer_sound_test_btn.dispatch("on_release")
+        self.screen.timer.set_test_timer_sound_callback(lambda: called.append(True))
+        self.screen.timer._timer_sound_test_btn.dispatch("on_release")
         self.assertEqual(called, [True])
 
     def test_test_button_toggles_to_stop_then_back(self):
@@ -405,29 +405,29 @@ class TestSettingsTimerSoundRow(unittest.TestCase):
         # to interrupt them. The Test button doubles as a Stop button.
         played = []
         stopped = []
-        self.screen.set_test_timer_sound_callback(lambda: played.append(True))
-        self.screen.set_stop_timer_sound_callback(lambda: stopped.append(True))
+        self.screen.timer.set_test_timer_sound_callback(lambda: played.append(True))
+        self.screen.timer.set_stop_timer_sound_callback(lambda: stopped.append(True))
 
-        self.assertEqual(self.screen._timer_sound_test_btn.text, "Test")
-        self.screen._timer_sound_test_btn.dispatch("on_release")
-        self.assertEqual(self.screen._timer_sound_test_btn.text, "Stop")
+        self.assertEqual(self.screen.timer._timer_sound_test_btn.text, "Test")
+        self.screen.timer._timer_sound_test_btn.dispatch("on_release")
+        self.assertEqual(self.screen.timer._timer_sound_test_btn.text, "Stop")
         self.assertEqual(played, [True])
         self.assertEqual(stopped, [])
 
         # Second tap stops playback and reverts text.
-        self.screen._timer_sound_test_btn.dispatch("on_release")
-        self.assertEqual(self.screen._timer_sound_test_btn.text, "Test")
+        self.screen.timer._timer_sound_test_btn.dispatch("on_release")
+        self.assertEqual(self.screen.timer._timer_sound_test_btn.text, "Test")
         self.assertEqual(stopped, [True])
         self.assertEqual(played, [True])  # unchanged
 
     def test_natural_playback_end_resets_button_text(self):
-        self.screen.set_test_timer_sound_callback(lambda: None)
-        self.screen._timer_sound_test_btn.dispatch("on_release")
-        self.assertEqual(self.screen._timer_sound_test_btn.text, "Stop")
+        self.screen.timer.set_test_timer_sound_callback(lambda: None)
+        self.screen.timer._timer_sound_test_btn.dispatch("on_release")
+        self.assertEqual(self.screen.timer._timer_sound_test_btn.text, "Stop")
         # Sound.on_stop fires → app_manager calls notify_timer_sound_test_ended.
-        self.screen.notify_timer_sound_test_ended()
-        self.assertEqual(self.screen._timer_sound_test_btn.text, "Test")
-        self.assertFalse(self.screen._timer_sound_test_playing)
+        self.screen.timer.notify_timer_sound_test_ended()
+        self.assertEqual(self.screen.timer._timer_sound_test_btn.text, "Test")
+        self.assertFalse(self.screen.timer._timer_sound_test_playing)
 
 
 class TestSettingsFormulaSlots(unittest.TestCase):

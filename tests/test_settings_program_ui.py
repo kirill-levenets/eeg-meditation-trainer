@@ -8,21 +8,21 @@ def _screen():
 def test_load_program_populates_without_firing_changed():
     s = _screen()
     changed = []
-    s.set_program_changed_callback(lambda segs: changed.append(segs))
+    s.timer.set_program_changed_callback(lambda segs: changed.append(segs))
     segs = [{"minutes": 10, "target": 50, "formula": "shamatha_score"},
             {"minutes": 5, "target": 70, "formula": "meditation_score"}]
-    s.load_program(segs, "program")
+    s.timer.load_program(segs, "program")
     assert changed == []                      # programmatic load must NOT fire changed
-    assert s.get_program_segments() == segs   # editor round-trips the segments
-    assert s.program_mode == "program"
+    assert s.timer.get_program_segments() == segs   # editor round-trips the segments
+    assert s.timer.program_mode == "program"
 
 
 def test_add_segment_fires_changed():
     s = _screen()
     changed = []
-    s.set_program_changed_callback(lambda segs: changed.append(segs))
-    s.load_program([], "program")
-    s._add_segment_row()
+    s.timer.set_program_changed_callback(lambda segs: changed.append(segs))
+    s.timer.load_program([], "program")
+    s.timer._add_segment_row()
     assert len(changed) >= 1
     assert len(changed[-1]) == 1
 
@@ -30,24 +30,24 @@ def test_add_segment_fires_changed():
 def test_set_program_mode_does_not_fire_callback():
     s = _screen()
     seen = []
-    s.set_program_mode_callback(lambda m: seen.append(m))
-    s.set_program_mode("program")
+    s.timer.set_program_mode_callback(lambda m: seen.append(m))
+    s.timer.set_program_mode("program")
     assert seen == []                          # programmatic set is silent
-    assert s.program_mode == "program"
+    assert s.timer.program_mode == "program"
 
 
 def test_set_saved_programs_populates_list():
     s = _screen()
-    s.set_saved_programs([{"name": "Ramp", "segments": []},
+    s.timer.set_saved_programs([{"name": "Ramp", "segments": []},
                           {"name": "Steps", "segments": []}])
-    assert len(s._saved_programs_box.children) == 2
+    assert len(s.timer._saved_programs_box.children) == 2
 
 
 def test_custom_formula_segment_roundtrips():
     s = _screen()
     seg = {"minutes": 8, "target": 120, "formula": {"name": "Foo", "formula": "alpha1"}}
-    s.load_program([seg], "program")
-    assert s.get_program_segments() == [seg]
+    s.timer.load_program([seg], "program")
+    assert s.timer.get_program_segments() == [seg]
 
 
 def test_set_feedback_source_does_not_fire_callback():
@@ -81,8 +81,8 @@ def test_segment_feedback_sound_roundtrips():
         {"minutes": 10, "target": 50, "formula": "shamatha_score", "feedback_sound": "tone"},
         {"minutes": 5, "target": 70, "formula": "meditation_score"},   # default -> omitted
     ]
-    s.load_program(segs, "program")
-    out = s.get_program_segments()
+    s.timer.load_program(segs, "program")
+    out = s.timer.get_program_segments()
     assert out[0].get("feedback_sound") == "tone"
     assert "feedback_sound" not in out[1]   # Default is not serialized
 
@@ -107,16 +107,16 @@ def test_rain_choice_does_not_open_chooser(monkeypatch):
 
 def test_segment_end_sound_picker_sets_value():
     s = _screen()
-    s.load_program([{"minutes": 10, "target": 50, "formula": "shamatha_score"}], "program")
-    row = s._segment_rows[0]
+    s.timer.load_program([{"minutes": 10, "target": 50, "formula": "shamatha_score"}], "program")
+    row = s.timer._segment_rows[0]
     btn = row._end_sound_btn if hasattr(row, "_end_sound_btn") else None
     # the picker calls _set_segment_end_sound; exercise it directly
-    s._set_segment_end_sound(row, row._formula_btn, "warble")  # any label-bearing btn
+    s.timer._set_segment_end_sound(row, row._formula_btn, "warble")  # any label-bearing btn
     assert row._end_sound == "warble"
-    assert s.get_program_segments()[0].get("end_sound") == "warble"
-    s._set_segment_end_sound(row, row._formula_btn, None)      # back to default (Chime)
+    assert s.timer.get_program_segments()[0].get("end_sound") == "warble"
+    s.timer._set_segment_end_sound(row, row._formula_btn, None)      # back to default (Chime)
     assert row._end_sound is None
-    assert "end_sound" not in s.get_program_segments()[0]
+    assert "end_sound" not in s.timer.get_program_segments()[0]
 
 
 def test_a_segments_sound_pickers_set_its_cue_and_feedback(monkeypatch):
@@ -126,12 +126,12 @@ def test_a_segments_sound_pickers_set_its_cue_and_feedback(monkeypatch):
     shown = []
     monkeypatch.setattr(common, "make_scroll_popup", lambda title, rows, **k: shown.append(rows) or Mock())
     s = _screen()
-    s.load_program([{"minutes": 5, "target": 60, "formula": "shamatha_score"}], "program")
-    row = s._segment_rows[0]
+    s.timer.load_program([{"minutes": 5, "target": 60, "formula": "shamatha_score"}], "program")
+    row = s.timer._segment_rows[0]
     end_btn, fb_btn = Mock(text=""), Mock(text="")
-    s._open_segment_end_sound_picker(row, end_btn)
+    s.timer._open_segment_end_sound_picker(row, end_btn)
     next(b for b in shown[-1] if b.text == "Warble").dispatch("on_release")
-    s._open_segment_feedback_picker(row, fb_btn)
+    s.timer._open_segment_feedback_picker(row, fb_btn)
     next(b for b in shown[-1] if b.text == "Tone").dispatch("on_release")
     assert (row._end_sound, end_btn.text) == ("warble", "Warble")
     assert (row._feedback_sound, fb_btn.text) == ("tone", "Tone")

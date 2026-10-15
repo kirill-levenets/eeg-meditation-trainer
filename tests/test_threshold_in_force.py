@@ -252,7 +252,7 @@ def _start(program: bool, monkeypatch, prepare=None, **before) -> EEGMeditationA
     monkeypatch.setattr(APP, "USE_MOCK_DEVICE", True)
     a = _threshold_app(state=SessionState.IDLE)
     a._session_manager.reset()
-    a._settings_screen = MagicMock(threshold=70, timer_enabled=False, timer_minutes=20)
+    a._settings_screen = MagicMock(threshold=70, **{"timer.timer_enabled": False, "timer.timer_minutes": 20})
     prog = SessionProgram([{"minutes": 5, "formula": "shamatha_score", "target": 60},
                            {"minutes": 5, "formula": "meditation_score", "target": 80}])
     a._program_settings = make_programs()

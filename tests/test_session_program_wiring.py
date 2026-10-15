@@ -98,7 +98,7 @@ def test_saved_program_unique_upsert_load_delete(tmp_path):
     db = DatabaseManager(db_path=str(tmp_path / "u.db"))
     uid = db.create_user("u")
     settings = _StubSettings()
-    programs = _program_settings(db, uid, settings_screen=settings, live_screen=_StubLive())
+    programs = _program_settings(db, uid, timer_section=settings, live_screen=_StubLive())
     programs.segments = [{"minutes": 10, "target": 50, "formula": "shamatha_score"}]
     programs.mode = "program"
 

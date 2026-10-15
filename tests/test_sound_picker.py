@@ -69,23 +69,23 @@ def _segment_custom_file(screen, monkeypatch):
     """A program segment's feedback picker, choosing Custom file..."""
     rows = []
     monkeypatch.setattr(common, "make_scroll_popup", lambda title, buttons, **k: rows.extend(buttons) or Mock())
-    screen._open_segment_feedback_picker(screen._segment_rows[0], screen._segment_rows[0]._feedback_btn)
+    screen.timer._open_segment_feedback_picker(screen.timer._segment_rows[0], screen.timer._segment_rows[0]._feedback_btn)
     next(b for b in rows if b.text == "Custom file...").dispatch("on_release")
 
 
 def test_every_sound_picker_opens_the_system_picker_for_audio(phone, monkeypatch):
     screen = SettingsScreen()
-    screen.load_program([{"minutes": 10, "target": 50, "formula": "shamatha_score"}], "program")
-    segment = screen._segment_rows[0]
+    screen.timer.load_program([{"minutes": 10, "target": 50, "formula": "shamatha_score"}], "program")
+    segment = screen.timer._segment_rows[0]
     for opener, picked in ((lambda: screen._choose_feedback_source("custom"), lambda: screen._feedback_sound_path),
                            (lambda: screen._choose_reward_source("custom"), lambda: screen._reward_sound_path),
-                           (lambda: screen._choose_timer_sound("custom"), lambda: screen.timer_sound_path),
+                           (lambda: screen.timer._choose_timer_sound("custom"), lambda: screen.timer.timer_sound_path),
                            (lambda: _segment_custom_file(screen, monkeypatch), lambda: segment._feedback_sound)):
         phone["picks"].append(BOWL)
         opener()
         _settle(picked)
     assert phone["launched"] == [common._AUDIO_TYPES] * 4 and common._AUDIO_TYPES[0] == "audio/*"
-    assert (screen._feedback_sound_path == screen._reward_sound_path == screen.timer_sound_path
+    assert (screen._feedback_sound_path == screen._reward_sound_path == screen.timer.timer_sound_path
             == segment._feedback_sound)
     assert screen._feedback_source_btn.text == "Custom: Singing bowl.mp3"
 
