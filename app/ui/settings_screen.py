@@ -4,7 +4,6 @@ from collections.abc import Callable
 from typing import Optional
 
 from kivy.clock import Clock
-from kivy.core.window import Keyboard, Window
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.checkbox import CheckBox
@@ -13,17 +12,15 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.slider import Slider
 
 from app.config import METRICS
-from app.ui.line_colours import LINE_COLOURS, MONO, GradientStrip
-from app.ui.line_colours import OPTIONS as LINE_OPTIONS
 from app.ui.settings_sections.audio import AudioSection
 from app.ui.settings_sections.common import (
     checkbox_row,
 )
 from app.ui.settings_sections.device import DeviceSection
+from app.ui.settings_sections.display import DisplaySection
 from app.ui.settings_sections.formulas import FormulaSection
 from app.ui.settings_sections.timer import TimerSection
 from app.ui.theme import (
-    TEXT_SIZES,
     THEMES,
     C,
     Divider,
@@ -37,7 +34,6 @@ from app.ui.theme import (
     cancel_button,
     fill_background,
     fit_height_to_text,
-    fit_row_to_text,
     format_count,
     make_message_popup,
 )
@@ -93,8 +89,6 @@ class SettingsScreen(Screen):
         self._on_backup_pressed: Optional[Callable] = None
         self._on_restore_pressed: Optional[Callable] = None
         self._on_threshold_change: Optional[Callable] = None
-        self._on_line_width_change: Optional[Callable] = None
-        self._on_rotate_screen: Optional[Callable] = None
         self._on_theme_change: Optional[Callable] = None
         self._graph_toggles: dict[str, bool] = {
             "shamatha_score": True,
@@ -293,111 +287,7 @@ class SettingsScreen(Screen):
         self.audio = AudioSection(accordion.add_section("Audio", collapsed=True))
 
         # --- Display section ---
-        display_section = accordion.add_section("Display", collapsed=True)
-
-        # Text size: every font in the app, applied at once (F.set_scale).
-        ts_label = ThemedLabel(text="Text size:", font_size=F.BODY, color=C.TEXT, halign="left", size_hint_y=None,
-                               height=dp(28))
-        ts_label.bind(size=ts_label.setter("text_size"))
-        display_section.add_widget(ts_label)
-        self._on_text_size: Callable[[float], None] | None = None
-        self._text_size_presets = PresetRow(items=[(name, scale) for scale, name in TEXT_SIZES],
-                                            callback=self._on_text_size_pressed)
-        display_section.add_widget(self._text_size_presets)
-        self._show_text_size()
-        F.add_listener(self._show_text_size)
-
-        # Scored line colours (#94): the trained series in its own colour or a gradient by value, on every graph at once.
-        lc_label = ThemedLabel(text="Scored line colours:", font_size=F.BODY, color=C.TEXT, halign="left",
-                               size_hint_y=None, height=dp(28))
-        lc_label.bind(size=lc_label.setter("text_size"))
-        display_section.add_widget(lc_label)
-        self._on_line_colours: Callable[[str], None] | None = None
-        self._line_colour_rows = [PresetRow(items=[(label, name) for name, label in LINE_OPTIONS[i:i + 3]],
-                                            callback=self._on_line_colours_pressed, height=dp(34))
-                                  for i in (0, 3)]
-        for row in self._line_colour_rows:
-            for name, btn in row.buttons().items():
-                if name != MONO:
-                    GradientStrip(btn, name)
-            display_section.add_widget(row)
-        self._show_line_colours()
-        LINE_COLOURS.add_listener(self._show_line_colours)
-
-        # Line width slider
-        lw_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
-        lw_label = ThemedLabel(
-            text="Line Width:", font_size=F.BODY,
-            color=C.TEXT,
-            size_hint_x=0.3, halign="left",
-        )
-        lw_label.bind(size=lw_label.setter("text_size"))
-        self._line_width_slider = Slider(
-            min=0.5, max=4.0, value=1.2, step=0.1, size_hint_x=0.5,
-        )
-        self._line_width_value = ThemedLabel(
-            text="1.2", font_size=F.BODY, bold=True, color=C.TEXT, size_hint_x=0.2,
-        )
-        self._line_width_slider.bind(value=self._on_line_width_slider)
-        lw_row.add_widget(lw_label)
-        lw_row.add_widget(self._line_width_slider)
-        lw_row.add_widget(self._line_width_value)
-        display_section.add_widget(lw_row)
-
-        lw_presets = PresetRow(
-            values=[0.5, 1.0, 1.5, 2.0, 3.0],
-            callback=lambda v: setattr(self._line_width_slider, 'value', v),
-            fmt="{}",
-        )
-        display_section.add_widget(lw_presets)
-
-        # Screen rotation button
-        self._rotate_btn = StyledButton(
-            text="Rotate Screen (0\u00b0)",
-            font_size=F.BODY,
-            bg_color=C.PRIMARY_DIM,
-            size_hint_y=None,
-            height=dp(36),
-        )
-        self._rotate_btn.bind(on_release=self._on_rotate_pressed)
-        self._current_rotation: int = 0
-        display_section.add_widget(self._rotate_btn)
-
-        # Marker hotkey picker
-        marker_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
-        marker_lbl = ThemedLabel(
-            text="Marker Hotkey:", font_size=F.BODY,
-            color=C.TEXT,
-            size_hint_x=0.35, halign="left", valign="middle",
-        )
-        self._marker_hotkey_btn = StyledButton(
-            text="m",
-            font_size=F.BODY,
-            bold=True,
-            bg_color=C.BG_CARD,
-            text_color=C.PRIMARY,
-            size_hint_x=0.35,
-            size_hint_y=None,
-            height=dp(36),
-        )
-        self._marker_hotkey_btn.bind(on_release=self._on_marker_hotkey_pressed)
-        self._marker_hotkey_clear = StyledButton(
-            text="Clear",
-            font_size=F.SMALL,
-            bg_color=C.BG_CARD,
-            text_color=C.DANGER,
-            size_hint_x=0.3,
-            size_hint_y=None,
-            height=dp(36),
-        )
-        self._marker_hotkey_clear.bind(on_release=self._on_marker_hotkey_clear)
-        marker_row.add_widget(marker_lbl)
-        marker_row.add_widget(self._marker_hotkey_btn)
-        marker_row.add_widget(self._marker_hotkey_clear)
-        fit_row_to_text(marker_row, marker_lbl, dp(36))
-        display_section.add_widget(marker_row)
-        self._marker_hotkey: str = "m"
-        self._waiting_for_hotkey: bool = False
+        self.display = DisplaySection(accordion.add_section("Display", collapsed=True))
 
         # Graph series are now chosen via the on-graph series picker (combobox);
         # the former "Graph Metrics" checkbox section was removed (subsumed).
@@ -529,63 +419,6 @@ class SettingsScreen(Screen):
         s = self._threshold_slider
         s.value = max(s.min, min(s.max, int(s.value) + delta))
 
-    def _on_line_width_slider(self, instance, value) -> None:
-        val = round(value, 1)
-        self._line_width_value.text = f"{val:.1f}"
-        if self._on_line_width_change:
-            self._on_line_width_change(val)
-
-    def _on_rotate_pressed(self, *args) -> None:
-        self._current_rotation = (self._current_rotation + 90) % 360
-        self._rotate_btn.text = f"Rotate Screen ({self._current_rotation}\u00b0)"
-        if self._on_rotate_screen:
-            self._on_rotate_screen(self._current_rotation)
-
-    def _on_marker_hotkey_pressed(self, *args) -> None:
-        """Enter hotkey capture mode — next key press sets the marker hotkey."""
-        self._waiting_for_hotkey = True
-        self._marker_hotkey_btn.text = "Press a key..."
-        self._marker_hotkey_btn.bg_color = C.WARM
-        self._marker_hotkey_btn.text_color = None  # AUTO on the capture fill
-        Window.bind(on_key_down=self._on_hotkey_capture)
-
-    def _on_hotkey_capture(self, window, key, scancode, codepoint, modifiers) -> bool:
-        """Capture a single key press for the marker hotkey."""
-        if not self._waiting_for_hotkey:
-            return False
-        Window.unbind(on_key_down=self._on_hotkey_capture)
-        self._waiting_for_hotkey = False
-        # Use codepoint (printable char) or Kivy key name
-        key_name = codepoint if codepoint else Keyboard.keycode_to_string(Keyboard(), key)
-        if key_name:
-            self._marker_hotkey = key_name
-            self._marker_hotkey_btn.text = key_name
-        else:
-            self._marker_hotkey_btn.text = f"key {key}"
-            self._marker_hotkey = str(key)
-        self._marker_hotkey_btn.bg_color = C.BG_CARD
-        self._marker_hotkey_btn.text_color = C.PRIMARY
-        return True
-
-    def _on_marker_hotkey_clear(self, *args) -> None:
-        """Clear the marker hotkey (disable keyboard marker)."""
-        if self._waiting_for_hotkey:
-            Window.unbind(on_key_down=self._on_hotkey_capture)
-            self._waiting_for_hotkey = False
-        self._marker_hotkey = ""
-        self._marker_hotkey_btn.text = "(none)"
-        self._marker_hotkey_btn.bg_color = C.BG_CARD
-        self._marker_hotkey_btn.text_color = C.PRIMARY
-
-    @property
-    def marker_hotkey(self) -> str:
-        return self._marker_hotkey
-
-    @marker_hotkey.setter
-    def marker_hotkey(self, value: str) -> None:
-        self._marker_hotkey = value
-        self._marker_hotkey_btn.text = value if value else "(none)"
-
     @property
     def threshold(self) -> int:
         return int(self._threshold_slider.value)
@@ -610,37 +443,6 @@ class SettingsScreen(Screen):
 
     def set_threshold_callback(self, callback: Callable) -> None:
         self._on_threshold_change = callback
-
-    def set_line_width_callback(self, callback: Callable) -> None:
-        self._on_line_width_change = callback
-
-    def set_rotate_screen_callback(self, callback: Callable) -> None:
-        self._on_rotate_screen = callback
-
-    def _show_text_size(self) -> None:
-        """Select the size in use, whoever applied it (this picker or a profile's settings load)."""
-        self._text_size_presets.set_selected(F.SCALE)
-
-    def set_text_size_callback(self, callback: Callable[[float], None]) -> None:
-        self._on_text_size = callback
-
-    def _on_text_size_pressed(self, size: float) -> None:
-        F.set_scale(size)
-        if self._on_text_size:
-            self._on_text_size(size)
-
-    def _show_line_colours(self) -> None:
-        """Select the line colours in use, whoever applied them (these rows or a profile's settings load)."""
-        for row in self._line_colour_rows:
-            row.set_selected(LINE_COLOURS.name)
-
-    def set_line_colours_callback(self, callback: Callable[[str], None]) -> None:
-        self._on_line_colours = callback
-
-    def _on_line_colours_pressed(self, name: str) -> None:
-        LINE_COLOURS.set(name)
-        if self._on_line_colours:
-            self._on_line_colours(name)
 
     def on_pre_enter(self, *args) -> None:
         # The link may have dropped between sessions, with nothing on screen to report it.

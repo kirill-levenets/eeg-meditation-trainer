@@ -297,8 +297,8 @@ def test_picking_a_size_applies_it_at_once():
     screen = SettingsScreen()
     label = ThemedLabel(text="built before", font_size=F.SMALL)
     picked = []
-    screen.set_text_size_callback(picked.append)
-    screen._text_size_presets.children[0].dispatch("on_release")  # Larger (children run right to left)
+    screen.display.set_text_size_callback(picked.append)
+    screen.display._text_size_presets.children[0].dispatch("on_release")  # Larger (children run right to left)
     assert picked == [LARGEST] and F.SCALE == LARGEST
     assert label.font_size == pytest.approx(dp(11) * LARGEST)
 
@@ -306,7 +306,7 @@ def test_picking_a_size_applies_it_at_once():
 def test_the_picker_shows_the_size_in_use_whoever_set_it():
     screen = SettingsScreen()
     F.set_scale(1.25)  # a profile's settings load
-    selected = {btn._preset_value: btn.bold for btn in screen._text_size_presets.children}
+    selected = {btn._preset_value: btn.bold for btn in screen.display._text_size_presets.children}
     assert selected == {1.0: False, 1.25: True, 1.5: False}
 
 

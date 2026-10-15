@@ -571,12 +571,12 @@ def test_the_marker_hotkey_capture_state_is_readable(theme):
     from app.ui.settings_screen import SettingsScreen
     C.set_theme(theme)
     s = SettingsScreen()
-    btn = s._marker_hotkey_btn
-    s._on_marker_hotkey_pressed()
+    btn = s.display._marker_hotkey_btn
+    s.display._on_marker_hotkey_pressed()
     try:
         assert _contrast(btn.text_color, btn.bg_color) == pytest.approx(_best_glyph_contrast(btn.bg_color))
     finally:
-        s._on_hotkey_capture(Window, 109, 0, "m", [])
+        s.display._on_hotkey_capture(Window, 109, 0, "m", [])
     assert tuple(btn.text_color) == tuple(C.PRIMARY)  # back to its resting colour
 
 

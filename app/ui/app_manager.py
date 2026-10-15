@@ -622,11 +622,11 @@ class EEGMeditationApp(App):
         self._settings_screen.device.set_device_select_callback(self._on_device_select)
         self._settings_screen.device.set_device_state_callback(self._device_state)
         self._settings_screen.device.set_device_rename_callback(self._on_device_rename)
-        self._settings_screen.set_text_size_callback(self._on_text_size_change)
-        self._settings_screen.set_line_colours_callback(self._on_line_colours_change)
+        self._settings_screen.display.set_text_size_callback(self._on_text_size_change)
+        self._settings_screen.display.set_line_colours_callback(self._on_line_colours_change)
         self._settings_screen.device.set_copy_diagnostics_callback(self._on_copy_diagnostics)
-        self._settings_screen.set_line_width_callback(self._on_line_width_change)
-        self._settings_screen.set_rotate_screen_callback(self._on_rotate_screen)
+        self._settings_screen.display.set_line_width_callback(self._on_line_width_change)
+        self._settings_screen.display.set_rotate_screen_callback(self._on_rotate_screen)
         self._settings_screen.formulas.set_formula_slot_callback(self._formula_settings.on_slot_change)
         self._settings_screen.formulas.set_save_formula_callback(self._formula_settings.on_save)
         self._settings_screen.formulas.set_load_formula_callback(self._formula_settings.on_load)
@@ -1923,9 +1923,9 @@ class EEGMeditationApp(App):
     def _on_key_down(self, window, key, scancode, codepoint, modifiers) -> bool:
         """Handle keyboard hotkey for marker."""
         # Don't capture keys while settings hotkey picker is active
-        if self._settings_screen._waiting_for_hotkey:
+        if self._settings_screen.display._waiting_for_hotkey:
             return False
-        hotkey = self._settings_screen.marker_hotkey
+        hotkey = self._settings_screen.display.marker_hotkey
         if not hotkey:
             return False
         pressed = codepoint if codepoint else str(key)
@@ -2802,11 +2802,11 @@ class EEGMeditationApp(App):
             APP.USE_MOCK_DEVICE = v; ss.device._device_mode_cb.active = v
 
         def set_line_width(v):
-            ss._line_width_slider.value = v; self._on_line_width_change(v)
+            ss.display._line_width_slider.value = v; self._on_line_width_change(v)
 
         def set_rotation(v):
-            ss._current_rotation = v
-            ss._rotate_btn.text = f"Rotate Screen ({v}°)"
+            ss.display._current_rotation = v
+            ss.display._rotate_btn.text = f"Rotate Screen ({v}°)"
             Window.rotation = v
 
         def set_audio_index(v):
@@ -2848,8 +2848,8 @@ class EEGMeditationApp(App):
         add("disconnect_alert", BOOL, lambda: self._audio.disconnect_alert_enabled, set_disconnect)
         add("threshold", INT, lambda: int(ss.threshold), set_threshold)
         add("use_mock", BOOL, lambda: APP.USE_MOCK_DEVICE, set_use_mock)
-        add("line_width", FLOAT, lambda: ss._line_width_slider.value, set_line_width)
-        add("rotation", INT, lambda: ss._current_rotation, set_rotation)
+        add("line_width", FLOAT, lambda: ss.display._line_width_slider.value, set_line_width)
+        add("rotation", INT, lambda: ss.display._current_rotation, set_rotation)
         add("graph_zoom_seconds", FLOAT, self._saved_zoom_seconds, self._apply_saved_zoom)
         # audio_formula_index BEFORE audio_metric: metric reconciles the index when it's a slot.
         add("audio_formula_index", INT, lambda: self._audio_formula_index, set_audio_index)
@@ -2859,7 +2859,7 @@ class EEGMeditationApp(App):
         add("feedback_sound_path", STR, lambda: self._feedback_sound_path, set_feedback_path)
         add("reward_source", STR, lambda: self._reward_source, set_reward_source)
         add("reward_sound_path", STR, lambda: self._reward_sound_path, set_reward_path)
-        add("marker_hotkey", STR, lambda: ss.marker_hotkey,
+        add("marker_hotkey", STR, lambda: ss.display.marker_hotkey,
             lambda v: setattr(ss, "marker_hotkey", v))
         add("stats_view_mode", STR, lambda: getattr(ls, "_stats_mode", "live"),
             self._apply_stats_mode)
