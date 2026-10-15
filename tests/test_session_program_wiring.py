@@ -309,3 +309,26 @@ def test_program_unsaved_changes_detection(tmp_path):
     programs.name = ""               # unnamed but non-empty
     assert programs.has_unsaved_changes() is True
     db.close()
+
+
+def test_a_running_programs_series_are_not_saved_once_settings_is_switched_to_simple(tmp_path):
+    """Settings → Timer can go back to simple during a program session (the edit waits for the next one): the live graph
+    still shows the program's set, which closing the series picker must not save as the profile's own selection."""
+    from app.metrics.formula_slots import FormulaSlots
+    from app.session.session_program import SessionProgram
+    from app.ui.live_session import LiveSessionScreen
+    db = DatabaseManager(db_path=str(tmp_path / "running.db"))
+    uid = db.create_user("u")
+    db.set_user_json_setting(uid, "graph_series_live_metrics", ["shamatha_score"])
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._db = db
+    app._current_user_id = uid
+    app._live_screen = LiveSessionScreen()
+    app._formulas = FormulaSlots()
+    app._program_run = make_run(app)
+    app._program_run.begin(SessionProgram([{"minutes": 1, "target": 50, "formula": "meditation_score"}]), [])
+    app._program_settings = _program_settings(db, uid)  # mode "simple": switched back mid-session
+    app._graph_series = make_graph_series(app)
+    app._graph_series.persist(app._live_screen.graph)
+    assert db.get_user_json_setting(uid, "graph_series_live_metrics") == ["shamatha_score"]
+    db.close()

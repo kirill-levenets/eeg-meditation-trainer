@@ -131,12 +131,12 @@ class GraphSeries:
     def persist(self, graph) -> None:
         """Persist `graph`'s visible series under its per-graph key (on picker close).
 
-        Skips the live metrics graph while a program governs its visibility — the
-        program-driven set must not overwrite the user's saved manual selection."""
+        Skips the live metrics graph while a program sets its series — a running one, or the idle preview of the one
+        Settings has loaded: the program-driven set must not overwrite the user's saved manual selection."""
         uid = self._user_id()
         if not (uid and graph.graph_id):
             return
-        if graph is self._live_graph and self._program_settings.governs_live_series():
+        if graph is self._live_graph and (self._program_run.active or self._program_settings.governs_live_series()):
             return
         self._db.set_user_json_setting(
             uid, f"graph_series_{graph.graph_id}",
