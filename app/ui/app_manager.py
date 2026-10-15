@@ -617,14 +617,14 @@ class EEGMeditationApp(App):
         self._settings_screen.set_sinking_alert_callback(self._on_sinking_alert_toggle)
         self._settings_screen.set_subtle_alert_callback(self._on_subtle_alert_toggle)
         self._settings_screen.set_disconnect_alert_callback(self._on_disconnect_alert_toggle)
-        self._settings_screen.set_device_mode_callback(self._on_device_mode_toggle)
-        self._settings_screen.set_scan_devices_callback(self._on_scan_devices)
-        self._settings_screen.set_device_select_callback(self._on_device_select)
-        self._settings_screen.set_device_state_callback(self._device_state)
-        self._settings_screen.set_device_rename_callback(self._on_device_rename)
+        self._settings_screen.device.set_device_mode_callback(self._on_device_mode_toggle)
+        self._settings_screen.device.set_scan_devices_callback(self._on_scan_devices)
+        self._settings_screen.device.set_device_select_callback(self._on_device_select)
+        self._settings_screen.device.set_device_state_callback(self._device_state)
+        self._settings_screen.device.set_device_rename_callback(self._on_device_rename)
         self._settings_screen.set_text_size_callback(self._on_text_size_change)
         self._settings_screen.set_line_colours_callback(self._on_line_colours_change)
-        self._settings_screen.set_copy_diagnostics_callback(self._on_copy_diagnostics)
+        self._settings_screen.device.set_copy_diagnostics_callback(self._on_copy_diagnostics)
         self._settings_screen.set_line_width_callback(self._on_line_width_change)
         self._settings_screen.set_rotate_screen_callback(self._on_rotate_screen)
         self._settings_screen.formulas.set_formula_slot_callback(self._formula_settings.on_slot_change)
@@ -854,7 +854,7 @@ class EEGMeditationApp(App):
         self._activate_user(uid)
         APP.USE_MOCK_DEVICE = True
         self._db.set_user_setting(uid, "use_mock", "True")
-        self._settings_screen._device_mode_cb.active = True
+        self._settings_screen.device._device_mode_cb.active = True
         self._live_screen.update_device_status(False, device_name="Mock EEG")
         logger.info("First run: using mock device")
         self._finish_first_run(f"user '{user_name}' created")
@@ -905,7 +905,7 @@ class EEGMeditationApp(App):
                 )
                 self._list_bt_devices(matches)
                 self._switch_screen("settings")
-                self._settings_screen.focus_device_section(
+                self._settings_screen.device.focus_device_section(
                     f"Found {len(matches)} MindWave devices.\n"
                     "Pick the one you want to use."
                 )
@@ -992,7 +992,7 @@ class EEGMeditationApp(App):
                     self._live_screen.set_controls_idle()
                     self._live_screen.hide_overlay()
                     self._switch_screen("settings")
-                    self._settings_screen.focus_device_section(
+                    self._settings_screen.device.focus_device_section(
                         f"Found {len(matches)} MindWave devices.\n"
                         "Pick the one you want to use, then press Start again."
                     )
@@ -1533,7 +1533,7 @@ class EEGMeditationApp(App):
         self._live_screen.update_state("Running")
         self._live_screen.set_start_time(self._session_manager.started_at)
         self._live_screen.hide_overlay()
-        self._settings_screen.update_device_status(True, name=name)
+        self._settings_screen.device.update_device_status(True, name=name)
         # Audio starts with the overlay hide, so the noise never plays while the connecting loader is still visible.
         self._audio.start()
         self._audio.play_connect_sound()
@@ -1734,7 +1734,7 @@ class EEGMeditationApp(App):
             self._bt_connected_notified = True
             name = self._device_name()
             _n = name
-            self._on_main(lambda n=_n: self._settings_screen.update_device_status(True, name=n))
+            self._on_main(lambda n=_n: self._settings_screen.device.update_device_status(True, name=n))
             logger.info(f"Settings updated: {name} connected")
 
         # Detect BT disconnect during session
@@ -2272,11 +2272,11 @@ class EEGMeditationApp(App):
     def _on_device_mode_toggle(self, use_mock: bool) -> None:
         APP.USE_MOCK_DEVICE = use_mock
         if use_mock:
-            self._settings_screen.update_device_status(False, meta="Mode: Mock Data")
+            self._settings_screen.device.update_device_status(False, meta="Mode: Mock Data")
             self._live_screen.update_device_status(False, device_name="Mock EEG")
         else:
             addr = self._real_stream._device_address or "none"
-            self._settings_screen.update_device_status(False, meta=f"Mode: Real Device ({addr})")
+            self._settings_screen.device.update_device_status(False, meta=f"Mode: Real Device ({addr})")
             self._live_screen.update_device_status(False, device_name=self._device_name())
         if self._current_user_id:
             self._db.set_user_setting(self._current_user_id, "use_mock", str(use_mock))
@@ -2295,7 +2295,7 @@ class EEGMeditationApp(App):
         self._real_stream.set_device(address, name)
         # Auto-switch to real device mode
         APP.USE_MOCK_DEVICE = False
-        self._settings_screen._device_mode_cb.active = False
+        self._settings_screen.device._device_mode_cb.active = False
         self._show_selected_device()
         logger.info(f"BT device selected: {name} ({address}), switched to real mode")
         if self._current_user_id:
@@ -2316,7 +2316,7 @@ class EEGMeditationApp(App):
         return [{**dev, "alias": self._device_aliases.get(dev["address"], "")} for dev in devices]
 
     def _list_bt_devices(self, devices: list[dict]) -> None:
-        self._settings_screen.populate_bt_devices(self._with_aliases(devices))
+        self._settings_screen.device.populate_bt_devices(self._with_aliases(devices))
 
     def _device_state(self) -> tuple[str | None, str | None]:
         """(selected, connected) headset addresses, none in mock mode: the stream's link is always to the selected one."""
@@ -2332,9 +2332,9 @@ class EEGMeditationApp(App):
         self._live_screen.update_device_status(connected, device_name=label,
                                                connecting=self._waiting_for_bt and not connected)
         if connected:
-            self._settings_screen.update_device_status(True, name=label)
+            self._settings_screen.device.update_device_status(True, name=label)
         else:
-            self._settings_screen.update_device_status(False, meta=f"Selected: {label}")
+            self._settings_screen.device.update_device_status(False, meta=f"Selected: {label}")
 
     def _on_device_rename(self, address: str, name: str, text: str) -> None:
         """Name a headset (`name` is its Bluetooth one) for every profile: it is the same headset whoever uses it.
@@ -2345,7 +2345,7 @@ class EEGMeditationApp(App):
             aliases[address] = alias
         self._db.set_json_setting("bt_device_aliases", aliases)
         self._device_aliases = MappingProxyType(aliases)
-        self._settings_screen.relabel_bt_device(address, aliases.get(address, ""))
+        self._settings_screen.device.relabel_bt_device(address, aliases.get(address, ""))
         logger.info(f"BT device {address} named {aliases.get(address)!r}")
         if address == self._device_state()[0]:
             self._show_selected_device()
@@ -2799,7 +2799,7 @@ class EEGMeditationApp(App):
             self._apply_threshold(v)
 
         def set_use_mock(v):
-            APP.USE_MOCK_DEVICE = v; ss._device_mode_cb.active = v
+            APP.USE_MOCK_DEVICE = v; ss.device._device_mode_cb.active = v
 
         def set_line_width(v):
             ss._line_width_slider.value = v; self._on_line_width_change(v)
@@ -2916,7 +2916,7 @@ class EEGMeditationApp(App):
             bt_name = g(user_id, "bt_device_name")
             if bt_addr:
                 self._real_stream.set_device(bt_addr, bt_name or bt_addr)
-                self._settings_screen.update_device_status(False, meta=f"Saved device: {self._device_name()}")
+                self._settings_screen.device.update_device_status(False, meta=f"Saved device: {self._device_name()}")
             # use_mock is applied by the settings registry (store.load) above.
 
         # Update live screen device label to match current mode

@@ -553,21 +553,21 @@ class TestSettingsDevicePicker(unittest.TestCase):
     def test_focus_device_section_shows_banner_and_opens_section(self):
         # Device section starts collapsed. focus_device_section should open it
         # and set the banner text + non-zero height.
-        self.assertTrue(self.screen._device_section._collapsed)
-        self.screen.focus_device_section("Pick one of 3 devices")
-        self.assertFalse(self.screen._device_section._collapsed)
+        self.assertTrue(self.screen.device._device_section._collapsed)
+        self.screen.device.focus_device_section("Pick one of 3 devices")
+        self.assertFalse(self.screen.device._device_section._collapsed)
         self.assertEqual(
-            self.screen._device_picker_banner.text, "Pick one of 3 devices",
+            self.screen.device._device_picker_banner.text, "Pick one of 3 devices",
         )
-        self.assertGreater(self.screen._device_picker_banner.height, 0)
+        self.assertGreater(self.screen.device._device_picker_banner.height, 0)
 
     def test_update_device_status_connected_clears_banner(self):
-        self.screen.focus_device_section("Pick one")
-        self.assertGreater(self.screen._device_picker_banner.height, 0)
+        self.screen.device.focus_device_section("Pick one")
+        self.assertGreater(self.screen.device._device_picker_banner.height, 0)
         # Once a device is connected, the prompt must disappear.
-        self.screen.update_device_status(True, name="MindWave A")
-        self.assertEqual(self.screen._device_picker_banner.text, "")
-        self.assertEqual(self.screen._device_picker_banner.height, 0)
+        self.screen.device.update_device_status(True, name="MindWave A")
+        self.assertEqual(self.screen.device._device_picker_banner.text, "")
+        self.assertEqual(self.screen.device._device_picker_banner.height, 0)
 
 
 class TestFilterMindwave(unittest.TestCase):
