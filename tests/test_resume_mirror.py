@@ -27,6 +27,7 @@ from app.session.manager import SessionState
 from app.session.timer_state import TimerState
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.live_session import METRICS_COLORS
+from tests._program_run import make_run
 
 BAND_KEYS = ("alpha", "beta", "gamma", "theta", "delta")
 
@@ -105,7 +106,7 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     app._tick_stop_event = MagicMock()
     app._tick_thread = None  # as __init__ leaves it
 
-    app._session_program_active = False
+    app._program_run = make_run(app)
     app._session_program_segments = []
 
     app._shamatha_active = False
@@ -240,6 +241,7 @@ def _make_resume_app(running: bool = True) -> EEGMeditationApp:
     )
     app._session_manager.elapsed_formatted = "1:23"
     app._live_screen = MagicMock()
+    app._program_run = make_run(app)
     app._settings_screen = MagicMock()
     app._ui_metrics_history = deque(maxlen=APP.GRAPH_POINTS_MAX)
     app._ui_band_history = deque(maxlen=APP.GRAPH_POINTS_MAX)

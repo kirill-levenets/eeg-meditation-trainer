@@ -15,6 +15,7 @@ from app.session.manager import SessionManager
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from tests._backup_flow import make_flow
+from tests._program_run import make_run
 
 
 @pytest.fixture
@@ -80,7 +81,7 @@ def _app(db) -> EEGMeditationApp:
     app._session_manager.start()
     app._with_score = lambda stats: stats
     app._session_custom_formulas_json = lambda: ""
-    app._session_program_json = lambda: ""
+    app._program_run = make_run()
     app._make_session_name = lambda: "06:00 - Mock"
     return app
 

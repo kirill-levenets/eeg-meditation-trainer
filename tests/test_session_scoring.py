@@ -12,6 +12,7 @@ from app.metrics.formula_slots import FormulaSlots
 from app.session.manager import SessionManager, SessionState
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
+from tests._program_run import make_run
 from tests.test_resume_mirror import _drive_tick, _make_tick_app, _metrics, _raw_sample
 
 
@@ -28,9 +29,7 @@ SHAMATHA_HIGH = _ticks(shamatha_score=[80, 85, 90, 20, 95], meditation_score=[10
 def _app(metric_key: str = "shamatha_score", formulas=()):
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._audio_metric_key = metric_key
-    app._session_program_active = False
-    app._program_audio_key = ""
-    app._active_program = None
+    app._program_run = make_run()
     app._session_program_name = ""
     app._formulas = FormulaSlots()
     if formulas:
@@ -127,8 +126,7 @@ def test_the_saved_stats_carry_the_scored_metric_and_its_name():
 @pytest.mark.parametrize("name,recorded", [("Evening program", "Evening program"), ("", "Program")])
 def test_a_program_session_records_program_its_name_and_no_average(name, recorded):
     app = _app()
-    app._session_program_active = True
-    app._active_program = MagicMock(segments=[{"duration": 60}])
+    app._program_run = make_run(program=MagicMock(segments=[{"duration": 60}]))
     app._session_program_name = name
     stats = app._with_score(_run(app, SHAMATHA_HIGH))
     assert (stats["score_metric_key"], stats["score_metric_name"], stats["avg_score"]) == ("program", recorded, None)
@@ -220,8 +218,8 @@ def test_a_simple_session_tick_scores_on_the_feedback_metric_and_marks_it():
 def test_a_program_session_tick_leaves_the_goal_to_the_program():
     app = _make_tick_app()
     app._timer_mode = "program"
-    app._session_program_active = True
-    app._apply_program_tick = MagicMock()
+    app._program_run = make_run(app, program=MagicMock())
+    app._program_run.tick = MagicMock()
     _drive_tick(app, _raw_sample(), _metrics())
     app._session_manager.set_active_goal.assert_not_called()
 
@@ -229,7 +227,7 @@ def test_a_program_session_tick_leaves_the_goal_to_the_program():
 def test_program_mode_with_no_usable_program_is_scored_like_a_simple_session():
     app = _make_tick_app()
     app._timer_mode = "program"  # the Settings toggle; the session started without a program
-    app._session_program_active = False
+    app._program_run = make_run(app)
     app._audio_metric_key = "shamatha_score"
     _drive_tick(app, _raw_sample(), _metrics())
     app._session_manager.set_active_goal.assert_called_with("shamatha_score")

@@ -13,6 +13,7 @@ import app.ui.app_manager as am
 from app.session.manager import SessionManager, SessionState
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
+from tests._program_run import make_run
 
 SID = 42
 
@@ -67,14 +68,14 @@ def test_user_stop_restores_program_series_and_clears_the_training_marker():
     app._stop_tick_thread = MagicMock()
     app._persist_session_data = MagicMock(return_value={"duration": 30})
     app._current_session_id = SID
-    for name in ("_reload_live_graphs_from_mirror", "_restore_program_series", "_release_wake_lock",
+    for name in ("_reload_live_graphs_from_mirror", "_program_run", "_release_wake_lock",
                  "_stop_session_keep_alive_service"):
         setattr(app, name, MagicMock())
     app._timer_state = MagicMock()
     app._session_manager = MagicMock()
     app._stop_and_save(reason="user")
     app._persist_session_data.assert_called_once_with("user")
-    app._restore_program_series.assert_called_once()
+    app._program_run.end.assert_called_once()
     app._live_screen.set_training_series.assert_called_with(None)
     app._live_screen.show_summary.assert_called_once_with(SID, {"duration": 30}, title="")
 
@@ -107,14 +108,14 @@ def _recorded_session(db) -> EEGMeditationApp:
     app._session_manager.start()
     app._with_score = lambda stats: stats
     app._session_custom_formulas_json = lambda: ""
-    app._session_program_json = lambda: ""
+    app._program_run = make_run()
     app._make_session_name = lambda: "2026-10-05 07:00 - MindWave Mobile"
     app._waiting_for_bt = False
     app._tick_thread = None
     app._eeg_stream = MagicMock()
     for name in ("_stop_tick_thread", "_audio", "_live_screen", "_settings_screen", "_timer_state", "_confirm_action",
                  "_release_wake_lock", "_stop_session_keep_alive_service", "_reload_live_graphs_from_mirror",
-                 "_mark_history_dirty", "_restore_program_series"):
+                 "_mark_history_dirty"):
         setattr(app, name, MagicMock())
     for _ in range(240):
         metrics = {"shamatha_score": 70, "meditation_score": 60}

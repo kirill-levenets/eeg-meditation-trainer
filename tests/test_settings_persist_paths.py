@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import app.ui.app_manager as am
 from app.session.manager import SessionManager
 from app.ui.app_manager import EEGMeditationApp
+from tests._program_run import make_run
 
 
 class _FakeTrigger:
@@ -48,7 +49,7 @@ def _make_app(monkeypatch):
     app._live_screen = MagicMock()
     app._timer_state = MagicMock()
     app._session_manager = SessionManager()
-    app._session_program_active = False
+    app._program_run = make_run(app)
     app._settings_screen = MagicMock(threshold=180)
     app._ui_metrics_history, app._ui_band_history, app._ui_raw_waveform = deque(), deque(), deque()
     return app, triggers, reports

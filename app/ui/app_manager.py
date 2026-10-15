@@ -1,4 +1,3 @@
-import json
 import os
 import sqlite3
 import sys
@@ -33,7 +32,6 @@ from app.eeg.band_spec import BAND_KEYS, group_powers
 from app.eeg.mock_stream_v2 import MockEEGStream
 from app.eeg.neurosky_stream import NeuroSkyStream
 from app.logger import logger, timed
-from app.metrics.custom_formula import evaluate_series
 from app.metrics.engine import MetricsEngine
 from app.metrics.formula_slots import (
     FORMULA_KEYS,
@@ -48,8 +46,6 @@ from app.session.scoring import target_steps
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
     SessionProgram,
-    program_evaluators,
-    program_plan,
     segment_target,
 )
 from app.session.timer_state import TimerState
@@ -74,7 +70,8 @@ from app.ui.history_screen import HistoryScreen
 from app.ui.line_colours import DEFAULT as LINE_DEFAULT
 from app.ui.line_colours import LINE_COLOURS
 from app.ui.line_colours import OPTIONS as LINE_OPTIONS
-from app.ui.live_session import METRICS_COLORS, SERIES_NAMES, LiveSessionScreen
+from app.ui.live_session import METRICS_COLORS, LiveSessionScreen
+from app.ui.program_run import ProgramRun, show_program_series
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.session_labels import session_title, start_stamp
 from app.ui.settings_screen import (
@@ -250,13 +247,6 @@ class EEGMeditationApp(App):
         self._audio_formula_index: int = 0  # the slot that drives the sound when the custom formula does
         self.serial_device_override: Optional[str] = None
         self._wake_lock = None
-        self._active_program = None
-        self._program_seg_idx: int = -1
-        self._program_formula_evs: dict = {}  # slot_key -> evaluator, one per distinct custom
-        self._program_segment_keys: list[str] = []  # metric key driven by each segment
-        self._program_segment_feedback_ids: list[str] = []
-        self._session_program_active: bool = False
-        self._program_prev_visibility: dict[str, bool] = {}  # live-graph visibility before a program
 
     def _persist_user_setting(self, key: str) -> None:
         """Persist one setting now via the registry (it reads the live value); no-op mid-load or unbuilt."""
@@ -386,31 +376,6 @@ class EEGMeditationApp(App):
         if problems:
             report_soft_error("sound_files_missing", "\n".join(problems), app=self, force=force)
 
-    def _apply_program_visibility(self, prog) -> list:
-        """Set the live graph to EXACTLY the program's metric set and label each program
-        custom line `Program: <name>`. Returns the (slot_key, custom_dict) list. Shared by
-        the running session (`_show_program_series`) and the idle preview."""
-        graph = self._live_screen.graph
-        keys, custom_slots, _ = program_plan(prog)
-        for slot, cust in custom_slots:
-            nm = cust.get("name")
-            graph.set_series_name(slot, f"Program: {nm}" if nm else "Program")
-        for k in graph.series_keys():
-            graph.set_visible(k, k in keys)
-        return custom_slots
-
-    def _show_program_series(self, prog) -> None:
-        """Session-start: snapshot prior visibility, show EXACTLY the program's metric
-        set for the whole session, and arm one persistent evaluator per distinct custom
-        formula. Each custom line is shown the whole program (not per-segment) and
-        evaluated every tick, so only the legend marker changes as segments cross."""
-        graph = self._live_screen.graph
-        # Snapshot every catalog key's visibility so stop restores exactly.
-        self._program_prev_visibility = {k: graph.is_visible(k) for k in graph.series_keys()}
-        self._apply_program_visibility(prog)
-        _, _, self._program_segment_keys = program_plan(prog)
-        self._program_formula_evs = program_evaluators(prog)
-
     def _program_governs_live_series(self) -> bool:
         """True when the live metrics graph's visibility is program-driven (program mode
         with a loaded program) — so it must not be persisted as the manual selection."""
@@ -427,37 +392,10 @@ class EEGMeditationApp(App):
         if not self._current_user_id:
             return  # silent-ok: idle live-graph preview; nothing to show without a user
         if self._program_governs_live_series():
-            self._apply_program_visibility(self._build_session_program())
+            show_program_series(self._live_screen.graph, self._build_session_program())
             self._live_screen.set_training_series(None)  # no active segment in idle
         else:
             self._apply_saved_series(self._live_screen.graph, self._current_user_id)
-
-    def _restore_program_series(self) -> None:
-        """Restore the live graph to its pre-program visibility and drop the program
-        custom-formula lines/labels/evaluators."""
-        graph = self._live_screen.graph
-        for slot in PROGRAM_FORMULA_KEYS:
-            graph.set_series_name(slot, SERIES_NAMES.get(slot, "Program"))  # drop stale labels
-        self._session_program_active = False
-        self._program_formula_evs = {}
-        self._program_segment_keys = []
-        self._program_segment_feedback_ids = []
-        self._program_audio_key = ""
-        prev = getattr(self, "_program_prev_visibility", None) or dict.fromkeys(PROGRAM_FORMULA_KEYS, False)
-        for k, on in prev.items():
-            graph.set_visible(k, on)
-        for slot in PROGRAM_FORMULA_KEYS:
-            graph.set_visible(slot, False)  # never linger as a user selection
-        self._program_prev_visibility = {}
-        # Debounced "in shamatha" zone state (drives the live status chip).
-        self._shamatha_active = False
-        self._shamatha_streak = 0
-
-    @staticmethod
-    def _program_transition(prev_idx: int, elapsed: float, program):
-        """Pure: (new_idx, segment, crossed). crossed=True when new_idx != prev_idx."""
-        idx, seg = program.segment_at(elapsed)
-        return (idx, seg, idx != prev_idx)
 
     @staticmethod
     def _shamatha_transition(
@@ -481,82 +419,6 @@ class EEGMeditationApp(App):
         sqrt_bands = self._metrics_engine.compute_sqrt_relative_bands(raw_sample)
         fvars.update({f"s_{k}": v for k, v in sqrt_bands.items()})
         return fvars
-
-    def _apply_program_tick(self, metrics: dict, raw_sample: dict) -> None:
-        """Per-tick program stepping: cross segments, fire cues, evaluate a custom segment formula.
-
-        Runs on the daemon tick thread — only thread-safe state here (audio
-        set_threshold/one-shot, SessionManager, pure evaluators). Kivy widget
-        mutations are dispatched via _on_main.
-        """
-        prog = self._active_program
-        if not prog:
-            return
-        elapsed = self._session_manager.elapsed_seconds
-        idx, seg, crossed = self._program_transition(self._program_seg_idx, elapsed, prog)
-        if seg is None:
-            return
-        if crossed:
-            self._apply_program_segment(self._program_seg_idx, idx, seg)
-            self._program_seg_idx = idx
-        # Every program custom line is evaluated every tick (persistent, shown the whole
-        # program) into its own metrics[slot] — so all stages' lines stay live at once.
-        evaluate_series(self._program_formula_evs, metrics, lambda: self._eval_formula_vars(raw_sample, metrics))
-
-    def _apply_program_segment(self, prev_idx: int, idx: int, seg: dict) -> None:
-        """On a boundary crossing: end-cue for the prior segment + repoint target/audio/marker
-        to this segment's metric (built-in key or its custom's persistent program line)."""
-        # End cue for the segment that just ended (skip on initial entry prev_idx == -1).
-        if prev_idx >= 0:
-            prev_seg = self._active_program.segments[prev_idx]
-            self._play_segment_end_sound(prev_seg.get("end_sound"))
-        metric_key = self._program_segment_keys[idx]
-        formula = seg.get("formula")
-        prog_name = None
-        if isinstance(formula, dict) and metric_key in PROGRAM_FORMULA_KEYS:
-            nm = formula.get("name")
-            prog_name = f"Program: {nm}" if nm else "Program"
-        target = segment_target(seg)
-        self._program_audio_key = metric_key  # transient; never clobber the user's baseline
-        self._session_manager.set_active_goal(metric_key, target)
-        self._audio.set_threshold(target)
-        fb_ids = getattr(self, "_program_segment_feedback_ids", None)
-        if fb_ids and 0 <= idx < len(fb_ids):
-            self._audio.set_active_feedback(fb_ids[idx])
-        self._on_main(lambda k=metric_key, nm=prog_name: self._apply_program_segment_ui(k, nm))
-        logger.info(f"Program segment {idx}: metric={metric_key} target={target}")
-
-    def _apply_program_segment_ui(self, metric_key: str, prog_name) -> None:
-        """Main-thread UI for a segment switch: ensure a custom segment's line is labelled
-        + visible, and move the legend marker (the ticks step the threshold line). Program lines'
-        visibility is owned by `_show_program_series` (shown the whole program), so a
-        built-in segment no longer hides anything — only the » marker moves."""
-        graph = self._live_screen.graph
-        if prog_name is not None:
-            # Custom segment: label this segment's program line with the formula's name.
-            graph.set_series_name(metric_key, prog_name)
-            graph.set_visible(metric_key, True)
-        self._live_screen.set_training_series(metric_key)  # bold + » on the trained series
-
-    def _play_segment_end_sound(self, sound_id) -> None:
-        """Segment-end cue. v1: chime (default) or 'warble'; richer choices land with #10."""
-        try:
-            if sound_id == "warble":
-                self._audio.play_alert()
-            else:
-                self._audio.play_transition_cue()
-        except Exception:
-            logger.exception("Program segment end cue failed")
-
-    def _session_program_json(self) -> str:
-        """JSON of the program that ran this session (empty for a simple session).
-
-        Serializes the snapshot captured at session start, not the live editor —
-        a mid-session edit in Settings must not rewrite what actually drove the run.
-        """
-        if self._session_program_active and self._active_program:
-            return json.dumps(self._active_program.segments)
-        return ""
 
     def _acquire_wake_lock(self) -> None:
         """Keep CPU running + screen on during session (Android only)."""
@@ -667,6 +529,8 @@ class EEGMeditationApp(App):
         self._sm = ScreenManager(transition=SlideTransition())
 
         self._live_screen = LiveSessionScreen()
+        self._program_run = ProgramRun(self._session_manager, self._audio, self._live_screen, on_main=self._on_main,
+                                       formula_vars=self._eval_formula_vars)
         self._settings_screen = SettingsScreen()
         self._history_screen = HistoryScreen()
         self._diary_screen = DiaryScreen()
@@ -835,7 +699,6 @@ class EEGMeditationApp(App):
         for key, active in self._settings_screen._graph_toggles.items():
             self._live_screen.graph.set_visible(key, active)
         self._audio_metric_key: str = "shamatha_score"
-        self._program_audio_key: str = ""  # transient program-segment audio metric
         self._feedback_source: str = "noise"
         self._feedback_sound_path: str = ""
         self._reward_source: str = "none"   # above-threshold reward channel (off by default)
@@ -1268,22 +1131,16 @@ class EEGMeditationApp(App):
         self._audio.stop_timer_bell()
         threshold = self._settings_screen.threshold
         prog = self._build_session_program()
-        self._program_seg_idx = -1
-        self._program_formula_evs = {}
-        self._program_segment_keys = []
-        self._program_segment_feedback_ids = []
-        self._program_audio_key = ""
-        self._session_program_active = self._timer_mode == "program" and bool(prog)
+        program = prog if self._timer_mode == "program" and bool(prog) else None
         self._cancel_settle("apply_threshold")  # a slider move just before Start: the start applies the slider itself
-        self._active_program = prog if self._session_program_active else None
-        if self._session_program_active:
+        if program:
             # Program total drives the timer so auto-stop reuses the proven
             # timer-expiry path; the first segment's target seeds the threshold.
-            threshold = segment_target(prog.segments[0])
+            threshold = segment_target(program.segments[0])
             self._timer_state.set_enabled(True)
-            self._timer_state.set_duration(max(1, int(round(prog.total_seconds / 60))))
-            logger.info(f"Program session: {format_count(len(prog.segments), 'segment')}, "
-                        f"{prog.total_seconds:.0f}s total drives the end gong")
+            self._timer_state.set_duration(max(1, int(round(program.total_seconds / 60))))
+            logger.info(f"Program session: {format_count(len(program.segments), 'segment')}, "
+                        f"{program.total_seconds:.0f}s total drives the end gong")
         else:
             # Session start is authoritative: re-sync the timer from Settings so a
             # prior program session's enabled/duration can't leak into a simple one.
@@ -1304,15 +1161,12 @@ class EEGMeditationApp(App):
 
         self._clear_live_display()
         self._live_display_uid = self._current_user_id
-        if self._session_program_active:
-            self._show_program_series(prog)
         gid = self._global_feedback_id()
-        if self._session_program_active:
-            fb_sources, self._program_segment_feedback_ids, fb_initial = \
-                self._feedback_plan(prog, gid)
+        if program:
+            fb_sources, fb_ids, fb_initial = self._feedback_plan(program, gid)
         else:
-            fb_sources, fb_initial = {gid: self._source_spec(gid)}, gid
-            self._program_segment_feedback_ids = []
+            fb_sources, fb_ids, fb_initial = {gid: self._source_spec(gid)}, [], gid
+        self._program_run.begin(program, fb_ids)
         # Above-threshold reward channel (global; "" = none). Add its player to the set.
         reward_id = self._reward_id()
         if reward_id:
@@ -1326,7 +1180,7 @@ class EEGMeditationApp(App):
         self._shamatha_active = False
         self._shamatha_streak = 0
         self._live_screen.set_controls_running()
-        self._settings_screen.lock_threshold(self._refuse_program_threshold if self._session_program_active else None)
+        self._settings_screen.lock_threshold(self._refuse_program_threshold if self._program_run.active else None)
 
         self._acquire_wake_lock()
         self._start_session_keep_alive_service()
@@ -1405,7 +1259,7 @@ class EEGMeditationApp(App):
         start attempt, so the callbacks still queued for it do nothing."""
         self._start_attempt += 1
         self._live_screen.set_training_series(None)  # clear the program "training now" marker
-        self._restore_program_series()
+        self._program_run.end()
         self._live_screen.set_controls_idle()
         self._live_screen.update_device_status(False)
         self._shamatha_active = False
@@ -1585,7 +1439,7 @@ class EEGMeditationApp(App):
                     user_id=self._current_user_id,
                     session_name=self._make_session_name(),
                     custom_formulas=self._session_custom_formulas_json(),
-                    session_program=self._session_program_json(),
+                    session_program=self._program_run.segments_json(),
                     engine_version=MetricsEngine.ENGINE_VERSION,
                     started_at=self._session_manager.started_at or None,
                 )
@@ -1986,8 +1840,8 @@ class EEGMeditationApp(App):
 
         # Program vs simple is what the session started as, not the Settings toggle (editable mid-session).
         # The drive key is resolved once: the tick scores and sounds the same metric.
-        if self._session_program_active:
-            self._apply_program_tick(metrics, raw_sample)
+        if self._program_run.active:
+            self._program_run.tick(metrics, raw_sample)
             drive_key, _scored = self._audio_drive_key(), None
         else:
             drive_key = _scored = self._score_on_drive_key()
@@ -2234,7 +2088,7 @@ class EEGMeditationApp(App):
 
     def _program_owns_threshold(self) -> bool:
         """A running program's segments own its targets: the Settings threshold waits for the next session."""
-        return self._session_program_active and self._session_pipeline_live()
+        return self._program_run.active and self._session_pipeline_live()
 
     def _refuse_program_threshold(self) -> bool:
         """A touch on the threshold controls a program locked: True, after saying why, until the session ends."""
@@ -2276,8 +2130,7 @@ class EEGMeditationApp(App):
         is_live = graph is self._live_screen.graph
         rows = []
         for key in graph.series_keys():
-            if key in PROGRAM_FORMULA_KEYS and not (is_live and self._session_program_active
-                                                     and key in self._program_formula_evs):
+            if key in PROGRAM_FORMULA_KEYS and not (is_live and self._program_run.computes(key)):
                 continue  # program-controlled: listed only while its program runs and computes it
             vis = graph.is_visible(key)
             btn = StyledButton(
@@ -2429,7 +2282,7 @@ class EEGMeditationApp(App):
         """Stats to save, with the scored metric's display name; a program session is scored per segment."""
         if not stats:
             return stats
-        if self._session_program_json():
+        if self._program_run.active:
             return {**stats, "score_metric_key": "program",
                     "score_metric_name": self._session_program_name or "Program", "avg_score": None}
         key = stats.get("score_metric_key") or self._audio_drive_key()  # no scored tick yet: what it would score
@@ -2439,8 +2292,8 @@ class EEGMeditationApp(App):
         """Metric key feeding noise. A running program drives it from the active segment's
         slot; otherwise the user's baseline. Falls back to shamatha when the key would read
         0 (invalid formula slot, or a program slot outside a program)."""
-        if getattr(self, "_session_program_active", False) and getattr(self, "_program_audio_key", ""):
-            key = self._program_audio_key
+        if self._program_run.active and self._program_run.audio_key:
+            key = self._program_run.audio_key
         else:
             key = self._baseline_audio_metric(self._audio_metric_key)
         ev = self._formulas.for_key(key)
@@ -2494,7 +2347,7 @@ class EEGMeditationApp(App):
     def _scoring_locked(self, doing: str) -> bool:
         """True (after telling the user) while a simple session runs: it is scored on the audio control metric (#51)
         until it stops. A program session is scored on its segments' metrics, so the control stays free."""
-        return (not getattr(self, "_session_program_active", False)
+        return (not self._program_run.active
                 and self._refused_while_session_runs(doing))
 
     def _show_audio_metric(self) -> None:

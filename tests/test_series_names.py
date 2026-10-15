@@ -9,7 +9,9 @@ from app.session.session_program import SessionProgram, program_evaluators
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.diary_screen import DiaryScreen
 from app.ui.live_session import SERIES_NAMES, LiveSessionScreen
+from app.ui.program_run import show_program_series
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
+from tests._program_run import make_run
 
 PAST_NAMES = {"custom_formula": "Old beta", "custom_formula_2": "Custom 2", "custom_formula_3": "Custom 3"}
 
@@ -22,6 +24,7 @@ def app() -> EEGMeditationApp:
     a._formulas = FormulaSlots()
     a._formulas.names[0] = "Calm alpha"
     a._push_formula_names_to_graph()  # the profile's slot names, as loading its settings does
+    a._program_run = make_run(a)
     return a
 
 
@@ -38,10 +41,10 @@ def test_the_detail_starts_from_the_defaults_not_the_session_screens_names(app):
 
 def test_a_programs_labels_go_when_it_ends(app):
     graph = app._live_screen.graph
-    app._apply_program_visibility(SessionProgram([{"minutes": 5, "target": 60,
-                                                   "formula": {"name": "Deep", "formula": "alpha1"}}]))
+    show_program_series(graph, SessionProgram([{"minutes": 5, "target": 60,
+                                                "formula": {"name": "Deep", "formula": "alpha1"}}]))
     assert graph.series_name("program_formula") == "Program: Deep"
-    app._restore_program_series()
+    app._program_run.end()
     assert graph.series_name("program_formula") == "Program"
 
 
@@ -68,8 +71,7 @@ def _picker_rows(app, monkeypatch) -> list[str]:
 
 def _run_program(app, segments) -> None:
     prog = SessionProgram(segments)
-    app._show_program_series(prog)  # as a program session's start does
-    app._session_program_active = True
+    app._program_run.begin(prog, [])  # as a program session's start does
 
 
 def test_a_program_of_built_in_metrics_lists_no_program_lines(app, monkeypatch):
@@ -88,7 +90,7 @@ def test_a_program_lists_only_the_lines_it_computes(app, monkeypatch):
 
 def test_no_program_lines_once_the_program_ends(app, monkeypatch):
     _run_program(app, [{"minutes": 5, "target": 60, "formula": {"name": "Deep", "formula": "alpha1"}}])
-    app._restore_program_series()
+    app._program_run.end()
     assert not [row for row in _picker_rows(app, monkeypatch) if row.startswith("Program")]
 
 

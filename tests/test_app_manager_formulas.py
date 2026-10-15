@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 from app.metrics.formula_slots import FORMULA_KEYS, FormulaSlots, read_active
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
+from tests._program_run import make_run
 
 
 class TestMultiFormulaTick(unittest.TestCase):
@@ -80,6 +81,7 @@ class TestAudioDriveKey(unittest.TestCase):
     def _app(self):
         app = EEGMeditationApp.__new__(EEGMeditationApp)
         app._formulas = FormulaSlots()
+        app._program_run = make_run()
         app._current_user_id = None       # no active user -> _persist_user_setting no-ops
         app._loading_settings = False
         return app

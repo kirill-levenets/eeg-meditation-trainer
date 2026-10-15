@@ -15,6 +15,7 @@ from app.config import APP
 from app.session.manager import SessionManager, SessionState
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
+from tests._program_run import make_run
 
 BANDS = {"delta": 10.0, "theta": 10.0, "alpha1": 10.0, "alpha2": 10.0, "beta1": 10.0, "beta2": 10.0,
          "gamma1": 10.0, "gamma2": 10.0, "signal_quality": 0}
@@ -39,6 +40,7 @@ def _app() -> EEGMeditationApp:
     app._release_wake_lock = MagicMock()
     app._stop_session_keep_alive_service = MagicMock()
     app._confirm_action = MagicMock()
+    app._program_run = make_run(app)
     queued = []
     app._on_main = queued.append
     app._queued = queued
@@ -207,10 +209,9 @@ def test_a_scan_result_still_starts_the_session_without_a_cancel(monkeypatch):
 
 
 def _with_program(app) -> EEGMeditationApp:
-    """What _start_session_common's _show_program_series left before the wait."""
-    app._session_program_active = True
-    app._active_program = MagicMock()
-    app._program_prev_visibility = {"shamatha_score": True, "program_formula": False}
+    """What _start_session_common's ProgramRun.begin left before the wait."""
+    app._program_run.program = MagicMock()
+    app._program_run._prev_visibility = {"shamatha_score": True, "program_formula": False}
     app._live_screen.graph.series_keys.return_value = ["shamatha_score", "program_formula"]
     return app
 
@@ -218,7 +219,7 @@ def _with_program(app) -> EEGMeditationApp:
 def test_a_cancelled_program_session_restores_the_series_and_leaves_no_program_state():
     app = _with_program(_waiting(_app()))
     app._on_connect_cancel()
-    assert app._session_program_active is False and app._program_prev_visibility == {}
+    assert not app._program_run.active and app._program_run._prev_visibility == {}
 
 
 def _end_the_wait(app, exit_case: str) -> None:
@@ -245,7 +246,7 @@ def test_a_wait_that_ends_on_its_own_undoes_the_program_setup(exit_case):
     _end_the_wait(app, exit_case)
     app._handle_bt_wait()
     _run_queued(app)
-    assert app._session_program_active is False and app._program_prev_visibility == {}
+    assert not app._program_run.active and app._program_run._prev_visibility == {}
     app._live_screen.show_overlay_retry.assert_called_once()
 
 
@@ -279,7 +280,6 @@ def test_a_session_row_is_dated_and_named_at_the_session_start(monkeypatch):
         app._metrics_buffer = [{"timestamp": 0.5, "shamatha_score": 70}]
         app._with_score = lambda stats: stats
         app._session_custom_formulas_json = lambda: ""
-        app._session_program_json = lambda: ""
         app._session_manager.start()
         started = time.time() - 3 * 3600  # the first checkpoint lands well after the start
         app._session_manager._start_time = started

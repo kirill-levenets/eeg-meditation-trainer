@@ -9,6 +9,7 @@ import pytest
 from app.metrics.formula_slots import FORMULA_KEYS, FormulaSlots
 from app.ui.app_manager import EEGMeditationApp
 from tests._backup_flow import make_flow
+from tests._program_run import make_run
 
 
 @pytest.fixture
@@ -26,7 +27,7 @@ def app(monkeypatch):
     a._formulas.evaluators[1].set_formula("theta / alpha1 * 100")
     a._audio_metric_key = "shamatha_score"
     a._audio_formula_index = 0
-    a._session_program_active = False
+    a._program_run = make_run(a)
     return a
 
 
@@ -139,7 +140,7 @@ def test_the_other_session_locks_say_the_same(app, call, doing):
 
 def test_a_program_session_leaves_the_audio_metric_free(app):
     # A program is scored per segment, on the segments' own metrics: the audio control metric plays no part.
-    app._session_program_active = True
+    app._program_run.program = MagicMock()
     app._audio_metric_key = FORMULA_KEYS[0]
     app._on_audio_metric_change("meditation_score")
     app._on_formula_slot_change(1, "Drowsy", "theta / beta1 * 100")

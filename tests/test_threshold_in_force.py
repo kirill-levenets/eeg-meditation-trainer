@@ -21,6 +21,7 @@ from app.ui.app_manager import EEGMeditationApp
 from app.ui.diary_screen import detail_graph_data
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
+from tests._program_run import make_run
 from tests.test_bt_wait_reconnect import wait  # noqa: F401  (fixture)
 from tests.test_resume_mirror import _drive_tick, _make_tick_app, _metrics, _raw_sample
 from tests.test_session_detail_open import _frames, app, db  # noqa: F401  (fixtures)
@@ -34,7 +35,7 @@ def _threshold_app(*, program: bool = False, state: SessionState = SessionState.
     a._live_screen = MagicMock()
     a._persist_user_setting_later = MagicMock()
     a._loading_settings = False
-    a._session_program_active = program
+    a._program_run = make_run(a, program=MagicMock() if program else None)
     a._ui_metrics_history, a._ui_band_history, a._ui_raw_waveform = deque(), deque(), deque()
     a._shamatha_threshold = 70
     a._metrics_engine.meditation_threshold = 70
@@ -117,7 +118,7 @@ def test_a_session_waiting_for_the_headset_starts_with_the_threshold_set_during_
     a._metrics_engine = MagicMock()
     a._audio = MagicMock()
     a._persist_user_setting_later = MagicMock()
-    a._session_program_active = False
+    a._program_run = make_run(a)
     tick(6.0, connected=True)
     a._apply_threshold(85)
     tick(7.0, connected=True, bands=5.0, packet=True)
@@ -133,7 +134,7 @@ def _tick_app() -> EEGMeditationApp:
     sm = SessionManager()
     sm.start(threshold=70)
     a._session_manager = sm
-    a._session_program_active = False
+    a._program_run = make_run(a)
     a._metrics_engine = MagicMock()
     a._persist_user_setting_later = MagicMock()
     return a
@@ -256,7 +257,7 @@ def _start(program: bool, monkeypatch, prepare=None, **before) -> EEGMeditationA
     a._build_session_program = lambda: prog
     a._timer_mode = "program" if program else "simple"
     a._timer_state = MagicMock()
-    for name in ("_show_program_series", "_warn_missing_sound_files", "_acquire_wake_lock",
+    for name in ("_warn_missing_sound_files", "_acquire_wake_lock",
                  "_start_session_keep_alive_service", "_start_tick_thread"):
         setattr(a, name, MagicMock())
     a._global_feedback_id = lambda: "noise"
@@ -342,7 +343,7 @@ def test_a_program_session_locks_the_threshold_controls_and_its_end_unlocks_them
     a = _start(program, monkeypatch)
     a._settings_screen.lock_threshold.assert_called_with(a._refuse_program_threshold if program else None)
     a._settings_screen.lock_threshold.reset_mock()
-    for name in ("_restore_program_series", "_release_wake_lock", "_stop_session_keep_alive_service"):
+    for name in ("_release_wake_lock", "_stop_session_keep_alive_service"):
         setattr(a, name, MagicMock())
     a._start_attempt = 1
     a._undo_session_setup()  # every ending
@@ -412,7 +413,7 @@ def test_a_program_start_that_fails_in_its_setup_leaves_the_controls_unlocked(mo
     started = {}
 
     def prepare(app_):
-        app_._show_program_series.side_effect = RuntimeError("bad custom sound file")
+        app_._program_run.begin = MagicMock(side_effect=RuntimeError("bad custom sound file"))
         started["app"] = app_
 
     with pytest.raises(RuntimeError):
