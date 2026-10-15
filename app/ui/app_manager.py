@@ -551,21 +551,6 @@ class EEGMeditationApp(App):
                     ev.push_variables(fvars)
                     metrics[slot] = ev.evaluate(fvars)
 
-    def _resolve_segment_key(self, seg: dict) -> str:
-        """Metric key a segment drives, for callers without a precomputed plan (direct
-        unit tests). A custom segment registers its evaluator under program_formula."""
-        f = seg.get("formula", "shamatha_score")
-        if isinstance(f, dict):
-            ev = CustomFormulaEvaluator()
-            ok, err = ev.set_formula(f.get("formula", "") or "")
-            if ok and ev.is_valid:
-                self._program_formula_evs = getattr(self, "_program_formula_evs", None) or {}
-                self._program_formula_evs["program_formula"] = ev
-                return "program_formula"
-            logger.warning(f"Program segment formula invalid, using shamatha: {err}")
-            return "shamatha_score"
-        return f or "shamatha_score"
-
     def _apply_program_segment(self, prev_idx: int, idx: int, seg: dict) -> None:
         """On a boundary crossing: end-cue for the prior segment + repoint target/audio/marker
         to this segment's metric (built-in key or its custom's persistent program line)."""
@@ -573,11 +558,7 @@ class EEGMeditationApp(App):
         if prev_idx >= 0:
             prev_seg = self._active_program.segments[prev_idx]
             self._play_segment_end_sound(prev_seg.get("end_sound"))
-        seg_keys = getattr(self, "_program_segment_keys", None)
-        if seg_keys and 0 <= idx < len(seg_keys):
-            metric_key = seg_keys[idx]
-        else:
-            metric_key = self._resolve_segment_key(seg)
+        metric_key = self._program_segment_keys[idx]
         formula = seg.get("formula")
         prog_name = None
         if isinstance(formula, dict) and metric_key in PROGRAM_FORMULA_KEYS:

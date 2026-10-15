@@ -150,9 +150,8 @@ def test_program_custom_formula_plots_and_marks():
     app._active_program = SessionProgram(
         [{"minutes": 1, "target": 120, "formula": {"name": "AlphaPwr", "formula": "alpha1"}}])
     app._program_seg_idx = -1
-    app._program_formula_evs = {}
-    app._program_segment_keys = []
     app._audio_metric_key = "shamatha_score"
+    app._show_program_series(app._active_program)  # what a program session's start does
 
     metrics = {"shamatha_score": 50}
     app._apply_program_tick(metrics, {"alpha1": 80.0})
