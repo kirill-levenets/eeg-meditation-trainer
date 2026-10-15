@@ -10,7 +10,7 @@ from app.metrics.formula_slots import (
     default_name,
     read_active,
 )
-from app.ui.settings_screen import saved_formula_label
+from app.ui.settings_sections.common import saved_formula_label
 from app.ui.theme import format_count
 
 

@@ -6,7 +6,7 @@ from app.logger import logger
 from app.session.manager import SessionState
 from app.session.session_program import SessionProgram
 from app.ui.program_run import show_program_series
-from app.ui.settings_screen import saved_program_label
+from app.ui.settings_sections.common import saved_program_label
 from app.ui.theme import C
 
 

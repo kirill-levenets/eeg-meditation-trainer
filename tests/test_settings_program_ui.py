@@ -122,9 +122,9 @@ def test_segment_end_sound_picker_sets_value():
 def test_a_segments_sound_pickers_set_its_cue_and_feedback(monkeypatch):
     from unittest.mock import Mock
 
-    import app.ui.settings_screen as ss
+    import app.ui.settings_sections.common as common
     shown = []
-    monkeypatch.setattr(ss, "make_scroll_popup", lambda title, rows, **k: shown.append(rows) or Mock())
+    monkeypatch.setattr(common, "make_scroll_popup", lambda title, rows, **k: shown.append(rows) or Mock())
     s = _screen()
     s.load_program([{"minutes": 5, "target": 60, "formula": "shamatha_score"}], "program")
     row = s._segment_rows[0]

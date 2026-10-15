@@ -388,9 +388,9 @@ class TestSettingsTimerSoundRow(unittest.TestCase):
         self.assertEqual(self.captured, ["/tmp/gong.mp3"])
 
     def test_the_button_offers_default_bell_and_a_custom_file(self):
-        import app.ui.settings_screen as ss
+        import app.ui.settings_sections.common as common
         offered = []
-        with mock.patch.object(ss, "make_scroll_popup", lambda title, rows, **_k: offered.extend(rows) or mock.Mock()):
+        with mock.patch.object(common, "make_scroll_popup", lambda title, rows, **_k: offered.extend(rows) or mock.Mock()):
             self.screen._timer_sound_btn.dispatch("on_release")
         self.assertEqual([b.text for b in offered], ["Default bell", "Custom file..."])
 

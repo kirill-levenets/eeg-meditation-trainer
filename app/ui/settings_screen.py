@@ -13,12 +13,20 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.slider import Slider
 
 from app.config import APP, METRICS
-from app.crash_handler import report_soft_error
 from app.logger import logger
-from app.storage import android_saf as _saf
 from app.ui.device_labels import MAX_DEVICE_ALIAS, device_row_text
 from app.ui.line_colours import LINE_COLOURS, MONO, GradientStrip
 from app.ui.line_colours import OPTIONS as LINE_OPTIONS
+from app.ui.settings_sections.common import (
+    SOURCE_LABELS,
+    checkbox_row,
+    fill_saved_list,
+    open_audio_file_chooser,
+    open_source_picker,
+    saved_formula_label,
+    saved_program_label,
+    source_label,
+)
 from app.ui.theme import (
     TEXT_SIZES,
     THEMES,
@@ -32,9 +40,7 @@ from app.ui.theme import (
     S,
     StyledButton,
     ThemedAccordion,
-    ThemedFileChooser,
     ThemedLabel,
-    ThemedPopup,
     cancel_button,
     fill_background,
     fit_height_to_text,
@@ -55,10 +61,6 @@ PROGRAM_BUILTIN_FORMULAS: list[tuple[str, str]] = [
 ]
 _PROGRAM_BUILTIN_LABELS: dict[str, str] = dict(PROGRAM_BUILTIN_FORMULAS)
 
-# Feedback / reward sound sources, offered through the shared source picker.
-_SOURCE_LABELS: dict[str, str] = {
-    "none": "Off", "noise": "Rain", "tone": "Tone", "heartbeat": "Crickets", "custom": "Custom",
-}
 _FEEDBACK_SOURCE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("Off", "none"), ("Rain", "noise"), ("Tone", "tone"), ("Custom file...", "custom"),
 )
@@ -73,52 +75,6 @@ _TIMER_SOUND_OPTIONS: tuple[tuple[str, str], ...] = (("Default bell", ""), ("Cus
 _SEGMENT_FEEDBACK_OPTIONS: tuple[tuple[str, str], ...] = (
     ("Default (use global)", ""), ("Rain", "noise"), ("Tone", "tone"), ("Custom file...", "custom"),
 )
-
-
-# Some providers type ogg and flac as application/*, not audio/*.
-_AUDIO_TYPES = ("audio/*", "application/ogg", "application/x-flac")
-
-
-def open_audio_file_chooser(on_select: Callable[[str], None], title: str = "Choose audio file") -> None:
-    """The one sound picker; on Android the system's, since an app can't browse storage by path."""
-    if _saf.is_available():
-        def _on_uri(uri: str | None) -> None:
-            if uri:
-                _saf.import_document(uri, os.path.join(os.path.dirname(APP.DB_PATH), "sounds"), "sound",
-                                     lambda path: Clock.schedule_once(lambda _dt: _sound_imported(path, on_select)))
-
-        _saf.open_document(_on_uri, _AUDIO_TYPES)
-        return
-    chooser = ThemedFileChooser(
-        path=os.path.expanduser("~"),
-        filters=["*.wav", "*.mp3", "*.ogg", "*.flac", "*.m4a"],
-    )
-    content = BoxLayout(orientation="vertical", spacing=dp(8))
-    content.add_widget(chooser)
-    btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
-    btn_cancel = cancel_button(font_size=F.SMALL)
-    btn_select = StyledButton(text="Select", font_size=F.SMALL, bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM)
-    btn_row.add_widget(btn_cancel)
-    btn_row.add_widget(btn_select)
-    content.add_widget(btn_row)
-    popup = ThemedPopup(title=title, content=content, size_hint=(0.9, 0.85))
-
-    def _on_select(*_):
-        sel = chooser.selection
-        if sel:
-            on_select(sel[0])
-        popup.dismiss()
-
-    btn_cancel.bind(on_release=popup.dismiss)
-    btn_select.bind(on_release=_on_select)
-    popup.open()
-
-
-def _sound_imported(path: str | None, on_select: Callable[[str], None]) -> None:
-    if path:
-        on_select(path)
-    else:
-        report_soft_error("sound_pick_failed", "Could not read the selected sound file", force=True)
 
 
 def _load_help_topics(lang: str = "en") -> list[tuple[str, str]]:
@@ -155,27 +111,6 @@ def _load_help_topics(lang: str = "en") -> list[tuple[str, str]]:
         topics.append((current_title, "\n".join(current_body).strip()))
 
     return topics
-
-
-def saved_formula_label(index: int, entry: dict) -> str:
-    """A saved formula as its list row and its delete confirmation name it."""
-    return entry.get("name", entry.get("formula", "")[:30])
-
-
-def saved_program_label(index: int, entry: dict) -> str:
-    """A saved program as its list row and its delete confirmation name it."""
-    return entry.get("name", f"Program {index + 1}")
-
-
-def _checkbox_row(text: str, height: float, **checkbox_kwargs) -> tuple[BoxLayout, CheckBox]:
-    """A checkbox and its label on one row, which grows if the label wraps at a larger text size."""
-    row = BoxLayout(size_hint_y=None, height=height, spacing=S.GAP)
-    checkbox = CheckBox(size_hint_x=0.15, size_hint_y=None, height=height, **checkbox_kwargs)
-    label = ThemedLabel(text=text, font_size=F.BODY, color=C.TEXT, size_hint_x=0.85, halign="left", valign="middle")
-    row.add_widget(checkbox)
-    row.add_widget(label)
-    fit_row_to_text(row, label, height)
-    return row, checkbox
 
 
 class SettingsScreen(Screen):
@@ -285,7 +220,7 @@ class SettingsScreen(Screen):
 
         # "Enable Timer" is a simple-mode concept (program mode forces the timer
         # on), so it lives inside _simple_box below and hides in program mode.
-        timer_toggle_row, self._timer_enable_cb = _checkbox_row("Enable Timer", S.ROW_SM, active=False)
+        timer_toggle_row, self._timer_enable_cb = checkbox_row("Enable Timer", S.ROW_SM, active=False)
 
         # Mode: Simple | Program segmented toggle (placed before the mode-specific
         # content so the layout reads top-down: mode -> content -> sound).
@@ -504,7 +439,7 @@ class SettingsScreen(Screen):
             size_hint_y=None,
             height=dp(36),
         )
-        self._timer_sound_btn.bind(on_release=lambda *_a: self._open_source_picker(
+        self._timer_sound_btn.bind(on_release=lambda *_a: open_source_picker(
             "Timer end sound", _TIMER_SOUND_OPTIONS, self._choose_timer_sound))
         self._timer_sound_test_btn = StyledButton(
             text="Test",
@@ -567,7 +502,7 @@ class SettingsScreen(Screen):
         device_section.add_widget(self._device_meta_label)
 
         # Mock / Real device switch
-        device_mode_row, self._device_mode_cb = _checkbox_row(
+        device_mode_row, self._device_mode_cb = checkbox_row(
             "Use Mock Data (uncheck for real device)", dp(36), active=APP.USE_MOCK_DEVICE)
         self._device_mode_cb.bind(active=self._on_device_mode_change)
         device_section.add_widget(device_mode_row)
@@ -723,7 +658,7 @@ class SettingsScreen(Screen):
             "custom_formula": "Custom Formula",
         }
         for key, display_name in audio_metric_options.items():
-            row, rb = _checkbox_row(display_name, dp(32), group="audio_metric", active=(key == "shamatha_score"))
+            row, rb = checkbox_row(display_name, dp(32), group="audio_metric", active=(key == "shamatha_score"))
             rb.audio_metric_key = key
             rb.bind(active=self._on_audio_metric_radio)
             threshold_section.add_widget(row)
@@ -791,7 +726,7 @@ class SettingsScreen(Screen):
         audio_section.add_widget(fb_label)
 
         self._feedback_source_btn = StyledButton(
-            text=self._source_label(self._feedback_source, self._feedback_sound_path),
+            text=source_label(self._feedback_source, self._feedback_sound_path),
             font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT,
             size_hint_y=None, height=dp(36),
         )
@@ -808,7 +743,7 @@ class SettingsScreen(Screen):
         audio_section.add_widget(rw_label)
 
         self._reward_source_btn = StyledButton(
-            text=self._source_label(self._reward_source, self._reward_sound_path),
+            text=source_label(self._reward_source, self._reward_sound_path),
             font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT,
             size_hint_y=None, height=dp(36),
         )
@@ -816,17 +751,17 @@ class SettingsScreen(Screen):
         audio_section.add_widget(self._reward_source_btn)
 
         # Sinking alert toggle
-        sinking_row, self._sinking_alert_cb = _checkbox_row("Enable Sinking Alert Bell", dp(36), active=False)
+        sinking_row, self._sinking_alert_cb = checkbox_row("Enable Sinking Alert Bell", dp(36), active=False)
         self._sinking_alert_cb.bind(active=self._on_sinking_alert_change)
         audio_section.add_widget(sinking_row)
 
         # Subtle distraction alert toggle
-        subtle_row, self._subtle_alert_cb = _checkbox_row("Enable Distraction Chime", dp(36), active=False)
+        subtle_row, self._subtle_alert_cb = checkbox_row("Enable Distraction Chime", dp(36), active=False)
         self._subtle_alert_cb.bind(active=self._on_subtle_alert_change)
         audio_section.add_widget(subtle_row)
 
         # Disconnect alert toggle
-        disconnect_row, self._disconnect_alert_cb = _checkbox_row(
+        disconnect_row, self._disconnect_alert_cb = checkbox_row(
             "Audio alert on disconnect / signal loss", dp(36), active=APP.DISCONNECT_ALERT_ENABLED)
         self._disconnect_alert_cb.bind(active=self._on_disconnect_alert_change)
         audio_section.add_widget(disconnect_row)
@@ -1382,27 +1317,6 @@ class SettingsScreen(Screen):
     def set_test_audio_callback(self, callback: Callable) -> None:
         self._on_test_audio = callback
 
-    @staticmethod
-    def _source_label(source: str, path: str = "") -> str:
-        """Human label for a feedback/reward source id, shown on the picker button."""
-        if source == "custom":
-            return f"Custom: {os.path.basename(path)}" if path else "Custom file..."
-        return _SOURCE_LABELS.get(source or "none", "Off")
-
-    def _open_source_picker(self, title: str, options, on_choose: Callable) -> None:
-        """Shared source picker (uses the standard list-select popup): a list of
-        (label, value) rows; a 'custom' value opens the file chooser via on_choose."""
-        holder: dict = {}
-        rows = []
-        for label, value in options:
-            b = StyledButton(text=label, font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT)
-            b.bind(on_release=lambda *_a, v=value: (holder["popup"].dismiss(), on_choose(v)))
-            rows.append(b)
-        cancel = cancel_button()
-        holder["popup"] = make_scroll_popup(title, rows, footer=cancel, width_hint=0.8)
-        cancel.bind(on_release=lambda *_a: holder["popup"].dismiss())
-        holder["popup"].open()
-
     def set_feedback_source_callback(self, callback: Callable) -> None:
         self._on_feedback_source_change = callback
 
@@ -1415,10 +1329,10 @@ class SettingsScreen(Screen):
         self._feedback_source = source or "noise"
         self._feedback_sound_path = path or ""
         if self._feedback_source_btn is not None:
-            self._feedback_source_btn.text = self._source_label(self._feedback_source, self._feedback_sound_path)
+            self._feedback_source_btn.text = source_label(self._feedback_source, self._feedback_sound_path)
 
     def _open_feedback_source_picker(self) -> None:
-        self._open_source_picker("Feedback sound", _FEEDBACK_SOURCE_OPTIONS, self._choose_feedback_source)
+        open_source_picker("Feedback sound", _FEEDBACK_SOURCE_OPTIONS, self._choose_feedback_source)
 
     def _choose_feedback_source(self, value: str) -> None:
         if value == "custom":
@@ -1440,10 +1354,10 @@ class SettingsScreen(Screen):
         self._reward_source = source or "none"
         self._reward_sound_path = path or ""
         if self._reward_source_btn is not None:
-            self._reward_source_btn.text = self._source_label(self._reward_source, self._reward_sound_path)
+            self._reward_source_btn.text = source_label(self._reward_source, self._reward_sound_path)
 
     def _open_reward_source_picker(self) -> None:
-        self._open_source_picker("Reward sound", _REWARD_SOURCE_OPTIONS, self._choose_reward_source)
+        open_source_picker("Reward sound", _REWARD_SOURCE_OPTIONS, self._choose_reward_source)
 
     def _choose_reward_source(self, value: str) -> None:
         if value == "custom":
@@ -1500,25 +1414,8 @@ class SettingsScreen(Screen):
         """Update the saved formulas list. formulas: [{name, formula}, ...]"""
         # Cache for the program segment formula picker (no separate callback).
         self._saved_formulas_cache = list(formulas)
-        self._fill_saved_list(self._saved_formulas_box, formulas, saved_formula_label,
+        fill_saved_list(self._saved_formulas_box, formulas, saved_formula_label,
                               self._on_load_formula_pressed, self._on_delete_formula_pressed)
-
-    def _fill_saved_list(self, box, entries, label: Callable, on_load: Callable, on_delete: Callable) -> None:
-        """One row per saved formula or program: its name loads it, X deletes it."""
-        box.clear_widgets()
-        row_height = dp(30)
-        box.height = row_height * len(entries) if entries else dp(0)
-        for i, entry in enumerate(entries):
-            row = BoxLayout(size_hint_y=None, height=row_height, spacing=S.GAP_SM)
-            load_btn = StyledButton(text=label(i, entry), font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT,
-                                    size_hint_x=0.85, size_hint_y=None, height=row_height, bold=False)
-            load_btn.bind(on_release=lambda *_a, i=i: on_load(i))
-            row.add_widget(load_btn)
-            del_btn = StyledButton(text="X", font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.DANGER,
-                                   size_hint_x=0.15, size_hint_y=None, height=row_height)
-            del_btn.bind(on_release=lambda *_a, i=i: on_delete(i))
-            row.add_widget(del_btn)
-            box.add_widget(row)
 
     # --- Session program (Timer → Program mode) -------------------------
 
@@ -1585,7 +1482,7 @@ class SettingsScreen(Screen):
 
     def set_saved_programs(self, programs: list[dict]) -> None:
         """Populate the Load list. programs: [{name, segments}, ...]."""
-        self._fill_saved_list(self._saved_programs_box, programs, saved_program_label,
+        fill_saved_list(self._saved_programs_box, programs, saved_program_label,
                               self._on_program_load_pressed, self._on_program_delete_pressed)
 
     def _add_segment_row(self, segment: Optional[dict] = None) -> None:
@@ -1690,14 +1587,14 @@ class SettingsScreen(Screen):
 
     def _open_segment_end_sound_picker(self, row, btn) -> None:
         """Pick a segment's end cue: Chime (default) or Warble."""
-        self._open_source_picker("Segment end cue", (("Chime", None), ("Warble", "warble")),
+        open_source_picker("Segment end cue", (("Chime", None), ("Warble", "warble")),
                                  lambda v: self._set_segment_end_sound(row, btn, v))
 
     def _feedback_seg_label(self, value) -> str:
         """A segment's feedback source as its button shows it: Default (the global one), a source's name, or a file."""
         if not value:
             return "Default"
-        return _SOURCE_LABELS.get(value) or os.path.basename(value)
+        return SOURCE_LABELS.get(value) or os.path.basename(value)
 
     def _set_segment_feedback(self, row, btn, value: str) -> None:
         row._feedback_sound = value
@@ -1714,7 +1611,7 @@ class SettingsScreen(Screen):
             else:
                 self._set_segment_feedback(row, btn, value)
 
-        self._open_source_picker("Segment feedback sound", _SEGMENT_FEEDBACK_OPTIONS, choose)
+        open_source_picker("Segment feedback sound", _SEGMENT_FEEDBACK_OPTIONS, choose)
 
     def _formula_label(self, formula) -> str:
         if isinstance(formula, dict):
@@ -1873,7 +1770,7 @@ class SettingsScreen(Screen):
         self._timer_sound_btn.text = self._timer_sound_label(self._timer_sound_path)
 
     def _timer_sound_label(self, path: str) -> str:
-        return self._source_label("custom", path) if path else "Default bell"
+        return source_label("custom", path) if path else "Default bell"
 
     def _choose_timer_sound(self, value: str) -> None:
         if value == "custom":

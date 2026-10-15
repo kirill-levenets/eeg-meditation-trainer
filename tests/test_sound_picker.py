@@ -12,7 +12,7 @@ import pytest
 from kivy.clock import Clock
 
 import app.storage.android_saf as saf
-import app.ui.settings_screen as ss
+import app.ui.settings_sections.common as common
 from app.config import APP
 from app.ui.settings_screen import SettingsScreen
 
@@ -25,7 +25,7 @@ def phone(monkeypatch, tmp_path):
     """Android, with a document picker that returns what `picks` holds and a provider serving `files`."""
     monkeypatch.setattr(saf, "_IS_ANDROID", True)
     monkeypatch.setattr(APP, "DB_PATH", str(tmp_path / "EEGMeditation" / "meditation.db"))
-    monkeypatch.setattr(ss, "ThemedFileChooser", lambda *a, **k: pytest.fail("Kivy's file browser opened on Android"))
+    monkeypatch.setattr(common, "ThemedFileChooser", lambda *a, **k: pytest.fail("Kivy's file browser opened on Android"))
     state = {"picks": [], "launched": [], "files": {BOWL: ("Singing bowl.mp3", b"ID3 bowl"),
                                                      RAIN: ("Singing bowl.mp3", b"ID3 rain")}}
 
@@ -56,7 +56,7 @@ def _pick(uri, phone, seconds: float = 3.0) -> list[str]:
     """Pick `uri` through the shared sound picker: the paths it hands back."""
     phone["picks"].append(uri)
     got: list[str] = []
-    ss.open_audio_file_chooser(got.append)
+    common.open_audio_file_chooser(got.append)
     _settle(lambda: got, seconds)
     return got
 
@@ -68,7 +68,7 @@ def _sounds() -> Path:
 def _segment_custom_file(screen, monkeypatch):
     """A program segment's feedback picker, choosing Custom file..."""
     rows = []
-    monkeypatch.setattr(ss, "make_scroll_popup", lambda title, buttons, **k: rows.extend(buttons) or Mock())
+    monkeypatch.setattr(common, "make_scroll_popup", lambda title, buttons, **k: rows.extend(buttons) or Mock())
     screen._open_segment_feedback_picker(screen._segment_rows[0], screen._segment_rows[0]._feedback_btn)
     next(b for b in rows if b.text == "Custom file...").dispatch("on_release")
 
@@ -84,7 +84,7 @@ def test_every_sound_picker_opens_the_system_picker_for_audio(phone, monkeypatch
         phone["picks"].append(BOWL)
         opener()
         _settle(picked)
-    assert phone["launched"] == [ss._AUDIO_TYPES] * 4 and ss._AUDIO_TYPES[0] == "audio/*"
+    assert phone["launched"] == [common._AUDIO_TYPES] * 4 and common._AUDIO_TYPES[0] == "audio/*"
     assert (screen._feedback_sound_path == screen._reward_sound_path == screen.timer_sound_path
             == segment._feedback_sound)
     assert screen._feedback_source_btn.text == "Custom: Singing bowl.mp3"
@@ -124,7 +124,7 @@ def _broken(uri, dst):
 def test_a_sound_that_cannot_be_read_is_reported_and_leaves_nothing_behind(phone, monkeypatch, read):
     reports = []
     monkeypatch.setattr(saf, "read_uri_to_file", read)
-    monkeypatch.setattr(ss, "report_soft_error", lambda label, detail="", **k: reports.append(label))
+    monkeypatch.setattr(common, "report_soft_error", lambda label, detail="", **k: reports.append(label))
     assert _pick(BOWL, phone) == []
     assert reports == ["sound_pick_failed"]
     assert [p for p in _sounds().rglob("*") if p.is_file()] == []
@@ -141,10 +141,10 @@ def test_the_desktop_keeps_kivys_file_browser(monkeypatch):
     monkeypatch.setattr(saf, "_IS_ANDROID", False)
     monkeypatch.setattr(saf, "open_document", lambda *a, **k: pytest.fail("the document picker opened on the desktop"))
     opened = []
-    monkeypatch.setattr(ss.ThemedPopup, "open", lambda popup, *a, **k: opened.append(popup))
-    ss.open_audio_file_chooser(lambda p: None)
+    monkeypatch.setattr(common.ThemedPopup, "open", lambda popup, *a, **k: opened.append(popup))
+    common.open_audio_file_chooser(lambda p: None)
     [popup] = opened
-    [chooser] = [w for w in popup.content.walk() if isinstance(w, ss.ThemedFileChooser)]
+    [chooser] = [w for w in popup.content.walk() if isinstance(w, common.ThemedFileChooser)]
     assert os.path.isdir(chooser.path)
 
 
@@ -160,8 +160,8 @@ def test_the_last_pick_is_the_one_that_stays(phone, monkeypatch):
     monkeypatch.setattr(saf, "read_uri_to_file", slow_bowl)
     got: list[str] = []
     phone["picks"] += [BOWL, RAIN]
-    ss.open_audio_file_chooser(got.append)  # a slow copy (a cloud file)
-    ss.open_audio_file_chooser(got.append)  # then the user picks another
+    common.open_audio_file_chooser(got.append)  # a slow copy (a cloud file)
+    common.open_audio_file_chooser(got.append)  # then the user picks another
     _settle(lambda: False, 0.3)
     held.set()
     _settle(lambda: len(got) == 2)
@@ -205,7 +205,7 @@ def test_a_failing_callback_does_not_stop_later_imports(phone):
 
 def test_every_sound_picker_has_a_cancel_that_picks_nothing(monkeypatch):
     opened = []
-    monkeypatch.setattr(ss, "make_scroll_popup", lambda title, rows, footer=None, **k: opened.append(
+    monkeypatch.setattr(common, "make_scroll_popup", lambda title, rows, footer=None, **k: opened.append(
         (title, footer, Mock())) or opened[-1][2])
     screen = SettingsScreen()
     changes = []
