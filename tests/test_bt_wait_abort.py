@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import app.ui.app_manager as am
 from app.session.manager import SessionManager
 from app.ui.app_manager import EEGMeditationApp
+from tests._headset import make_headset
 from tests._program_run import make_run
 
 
@@ -33,6 +34,7 @@ def _make_waiting_app() -> tuple[EEGMeditationApp, list]:
     app._timer_state = MagicMock()
     app._session_manager = SessionManager()  # idle: the session starts only when data arrives
     app._program_run = make_run(app)
+    app._headset = make_headset(app)
     return app, events
 
 

@@ -3,6 +3,7 @@ from unittest import mock
 
 from kivy.metrics import dp
 
+from app.ui.headset import filter_mindwave
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.theme import ThemedAccordion
 
@@ -574,7 +575,6 @@ class TestFilterMindwave(unittest.TestCase):
     """Static helper used by both auto-scan and start-session paths."""
 
     def test_filter_mindwave_picks_only_matching_names(self):
-        from app.ui.app_manager import EEGMeditationApp
         devices = [
             {"name": "Bose QC35", "address": "AA:00"},
             {"name": "MindWave Mobile 2", "address": "AA:01"},
@@ -582,12 +582,11 @@ class TestFilterMindwave(unittest.TestCase):
             {"name": "Apple Watch", "address": "AA:03"},
             {"name": "MINDWAVE", "address": "AA:04"},
         ]
-        out = EEGMeditationApp._filter_mindwave(devices)
+        out = filter_mindwave(devices)
         self.assertEqual([d["address"] for d in out], ["AA:01", "AA:02", "AA:04"])
 
     def test_filter_mindwave_handles_missing_name(self):
-        from app.ui.app_manager import EEGMeditationApp
-        out = EEGMeditationApp._filter_mindwave([
+        out = filter_mindwave([
             {"address": "AA:01"},                  # no 'name' key
             {"name": None, "address": "AA:02"},    # None name
             {"name": "", "address": "AA:03"},      # empty name

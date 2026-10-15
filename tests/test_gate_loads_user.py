@@ -19,7 +19,7 @@ def _gate_app(created_uid):
     db.create_user.return_value = created_uid
     app._db = db
     for attr in ("_real_stream", "_settings_screen", "_live_screen", "_bottom_nav",
-                 "_sm", "_auto_scan_bt", "_refresh_profile", "_load_user_settings"):
+                 "_sm", "_headset", "_refresh_profile", "_load_user_settings"):
         setattr(app, attr, MagicMock())
     return app
 

@@ -28,6 +28,7 @@ from app.session.timer_state import TimerState
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.live_mirror import LiveMirror
 from app.ui.live_session import METRICS_COLORS
+from tests._headset import make_headset
 from tests._program_run import make_run
 from tests._program_settings import make_programs
 from tests._recorder import make_recorder
@@ -402,6 +403,7 @@ def _make_btwait_app() -> EEGMeditationApp:
     ts.set_enabled(True)
     ts.set_duration(15)
     app._timer_state = ts
+    app._headset = make_headset(app)
     return app
 
 

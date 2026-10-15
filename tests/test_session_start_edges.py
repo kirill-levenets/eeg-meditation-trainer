@@ -16,6 +16,7 @@ from app.session.manager import SessionManager, SessionState
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.live_mirror import LiveMirror
+from tests._headset import make_headset
 from tests._program_run import make_run
 from tests._recorder import make_recorder
 
@@ -45,6 +46,7 @@ def _app() -> EEGMeditationApp:
     queued = []
     app._on_main = queued.append
     app._queued = queued
+    app._headset = make_headset(app)
     return app
 
 
@@ -180,7 +182,7 @@ def test_cancel_during_the_device_scan_does_not_start_the_session(monkeypatch):
     monkeypatch.setattr(am.Clock, "schedule_once", lambda cb, *a, **k: scheduled.append(cb))
     app = _app()
     app._real_stream._device_address = ""
-    app._on_device_select = MagicMock()
+    app._headset.on_select = MagicMock()
     app._start_session_common = MagicMock()
     app._on_start()  # "Scanning for MindWave..."; the scan result is queued
     app._on_connect_cancel()
@@ -198,7 +200,7 @@ def test_a_scan_result_still_starts_the_session_without_a_cancel(monkeypatch):
     monkeypatch.setattr(am.Clock, "schedule_once", lambda cb, *a, **k: scheduled.append(cb))
     app = _app()
     app._real_stream._device_address = ""
-    app._on_device_select = MagicMock()
+    app._headset.on_select = MagicMock()
     app._start_session_common = MagicMock()
     app._on_start()
     for cb in scheduled:

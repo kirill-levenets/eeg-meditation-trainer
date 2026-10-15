@@ -8,6 +8,7 @@ import pytest
 import app.ui.app_manager as am
 from app.session.manager import SessionManager, SessionState
 from app.ui.app_manager import EEGMeditationApp
+from tests._headset import make_headset
 
 T0 = 1000.0
 
@@ -56,6 +57,8 @@ def wait(monkeypatch):
     app._session_manager = SessionManager()
     app._timer_state = MagicMock()
     app._live_screen = MagicMock()
+    app._settings_screen = MagicMock()
+    app._headset = make_headset(app)
     app._on_main_for_wait = MagicMock()
     app._report_bt_connect_failure = MagicMock()
     app._undo_session_setup = MagicMock()
