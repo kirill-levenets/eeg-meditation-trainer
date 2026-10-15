@@ -19,7 +19,7 @@ class SessionRecorder:
         self._session_manager = session_manager
         self._with_score = with_score
         self._row_fields = row_fields  # the row's profile, name, formulas, program, engine version and start
-        # A tick (session stats + buffered row) and a checkpoint's snapshot of both, one at a time.
+        # A tick (session stats + buffered row), a checkpoint's snapshot of both, and every reset, one at a time.
         self._lock = threading.Lock()
         self.session_id: int | None = None  # the row, from the session's first checkpoint
         self._buffer: list[dict] = []
@@ -27,9 +27,10 @@ class SessionRecorder:
 
     def begin(self) -> None:
         """A new session: no row yet and nothing buffered."""
-        self._buffer = []
-        self._flush_counter = 0
-        self.session_id = None
+        with self._lock:
+            self._buffer = []
+            self._flush_counter = 0
+            self.session_id = None
 
     def record(self, metrics: dict, full_record: dict) -> float | None:
         """Score a tick and buffer its stamped row, as one step for a checkpoint: its target, or None if not scored."""
@@ -43,8 +44,10 @@ class SessionRecorder:
 
     def flush_tick(self) -> None:
         """Every FLUSH_INTERVAL_SECONDS of ticks, checkpoint the session: its row as well as its data."""
-        self._flush_counter += 1
-        if self._flush_counter >= int(APP.FLUSH_INTERVAL_SECONDS / APP.UPDATE_FREQUENCY) and self._buffer:
+        with self._lock:
+            self._flush_counter += 1
+            due = self._flush_counter >= int(APP.FLUSH_INTERVAL_SECONDS / APP.UPDATE_FREQUENCY) and bool(self._buffer)
+        if due:
             self.checkpoint()
 
     def checkpoint(self, stats: dict | None = None) -> None:
@@ -68,9 +71,10 @@ class SessionRecorder:
             self.session_id = sid
 
     def discard(self) -> None:
-        """Delete the session's row, if a checkpoint wrote one, and drop what is buffered (its profile was deleted)."""
-        if self.session_id is not None:
-            self._db.delete_session(self.session_id)
-            logger.info(f"Session {self.session_id} discarded (profile deleted)")
-            self.session_id = None
-        self._buffer = []
+        """Delete the session's row and drop its buffer (its profile was deleted), after a checkpoint still writing."""
+        with self._lock:
+            if self.session_id is not None:
+                self._db.delete_session(self.session_id)
+                logger.info(f"Session {self.session_id} discarded (profile deleted)")
+                self.session_id = None
+            self._buffer = []
