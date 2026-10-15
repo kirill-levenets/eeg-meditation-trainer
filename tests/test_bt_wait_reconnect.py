@@ -50,8 +50,7 @@ def wait(monkeypatch):
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     stream = _Stream(clock)
     app._real_stream = app._eeg_stream = stream
-    app._tick_thread = None
-    app._stop_tick_thread = MagicMock()
+    app._ticker = MagicMock(running=False)
     app._release_wake_lock = MagicMock()
     app._stop_session_keep_alive_service = MagicMock()
     app._session_manager = SessionManager()

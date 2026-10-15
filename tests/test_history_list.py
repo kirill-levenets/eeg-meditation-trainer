@@ -349,6 +349,7 @@ def test_an_empty_list_shows_the_message_and_no_rows(history):
 
 def test_history_loads_without_the_full_screen_spinner(monkeypatch):
     app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._ticker = MagicMock(running=False)  # no session's tick running
     app._db = MagicMock()
     app._history_screen = MagicMock()
     app._current_user_id = 1

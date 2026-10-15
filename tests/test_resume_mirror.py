@@ -23,6 +23,7 @@ from app.config import APP
 from app.metrics.engine import MetricsEngine
 from app.metrics.formula_slots import FormulaSlots
 from app.session.manager import SessionState
+from app.session.tick_thread import TickThread
 from app.session.timer_state import TimerState
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.live_mirror import LiveMirror
@@ -104,8 +105,7 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     app._current_session_id = None
     app._current_user_id = 1
     app._make_session_name = MagicMock(return_value="sess")
-    app._tick_stop_event = MagicMock()
-    app._tick_thread = None  # as __init__ leaves it
+    app._ticker = TickThread(lambda dt: None)  # as __init__ leaves it: not started
 
     app._program_run = make_run(app)
     app._program_settings = make_programs(app._db, app._current_user_id)
@@ -472,7 +472,7 @@ def test_timer_expiry_leaves_no_live_pipeline_behind():
     app._session_manager.stop.return_value = {"duration": 100}
     app._metrics_buffer = []
     app._waiting_for_bt = False
-    app._tick_thread = MagicMock()  # the running SessionTick thread
+    app._ticker._thread = MagicMock()  # the running SessionTick thread
 
     def stop(reason):
         app._session_manager.state = SessionState.IDLE
@@ -482,7 +482,7 @@ def test_timer_expiry_leaves_no_live_pipeline_behind():
 
     _drive_tick(app, _raw_sample(), _metrics())
 
-    assert app._tick_thread is None
+    assert not app._ticker.running
     assert app._session_pipeline_live() is False
 
 

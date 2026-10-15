@@ -21,6 +21,7 @@ SID = 42
 
 def _app() -> EEGMeditationApp:
     app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._ticker = MagicMock(running=False)  # no session's tick running
     app._db = MagicMock()
     app._db.update_session_notes.return_value = True
     app._db.get_session.return_value = None
@@ -50,7 +51,7 @@ def test_user_stop_confirms_then_takes_the_shared_save_path():
     app = _app()
     app._session_manager = MagicMock(state=SessionState.RUNNING)
     app._waiting_for_bt = False
-    app._stop_tick_thread = MagicMock()
+    app._ticker = MagicMock(running=False)
     app._stop_and_save = MagicMock()
     app._confirm_action = MagicMock()
     app._on_stop()
@@ -65,7 +66,7 @@ def test_user_stop_confirms_then_takes_the_shared_save_path():
 
 def test_user_stop_restores_program_series_and_clears_the_training_marker():
     app = _app()
-    app._stop_tick_thread = MagicMock()
+    app._ticker = MagicMock(running=False)
     app._persist_session_data = MagicMock(return_value={"duration": 30})
     app._current_session_id = SID
     for name in ("_program_run", "_release_wake_lock",
@@ -111,9 +112,9 @@ def _recorded_session(db) -> EEGMeditationApp:
     app._program_run = make_run()
     app._make_session_name = lambda: "2026-10-05 07:00 - MindWave Mobile"
     app._waiting_for_bt = False
-    app._tick_thread = None
+    app._ticker = MagicMock(running=False)
     app._eeg_stream = MagicMock()
-    for name in ("_stop_tick_thread", "_audio", "_live_screen", "_settings_screen", "_timer_state", "_confirm_action",
+    for name in ("_audio", "_live_screen", "_settings_screen", "_timer_state", "_confirm_action",
                  "_release_wake_lock", "_stop_session_keep_alive_service",
                  "_mark_history_dirty"):
         setattr(app, name, MagicMock())
@@ -331,14 +332,14 @@ def test_ok_right_after_cancel_does_not_run_the_action():
 
 def test_cancelling_stop_restarts_the_tick_only_for_a_running_session():
     app = _app()
-    app._start_tick_thread = MagicMock()
+    app._ticker = MagicMock()
     app._session_manager = MagicMock()
     app._session_manager.state = SessionState.RUNNING
     app._cancel_stop()
-    app._start_tick_thread.assert_called_once()
+    app._ticker.start.assert_called_once()
     app._session_manager.state = SessionState.PAUSED
     app._cancel_stop()
-    app._start_tick_thread.assert_called_once()
+    app._ticker.start.assert_called_once()
 
 
 # --- Storage: a notes save touches only the fields it is given -------------------------------------------------

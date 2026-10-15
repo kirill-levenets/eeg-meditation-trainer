@@ -24,6 +24,7 @@ class _FakeDB:
 
 def _app(uid=7):
     app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._ticker = MagicMock(running=False)  # no session's tick running
     app._current_user_id = uid
     app._loading_settings = False
     app._db = _FakeDB()

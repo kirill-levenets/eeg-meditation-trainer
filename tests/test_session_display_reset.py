@@ -232,7 +232,7 @@ def test_a_failing_average_is_logged_once_until_it_recovers(monkeypatch):
 
 def test_a_start_that_never_connected_leaves_no_owner():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
-    for name in ("_stop_tick_thread", "_release_wake_lock", "_stop_session_keep_alive_service"):
+    for name in ("_ticker", "_release_wake_lock", "_stop_session_keep_alive_service"):
         setattr(app, name, MagicMock())
     app._real_stream = MagicMock()
     app._live_display_uid = 1

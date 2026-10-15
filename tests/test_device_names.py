@@ -36,7 +36,7 @@ def _app(db: DatabaseManager | None = None) -> EEGMeditationApp:
     app._db = db or MagicMock()
     app._current_user_id = 1
     app._waiting_for_bt = False
-    app._tick_thread = None
+    app._ticker = MagicMock(running=False)
     app._real_stream = MagicMock()
     app._real_stream._device_address = BLUE
     app._real_stream._device_name = "MindWave Mobile"

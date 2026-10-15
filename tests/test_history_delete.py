@@ -166,6 +166,7 @@ def test_a_reload_for_another_view_clears_the_day_filter():
 
 def test_history_keeps_the_day_filter_only_for_the_same_profile_and_view():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._ticker = MagicMock(running=False)  # no session's tick running
     app._db = MagicMock()
     app._history_screen = MagicMock()
     app.show_loading = MagicMock()
@@ -197,6 +198,7 @@ def test_renaming_updates_the_row_and_the_model_in_place():
 
 def _app() -> EEGMeditationApp:
     app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._ticker = MagicMock(running=False)  # no session's tick running
     app._db = MagicMock()
     app._history_screen = MagicMock()
     app._session_manager = SessionManager()  # idle: nothing running to protect

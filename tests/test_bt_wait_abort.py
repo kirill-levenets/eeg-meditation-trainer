@@ -14,16 +14,16 @@ def _make_waiting_app() -> tuple[EEGMeditationApp, list]:
     events: list = []
     app._waiting_for_bt = True
     app._bt_signal_start = 123.0
-    app._tick_thread = MagicMock()
+    app._ticker = MagicMock(running=True)
 
     def stop_tick():
         events.append("tick_stopped")
-        app._tick_thread = None
+        app._ticker.running = False
 
-    app._stop_tick_thread = stop_tick
+    app._ticker.stop.side_effect = stop_tick
     app._real_stream = MagicMock()
     app._real_stream.stop.side_effect = lambda: events.append(
-        ("stream_stopped", app._waiting_for_bt, app._tick_thread)
+        ("stream_stopped", app._waiting_for_bt, app._ticker.running)
     )
     app._eeg_stream = app._real_stream
     app._release_wake_lock = MagicMock()
@@ -37,7 +37,7 @@ def _make_waiting_app() -> tuple[EEGMeditationApp, list]:
 
 
 def _assert_unwatched_stream_stop(app: EEGMeditationApp, events: list) -> None:
-    assert events == ["tick_stopped", ("stream_stopped", False, None)]
+    assert events == ["tick_stopped", ("stream_stopped", False, False)]
     assert app._bt_signal_start is None
     # Released by the abort itself (on the tick thread for a wait exit), and again by a cancel's shared teardown.
     app._release_wake_lock.assert_called()

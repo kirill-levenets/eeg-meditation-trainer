@@ -11,7 +11,7 @@ def _make_app(state: SessionState) -> EEGMeditationApp:
     app._session_manager = MagicMock()
     app._session_manager.state = state
     app._waiting_for_bt = False
-    app._tick_thread = None
+    app._ticker = MagicMock(running=False)
     app._current_user_id = 1
     app._view_all_users = False
     app._db = MagicMock()

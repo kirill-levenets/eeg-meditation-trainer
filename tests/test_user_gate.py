@@ -190,7 +190,7 @@ def test_discard_running_session_deletes_partial_row_and_resets_ui():
     # #1/#5/#12: the 60s flush may already have written a session row under the
     # doomed profile — discard must delete it and reuse the shared UI teardown.
     app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._stop_tick_thread = MagicMock()
+    app._ticker = MagicMock(running=False)
     app._session_manager = MagicMock()
     app._eeg_stream = MagicMock()
     app._audio = MagicMock()
@@ -228,7 +228,7 @@ def test_restore_refused_during_bt_connect_window(monkeypatch):
     app._session_manager = MagicMock()
     app._session_manager.state = SessionState.IDLE
     app._waiting_for_bt = True          # connecting
-    app._tick_thread = MagicMock()
+    app._ticker = MagicMock(running=True)
     app._info_popup = MagicMock()
     on_android = MagicMock()
     monkeypatch.setattr(bf, "_on_android", on_android)
@@ -246,7 +246,7 @@ def test_delete_active_profile_discards_during_bt_connect():
     app._session_manager = MagicMock()
     app._session_manager.state = SessionState.IDLE
     app._waiting_for_bt = True
-    app._tick_thread = MagicMock()
+    app._ticker = MagicMock(running=True)
     app._discard_running_session = MagicMock()
     app._db = MagicMock()
     app._db.get_all_users.return_value = []

@@ -36,6 +36,7 @@ def _threshold_app(*, program: bool = False, state: SessionState = SessionState.
     a._live_screen = MagicMock()
     a._persist_user_setting_later = MagicMock()
     a._loading_settings = False
+    a._ticker = MagicMock(running=False)
     a._program_run = make_run(a, program=MagicMock() if program else None)
     a._mirror = LiveMirror()
     a._shamatha_threshold = 70
@@ -66,7 +67,7 @@ def test_a_new_threshold_moves_a_simple_sessions_sound_scoring_and_pill_together
 def test_a_new_threshold_never_reaches_a_running_program():
     # A settle that lands late, or the profile's settings reloaded (re-picking the active profile), mid-program.
     a = _threshold_app(program=True)
-    a._tick_thread = MagicMock()  # the program session is live
+    a._ticker.running = True  # the program session is live
     a._apply_threshold(85)
     a._audio.set_threshold.assert_not_called()  # the sound kept the segment's 70 (it used to switch to 85)
     assert _next_target(a) == 70
@@ -260,7 +261,7 @@ def _start(program: bool, monkeypatch, prepare=None, **before) -> EEGMeditationA
     a._program_settings.mode = "program" if program else "simple"
     a._timer_state = MagicMock()
     for name in ("_warn_missing_sound_files", "_acquire_wake_lock",
-                 "_start_session_keep_alive_service", "_start_tick_thread"):
+                 "_start_session_keep_alive_service"):
         setattr(a, name, MagicMock())
     a._global_feedback_id = lambda: "noise"
     a._source_spec = lambda sid: ("noise", "")
@@ -319,7 +320,7 @@ def test_a_settle_runs_the_latest_function_given_for_its_input(monkeypatch):
 
 def test_a_touch_on_the_locked_controls_says_why_while_the_program_runs():
     a = _threshold_app(program=True)
-    a._tick_thread = MagicMock()
+    a._ticker.running = True
     a._info_popup = MagicMock()
     assert a._refuse_program_threshold() is True
     assert a._info_popup.call_args.args == (
@@ -336,7 +337,7 @@ def test_a_touch_after_the_program_ended_is_not_refused():
 
 
 def test_a_session_start_applies_its_threshold_whatever_the_last_one_left_running(monkeypatch):
-    a = _start(True, monkeypatch, _tick_thread=MagicMock())  # the last session's tick thread hasn't exited yet
+    a = _start(True, monkeypatch, _ticker=MagicMock(running=True))  # the last session's tick hasn't exited yet
     a._audio.set_threshold.assert_called_with(60)
 
 

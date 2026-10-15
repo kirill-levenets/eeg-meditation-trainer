@@ -28,8 +28,7 @@ def _app() -> EEGMeditationApp:
     app._mirror = LiveMirror()
     app._waiting_for_bt = False
     app._bt_signal_start = None
-    app._tick_thread = None
-    app._stop_tick_thread = MagicMock()
+    app._ticker = MagicMock(running=False)
     app._real_stream = MagicMock()
     app._real_stream._device_name = "MindWave"
     app._eeg_stream = app._real_stream
@@ -58,7 +57,7 @@ def _waiting(app) -> EEGMeditationApp:
     app._start_attempt += 1  # as _on_start does
     app._real_stream.start.return_value = True
     assert app._begin_bt_wait()
-    app._tick_thread = MagicMock()
+    app._ticker.running = True
     app._bt_connect_start = time.time()
     app._real_stream.is_connected = True
     app._real_stream.read_sample.return_value = dict(BANDS)
@@ -74,7 +73,7 @@ def test_stop_after_a_failed_wait_cleans_up_without_offering_to_save():
     app._on_stop()
     app._confirm_action.assert_not_called()  # "Stop session? It will be saved" for a session that never existed
     app._live_screen.set_controls_idle.assert_called()
-    app._stop_tick_thread.assert_not_called()
+    app._ticker.stop.assert_not_called()
 
 
 def test_stop_during_a_running_session_still_asks():
@@ -113,7 +112,7 @@ def test_a_cancel_while_the_tick_reads_the_first_data_leaves_no_session_running(
     tick = threading.Thread(target=app._handle_bt_wait)
     tick.start()
     assert in_read.wait(2)
-    app._stop_tick_thread = MagicMock(side_effect=lambda: (release.set(), tick.join(2)))  # the real stop joins the tick
+    app._ticker.stop = MagicMock(side_effect=lambda: (release.set(), tick.join(2)))  # the real stop joins the tick
     app._on_connect_cancel()
     assert not tick.is_alive()
     _run_queued(app)
@@ -130,7 +129,7 @@ def test_a_tick_that_outlives_the_cancel_shows_nothing():
     tick = threading.Thread(target=app._handle_bt_wait)
     tick.start()
     assert in_read.wait(2)
-    app._on_connect_cancel()  # the fixture's _stop_tick_thread returns without the tick, like a timed-out join
+    app._on_connect_cancel()  # the fixture's ticker stop returns without the tick, like a timed-out join
     release.set()
     tick.join(2)
     _run_queued(app)
@@ -164,7 +163,7 @@ def test_stop_after_the_timer_ended_the_session_leaves_its_teardown_alone():
     app = _app()
     app._session_manager.start()
     app._session_manager.stop(reason="timer")  # saved on the tick thread; its UI teardown is queued
-    app._tick_thread = MagicMock()
+    app._ticker.running = True
     app._on_stop()
     app._real_stream.stop.assert_not_called()  # the kept-alive headset link stays up
     app._confirm_action.assert_not_called()

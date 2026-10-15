@@ -43,6 +43,7 @@ from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
     segment_target,
 )
+from app.session.tick_thread import TickThread
 from app.session.timer_state import TimerState
 from app.session.what_if import scored_ticks
 from app.settings.registry import (
@@ -206,8 +207,7 @@ class EEGMeditationApp(App):
         self._db: DatabaseManager = DatabaseManager()
         self._audio: AudioEngine = AudioEngine()
         self._session_manager.set_audio(self._audio)
-        self._tick_thread: Optional[threading.Thread] = None
-        self._tick_stop_event: threading.Event = threading.Event()
+        self._ticker: TickThread = TickThread(lambda dt: self._update_tick(dt))
         self._waiting_for_bt: bool = False
         self._bt_signal_start: float | None = None
         # Android pause state: when True, tick thread skips per-tick UI
@@ -1008,11 +1008,6 @@ class EEGMeditationApp(App):
 
         threading.Thread(target=_scan_and_connect, daemon=True).start()
 
-    # ------------------------------------------------------------------
-    # Background tick thread (replaces Clock.schedule_interval so that
-    # compute / audio / DB work continues while Android screen is locked)
-    # ------------------------------------------------------------------
-
     def _on_main(self, fn) -> None:
         """Queue callable on Kivy's main thread.
 
@@ -1020,56 +1015,6 @@ class EEGMeditationApp(App):
         call is buffered and executed when the app resumes.
         """
         Clock.schedule_once(lambda dt: fn(), 0)
-
-    def _start_tick_thread(self) -> None:
-        """Start the 2 Hz tick loop in a daemon thread (survives Android screen lock); no-op while one is running."""
-        if self._tick_thread is not None and self._tick_thread.is_alive():
-            return
-        # Each thread gets its own stop event: clearing a shared one revived a thread whose stop join timed out.
-        stop = threading.Event()
-        self._tick_stop_event = stop
-        self._tick_thread = threading.Thread(
-            target=self._tick_loop, args=(stop,), daemon=True, name="SessionTick"
-        )
-        self._tick_thread.start()
-        logger.debug("SessionTick thread started")
-
-    def _stop_tick_thread(self) -> None:
-        """Signal the tick thread to exit and join briefly.
-
-        Safe to call from the tick thread itself: skips join() in that case
-        (joining the current thread raises RuntimeError, which would swallow
-        the rest of the calling tick — that bug caused the connect-overlay
-        countdown to freeze when BT failure paths called this from inside
-        _handle_bt_wait).
-        """
-        self._tick_stop_event.set()
-        t = self._tick_thread
-        self._tick_thread = None
-        if (
-            t is not None
-            and t.is_alive()
-            and t is not threading.current_thread()
-        ):
-            t.join(timeout=1.0)
-        logger.debug("SessionTick thread stopped")
-
-    def _tick_loop(self, stop: threading.Event) -> None:
-        """Daemon-thread loop: call _update_tick every UPDATE_FREQUENCY seconds until this thread's stop is set."""
-        interval = APP.UPDATE_FREQUENCY
-        next_t = time.monotonic()
-        while not stop.is_set():
-            try:
-                self._update_tick(interval)
-            except Exception:
-                logger.exception("Error in session tick loop")
-            next_t += interval
-            remaining = next_t - time.monotonic()
-            if remaining > 0:
-                if stop.wait(remaining):
-                    break
-            else:
-                next_t = time.monotonic()
 
     # ------------------------------------------------------------------
 
@@ -1155,7 +1100,7 @@ class EEGMeditationApp(App):
         elif not self._begin_bt_wait():
             return
 
-        self._start_tick_thread()
+        self._ticker.start()
         self._tick_count = 0
         logger.info("Session started via UI")
 
@@ -1181,7 +1126,7 @@ class EEGMeditationApp(App):
 
     def _abort_bt_wait(self) -> None:
         """Tear down a BT-connect wait; the tick watcher stops first or it reads our stop as a failed connect."""
-        self._stop_tick_thread()
+        self._ticker.stop()
         self._waiting_for_bt = False
         self._bt_signal_start = None
         self._real_stream.stop()
@@ -1196,7 +1141,7 @@ class EEGMeditationApp(App):
     def _cancel_session_start(self, state: str) -> None:
         """End a start that hasn't become a session: the device scan, the BT wait, or data that arrived in the same frame
         as the Cancel."""
-        if self._waiting_for_bt or self._tick_thread is not None:
+        if self._waiting_for_bt or self._ticker.running:
             self._abort_bt_wait()
         self._live_screen.hide_overlay()
         self._undo_session_setup()  # also resets a session that started in the frame of the Cancel
@@ -1315,13 +1260,13 @@ class EEGMeditationApp(App):
             self._live_screen.set_controls_paused()
             # Not stop(): that tears down the session's prepared players, which only session start rebuilds.
             self._audio.pause()
-            self._stop_tick_thread()
+            self._ticker.stop()
             logger.info("Session paused")
         elif self._session_manager.state == SessionState.PAUSED:
             self._session_manager.resume()
             self._live_screen.set_controls_running()
             self._audio.resume()
-            self._start_tick_thread()
+            self._ticker.start()
             logger.info("Session resumed")
 
     def _on_stop(self, *args) -> None:
@@ -1335,7 +1280,7 @@ class EEGMeditationApp(App):
             return
 
         # Pause the tick thread while the dialog is open
-        self._stop_tick_thread()
+        self._ticker.stop()
         # Every ending saves (the same path as a timer or lost-signal stop); deleting is a confirmed card action.
         self._confirm_action(
             "Stop session?", "The session will be saved. You can delete it on the next screen.",
@@ -1458,7 +1403,7 @@ class EEGMeditationApp(App):
         the state-only check misses the connecting phase (mirrors _on_connect_cancel)."""
         return (self._session_manager.state in (SessionState.RUNNING, SessionState.PAUSED)
                 or getattr(self, "_waiting_for_bt", False)
-                or getattr(self, "_tick_thread", None) is not None)
+                or self._ticker.running)
 
     def _discard_running_session(self) -> None:
         """Halt a running session and DELETE its data — used when its owning
@@ -1468,7 +1413,7 @@ class EEGMeditationApp(App):
         Session screen returns to idle."""
         self._waiting_for_bt = False  # also halt a session still in the BT-connect wait
         self._bt_signal_start = None
-        self._stop_tick_thread()
+        self._ticker.stop()
         self._session_manager.stop(reason="user")
         if APP.USE_MOCK_DEVICE:
             self._eeg_stream.stop()
@@ -1483,7 +1428,7 @@ class EEGMeditationApp(App):
     def _stop_and_save(self, reason: str = "user") -> None:
         """Stop session and save data immediately (no dialog). Main-thread path."""
         t_start = time.monotonic()
-        self._stop_tick_thread()
+        self._ticker.stop()
         stats = self._persist_session_data(reason)
         self._audio.stop()
         self._finalize_stop_ui(stats, self._current_session_id)
@@ -1505,7 +1450,7 @@ class EEGMeditationApp(App):
     def _cancel_stop(self) -> None:
         """Back to the session after cancelling stop; a paused one gets its tick back only on Resume."""
         if self._session_manager.state == SessionState.RUNNING:
-            self._start_tick_thread()
+            self._ticker.start()
         logger.info("Stop cancelled")
 
     def _on_main_for_wait(self, fn: Callable[[], object]) -> None:
@@ -1850,8 +1795,8 @@ class EEGMeditationApp(App):
             # The real stop()/release() teardown is deferred to the main
             # thread below, where the Looper is live and release() won't hang.
             self._audio.mute()
-            # Stop the loop now (safe from this thread); also clears _tick_thread so idle isn't "live".
-            self._stop_tick_thread()
+            # Stop the loop now (safe from this thread); also ends `running`, so idle isn't "live".
+            self._ticker.stop()
             def _finish_on_main(_dt=None):
                 self._audio.stop()  # full noise teardown on the main thread
                 self._finalize_stop_ui(stats, session_id)
