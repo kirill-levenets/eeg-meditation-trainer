@@ -12,14 +12,12 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.slider import Slider
 
-from app.config import APP, METRICS
+from app.config import METRICS
 from app.ui.line_colours import LINE_COLOURS, MONO, GradientStrip
 from app.ui.line_colours import OPTIONS as LINE_OPTIONS
+from app.ui.settings_sections.audio import AudioSection
 from app.ui.settings_sections.common import (
     checkbox_row,
-    open_audio_file_chooser,
-    open_source_picker,
-    source_label,
 )
 from app.ui.settings_sections.device import DeviceSection
 from app.ui.settings_sections.formulas import FormulaSection
@@ -44,16 +42,6 @@ from app.ui.theme import (
     make_message_popup,
 )
 from app.ui.widgets.user_picker import UserPickerForm
-
-_FEEDBACK_SOURCE_OPTIONS: tuple[tuple[str, str], ...] = (
-    ("Off", "none"), ("Rain", "noise"), ("Tone", "tone"), ("Custom file...", "custom"),
-)
-# Reward adds the periodic Crickets cue (issue #11); below-threshold feedback does not.
-# ("heartbeat" is the stable internal source id — the timbre is a cricket chirp.)
-_REWARD_SOURCE_OPTIONS: tuple[tuple[str, str], ...] = (
-    ("Off", "none"), ("Rain", "noise"), ("Tone", "tone"),
-    ("Crickets", "heartbeat"), ("Custom file...", "custom"),
-)
 
 
 def _load_help_topics(lang: str = "en") -> list[tuple[str, str]]:
@@ -105,21 +93,9 @@ class SettingsScreen(Screen):
         self._on_backup_pressed: Optional[Callable] = None
         self._on_restore_pressed: Optional[Callable] = None
         self._on_threshold_change: Optional[Callable] = None
-        self._on_test_audio: Optional[Callable] = None
-        self._on_sinking_alert_toggle: Optional[Callable] = None
-        self._on_subtle_alert_toggle: Optional[Callable] = None
-        self._on_disconnect_alert_toggle: Optional[Callable] = None
         self._on_line_width_change: Optional[Callable] = None
         self._on_rotate_screen: Optional[Callable] = None
         self._on_theme_change: Optional[Callable] = None
-        self._on_feedback_source_change: Optional[Callable] = None
-        self._feedback_source: str = "noise"
-        self._feedback_sound_path: str = ""
-        self._feedback_source_btn: Optional[StyledButton] = None
-        self._on_reward_source_change: Optional[Callable] = None
-        self._reward_source: str = "none"   # above-threshold reward (off by default)
-        self._reward_sound_path: str = ""
-        self._reward_source_btn: Optional[StyledButton] = None
         self._graph_toggles: dict[str, bool] = {
             "shamatha_score": True,
             "meditation_score": False,
@@ -314,81 +290,7 @@ class SettingsScreen(Screen):
         threshold_section.add_widget(index_row)
 
         # --- Audio section ---
-        audio_section = accordion.add_section("Audio", collapsed=True)
-
-        audio_desc = ThemedLabel(
-            text=(
-                "Rain noise — volume decreases as meditation deepens\n"
-                "Test: reward sample, feedback sweep (0-max-0), sinking bell (every 15s),\n"
-                "distraction chime (subtle > 30, every 20s), disconnect warble (device lost)"
-            ),
-            font_size=F.SMALL,
-            size_hint_y=None,
-            color=C.TEXT_SECONDARY,
-            halign="left",
-        )
-        fit_height_to_text(audio_desc)
-        audio_section.add_widget(audio_desc)
-
-        # Test Audio button
-        self._test_audio_btn = StyledButton(
-            text="Test Audio",
-            font_size=F.H3,
-            bold=True,
-            bg_color=C.PRIMARY,
-            size_hint_y=None,
-            height=dp(40),
-        )
-        self._test_audio_btn.bind(on_release=self._on_test_audio_pressed)
-        audio_section.add_widget(self._test_audio_btn)
-
-        fb_label = ThemedLabel(
-            text="Feedback sound:", font_size=F.SMALL, color=C.TEXT_SECONDARY,
-            size_hint_y=None, height=dp(24), halign="left", valign="middle",
-        )
-        fb_label.bind(size=fb_label.setter("text_size"))
-        audio_section.add_widget(fb_label)
-
-        self._feedback_source_btn = StyledButton(
-            text=source_label(self._feedback_source, self._feedback_sound_path),
-            font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT,
-            size_hint_y=None, height=dp(36),
-        )
-        self._feedback_source_btn.bind(on_release=lambda *_a: self._open_feedback_source_picker())
-        audio_section.add_widget(self._feedback_source_btn)
-
-        # Above-threshold reward channel (issue #12): a second sound that rises as the
-        # score climbs above the threshold. Off by default.
-        rw_label = ThemedLabel(
-            text="Reward sound (above threshold):", font_size=F.SMALL, color=C.TEXT_SECONDARY,
-            size_hint_y=None, height=dp(24), halign="left", valign="middle",
-        )
-        rw_label.bind(size=rw_label.setter("text_size"))
-        audio_section.add_widget(rw_label)
-
-        self._reward_source_btn = StyledButton(
-            text=source_label(self._reward_source, self._reward_sound_path),
-            font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT,
-            size_hint_y=None, height=dp(36),
-        )
-        self._reward_source_btn.bind(on_release=lambda *_a: self._open_reward_source_picker())
-        audio_section.add_widget(self._reward_source_btn)
-
-        # Sinking alert toggle
-        sinking_row, self._sinking_alert_cb = checkbox_row("Enable Sinking Alert Bell", dp(36), active=False)
-        self._sinking_alert_cb.bind(active=self._on_sinking_alert_change)
-        audio_section.add_widget(sinking_row)
-
-        # Subtle distraction alert toggle
-        subtle_row, self._subtle_alert_cb = checkbox_row("Enable Distraction Chime", dp(36), active=False)
-        self._subtle_alert_cb.bind(active=self._on_subtle_alert_change)
-        audio_section.add_widget(subtle_row)
-
-        # Disconnect alert toggle
-        disconnect_row, self._disconnect_alert_cb = checkbox_row(
-            "Audio alert on disconnect / signal loss", dp(36), active=APP.DISCONNECT_ALERT_ENABLED)
-        self._disconnect_alert_cb.bind(active=self._on_disconnect_alert_change)
-        audio_section.add_widget(disconnect_row)
+        self.audio = AudioSection(accordion.add_section("Audio", collapsed=True))
 
         # --- Display section ---
         display_section = accordion.add_section("Display", collapsed=True)
@@ -627,22 +529,6 @@ class SettingsScreen(Screen):
         s = self._threshold_slider
         s.value = max(s.min, min(s.max, int(s.value) + delta))
 
-    def _on_test_audio_pressed(self, *args) -> None:
-        if self._on_test_audio:
-            self._on_test_audio()
-
-    def _on_sinking_alert_change(self, checkbox, active) -> None:
-        if self._on_sinking_alert_toggle:
-            self._on_sinking_alert_toggle(active)
-
-    def _on_subtle_alert_change(self, checkbox, active) -> None:
-        if self._on_subtle_alert_toggle:
-            self._on_subtle_alert_toggle(active)
-
-    def _on_disconnect_alert_change(self, checkbox, active) -> None:
-        if self._on_disconnect_alert_toggle:
-            self._on_disconnect_alert_toggle(active)
-
     def _on_line_width_slider(self, instance, value) -> None:
         val = round(value, 1)
         self._line_width_value.text = f"{val:.1f}"
@@ -724,72 +610,6 @@ class SettingsScreen(Screen):
 
     def set_threshold_callback(self, callback: Callable) -> None:
         self._on_threshold_change = callback
-
-    def set_test_audio_callback(self, callback: Callable) -> None:
-        self._on_test_audio = callback
-
-    def set_feedback_source_callback(self, callback: Callable) -> None:
-        self._on_feedback_source_change = callback
-
-    @property
-    def feedback_source(self) -> str:
-        return self._feedback_source
-
-    def set_feedback_source(self, source: str, path: str = "") -> None:
-        """Reflect a restored/loaded feedback selection on the picker button (no callback)."""
-        self._feedback_source = source or "noise"
-        self._feedback_sound_path = path or ""
-        if self._feedback_source_btn is not None:
-            self._feedback_source_btn.text = source_label(self._feedback_source, self._feedback_sound_path)
-
-    def _open_feedback_source_picker(self) -> None:
-        open_source_picker("Feedback sound", _FEEDBACK_SOURCE_OPTIONS, self._choose_feedback_source)
-
-    def _choose_feedback_source(self, value: str) -> None:
-        if value == "custom":
-            open_audio_file_chooser(
-                lambda p: self._apply_feedback_source("custom", p), title="Feedback sound file")
-            return
-        self._apply_feedback_source(value, "")
-
-    def _apply_feedback_source(self, source: str, path: str) -> None:
-        self.set_feedback_source(source, path)
-        if self._on_feedback_source_change:
-            self._on_feedback_source_change(self._feedback_source, self._feedback_sound_path)
-
-    def set_reward_source_callback(self, callback: Callable) -> None:
-        self._on_reward_source_change = callback
-
-    def set_reward_source(self, source: str, path: str = "") -> None:
-        """Reflect a restored/loaded reward selection on the picker button (no callback)."""
-        self._reward_source = source or "none"
-        self._reward_sound_path = path or ""
-        if self._reward_source_btn is not None:
-            self._reward_source_btn.text = source_label(self._reward_source, self._reward_sound_path)
-
-    def _open_reward_source_picker(self) -> None:
-        open_source_picker("Reward sound", _REWARD_SOURCE_OPTIONS, self._choose_reward_source)
-
-    def _choose_reward_source(self, value: str) -> None:
-        if value == "custom":
-            open_audio_file_chooser(
-                lambda p: self._apply_reward_source("custom", p), title="Reward sound file")
-            return
-        self._apply_reward_source(value, "")
-
-    def _apply_reward_source(self, source: str, path: str) -> None:
-        self.set_reward_source(source, path)
-        if self._on_reward_source_change:
-            self._on_reward_source_change(self._reward_source, self._reward_sound_path)
-
-    def set_sinking_alert_callback(self, callback: Callable) -> None:
-        self._on_sinking_alert_toggle = callback
-
-    def set_subtle_alert_callback(self, callback: Callable) -> None:
-        self._on_subtle_alert_toggle = callback
-
-    def set_disconnect_alert_callback(self, callback: Callable) -> None:
-        self._on_disconnect_alert_toggle = callback
 
     def set_line_width_callback(self, callback: Callable) -> None:
         self._on_line_width_change = callback

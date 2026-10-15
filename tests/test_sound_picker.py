@@ -77,17 +77,17 @@ def test_every_sound_picker_opens_the_system_picker_for_audio(phone, monkeypatch
     screen = SettingsScreen()
     screen.timer.load_program([{"minutes": 10, "target": 50, "formula": "shamatha_score"}], "program")
     segment = screen.timer._segment_rows[0]
-    for opener, picked in ((lambda: screen._choose_feedback_source("custom"), lambda: screen._feedback_sound_path),
-                           (lambda: screen._choose_reward_source("custom"), lambda: screen._reward_sound_path),
+    for opener, picked in ((lambda: screen.audio._choose_feedback_source("custom"), lambda: screen.audio._feedback_sound_path),
+                           (lambda: screen.audio._choose_reward_source("custom"), lambda: screen.audio._reward_sound_path),
                            (lambda: screen.timer._choose_timer_sound("custom"), lambda: screen.timer.timer_sound_path),
                            (lambda: _segment_custom_file(screen, monkeypatch), lambda: segment._feedback_sound)):
         phone["picks"].append(BOWL)
         opener()
         _settle(picked)
     assert phone["launched"] == [common._AUDIO_TYPES] * 4 and common._AUDIO_TYPES[0] == "audio/*"
-    assert (screen._feedback_sound_path == screen._reward_sound_path == screen.timer.timer_sound_path
+    assert (screen.audio._feedback_sound_path == screen.audio._reward_sound_path == screen.timer.timer_sound_path
             == segment._feedback_sound)
-    assert screen._feedback_source_btn.text == "Custom: Singing bowl.mp3"
+    assert screen.audio._feedback_source_btn.text == "Custom: Singing bowl.mp3"
 
 
 def test_a_picked_sound_is_copied_into_app_storage_under_its_own_name(phone):
@@ -209,8 +209,8 @@ def test_every_sound_picker_has_a_cancel_that_picks_nothing(monkeypatch):
         (title, footer, Mock())) or opened[-1][2])
     screen = SettingsScreen()
     changes = []
-    screen.set_feedback_source_callback(lambda *a: changes.append(a))
-    for open_picker in (screen._open_feedback_source_picker, screen._open_reward_source_picker):
+    screen.audio.set_feedback_source_callback(lambda *a: changes.append(a))
+    for open_picker in (screen.audio._open_feedback_source_picker, screen.audio._open_reward_source_picker):
         open_picker()
     for title, footer, popup in opened:
         assert footer is not None and footer.text == "Cancel", title

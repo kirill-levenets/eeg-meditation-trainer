@@ -613,10 +613,10 @@ class EEGMeditationApp(App):
         self._wire_graph_affordances()
 
         self._settings_screen.set_threshold_callback(self._on_threshold_change)
-        self._settings_screen.set_test_audio_callback(self._on_test_audio)
-        self._settings_screen.set_sinking_alert_callback(self._on_sinking_alert_toggle)
-        self._settings_screen.set_subtle_alert_callback(self._on_subtle_alert_toggle)
-        self._settings_screen.set_disconnect_alert_callback(self._on_disconnect_alert_toggle)
+        self._settings_screen.audio.set_test_audio_callback(self._on_test_audio)
+        self._settings_screen.audio.set_sinking_alert_callback(self._on_sinking_alert_toggle)
+        self._settings_screen.audio.set_subtle_alert_callback(self._on_subtle_alert_toggle)
+        self._settings_screen.audio.set_disconnect_alert_callback(self._on_disconnect_alert_toggle)
         self._settings_screen.device.set_device_mode_callback(self._on_device_mode_toggle)
         self._settings_screen.device.set_scan_devices_callback(self._on_scan_devices)
         self._settings_screen.device.set_device_select_callback(self._on_device_select)
@@ -634,8 +634,8 @@ class EEGMeditationApp(App):
         self._settings_screen.formulas.set_export_formulas_callback(self._formula_settings.on_export)
         self._settings_screen.set_audio_metric_callback(self._on_audio_metric_change)
         self._settings_screen.set_audio_formula_index_callback(self._on_audio_formula_index)
-        self._settings_screen.set_feedback_source_callback(self._on_feedback_source_change)
-        self._settings_screen.set_reward_source_callback(self._on_reward_source_change)
+        self._settings_screen.audio.set_feedback_source_callback(self._on_feedback_source_change)
+        self._settings_screen.audio.set_reward_source_callback(self._on_reward_source_change)
         self._settings_screen.timer.set_program_mode_callback(self._program_settings.on_mode_change)
         self._settings_screen.timer.set_program_changed_callback(self._program_settings.on_changed)
         self._settings_screen.timer.set_program_save_callback(self._program_settings.on_save)
@@ -2786,13 +2786,13 @@ class EEGMeditationApp(App):
             self._timer_state.set_custom_sound_path(v); ss.timer.timer_sound_path = v
 
         def set_sinking(v):
-            self._audio.sinking_alert_enabled = v; ss._sinking_alert_cb.active = v
+            self._audio.sinking_alert_enabled = v; ss.audio._sinking_alert_cb.active = v
 
         def set_subtle(v):
-            self._audio.subtle_alert_enabled = v; ss._subtle_alert_cb.active = v
+            self._audio.subtle_alert_enabled = v; ss.audio._subtle_alert_cb.active = v
 
         def set_disconnect(v):
-            self._audio.disconnect_alert_enabled = v; ss._disconnect_alert_cb.active = v
+            self._audio.disconnect_alert_enabled = v; ss.audio._disconnect_alert_cb.active = v
 
         def set_threshold(v):
             ss.threshold = v
@@ -2820,16 +2820,16 @@ class EEGMeditationApp(App):
             self._show_audio_metric()
 
         def set_feedback_source(v):
-            self._feedback_source = v; ss.set_feedback_source(v, self._feedback_sound_path)
+            self._feedback_source = v; ss.audio.set_feedback_source(v, self._feedback_sound_path)
 
         def set_feedback_path(v):
-            self._feedback_sound_path = v; ss.set_feedback_source(self._feedback_source, v)
+            self._feedback_sound_path = v; ss.audio.set_feedback_source(self._feedback_source, v)
 
         def set_reward_source(v):
-            self._reward_source = v; ss.set_reward_source(v, self._reward_sound_path)
+            self._reward_source = v; ss.audio.set_reward_source(v, self._reward_sound_path)
 
         def set_reward_path(v):
-            self._reward_sound_path = v; ss.set_reward_source(self._reward_source, v)
+            self._reward_sound_path = v; ss.audio.set_reward_source(self._reward_source, v)
 
         def add(key, codec, get, set_):
             settings.append(Setting(key, get(), codec[0], codec[1], get, set_))

@@ -119,7 +119,7 @@ def test_audio_source_pickers_no_dead_zones():
     s = _settings_audio_open()
     try:
         for src, path in (("noise", ""), ("custom", "/tmp/x.wav"), ("heartbeat", "")):
-            s.set_reward_source(src, path)
+            s.audio.set_reward_source(src, path)
             _pump()
             assert not find_dead_zones(s), _describe(find_dead_zones(s))
         bad = find_collapsed_disabled_with_children(s)
