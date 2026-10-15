@@ -850,15 +850,26 @@ class AudioEngine:
         self._unload_one_shot("_bell_sound")
 
     def _unload_one_shot(self, attr: str) -> None:
+        """Let go of a one-shot sound; off the main thread (a tick's alert or cue) its release waits for the main one."""
         snd = getattr(self, attr, None)
         if not snd:
             return
+        setattr(self, attr, None)
+        if threading.current_thread() is threading.main_thread():
+            self._release_one_shot(snd, attr)
+            return
+        # MediaPlayer.stop()/release() wait on the main Looper, which a locked screen pauses: on the tick thread they
+        # froze the app. Kivy runs the release on the main thread when it next runs.
+        from kivy.clock import Clock
+        Clock.schedule_once(lambda _dt: self._release_one_shot(snd, attr))
+
+    @staticmethod
+    def _release_one_shot(snd, attr: str) -> None:
         try:
             snd.stop()
             snd.unload()
         except Exception:
             logger.exception(f"Failed to stop/unload {attr}")
-        setattr(self, attr, None)
 
     def play_connect_sound(self) -> None:
         """Play a chime to confirm device connected."""
