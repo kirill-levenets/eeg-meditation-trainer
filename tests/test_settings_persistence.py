@@ -82,7 +82,7 @@ def test_saving_settings_mid_program_keeps_the_programs_timer():
     app._settings_store = MagicMock()
     app._formula_settings = MagicMock()
     app._program_settings = MagicMock()
-    app._all_graphs = lambda: []
+    app._graph_series = MagicMock()
 
     app._save_user_settings()
 

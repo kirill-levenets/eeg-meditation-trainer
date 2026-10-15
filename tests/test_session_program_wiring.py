@@ -1,6 +1,7 @@
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.program_run import ProgramRun
+from tests._graph_series import make_graph_series
 from tests._program_run import make_run
 from tests._program_settings import make_programs
 
@@ -250,7 +251,8 @@ def test_idle_program_preview_shows_program_set(tmp_path):
     app._session_manager.state = SessionState.IDLE  # not running
     app._formulas = FormulaSlots()
     app._program_settings = _program_settings(db, uid, live_screen=app._live_screen, session_manager=app._session_manager,
-                              show_saved_series=lambda u: app._apply_saved_series(app._live_screen.graph, u))
+                              show_saved_series=lambda u: app._graph_series.apply_saved(app._live_screen.graph, u))
+    app._graph_series = make_graph_series(app)
     app._program_settings.mode = "program"
     app._program_settings.segments = [
         {"minutes": 1, "target": 50, "formula": "shamatha_score"},
@@ -263,7 +265,7 @@ def test_idle_program_preview_shows_program_set(tmp_path):
     assert g.series_name("program_formula") == "Program: Alpha"
 
     # A program governs the live graph -> its set must not be persisted as the manual one.
-    app._persist_graph_series(g)
+    app._graph_series.persist(g)
     assert db.get_user_json_setting(uid, "graph_series_live_metrics") == ["shamatha_score"]
 
     # Back to simple mode -> the saved selection (shamatha only) is restored.

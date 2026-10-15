@@ -21,6 +21,7 @@ from app.ui.live_session import (
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.widgets.band_totals import BAND_COLORS, BAND_SCALES
 from tests._formula_settings import make_formula_settings
+from tests._graph_series import make_graph_series
 from tests._program_settings import make_programs
 
 
@@ -66,6 +67,7 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         self.app._audio_metric_key = "shamatha_score"  # the app's default: no formula slot drives the sound
         self.app._program_settings = make_programs(self.app._db, self.uid)  # simple mode: the user's own series
         self.app._formula_settings = make_formula_settings(self.app)
+        self.app._graph_series = make_graph_series(self.app)
 
     def tearDown(self):
         self.app._db.close()
@@ -81,7 +83,7 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         self.app._db.set_user_json_setting(
             self.uid, "graph_series_diary_freq", ["alpha", "beta"]
         )
-        self.app._restore_graph_series(self.uid)
+        self.app._graph_series.restore(self.uid)
 
         self.assertTrue(self.graph.is_visible("distraction"))
         self.assertTrue(self.graph.is_visible("sinking"))
@@ -95,7 +97,7 @@ class TestGraphSeriesPersistence(unittest.TestCase):
     def test_legacy_migration_only_for_live_metrics(self):
         self.app._db.set_user_setting(self.uid, "toggle_native_attention", "True")
         self.app._db.set_user_setting(self.uid, "toggle_shamatha_score", "False")
-        self.app._restore_graph_series(self.uid)
+        self.app._graph_series.restore(self.uid)
 
         self.assertTrue(self.graph.is_visible("native_attention"))
         self.assertFalse(self.graph.is_visible("shamatha_score"))
@@ -104,7 +106,7 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         self.assertEqual(set(diary_m.visible_keys()), set(diary_m.series_keys()))
 
     def test_first_run_defaults(self):
-        self.app._restore_graph_series(self.uid)
+        self.app._graph_series.restore(self.uid)
         # Live metrics: _graph_toggles default = Shamatha only.
         self.assertTrue(self.graph.is_visible("shamatha_score"))
         self.assertFalse(self.graph.is_visible("distraction"))
@@ -115,27 +117,27 @@ class TestGraphSeriesPersistence(unittest.TestCase):
     def test_single_series_graphs_untouched(self):
         # 1-series graphs are skipped by restore (a picker there could only blank
         # the line); their sole series stays visible.
-        self.app._restore_graph_series(self.uid)
+        self.app._graph_series.restore(self.uid)
         self.assertTrue(self.app._live_screen.raw_graph.is_visible("eeg"))
         self.assertTrue(self.app._diary_screen._raw_eeg_graph.is_visible("eeg"))
 
     # ── toggle + persist ──
 
     def _toggle(self, graph, key):
-        self.app._toggle_series_row(graph, key, types.SimpleNamespace())
+        self.app._graph_series._toggle(graph, key, types.SimpleNamespace())
 
     def test_toggle_flips_and_persists_per_graph(self):
-        self.app._restore_graph_series(self.uid)  # live: shamatha only
+        self.app._graph_series.restore(self.uid)  # live: shamatha only
         self._toggle(self.graph, "distraction")
         self.assertTrue(self.graph.is_visible("distraction"))
-        self.app._persist_graph_series(self.graph)
+        self.app._graph_series.persist(self.graph)
         saved = self.app._db.get_user_json_setting(self.uid, "graph_series_live_metrics")
         self.assertIn("distraction", saved)
 
         freq = self.app._diary_screen._freq_graph
         self._toggle(freq, "gamma")  # gamma was visible by default → now hidden
         self.assertFalse(freq.is_visible("gamma"))
-        self.app._persist_graph_series(freq)
+        self.app._graph_series.persist(freq)
         saved_freq = self.app._db.get_user_json_setting(self.uid, "graph_series_diary_freq")
         self.assertNotIn("gamma", saved_freq)
 
@@ -181,7 +183,7 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         self.app._db.set_user_setting(self.uid, "custom_formula", formula)
 
         self.app._formula_settings.load(self.uid)
-        self.app._restore_graph_series(self.uid)
+        self.app._graph_series.restore(self.uid)
 
         self.assertTrue(self.app._formulas.evaluators[0].is_valid)  # formula loaded
         self.assertFalse(self.graph.is_visible("custom_formula"))  # hide survived
@@ -199,7 +201,7 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         self.app._db.set_user_setting(self.uid, "custom_formula", formula)
 
         self.app._formula_settings.load(self.uid)
-        self.app._restore_graph_series(self.uid)
+        self.app._graph_series.restore(self.uid)
 
         self.assertTrue(self.graph.is_visible("custom_formula"))
 

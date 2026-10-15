@@ -64,6 +64,7 @@ from app.ui.device_labels import MAX_DEVICE_ALIAS, device_label
 from app.ui.diary_screen import DiaryScreen, detail_graph_data
 from app.ui.formula_settings import FormulaSettings
 from app.ui.graph_fullscreen import GraphFullscreen
+from app.ui.graph_series import GraphSeries
 from app.ui.history_screen import HistoryScreen
 from app.ui.line_colours import DEFAULT as LINE_DEFAULT
 from app.ui.line_colours import LINE_COLOURS
@@ -83,16 +84,13 @@ from app.ui.theme import (
     BottomNav,
     C,
     F,
-    S,
     StyledButton,
     ThemedLabel,
     ThemedPopup,
-    cancel_button,
     confirm_popup,
     fill_background,
     format_count,
     make_message_popup,
-    make_scroll_popup,
     paint_panel,
 )
 from app.ui.widgets.loading_overlay import LoadingOverlay
@@ -487,7 +485,7 @@ class EEGMeditationApp(App):
             self._db, self._settings_screen, self._live_screen, self._session_manager,
             user_id=lambda: self._current_user_id, require_user=self._require_user, confirm=self._confirm_action,
             info=self._info_popup, confirm_saved_delete=self._confirm_saved_delete,
-            show_saved_series=lambda uid: self._apply_saved_series(self._live_screen.graph, uid),
+            show_saved_series=lambda uid: self._graph_series.apply_saved(self._live_screen.graph, uid),
             save_settings=self._save_user_settings)
         self._formula_settings = FormulaSettings(
             self._db, self._settings_screen, self._live_screen.graph, self._formulas,
@@ -518,6 +516,11 @@ class EEGMeditationApp(App):
         float_root = FloatLayout()
         self._float_root = float_root
         self._fullscreen = GraphFullscreen(float_root)
+        self._graph_series = GraphSeries(
+            self._db, self._live_screen.graph, self._formulas, self._program_run, self._program_settings,
+            self._formula_settings, self._fullscreen, graphs=self._all_graphs,
+            legacy_defaults=self._settings_screen._graph_toggles, user_id=lambda: self._current_user_id,
+            require_user=self._require_user)
         self._last_back_time = 0.0  # for double-back-to-exit on the root screen
         float_root.add_widget(root)
         self._loading_overlay = LoadingOverlay()
@@ -573,7 +576,7 @@ class EEGMeditationApp(App):
         for g in self._all_graphs():
             g.set_expand_callback(self._fullscreen.present)
             if len(g.series_keys()) > 1:
-                g.set_series_picker_callback(self._present_series_picker)
+                g.set_series_picker_callback(self._graph_series.present_picker)
             g.set_fit_callback(ScrollableGraphWidget.toggle_fit)  # its zoom group, together
 
     def _saved_zoom_seconds(self) -> float:
@@ -2045,112 +2048,6 @@ class EEGMeditationApp(App):
         self._session_manager.set_threshold(value)  # also what a session waiting for the headset starts with
         self._live_screen.graph.set_threshold(float(value))  # drawn until ticks step the line
 
-    def _present_series_picker(self, graph) -> None:
-        """Open the shared multi-select series popup for `graph`.
-
-        Reads the graph's own catalog/labels/colors, so one presenter serves
-        every graph. Wired to all multi-series graphs by _wire_graph_affordances.
-        For the live metrics graph, custom-formula rows also carry a Choose button
-        that assigns a saved formula to that slot without leaving the picker.
-        """
-        is_live = graph is self._live_screen.graph
-        rows = []
-        for key in graph.series_keys():
-            if key in PROGRAM_FORMULA_KEYS and not (is_live and self._program_run.computes(key)):
-                continue  # program-controlled: listed only while its program runs and computes it
-            vis = graph.is_visible(key)
-            btn = StyledButton(
-                text=graph.series_name(key), height=dp(44),
-                bg_color=C.ACCENT if vis else C.BG_CARD,
-                text_color=None if vis else C.TEXT_SECONDARY, bold=vis,
-            )
-            btn.bind(on_release=lambda b, k=key: self._toggle_series_row(graph, k, b))
-            if is_live and key in FORMULA_KEYS:
-                row = BoxLayout(orientation="horizontal", spacing=S.GAP_SM, height=dp(44), size_hint_y=None)
-                btn.size_hint_x = 1
-                choose_btn = StyledButton(
-                    text="Choose…", height=dp(44), size_hint_x=None, width=dp(90),
-                    bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY,
-                )
-                slot_idx = FORMULA_KEYS.index(key)
-                choose_btn.bind(on_release=lambda _b, si=slot_idx, tb=btn: self._open_saved_formula_chooser(si, tb))
-                row.add_widget(btn)
-                row.add_widget(choose_btn)
-                rows.append(row)
-            else:
-                rows.append(btn)
-        # Neutral, not a fill: a green Close (PRIMARY) collided with the green "selected" pills on the green palettes.
-        close_btn = cancel_button("Close", height=dp(44))
-        popup = make_scroll_popup("Graph series", rows, footer=close_btn)
-        close_btn.bind(on_release=lambda *_a: popup.dismiss())
-        popup.bind(on_dismiss=lambda *_a: self._persist_graph_series(graph))
-        popup.open()
-
-    def _open_saved_formula_chooser(self, slot_idx: int, toggle_btn) -> None:
-        """Open a second popup listing saved formulas; selecting one assigns it to
-        slot_idx and refreshes the picker's toggle button to its new visible state."""
-        if self._require_user("choose a saved formula") is None:
-            return
-        formulas = self._db.get_saved_formulas(self._current_user_id)
-
-        def _choose(entry):
-            inner_popup.dismiss()
-            self._formula_settings.assign_saved(slot_idx, entry)
-            vis = self._live_screen.graph.is_visible(FORMULA_KEYS[slot_idx])
-            toggle_btn.bg_color = C.ACCENT if vis else C.BG_CARD
-            toggle_btn.text_color = None if vis else C.TEXT_SECONDARY
-            toggle_btn.bold = vis
-
-        rows = []
-        if not formulas:
-            rows.append(ThemedLabel(
-                text="No saved formulas", color=C.TEXT_SECONDARY,
-                height=dp(44), size_hint_y=None,
-            ))
-        else:
-            for entry in formulas:
-                row_btn = StyledButton(
-                    text=entry.get("name", entry.get("formula", "")[:30]),
-                    height=dp(44),
-                    bg_color=C.BG_CARD, text_color=C.TEXT,
-                )
-                row_btn.bind(on_release=lambda _b, e=entry: _choose(e))
-                rows.append(row_btn)
-        cancel_btn = cancel_button(height=dp(44))
-        inner_popup = make_scroll_popup("Choose saved formula", rows, footer=cancel_btn, width_hint=0.8)
-        cancel_btn.bind(on_release=lambda *_a: inner_popup.dismiss())
-        inner_popup.open()
-
-    def _toggle_series_row(self, graph, key: str, btn) -> None:
-        """Flip one series on `graph` (stays in the popup for multi-select)."""
-        visible = not graph.is_visible(key)
-        # The live formula must be valid to plot live custom_formula values;
-        # diary custom_formula is recorded data and toggles freely.
-        ev = self._formulas.for_key(key)
-        if ev is not None and graph is self._live_screen.graph:
-            visible = visible and ev.is_valid
-        graph.set_visible(key, visible)  # fires the owning screen's legend refresh
-        self._fullscreen.refresh_legend()
-        vis = graph.is_visible(key)
-        btn.bg_color = C.ACCENT if vis else C.BG_CARD
-        btn.text_color = None if vis else C.TEXT_SECONDARY
-        btn.bold = vis
-
-    def _persist_graph_series(self, graph) -> None:
-        """Persist `graph`'s visible series under its per-graph key on picker close.
-
-        Skips the live metrics graph while a program governs its visibility — the
-        program-driven set must not overwrite the user's saved manual selection."""
-        uid = self._current_user_id
-        if not (uid and graph.graph_id):
-            return
-        if graph is self._live_screen.graph and self._program_settings.governs_live_series():
-            return
-        self._db.set_user_json_setting(
-            uid, f"graph_series_{graph.graph_id}",
-            [k for k in graph.visible_keys() if k not in PROGRAM_FORMULA_KEYS],
-        )
-
     def _test_audio_sources(self) -> tuple[dict, str, str]:
         """(prepared sources, below id, reward id) for the Test button — both the
         selected below feedback source and the reward source (so Crickets etc. preview)."""
@@ -2985,67 +2882,12 @@ class EEGMeditationApp(App):
             self._settings_store.save(uid)          # all scalar per-user settings + theme
             self._formula_settings.persist(uid)
             self._program_settings.persist(uid)
-            # Per-graph series selection (the on-graph picker is the source of truth).
-            for g in self._all_graphs():
-                if g.graph_id and len(g.series_keys()) > 1:
-                    if g is self._live_screen.graph and self._program_settings.governs_live_series():
-                        continue  # program-driven visibility; keep the saved manual selection
-                    self._db.set_user_json_setting(
-                        uid, f"graph_series_{g.graph_id}",
-                        [k for k in g.visible_keys() if k not in PROGRAM_FORMULA_KEYS],
-                    )
+            self._graph_series.persist_all()  # the on-graph picker is the source of truth
         except sqlite3.Error as e:
             # Runs from UI callbacks (backup, pause, profile switch): report, don't crash.
             report_soft_error("settings_save_failed", f"Couldn't save your settings: {e}", app=self)
             return
         logger.debug(f"Saved settings for user {uid}")
-
-    def _restore_graph_series(self, user_id: int) -> None:
-        """Apply each graph's persisted series selection (graph_series_<id>).
-
-        set_visible drives each graph's own legend refresh. The live metrics graph
-        migrates the pre-F2 toggle_<key> rows when it has no JSON yet; other graphs
-        default to all-visible (their pre-picker behavior)."""
-        for graph in self._all_graphs():
-            if not graph.graph_id or len(graph.series_keys()) <= 1:
-                continue
-            self._apply_saved_series(graph, user_id)
-
-    def _apply_saved_series(self, graph, user_id: int) -> None:
-        """Apply one graph's persisted series selection (graph_series_<id>). The live
-        metrics graph migrates the pre-F2 toggle_<key> rows when it has no JSON yet and
-        gates custom-formula slots on validity; other graphs default to all-visible."""
-        series = self._db.get_user_json_setting(user_id, f"graph_series_{graph.graph_id}")
-        if series is not None:
-            sel = set(series)
-        elif graph is self._live_screen.graph:
-            sel = self._legacy_live_series(user_id)
-        else:
-            sel = set(graph.series_keys())
-        for key in graph.series_keys():
-            on = key in sel
-            if key in PROGRAM_FORMULA_KEYS:
-                on = False  # program-controlled; never restored as a user selection
-            ev = self._formulas.for_key(key)
-            if ev is not None and graph is self._live_screen.graph:
-                on = on and ev.is_valid
-            graph.set_visible(key, on)
-
-    def _legacy_live_series(self, user_id: int) -> set[str]:
-        """Pre-F2 fallback for the live metrics graph: per-metric toggle_<key> rows
-        + custom_formula_visible, defaulting to the first-run _graph_toggles set."""
-        defaults = self._settings_screen._graph_toggles
-        sel: set[str] = set()
-        for key in self._live_screen.graph.series_keys():
-            if key in FORMULA_KEYS:  # custom slots never had pre-F2 toggle_ rows
-                continue
-            saved = self._db.get_user_setting(user_id, f"toggle_{key}")
-            active = (saved == "True") if saved is not None else defaults.get(key, True)
-            if active:
-                sel.add(key)
-        if self._db.get_user_setting(user_id, "custom_formula_visible") == "True":
-            sel.add("custom_formula")
-        return sel
 
     def _load_user_settings(self, user_id: int) -> None:
         """Restore persisted settings for a user."""
@@ -3061,12 +2903,12 @@ class EEGMeditationApp(App):
         # Always applies a value (default if absent), so no user inherits the previous user's settings.
         self._settings_store.load(user_id)
 
-        # Load formulas BEFORE _restore_graph_series so the per-slot validity gate
+        # Load formulas BEFORE GraphSeries.restore so the per-slot validity gate
         # sees real is_valid; the picker selection (graph_series_*) decides visibility.
         self._formula_settings.load(user_id)
         self._program_settings.load(user_id)  # its saved-programs list goes to both UIs at the end (refresh_saved)
 
-        self._restore_graph_series(user_id)
+        self._graph_series.restore(user_id)
 
         # Skip BT/mock restore if --serial override is active
         if not self.serial_device_override:
