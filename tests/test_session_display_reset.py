@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 
 import app.ui.app_manager as am
 from app.ui.app_manager import EEGMeditationApp
+from app.ui.live_mirror import LiveMirror
 from app.ui.live_session import LiveSessionScreen
 
 METRICS = {"shamatha_score": 71, "distraction": 22, "sinking": 9, "native_attention": 55, "native_meditation": 63}
@@ -61,12 +62,11 @@ def test_the_avg_toggle_after_a_clear_shows_no_sessions_averages(monkeypatch):
 def test_clear_live_display_empties_the_graphs_their_mirrors_and_the_readout():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._live_screen = _finished_screen()
-    app._ui_metrics_history = [METRICS]
-    app._ui_band_history = [{"alpha": 1.0}]
-    app._ui_raw_waveform = [1.0]
-    app._ui_last_metrics = METRICS
+    app._mirror = LiveMirror()
+    app._mirror.record(METRICS, 70, {"alpha1": 1.0, "raw_eeg_waveform": [1.0]})
     app._clear_live_display()
-    assert (app._ui_metrics_history, app._ui_band_history, app._ui_raw_waveform, app._ui_last_metrics) == ([], [], [], {})
+    mirror = app._mirror
+    assert (list(mirror.metrics), list(mirror.bands), list(mirror.waveform), mirror.last_metrics) == ([], [], [], {})
     assert app._live_screen.graph.total_points == 0
     assert app._live_screen._timer_label.text == "00:00"
     assert _texts(app._live_screen) == _texts(LiveSessionScreen())
@@ -158,7 +158,8 @@ def test_a_deleted_sessions_card_closes_unsaved_but_its_bell_stops():
 def test_an_idle_threshold_clear_keeps_the_owner_of_an_open_card():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._live_screen = MagicMock()
-    app._ui_metrics_history, app._ui_band_history, app._ui_raw_waveform = [METRICS], [], []
+    app._mirror = LiveMirror()
+    app._mirror.metrics.append(METRICS)
     app._live_display_uid = 1
     app._clear_live_display()
     assert app._live_display_uid == 1  # a later switch to another profile still closes the card
@@ -203,8 +204,9 @@ def test_the_end_of_a_session_locked_since_its_first_minute_shows_its_whole_aver
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._live_screen = _finished_screen()  # its readout cached at the first minute
     running._session_manager.compute_statistics.return_value = late  # the timer ran out while locked
-    app._ui_last_metrics = METRICS
-    for name in ("_reload_live_graphs_from_mirror", "_undo_session_setup", "_mark_history_dirty"):
+    app._mirror = LiveMirror()
+    app._mirror.last_metrics = METRICS
+    for name in ("_undo_session_setup", "_mark_history_dirty"):
         setattr(app, name, MagicMock())
     app._finalize_stop_ui({"duration": 1800}, None)
     app._live_screen.set_stats_mode("aggregate")

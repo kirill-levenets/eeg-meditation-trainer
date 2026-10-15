@@ -3,7 +3,6 @@ import sqlite3
 import sys
 import threading
 import time
-from collections import deque
 from collections.abc import Callable, Mapping
 from datetime import datetime as _dt
 from types import MappingProxyType
@@ -28,7 +27,7 @@ from app.crash_handler import (
     install_crash_handler,
     report_soft_error,
 )
-from app.eeg.band_spec import BAND_KEYS, group_powers
+from app.eeg.band_spec import BAND_KEYS
 from app.eeg.mock_stream_v2 import MockEEGStream
 from app.eeg.neurosky_stream import NeuroSkyStream
 from app.logger import logger, timed
@@ -40,7 +39,6 @@ from app.metrics.formula_slots import (
 )
 from app.metrics.noise_detector import PowerLineDetector
 from app.session.manager import SessionManager, SessionState, elapsed_clock
-from app.session.scoring import target_steps
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
     segment_target,
@@ -69,7 +67,8 @@ from app.ui.history_screen import HistoryScreen
 from app.ui.line_colours import DEFAULT as LINE_DEFAULT
 from app.ui.line_colours import LINE_COLOURS
 from app.ui.line_colours import OPTIONS as LINE_OPTIONS
-from app.ui.live_session import METRICS_COLORS, LiveSessionScreen
+from app.ui.live_mirror import LiveMirror
+from app.ui.live_session import LiveSessionScreen
 from app.ui.program_run import ProgramRun
 from app.ui.program_settings import ProgramSettings
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
@@ -218,15 +217,7 @@ class EEGMeditationApp(App):
         self._is_paused: bool = False
         self._metrics_buffer: list[dict] = []
         self._raw_buffer: list[dict] = []
-        # Session-lifetime mirrors of what would have gone into the live
-        # graphs. Tick thread appends to these regardless of pause state;
-        # on resume we reload graphs from these in a single batch instead
-        # of replaying N per-tick UI updates. Bounded by graph capacity.
-        self._ui_metrics_history: deque[dict] = deque(maxlen=APP.GRAPH_POINTS_MAX)
-        self._ui_band_history: deque[dict] = deque(maxlen=APP.GRAPH_POINTS_MAX)
-        self._ui_raw_waveform: deque[float] = deque(maxlen=512 * 60)
-        self._ui_last_metrics: dict = {}
-        self._ui_last_state: str = "Neutral"
+        self._mirror: LiveMirror = LiveMirror()  # the live graphs' session, kept through a screen lock
         self._flush_counter: int = 0
         self._current_session_id: Optional[int] = None
         self._current_user_id: Optional[int] = None
@@ -1109,7 +1100,6 @@ class EEGMeditationApp(App):
         self._noise_detector = PowerLineDetector() if not APP.USE_MOCK_DEVICE else None
         self._metrics_buffer = []
         self._raw_buffer = []
-        self._ui_last_state = "Neutral"
         self._flush_counter = 0
         self._tick_count = 0
         self._current_session_id = None
@@ -1426,32 +1416,6 @@ class EEGMeditationApp(App):
         if self._flush_counter >= int(APP.FLUSH_INTERVAL_SECONDS / APP.UPDATE_FREQUENCY) and self._metrics_buffer:
             self._checkpoint_session()
 
-    def _reload_live_graphs_from_mirror(self) -> None:
-        """Batch-reload the 3 live graphs from the session-lifetime mirror
-        buffers (one load_static_data per graph). Used on Android resume and on
-        session finish: during a screen lock the per-tick add_point is skipped
-        (mirror buffers fill instead), so without this the live graph would
-        show only the pre-lock portion of the session."""
-        metrics_snapshot = list(self._ui_metrics_history)
-        band_snapshot = list(self._ui_band_history)
-        waveform_snapshot = list(self._ui_raw_waveform)
-        if metrics_snapshot:
-            metric_series = {
-                key: [d.get(key, 0.0) for d in metrics_snapshot]
-                for key in METRICS_COLORS
-            }
-            self._live_screen.graph.load_static_data(metric_series, new_session=False)
-            self._live_screen.graph.set_threshold_steps(target_steps(d.get("score_target") for d in metrics_snapshot))
-        if band_snapshot:
-            band_keys = ("alpha", "beta", "gamma", "theta", "delta")
-            band_series = {
-                key: [d.get(key, 0.0) for d in band_snapshot]
-                for key in band_keys
-            }
-            self._live_screen.band_graph.load_static_data(band_series, new_session=False)
-        if waveform_snapshot:
-            self._live_screen.raw_graph.load_static_data({"eeg": waveform_snapshot}, new_session=False)
-
     def _finalize_stop_ui(self, stats: dict, session_id: Optional[int]) -> None:
         """Main-thread UI teardown after a session has been persisted."""
         # Reload the live graph from the mirror buffers so it shows the FULL
@@ -1460,10 +1424,10 @@ class EEGMeditationApp(App):
         # covering only the pre-lock seconds while History shows the real
         # duration.
         try:
-            self._reload_live_graphs_from_mirror()
+            self._mirror.reload_into(self._live_screen)
         except Exception:
             logger.exception("graph reload on stop failed")
-        self._live_screen.update_stats(self._ui_last_metrics)  # the whole session's averages: no tick ran while locked
+        self._live_screen.update_stats(self._mirror.last_metrics)  # the whole session's averages: no tick ran while locked
         self._undo_session_setup()
         self._live_screen.update_state("FINISHED")
         # Sync the header timer to the final duration (it froze at lock time).
@@ -1822,22 +1786,7 @@ class EEGMeditationApp(App):
             self._audio.update_sinking(metrics.get("sinking", 0))
             self._audio.update_subtle_distraction(metrics.get("subtle_distraction", 0))
 
-        # Mirror what the UI graphs would have received. Done here on the
-        # tick thread (no Kivy graphics ops) so the data exists even while
-        # the UI is paused (Android screen lock); on resume we batch-reload
-        # the graphs from these mirrors instead of replaying N per-tick
-        # Clock callbacks (which previously flooded the main loop and
-        # caused a black screen).
-        self._ui_metrics_history.append({**metrics, "score_target": target})
-        _band_record = group_powers(lambda k: raw_sample.get(k, 0.0))
-        self._ui_band_history.append(_band_record)
-        _waveform = raw_sample.get("raw_eeg_waveform")
-        if _waveform:
-            self._ui_raw_waveform.extend(_waveform)
-        else:
-            self._ui_raw_waveform.append(sum(_band_record.values()))
-        self._ui_last_metrics = metrics
-        self._ui_last_state = metrics.get("state", "Neutral")
+        self._mirror.record(metrics, target, raw_sample)  # kept even while the screen is locked
 
         # UI updates — dispatch to main thread
         _elapsed_fmt = self._session_manager.elapsed_formatted
@@ -2008,7 +1957,7 @@ class EEGMeditationApp(App):
             logger.info("Marker placed")
 
     def _on_threshold_change(self, value: int) -> None:
-        if self._ui_metrics_history and not self._session_pipeline_live():
+        if self._mirror.metrics and not self._session_pipeline_live():
             self._clear_live_display()  # the last session's line is not the threshold the next one runs against
         # A drag is one change of the threshold in force, at the value it settles on, not one per slider step.
         self._after_settle("apply_threshold", lambda: self._apply_threshold(self._settings_screen.threshold))
@@ -2030,10 +1979,7 @@ class EEGMeditationApp(App):
 
     def _clear_live_display(self) -> None:
         """Empty the Session screen of its session: graphs, their mirrors, threshold steps and the readout."""
-        self._ui_last_metrics = {}
-        self._ui_metrics_history.clear()
-        self._ui_band_history.clear()
-        self._ui_raw_waveform.clear()
+        self._mirror.clear()
         self._live_screen.graph.clear_data()
         self._live_screen.raw_graph.clear_data()
         self._live_screen.band_graph.clear_data()
@@ -3027,10 +2973,10 @@ class EEGMeditationApp(App):
             logger.info("on_resume: session not RUNNING → skipping graph reload")
             return
         try:
-            self._reload_live_graphs_from_mirror()
-            if self._ui_last_metrics:
-                self._live_screen.update_stats(self._ui_last_metrics)
-                self._live_screen.update_state(self._ui_last_state)
+            self._mirror.reload_into(self._live_screen)
+            if self._mirror.last_metrics:
+                self._live_screen.update_stats(self._mirror.last_metrics)
+                self._live_screen.update_state(self._mirror.last_state)
                 self._live_screen.set_shamatha(self._shamatha_active)
         except Exception:
             logger.exception("graph reload on resume failed")

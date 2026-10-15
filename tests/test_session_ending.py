@@ -13,6 +13,7 @@ import app.ui.app_manager as am
 from app.session.manager import SessionManager, SessionState
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
+from app.ui.live_mirror import LiveMirror
 from tests._program_run import make_run
 
 SID = 42
@@ -30,8 +31,7 @@ def _app() -> EEGMeditationApp:
     app._live_screen.summary_notes = ""
     app._summary_saved_notes = ""
     app._current_session_id = None
-    app._ui_last_metrics = {}
-    app._ui_metrics_history, app._ui_band_history, app._ui_raw_waveform = [], [], []
+    app._mirror = LiveMirror()
     app._toast = MagicMock()
     app._history_screen = MagicMock()
     app._refresh_history = MagicMock()
@@ -68,7 +68,7 @@ def test_user_stop_restores_program_series_and_clears_the_training_marker():
     app._stop_tick_thread = MagicMock()
     app._persist_session_data = MagicMock(return_value={"duration": 30})
     app._current_session_id = SID
-    for name in ("_reload_live_graphs_from_mirror", "_program_run", "_release_wake_lock",
+    for name in ("_program_run", "_release_wake_lock",
                  "_stop_session_keep_alive_service"):
         setattr(app, name, MagicMock())
     app._timer_state = MagicMock()
@@ -101,7 +101,7 @@ def _recorded_session(db) -> EEGMeditationApp:
     app._db = db
     app._current_user_id = db.create_user("t")
     app._current_session_id = None
-    app._ui_last_metrics = {}
+    app._mirror = LiveMirror()
     app._metrics_buffer = []
     app._flush_counter = 0
     app._session_manager = SessionManager()
@@ -114,7 +114,7 @@ def _recorded_session(db) -> EEGMeditationApp:
     app._tick_thread = None
     app._eeg_stream = MagicMock()
     for name in ("_stop_tick_thread", "_audio", "_live_screen", "_settings_screen", "_timer_state", "_confirm_action",
-                 "_release_wake_lock", "_stop_session_keep_alive_service", "_reload_live_graphs_from_mirror",
+                 "_release_wake_lock", "_stop_session_keep_alive_service",
                  "_mark_history_dirty"):
         setattr(app, name, MagicMock())
     for _ in range(240):

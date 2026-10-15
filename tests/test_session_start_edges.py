@@ -15,6 +15,7 @@ from app.config import APP
 from app.session.manager import SessionManager, SessionState
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
+from app.ui.live_mirror import LiveMirror
 from tests._program_run import make_run
 
 BANDS = {"delta": 10.0, "theta": 10.0, "alpha1": 10.0, "alpha2": 10.0, "beta1": 10.0, "beta2": 10.0,
@@ -24,7 +25,7 @@ BANDS = {"delta": 10.0, "theta": 10.0, "alpha1": 10.0, "alpha2": 10.0, "beta1": 
 def _app() -> EEGMeditationApp:
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._current_user_id = 1
-    app._ui_last_metrics = {}
+    app._mirror = LiveMirror()
     app._waiting_for_bt = False
     app._bt_signal_start = None
     app._tick_thread = None
@@ -143,7 +144,7 @@ def test_deleting_the_profile_in_the_frame_the_session_starts_leaves_no_audio_pl
     app._db = MagicMock()
     app._current_session_id = None
     app._metrics_buffer = []
-    app._reload_live_graphs_from_mirror = MagicMock()
+    app._mirror = MagicMock()
     app._mark_history_dirty = MagicMock()
     app._discard_running_session()
     _run_queued(app)

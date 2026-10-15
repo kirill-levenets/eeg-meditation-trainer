@@ -3,7 +3,7 @@
 The Android screen-lock fix splits live-graph updates into two paths:
 
 - The tick thread mirrors every sample into session-lifetime deques
-  (``_ui_metrics_history`` / ``_ui_band_history`` / ``_ui_raw_waveform``)
+  (``LiveMirror``: ``metrics`` / ``bands`` / ``waveform``)
   regardless of pause state — no Kivy graphics ops, so it is safe while
   the screen is locked.
 - ``_refresh_ui_after_resume`` reloads all three graphs from those
@@ -17,7 +17,6 @@ exact lines the ANR fix introduced — are exercised, not re-implemented.
 """
 
 import time
-from collections import deque
 from unittest.mock import MagicMock
 
 from app.config import APP
@@ -26,6 +25,7 @@ from app.metrics.formula_slots import FormulaSlots
 from app.session.manager import SessionState
 from app.session.timer_state import TimerState
 from app.ui.app_manager import EEGMeditationApp
+from app.ui.live_mirror import LiveMirror
 from app.ui.live_session import METRICS_COLORS
 from tests._program_run import make_run
 from tests._program_settings import make_programs
@@ -114,11 +114,7 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     app._shamatha_streak = 0
     app._shamatha_threshold = 50
 
-    app._ui_metrics_history = deque(maxlen=APP.GRAPH_POINTS_MAX)
-    app._ui_band_history = deque(maxlen=APP.GRAPH_POINTS_MAX)
-    app._ui_raw_waveform = deque(maxlen=512 * 60)
-    app._ui_last_metrics = {}
-    app._ui_last_state = "Neutral"
+    app._mirror = LiveMirror()
     return app
 
 
@@ -135,11 +131,11 @@ def test_tick_appends_to_all_mirror_buffers():
     app = _make_tick_app()
     _drive_tick(app, _raw_sample(), _metrics())
 
-    assert len(app._ui_metrics_history) == 1
-    assert len(app._ui_band_history) == 1
-    assert len(app._ui_raw_waveform) == 3  # waveform of length 3
-    assert app._ui_last_metrics == _metrics()
-    assert app._ui_last_state == "Shamatha"
+    assert len(app._mirror.metrics) == 1
+    assert len(app._mirror.bands) == 1
+    assert len(app._mirror.waveform) == 3  # waveform of length 3
+    assert app._mirror.last_metrics == _metrics()
+    assert app._mirror.last_state == "Shamatha"
 
 
 def test_tick_band_record_aggregates_paired_bands():
@@ -147,7 +143,7 @@ def test_tick_band_record_aggregates_paired_bands():
     raw = _raw_sample(seed=10.0)
     _drive_tick(app, raw, _metrics())
 
-    band = app._ui_band_history[-1]
+    band = app._mirror.bands[-1]
     assert band["alpha"] == raw["alpha1"] + raw["alpha2"]
     assert band["beta"] == raw["beta1"] + raw["beta2"]
     assert band["gamma"] == raw["gamma1"] + raw["gamma2"]
@@ -197,9 +193,9 @@ def test_tick_waveform_fallback_appends_band_sum():
     _drive_tick(app, raw, _metrics())
 
     # No raw waveform → one synthetic point equal to the band-record sum.
-    band = app._ui_band_history[-1]
-    assert len(app._ui_raw_waveform) == 1
-    assert app._ui_raw_waveform[-1] == sum(band.values())
+    band = app._mirror.bands[-1]
+    assert len(app._mirror.waveform) == 1
+    assert app._mirror.waveform[-1] == sum(band.values())
 
 
 def test_tick_stores_metrics_copy_not_reference():
@@ -208,7 +204,7 @@ def test_tick_stores_metrics_copy_not_reference():
     _drive_tick(app, _raw_sample(), metrics)
 
     metrics["shamatha_score"] = 999  # mutate the original after the tick
-    assert app._ui_metrics_history[-1]["shamatha_score"] != 999
+    assert app._mirror.metrics[-1]["shamatha_score"] != 999
 
 
 def test_mirror_fills_while_paused_but_skips_ui_dispatch():
@@ -217,9 +213,9 @@ def test_mirror_fills_while_paused_but_skips_ui_dispatch():
 
     # The whole point of the fix: data still accrues while the screen is
     # locked, but no per-tick UI work is queued onto the (paused) Clock.
-    assert len(app._ui_metrics_history) == 1
-    assert len(app._ui_band_history) == 1
-    assert len(app._ui_raw_waveform) == 3
+    assert len(app._mirror.metrics) == 1
+    assert len(app._mirror.bands) == 1
+    assert len(app._mirror.waveform) == 3
     app._on_main.assert_not_called()
 
 
@@ -227,7 +223,7 @@ def test_unpaused_tick_dispatches_ui_once():
     app = _make_tick_app(is_paused=False)
     _drive_tick(app, _raw_sample(), _metrics())
 
-    assert len(app._ui_metrics_history) == 1
+    assert len(app._mirror.metrics) == 1
     app._on_main.assert_called_once()
 
 
@@ -244,19 +240,15 @@ def _make_resume_app(running: bool = True) -> EEGMeditationApp:
     app._live_screen = MagicMock()
     app._program_run = make_run(app)
     app._settings_screen = MagicMock()
-    app._ui_metrics_history = deque(maxlen=APP.GRAPH_POINTS_MAX)
-    app._ui_band_history = deque(maxlen=APP.GRAPH_POINTS_MAX)
-    app._ui_raw_waveform = deque(maxlen=512 * 60)
-    app._ui_last_metrics = {}
-    app._ui_last_state = "Neutral"
+    app._mirror = LiveMirror()
     return app
 
 
 def _populate(app: EEGMeditationApp, n: int) -> None:
     for i in range(n):
-        app._ui_metrics_history.append(_metrics(seed=float(i)))
+        app._mirror.metrics.append(_metrics(seed=float(i)))
         raw = _raw_sample(seed=float(i))
-        app._ui_band_history.append(
+        app._mirror.bands.append(
             {
                 "alpha": raw["alpha1"] + raw["alpha2"],
                 "beta": raw["beta1"] + raw["beta2"],
@@ -265,9 +257,9 @@ def _populate(app: EEGMeditationApp, n: int) -> None:
                 "delta": raw["delta"],
             }
         )
-        app._ui_raw_waveform.extend(raw["raw_eeg_waveform"])
-    app._ui_last_metrics = _metrics(seed=float(n - 1))
-    app._ui_last_state = "Shamatha"
+        app._mirror.waveform.extend(raw["raw_eeg_waveform"])
+    app._mirror.last_metrics = _metrics(seed=float(n - 1))
+    app._mirror.last_state = "Shamatha"
 
 
 def test_resume_batch_reloads_each_graph_once():
@@ -334,7 +326,7 @@ def test_resume_refreshes_stats_state_and_timer():
     EEGMeditationApp._refresh_ui_after_resume(app)
     ls = app._live_screen
 
-    ls.update_stats.assert_called_once_with(app._ui_last_metrics)
+    ls.update_stats.assert_called_once_with(app._mirror.last_metrics)
     ls.update_state.assert_called_once_with("Shamatha")
     ls.update_timer.assert_called_once_with("1:23")
 

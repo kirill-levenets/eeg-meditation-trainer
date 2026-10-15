@@ -3,7 +3,6 @@ follow it together, from the next tick, and a drag is one change at the value it
 their targets. The live graph steps its threshold line where the ticks' target changes, and so does the session
 detail."""
 
-from collections import deque
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -19,6 +18,7 @@ from app.session.scoring import target_steps
 from app.session.session_program import SessionProgram
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.diary_screen import detail_graph_data
+from app.ui.live_mirror import LiveMirror
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
 from tests._program_run import make_run
@@ -37,7 +37,7 @@ def _threshold_app(*, program: bool = False, state: SessionState = SessionState.
     a._persist_user_setting_later = MagicMock()
     a._loading_settings = False
     a._program_run = make_run(a, program=MagicMock() if program else None)
-    a._ui_metrics_history, a._ui_band_history, a._ui_raw_waveform = deque(), deque(), deque()
+    a._mirror = LiveMirror()
     a._shamatha_threshold = 70
     a._metrics_engine.meditation_threshold = 70
     sm = SessionManager()
@@ -156,7 +156,7 @@ def test_each_ticks_row_and_mirror_point_record_its_target():
         _drive_tick(a, _raw_sample(), _metrics(seed=80.0))
     assert [(r["score_key"], r["score_value"], r["score_target"]) for r in a._metrics_buffer] == [
         ("shamatha_score", 80.0, 70), ("shamatha_score", 80.0, 70), ("shamatha_score", 80.0, 85)]
-    assert [m["score_target"] for m in a._ui_metrics_history] == [70, 70, 85]
+    assert [m["score_target"] for m in a._mirror.metrics] == [70, 70, 85]
     assert [c.kwargs["threshold"] for c in _ui_updates(a)] == [70, 70, 85]
 
 
@@ -173,7 +173,7 @@ def test_a_tick_the_session_paused_under_is_not_recorded():
     a._session_manager.add_metric = pause_first
     a._pending_marker = True
     _drive_tick(a, _raw_sample(), _metrics())
-    assert a._metrics_buffer == [] and len(a._ui_metrics_history) == 0
+    assert a._metrics_buffer == [] and len(a._mirror.metrics) == 0
     a._on_main.assert_not_called()
     assert a._pending_marker  # it goes on the next tick that is recorded
 
@@ -185,7 +185,7 @@ def test_the_live_graph_reloaded_from_the_mirror_steps_its_line():
         if i == 2:
             a._apply_threshold(85)
         _drive_tick(a, _raw_sample(), _metrics(seed=80.0))
-    a._reload_live_graphs_from_mirror()
+    a._mirror.reload_into(a._live_screen)
     a._live_screen.graph.set_threshold_steps.assert_called_with([(0, 70), (2, 85)])
 
 
@@ -267,7 +267,7 @@ def _start(program: bool, monkeypatch, prepare=None, **before) -> EEGMeditationA
     a._feedback_plan = lambda p, gid: ({gid: ("noise", "")}, ["noise", "noise"], gid)
     a._reward_id = lambda: ""
     a._eeg_stream = MagicMock()
-    a._ui_metrics_history, a._ui_band_history, a._ui_raw_waveform = deque(), deque(), deque()
+    a._mirror = LiveMirror()
     a._live_screen.graph.set_threshold_steps([(0, 50)])  # the last session's steps
     for name, value in before.items():
         setattr(a, name, value)
@@ -425,7 +425,8 @@ def test_a_program_start_that_fails_in_its_setup_leaves_the_controls_unlocked(mo
 
 def _idle_app() -> EEGMeditationApp:
     a = _threshold_app(state=SessionState.FINISHED)  # the last session ended; its graphs are still on screen
-    a._ui_metrics_history, a._ui_band_history, a._ui_raw_waveform = deque([{}]), deque([{}]), deque([0.0])
+    a._mirror = LiveMirror()
+    a._mirror.record({}, 70, {})
     a._after_settle = MagicMock()
     return a
 
@@ -436,7 +437,7 @@ def test_moving_the_slider_while_idle_clears_the_last_sessions_graphs():
     for graph in (a._live_screen.graph, a._live_screen.raw_graph, a._live_screen.band_graph):
         graph.clear_data.assert_called_once()
     a._live_screen.graph.set_threshold_steps.assert_called_with(None)
-    assert not a._ui_metrics_history and not a._ui_band_history and not a._ui_raw_waveform
+    assert not a._mirror.metrics and not a._mirror.bands and not a._mirror.waveform
     a._apply_threshold(85)  # the settled value
     a._live_screen.graph.set_threshold.assert_called_with(85.0)
 
@@ -452,7 +453,7 @@ def test_reapplying_the_settings_threshold_keeps_the_graphs():
 
 def test_nothing_to_clear_before_any_session():
     a = _idle_app()
-    a._ui_metrics_history.clear()
+    a._mirror.metrics.clear()
     a._on_threshold_change(85)
     a._live_screen.graph.clear_data.assert_not_called()
 
@@ -460,7 +461,7 @@ def test_nothing_to_clear_before_any_session():
 def test_moving_the_slider_during_a_simple_session_keeps_its_graphs():
     a = _threshold_app()
     a._after_settle = MagicMock()
-    a._ui_metrics_history.append({})
+    a._mirror.metrics.append({})
     a._on_threshold_change(85)
     a._live_screen.graph.clear_data.assert_not_called()
     a._live_screen.graph.set_threshold_steps.assert_not_called()
