@@ -108,7 +108,7 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     app._tick_thread = None  # as __init__ leaves it
 
     app._program_run = make_run(app)
-    app._programs = make_programs(app._db, app._current_user_id)
+    app._program_settings = make_programs(app._db, app._current_user_id)
 
     app._shamatha_active = False
     app._shamatha_streak = 0

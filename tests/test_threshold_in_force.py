@@ -255,9 +255,9 @@ def _start(program: bool, monkeypatch, prepare=None, **before) -> EEGMeditationA
     a._settings_screen = MagicMock(threshold=70, timer_enabled=False, timer_minutes=20)
     prog = SessionProgram([{"minutes": 5, "formula": "shamatha_score", "target": 60},
                            {"minutes": 5, "formula": "meditation_score", "target": 80}])
-    a._programs = make_programs()
-    a._programs.segments = prog.segments
-    a._programs.mode = "program" if program else "simple"
+    a._program_settings = make_programs()
+    a._program_settings.segments = prog.segments
+    a._program_settings.mode = "program" if program else "simple"
     a._timer_state = MagicMock()
     for name in ("_warn_missing_sound_files", "_acquire_wake_lock",
                  "_start_session_keep_alive_service", "_start_tick_thread"):

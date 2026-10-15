@@ -5,7 +5,7 @@ from tests._program_run import make_run
 from tests._program_settings import make_programs
 
 
-def _programs(db, uid, **kw):
+def _program_settings(db, uid, **kw):
     return make_programs(db, uid, **kw)
 
 
@@ -13,7 +13,7 @@ def test_program_persist_roundtrip(tmp_path):
     db = DatabaseManager(db_path=str(tmp_path / "sp_wire.db"))
     uid = db.create_user("u")
 
-    programs = _programs(db, uid)
+    programs = _program_settings(db, uid)
     segs = [{"minutes": 10, "target": 50, "formula": "shamatha_score"}]
     programs.segments = segs
     programs.name = "Ramp"
@@ -21,7 +21,7 @@ def test_program_persist_roundtrip(tmp_path):
     programs.persist(uid)
 
     # A fresh profile load on the same DB restores the persisted program + name + mode.
-    fresh = _programs(db, uid)
+    fresh = _program_settings(db, uid)
     fresh.load(uid)
     assert fresh.segments == segs
     assert fresh.name == "Ramp"
@@ -48,8 +48,8 @@ def test_session_program_json_records_snapshot_not_live_editor():
     snapshot = [{"minutes": 10, "target": 50, "formula": "shamatha_score"}]
     app._program_run = make_run(program=SessionProgram(snapshot))
     # A mid-session edit to the live editor must NOT change what's recorded.
-    app._programs = make_programs()
-    app._programs.segments = [{"minutes": 99, "target": 1, "formula": "meditation_score"}]
+    app._program_settings = make_programs()
+    app._program_settings.segments = [{"minutes": 99, "target": 1, "formula": "meditation_score"}]
     assert json.loads(app._program_run.segments_json()) == snapshot
     # A simple session records nothing.
     assert make_run().segments_json() == ""
@@ -97,7 +97,7 @@ def test_saved_program_unique_upsert_load_delete(tmp_path):
     db = DatabaseManager(db_path=str(tmp_path / "u.db"))
     uid = db.create_user("u")
     settings = _StubSettings()
-    programs = _programs(db, uid, settings_screen=settings, live_screen=_StubLive())
+    programs = _program_settings(db, uid, settings_screen=settings, live_screen=_StubLive())
     programs.segments = [{"minutes": 10, "target": 50, "formula": "shamatha_score"}]
     programs.mode = "program"
 
@@ -249,16 +249,16 @@ def test_idle_program_preview_shows_program_set(tmp_path):
     app._session_manager = MagicMock()
     app._session_manager.state = SessionState.IDLE  # not running
     app._formulas = FormulaSlots()
-    app._programs = _programs(db, uid, live_screen=app._live_screen, session_manager=app._session_manager,
+    app._program_settings = _program_settings(db, uid, live_screen=app._live_screen, session_manager=app._session_manager,
                               show_saved_series=lambda u: app._apply_saved_series(app._live_screen.graph, u))
-    app._programs.mode = "program"
-    app._programs.segments = [
+    app._program_settings.mode = "program"
+    app._program_settings.segments = [
         {"minutes": 1, "target": 50, "formula": "shamatha_score"},
         {"minutes": 1, "target": 80, "formula": {"name": "Alpha", "formula": "alpha1"}},
     ]
     g = app._live_screen.graph
 
-    app._programs.refresh_live_series()  # idle preview
+    app._program_settings.refresh_live_series()  # idle preview
     assert set(g.visible_keys()) == {"shamatha_score", "program_formula"}
     assert g.series_name("program_formula") == "Program: Alpha"
 
@@ -267,8 +267,8 @@ def test_idle_program_preview_shows_program_set(tmp_path):
     assert db.get_user_json_setting(uid, "graph_series_live_metrics") == ["shamatha_score"]
 
     # Back to simple mode -> the saved selection (shamatha only) is restored.
-    app._programs.mode = "simple"
-    app._programs.refresh_live_series()
+    app._program_settings.mode = "simple"
+    app._program_settings.refresh_live_series()
     assert set(g.visible_keys()) == {"shamatha_score"}
     db.close()
 
@@ -291,7 +291,7 @@ def test_program_unsaved_changes_detection(tmp_path):
     db = DatabaseManager(db_path=str(tmp_path / "unsaved.db"))
     uid = db.create_user("u")
     db.add_saved_program(uid, "Ramp", [{"minutes": 10, "target": 50, "formula": "shamatha_score"}])
-    programs = _programs(db, uid)
+    programs = _program_settings(db, uid)
 
     programs.segments = []           # nothing loaded
     programs.name = ""

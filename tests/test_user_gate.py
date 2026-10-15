@@ -141,7 +141,7 @@ def test_deleting_active_profile_mid_session_discards_it_and_regates():
     app._db = MagicMock()
     app._db.get_all_users.return_value = []       # last profile removed
     app._refresh_profile = MagicMock()
-    app._programs = MagicMock()
+    app._program_settings = MagicMock()
     app._open_user_gate = MagicMock()
     EEGMeditationApp._on_user_delete(app, 5)
     app._discard_running_session.assert_called_once()  # discarded, not saved-then-orphaned
@@ -158,7 +158,7 @@ def test_deleting_last_profile_in_all_users_view_regates():
     app._db = MagicMock()
     app._db.get_all_users.return_value = []
     app._refresh_profile = MagicMock()
-    app._programs = MagicMock()
+    app._program_settings = MagicMock()
     app._open_user_gate = MagicMock()
     EEGMeditationApp._on_user_delete(app, 9)
     app._open_user_gate.assert_called_once()
@@ -171,7 +171,7 @@ def test_reopen_gate_when_selection_left_no_user():
     app._current_user_id = None
     app._view_all_users = False
     app._refresh_profile = MagicMock()
-    app._programs = MagicMock()
+    app._program_settings = MagicMock()
     app._open_user_gate = MagicMock()
     EEGMeditationApp._reopen_gate_if_unresolved(app)
     app._open_user_gate.assert_called_once()
@@ -251,7 +251,7 @@ def test_delete_active_profile_discards_during_bt_connect():
     app._db = MagicMock()
     app._db.get_all_users.return_value = []
     app._refresh_profile = MagicMock()
-    app._programs = MagicMock()
+    app._program_settings = MagicMock()
     app._open_user_gate = MagicMock()
     EEGMeditationApp._on_user_delete(app, 5)
     app._discard_running_session.assert_called_once()   # connecting session halted

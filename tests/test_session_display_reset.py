@@ -171,7 +171,7 @@ def _deleting_app(shown) -> EEGMeditationApp:
     app._current_user_id = 2
     app._view_all_users = False
     app._live_display_uid = shown
-    for name in ("_session_pipeline_live", "_mark_history_dirty", "_refresh_profile", "_programs",
+    for name in ("_session_pipeline_live", "_mark_history_dirty", "_refresh_profile", "_program_settings",
                  "_open_user_gate", "_drop_shown_session"):
         setattr(app, name, MagicMock(return_value=False))
     return app

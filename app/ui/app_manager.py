@@ -493,7 +493,7 @@ class EEGMeditationApp(App):
         self._history_screen = HistoryScreen()
         self._diary_screen = DiaryScreen()
         self._timer_state = TimerState()
-        self._programs = ProgramSettings(
+        self._program_settings = ProgramSettings(
             self._db, self._settings_screen, self._live_screen, self._session_manager,
             user_id=lambda: self._current_user_id, require_user=self._require_user, confirm=self._confirm_action,
             info=self._info_popup, confirm_saved_delete=self._confirm_saved_delete,
@@ -599,8 +599,8 @@ class EEGMeditationApp(App):
         self._live_screen.btn_pause.bind(on_release=self._on_pause)
         self._live_screen.btn_stop.bind(on_release=self._on_stop)
         self._live_screen.btn_marker.bind(on_release=self._on_marker)
-        self._live_screen.on_duration_preset = self._programs.on_duration_preset
-        self._live_screen.on_program_pick = self._programs.on_load
+        self._live_screen.on_duration_preset = self._program_settings.on_duration_preset
+        self._live_screen.on_program_pick = self._program_settings.on_load
         self._live_screen.overlay_cancel_btn.bind(on_release=self._on_connect_cancel)
         self._live_screen.overlay_retry_btn.bind(on_release=self._on_connect_retry)
         self._live_screen.summary_ok_btn.bind(on_release=self._on_summary_ok)
@@ -638,11 +638,11 @@ class EEGMeditationApp(App):
         self._settings_screen.set_audio_formula_index_callback(self._on_audio_formula_index)
         self._settings_screen.set_feedback_source_callback(self._on_feedback_source_change)
         self._settings_screen.set_reward_source_callback(self._on_reward_source_change)
-        self._settings_screen.set_program_mode_callback(self._programs.on_mode_change)
-        self._settings_screen.set_program_changed_callback(self._programs.on_changed)
-        self._settings_screen.set_program_save_callback(self._programs.on_save)
-        self._settings_screen.set_program_load_callback(self._programs.on_load)
-        self._settings_screen.set_program_delete_callback(self._programs.on_delete)
+        self._settings_screen.set_program_mode_callback(self._program_settings.on_mode_change)
+        self._settings_screen.set_program_changed_callback(self._program_settings.on_changed)
+        self._settings_screen.set_program_save_callback(self._program_settings.on_save)
+        self._settings_screen.set_program_load_callback(self._program_settings.on_load)
+        self._settings_screen.set_program_delete_callback(self._program_settings.on_delete)
         self._settings_screen.set_theme_callback(self._on_theme_change)
 
         # Keyboard hotkey for marker
@@ -942,7 +942,7 @@ class EEGMeditationApp(App):
             self._refresh_history()
         elif name == "live_session":
             # Reflect any Settings timer/mode change on the Start duration button.
-            self._programs.sync_picker()
+            self._program_settings.sync_picker()
         # Sync bottom nav highlight
         for tab_key, screen in self._TAB_SCREENS.items():
             if screen == name:
@@ -1091,7 +1091,7 @@ class EEGMeditationApp(App):
         # doesn't overlap with the new session's noise loop.
         self._audio.stop_timer_bell()
         threshold = self._settings_screen.threshold
-        program = self._programs.for_session()
+        program = self._program_settings.for_session()
         self._cancel_settle("apply_threshold")  # a slider move just before Start: the start applies the slider itself
         if program:
             # Program total drives the timer so auto-stop reuses the proven
@@ -2149,7 +2149,7 @@ class EEGMeditationApp(App):
         uid = self._current_user_id
         if not (uid and graph.graph_id):
             return
-        if graph is self._live_screen.graph and self._programs.governs_live_series():
+        if graph is self._live_screen.graph and self._program_settings.governs_live_series():
             return
         self._db.set_user_json_setting(
             uid, f"graph_series_{graph.graph_id}",
@@ -2215,7 +2215,7 @@ class EEGMeditationApp(App):
             return stats
         if self._program_run.active:
             return {**stats, "score_metric_key": "program",
-                    "score_metric_name": self._programs.name or "Program", "avg_score": None}
+                    "score_metric_name": self._program_settings.name or "Program", "avg_score": None}
         key = stats.get("score_metric_key") or self._audio_drive_key()  # no scored tick yet: what it would score
         return {**stats, "score_metric_key": key, "score_metric_name": self._live_screen.graph.series_name(key)}
 
@@ -2982,7 +2982,7 @@ class EEGMeditationApp(App):
             self._current_user_id = None
             self._view_all_users = False
             self._refresh_profile()
-            self._programs.refresh_saved()  # drop the deleted user's programs from the UI now
+            self._program_settings.refresh_saved()  # drop the deleted user's programs from the UI now
             self._open_user_gate(0)
         else:
             self._refresh_profile()
@@ -3101,11 +3101,11 @@ class EEGMeditationApp(App):
         try:
             self._settings_store.save(uid)          # all scalar per-user settings + theme
             self._persist_active_formulas(uid)
-            self._programs.persist(uid)
+            self._program_settings.persist(uid)
             # Per-graph series selection (the on-graph picker is the source of truth).
             for g in self._all_graphs():
                 if g.graph_id and len(g.series_keys()) > 1:
-                    if g is self._live_screen.graph and self._programs.governs_live_series():
+                    if g is self._live_screen.graph and self._program_settings.governs_live_series():
                         continue  # program-driven visibility; keep the saved manual selection
                     self._db.set_user_json_setting(
                         uid, f"graph_series_{g.graph_id}",
@@ -3181,7 +3181,7 @@ class EEGMeditationApp(App):
         # Load formulas BEFORE _restore_graph_series so the per-slot validity gate
         # sees real is_valid; the picker selection (graph_series_*) decides visibility.
         self._formulas.load(read_active(self._db, user_id))
-        self._programs.load(user_id)  # its saved-programs list goes to both UIs at the end (refresh_saved)
+        self._program_settings.load(user_id)  # its saved-programs list goes to both UIs at the end (refresh_saved)
         self._push_formula_names_to_graph()
         # Reflect every slot's name+formula into the Settings inputs.
         for i in range(len(FORMULA_KEYS)):
@@ -3209,9 +3209,9 @@ class EEGMeditationApp(App):
         self._history_screen.set_view_mode(history_mode)
 
         # Sync live-screen preset highlight (incl. program "P") with loaded state
-        self._programs.sync_picker()
+        self._program_settings.sync_picker()
         self._refresh_saved_formulas()
-        self._programs.refresh_saved()
+        self._program_settings.refresh_saved()
         logger.debug(f"Loaded settings for user {user_id}")
 
     def on_start(self) -> None:
