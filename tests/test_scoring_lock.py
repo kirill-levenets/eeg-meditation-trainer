@@ -89,7 +89,7 @@ def test_the_driving_slots_formula_cant_change_while_a_session_runs(app):
     app._formula_settings.on_slot_change(0, "Calm ratio", "alpha2 / beta2 * 100")
     assert _refused(app)
     assert app._formulas.evaluators[0].formula == "alpha1 / beta1 * 100"
-    app._settings_screen.set_formula_slot.assert_called_with(0, "Custom 1", "alpha1 / beta1 * 100")  # inputs restored
+    app._settings_screen.formulas.set_formula_slot.assert_called_with(0, "Custom 1", "alpha1 / beta1 * 100")  # inputs restored
 
 
 def test_the_driving_slot_cant_be_cleared_either(app):
@@ -125,7 +125,7 @@ def test_loading_a_saved_formula_into_the_driving_slot_is_refused(app, monkeypat
     app._formula_settings.on_load(0)
     assert _refused(app)
     assert not app._formulas.evaluators[2].is_valid
-    app._settings_screen.set_formula_slot.assert_called_with(2, "Custom 3", "")  # inputs restored
+    app._settings_screen.formulas.set_formula_slot.assert_called_with(2, "Custom 3", "")  # inputs restored
 
 
 @pytest.mark.parametrize("call, doing", [

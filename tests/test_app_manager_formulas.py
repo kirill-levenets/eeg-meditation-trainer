@@ -236,10 +236,10 @@ class TestAssignSavedToSlot(unittest.TestCase):
         app._current_user_id = None
         app._audio_metric_key = "shamatha_score"  # the app's default: no formula slot drives the sound
         app._live_screen = types.SimpleNamespace(graph=_FakeGraph())
-        app._settings_screen = types.SimpleNamespace(
+        app._settings_screen = types.SimpleNamespace(formulas=types.SimpleNamespace(
             set_formula_slot=lambda *a, **k: None,
             set_formula_slot_status=lambda *a, **k: None,
-        )
+        ))
         app._formula_settings = make_formula_settings(app)
         return app
 

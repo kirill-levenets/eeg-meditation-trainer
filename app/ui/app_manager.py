@@ -488,7 +488,7 @@ class EEGMeditationApp(App):
             show_saved_series=lambda uid: self._graph_series.apply_saved(self._live_screen.graph, uid),
             save_settings=self._save_user_settings)
         self._formula_settings = FormulaSettings(
-            self._db, self._settings_screen, self._live_screen.graph, self._formulas,
+            self._db, self._settings_screen.formulas, self._live_screen.graph, self._formulas,
             user_id=lambda: self._current_user_id, require_user=self._require_user,
             scoring_locked=self._scoring_locked, audio_key=lambda: self._audio_metric_key,
             confirm_saved_delete=self._confirm_saved_delete)
@@ -627,11 +627,11 @@ class EEGMeditationApp(App):
         self._settings_screen.set_copy_diagnostics_callback(self._on_copy_diagnostics)
         self._settings_screen.set_line_width_callback(self._on_line_width_change)
         self._settings_screen.set_rotate_screen_callback(self._on_rotate_screen)
-        self._settings_screen.set_formula_slot_callback(self._formula_settings.on_slot_change)
-        self._settings_screen.set_save_formula_callback(self._formula_settings.on_save)
-        self._settings_screen.set_load_formula_callback(self._formula_settings.on_load)
-        self._settings_screen.set_delete_formula_callback(self._formula_settings.on_delete)
-        self._settings_screen.set_export_formulas_callback(self._formula_settings.on_export)
+        self._settings_screen.formulas.set_formula_slot_callback(self._formula_settings.on_slot_change)
+        self._settings_screen.formulas.set_save_formula_callback(self._formula_settings.on_save)
+        self._settings_screen.formulas.set_load_formula_callback(self._formula_settings.on_load)
+        self._settings_screen.formulas.set_delete_formula_callback(self._formula_settings.on_delete)
+        self._settings_screen.formulas.set_export_formulas_callback(self._formula_settings.on_export)
         self._settings_screen.set_audio_metric_callback(self._on_audio_metric_change)
         self._settings_screen.set_audio_formula_index_callback(self._on_audio_formula_index)
         self._settings_screen.set_feedback_source_callback(self._on_feedback_source_change)

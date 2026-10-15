@@ -61,6 +61,8 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         metric_keys = [k for k in METRICS_COLORS if k != "custom_formula"]
         settings = types.SimpleNamespace()
         settings._graph_toggles = {k: (k == "shamatha_score") for k in metric_keys}
+        settings.formulas = types.SimpleNamespace(set_formula_slot=lambda *a, **k: None,
+                                                  set_formula_slot_status=lambda *a, **k: None)
         self.app._settings_screen = settings
         self.app._formulas = FormulaSlots()
         self.app._formulas.evaluators[0] = types.SimpleNamespace(is_valid=False)
@@ -174,7 +176,6 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         from app.metrics.custom_formula import CustomFormulaEvaluator
 
         self.app._formulas.evaluators[0] = CustomFormulaEvaluator()
-        self.app._settings_screen.set_formula_slot = lambda *a, **k: None
         formula = "alpha + beta"
 
         self.app._db.set_user_json_setting(
@@ -192,7 +193,6 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         from app.metrics.custom_formula import CustomFormulaEvaluator
 
         self.app._formulas.evaluators[0] = CustomFormulaEvaluator()
-        self.app._settings_screen.set_formula_slot = lambda *a, **k: None
         formula = "alpha + beta"
 
         self.app._db.set_user_json_setting(
