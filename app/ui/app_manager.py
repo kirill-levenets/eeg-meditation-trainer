@@ -1426,9 +1426,8 @@ class EEGMeditationApp(App):
             self._on_main_for_wait(lambda m=msg: self._live_screen.update_overlay(m))
 
     def _bt_link_dropped(self, name: str) -> bool:
-        """Tick thread: the link dropped and the reader reconnects: the next connection gets its own connect and
-        no-data windows, and only its own packets count (one that inherited the old windows was given up 0.4 s after it
-        connected). A headset that keeps closing it ends the wait instead: True."""
+        """Tick thread: the link dropped and the reader reconnects; True if the headset keeps closing it (the wait ends)."""
+        # The next connection gets its own connect and no-data windows, and only its own packets count.
         self._bt_signal_start = None
         self._bt_dropped_at = time.monotonic()
         self._bt_connect_start = time.time()
@@ -1665,7 +1664,7 @@ class EEGMeditationApp(App):
                      f"native_med={native_med:.0f}{bat_str}")
 
     def _show_tick(self, metrics: dict, raw_sample: dict, target: float, marker_pending: bool,
-                   scored: Optional[str]) -> None:
+                   scored: str | None) -> None:
         """Tick thread: queue the tick's Session screen update for the main thread, unless the screen is locked."""
         elapsed_fmt = self._session_manager.elapsed_formatted
 
@@ -1706,11 +1705,10 @@ class EEGMeditationApp(App):
             self._on_main(_ui_update)
 
     def _end_by_timer(self) -> None:
-        """Tick thread: the timer expired. Persist FIRST, before any audio teardown: the finished session must be saved
-        even though the screen may be locked. (Originally _audio.stop() ran here first and DEADLOCKED the tick thread:
-        MediaPlayer.release() synchronises with its event handler on the main Looper, which is PAUSED during lock — so
-        the save never ran and the whole session was lost.)"""
+        """Tick thread: the timer expired; save the session, silence it, end the tick, ring the gong."""
         logger.info("Timer expired, auto-stopping session")
+        # Persist FIRST, before any audio teardown: the session must be saved even with the screen locked, and
+        # MediaPlayer.release() on this thread waits on the main Looper, which is paused during a lock.
         stats = self._persist_session_data(reason="timer")
         session_id = self._recorder.session_id
         # Silence the noise with a non-blocking volume→0 (setVolume is a
