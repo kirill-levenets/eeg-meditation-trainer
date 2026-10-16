@@ -17,16 +17,16 @@ from app.storage.fileops import discard_file
 # ---------------------------------------------------------------------------
 
 class _KivyNoisePlayer:
-    """Kivy SoundLoader-backed noise loop. Used on desktop platforms."""
+    """Kivy SoundLoader-backed player: a noise loop or a one-shot alert. Used on desktop platforms."""
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, loop: bool = True) -> None:
         from kivy.core.audio import SoundLoader
         snd = SoundLoader.load(path)
         if snd is None:
             raise RuntimeError(f"SoundLoader could not load {path!r}")
-        snd.loop = True
+        snd.loop = loop
         self._snd = snd
-        self.loop: bool = True
+        self.loop: bool = loop
 
     @property
     def volume(self) -> float:
@@ -53,7 +53,7 @@ class _KivyNoisePlayer:
 class _AndroidMediaNoisePlayer:
     """MediaPlayer-backed player. USAGE_MEDIA so it keeps playing through
     screen lock (SDL_mixer/SoundLoader is silenced while locked). Used for the
-    looping noise (loop=True) and the one-shot timer gong (loop=False)."""
+    looping noise (loop=True), the one-shot timer gong and the alerts (loop=False)."""
 
     def __init__(self, path: str, loop: bool = True) -> None:
         from jnius import autoclass
@@ -148,8 +148,8 @@ class _AndroidMediaNoisePlayer:
             logger.exception("MediaPlayer abandonAudioFocusRequest failed")
 
 
-def _make_noise_player(path: str):
-    """Return the right noise player for this platform.
+def _make_noise_player(path: str, loop: bool = True):
+    """Return the right player for this platform: a noise loop, or a one-shot alert (loop=False).
 
     On Android, tries MediaPlayer first (survives screen lock). Falls back to
     SoundLoader if MediaPlayer init fails. Desktop always uses SoundLoader.
@@ -157,10 +157,10 @@ def _make_noise_player(path: str):
     from kivy.utils import platform as kplat
     if kplat == "android":
         try:
-            return _AndroidMediaNoisePlayer(path)
+            return _AndroidMediaNoisePlayer(path, loop)
         except Exception as e:
-            logger.warning(f"Falling back to SoundLoader for noise: {e}")
-    return _KivyNoisePlayer(path)
+            logger.warning(f"Falling back to SoundLoader for {path}: {e}")
+    return _KivyNoisePlayer(path, loop)
 
 METRICS_THRESHOLD_FALLBACK = 100
 _FADE_SAMPLES = 512
@@ -363,7 +363,7 @@ class AudioEngine:
         self._active_feedback: str = ""                 # below-threshold (noise) player id
         self._reward_feedback: str = ""                 # above-threshold reward player id ("" = none)
         self._reward_target_volume: float = 0.0
-        self._bell_sound: object = None
+        self._bell_sound: object = None  # the gong on desktop (SoundLoader)
         self._timer_bell_player: object = None  # Android MediaPlayer gong (lock-through)
         self._noise_path: str = ""
         self._bell_path: str = ""
@@ -381,8 +381,10 @@ class AudioEngine:
         self._heartbeat_path = os.path.join(self._tmpdir, "heartbeat.wav")
         self._chime_path = os.path.join(self._tmpdir, "chime.wav")
         self._disconnect_path = os.path.join(self._tmpdir, "disconnect.wav")
+        self._sinking_bell_sound: object = None  # each alert's one player, replayed (see _play_one_shot)
         self._chime_sound: object = None
         self._disconnect_sound: object = None
+        self._one_shot_lock = threading.Lock()
         self._lock = threading.Lock()
         self._ramp_thread: Optional[threading.Thread] = None
         self._ramp_running: bool = False
@@ -633,20 +635,32 @@ class AudioEngine:
             logger.warning(f"Failed to play sound {path}: {e}")
         return None
 
+    def _play_one_shot(self, attr: str, path: str, volume: float) -> None:
+        """Play an alert from its start on the one player it keeps: on Android a MediaPlayer, since SDL_mixer holds its
+        lock while the app is paused and a SoundLoader call from the tick thread then stopped every Python thread."""
+        try:
+            with self._one_shot_lock:
+                snd = getattr(self, attr)
+                if snd is None:
+                    snd = _make_noise_player(path, loop=False)
+                    setattr(self, attr, snd)
+            snd.volume = volume
+            snd.stop()  # rewinds a replay
+            snd.play()
+        except Exception as e:
+            logger.warning(f"Failed to play sound {path}: {e}")
+
     def _play_bell(self) -> None:
         """Play the sinking bell WAV."""
-        self._unload_one_shot("_bell_sound")
-        self._bell_sound = self._play_sound(self._bell_path, 0.8)
+        self._play_one_shot("_sinking_bell_sound", self._bell_path, 0.8)
 
     def _play_chime(self) -> None:
         """Play the gentle chime WAV for subtle distraction."""
-        self._unload_one_shot("_chime_sound")
-        self._chime_sound = self._play_sound(self._chime_path, 0.6)
+        self._play_one_shot("_chime_sound", self._chime_path, 0.6)
 
     def _play_disconnect(self) -> None:
         """Play the harsh disconnect alert WAV."""
-        self._unload_one_shot("_disconnect_sound")
-        self._disconnect_sound = self._play_sound(self._disconnect_path, 0.9)
+        self._play_one_shot("_disconnect_sound", self._disconnect_path, 0.9)
 
     def start(self) -> None:
         """Start noise playback."""
@@ -850,21 +864,13 @@ class AudioEngine:
         self._unload_one_shot("_bell_sound")
 
     def _unload_one_shot(self, attr: str) -> None:
-        """Let go of a one-shot sound; off the main thread (a tick's alert or cue) its release waits for the main one."""
-        snd = getattr(self, attr, None)
+        """Release a one-shot sound. Main thread only (stop, cleanup, the gong's stop): a tick's alert replays its
+        player instead of releasing it."""
+        with self._one_shot_lock:
+            snd = getattr(self, attr, None)
+            setattr(self, attr, None)
         if not snd:
             return
-        setattr(self, attr, None)
-        if threading.current_thread() is threading.main_thread():
-            self._release_one_shot(snd, attr)
-            return
-        # MediaPlayer.stop()/release() wait on the main Looper, which a locked screen pauses: on the tick thread they
-        # froze the app. Kivy runs the release on the main thread when it next runs.
-        from kivy.clock import Clock
-        Clock.schedule_once(lambda _dt: self._release_one_shot(snd, attr))
-
-    @staticmethod
-    def _release_one_shot(snd, attr: str) -> None:
         try:
             snd.stop()
             snd.unload()
@@ -932,6 +938,7 @@ class AudioEngine:
         self.stop()
         self.stop_timer_bell()
         self._unload_one_shot("_disconnect_sound")
+        self._unload_one_shot("_sinking_bell_sound")
         for path in (
             self._noise_path,
             self._bell_path,
