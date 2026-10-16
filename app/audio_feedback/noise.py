@@ -74,7 +74,7 @@ class _AndroidMediaNoisePlayer:
         self._mp.prepare()  # synchronous — fine for small WAV files
         self._volume: float = 0.0
         self._mp.setVolume(0.0, 0.0)
-        self.loop: bool = True
+        self.loop: bool = loop
         self._playing: bool = False
 
         # Request audio focus so Android treats this as intentional media
@@ -638,8 +638,7 @@ class AudioEngine:
         return None
 
     def _play_one_shot(self, attr: str, path: str, volume: float) -> None:
-        """Play an alert from its start on the one player it keeps: on Android a MediaPlayer, since SDL_mixer holds its
-        lock while the app is paused and a SoundLoader call from the tick thread then stopped every Python thread."""
+        """Replay an alert's one kept player: on Android a MediaPlayer, as SoundLoader freezes a locked app."""
         try:
             with self._one_shot_lock:
                 snd = getattr(self, attr)
@@ -867,8 +866,7 @@ class AudioEngine:
         self._unload_one_shot("_bell_sound")
 
     def _unload_one_shot(self, attr: str) -> None:
-        """Release a one-shot sound. Main thread only (stop, cleanup, the gong's stop): a tick's alert replays its
-        player instead of releasing it."""
+        """Stop and release a one-shot sound; an alert replays its player instead of releasing it on each play."""
         with self._one_shot_lock:
             snd = getattr(self, attr, None)
             setattr(self, attr, None)

@@ -1,7 +1,4 @@
-"""An alert the tick plays (a program segment's end cue, the distraction chime, the sinking bell, the disconnect warble)
-goes through the platform player, a MediaPlayer on Android: SDL_mixer holds its lock while the app is paused, so a
-SoundLoader call from the tick thread during a screen lock stopped every Python thread and froze the app. Each alert
-keeps one player and replays it, so a long locked session doesn't pile up players nobody releases."""
+"""The tick's alerts replay one kept player each, a MediaPlayer on Android: SoundLoader there freezes a locked app."""
 import threading
 from unittest.mock import MagicMock
 
