@@ -8,8 +8,6 @@ import time
 import wave
 from typing import Optional
 
-from kivy.clock import Clock
-
 from app.config import APP
 from app.logger import logger
 from app.storage.fileops import discard_file
@@ -52,17 +50,6 @@ class _KivyNoisePlayer:
             pass
 
 
-def _release_media_player(mp) -> None:
-    """Release a MediaPlayer on the main thread: off it, release() deadlocks against the Looper a lock pauses."""
-    if threading.current_thread() is not threading.main_thread():
-        Clock.schedule_once(lambda _dt: _release_media_player(mp))
-        return
-    try:
-        mp.release()
-    except Exception:
-        logger.exception("MediaPlayer release failed")
-
-
 class _AndroidMediaNoisePlayer:
     """MediaPlayer-backed player. USAGE_MEDIA so it keeps playing through
     screen lock (SDL_mixer/SoundLoader is silenced while locked). Used for the
@@ -74,23 +61,19 @@ class _AndroidMediaNoisePlayer:
         AudioAttributes = autoclass("android.media.AudioAttributes")
         AudioAttributesBuilder = autoclass("android.media.AudioAttributes$Builder")
 
+        self._mp = MediaPlayer()  # a failed setup leaves it to GC: its finalizer releases it, off the tick thread
         attrs = (
             AudioAttributesBuilder()
             .setUsage(AudioAttributes.USAGE_MEDIA)
             .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
             .build()
         )
-        self._mp = MediaPlayer()
-        try:
-            self._mp.setAudioAttributes(attrs)
-            self._mp.setDataSource(path)
-            self._mp.setLooping(loop)
-            self._mp.prepare()  # synchronous — fine for small WAV files
-            self._mp.setVolume(0.0, 0.0)
-        except Exception:
-            _release_media_player(self._mp)  # nobody else holds it: a failed player would keep its native resources
-            raise
+        self._mp.setAudioAttributes(attrs)
+        self._mp.setDataSource(path)
+        self._mp.setLooping(loop)
+        self._mp.prepare()  # synchronous — fine for small WAV files
         self._volume: float = 0.0
+        self._mp.setVolume(0.0, 0.0)
         self.loop: bool = loop
         self._playing: bool = False
 
