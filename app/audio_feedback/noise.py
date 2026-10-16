@@ -159,6 +159,8 @@ def _make_noise_player(path: str, loop: bool = True):
         try:
             return _AndroidMediaNoisePlayer(path, loop)
         except Exception as e:
+            if not loop:
+                raise  # a one-shot plays off the main thread, where SoundLoader on Android can freeze the app
             logger.warning(f"Falling back to SoundLoader for {path}: {e}")
     return _KivyNoisePlayer(path, loop)
 
@@ -810,7 +812,7 @@ class AudioEngine:
         On Android the gong goes through a one-shot MediaPlayer (USAGE_MEDIA),
         like the noise — SoundLoader/SDL_mixer is silenced while the screen is
         locked, so a meditation bell played that way would never be heard at
-        the actual timer end. Desktop falls back to SoundLoader.
+        the actual timer end. Desktop uses SoundLoader.
 
         Safe to call from the tick thread: only create()/prepare()/start()
         run here (no MediaPlayer.release(), which would deadlock against the
@@ -828,7 +830,8 @@ class AudioEngine:
                 logger.info("Timer gong (MediaPlayer, lock-through)")
                 return
             except Exception:
-                logger.exception("MediaPlayer gong failed; falling back to SoundLoader")
+                logger.exception("MediaPlayer gong failed")  # no SoundLoader: at timer expiry it freezes a locked app
+                return
         if self._bell_sound:
             try:
                 self._bell_sound.stop()
