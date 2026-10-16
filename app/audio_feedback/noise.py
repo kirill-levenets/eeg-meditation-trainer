@@ -151,8 +151,9 @@ class _AndroidMediaNoisePlayer:
 def _make_noise_player(path: str, loop: bool = True):
     """Return the right player for this platform: a noise loop, or a one-shot alert (loop=False).
 
-    On Android, tries MediaPlayer first (survives screen lock). Falls back to
-    SoundLoader if MediaPlayer init fails. Desktop always uses SoundLoader.
+    On Android, tries MediaPlayer first (survives screen lock). A loop falls back
+    to SoundLoader if MediaPlayer init fails; a one-shot raises. Desktop always
+    uses SoundLoader.
     """
     from kivy.utils import platform as kplat
     if kplat == "android":
@@ -829,8 +830,9 @@ class AudioEngine:
                 logger.info("Timer gong (MediaPlayer, lock-through)")
                 return
             except Exception:
-                logger.exception("MediaPlayer gong failed")  # no SoundLoader: at timer expiry it freezes a locked app
-                return
+                logger.exception("MediaPlayer gong failed")
+                if threading.current_thread() is not threading.main_thread():
+                    return  # SoundLoader off the main thread (the timer's end) freezes a locked app
         if self._bell_sound:
             try:
                 self._bell_sound.stop()

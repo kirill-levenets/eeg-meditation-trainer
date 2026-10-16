@@ -101,6 +101,15 @@ def test_on_android_a_gong_whose_media_player_fails_stays_silent_rather_than_use
         engine.cleanup()
 
 
+def test_on_android_the_settings_gong_test_on_the_main_thread_still_falls_back(broken_media_player, soundloader):
+    engine = AudioEngine()
+    try:
+        engine.play_timer_sound()
+        soundloader.assert_called_once()
+    finally:
+        engine.cleanup()
+
+
 def test_on_android_a_noise_loop_whose_media_player_fails_still_falls_back(broken_media_player, monkeypatch):
     monkeypatch.setattr(noise_mod, "_KivyNoisePlayer", lambda path, loop: ("SoundLoader", path, loop))
     assert noise_mod._make_noise_player("rain.wav") == ("SoundLoader", "rain.wav", True)
