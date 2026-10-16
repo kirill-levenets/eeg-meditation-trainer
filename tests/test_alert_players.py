@@ -1,4 +1,5 @@
 """The tick's alerts replay one kept player each, a MediaPlayer on Android: SoundLoader there freezes a locked app."""
+import sys
 import threading
 from unittest.mock import MagicMock
 
@@ -108,6 +109,17 @@ def test_on_android_the_settings_gong_test_on_the_main_thread_still_falls_back(b
         soundloader.assert_called_once()
     finally:
         engine.cleanup()
+
+
+def test_a_media_player_that_fails_to_prepare_is_released(monkeypatch):
+    player = MagicMock()
+    player.prepare.side_effect = RuntimeError("prepare failed")
+    jnius = MagicMock()
+    jnius.autoclass.side_effect = lambda name: (lambda: player) if name == "android.media.MediaPlayer" else MagicMock()
+    monkeypatch.setitem(sys.modules, "jnius", jnius)
+    with pytest.raises(RuntimeError):
+        noise_mod._AndroidMediaNoisePlayer("chime.wav", loop=False)
+    player.release.assert_called_once()
 
 
 def test_on_android_a_noise_loop_whose_media_player_fails_still_falls_back(broken_media_player, monkeypatch):

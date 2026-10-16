@@ -68,10 +68,14 @@ class _AndroidMediaNoisePlayer:
             .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
             .build()
         )
-        self._mp.setAudioAttributes(attrs)
-        self._mp.setDataSource(path)
-        self._mp.setLooping(loop)
-        self._mp.prepare()  # synchronous — fine for small WAV files
+        try:
+            self._mp.setAudioAttributes(attrs)
+            self._mp.setDataSource(path)
+            self._mp.setLooping(loop)
+            self._mp.prepare()  # synchronous — fine for small WAV files
+        except Exception:
+            self._mp.release()  # nobody else holds it: a failed player would keep its native resources
+            raise
         self._volume: float = 0.0
         self._mp.setVolume(0.0, 0.0)
         self.loop: bool = loop
