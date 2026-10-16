@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import kivy.utils
 import pytest
+from kivy.clock import Clock
 from kivy.core.audio import SoundLoader
 
 import app.audio_feedback.noise as noise_mod
@@ -111,15 +112,45 @@ def test_on_android_the_settings_gong_test_on_the_main_thread_still_falls_back(b
         engine.cleanup()
 
 
-def test_a_media_player_that_fails_to_prepare_is_released(monkeypatch):
+@pytest.fixture
+def unpreparable(monkeypatch) -> MagicMock:
     player = MagicMock()
     player.prepare.side_effect = RuntimeError("prepare failed")
     jnius = MagicMock()
     jnius.autoclass.side_effect = lambda name: (lambda: player) if name == "android.media.MediaPlayer" else MagicMock()
     monkeypatch.setitem(sys.modules, "jnius", jnius)
-    with pytest.raises(RuntimeError):
+    return player
+
+
+def test_a_media_player_that_fails_to_prepare_is_released(unpreparable):
+    with pytest.raises(RuntimeError, match="prepare failed"):
         noise_mod._AndroidMediaNoisePlayer("chime.wav", loop=False)
-    player.release.assert_called_once()
+    unpreparable.release.assert_called_once()
+
+
+def test_one_that_fails_on_the_tick_thread_is_released_on_the_main_thread(unpreparable, monkeypatch):
+    queued = []
+    monkeypatch.setattr(Clock, "schedule_once", lambda fn, *a, **k: queued.append(fn))
+    raised = []
+
+    def build():
+        try:
+            noise_mod._AndroidMediaNoisePlayer("chime.wav", loop=False)
+        except RuntimeError as e:
+            raised.append(e)
+
+    _on_tick_thread(build)
+    assert raised and str(raised[0]) == "prepare failed"
+    unpreparable.release.assert_not_called()
+    for fn in queued:
+        fn(0)  # the main thread, once it runs again
+    unpreparable.release.assert_called_once()
+
+
+def test_a_failing_release_keeps_the_setup_error(unpreparable):
+    unpreparable.release.side_effect = RuntimeError("release failed")
+    with pytest.raises(RuntimeError, match="prepare failed"):
+        noise_mod._AndroidMediaNoisePlayer("chime.wav", loop=False)
 
 
 def test_on_android_a_noise_loop_whose_media_player_fails_still_falls_back(broken_media_player, monkeypatch):
