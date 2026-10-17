@@ -366,7 +366,7 @@ class TestSettingsTimerSoundRow(unittest.TestCase):
         from app.ui.settings_screen import SettingsScreen
         self.screen = SettingsScreen()
         self.captured = []
-        self.screen.timer.set_timer_sound_change_callback(self.captured.append)
+        wire(self.screen.timer, on_timer_sound_change=self.captured.append)
 
     def test_a_loaded_path_shows_on_the_button_without_a_change(self):
         self.screen.timer.timer_sound_path = "/tmp/bell.wav"
@@ -398,7 +398,7 @@ class TestSettingsTimerSoundRow(unittest.TestCase):
 
     def test_test_button_invokes_callback(self):
         called = []
-        self.screen.timer.set_test_timer_sound_callback(lambda: called.append(True))
+        wire(self.screen.timer, on_test_timer_sound=lambda: called.append(True))
         self.screen.timer._timer_sound_test_btn.dispatch("on_release")
         self.assertEqual(called, [True])
 
@@ -407,8 +407,11 @@ class TestSettingsTimerSoundRow(unittest.TestCase):
         # to interrupt them. The Test button doubles as a Stop button.
         played = []
         stopped = []
-        self.screen.timer.set_test_timer_sound_callback(lambda: played.append(True))
-        self.screen.timer.set_stop_timer_sound_callback(lambda: stopped.append(True))
+        wire(
+            self.screen.timer,
+            on_test_timer_sound=lambda: played.append(True),
+            on_stop_timer_sound=lambda: stopped.append(True),
+        )
 
         self.assertEqual(self.screen.timer._timer_sound_test_btn.text, "Test")
         self.screen.timer._timer_sound_test_btn.dispatch("on_release")
@@ -423,7 +426,7 @@ class TestSettingsTimerSoundRow(unittest.TestCase):
         self.assertEqual(played, [True])  # unchanged
 
     def test_natural_playback_end_resets_button_text(self):
-        self.screen.timer.set_test_timer_sound_callback(lambda: None)
+        wire(self.screen.timer, on_test_timer_sound=lambda: None)
         self.screen.timer._timer_sound_test_btn.dispatch("on_release")
         self.assertEqual(self.screen.timer._timer_sound_test_btn.text, "Stop")
         # Sound.on_stop fires → app_manager calls notify_timer_sound_test_ended.

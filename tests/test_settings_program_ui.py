@@ -9,7 +9,7 @@ def _screen():
 def test_load_program_populates_without_firing_changed():
     s = _screen()
     changed = []
-    s.timer.set_program_changed_callback(lambda segs: changed.append(segs))
+    wire(s.timer, on_program_changed=lambda segs: changed.append(segs))
     segs = [{"minutes": 10, "target": 50, "formula": "shamatha_score"},
             {"minutes": 5, "target": 70, "formula": "meditation_score"}]
     s.timer.load_program(segs, "program")
@@ -21,7 +21,7 @@ def test_load_program_populates_without_firing_changed():
 def test_add_segment_fires_changed():
     s = _screen()
     changed = []
-    s.timer.set_program_changed_callback(lambda segs: changed.append(segs))
+    wire(s.timer, on_program_changed=lambda segs: changed.append(segs))
     s.timer.load_program([], "program")
     s.timer._add_segment_row()
     assert len(changed) >= 1
@@ -31,7 +31,7 @@ def test_add_segment_fires_changed():
 def test_set_program_mode_does_not_fire_callback():
     s = _screen()
     seen = []
-    s.timer.set_program_mode_callback(lambda m: seen.append(m))
+    wire(s.timer, on_program_mode=lambda m: seen.append(m))
     s.timer.set_program_mode("program")
     assert seen == []                          # programmatic set is silent
     assert s.timer.program_mode == "program"

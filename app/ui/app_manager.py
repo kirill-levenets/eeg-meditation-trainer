@@ -643,11 +643,17 @@ class EEGMeditationApp(App):
         )
         self._settings_screen.set_audio_metric_callback(self._on_audio_metric_change)
         self._settings_screen.set_audio_formula_index_callback(self._on_audio_formula_index)
-        self._settings_screen.timer.set_program_mode_callback(self._program_settings.on_mode_change)
-        self._settings_screen.timer.set_program_changed_callback(self._program_settings.on_changed)
-        self._settings_screen.timer.set_program_save_callback(self._program_settings.on_save)
-        self._settings_screen.timer.set_program_load_callback(self._program_settings.on_load)
-        self._settings_screen.timer.set_program_delete_callback(self._program_settings.on_delete)
+        wire(
+            self._settings_screen.timer,
+            on_program_mode=self._program_settings.on_mode_change,
+            on_program_changed=self._program_settings.on_changed,
+            on_program_save=self._program_settings.on_save,
+            on_program_load=self._program_settings.on_load,
+            on_program_delete=self._program_settings.on_delete,
+            on_test_timer_sound=self._on_test_timer_sound,
+            on_stop_timer_sound=self._on_stop_test_timer_sound,
+            on_timer_sound_change=self._on_timer_sound_change,
+        )
         self._settings_screen.set_theme_callback(self._on_theme_change)
 
         # Keyboard hotkey for marker
@@ -696,9 +702,6 @@ class EEGMeditationApp(App):
             lambda _collapsed: self._persist_user_setting("band_power_collapsed"))
         self._history_screen.set_export_sessions_callback(self._on_export_sessions_csv)
 
-        self._settings_screen.timer.set_test_timer_sound_callback(self._on_test_timer_sound)
-        self._settings_screen.timer.set_stop_timer_sound_callback(self._on_stop_test_timer_sound)
-        self._settings_screen.timer.set_timer_sound_change_callback(self._on_timer_sound_change)
 
         # Profile section in settings
         self._settings_screen.set_profile_callbacks(

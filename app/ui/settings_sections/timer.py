@@ -9,6 +9,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.slider import Slider
 
 from app.logger import logger
+from app.ui.hooks import Hook
 from app.ui.settings_sections.common import (
     SOURCE_LABELS,
     checkbox_row,
@@ -52,17 +53,18 @@ class TimerSection:
     """Builds the section's content into `section` and reports the user's actions through its callbacks. A segment's
     formula can be any saved formula, read from `saved_formulas` when its picker opens."""
 
+    on_program_mode = Hook()
+    on_program_changed = Hook()
+    on_program_save = Hook()
+    on_program_load = Hook()
+    on_program_delete = Hook()
+    on_timer_sound_change = Hook()
+    on_test_timer_sound = Hook()
+    on_stop_timer_sound = Hook()
+
     def __init__(self, section, *, saved_formulas: Callable[[], list[dict]]) -> None:
         self._saved_formulas = saved_formulas
-        self._on_timer_sound_change: Optional[Callable] = None
-        self._on_test_timer_sound: Optional[Callable] = None
-        self._on_stop_timer_sound: Optional[Callable] = None
         self._timer_sound_test_playing: bool = False
-        self._on_program_mode_cb: Optional[Callable] = None
-        self._on_program_changed_cb: Optional[Callable] = None
-        self._on_program_save_cb: Optional[Callable] = None
-        self._on_program_load_cb: Optional[Callable] = None
-        self._on_program_delete_cb: Optional[Callable] = None
         self._program_mode: str = "simple"
         self._segment_rows: list = []
         self._loading_program: bool = False
@@ -314,21 +316,6 @@ class TimerSection:
     def program_mode(self) -> str:
         return self._program_mode
 
-    def set_program_mode_callback(self, cb: Callable) -> None:
-        self._on_program_mode_cb = cb
-
-    def set_program_changed_callback(self, cb: Callable) -> None:
-        self._on_program_changed_cb = cb
-
-    def set_program_save_callback(self, cb: Callable) -> None:
-        self._on_program_save_cb = cb
-
-    def set_program_load_callback(self, cb: Callable) -> None:
-        self._on_program_load_cb = cb
-
-    def set_program_delete_callback(self, cb: Callable) -> None:
-        self._on_program_delete_cb = cb
-
     def set_program_mode(self, mode: str) -> None:
         """Set toggle + show/hide widgets. Does NOT fire the mode callback."""
         mode = "program" if mode == "program" else "simple"
@@ -346,14 +333,12 @@ class TimerSection:
         mode = getattr(btn, "_mode_key", "simple")
         logger.info(f"Timer mode -> {mode}")
         self.set_program_mode(mode)
-        if self._on_program_mode_cb:
-            self._on_program_mode_cb(mode)
+        self.on_program_mode(mode)
 
     def _on_program_save_pressed(self, *_args) -> None:
         name = self._program_name_input.text.strip()
         logger.info(f"Save program pressed: name={name!r}")
-        if self._on_program_save_cb:
-            self._on_program_save_cb(name)
+        self.on_program_save(name)
 
     def confirm_program_saved(self) -> None:
         """Flash a success cue on the program Save button (issue #33 E). Main-thread only."""
@@ -363,13 +348,11 @@ class TimerSection:
 
     def _on_program_load_pressed(self, idx: int) -> None:
         logger.info(f"Load saved program #{idx}")
-        if self._on_program_load_cb:
-            self._on_program_load_cb(idx)
+        self.on_program_load(idx)
 
     def _on_program_delete_pressed(self, idx: int) -> None:
         logger.info(f"Delete saved program #{idx}")
-        if self._on_program_delete_cb:
-            self._on_program_delete_cb(idx)
+        self.on_program_delete(idx)
 
     def set_saved_programs(self, programs: list[dict]) -> None:
         """Populate the Load list. programs: [{name, segments}, ...]."""
@@ -577,8 +560,7 @@ class TimerSection:
     def _emit_program_changed(self) -> None:
         if self._loading_program:
             return
-        if self._on_program_changed_cb:
-            self._on_program_changed_cb(self.get_program_segments())
+        self.on_program_changed(self.get_program_segments())
 
     def load_program(self, segments: list[dict], mode: str) -> None:
         """Clear + rebuild rows from segments; set mode. Does NOT fire changed."""
@@ -621,28 +603,16 @@ class TimerSection:
 
     def _apply_timer_sound(self, path: str) -> None:
         self.timer_sound_path = path
-        if self._on_timer_sound_change:
-            self._on_timer_sound_change(path)
-
-    def set_timer_sound_change_callback(self, callback: Callable) -> None:
-        self._on_timer_sound_change = callback
-
-    def set_test_timer_sound_callback(self, callback: Callable) -> None:
-        self._on_test_timer_sound = callback
-
-    def set_stop_timer_sound_callback(self, callback: Callable) -> None:
-        self._on_stop_timer_sound = callback
+        self.on_timer_sound_change(path)
 
     def _on_timer_sound_test(self, *_args) -> None:
         """Toggle play/stop for the test sound — long custom files would
         otherwise keep playing with no UI control to interrupt."""
         if self._timer_sound_test_playing:
-            if self._on_stop_timer_sound:
-                self._on_stop_timer_sound()
+            self.on_stop_timer_sound()
             self.notify_timer_sound_test_ended()
         else:
-            if self._on_test_timer_sound:
-                self._on_test_timer_sound()
+            self.on_test_timer_sound()
             self._timer_sound_test_playing = True
             self._timer_sound_test_btn.text = "Stop"
 
