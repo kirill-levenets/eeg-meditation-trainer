@@ -56,16 +56,36 @@ def test_a_name_that_is_no_hook_fails_at_wiring_instead_of_never_firing():
 
 
 def _clashes(cls: type) -> set[str]:
-    """Hooks named `on_<property>`: Kivy calls such a member whenever that property changes."""
-    props = {name for k in cls.__mro__ for name, v in vars(k).items() if type(v).__name__.endswith("Property")}
-    return {name for name, v in vars(cls).items() if isinstance(v, Hook) and name[3:] in props and name[:3] == "on_"}
+    """Hooks Kivy would call itself: `on_<property>` on a property change, or a registered event's name."""
+    members = {name: v for k in reversed(cls.__mro__) for name, v in vars(k).items()}
+    props = {name for name, v in members.items() if type(v).__name__.endswith("Property")}
+    events = {e for k in cls.__mro__ for e in vars(k).get("__events__", ())}
+    hooks = {name for name, v in members.items() if isinstance(v, Hook)}
+    return {h for h in hooks if h in events or (h.startswith("on_") and h[3:] in props)}
 
 
-def test_a_hook_named_after_a_kivy_property_is_caught():
+def test_a_hook_kivy_would_call_itself_is_caught():
     class _Bad(BoxLayout):
-        on_orientation = Hook()
+        on_orientation = Hook()  # a property's change handler
+        on_touch_down = Hook()  # a registered event
 
-    assert _clashes(_Bad) == {"on_orientation"}
+    class _Child(_Bad):
+        pass
+
+    assert _clashes(_Bad) == _clashes(_Child) == {"on_orientation", "on_touch_down"}
+
+
+def test_a_falsy_handler_is_still_the_handler():
+    class _Falsy:
+        def __call__(self, text):
+            return f"saved {text}"
+
+        def __bool__(self):
+            return False
+
+    panel = _Panel()
+    wire(panel, on_save=_Falsy())
+    assert is_wired(panel, "on_save") and panel.on_save("notes") == "saved notes"
 
 
 def test_no_widget_hook_shadows_a_kivy_property_handler():

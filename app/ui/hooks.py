@@ -4,8 +4,7 @@ from typing import Any
 
 
 class Hook:
-    """A widget's slot for one handler from the app; unset (or set to None), calling it does nothing and returns
-    `default`."""
+    """A widget's slot for one app handler; unset or None, calling it returns `default` (immutable: it's shared)."""
 
     def __init__(self, default: Any = None) -> None:
         self.default = default
@@ -17,7 +16,8 @@ class Hook:
     def __get__(self, obj: Any, owner: type | None = None) -> Any:
         if obj is None:
             return self
-        return obj.__dict__.get(self.name) or self._unset
+        handler = obj.__dict__.get(self.name)
+        return self._unset if handler is None else handler
 
     def __set__(self, obj: Any, handler: Callable | None) -> None:
         obj.__dict__[self.name] = handler
