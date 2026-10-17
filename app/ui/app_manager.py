@@ -617,11 +617,15 @@ class EEGMeditationApp(App):
             on_feedback_source_change=self._on_feedback_source_change,
             on_reward_source_change=self._on_reward_source_change,
         )
-        self._settings_screen.device.set_device_mode_callback(self._headset.on_mode_toggle)
-        self._settings_screen.device.set_scan_devices_callback(self._headset.on_scan)
-        self._settings_screen.device.set_device_select_callback(self._headset.on_select)
-        self._settings_screen.device.set_device_state_callback(self._headset.state)
-        self._settings_screen.device.set_device_rename_callback(self._headset.on_rename)
+        wire(
+            self._settings_screen.device,
+            on_device_mode_toggle=self._headset.on_mode_toggle,
+            on_scan_devices=self._headset.on_scan,
+            on_device_select=self._headset.on_select,
+            device_state=self._headset.state,
+            on_device_rename=self._headset.on_rename,
+            on_copy_diagnostics=self._headset.on_copy_diagnostics,
+        )
         wire(
             self._settings_screen.display,
             on_text_size=self._on_text_size_change,
@@ -629,7 +633,6 @@ class EEGMeditationApp(App):
             on_line_width_change=self._on_line_width_change,
             on_rotate_screen=self._on_rotate_screen,
         )
-        self._settings_screen.device.set_copy_diagnostics_callback(self._headset.on_copy_diagnostics)
         wire(
             self._settings_screen.formulas,
             on_formula_slot_change=self._formula_settings.on_slot_change,
