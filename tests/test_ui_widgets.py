@@ -4,6 +4,7 @@ from unittest import mock
 from kivy.metrics import dp
 
 from app.ui.headset import filter_mindwave
+from app.ui.hooks import wire
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.theme import ThemedAccordion
 
@@ -446,9 +447,7 @@ class TestSettingsFormulaSlots(unittest.TestCase):
 
     def test_submit_slot_fires_callback_with_index_name_formula(self):
         captured = []
-        self.screen.formulas.set_formula_slot_callback(
-            lambda idx, name, formula: captured.append((idx, name, formula))
-        )
+        wire(self.screen.formulas, on_formula_slot_change=lambda idx, name, formula: captured.append((idx, name, formula)))
         self.screen.formulas._formula_name_inputs[1].text = "  Focus  "
         self.screen.formulas._formula_inputs[1].text = "  alpha + beta  "
         self.screen.formulas._submit_slot(1)
@@ -456,9 +455,7 @@ class TestSettingsFormulaSlots(unittest.TestCase):
 
     def test_save_slot_reuses_library_callback_with_index_name_formula(self):
         captured = []
-        self.screen.formulas.set_save_formula_callback(
-            lambda idx, name, formula: captured.append((idx, name, formula))
-        )
+        wire(self.screen.formulas, on_save_formula=lambda idx, name, formula: captured.append((idx, name, formula)))
         self.screen.formulas._formula_name_inputs[2].text = "Calm"
         self.screen.formulas._formula_inputs[2].text = "theta / (delta + 1)"
         self.screen.formulas._save_slot(2)

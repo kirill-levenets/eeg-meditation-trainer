@@ -630,11 +630,14 @@ class EEGMeditationApp(App):
             on_rotate_screen=self._on_rotate_screen,
         )
         self._settings_screen.device.set_copy_diagnostics_callback(self._headset.on_copy_diagnostics)
-        self._settings_screen.formulas.set_formula_slot_callback(self._formula_settings.on_slot_change)
-        self._settings_screen.formulas.set_save_formula_callback(self._formula_settings.on_save)
-        self._settings_screen.formulas.set_load_formula_callback(self._formula_settings.on_load)
-        self._settings_screen.formulas.set_delete_formula_callback(self._formula_settings.on_delete)
-        self._settings_screen.formulas.set_export_formulas_callback(self._formula_settings.on_export)
+        wire(
+            self._settings_screen.formulas,
+            on_formula_slot_change=self._formula_settings.on_slot_change,
+            on_save_formula=self._formula_settings.on_save,
+            on_load_formula=self._formula_settings.on_load,
+            on_delete_formula=self._formula_settings.on_delete,
+            on_export_formulas=self._formula_settings.on_export,
+        )
         self._settings_screen.set_audio_metric_callback(self._on_audio_metric_change)
         self._settings_screen.set_audio_formula_index_callback(self._on_audio_formula_index)
         self._settings_screen.timer.set_program_mode_callback(self._program_settings.on_mode_change)
