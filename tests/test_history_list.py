@@ -177,7 +177,7 @@ def test_another_profiles_list_drops_the_selection_and_the_same_list_keeps_it(hi
 
 def test_a_tap_on_a_row_opens_its_session(history):
     opened = []
-    history._on_session_select = opened.append
+    history.on_session_select = opened.append
     history.load_sessions(_sessions(20))
     _frames()
     sid, view = next(iter(sorted(_views(history).items())))
@@ -217,7 +217,7 @@ def test_a_tap_in_select_mode_toggles_its_row(history):
 
 def test_the_rename_editor_follows_its_session_while_scrolling(history):
     renamed = []
-    history._on_rename_session = lambda sid, name: renamed.append((sid, name))
+    history.on_rename_session = lambda sid, name: renamed.append((sid, name))
     history.load_sessions(_sessions(300))
     _frames()
     history._toggle_rename(0)

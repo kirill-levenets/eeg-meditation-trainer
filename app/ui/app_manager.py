@@ -691,13 +691,13 @@ class EEGMeditationApp(App):
         self._diary_screen.set_back_callback(self._on_diary_back)
         self._diary_screen.band_view_persist_cb = self._persist_band_view
 
-        self._history_screen.set_callbacks(
+        wire(
+            self._history_screen,
             on_session_select=self._on_session_select,
             on_delete_sessions=self._delete_sessions,
             on_rename_session=self._on_rename_session,
-        )
-        self._history_screen.set_view_mode_callback(
-            self._on_history_view_mode_change,
+            on_view_mode_change=self._on_history_view_mode_change,
+            on_export_sessions=self._on_export_sessions_csv,
         )
         self._history_screen.set_chart_collapse_callback(
             lambda _collapsed: self._persist_user_setting("history_chart_collapsed"))
@@ -705,7 +705,6 @@ class EEGMeditationApp(App):
             lambda _collapsed: self._persist_user_setting("what_if_collapsed"))
         self._diary_screen.set_band_collapse_callback(
             lambda _collapsed: self._persist_user_setting("band_power_collapsed"))
-        self._history_screen.set_export_sessions_callback(self._on_export_sessions_csv)
 
         # Data Backup section
         self._backup_flow = BackupFlow(

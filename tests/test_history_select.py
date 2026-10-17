@@ -1,4 +1,5 @@
 from app.ui.history_screen import HistoryScreen
+from app.ui.hooks import wire
 
 
 def _history():
@@ -39,7 +40,7 @@ def test_select_all_shown_selects_visible_rows_only():
 def test_export_selected_fires_callback_with_sorted_ids():
     got = []
     h = _history()
-    h.set_export_sessions_callback(lambda ids: got.append(ids))
+    wire(h, on_export_sessions=lambda ids: got.append(ids))
     h.set_select_mode(True)
     h.toggle_session_selection(3)
     h.toggle_session_selection(1)
@@ -50,7 +51,7 @@ def test_export_selected_fires_callback_with_sorted_ids():
 def test_export_selected_is_noop_when_nothing_selected():
     got = []
     h = _history()
-    h.set_export_sessions_callback(lambda ids: got.append(ids))
+    wire(h, on_export_sessions=lambda ids: got.append(ids))
     h.set_select_mode(True)
     h.export_selected()
     assert got == []

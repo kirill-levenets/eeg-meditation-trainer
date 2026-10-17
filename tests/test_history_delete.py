@@ -186,7 +186,7 @@ def test_history_keeps_the_day_filter_only_for_the_same_profile_and_view():
 def test_renaming_updates_the_row_and_the_model_in_place():
     h = _loaded(3)
     renamed = []
-    h._on_rename_session = lambda sid, name: renamed.append((sid, name))
+    h.on_rename_session = lambda sid, name: renamed.append((sid, name))
     h._toggle_rename(1)
     h._rename_input.text = "Evening sit"
     h._rename_input.dispatch("on_text_validate")

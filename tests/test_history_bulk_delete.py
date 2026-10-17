@@ -330,7 +330,7 @@ def test_the_confirm_names_several_profiles_in_the_all_users_view(confirm, users
 def test_cancel_deletes_nothing_and_confirm_deletes_the_selection_then_leaves_select_mode(confirm):
     h = _history()
     deleted = []
-    h._on_delete_sessions = lambda ids, done: (deleted.append(ids), done(True))
+    h.on_delete_sessions = lambda ids, done: (deleted.append(ids), done(True))
     h.set_select_mode(True)
     h.toggle_session_selection(2)
     h.toggle_session_selection(1)
@@ -348,7 +348,7 @@ def test_delete_tapped_during_the_fade_after_cancel_deletes_nothing(confirm):
     # Kivy still delivers taps to a popup while it fades out: the confirm decides once.
     h = _history()
     deleted = []
-    h._on_delete_sessions = lambda ids, done: (deleted.append(ids), done(True))
+    h.on_delete_sessions = lambda ids, done: (deleted.append(ids), done(True))
     h.set_select_mode(True)
     h.select_all_shown()
     _text, buttons = confirm(h.delete_selected)
@@ -359,7 +359,7 @@ def test_delete_tapped_during_the_fade_after_cancel_deletes_nothing(confirm):
 
 def test_a_failed_bulk_delete_keeps_select_mode_and_the_selection(confirm):
     h = _history()
-    h._on_delete_sessions = lambda ids, done: done(False)
+    h.on_delete_sessions = lambda ids, done: done(False)
     h.set_select_mode(True)
     h.toggle_session_selection(3)
     _text, buttons = confirm(h.delete_selected)
@@ -370,7 +370,7 @@ def test_a_failed_bulk_delete_keeps_select_mode_and_the_selection(confirm):
 def test_select_all_then_delete_takes_every_session_in_the_filter(confirm):
     h = _history(n=300)
     deleted = []
-    h._on_delete_sessions = lambda ids, done: (deleted.append(ids), h.remove_sessions(ids), done(True))
+    h.on_delete_sessions = lambda ids, done: (deleted.append(ids), h.remove_sessions(ids), done(True))
     h.set_select_mode(True)
     h.select_all_shown()  # including the rows the list never built
     _text, buttons = confirm(h.delete_selected)
@@ -382,7 +382,7 @@ def test_select_all_then_delete_takes_every_session_in_the_filter(confirm):
 def test_a_row_delete_asks_with_its_title_and_takes_the_same_path(confirm):
     h = _history()
     deleted = []
-    h._on_delete_sessions = lambda ids, done: (deleted.append(ids), done(True))
+    h.on_delete_sessions = lambda ids, done: (deleted.append(ids), done(True))
     text, buttons = confirm(lambda: h._confirm_delete([2]))
     assert "2026-09-27 10:00 - Session 2" in text and "can't be undone" in text
     buttons["Delete"].dispatch("on_release")
