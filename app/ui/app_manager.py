@@ -592,8 +592,11 @@ class EEGMeditationApp(App):
         self._live_screen.btn_pause.bind(on_release=self._on_pause)
         self._live_screen.btn_stop.bind(on_release=self._on_stop)
         self._live_screen.btn_marker.bind(on_release=self._on_marker)
-        self._live_screen.on_duration_preset = self._program_settings.on_duration_preset
-        self._live_screen.on_program_pick = self._program_settings.on_load
+        wire(
+            self._live_screen,
+            on_duration_preset=self._program_settings.on_duration_preset,
+            on_program_pick=self._program_settings.on_load,
+        )
         self._live_screen.overlay_cancel_btn.bind(on_release=self._on_connect_cancel)
         self._live_screen.overlay_retry_btn.bind(on_release=self._on_connect_retry)
         self._live_screen.summary_ok_btn.bind(on_release=self._on_summary_ok)

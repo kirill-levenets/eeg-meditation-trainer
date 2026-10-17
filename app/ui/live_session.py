@@ -17,7 +17,7 @@ from kivy.uix.widget import Widget
 
 from app.eeg.band_spec import BAND_KEYS, GROUP_NAMES, group_powers
 from app.logger import logger
-from app.ui.hooks import wire
+from app.ui.hooks import Hook, wire
 from app.ui.raw_eeg_screen import (
     GraphAwareScrollView,
     ScrollableGraphWidget,
@@ -274,6 +274,9 @@ class _DurationPickerButton(BoxLayout):
 class LiveSessionScreen(Screen):
     """Main session screen with graph, stats, and controls."""
 
+    on_program_pick = Hook()  # a saved program picked on the duration picker, by its index
+    on_duration_preset = Hook()  # a duration preset picked: minutes, or None for no timer
+
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.name = "live_session"
@@ -512,7 +515,6 @@ class LiveSessionScreen(Screen):
         # Saved programs offered by the in-session "Programs…" picker.
         self._session_programs: list = []
         self._session_program_current_name: str = ""  # loaded program (button + highlight)
-        self.on_program_pick = None  # set by AppManager; called with an index
 
         # ── Controls ──
         self._bottom_bar = BoxLayout(
@@ -936,7 +938,6 @@ class LiveSessionScreen(Screen):
         self._btn_marker.disabled = True
 
     # ── Duration preset hooks ──
-    on_duration_preset = None  # set by AppManager; called with value (int or None)
 
     def _rebuild_band_legend(self) -> None:
         """Repopulate the band legend with only the band graph's visible series."""
@@ -1010,8 +1011,7 @@ class LiveSessionScreen(Screen):
 
         def _pick(index):
             popup.dismiss()
-            if self.on_program_pick is not None:
-                self.on_program_pick(index)
+            self.on_program_pick(index)
 
         rows = []
         if not self._session_programs:
@@ -1036,8 +1036,7 @@ class LiveSessionScreen(Screen):
         popup.open()
 
     def _pick_from_popup(self, value) -> None:
-        if self.on_duration_preset is not None:
-            self.on_duration_preset(value)
+        self.on_duration_preset(value)
         if self._duration_popup is not None:
             self._duration_popup.dismiss()
             self._duration_popup = None
