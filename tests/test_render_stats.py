@@ -17,7 +17,12 @@ def test_summary_attributes_redraws_per_graph_sorted_by_total():
 
 def test_window_logs_once_then_resets(monkeypatch):
     lines = []
-    monkeypatch.setattr(render_stats.logger, "info", lines.append)
+
+    def capture(msg, *_args, **_kwargs):
+        if str(msg).startswith("Render:"):  # the logger is shared: a line another thread logs isn't this test's
+            lines.append(msg)
+
+    monkeypatch.setattr(render_stats.logger, "info", capture)
     s = RenderStats()
     t0 = s._window_start
     s.record_redraw("live_band", 0.010)
