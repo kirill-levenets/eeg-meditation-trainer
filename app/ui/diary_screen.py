@@ -17,6 +17,7 @@ from app.eeg.band_spec import BAND_KEYS, GROUP_NAMES, group_powers
 from app.logger import logger, timed
 from app.session.scoring import recorded_score, target_steps
 from app.session.session_program import PROGRAM_FORMULA_KEYS, SessionProgram
+from app.ui.hooks import Hook, is_wired
 from app.ui.live_session import (
     METRICS_COLORS,
     METRICS_SCALES,
@@ -156,12 +157,14 @@ def detail_graph_data(rows: list[dict], formula_series: dict[str, list[float]]) 
 class DiaryScreen(Screen):
     """Session detail, opened from History: stats, notes, tags and mood, graphs."""
 
+    on_save_notes = Hook()
+    on_export_csv = Hook()
+    on_back = Hook()
+    on_band_view_change = Hook()  # (mode, sort_by, descending): the app keeps it per profile
+
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.name = "diary"
-        self._on_save_notes: Optional[Callable] = None
-        self._on_export_csv: Optional[Callable] = None
-        self._on_back: Optional[Callable] = None
         self._selected_session_id: Optional[int] = None
         self._scored_key: Optional[str] = None  # the series the shown session was scored on, marked in its legend
         self._saved_notes_state: tuple[str, str, int] | None = None  # the fields as loaded or last saved
@@ -238,7 +241,6 @@ class DiaryScreen(Screen):
         for w in (band_title, self._btn_band_fold, Widget()):
             self._band_header.add_widget(w)
         self._detail_layout.add_widget(self._band_header)
-        self.band_view_persist_cb = None  # set by AppManager to persist per-user
         self._band_totals = BandTotalsView(on_change=self._on_band_view_change)
         self._band_placeholder = ThemedLabel(text="", font_size=F.BODY, color=C.TEXT_SECONDARY,
                                              size_hint_y=None, height=dp(40))
@@ -429,18 +431,8 @@ class DiaryScreen(Screen):
 
         self.add_widget(root)
 
-    def set_save_notes_callback(self, callback: Callable) -> None:
-        self._on_save_notes = callback
-
-    def set_export_csv_callback(self, callback: Callable) -> None:
-        self._on_export_csv = callback
-
-    def set_back_callback(self, callback: Callable) -> None:
-        self._on_back = callback
-
     def _on_back_pressed(self, *args) -> None:
-        if self._on_back:
-            self._on_back()
+        self.on_back()
 
     def _fit_band_holder(self, *_a) -> None:
         if self._band_holder.children:
@@ -515,8 +507,7 @@ class DiaryScreen(Screen):
         self._band_totals.set_view_state(mode, sort_by, descending)
 
     def _on_band_view_change(self, mode: str, sort_by: str, descending: bool) -> None:
-        if self.band_view_persist_cb:
-            self.band_view_persist_cb(mode, sort_by, descending)
+        self.on_band_view_change(mode, sort_by, descending)
 
     @staticmethod
     def _make_detail_row() -> tuple[ThemedLabel, ThemedLabel]:
@@ -690,10 +681,10 @@ class DiaryScreen(Screen):
                 if now != then}
 
     def _save_notes(self, **fields) -> None:
-        if self._selected_session_id is None or not self._on_save_notes:
+        if self._selected_session_id is None or not is_wired(self, "on_save_notes"):
             return
         state = self._notes_state()
-        if self._on_save_notes(self._selected_session_id, **fields):
+        if self.on_save_notes(self._selected_session_id, **fields):
             self._saved_notes_state = state
 
     def flush_notes(self) -> None:
@@ -718,7 +709,7 @@ class DiaryScreen(Screen):
         return export_dir
 
     def _on_export_pressed(self, *args) -> None:
-        if not self._selected_session_id or not self._on_export_csv:
+        if not self._selected_session_id or not is_wired(self, "on_export_csv"):
             return
 
         is_android = hasattr(sys, "getandroidapilevel")
@@ -812,8 +803,8 @@ class DiaryScreen(Screen):
             full_path = os.path.join(folder, filename)
             popup.dismiss()
 
-            if self._selected_session_id and self._on_export_csv:
-                result = self._on_export_csv(self._selected_session_id, full_path)
+            if self._selected_session_id and is_wired(self, "on_export_csv"):
+                result = self.on_export_csv(self._selected_session_id, full_path)
                 if not result:
                     self._show_export_result("No data to export", success=False)
                     return

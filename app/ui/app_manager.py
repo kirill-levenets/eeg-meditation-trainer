@@ -686,10 +686,13 @@ class EEGMeditationApp(App):
         self._reward_source: str = "none"   # above-threshold reward channel (off by default)
         self._reward_sound_path: str = ""
 
-        self._diary_screen.set_save_notes_callback(self._on_save_notes)
-        self._diary_screen.set_export_csv_callback(self._on_export_csv)
-        self._diary_screen.set_back_callback(self._on_diary_back)
-        self._diary_screen.band_view_persist_cb = self._persist_band_view
+        wire(
+            self._diary_screen,
+            on_save_notes=self._on_save_notes,
+            on_export_csv=self._on_export_csv,
+            on_back=self._on_diary_back,
+            on_band_view_change=self._persist_band_view,
+        )
 
         wire(
             self._history_screen,
