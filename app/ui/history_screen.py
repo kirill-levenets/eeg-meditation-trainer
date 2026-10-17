@@ -616,9 +616,7 @@ class HistoryScreen(Screen):
         super().__init__(**kwargs)
         self.name = "history"
         self._on_session_select: Optional[Callable] = None
-        self._on_save_notes: Optional[Callable] = None
         self._on_delete_sessions: Optional[Callable] = None  # (ids, done) -> done(True) once deleted
-        self._on_export_csv: Optional[Callable] = None
         self._on_rename_session: Optional[Callable] = None
         self._sessions: list[dict] = []
         self._filtered_date: Optional[str] = None
@@ -922,15 +920,11 @@ class HistoryScreen(Screen):
     def set_callbacks(
         self,
         on_session_select=None,
-        on_save_notes=None,
         on_delete_sessions=None,
-        on_export_csv=None,
         on_rename_session=None,
     ) -> None:
         self._on_session_select = on_session_select
-        self._on_save_notes = on_save_notes
         self._on_delete_sessions = on_delete_sessions
-        self._on_export_csv = on_export_csv
         self._on_rename_session = on_rename_session
 
     def set_export_sessions_callback(self, callback) -> None:

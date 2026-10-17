@@ -693,9 +693,7 @@ class EEGMeditationApp(App):
 
         self._history_screen.set_callbacks(
             on_session_select=self._on_session_select,
-            on_save_notes=self._on_save_notes,
             on_delete_sessions=self._delete_sessions,
-            on_export_csv=self._on_export_csv,
             on_rename_session=self._on_rename_session,
         )
         self._history_screen.set_view_mode_callback(
