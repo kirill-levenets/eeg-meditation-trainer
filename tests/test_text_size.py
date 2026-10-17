@@ -26,6 +26,7 @@ from app.storage.database import DatabaseManager
 from app.ui.app_manager import startup_text_size, text_size_setting
 from app.ui.diary_screen import DiaryScreen
 from app.ui.history_screen import HistoryScreen
+from app.ui.hooks import wire
 from app.ui.live_session import LiveSessionScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
@@ -297,7 +298,7 @@ def test_picking_a_size_applies_it_at_once():
     screen = SettingsScreen()
     label = ThemedLabel(text="built before", font_size=F.SMALL)
     picked = []
-    screen.display.set_text_size_callback(picked.append)
+    wire(screen.display, on_text_size=picked.append)
     screen.display._text_size_presets.children[0].dispatch("on_release")  # Larger (children run right to left)
     assert picked == [LARGEST] and F.SCALE == LARGEST
     assert label.font_size == pytest.approx(dp(11) * LARGEST)

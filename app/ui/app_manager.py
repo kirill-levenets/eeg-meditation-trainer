@@ -65,6 +65,7 @@ from app.ui.graph_fullscreen import GraphFullscreen
 from app.ui.graph_series import GraphSeries
 from app.ui.headset import Headset, filter_mindwave
 from app.ui.history_screen import HistoryScreen
+from app.ui.hooks import wire
 from app.ui.line_colours import DEFAULT as LINE_DEFAULT
 from app.ui.line_colours import LINE_COLOURS
 from app.ui.line_colours import OPTIONS as LINE_OPTIONS
@@ -616,11 +617,14 @@ class EEGMeditationApp(App):
         self._settings_screen.device.set_device_select_callback(self._headset.on_select)
         self._settings_screen.device.set_device_state_callback(self._headset.state)
         self._settings_screen.device.set_device_rename_callback(self._headset.on_rename)
-        self._settings_screen.display.set_text_size_callback(self._on_text_size_change)
-        self._settings_screen.display.set_line_colours_callback(self._on_line_colours_change)
+        wire(
+            self._settings_screen.display,
+            on_text_size=self._on_text_size_change,
+            on_line_colours=self._on_line_colours_change,
+            on_line_width_change=self._on_line_width_change,
+            on_rotate_screen=self._on_rotate_screen,
+        )
         self._settings_screen.device.set_copy_diagnostics_callback(self._headset.on_copy_diagnostics)
-        self._settings_screen.display.set_line_width_callback(self._on_line_width_change)
-        self._settings_screen.display.set_rotate_screen_callback(self._on_rotate_screen)
         self._settings_screen.formulas.set_formula_slot_callback(self._formula_settings.on_slot_change)
         self._settings_screen.formulas.set_save_formula_callback(self._formula_settings.on_save)
         self._settings_screen.formulas.set_load_formula_callback(self._formula_settings.on_load)
