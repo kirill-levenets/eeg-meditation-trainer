@@ -608,10 +608,15 @@ class EEGMeditationApp(App):
         self._wire_graph_affordances()
 
         self._settings_screen.set_threshold_callback(self._on_threshold_change)
-        self._settings_screen.audio.set_test_audio_callback(self._on_test_audio)
-        self._settings_screen.audio.set_sinking_alert_callback(self._on_sinking_alert_toggle)
-        self._settings_screen.audio.set_subtle_alert_callback(self._on_subtle_alert_toggle)
-        self._settings_screen.audio.set_disconnect_alert_callback(self._on_disconnect_alert_toggle)
+        wire(
+            self._settings_screen.audio,
+            on_test_audio=self._on_test_audio,
+            on_sinking_alert_toggle=self._on_sinking_alert_toggle,
+            on_subtle_alert_toggle=self._on_subtle_alert_toggle,
+            on_disconnect_alert_toggle=self._on_disconnect_alert_toggle,
+            on_feedback_source_change=self._on_feedback_source_change,
+            on_reward_source_change=self._on_reward_source_change,
+        )
         self._settings_screen.device.set_device_mode_callback(self._headset.on_mode_toggle)
         self._settings_screen.device.set_scan_devices_callback(self._headset.on_scan)
         self._settings_screen.device.set_device_select_callback(self._headset.on_select)
@@ -632,8 +637,6 @@ class EEGMeditationApp(App):
         self._settings_screen.formulas.set_export_formulas_callback(self._formula_settings.on_export)
         self._settings_screen.set_audio_metric_callback(self._on_audio_metric_change)
         self._settings_screen.set_audio_formula_index_callback(self._on_audio_formula_index)
-        self._settings_screen.audio.set_feedback_source_callback(self._on_feedback_source_change)
-        self._settings_screen.audio.set_reward_source_callback(self._on_reward_source_change)
         self._settings_screen.timer.set_program_mode_callback(self._program_settings.on_mode_change)
         self._settings_screen.timer.set_program_changed_callback(self._program_settings.on_changed)
         self._settings_screen.timer.set_program_save_callback(self._program_settings.on_save)

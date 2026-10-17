@@ -14,6 +14,7 @@ from kivy.clock import Clock
 import app.storage.android_saf as saf
 import app.ui.settings_sections.common as common
 from app.config import APP
+from app.ui.hooks import wire
 from app.ui.settings_screen import SettingsScreen
 
 BOWL = "content://com.android.providers.media.documents/document/audio%3A41"
@@ -209,7 +210,7 @@ def test_every_sound_picker_has_a_cancel_that_picks_nothing(monkeypatch):
         (title, footer, Mock())) or opened[-1][2])
     screen = SettingsScreen()
     changes = []
-    screen.audio.set_feedback_source_callback(lambda *a: changes.append(a))
+    wire(screen.audio, on_feedback_source_change=lambda *a: changes.append(a))
     for open_picker in (screen.audio._open_feedback_source_picker, screen.audio._open_reward_source_picker):
         open_picker()
     for title, footer, popup in opened:

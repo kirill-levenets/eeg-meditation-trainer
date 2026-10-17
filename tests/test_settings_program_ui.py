@@ -1,3 +1,4 @@
+from app.ui.hooks import wire
 from app.ui.settings_screen import SettingsScreen
 
 
@@ -53,7 +54,7 @@ def test_custom_formula_segment_roundtrips():
 def test_set_feedback_source_does_not_fire_callback():
     s = _screen()
     fired = []
-    s.audio.set_feedback_source_callback(lambda src, path: fired.append((src, path)))
+    wire(s.audio, on_feedback_source_change=lambda src, path: fired.append((src, path)))
     s.audio.set_feedback_source("custom", "/tmp/x.wav")  # restore -> silent
     assert fired == []
     s.audio._choose_feedback_source("tone")  # user action -> fires, clears stale custom path
@@ -69,7 +70,7 @@ def test_choose_feedback_source_updates_button_label():
 def test_choose_reward_crickets_fires_and_labels():
     s = _screen()
     fired = []
-    s.audio.set_reward_source_callback(lambda src, path: fired.append((src, path)))
+    wire(s.audio, on_reward_source_change=lambda src, path: fired.append((src, path)))
     s.audio._choose_reward_source("heartbeat")
     assert fired == [("heartbeat", "")]
     assert s.audio._reward_source_btn.text == "Crickets"

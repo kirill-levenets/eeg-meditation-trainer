@@ -1,11 +1,11 @@
 """Settings → Audio: the feedback sound below the threshold and the reward above it, the alert bells and the sound
 test."""
-from collections.abc import Callable
 from typing import Optional
 
 from kivy.metrics import dp
 
 from app.config import APP
+from app.ui.hooks import Hook
 from app.ui.settings_sections.common import (
     checkbox_row,
     open_audio_file_chooser,
@@ -28,16 +28,17 @@ _REWARD_SOURCE_OPTIONS: tuple[tuple[str, str], ...] = (
 class AudioSection:
     """Builds the section's content into `section` and reports the user's actions through its callbacks."""
 
+    on_test_audio = Hook()
+    on_feedback_source_change = Hook()
+    on_reward_source_change = Hook()
+    on_sinking_alert_toggle = Hook()
+    on_subtle_alert_toggle = Hook()
+    on_disconnect_alert_toggle = Hook()
+
     def __init__(self, section) -> None:
-        self._on_test_audio: Optional[Callable] = None
-        self._on_sinking_alert_toggle: Optional[Callable] = None
-        self._on_subtle_alert_toggle: Optional[Callable] = None
-        self._on_disconnect_alert_toggle: Optional[Callable] = None
-        self._on_feedback_source_change: Optional[Callable] = None
         self._feedback_source: str = "noise"
         self._feedback_sound_path: str = ""
         self._feedback_source_btn: Optional[StyledButton] = None
-        self._on_reward_source_change: Optional[Callable] = None
         self._reward_source: str = "none"   # above-threshold reward (off by default)
         self._reward_sound_path: str = ""
         self._reward_source_btn: Optional[StyledButton] = None
@@ -120,26 +121,16 @@ class AudioSection:
         section.add_widget(disconnect_row)
 
     def _on_test_audio_pressed(self, *args) -> None:
-        if self._on_test_audio:
-            self._on_test_audio()
+        self.on_test_audio()
 
     def _on_sinking_alert_change(self, checkbox, active) -> None:
-        if self._on_sinking_alert_toggle:
-            self._on_sinking_alert_toggle(active)
+        self.on_sinking_alert_toggle(active)
 
     def _on_subtle_alert_change(self, checkbox, active) -> None:
-        if self._on_subtle_alert_toggle:
-            self._on_subtle_alert_toggle(active)
+        self.on_subtle_alert_toggle(active)
 
     def _on_disconnect_alert_change(self, checkbox, active) -> None:
-        if self._on_disconnect_alert_toggle:
-            self._on_disconnect_alert_toggle(active)
-
-    def set_test_audio_callback(self, callback: Callable) -> None:
-        self._on_test_audio = callback
-
-    def set_feedback_source_callback(self, callback: Callable) -> None:
-        self._on_feedback_source_change = callback
+        self.on_disconnect_alert_toggle(active)
 
     @property
     def feedback_source(self) -> str:
@@ -164,11 +155,7 @@ class AudioSection:
 
     def _apply_feedback_source(self, source: str, path: str) -> None:
         self.set_feedback_source(source, path)
-        if self._on_feedback_source_change:
-            self._on_feedback_source_change(self._feedback_source, self._feedback_sound_path)
-
-    def set_reward_source_callback(self, callback: Callable) -> None:
-        self._on_reward_source_change = callback
+        self.on_feedback_source_change(self._feedback_source, self._feedback_sound_path)
 
     def set_reward_source(self, source: str, path: str = "") -> None:
         """Reflect a restored/loaded reward selection on the picker button (no callback)."""
@@ -189,14 +176,5 @@ class AudioSection:
 
     def _apply_reward_source(self, source: str, path: str) -> None:
         self.set_reward_source(source, path)
-        if self._on_reward_source_change:
-            self._on_reward_source_change(self._reward_source, self._reward_sound_path)
+        self.on_reward_source_change(self._reward_source, self._reward_sound_path)
 
-    def set_sinking_alert_callback(self, callback: Callable) -> None:
-        self._on_sinking_alert_toggle = callback
-
-    def set_subtle_alert_callback(self, callback: Callable) -> None:
-        self._on_subtle_alert_toggle = callback
-
-    def set_disconnect_alert_callback(self, callback: Callable) -> None:
-        self._on_disconnect_alert_toggle = callback
