@@ -105,13 +105,13 @@ class _DayChart(Widget):
 
     on_day_tap = Hook()
     on_swipe = Hook()
+    period_end = Hook()  # the owner's period end; today without one
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.size_hint_y = None
         self._day_values: dict[str, float] = {}  # "YYYY-MM-DD" -> avg_shamatha
         self._cell_positions: dict[str, tuple] = {}
-        self._period_source: Callable[[], datetime.date] | None = None  # the owner's period end; today without one
         self._selected_date: str | None = None
         self.bind(size=self._redraw, pos=self._redraw)
         C.add_listener(self._redraw)
@@ -128,10 +128,7 @@ class _DayChart(Widget):
         raise NotImplementedError
 
     def _shown_window(self) -> tuple[datetime.date, datetime.date]:
-        return self.window((self._period_source or _today)())
-
-    def set_period_source(self, source: Callable[[], datetime.date]) -> None:
-        self._period_source = source
+        return self.window(self.period_end() or _today())
 
     def set_data(self, day_values: dict[str, float]) -> None:
         self._day_values = day_values
@@ -668,8 +665,8 @@ class HistoryScreen(Screen):
                 chart,
                 on_day_tap=self._on_day_tap,
                 on_swipe=self.shift_period,
+                period_end=lambda: self.period_end,
             )
-            chart.set_period_source(lambda: self.period_end)
             chart.bind(height=self._on_active_widget_height)
         self._graph_wrap.add_widget(self._heatmap)
 
