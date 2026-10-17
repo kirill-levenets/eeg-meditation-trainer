@@ -695,6 +695,7 @@ class EEGMeditationApp(App):
             on_export_csv=self._on_export_csv,
             on_back=self._on_diary_back,
             on_band_view_change=self._persist_band_view,
+            on_band_collapse=lambda _collapsed: self._persist_user_setting("band_power_collapsed"),
         )
 
         wire(
@@ -704,13 +705,9 @@ class EEGMeditationApp(App):
             on_rename_session=self._on_rename_session,
             on_view_mode_change=self._on_history_view_mode_change,
             on_export_sessions=self._on_export_sessions_csv,
+            on_chart_collapse=lambda _collapsed: self._persist_user_setting("history_chart_collapsed"),
         )
-        self._history_screen.set_chart_collapse_callback(
-            lambda _collapsed: self._persist_user_setting("history_chart_collapsed"))
-        self._diary_screen.what_if.set_collapse_callback(
-            lambda _collapsed: self._persist_user_setting("what_if_collapsed"))
-        self._diary_screen.set_band_collapse_callback(
-            lambda _collapsed: self._persist_user_setting("band_power_collapsed"))
+        wire(self._diary_screen.what_if, on_collapse=lambda _collapsed: self._persist_user_setting("what_if_collapsed"))
 
         # Data Backup section
         self._backup_flow = BackupFlow(

@@ -17,6 +17,7 @@ from app.storage.database import DatabaseManager
 from app.ui import history_screen, theme
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.history_screen import HistoryScreen
+from app.ui.hooks import wire
 from app.ui.theme import Icons
 
 TODAY = datetime.date(2026, 10, 7)  # a Wednesday
@@ -170,7 +171,7 @@ def test_the_chart_folds_away_and_the_list_gets_its_room(history):
 
 def test_tapping_the_chevron_folds_and_unfolds_and_reports_it(history):
     states = []
-    history.set_chart_collapse_callback(states.append)
+    wire(history, on_chart_collapse=states.append)
     _tap(history._btn_collapse)
     assert history.chart_collapsed and states == [True]
     _tap(history._btn_collapse)
@@ -207,7 +208,7 @@ def test_the_folded_chart_is_saved_per_profile(history, tmp_path):
         # As _build_settings_store declares it, and as build() wires the chevron.
         a._settings_store = SettingsStore(db, [Setting("history_chart_collapsed", False, BOOL[0], BOOL[1],
                                                        lambda: history.chart_collapsed, history.set_chart_collapsed)])
-        history.set_chart_collapse_callback(lambda _c: a._persist_user_setting("history_chart_collapsed"))
+        wire(history, on_chart_collapse=lambda _c: a._persist_user_setting("history_chart_collapsed"))
         history._btn_collapse.dispatch("on_release")  # "me" folds it
         assert db.get_user_setting(me, "history_chart_collapsed") == "True"
         a._settings_store.load(other)

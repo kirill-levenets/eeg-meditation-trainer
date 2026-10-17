@@ -7,7 +7,6 @@ to see sessions for that date; tap a session to see full detail.
 
 import datetime
 import math
-from collections.abc import Callable
 from typing import Optional
 
 from kivy.clock import Clock
@@ -607,6 +606,7 @@ class HistoryScreen(Screen):
     on_rename_session = Hook()
     on_export_sessions = Hook()
     on_view_mode_change = Hook()
+    on_chart_collapse = Hook()  # the user folded the chart (True) or opened it
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -636,6 +636,7 @@ class HistoryScreen(Screen):
         self._btn_collapse = FoldChevron()
         self._chart_fold = Fold(self._btn_collapse,
                                 lambda folded: fold_away(self._root, self._chart_area, self._title_row, folded))
+        wire(self._chart_fold, on_change=lambda folded: self.on_chart_collapse(folded))
         for w in (self._title, self._btn_collapse):
             self._title_row.add_widget(w)
         root.add_widget(self._title_row)
@@ -901,9 +902,6 @@ class HistoryScreen(Screen):
     def set_chart_collapsed(self, collapsed: bool) -> None:
         """Fold the chart and the totals away, detached, or bring them back under the title."""
         self._chart_fold.set(collapsed)
-
-    def set_chart_collapse_callback(self, cb: Callable) -> None:
-        self._chart_fold.on_change = cb
 
     _drawn_for: datetime.date | None = None  # the "today" the chart and the totals were last drawn for
 

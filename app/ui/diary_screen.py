@@ -2,7 +2,6 @@ import json
 import math
 import os
 import sys
-from collections.abc import Callable
 from typing import Optional
 
 from kivy.metrics import dp
@@ -161,6 +160,7 @@ class DiaryScreen(Screen):
     on_export_csv = Hook()
     on_back = Hook()
     on_band_view_change = Hook()  # (mode, sort_by, descending): the app keeps it per profile
+    on_band_collapse = Hook()  # the user folded the band breakdown (True) or opened it
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -238,6 +238,7 @@ class DiaryScreen(Screen):
         self._btn_band_fold = FoldChevron(size_hint_y=None, height=dp(28))
         self._band_fold = Fold(self._btn_band_fold, lambda folded: fold_away(
             self._detail_layout, self._band_holder, self._band_header, folded))
+        wire(self._band_fold, on_change=lambda folded: self.on_band_collapse(folded))
         for w in (band_title, self._btn_band_fold, Widget()):
             self._band_header.add_widget(w)
         self._detail_layout.add_widget(self._band_header)
@@ -445,9 +446,6 @@ class DiaryScreen(Screen):
     def set_band_collapsed(self, collapsed: bool) -> None:
         """Fold the table (or its placeholder) away, detached, or bring it back under its title; the title stays."""
         self._band_fold.set(collapsed)
-
-    def set_band_collapse_callback(self, cb: Callable[[bool], None]) -> None:
-        self._band_fold.on_change = cb
 
     def _show_band_section(self) -> None:
         """The totals table once its data is in, else the placeholder (loading, or the load failed)."""
