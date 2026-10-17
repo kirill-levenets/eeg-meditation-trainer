@@ -63,42 +63,43 @@ def _x_grid_step(graph_w: float, visible_seconds: float) -> float:
 _MESH_MAX_QUADS = 65535 // 6
 
 
-# Samples per pixel column from which folding is cheaper than drawing every point. A gradient point is two quads, a
-# patch and texture coordinates, a plain line point two floats (desktop, 2026-10-02: a gradient at 4/px 5.2 -> 3.1 ms,
-# a line at 4/px 0.9 -> 1.2 ms but at 8/px 1.9 -> 1.4 ms).
-_FOLD_MIN_PER_PX_GRADIENT = 4
-_FOLD_MIN_PER_PX_LINE = 8
+# A zoomed-out series draws each run of samples' min and max (MinMax). It looks like the full series once it has about
+# 3 points per stroke width (Van Der Donckt et al., IEEE VIS 2023: the image stops improving at canvas width * 3 / line
+# width), and a run draws 2, so a run spans up to 2/3 of the stroke: a thick line on a phone needs few points.
+_RUN_STROKES = 2 / 3
+_MIN_RUN = 4  # samples: a shorter run saves too little to be worth folding
 
 
-def _column_bounds(n: int, offset: int, per_px: float) -> list[int]:
-    """Where each pixel column's samples end, for n samples starting at viewport position `offset` with per_px samples
-    per column: a sample's column is floor((offset + i) / per_px). Shared by every series of one redraw."""
-    stops: list[int] = []
-    start = 0
-    while start < n:
-        column = math.floor((offset + start) / per_px)
-        # Where the next column starts, then corrected by the same floor rule (float rounding at a boundary).
-        stop = min(n, max(start + 1, math.ceil((column + 1) * per_px) - offset))
-        while stop > start + 1 and math.floor((offset + stop - 1) / per_px) > column:
-            stop -= 1
-        while stop < n and math.floor((offset + stop) / per_px) == column:
-            stop += 1
-        stops.append(stop)
-        start = stop
-    return stops
+def _extremes(values: list[float], start: int, stop: int) -> tuple[int, int]:
+    """Indices of values[start:stop]'s min and max, in sample order."""
+    run = values[start:stop]
+    lo, hi = start + run.index(min(run)), start + run.index(max(run))
+    return (lo, hi) if lo <= hi else (hi, lo)
 
 
-def _fold_columns(values: list[float], stops: list[int]) -> list[int]:
-    """Indices into values to draw: each pixel column's first, last, min and max sample (M4 aggregation, Jugel et al.,
-    VLDB 2014), in sample order. The line entering and leaving every column at its real samples and spanning its real
-    extremes rasterizes like the full series, so a redraw costs the graph's width, not its zoom."""
-    out: list[int] = []
-    start = 0
-    for stop in stops:
-        col = values[start:stop]
-        out.extend(start + i for i in sorted({0, col.index(min(col)), col.index(max(col)), len(col) - 1}))
-        start = stop
-    return out
+class _RunExtremes:
+    """One series' min and max per run of `size` samples at fixed absolute positions, kept as data arrives: a redraw
+    reads them instead of scanning every sample, and a run never moves as the series grows (Audacity's summaries)."""
+
+    __slots__ = ("size", "base", "idx")
+
+    def __init__(self, size: int) -> None:
+        self.size = size
+        self.base = 0  # the absolute run number of idx[0:2]
+        self.idx: list[int] = []  # two absolute sample indices per run: its min and max in sample order
+
+    def runs(self, values: list[float], v0: int, first: int, last: int) -> list[int]:
+        """Absolute indices for runs first..last-1, which lie inside values (values[0] is absolute sample v0)."""
+        have = self.base + len(self.idx) // 2
+        if first < self.base or first > have:  # shown from before what is kept, or past a gap: start over there
+            self.base, self.idx, have = first, [], first
+        elif first - self.base > 2 * (last - first):  # what scrolled out of the buffer
+            del self.idx[:2 * (first - self.base)]
+            self.base = first
+        size = self.size
+        for r in range(have, last):
+            self.idx.extend(v0 + i for i in _extremes(values, r * size - v0, (r + 1) * size - v0))
+        return self.idx[2 * (first - self.base):2 * (last - self.base)]
 
 
 class ScrollableGraphWidget(Widget):
@@ -139,6 +140,8 @@ class ScrollableGraphWidget(Widget):
             key: deque(maxlen=effective_max) for key in colors
         }
         self._visible: dict[str, bool] = dict.fromkeys(colors, True)
+        self._appended: dict[str, int] = dict.fromkeys(colors, 0)  # samples ever added: a run's absolute position
+        self._run_extremes: dict[tuple[str, int], _RunExtremes] = {}
         self._gradient_key: str | None = None  # the series drawn in LINE_COLOURS' gradient, not its own colour
         self._scroll_offset: int = 0
         self._total_points: int = 0
@@ -289,6 +292,7 @@ class ScrollableGraphWidget(Widget):
         for key in self._data:
             val = values.get(key, 0.0)
             self._data[key].append(val)
+            self._appended[key] += 1
         first_key = next(iter(self._data))
         self._total_points = len(self._data[first_key])
         if threshold is not None:
@@ -304,6 +308,7 @@ class ScrollableGraphWidget(Widget):
             return
         for val in values:
             self._data[key].append(val)
+        self._appended[key] += len(values)
         first_key = next(iter(self._data))
         self._total_points = len(self._data[first_key])
         self._follow_fit()
@@ -318,6 +323,8 @@ class ScrollableGraphWidget(Widget):
             # over 30k raw-EEG samples used to take ~1.5 s on Android and
             # contributed to a post-resume ANR after a screen-lock session.
             d.extend(series.get(key, []))
+            self._appended[key] = len(series.get(key, []))
+        self._run_extremes.clear()
         first_key = next(iter(self._data))
         self._total_points = len(self._data[first_key])
         self._scroll_offset = 0
@@ -544,7 +551,6 @@ class ScrollableGraphWidget(Widget):
 
         # Data lines + endpoint value labels
         label_y_positions: list[float] = []
-        column_stops: dict[int, list[int]] = {}  # by slice length: the same pixel columns for every series
         for key, slice_data in slices.items():
             if len(slice_data) < 2:
                 continue
@@ -559,13 +565,8 @@ class ScrollableGraphWidget(Widget):
             x_offset = vp - n
             span = max(vp - 1, 1)
 
-            # (x, y) once per drawn point: at most 4 per pixel column (M4) once folding pays, whatever the zoom.
-            per_px = span / graph_w
-            drawn = range(n)
-            if n >= 3 and per_px >= (_FOLD_MIN_PER_PX_GRADIENT if gradient else _FOLD_MIN_PER_PX_LINE):
-                if n not in column_stops:
-                    column_stops[n] = _column_bounds(n, x_offset, per_px)
-                drawn = _fold_columns(slice_data, column_stops[n])
+            # (x, y) once per drawn point: a run's min and max once runs span part of the stroke, whatever the zoom.
+            drawn = self._drawn_indices(key, slice_data, start_idx, span / graph_w)
             xy: list[tuple[float, float]] = []
             for i in drawn:
                 val = slice_data[i]
@@ -627,6 +628,30 @@ class ScrollableGraphWidget(Widget):
         self._draw_series_icon()
         self._draw_fit_icon()
         self._draw_expand_icon()
+
+    def _drawn_indices(self, key: str, values: list[float], start_idx: int, per_px: float) -> range | list[int]:
+        """Indices into values to draw: every one, or each run's min and max and the series' two ends."""
+        n = len(values)
+        stroke = 2 * dp(self._line_width)  # Kivy Line width is the half-thickness
+        longest = per_px * stroke * _RUN_STROKES  # samples in a run spanning _RUN_STROKES of the stroke
+        if n < 3 or longest < _MIN_RUN:
+            return range(n)
+        size = 1 << int(math.log2(longest))  # a power of two: the runs stay put until the zoom doubles
+        v0 = self._appended[key] - len(self._data[key]) + start_idx  # the absolute index of values[0]
+        first, last = -(-v0 // size), (v0 + n) // size
+        if last <= first:
+            return range(n)
+        kept = self._run_extremes.get((key, size))
+        if kept is None:
+            kept = self._run_extremes[(key, size)] = _RunExtremes(size)
+        out = [0]
+        if first * size > v0:
+            out.extend(_extremes(values, 0, first * size - v0))
+        out.extend(i - v0 for i in kept.runs(values, v0, first, last))
+        if last * size - v0 < n:
+            out.extend(_extremes(values, last * size - v0, n))
+        out.append(n - 1)
+        return [i for j, i in enumerate(out) if j == 0 or i != out[j - 1]]
 
     def _add_polyline(self, points: list[float], color) -> None:
         if color is None or len(points) < 4:
@@ -1133,6 +1158,8 @@ class ScrollableGraphWidget(Widget):
     def clear_data(self) -> None:
         for key in self._data:
             self._data[key].clear()
+            self._appended[key] = 0
+        self._run_extremes.clear()
         self._total_points = 0
         self._scroll_offset = 0
         self._markers = []
