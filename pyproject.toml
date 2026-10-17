@@ -88,6 +88,8 @@ ignore = [
 "app/config.py" = ["PLC0415"]
 # App manager: Android pyjnius lazy import, broad except, threading
 "app/ui/app_manager.py" = ["PLC0415", "BLE001", "PLR0912", "PLR0915"]
+# Backup/restore (moved from app_manager): broad except around SAF / pyjnius / file I/O, each logged or reported
+"app/ui/backup_flow.py" = ["BLE001"]
 # UI screens: _build_ui methods are long but flat widget construction
 "app/ui/live_session.py" = ["PLR0915", "BLE001"]
 "app/ui/settings_screen.py" = ["PLR0915"]

@@ -11,6 +11,7 @@ from kivy.metrics import dp
 from app.config import APP
 from app.session.manager import SessionManager
 from app.ui.history_screen import HistoryScreen, _SessionRow
+from app.ui.live_mirror import LiveMirror
 from app.ui.session_labels import (
     session_label,
     session_notes_line,
@@ -245,6 +246,7 @@ def test_a_new_session_is_named_with_its_date(monkeypatch):
     from app.ui.app_manager import EEGMeditationApp
     monkeypatch.setattr(APP, "USE_MOCK_DEVICE", True)
     app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._mirror = LiveMirror()
     app._session_manager = SessionManager()
     app._real_stream = MagicMock()
     app._session_manager.start()
@@ -269,6 +271,7 @@ def test_the_default_name_is_recognised_as_the_sessions_own_time(monkeypatch):
     from app.ui.app_manager import EEGMeditationApp
     monkeypatch.setattr(APP, "USE_MOCK_DEVICE", True)
     app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._mirror = LiveMirror()
     app._session_manager = SessionManager()
     app._real_stream = MagicMock()
     app._session_manager.start()
@@ -399,10 +402,11 @@ def test_the_end_card_is_titled_with_the_saved_session(monkeypatch):
     from app.ui.app_manager import EEGMeditationApp
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._live_screen = MagicMock()
+    app._mirror = LiveMirror()
     app._db = MagicMock()
     app._db.get_session.return_value = {"id": 9, "date_time": "2026-10-03T20:05:46.25",
                                         "session_name": "2026-10-03 20:05 - MindWave Mobile"}
-    for name in ("_reload_live_graphs_from_mirror", "_undo_session_setup", "_mark_history_dirty"):
+    for name in ("_undo_session_setup", "_mark_history_dirty"):
         monkeypatch.setattr(app, name, MagicMock())
     app._finalize_stop_ui({"duration": 96}, 9)
     app._live_screen.show_summary.assert_called_once_with(
@@ -479,9 +483,10 @@ def test_a_failed_title_read_still_shows_the_end_card(monkeypatch):
     from app.ui.app_manager import EEGMeditationApp
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._live_screen = MagicMock()
+    app._mirror = LiveMirror()
     app._db = MagicMock()
     app._db.get_session.side_effect = sqlite3.OperationalError("disk I/O error")
-    for name in ("_reload_live_graphs_from_mirror", "_undo_session_setup", "_mark_history_dirty"):
+    for name in ("_undo_session_setup", "_mark_history_dirty"):
         monkeypatch.setattr(app, name, MagicMock())
     app._finalize_stop_ui({"duration": 96}, 9)  # the session is saved; only its title couldn't be read
     app._live_screen.show_summary.assert_called_once_with(9, {"duration": 96}, title="")

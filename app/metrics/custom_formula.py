@@ -2,6 +2,7 @@ import ast
 import math
 import operator
 from collections import deque
+from collections.abc import Callable, Mapping
 from typing import Optional
 
 from app.logger import logger
@@ -324,6 +325,19 @@ class CustomFormulaEvaluator:
         if not values:
             return 0.0
         return sum(values) / len(values)
+
+
+def evaluate_series(evaluators: Mapping[str, CustomFormulaEvaluator], metrics: dict,
+                    variables: Callable[[], dict[str, float]]) -> None:
+    """Write each valid evaluator's value for this tick into `metrics` under its series key; the variables are built
+    only when one is valid."""
+    valid = [(key, ev) for key, ev in evaluators.items() if ev.is_valid]
+    if not valid:
+        return
+    fvars = variables()
+    for key, ev in valid:
+        ev.push_variables(fvars)
+        metrics[key] = ev.evaluate(fvars)
 
 
 if __name__ == "__main__":

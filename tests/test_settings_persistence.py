@@ -5,6 +5,7 @@ from app.session.manager import SessionManager
 from app.session.timer_state import TimerState
 from app.settings.registry import BOOL, INT, STR, Setting, SettingsStore
 from app.ui.app_manager import EEGMeditationApp
+from tests._program_run import make_run
 
 
 class _FakeDB:
@@ -23,10 +24,12 @@ class _FakeDB:
 
 def _app(uid=7):
     app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._ticker = MagicMock(running=False)  # no session's tick running
     app._current_user_id = uid
     app._loading_settings = False
     app._db = _FakeDB()
     app._session_manager = SessionManager()  # idle: nothing running owns the settings
+    app._program_run = make_run(app)
     return app
 
 
@@ -76,11 +79,11 @@ def test_saving_settings_mid_program_keeps_the_programs_timer():
     app._timer_state = TimerState()
     app._timer_state.set_enabled(True)   # program force-enables the timer...
     app._timer_state.set_duration(45)    # ...with the program's total
-    app._settings_screen = MagicMock(timer_enabled=False, timer_minutes=20)
+    app._settings_screen = MagicMock(**{"timer.timer_enabled": False, "timer.timer_minutes": 20})
     app._settings_store = MagicMock()
-    app._persist_active_formulas = MagicMock()
-    app._persist_session_program = MagicMock()
-    app._all_graphs = lambda: []
+    app._formula_settings = MagicMock()
+    app._program_settings = MagicMock()
+    app._graph_series = MagicMock()
 
     app._save_user_settings()
 

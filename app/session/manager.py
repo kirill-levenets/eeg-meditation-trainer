@@ -13,6 +13,13 @@ class SessionState(Enum):
     FINISHED = "FINISHED"
 
 
+
+def elapsed_clock(seconds: float) -> str:
+    """Elapsed time as a clock: MM:SS under an hour, H:MM:SS from an hour (75 minutes read 1:15:00, not 75:00)."""
+    s = int(seconds)
+    hours, minutes, secs = s // 3600, s // 60 % 60, s % 60
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
+
 class SessionManager:
     """Manages session lifecycle: Start, Pause, Resume, Stop."""
 
@@ -79,10 +86,7 @@ class SessionManager:
 
     @property
     def elapsed_formatted(self) -> str:
-        secs = int(self.elapsed_seconds)
-        minutes = secs // 60
-        seconds = secs % 60
-        return f"{minutes:02d}:{seconds:02d}"
+        return elapsed_clock(self.elapsed_seconds)
 
     @property
     def metrics_count(self) -> int:

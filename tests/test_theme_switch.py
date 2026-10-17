@@ -17,9 +17,7 @@ from app.ui.theme import (
     Card,
     CenteredTextInput,
     Divider,
-    IconLabel,
     PresetRow,
-    SectionLabel,
     StyledButton,
     ThemedColor,
     ThemedLabel,
@@ -124,8 +122,6 @@ def test_a_palette_colour_carries_its_role_and_list_makes_a_fixed_copy():
     (lambda: Card(bg_color=C.BG_CARD), "bg_color", "BG_CARD"),
     (lambda: Card(), "bg_color", "BG_CARD"),
     (lambda: Divider(), "color", "BORDER"),
-    (lambda: SectionLabel(text="s"), "color", "TEXT_SECONDARY"),
-    (lambda: IconLabel(icon="i"), "color", "TEXT_SECONDARY"),
     (lambda: ThemedLabel(text="l", color=C.TEXT_SECONDARY), "color", "TEXT_SECONDARY"),
     (lambda: ThemedTextInput(background_color=C.BG_INPUT), "background_color", "BG_INPUT"),
     (lambda: CenteredTextInput(foreground_color=C.TEXT), "foreground_color", "TEXT"),
@@ -423,9 +419,9 @@ def test_settings_screen_repaints_every_section(old, new):
     _mount(s)
     segments = [{"minutes": 10, "target": 50, "formula": "shamatha_score"},
                 {"minutes": 5, "target": 60, "formula": "meditation_score"}]
-    s.load_program(segments, "program")
-    s.set_saved_programs([{"name": "Ramp", "segments": segments}])
-    s.set_program_mode("simple")  # the program editor is built, then detached
+    s.timer.load_program(segments, "program")
+    s.timer.set_saved_programs([{"name": "Ramp", "segments": segments}])
+    s.timer.set_program_mode("simple")  # the program editor is built, then detached
     try:
         C.set_theme(new)
         _assert_repainted(s, old, new, "all sections collapsed")
@@ -436,29 +432,24 @@ def test_settings_screen_repaints_every_section(old, new):
             _assert_repainted(s, old, new, f"{sec._header.text} open")
         timer = next(sec for sec in sections if sec._header.text.startswith("Timer"))
         timer.open()
-        s.set_program_mode("program")
+        s.timer.set_program_mode("program")
         _assert_repainted(s, old, new, "Timer in Program mode, built before the switch")
     finally:
         _unmount(s)
 
 
 @pytest.mark.parametrize("old, new", PAIRS)
-def test_wizard_and_bottom_nav_repaint(old, new):
-    from app.ui.wizard_screen import WizardScreen
+def test_bottom_nav_repaint(old, new):
     C.set_theme(old)
-    wizard = WizardScreen()
     nav = BottomNav(tabs=[("Session", "session"), ("History", "history"), ("Settings", "settings")])
-    _mount(wizard)
     _mount(nav)
     try:
         C.set_theme(new)
-        _assert_repainted(wizard, old, new, "wizard")
         _assert_repainted(nav, old, new, "bottom nav")
         nav.active_tab = "history"
         _assert_repainted(nav, old, new, "bottom nav, another tab")
     finally:
         _unmount(nav)
-        _unmount(wizard)
 
 
 def test_the_theme_selector_shows_the_active_theme_however_it_was_applied():

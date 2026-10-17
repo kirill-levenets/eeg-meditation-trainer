@@ -4,14 +4,16 @@ import types
 import unittest
 from unittest import mock
 
+from kivy.uix.floatlayout import FloatLayout
+
 from app.ui.app_manager import EEGMeditationApp
+from app.ui.graph_fullscreen import GraphFullscreen
 
 
 def _app(current="live_session"):
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._sm = types.SimpleNamespace(current=current)
-    app._fullscreen_overlay = None
-    app._fullscreen_close = None
+    app._fullscreen = GraphFullscreen(FloatLayout())
     app._last_back_time = 0.0
     app._switched = []
     app._diary_back_calls = 0
@@ -52,8 +54,8 @@ class TestBackButton(unittest.TestCase):
     def test_fullscreen_overlay_closes(self):
         app = _app()
         closed = []
-        app._fullscreen_overlay = object()
-        app._fullscreen_close = lambda: closed.append(True)
+        app._fullscreen._overlay = object()
+        app._fullscreen._close = lambda: closed.append(True)
         handled, _ = self._press(app)
         self.assertTrue(handled)
         self.assertEqual(closed, [True])

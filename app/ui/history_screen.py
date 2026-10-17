@@ -44,6 +44,7 @@ from app.ui.theme import (
     Card,
     Divider,
     F,
+    Fold,
     FoldChevron,
     Icons,
     RenameRow,
@@ -54,6 +55,8 @@ from app.ui.theme import (
     confirm_popup,
     fill_background,
     fit_row_to_text,
+    fit_width_to_text,
+    fold_away,
     format_count,
     format_duration,
 )
@@ -640,9 +643,10 @@ class HistoryScreen(Screen):
         # Title, and right after it the chevron that folds the chart and the totals away (the list gets their room)
         self._title_row = BoxLayout(size_hint_y=None, height=dp(32), spacing=S.GAP_SM)
         self._title = ThemedLabel(text="History", font_size=F.H1, bold=True, color=C.TEXT, size_hint_x=None)
-        self._title.bind(texture_size=lambda w, ts: setattr(w, "width", ts[0]))
+        fit_width_to_text(self._title)
         self._btn_collapse = FoldChevron()
-        self._btn_collapse.bind(on_release=lambda *a: self._toggle_chart())
+        self._chart_fold = Fold(self._btn_collapse,
+                                lambda folded: fold_away(self._root, self._chart_area, self._title_row, folded))
         for w in (self._title, self._btn_collapse):
             self._title_row.add_widget(w)
         root.add_widget(self._title_row)
@@ -898,28 +902,16 @@ class HistoryScreen(Screen):
             self._chart_area.add_widget(self._totals)  # under the chart
         self._fit_graph_row()
 
-    _on_chart_collapse: Optional[Callable] = None
-
     @property
     def chart_collapsed(self) -> bool:
-        return self._chart_area.parent is None
+        return self._chart_fold.folded
 
     def set_chart_collapsed(self, collapsed: bool) -> None:
         """Fold the chart and the totals away, detached, or bring them back under the title."""
-        if collapsed != self.chart_collapsed:
-            if collapsed:
-                self._root.remove_widget(self._chart_area)
-            else:
-                self._root.add_widget(self._chart_area, index=self._root.children.index(self._title_row))
-        self._btn_collapse.show_folded(collapsed)
+        self._chart_fold.set(collapsed)
 
     def set_chart_collapse_callback(self, cb: Callable) -> None:
-        self._on_chart_collapse = cb
-
-    def _toggle_chart(self) -> None:
-        self.set_chart_collapsed(not self.chart_collapsed)
-        if self._on_chart_collapse:
-            self._on_chart_collapse(self.chart_collapsed)
+        self._chart_fold.on_change = cb
 
     _drawn_for: datetime.date | None = None  # the "today" the chart and the totals were last drawn for
 

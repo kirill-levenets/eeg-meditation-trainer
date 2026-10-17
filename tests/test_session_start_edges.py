@@ -15,6 +15,10 @@ from app.config import APP
 from app.session.manager import SessionManager, SessionState
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
+from app.ui.live_mirror import LiveMirror
+from tests._headset import make_headset
+from tests._program_run import make_run
+from tests._recorder import make_recorder
 
 BANDS = {"delta": 10.0, "theta": 10.0, "alpha1": 10.0, "alpha2": 10.0, "beta1": 10.0, "beta2": 10.0,
          "gamma1": 10.0, "gamma2": 10.0, "signal_quality": 0}
@@ -23,10 +27,10 @@ BANDS = {"delta": 10.0, "theta": 10.0, "alpha1": 10.0, "alpha2": 10.0, "beta1": 
 def _app() -> EEGMeditationApp:
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._current_user_id = 1
+    app._mirror = LiveMirror()
     app._waiting_for_bt = False
     app._bt_signal_start = None
-    app._tick_thread = None
-    app._stop_tick_thread = MagicMock()
+    app._ticker = MagicMock(running=False)
     app._real_stream = MagicMock()
     app._real_stream._device_name = "MindWave"
     app._eeg_stream = app._real_stream
@@ -38,9 +42,11 @@ def _app() -> EEGMeditationApp:
     app._release_wake_lock = MagicMock()
     app._stop_session_keep_alive_service = MagicMock()
     app._confirm_action = MagicMock()
+    app._program_run = make_run(app)
     queued = []
     app._on_main = queued.append
     app._queued = queued
+    app._headset = make_headset(app)
     return app
 
 
@@ -54,7 +60,7 @@ def _waiting(app) -> EEGMeditationApp:
     app._start_attempt += 1  # as _on_start does
     app._real_stream.start.return_value = True
     assert app._begin_bt_wait()
-    app._tick_thread = MagicMock()
+    app._ticker.running = True
     app._bt_connect_start = time.time()
     app._real_stream.is_connected = True
     app._real_stream.read_sample.return_value = dict(BANDS)
@@ -70,7 +76,7 @@ def test_stop_after_a_failed_wait_cleans_up_without_offering_to_save():
     app._on_stop()
     app._confirm_action.assert_not_called()  # "Stop session? It will be saved" for a session that never existed
     app._live_screen.set_controls_idle.assert_called()
-    app._stop_tick_thread.assert_not_called()
+    app._ticker.stop.assert_not_called()
 
 
 def test_stop_during_a_running_session_still_asks():
@@ -109,7 +115,7 @@ def test_a_cancel_while_the_tick_reads_the_first_data_leaves_no_session_running(
     tick = threading.Thread(target=app._handle_bt_wait)
     tick.start()
     assert in_read.wait(2)
-    app._stop_tick_thread = MagicMock(side_effect=lambda: (release.set(), tick.join(2)))  # the real stop joins the tick
+    app._ticker.stop = MagicMock(side_effect=lambda: (release.set(), tick.join(2)))  # the real stop joins the tick
     app._on_connect_cancel()
     assert not tick.is_alive()
     _run_queued(app)
@@ -126,7 +132,7 @@ def test_a_tick_that_outlives_the_cancel_shows_nothing():
     tick = threading.Thread(target=app._handle_bt_wait)
     tick.start()
     assert in_read.wait(2)
-    app._on_connect_cancel()  # the fixture's _stop_tick_thread returns without the tick, like a timed-out join
+    app._on_connect_cancel()  # the fixture's ticker stop returns without the tick, like a timed-out join
     release.set()
     tick.join(2)
     _run_queued(app)
@@ -138,9 +144,9 @@ def test_deleting_the_profile_in_the_frame_the_session_starts_leaves_no_audio_pl
     app = _waiting(_app())
     app._handle_bt_wait()  # data arrived: the "Running" UI + audio are queued
     app._db = MagicMock()
-    app._current_session_id = None
-    app._metrics_buffer = []
-    app._reload_live_graphs_from_mirror = MagicMock()
+    app._recorder = make_recorder(app)
+    app._recorder._buffer = []
+    app._mirror = MagicMock()
     app._mark_history_dirty = MagicMock()
     app._discard_running_session()
     _run_queued(app)
@@ -160,7 +166,7 @@ def test_stop_after_the_timer_ended_the_session_leaves_its_teardown_alone():
     app = _app()
     app._session_manager.start()
     app._session_manager.stop(reason="timer")  # saved on the tick thread; its UI teardown is queued
-    app._tick_thread = MagicMock()
+    app._ticker.running = True
     app._on_stop()
     app._real_stream.stop.assert_not_called()  # the kept-alive headset link stays up
     app._confirm_action.assert_not_called()
@@ -176,7 +182,7 @@ def test_cancel_during_the_device_scan_does_not_start_the_session(monkeypatch):
     monkeypatch.setattr(am.Clock, "schedule_once", lambda cb, *a, **k: scheduled.append(cb))
     app = _app()
     app._real_stream._device_address = ""
-    app._on_device_select = MagicMock()
+    app._headset.on_select = MagicMock()
     app._start_session_common = MagicMock()
     app._on_start()  # "Scanning for MindWave..."; the scan result is queued
     app._on_connect_cancel()
@@ -194,7 +200,7 @@ def test_a_scan_result_still_starts_the_session_without_a_cancel(monkeypatch):
     monkeypatch.setattr(am.Clock, "schedule_once", lambda cb, *a, **k: scheduled.append(cb))
     app = _app()
     app._real_stream._device_address = ""
-    app._on_device_select = MagicMock()
+    app._headset.on_select = MagicMock()
     app._start_session_common = MagicMock()
     app._on_start()
     for cb in scheduled:
@@ -206,10 +212,9 @@ def test_a_scan_result_still_starts_the_session_without_a_cancel(monkeypatch):
 
 
 def _with_program(app) -> EEGMeditationApp:
-    """What _start_session_common's _show_program_series left before the wait."""
-    app._session_program_active = True
-    app._active_program = MagicMock()
-    app._program_prev_visibility = {"shamatha_score": True, "program_formula": False}
+    """What _start_session_common's ProgramRun.begin left before the wait."""
+    app._program_run.program = MagicMock()
+    app._program_run._prev_visibility = {"shamatha_score": True, "program_formula": False}
     app._live_screen.graph.series_keys.return_value = ["shamatha_score", "program_formula"]
     return app
 
@@ -217,7 +222,7 @@ def _with_program(app) -> EEGMeditationApp:
 def test_a_cancelled_program_session_restores_the_series_and_leaves_no_program_state():
     app = _with_program(_waiting(_app()))
     app._on_connect_cancel()
-    assert app._session_program_active is False and app._program_prev_visibility == {}
+    assert not app._program_run.active and app._program_run._prev_visibility == {}
 
 
 def _end_the_wait(app, exit_case: str) -> None:
@@ -244,7 +249,7 @@ def test_a_wait_that_ends_on_its_own_undoes_the_program_setup(exit_case):
     _end_the_wait(app, exit_case)
     app._handle_bt_wait()
     _run_queued(app)
-    assert app._session_program_active is False and app._program_prev_visibility == {}
+    assert not app._program_run.active and app._program_run._prev_visibility == {}
     app._live_screen.show_overlay_retry.assert_called_once()
 
 
@@ -274,16 +279,15 @@ def test_a_session_row_is_dated_and_named_at_the_session_start(monkeypatch):
     try:
         app = _app()
         app._db = db
-        app._current_session_id = None
-        app._metrics_buffer = [{"timestamp": 0.5, "shamatha_score": 70}]
+        app._recorder = make_recorder(app)
+        app._recorder._buffer = [{"timestamp": 0.5, "shamatha_score": 70}]
         app._with_score = lambda stats: stats
         app._session_custom_formulas_json = lambda: ""
-        app._session_program_json = lambda: ""
         app._session_manager.start()
         started = time.time() - 3 * 3600  # the first checkpoint lands well after the start
         app._session_manager._start_time = started
-        app._checkpoint_session()
-        row = db.get_session(app._current_session_id)
+        app._recorder.checkpoint()
+        row = db.get_session(app._recorder.session_id)
         assert row["date_time"][:19] == datetime.datetime.fromtimestamp(started).isoformat()[:19]
         assert row["session_name"] == time.strftime("%Y-%m-%d %H:%M", time.localtime(started)) + " - Mock"
     finally:

@@ -13,17 +13,22 @@ from kivy.uix.slider import Slider
 from kivy.uix.widget import Widget
 
 from app.config import APP
-from app.eeg.band_spec import GROUP_NAMES, group_powers
+from app.eeg.band_spec import BAND_KEYS, GROUP_NAMES, group_powers
 from app.logger import logger, timed
 from app.session.scoring import recorded_score, target_steps
-from app.session.session_program import SessionProgram
-from app.ui.live_session import SERIES_NAMES
+from app.session.session_program import PROGRAM_FORMULA_KEYS, SessionProgram
+from app.ui.live_session import (
+    METRICS_COLORS,
+    METRICS_SCALES,
+    SERIES_NAMES,
+)
 from app.ui.raw_eeg_screen import GraphAwareScrollView, ScrollableGraphWidget
 from app.ui.session_labels import session_score_rows, session_title
 from app.ui.theme import (
     C,
     CenteredTextInput,
     F,
+    Fold,
     FoldChevron,
     Icons,
     S,
@@ -35,38 +40,19 @@ from app.ui.theme import (
     cancel_button,
     fill_background,
     fit_height_to_text,
+    fit_width_to_text,
+    fold_away,
     format_duration,
     make_message_popup,
 )
-from app.ui.widgets.band_totals import BandTotalsView
+from app.ui.widgets.band_totals import BAND_COLORS, BAND_SCALES, BandTotalsView
 from app.ui.widgets.legend import LegendBar
 from app.ui.widgets.what_if import WhatIfPanel
 
-METRICS_PREVIEW_COLORS = {
-    "meditation_score": (0.2, 0.6, 1.0, 1.0),
-    "shamatha_score": (0.0, 0.9, 0.4, 1.0),
-    "distraction": (1.0, 0.3, 0.3, 1.0),
-    "sinking": (0.8, 0.5, 0.0, 1.0),
-    "subtle_distraction": (0.9, 0.9, 0.2, 1.0),
-    "native_attention": (0.6, 0.3, 0.9, 1.0),
-    "native_meditation": (0.3, 0.9, 0.9, 1.0),
-    "custom_formula": (1.0, 0.4, 0.8, 1.0),
-    "custom_formula_2": (1.0, 0.50, 0.0, 1.0),
-    "custom_formula_3": (0.40, 0.75, 0.95, 1.0),
-}
+# A session's series: the live ones without a running program's (its formula lines are recomputed apart).
+METRICS_PREVIEW_COLORS = {k: c for k, c in METRICS_COLORS.items() if k not in PROGRAM_FORMULA_KEYS}
 
-METRICS_PREVIEW_SCALES = {
-    "meditation_score": 100.0,
-    "shamatha_score": 100.0,
-    "distraction": 100.0,
-    "sinking": 100.0,
-    "subtle_distraction": 100.0,
-    "native_attention": 100.0,
-    "native_meditation": 100.0,
-    "custom_formula": 200.0,
-    "custom_formula_2": 200.0,
-    "custom_formula_3": 200.0,
-}
+METRICS_PREVIEW_SCALES = {k: METRICS_SCALES[k] for k in METRICS_PREVIEW_COLORS}
 
 RAW_EEG_PREVIEW_COLORS = {
     "eeg": (0.3, 0.8, 1.0, 1.0),
@@ -94,12 +80,7 @@ _BAND_FREQS = {
 _AMPLITUDE_SCALE: float = 0.0004
 
 
-_RAW_KEYS = {
-    "delta": "delta_raw", "theta": "theta_raw",
-    "alpha1": "alpha1_raw", "alpha2": "alpha2_raw",
-    "beta1": "beta1_raw", "beta2": "beta2_raw",
-    "gamma1": "gamma1_raw", "gamma2": "gamma2_raw",
-}
+_RAW_KEYS = {k: f"{k}_raw" for k in BAND_KEYS}
 # The raw-EEG preview graph's deque is capped at sample_rate*60 (last 60s), so
 # synthesizing the whole session then discarding all but the tail cost ~3.6s on
 # a 47-min session. Synthesize only the retained tail.
@@ -141,21 +122,7 @@ def _synthesize_waveform(rows: list[dict]) -> tuple[list[float], int]:
     scale_factor = (500.0 * 0.8) / peak
     return [v * scale_factor for v in waveform], start
 
-FREQ_PREVIEW_COLORS = {
-    "alpha": (0.1, 0.8, 0.4, 1.0),
-    "beta": (0.9, 0.7, 0.1, 1.0),
-    "gamma": (1.0, 0.3, 0.3, 1.0),
-    "theta": (0.2, 0.5, 0.9, 1.0),
-    "delta": (0.4, 0.2, 0.8, 1.0),
-}
 
-FREQ_PREVIEW_SCALES = {
-    "alpha": 200000.0,
-    "beta": 100000.0,
-    "gamma": 50000.0,
-    "theta": 200000.0,
-    "delta": 1500000.0,
-}
 
 
 def detail_graph_data(rows: list[dict], formula_series: dict[str, list[float]]) -> dict:
@@ -174,7 +141,7 @@ def detail_graph_data(rows: list[dict], formula_series: dict[str, list[float]]) 
     with timed("diary.synth_waveform"):
         synth, raw_start = _synthesize_waveform(rows)  # tail only, see _synthesize_waveform
 
-    freq_series: dict[str, list[float]] = {k: [] for k in FREQ_PREVIEW_COLORS}
+    freq_series: dict[str, list[float]] = {k: [] for k in BAND_COLORS}
     for row in rows:
         for key, power in group_powers(lambda k: row.get(f"{k}_raw", 0.0)).items():
             freq_series[key].append(power)
@@ -266,10 +233,10 @@ class DiaryScreen(Screen):
         self._band_header = BoxLayout(size_hint_y=None, height=dp(28), spacing=S.GAP_SM)
         band_title = ThemedLabel(text="Band Power (whole session)", font_size=F.SMALL, color=C.TEXT_SECONDARY,
                                  size_hint_x=None)
-        band_title.bind(texture_size=lambda w, ts: setattr(w, "width", ts[0]))
+        fit_width_to_text(band_title)
         self._btn_band_fold = FoldChevron(size_hint_y=None, height=dp(28))
-        self._btn_band_fold.bind(on_release=lambda *_a: self.toggle_band_collapsed())
-        self._on_band_collapse: Callable[[bool], None] | None = None
+        self._band_fold = Fold(self._btn_band_fold, lambda folded: fold_away(
+            self._detail_layout, self._band_holder, self._band_header, folded))
         for w in (band_title, self._btn_band_fold, Widget()):
             self._band_header.add_widget(w)
         self._detail_layout.add_widget(self._band_header)
@@ -435,8 +402,8 @@ class DiaryScreen(Screen):
             graph_id="diary_raw",
         )
         self._freq_graph = ScrollableGraphWidget(
-            colors=FREQ_PREVIEW_COLORS,
-            scales=FREQ_PREVIEW_SCALES,
+            colors=BAND_COLORS,
+            scales=BAND_SCALES,
             viewport_seconds=60,
             show_value_labels=True,
             show_timestamps=True,
@@ -456,7 +423,6 @@ class DiaryScreen(Screen):
 
         self._active_graph_tab: str = "metrics"
         self._show_band_section()
-        self._cached_metrics_rows: list[dict] = []
         self._graph_container.add_widget(self._metrics_graph)
         self._rebuild_legend("metrics")
 
@@ -490,25 +456,14 @@ class DiaryScreen(Screen):
 
     @property
     def band_collapsed(self) -> bool:
-        return self._band_holder.parent is None
+        return self._band_fold.folded
 
     def set_band_collapsed(self, collapsed: bool) -> None:
         """Fold the table (or its placeholder) away, detached, or bring it back under its title; the title stays."""
-        if collapsed != self.band_collapsed:
-            if collapsed:
-                self._detail_layout.remove_widget(self._band_holder)
-            else:
-                self._detail_layout.add_widget(self._band_holder,
-                                               index=self._detail_layout.children.index(self._band_header))
-        self._btn_band_fold.show_folded(collapsed)
+        self._band_fold.set(collapsed)
 
     def set_band_collapse_callback(self, cb: Callable[[bool], None]) -> None:
-        self._on_band_collapse = cb
-
-    def toggle_band_collapsed(self) -> None:
-        self.set_band_collapsed(not self.band_collapsed)
-        if self._on_band_collapse:
-            self._on_band_collapse(self.band_collapsed)
+        self._band_fold.on_change = cb
 
     def _show_band_section(self) -> None:
         """The totals table once its data is in, else the placeholder (loading, or the load failed)."""
@@ -575,7 +530,7 @@ class DiaryScreen(Screen):
     def _make_detail_row() -> tuple[ThemedLabel, ThemedLabel]:
         # A title takes its text's width (the column, its widest title) and the value the rest of the row.
         title = ThemedLabel(text="", font_size=F.SMALL, color=C.TEXT_SECONDARY, size_hint=(None, None), height=dp(20))
-        title.bind(texture_size=lambda w, ts: setattr(w, "width", ts[0] + S.GAP))
+        fit_width_to_text(title, S.GAP)
         value = ThemedLabel(text="-", font_size=F.H3, bold=True, color=C.TEXT, halign="left", size_hint_y=None,
                             height=dp(20), shorten=True, shorten_from="right")
         value.bind(size=value.setter("text_size"))
@@ -623,7 +578,6 @@ class DiaryScreen(Screen):
         self._metrics_graph.set_gradient_series(self._scored_key)
         self._raw_eeg_graph.clear_data()
         self._freq_graph.clear_data()
-        self._cached_metrics_rows = []
         self._session_formula_series = {}
         self._ready = set()  # graphs and band totals: "Loading…" until their data arrives
         self._load_failed = False
@@ -639,7 +593,6 @@ class DiaryScreen(Screen):
 
     def load_metrics_preview(self, metrics_rows: list[dict]) -> None:
         """Load session metrics into all three preview graphs at once (the async open fills them one per frame)."""
-        self._cached_metrics_rows = metrics_rows
         data = detail_graph_data(metrics_rows, self._session_formula_series)
         for section in self.graph_fill_order():
             self.fill_graph(section, data)
@@ -664,7 +617,7 @@ class DiaryScreen(Screen):
 
     def set_metrics_threshold(self, value: float) -> None:
         """Set threshold line on the metrics preview graph."""
-        self._metrics_graph.set_threshold(value, "meditation_score")
+        self._metrics_graph.set_threshold(value)
 
     def set_program(self, program_json: str) -> None:
         """Draw the recorded program's stepped threshold on the metrics graph.
@@ -729,10 +682,7 @@ class DiaryScreen(Screen):
         """Rebuild legend labels for the active graph tab's visible series."""
         graph = self._graph_for_tab(tab)
         scored = self._scored_key if tab == "metrics" and self._scored_key in graph.visible_keys() else None
-        self._legend_container.set_items([
-            (graph.series_name(key), graph.series_color(key))
-            for key in graph.visible_keys()
-        ], active_text=graph.series_name(scored) if scored else None)  # » on the series it was scored on
+        self._legend_container.show_graph(graph, active_key=scored)  # » on the series it was scored on
 
     def _on_save_pressed(self, *args) -> None:
         notes, tags, mood = self._notes_state()
@@ -787,7 +737,6 @@ class DiaryScreen(Screen):
             # Android: save directly to app's writable dir (no FileChooser —
             # it can't browse /sdcard on Android 11+ without special permission)
             self._file_chooser = None
-            export_dir = self._get_android_export_dir()
 
             loc_label = ThemedLabel(
                 text="Will appear in:\nDocuments/EEGMeditation/",
@@ -839,7 +788,6 @@ class DiaryScreen(Screen):
             content=content,
             size_hint=(0.9, None) if is_android else (0.95, 0.85),
         )
-        self._export_popup = popup
         btn_cancel.bind(on_release=popup.dismiss)
         btn_save.bind(on_release=lambda x: self._do_export(popup))
         popup.open()

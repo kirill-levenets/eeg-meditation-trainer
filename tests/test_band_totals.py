@@ -83,8 +83,8 @@ def test_band_shares_zero_total_is_all_zero_no_div_by_zero():
     assert all(v == 0.0 for v in shares.values())
 
 
-def test_band_shares_missing_band_treated_as_zero():
-    shares = band_shares({"delta": 100.0})
+def test_a_missing_band_is_a_zero_share_row():
+    shares = {r["key"]: r["share"] for r in band_rows({"delta": 100.0})}
     assert shares["delta"] == 1.0
     assert shares["gamma2"] == 0.0
     assert set(shares) == set(BANDS)

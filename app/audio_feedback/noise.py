@@ -10,22 +10,23 @@ from typing import Optional
 
 from app.config import APP
 from app.logger import logger
+from app.storage.fileops import discard_file
 
 # ---------------------------------------------------------------------------
 # Noise-player abstraction
 # ---------------------------------------------------------------------------
 
 class _KivyNoisePlayer:
-    """Kivy SoundLoader-backed noise loop. Used on desktop platforms."""
+    """Kivy SoundLoader-backed player: a noise loop or a one-shot alert. Used on desktop platforms."""
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, loop: bool = True) -> None:
         from kivy.core.audio import SoundLoader
         snd = SoundLoader.load(path)
         if snd is None:
             raise RuntimeError(f"SoundLoader could not load {path!r}")
-        snd.loop = True
+        snd.loop = loop
         self._snd = snd
-        self.loop: bool = True
+        self.loop: bool = loop
 
     @property
     def volume(self) -> float:
@@ -52,7 +53,7 @@ class _KivyNoisePlayer:
 class _AndroidMediaNoisePlayer:
     """MediaPlayer-backed player. USAGE_MEDIA so it keeps playing through
     screen lock (SDL_mixer/SoundLoader is silenced while locked). Used for the
-    looping noise (loop=True) and the one-shot timer gong (loop=False)."""
+    looping noise (loop=True), the one-shot timer gong and the alerts (loop=False)."""
 
     def __init__(self, path: str, loop: bool = True) -> None:
         from jnius import autoclass
@@ -60,7 +61,7 @@ class _AndroidMediaNoisePlayer:
         AudioAttributes = autoclass("android.media.AudioAttributes")
         AudioAttributesBuilder = autoclass("android.media.AudioAttributes$Builder")
 
-        self._mp = MediaPlayer()
+        self._mp = MediaPlayer()  # a failed setup leaves it to GC: its finalizer releases it, off the tick thread
         attrs = (
             AudioAttributesBuilder()
             .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -73,7 +74,7 @@ class _AndroidMediaNoisePlayer:
         self._mp.prepare()  # synchronous — fine for small WAV files
         self._volume: float = 0.0
         self._mp.setVolume(0.0, 0.0)
-        self.loop: bool = True
+        self.loop: bool = loop
         self._playing: bool = False
 
         # Request audio focus so Android treats this as intentional media
@@ -147,19 +148,22 @@ class _AndroidMediaNoisePlayer:
             logger.exception("MediaPlayer abandonAudioFocusRequest failed")
 
 
-def _make_noise_player(path: str):
-    """Return the right noise player for this platform.
+def _make_noise_player(path: str, loop: bool = True):
+    """Return the right player for this platform: a noise loop, or a one-shot alert (loop=False).
 
-    On Android, tries MediaPlayer first (survives screen lock). Falls back to
-    SoundLoader if MediaPlayer init fails. Desktop always uses SoundLoader.
+    On Android, tries MediaPlayer first (survives screen lock). A loop falls back
+    to SoundLoader if MediaPlayer init fails; a one-shot raises. Desktop always
+    uses SoundLoader.
     """
     from kivy.utils import platform as kplat
     if kplat == "android":
         try:
-            return _AndroidMediaNoisePlayer(path)
+            return _AndroidMediaNoisePlayer(path, loop)
         except Exception as e:
-            logger.warning(f"Falling back to SoundLoader for noise: {e}")
-    return _KivyNoisePlayer(path)
+            if not loop:
+                raise  # a one-shot plays off the main thread, where SoundLoader on Android can freeze the app
+            logger.warning(f"Falling back to SoundLoader for {path}: {e}")
+    return _KivyNoisePlayer(path, loop)
 
 METRICS_THRESHOLD_FALLBACK = 100
 _FADE_SAMPLES = 512
@@ -192,10 +196,7 @@ def _generate_noise_wav(volume: float, rate: int, duration: float) -> bytes:
     leak = 0.98  # higher = deeper rumble
     # Low-pass filter state (smooths the final mix)
     lp = 0.0
-    cutoff = 2500.0  # Hz — tame harsh highs
-    rc = 1.0 / (2.0 * math.pi * cutoff)
-    dt = 1.0 / rate
-    alpha = dt / (rc + dt)
+    alpha = _lowpass_alpha(2500.0, rate)  # tames harsh highs
 
     raw = []
     for _ in range(n_samples):
@@ -208,22 +209,29 @@ def _generate_noise_wav(volume: float, rate: int, duration: float) -> bytes:
         lp += alpha * (sample - lp)
         raw.append(lp)
 
-    # Normalize to [-1, 1]
-    peak = max(abs(s) for s in raw) or 1.0
-    raw = [int((s / peak) * volume * 32767) for s in raw]
+    return _loop_pcm(raw, volume)
 
-    # Crossfade: blend tail into head so loop boundary is seamless
+
+def _lowpass_alpha(cutoff: float, rate: int) -> float:
+    """The one-pole low-pass coefficient for `cutoff` Hz at `rate` samples per second."""
+    rc = 1.0 / (2.0 * math.pi * cutoff)
+    dt = 1.0 / rate
+    return dt / (rc + dt)
+
+
+def _loop_pcm(raw: list[float], gain: float) -> bytes:
+    """Float samples as 16-bit PCM peaking at `gain` of full scale, ends crossfaded so the loop repeats without a click."""
+    n_samples = len(raw)
+    peak = max(abs(s) for s in raw) or 1.0
+    pcm = [int((s / peak) * gain * 32767) for s in raw]
     for i in range(_FADE_SAMPLES):
         t = i / _FADE_SAMPLES  # 0 → 1
-        head = raw[i]
-        tail = raw[n_samples - _FADE_SAMPLES + i]
-        raw[i] = int(head * t + tail * (1 - t))
-        raw[n_samples - _FADE_SAMPLES + i] = int(tail * t + head * (1 - t))
-
-    # Clamp to 16-bit range
-    raw = [max(-32767, min(32767, s)) for s in raw]
-
-    return struct.pack(f"<{n_samples}h", *raw)
+        head = pcm[i]
+        tail = pcm[n_samples - _FADE_SAMPLES + i]
+        pcm[i] = int(head * t + tail * (1 - t))
+        pcm[n_samples - _FADE_SAMPLES + i] = int(tail * t + head * (1 - t))
+    pcm = [max(-32767, min(32767, s)) for s in pcm]
+    return struct.pack(f"<{n_samples}h", *pcm)
 
 
 def _generate_tone_wav(rate: int, freq: float, duration: float) -> bytes:
@@ -231,10 +239,7 @@ def _generate_tone_wav(rate: int, freq: float, duration: float) -> bytes:
     n_samples = int(rate * duration)
     fifth = freq * 1.5
     lp = 0.0
-    cutoff = 3000.0
-    rc = 1.0 / (2.0 * math.pi * cutoff)
-    dt = 1.0 / rate
-    alpha = dt / (rc + dt)
+    alpha = _lowpass_alpha(3000.0, rate)
 
     raw = []
     for i in range(n_samples):
@@ -245,18 +250,7 @@ def _generate_tone_wav(rate: int, freq: float, duration: float) -> bytes:
         lp += alpha * (value - lp)
         raw.append(lp)
 
-    peak = max(abs(s) for s in raw) or 1.0
-    raw = [int((s / peak) * 0.9 * 32767) for s in raw]  # 10% headroom below the 16-bit ceiling
-
-    for i in range(_FADE_SAMPLES):
-        t = i / _FADE_SAMPLES
-        head = raw[i]
-        tail = raw[n_samples - _FADE_SAMPLES + i]
-        raw[i] = int(head * t + tail * (1 - t))
-        raw[n_samples - _FADE_SAMPLES + i] = int(tail * t + head * (1 - t))
-
-    raw = [max(-32767, min(32767, s)) for s in raw]
-    return struct.pack(f"<{n_samples}h", *raw)
+    return _loop_pcm(raw, 0.9)  # 10% headroom below the 16-bit ceiling
 
 
 def _generate_heartbeat_wav(rate: int, duration: float, pulse_seconds: float) -> bytes:
@@ -368,16 +362,15 @@ class AudioEngine:
         self._max_volume: float = APP.MAX_VOLUME
         self._threshold: int = METRICS_THRESHOLD_FALLBACK
         self._is_playing: bool = False
-        self._noise_sound: object = None
         self._feedback_players: dict[str, object] = {}  # source_id -> looping player
         self._active_feedback: str = ""                 # below-threshold (noise) player id
         self._reward_feedback: str = ""                 # above-threshold reward player id ("" = none)
         self._reward_target_volume: float = 0.0
-        self._bell_sound: object = None
+        self._bell_sound: object = None  # the gong on desktop (SoundLoader)
         self._timer_bell_player: object = None  # Android MediaPlayer gong (lock-through)
         self._noise_path: str = ""
         self._bell_path: str = ""
-        self._sinking_cooldown_until: float = 0.0
+        self._alert_until: dict[str, float] = {"sinking": 0.0, "subtle": 0.0}  # each alert's next allowed time
         self._sinking_alert_enabled: bool = False
         self._subtle_alert_enabled: bool = False
         self._disconnect_alert_enabled: bool = APP.DISCONNECT_ALERT_ENABLED
@@ -391,9 +384,10 @@ class AudioEngine:
         self._heartbeat_path = os.path.join(self._tmpdir, "heartbeat.wav")
         self._chime_path = os.path.join(self._tmpdir, "chime.wav")
         self._disconnect_path = os.path.join(self._tmpdir, "disconnect.wav")
+        self._sinking_bell_sound: object = None  # each alert's one player, replayed (see _play_one_shot)
         self._chime_sound: object = None
         self._disconnect_sound: object = None
-        self._subtle_cooldown_until: float = 0.0
+        self._one_shot_lock = threading.Lock()
         self._lock = threading.Lock()
         self._ramp_thread: Optional[threading.Thread] = None
         self._ramp_running: bool = False
@@ -463,7 +457,6 @@ class AudioEngine:
                 logger.warning(f"Feedback source {sid!r} failed to load ({resolved!r}): {e}")
         self._feedback_players = players
         self._active_feedback = self._resolve_active(active_id, list(players))
-        self._noise_sound = self._feedback_players.get(self._active_feedback)
 
     @staticmethod
     def _resolve_active(active_id: str, player_ids: list[str]) -> str:
@@ -491,7 +484,6 @@ class AudioEngine:
             except Exception:
                 logger.exception("set_active_feedback: zeroing old player failed")
         self._active_feedback = source_id
-        self._noise_sound = player
 
     def set_reward(self, source_id: str) -> None:
         """Designate the above-threshold reward player ("" = none). setVolume-only path;
@@ -514,7 +506,6 @@ class AudioEngine:
         self._active_feedback = ""
         self._reward_feedback = ""
         self._reward_target_volume = 0.0
-        self._noise_sound = None
 
     def _start_noise_loop(self) -> None:
         """Play the prepared feedback players looping (active at current volume, rest
@@ -527,7 +518,6 @@ class AudioEngine:
                 player.play()
             except Exception as e:
                 logger.warning(f"Failed to start feedback player {sid!r}: {e}")
-        self._noise_sound = self._feedback_players.get(self._active_feedback)
 
     def _set_noise_volume(self, volume: float) -> None:
         """Set target volume — the ramp thread interpolates smoothly toward it."""
@@ -580,10 +570,7 @@ class AudioEngine:
         """
         if meditation_score >= self._threshold:
             return 0.0
-        t = (self._threshold - meditation_score) / self._threshold  # 0..1 linear
-        k = 9.0
-        scaled = math.log(1.0 + t * k) / math.log(1.0 + k)  # 0..1 log-curved
-        return min(scaled * self._max_volume, self._max_volume)
+        return self._log_rise((self._threshold - meditation_score) / self._threshold)
 
     def compute_reward_volume(self, meditation_score: float) -> float:
         """Above-threshold reward volume: silent at/below threshold, log-rising to
@@ -592,9 +579,12 @@ class AudioEngine:
         if meditation_score <= self._threshold:
             return 0.0
         span = max(1, APP.REWARD_SPAN)
-        t = min(1.0, (meditation_score - self._threshold) / span)  # 0..1 linear
+        return self._log_rise(min(1.0, (meditation_score - self._threshold) / span))
+
+    def _log_rise(self, t: float) -> float:
+        """Volume for t in 0..1, log-curved (log(1 + 9t) / log 10): quick at first, slower toward max."""
         k = 9.0
-        scaled = math.log(1.0 + t * k) / math.log(1.0 + k)  # 0..1 log-curved
+        scaled = math.log(1.0 + t * k) / math.log(1.0 + k)
         return min(scaled * self._max_volume, self._max_volume)
 
     def update(self, meditation_score: float) -> None:
@@ -612,27 +602,27 @@ class AudioEngine:
 
     def update_sinking(self, sinking_score: float) -> None:
         """Check sinking score and trigger bell alert if needed."""
-        if not self._sinking_alert_enabled:
-            return
-        if not self._is_playing:
-            return
-        now = time.time()
-        if sinking_score > APP.SINKING_ALERT_THRESHOLD and now >= self._sinking_cooldown_until:
+        if self._alert_due("sinking", self._sinking_alert_enabled, sinking_score,
+                           APP.SINKING_ALERT_THRESHOLD, APP.SINKING_ALERT_COOLDOWN):
             self._play_bell()
-            self._sinking_cooldown_until = now + APP.SINKING_ALERT_COOLDOWN
             logger.info(f"Sinking alert triggered (score={sinking_score:.0f})")
 
     def update_subtle_distraction(self, subtle_score: float) -> None:
         """Check subtle distraction score and play gentle chime if needed."""
-        if not self._subtle_alert_enabled:
-            return
-        if not self._is_playing:
-            return
-        now = time.time()
-        if subtle_score > APP.SUBTLE_ALERT_THRESHOLD and now >= self._subtle_cooldown_until:
+        if self._alert_due("subtle", self._subtle_alert_enabled, subtle_score,
+                           APP.SUBTLE_ALERT_THRESHOLD, APP.SUBTLE_ALERT_COOLDOWN):
             self._play_chime()
-            self._subtle_cooldown_until = now + APP.SUBTLE_ALERT_COOLDOWN
             logger.info(f"Subtle distraction chime (score={subtle_score:.0f})")
+
+    def _alert_due(self, kind: str, enabled: bool, score: float, threshold: float, cooldown: float) -> bool:
+        """An alert sounds while feedback plays, above its threshold, at most once per cooldown."""
+        if not enabled or not self._is_playing:
+            return False
+        now = time.time()
+        if score > threshold and now >= self._alert_until[kind]:
+            self._alert_until[kind] = now + cooldown
+            return True
+        return False
 
     def _play_sound(self, path: str, volume: float = 0.8) -> object:
         """Play a WAV file once via SoundLoader. Returns the Sound object."""
@@ -648,20 +638,31 @@ class AudioEngine:
             logger.warning(f"Failed to play sound {path}: {e}")
         return None
 
+    def _play_one_shot(self, attr: str, path: str, volume: float) -> None:
+        """Replay an alert's one kept player: on Android a MediaPlayer, as SoundLoader freezes a locked app."""
+        try:
+            with self._one_shot_lock:
+                snd = getattr(self, attr)
+                if snd is None:
+                    snd = _make_noise_player(path, loop=False)
+                    setattr(self, attr, snd)
+            snd.volume = volume
+            snd.stop()  # rewinds a replay
+            snd.play()
+        except Exception as e:
+            logger.warning(f"Failed to play sound {path}: {e}")
+
     def _play_bell(self) -> None:
         """Play the sinking bell WAV."""
-        self._unload_one_shot("_bell_sound")
-        self._bell_sound = self._play_sound(self._bell_path, 0.8)
+        self._play_one_shot("_sinking_bell_sound", self._bell_path, 0.8)
 
     def _play_chime(self) -> None:
         """Play the gentle chime WAV for subtle distraction."""
-        self._unload_one_shot("_chime_sound")
-        self._chime_sound = self._play_sound(self._chime_path, 0.6)
+        self._play_one_shot("_chime_sound", self._chime_path, 0.6)
 
     def _play_disconnect(self) -> None:
         """Play the harsh disconnect alert WAV."""
-        self._unload_one_shot("_disconnect_sound")
-        self._disconnect_sound = self._play_sound(self._disconnect_path, 0.9)
+        self._play_one_shot("_disconnect_sound", self._disconnect_path, 0.9)
 
     def start(self) -> None:
         """Start noise playback."""
@@ -811,7 +812,7 @@ class AudioEngine:
         On Android the gong goes through a one-shot MediaPlayer (USAGE_MEDIA),
         like the noise — SoundLoader/SDL_mixer is silenced while the screen is
         locked, so a meditation bell played that way would never be heard at
-        the actual timer end. Desktop falls back to SoundLoader.
+        the actual timer end. Desktop uses SoundLoader.
 
         Safe to call from the tick thread: only create()/prepare()/start()
         run here (no MediaPlayer.release(), which would deadlock against the
@@ -829,7 +830,9 @@ class AudioEngine:
                 logger.info("Timer gong (MediaPlayer, lock-through)")
                 return
             except Exception:
-                logger.exception("MediaPlayer gong failed; falling back to SoundLoader")
+                logger.exception("MediaPlayer gong failed")
+                if threading.current_thread() is not threading.main_thread():
+                    return  # SoundLoader off the main thread freezes a locked app
         if self._bell_sound:
             try:
                 self._bell_sound.stop()
@@ -865,7 +868,10 @@ class AudioEngine:
         self._unload_one_shot("_bell_sound")
 
     def _unload_one_shot(self, attr: str) -> None:
-        snd = getattr(self, attr, None)
+        """Stop and release a one-shot sound; an alert replays its player instead of releasing it on each play."""
+        with self._one_shot_lock:
+            snd = getattr(self, attr, None)
+            setattr(self, attr, None)
         if not snd:
             return
         try:
@@ -873,7 +879,6 @@ class AudioEngine:
             snd.unload()
         except Exception:
             logger.exception(f"Failed to stop/unload {attr}")
-        setattr(self, attr, None)
 
     def play_connect_sound(self) -> None:
         """Play a chime to confirm device connected."""
@@ -936,6 +941,7 @@ class AudioEngine:
         self.stop()
         self.stop_timer_bell()
         self._unload_one_shot("_disconnect_sound")
+        self._unload_one_shot("_sinking_bell_sound")
         for path in (
             self._noise_path,
             self._bell_path,
@@ -945,16 +951,15 @@ class AudioEngine:
             self._chime_path,
             self._disconnect_path,
         ):
+            if path:
+                discard_file(path)
+        if self._tmpdir:
             try:
-                if path and os.path.exists(path):
-                    os.remove(path)
-            except OSError:
-                pass
-        try:
-            if self._tmpdir and os.path.isdir(self._tmpdir):
                 os.rmdir(self._tmpdir)
-        except OSError:
-            pass
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                logger.warning(f"Could not remove the sound folder {self._tmpdir}: {e}")
 
 
 if __name__ == "__main__":

@@ -27,7 +27,6 @@ from app.ui.app_manager import startup_text_size, text_size_setting
 from app.ui.diary_screen import DiaryScreen
 from app.ui.history_screen import HistoryScreen
 from app.ui.live_session import LiveSessionScreen
-from app.ui.profile_screen import ProfileScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
 from app.ui.theme import (
@@ -47,7 +46,6 @@ from app.ui.theme import (
     text_width,
 )
 from app.ui.widgets.band_totals import _BAND_ROW_H, _W_NAME, BandTotalsView
-from app.ui.wizard_screen import WizardScreen
 
 APP_DIR = Path(__file__).resolve().parents[1] / "app"  # the source tree, from wherever pytest runs
 ROLES = {"DISPLAY": 48, "H1": 22, "H2": 16, "H3": 14, "BODY": 13, "SMALL": 11, "TINY": 9}
@@ -143,8 +141,8 @@ def test_narrow_buttons_keep_their_text_on_one_line_at_the_largest_size():
     history.set_view_mode("bars")  # Cal unselected: drawn regular, and measured so
     preset = PresetRow(items=[("1h30", 90)]).children[0]
     settings = SettingsScreen()
-    settings._add_segment_row({"minutes": 10, "target": 60, "formula": "shamatha_score", "end_sound": "warble"})
-    row = settings._segments_box.children[0]
+    settings.timer._add_segment_row({"minutes": 10, "target": 60, "formula": "shamatha_score", "end_sound": "warble"})
+    row = settings.timer._segments_box.children[0]
     column = 0.16 * (dp(360) - 2 * S.PAGE_PAD - 5 * S.GAP_SM)
     end_cue = next(w for w in row.children if getattr(w, "text", "") == "Warble")
     for btn, width in ((history._btn_calendar, dp(40)), (history._btn_bars, dp(40)), (preset, dp(38)),
@@ -299,8 +297,8 @@ def test_picking_a_size_applies_it_at_once():
     screen = SettingsScreen()
     label = ThemedLabel(text="built before", font_size=F.SMALL)
     picked = []
-    screen.set_text_size_callback(picked.append)
-    screen._text_size_presets.children[0].dispatch("on_release")  # Larger (children run right to left)
+    screen.display.set_text_size_callback(picked.append)
+    screen.display._text_size_presets.children[0].dispatch("on_release")  # Larger (children run right to left)
     assert picked == [LARGEST] and F.SCALE == LARGEST
     assert label.font_size == pytest.approx(dp(11) * LARGEST)
 
@@ -308,7 +306,7 @@ def test_picking_a_size_applies_it_at_once():
 def test_the_picker_shows_the_size_in_use_whoever_set_it():
     screen = SettingsScreen()
     F.set_scale(1.25)  # a profile's settings load
-    selected = {btn._preset_value: btn.bold for btn in screen._text_size_presets.children}
+    selected = {btn._preset_value: btn.bold for btn in screen.display._text_size_presets.children}
     assert selected == {1.0: False, 1.25: True, 1.5: False}
 
 
@@ -396,8 +394,10 @@ def _settings_states(screen):
     yield "", None
     for k, section in enumerate(screen._accordion._sections):
         yield f" section {k}", section.open
-    yield " program", lambda: (screen.set_program_mode("program"), screen.load_program(PROGRAM, "program"),
+    yield " program", lambda: (screen.timer.set_program_mode("program"), screen.timer.load_program(PROGRAM, "program"),
                                screen._accordion._sections[1].open())
+    yield " profiles", lambda: (screen.populate_users([{"id": 1, "name": "Mock"}, {"id": 2, "name": "Second mock"}], 1),
+                                screen._accordion._sections[0].open())
 
 
 PROGRAM = [{"minutes": 10, "formula": "shamatha_score", "target": 60, "end_sound": "warble"},
@@ -410,22 +410,8 @@ def _detail_states(screen):
          "gamma2": 6e4})
 
 
-def _profile_states(screen):
-    yield "", lambda: screen.populate_users([{"id": 1, "name": "Mock"}, {"id": 2, "name": "Second mock"}], 1)
-
-
 def _only_state(_widget):
     yield "", None
-
-
-def _wizard_states(screen):
-    yield " step 1", None
-
-    def step_2():  # an existing profile picked in the wizard: its text size applies as step 2 shows
-        screen._user_name = "Mock"
-        screen._advance_to_step2()
-
-    yield " step 2", step_2
 
 
 # (where, build, states): each screen, and the states it is checked in, one after another on the same build.
@@ -434,8 +420,6 @@ VIEWS = [
     ("history", HistoryScreen, _history_states),
     ("settings", SettingsScreen, _settings_states),
     ("session detail", DiaryScreen, _detail_states),
-    ("profiles", ProfileScreen, _profile_states),
-    ("wizard", WizardScreen, _wizard_states),
     ("bottom nav", lambda: BottomNav(tabs=[("Session", "session"), ("History", "history"), ("Settings", "settings")],
                                      callback=lambda *_a: None), _only_state),
 ]

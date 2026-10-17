@@ -42,11 +42,9 @@ class SessionProgram:
         """(index, segment) active at elapsed; clamps to the last segment past total."""
         if not self._segments:
             return (-1, None)
-        t = 0.0
-        for i, s in enumerate(self._segments):
-            t += _minutes(s) * 60
-            if elapsed_seconds < t:
-                return (i, s)
+        for i, end in enumerate(self.boundaries):
+            if elapsed_seconds < end:
+                return (i, self._segments[i])
         return (len(self._segments) - 1, self._segments[-1])
 
     @property

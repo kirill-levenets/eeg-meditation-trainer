@@ -235,16 +235,9 @@ class NeuroSkyStream:
         self._stop_event.clear()
         self._running = True
         self._start_time = time.time()
-        self._sample_count = 0
         self._parser = ThinkGearParser()
-        # Reset sample state so stale data from a previous session
-        # doesn't trick the signal-wait check into thinking data is flowing.
-        self._latest_bands = dict.fromkeys(BAND_NAMES, 0.0)
-        self._latest_attention = 0.0
-        self._latest_meditation = 0.0
-        self._latest_signal_quality = 200
-        self._raw_wave_buffer.clear()
-        self._last_packet_time = 0.0
+        # Stale data from a previous session must not pass the signal-wait check as data flowing.
+        self.reset_sample_state()
         self._connect_epoch += 1
         self._thread = threading.Thread(
             target=self._read_loop, args=(self._connect_epoch,), daemon=True
@@ -593,24 +586,6 @@ class NeuroSkyStream:
             raise RuntimeError(f"Serial device connect failed: {e}")
 
     # ---- Desktop Linux backend ----
-
-    @staticmethod
-    def _bluez_disconnect(address: str) -> None:
-        """Ask BlueZ to drop any existing connection to this device.
-
-        Clears stale RFCOMM state that causes EBUSY / silent connection
-        failures even after the headset has been power-cycled.
-        """
-        try:
-            result = subprocess.run(
-                ["bluetoothctl", "disconnect", address],
-                capture_output=True, text=True, timeout=5,
-            )
-            out = (result.stdout + result.stderr).strip()
-            if out:
-                logger.info(f"bluetoothctl disconnect: {out}")
-        except Exception as e:
-            logger.debug(f"bluetoothctl disconnect skipped: {e}")
 
     def _connect_desktop(self) -> None:
         """Open RFCOMM socket via Python socket module (Linux desktop).

@@ -16,9 +16,9 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
 from app.eeg.band_spec import BAND_KEYS, GROUP_NAMES, group_powers
+from app.logger import logger
 from app.ui.raw_eeg_screen import (
     GraphAwareScrollView,
-    RawEEGScreen,
     ScrollableGraphWidget,
 )
 from app.ui.session_labels import session_score_rows
@@ -36,11 +36,13 @@ from app.ui.theme import (
     ThemedTextInput,
     cancel_button,
     fill_background,
+    fit_width_to_text,
     format_duration,
     make_scroll_popup,
     readable_fg,
     text_width,
 )
+from app.ui.widgets.band_totals import BAND_COLORS, BAND_SCALES
 from app.ui.widgets.legend import LegendBar
 
 _DURATION_PRESETS = [
@@ -54,15 +56,6 @@ _DURATION_PRESETS = [
     ("2 h", 120),
     ("Free", None),
 ]
-
-# Band colors/scales for inline raw EEG view
-_BAND_COLORS = {
-    "alpha": (0.15, 0.75, 0.45, 1.0),
-    "beta": (0.85, 0.70, 0.15, 1.0),
-    "gamma": (0.90, 0.35, 0.35, 1.0),
-    "theta": (0.25, 0.55, 0.85, 1.0),
-    "delta": (0.45, 0.25, 0.75, 1.0),
-}
 
 _RAW_SIGNAL_COLORS = {"eeg": C.MEDITATION}
 _RAW_SIGNAL_SCALES = {"eeg": 500.0}
@@ -119,11 +112,6 @@ SERIES_NAMES = MappingProxyType({
     "program_formula_2": "Program 2",
     "program_formula_3": "Program 3",
 })
-
-
-def _compute_graph_height(viewport_h: float, floor_dp: float) -> float:
-    """Return the height the graph area should take: fill the viewport, floor at floor_dp."""
-    return max(viewport_h, floor_dp)
 
 
 def _compute_graph_height_adaptive(
@@ -289,6 +277,8 @@ class LiveSessionScreen(Screen):
         super().__init__(**kwargs)
         self.name = "live_session"
         self._last_metrics: dict = {}
+        self._last_stats: dict = {}  # the session averages shown with them, for the AVG toggle
+        self._stats_failing = False
         self._build_ui()
         # Scroll height tracking is persistent (the widget itself lives for the screen's lifetime)
         self._scroll.bind(height=self._reflow)
@@ -330,23 +320,17 @@ class LiveSessionScreen(Screen):
             bold=True,
             color=C.TEXT,
         )
-        # Deprecated alias kept so reset_display can reference it
-        # without branching; both point to the same single label now.
-        self._start_time_label = self._timer_label
         self._start_time_str: str = ""  # wall-clock string cached for combined display
         self._state_label = ThemedLabel(
-            text="IDLE",
             size_hint_x=1 / 3,
             font_size=F.capped(F.BODY),
-            color=C.TEXT_SECONDARY,
         )
         # "In shamatha" chip — a rounded pill drawn behind the status text, sized to
         # the text and toggled via set_shamatha(). Alpha 0 = hidden.
-        self._shamatha_active = False
-        self._last_state = "IDLE"
         with self._state_label.canvas.before:
             self._shamatha_bg = Color(*C.SHAMATHA[:3], 0)
             self._shamatha_rect = RoundedRectangle(radius=[dp(9)])
+        self._show_idle_state()
         self._state_label.bind(
             pos=self._position_shamatha_chip,
             size=self._position_shamatha_chip,
@@ -435,8 +419,8 @@ class LiveSessionScreen(Screen):
         self._raw_container.add_widget(self._raw_graph)
 
         self._band_graph = ScrollableGraphWidget(
-            colors=_BAND_COLORS,
-            scales=RawEEGScreen.BAND_SCALES,
+            colors=BAND_COLORS,
+            scales=BAND_SCALES,
             viewport_seconds=60,
             show_value_labels=True,
             show_timestamps=True,
@@ -778,13 +762,8 @@ class LiveSessionScreen(Screen):
         The program's currently-training series (if it's a plotted metric) is
         bolded with a » marker via active_text.
         """
-        active = (self._graph.series_name(self._training_key)
-                  if self._training_key in METRICS_COLORS else None)
-        self._legend.set_items(
-            [(self._graph.series_name(m), self._graph.series_color(m))
-             for m in METRICS_COLORS if m in enabled_keys],
-            active_text=active,
-        )
+        self._legend.show_graph(self._graph, [m for m in METRICS_COLORS if m in enabled_keys],
+                                active_key=self._training_key if self._training_key in METRICS_COLORS else None)
 
     def set_training_series(self, key) -> None:
         """Mark the series currently driving the program target (bold + »), or
@@ -837,6 +816,22 @@ class LiveSessionScreen(Screen):
         else:
             self._timer_label.text = text
 
+    def clear_readout(self) -> None:
+        """Back to the readout a fresh screen shows: no session's numbers, timer, start time, state or alert."""
+        self._last_metrics = {}
+        self._last_stats = {}
+        self._render_stats({}, {})
+        self._start_time_str = ""
+        self._graph.set_start_wall_time(None)
+        self._timer_label.text = "00:00"
+        self._show_idle_state()
+        self.hide_alert()
+
+    def _show_idle_state(self) -> None:
+        """The state a fresh screen shows: IDLE, no shamatha chip."""
+        self._last_state = "IDLE"
+        self.set_shamatha(False)
+
     def set_start_time(self, epoch: float) -> None:
         """Cache session start wall-clock time, update combined timer, and pass to graph."""
         lt = time.localtime(epoch)
@@ -852,6 +847,7 @@ class LiveSessionScreen(Screen):
             "Gross Distraction": C.STATE_DISTRACTED,
             "Sinking": C.STATE_SINKING,
             "Neutral": C.STATE_NEUTRAL,
+            "IDLE": C.TEXT_SECONDARY,
         }
         self._state_label.color = color_map.get(state, C.STATE_NEUTRAL)
 
@@ -887,12 +883,16 @@ class LiveSessionScreen(Screen):
 
     def update_stats(self, metrics: dict[str, float]) -> None:
         self._last_metrics = metrics
-        stats = {}
+        app = App.get_running_app()
         try:
-            stats = App.get_running_app()._session_manager.compute_statistics()
+            self._last_stats = app._session_manager.compute_statistics() if app is not None else {}
+            self._stats_failing = False
         except Exception:
-            pass
-        self._render_stats(metrics, stats)
+            if not self._stats_failing:  # once until it recovers: this runs at 2 Hz
+                logger.exception("Session averages could not be computed")
+            self._stats_failing = True
+            self._last_stats = {}
+        self._render_stats(metrics, self._last_stats)
 
     def update_device_status(
         self, connected: bool, device_name: str = "", connecting: bool = False
@@ -941,10 +941,7 @@ class LiveSessionScreen(Screen):
 
     def _rebuild_band_legend(self) -> None:
         """Repopulate the band legend with only the band graph's visible series."""
-        self._band_legend.set_items([
-            (self._band_graph.series_name(k), self._band_graph.series_color(k))
-            for k in self._band_graph.visible_keys()
-        ])
+        self._band_legend.show_graph(self._band_graph)
 
     def _open_duration_popup(self, *_args) -> None:
         """Open a modal Popup to pick a session duration preset.
@@ -1128,20 +1125,6 @@ class LiveSessionScreen(Screen):
         self._alert_label.text = ""
         self._alert_label.height = dp(0)
 
-    def reset_display(self) -> None:
-        self._graph.clear_data()
-        self._graph.set_start_wall_time(None)
-        self._start_time_str = ""
-        self._timer_label.text = "00:00"
-        self._state_label.text = "IDLE"
-        self._state_label.color = C.STATE_NEUTRAL
-        self.hide_alert()
-        self.hide_overlay()
-        self.hide_summary()
-        for label in self._stat_labels.values():
-            label.text = "0"
-        self.set_controls_idle()
-
     def show_summary(self, session_id: int, stats: dict, title: str = "") -> None:
         """Show the post-session card: the session's name, its duration and scored stats, and a notes field."""
         self._summary_session_id = session_id
@@ -1173,7 +1156,7 @@ class LiveSessionScreen(Screen):
         row = BoxLayout(size_hint_y=None, height=self._summary_line_h)
         # The label takes its text's width and the value the rest: a Metric value can be longer than its label.
         label = ThemedLabel(text="", font_size=F.BODY, color=C.TEXT_SECONDARY, size_hint_x=None)
-        label.bind(texture_size=lambda w, ts: setattr(w, "width", ts[0] + S.GAP))
+        fit_width_to_text(label, S.GAP)
         value = ThemedLabel(text="-", font_size=F.BODY, bold=True, color=C.TEXT, halign="right", valign="middle",
                             shorten=True, shorten_from="right")
         value.bind(size=value.setter("text_size"))
@@ -1249,21 +1232,17 @@ class LiveSessionScreen(Screen):
         return self._summary_session_id
 
     def _toggle_stats_mode(self, *_args) -> None:
-        self._stats_mode = "aggregate" if self._stats_mode == "live" else "live"
-        self._apply_stats_mode_styling()
-        # Force immediate refresh using last known values
-        metrics = getattr(self, "_last_metrics", {}) or {}
-        stats = {}
-        try:
-            stats = App.get_running_app()._session_manager.compute_statistics()
-        except Exception:
-            pass
-        self._render_stats(metrics, stats)
-        # Persist
+        self.set_stats_mode("aggregate" if self._stats_mode == "live" else "live")
         try:
             App.get_running_app()._save_user_settings()
         except Exception:
-            pass
+            logger.exception("The stats view could not be saved")
+
+    def set_stats_mode(self, mode: str) -> None:
+        """Show the stats strip as live values or session averages, redrawn at once."""
+        self._stats_mode = mode if mode in ("live", "aggregate") else "live"
+        self._apply_stats_mode_styling()
+        self._render_stats(self._last_metrics, self._last_stats)
 
     def _apply_stats_mode_styling(self) -> None:
         active = self._stats_mode == "aggregate"

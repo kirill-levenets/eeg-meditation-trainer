@@ -17,8 +17,10 @@ from app.session.manager import SessionManager
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.history_screen import HistoryScreen
+from app.ui.live_mirror import LiveMirror
 from app.ui.theme import StyledButton
 from app.ui.widgets.loading_overlay import LoadingOverlay
+from tests._recorder import make_recorder
 
 
 @pytest.fixture
@@ -125,13 +127,15 @@ def _app(db, monkeypatch) -> tuple[EEGMeditationApp, _Deferred, list]:
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._db = db
     app._history_screen = MagicMock()
+    app._recorder = make_recorder(app)
+    app._mirror = LiveMirror()
     app._live_screen = MagicMock()
     app._live_screen.summary_session_id = None
     app._audio = MagicMock()
     app._session_manager = SessionManager()
     app._waiting_for_bt = False
-    app._tick_thread = None
-    app._current_session_id = None
+    app._ticker = MagicMock(running=False)
+    app._recorder = make_recorder(app)
     app._info_popup = MagicMock()
     app.show_loading = MagicMock()
     app.hide_loading = MagicMock()
@@ -218,7 +222,7 @@ def test_the_running_session_is_not_deleted(db, monkeypatch):
     running, finished = _session(db, me), _session(db, me)
     app, deferred, done = _app(db, monkeypatch)
     app._session_manager.start()
-    app._current_session_id = running
+    app._recorder.session_id = running
     app._delete_sessions([finished, running], done.append)
     deferred.run()
     assert done == [False]
@@ -398,7 +402,7 @@ def test_history_does_not_list_the_running_session_until_it_ends(db, monkeypatch
     app._history_view = None
     app._history_screen = HistoryScreen()
     app._session_manager.start()
-    app._current_session_id = running
+    app._recorder.session_id = running
     app._refresh_history(force=True)
     assert [s["id"] for s in app._history_screen._sessions] == [finished]
     app._session_manager.stop()

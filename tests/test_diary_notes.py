@@ -98,6 +98,7 @@ def _app() -> EEGMeditationApp:
     app._save_user_settings = MagicMock()
     app._restoring = False
     app._is_paused = False
+    app._recorder = MagicMock()  # no session running
     return app
 
 

@@ -1,14 +1,21 @@
 """Each graph keeps its own series names: a session opened in History names its own lines, never the Session screen's,
 and a program's labels go when it ends."""
 
+from unittest.mock import MagicMock
+
 import pytest
 
-import app.ui.app_manager as am
+import app.ui.graph_series as graph_series
+from app.metrics.formula_slots import FormulaSlots
 from app.session.session_program import SessionProgram, program_evaluators
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.diary_screen import DiaryScreen
 from app.ui.live_session import SERIES_NAMES, LiveSessionScreen
+from app.ui.program_run import show_program_series
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
+from tests._formula_settings import make_formula_settings
+from tests._graph_series import make_graph_series
+from tests._program_run import make_run
 
 PAST_NAMES = {"custom_formula": "Old beta", "custom_formula_2": "Custom 2", "custom_formula_3": "Custom 3"}
 
@@ -18,8 +25,12 @@ def app() -> EEGMeditationApp:
     a = EEGMeditationApp.__new__(EEGMeditationApp)
     a._live_screen = LiveSessionScreen()
     a._diary_screen = DiaryScreen()
-    a._formula_names = ["Calm alpha", "Custom 2", "Custom 3"]
-    a._push_formula_names_to_graph()  # the profile's slot names, as loading its settings does
+    a._formulas = FormulaSlots()
+    a._db = MagicMock()
+    a._db.get_user_json_setting.return_value = [{"name": "Calm alpha", "formula": ""}]
+    make_formula_settings(a).load(1)  # the profile's slot names, as loading its settings does
+    a._program_run = make_run(a)
+    a._graph_series = make_graph_series(a)
     return a
 
 
@@ -36,10 +47,10 @@ def test_the_detail_starts_from_the_defaults_not_the_session_screens_names(app):
 
 def test_a_programs_labels_go_when_it_ends(app):
     graph = app._live_screen.graph
-    app._apply_program_visibility(SessionProgram([{"minutes": 5, "target": 60,
-                                                   "formula": {"name": "Deep", "formula": "alpha1"}}]))
+    show_program_series(graph, SessionProgram([{"minutes": 5, "target": 60,
+                                                "formula": {"name": "Deep", "formula": "alpha1"}}]))
     assert graph.series_name("program_formula") == "Program: Deep"
-    app._restore_program_series()
+    app._program_run.end()
     assert graph.series_name("program_formula") == "Program"
 
 
@@ -59,15 +70,14 @@ def _picker_rows(app, monkeypatch) -> list[str]:
         shown.extend(getattr(row, "text", None) or row.children[-1].text for row in rows)
         return _Popup()
 
-    monkeypatch.setattr(am, "make_scroll_popup", capture)
-    app._present_series_picker(app._live_screen.graph)
+    monkeypatch.setattr(graph_series, "make_scroll_popup", capture)
+    app._graph_series.present_picker(app._live_screen.graph)
     return shown
 
 
 def _run_program(app, segments) -> None:
     prog = SessionProgram(segments)
-    app._show_program_series(prog)  # as a program session's start does
-    app._session_program_active = True
+    app._program_run.begin(prog, [], "")  # as a program session's start does
 
 
 def test_a_program_of_built_in_metrics_lists_no_program_lines(app, monkeypatch):
@@ -86,7 +96,7 @@ def test_a_program_lists_only_the_lines_it_computes(app, monkeypatch):
 
 def test_no_program_lines_once_the_program_ends(app, monkeypatch):
     _run_program(app, [{"minutes": 5, "target": 60, "formula": {"name": "Deep", "formula": "alpha1"}}])
-    app._restore_program_series()
+    app._program_run.end()
     assert not [row for row in _picker_rows(app, monkeypatch) if row.startswith("Program")]
 
 

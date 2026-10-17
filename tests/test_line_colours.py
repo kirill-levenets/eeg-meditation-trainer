@@ -141,11 +141,11 @@ def test_history_colours_the_metric_a_session_was_scored_on():
 def test_picking_line_colours_applies_them_at_once():
     screen = SettingsScreen()
     picked = []
-    screen.set_line_colours_callback(picked.append)
-    plasma = next(btn for row in screen._line_colour_rows for btn in row.children if btn._preset_value == "plasma")
+    screen.display.set_line_colours_callback(picked.append)
+    plasma = next(btn for row in screen.display._line_colour_rows for btn in row.children if btn._preset_value == "plasma")
     plasma.dispatch("on_release")
     assert picked == ["plasma"] and LINE_COLOURS.name == "plasma"
-    selected = [btn._preset_value for row in screen._line_colour_rows for btn in row.children if btn.bold]
+    selected = [btn._preset_value for row in screen.display._line_colour_rows for btn in row.children if btn.bold]
     assert selected == ["plasma"]  # one choice across both rows
 
 
@@ -162,7 +162,7 @@ def test_the_line_colours_are_saved_per_profile(db):
 
 def test_a_strip_shows_its_gradient_low_to_high_from_left_to_right():
     screen = SettingsScreen()
-    viridis = next(row.buttons()["viridis"] for row in screen._line_colour_rows if "viridis" in row.buttons())
+    viridis = next(row.buttons()["viridis"] for row in screen.display._line_colour_rows if "viridis" in row.buttons())
     coords = viridis._gradient_strip._rect.tex_coords  # (u, v) at bottom-left, bottom-right, top-right, top-left
     assert coords[1::2] == (0.0, 1.0, 1.0, 0.0)
     C.set_theme("Light Cream")  # a theme switch repaints it

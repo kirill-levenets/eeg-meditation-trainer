@@ -1,7 +1,6 @@
 import csv
 import io
 import json
-import math
 import os
 import sqlite3
 import threading
@@ -10,7 +9,9 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 from app.config import APP
+from app.eeg.band_spec import BAND_KEYS, group_powers
 from app.logger import logger
+from app.metrics.engine import MetricsEngine
 
 if TYPE_CHECKING:
     from app.metrics.custom_formula import CustomFormulaEvaluator
@@ -64,6 +65,14 @@ class _NullConnection:
 
 
 _NULL_CONN = _NullConnection()
+
+
+# A session row's stats columns and their defaults: the same for its insert and every checkpoint's update.
+_SESSION_STAT_DEFAULTS: tuple[tuple[str, object], ...] = (
+    ("duration", 0), ("threshold_used", 50), ("avg_meditation", 0), ("avg_shamatha", 0), ("max_meditation", 0),
+    ("time_above_threshold", 0), ("longest_streak", 0), ("time_shamatha_90", 0),
+    ("score_metric_key", ""), ("score_metric_name", ""), ("avg_score", None), ("score_targets", ""),
+)
 
 
 class UserExistsError(Exception):
@@ -290,36 +299,17 @@ class DatabaseManager:
                         session_program: str, engine_version: str, started_at: float | None = None) -> Optional[int]:
         """The session-row INSERT inside the caller's transaction: its id, or None from the null connection.
         `started_at` (epoch seconds) dates the row; without it, now."""
+        row = {
+            "user_id": user_id,
+            "date_time": (datetime.fromtimestamp(started_at) if started_at else datetime.now()).isoformat(),
+            **{col: stats.get(col, default) for col, default in _SESSION_STAT_DEFAULTS},
+            "session_name": session_name,
+            "custom_formulas": custom_formulas,
+            "session_program": session_program,
+            "engine_version": engine_version,
+        }
         cursor = c.execute(
-            """
-            INSERT INTO sessions
-            (user_id, date_time, duration, threshold_used, avg_meditation, avg_shamatha,
-             max_meditation, time_above_threshold, longest_streak, session_name,
-             time_shamatha_90, custom_formulas, session_program, engine_version,
-             score_metric_key, score_metric_name, avg_score, score_targets)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                user_id,
-                (datetime.fromtimestamp(started_at) if started_at else datetime.now()).isoformat(),
-                stats.get("duration", 0),
-                stats.get("threshold_used", 50),
-                stats.get("avg_meditation", 0),
-                stats.get("avg_shamatha", 0),
-                stats.get("max_meditation", 0),
-                stats.get("time_above_threshold", 0),
-                stats.get("longest_streak", 0),
-                session_name,
-                stats.get("time_shamatha_90", 0),
-                custom_formulas,
-                session_program,
-                engine_version,
-                stats.get("score_metric_key", ""),
-                stats.get("score_metric_name", ""),
-                stats.get("avg_score"),
-                stats.get("score_targets", ""),
-            ),
-        )
+            f"INSERT INTO sessions ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})", tuple(row.values()))
         return cursor.lastrowid
 
     def save_metrics_batch(self, session_id: int, metrics_list: list[dict]) -> None:
@@ -412,7 +402,7 @@ class DatabaseManager:
 
     def get_session_band_totals(self, session_id: int) -> dict[str, float]:
         """Summed raw power per frequency band over the whole session (0.0 if no rows)."""
-        bands = ["delta", "theta", "alpha1", "alpha2", "beta1", "beta2", "gamma1", "gamma2"]
+        bands = BAND_KEYS
         cols = ", ".join(f"SUM({b}_raw)" for b in bands)
         row = self._conn.execute(
             f"SELECT {cols} FROM metrics WHERE session_id = ?", (session_id,)
@@ -434,14 +424,6 @@ class DatabaseManager:
         with self._write() as c:
             cur = c.execute(f"UPDATE sessions SET {assignments} WHERE id = ?", (*given.values(), session_id))
         return cur.rowcount > 0
-
-    def get_sessions_in_range(self, start_date: str, end_date: str) -> list[dict]:
-        """Return sessions within a date range for analytics."""
-        cursor = self._conn.execute(
-            "SELECT * FROM sessions WHERE date_time BETWEEN ? AND ? ORDER BY date_time",
-            (start_date, end_date),
-        )
-        return [dict(row) for row in cursor.fetchall()]
 
     def delete_session(self, session_id: int) -> None:
         """Delete a session and its metrics."""
@@ -534,24 +516,8 @@ class DatabaseManager:
     def _update_session_row(c, session_id: int, stats: dict, custom_formulas: str | None,
                             session_program: str | None, engine_version: str | None) -> None:
         """The session-row UPDATE inside the caller's transaction."""
-        cols = ["duration = ?", "threshold_used = ?", "avg_meditation = ?",
-                "avg_shamatha = ?", "max_meditation = ?", "time_above_threshold = ?",
-                "longest_streak = ?", "time_shamatha_90 = ?",
-                "score_metric_key = ?", "score_metric_name = ?", "avg_score = ?", "score_targets = ?"]
-        vals: list = [
-            stats.get("duration", 0),
-            stats.get("threshold_used", 50),
-            stats.get("avg_meditation", 0),
-            stats.get("avg_shamatha", 0),
-            stats.get("max_meditation", 0),
-            stats.get("time_above_threshold", 0),
-            stats.get("longest_streak", 0),
-            stats.get("time_shamatha_90", 0),
-            stats.get("score_metric_key", ""),
-            stats.get("score_metric_name", ""),
-            stats.get("avg_score"),
-            stats.get("score_targets", ""),
-        ]
+        cols = [f"{col} = ?" for col, _ in _SESSION_STAT_DEFAULTS]
+        vals: list = [stats.get(col, default) for col, default in _SESSION_STAT_DEFAULTS]
         if custom_formulas is not None:
             cols.append("custom_formulas = ?")
             vals.append(custom_formulas)
@@ -652,54 +618,14 @@ class DatabaseManager:
         """Persist a per-user setting as a JSON string."""
         self.set_json_setting(f"user_{user_id}_{key}", value)
 
-    # ---- Saved formulas (per-user, max 50) ----
+    # ---- Saved lists: a profile's saved formulas (max 50) and programs (max 20) ----
 
     _MAX_SAVED_FORMULAS = 50
-
-    def get_saved_formulas(self, user_id: int) -> list[dict[str, str]]:
-        """Return saved formulas for a user as [{name, formula}, ...]."""
-        raw = self.get_user_setting(user_id, "saved_formulas")
-        if not raw:
-            return []
-        try:
-            data = json.loads(raw)
-            return data if isinstance(data, list) else []
-        except (json.JSONDecodeError, TypeError):
-            return []
-
-    def _save_formulas_list(self, user_id: int, formulas: list[dict[str, str]]) -> None:
-        self.set_user_setting(user_id, "saved_formulas", json.dumps(formulas))
-
-    def add_saved_formula(self, user_id: int, name: str, formula: str) -> bool:
-        """Save a formula. Returns False if limit reached."""
-        formulas = self.get_saved_formulas(user_id)
-        if len(formulas) >= self._MAX_SAVED_FORMULAS:
-            return False
-        formulas.append({"name": name, "formula": formula})
-        self._save_formulas_list(user_id, formulas)
-        return True
-
-    def update_saved_formula(self, user_id: int, index: int, name: str, formula: str) -> None:
-        """Update a saved formula by index."""
-        formulas = self.get_saved_formulas(user_id)
-        if 0 <= index < len(formulas):
-            formulas[index] = {"name": name, "formula": formula}
-            self._save_formulas_list(user_id, formulas)
-
-    def remove_saved_formula(self, user_id: int, index: int) -> None:
-        """Remove a saved formula by index."""
-        formulas = self.get_saved_formulas(user_id)
-        if 0 <= index < len(formulas):
-            formulas.pop(index)
-            self._save_formulas_list(user_id, formulas)
-
-    # ---- Saved programs (per-user, max 20) ----
-
     _MAX_SAVED_PROGRAMS = 20
 
-    def get_saved_programs(self, user_id: int) -> list[dict]:
-        """Return saved programs for a user as [{name, segments}, ...]."""
-        raw = self.get_user_setting(user_id, "saved_programs")
+    def _saved_list(self, user_id: int, key: str) -> list[dict]:
+        """The JSON list stored under the profile setting `key`; [] when absent or unreadable."""
+        raw = self.get_user_setting(user_id, key)
         if not raw:
             return []
         try:
@@ -708,33 +634,51 @@ class DatabaseManager:
         except (json.JSONDecodeError, TypeError):
             return []
 
-    def _save_programs_list(self, user_id: int, programs: list[dict]) -> None:
-        self.set_user_setting(user_id, "saved_programs", json.dumps(programs))
+    def _add_saved(self, user_id: int, key: str, entry: dict, cap: int) -> bool:
+        """Append `entry`; False if the list already holds `cap`."""
+        entries = self._saved_list(user_id, key)
+        if len(entries) >= cap:
+            return False
+        self.set_user_setting(user_id, key, json.dumps([*entries, entry]))
+        return True
+
+    def _replace_saved(self, user_id: int, key: str, index: int, entry: dict) -> bool:
+        """Put `entry` at `index`; False if the index is out of range."""
+        entries = self._saved_list(user_id, key)
+        if not (0 <= index < len(entries)):
+            return False
+        entries[index] = entry
+        self.set_user_setting(user_id, key, json.dumps(entries))
+        return True
+
+    def _remove_saved(self, user_id: int, key: str, index: int) -> None:
+        entries = self._saved_list(user_id, key)
+        if 0 <= index < len(entries):
+            entries.pop(index)
+            self.set_user_setting(user_id, key, json.dumps(entries))
+
+    def get_saved_formulas(self, user_id: int) -> list[dict[str, str]]:
+        """[{name, formula}, ...]."""
+        return self._saved_list(user_id, "saved_formulas")
+
+    def add_saved_formula(self, user_id: int, name: str, formula: str) -> bool:
+        return self._add_saved(user_id, "saved_formulas", {"name": name, "formula": formula}, self._MAX_SAVED_FORMULAS)
+
+    def remove_saved_formula(self, user_id: int, index: int) -> None:
+        self._remove_saved(user_id, "saved_formulas", index)
+
+    def get_saved_programs(self, user_id: int) -> list[dict]:
+        """[{name, segments}, ...]."""
+        return self._saved_list(user_id, "saved_programs")
 
     def add_saved_program(self, user_id: int, name: str, segments: list[dict]) -> bool:
-        """Save a program. Returns False if the limit is reached."""
-        programs = self.get_saved_programs(user_id)
-        if len(programs) >= self._MAX_SAVED_PROGRAMS:
-            return False
-        programs.append({"name": name, "segments": segments})
-        self._save_programs_list(user_id, programs)
-        return True
+        return self._add_saved(user_id, "saved_programs", {"name": name, "segments": segments}, self._MAX_SAVED_PROGRAMS)
 
     def update_saved_program(self, user_id: int, index: int, name: str, segments: list[dict]) -> bool:
-        """Update a saved program by index. Returns False if the index is out of range."""
-        programs = self.get_saved_programs(user_id)
-        if not (0 <= index < len(programs)):
-            return False
-        programs[index] = {"name": name, "segments": segments}
-        self._save_programs_list(user_id, programs)
-        return True
+        return self._replace_saved(user_id, "saved_programs", index, {"name": name, "segments": segments})
 
     def remove_saved_program(self, user_id: int, index: int) -> None:
-        """Remove a saved program by index."""
-        programs = self.get_saved_programs(user_id)
-        if 0 <= index < len(programs):
-            programs.pop(index)
-            self._save_programs_list(user_id, programs)
+        self._remove_saved(user_id, "saved_programs", index)
 
     def get_db_size_bytes(self) -> int:
         """Return the database file size in bytes."""
@@ -755,27 +699,10 @@ class DatabaseManager:
     @staticmethod
     def formula_vars_from_row(row: dict) -> dict[str, float]:
         """Shared var namespace so CSV export and diary recompute see identical inputs."""
-        raw_bands = {
-            "delta": row.get("delta_raw", 0),
-            "theta": row.get("theta_raw", 0),
-            "alpha1": row.get("alpha1_raw", 0),
-            "alpha2": row.get("alpha2_raw", 0),
-            "beta1": row.get("beta1_raw", 0),
-            "beta2": row.get("beta2_raw", 0),
-            "gamma1": row.get("gamma1_raw", 0),
-            "gamma2": row.get("gamma2_raw", 0),
-        }
-        alpha = raw_bands["alpha1"] + raw_bands["alpha2"]
-        beta = raw_bands["beta1"] + raw_bands["beta2"]
-        gamma = raw_bands["gamma1"] + raw_bands["gamma2"]
-        fvars: dict[str, float] = {
-            **raw_bands,
-            "alpha": alpha,
-            "beta": beta,
-            "gamma": gamma,
-            # Matches MetricsEngine.normalize_bands so total_power replays identically.
-            "total_power": alpha + beta + gamma + raw_bands["theta"] + raw_bands["delta"] + 1.0,
-        }
+        raw_bands = {k: row.get(f"{k}_raw", 0) for k in BAND_KEYS}
+        groups = group_powers(lambda k: raw_bands[k])
+        # The live tick's own band functions, so a replayed formula sees the inputs it saw live.
+        fvars: dict[str, float] = {**raw_bands, **groups, "total_power": MetricsEngine.total_power(groups)}
         # The stored columns for normalized bands + scores feed formulas directly,
         # so diary replay sees the same namespace as the live tick (not silent zeros).
         for k in ("alpha_norm", "beta_norm", "gamma_norm", "theta_norm", "delta_norm",
@@ -783,11 +710,7 @@ class DatabaseManager:
                   "subtle_distraction", "stability", "calmness",
                   "native_attention", "native_meditation"):
             fvars[k] = row.get(k, 0.0)
-        sqrt_keys = ("delta", "theta", "alpha1", "alpha2", "beta1", "beta2")
-        sqrt_vals = {k: max(raw_bands.get(k, 0.0), 0.0) for k in sqrt_keys}
-        total = sum(sqrt_vals.values())
-        for k in sqrt_keys:
-            fvars[f"s_{k}"] = math.sqrt(sqrt_vals[k] / total) if total >= 1.0 else 0.0
+        fvars.update({f"s_{k}": v for k, v in MetricsEngine.compute_sqrt_relative_bands(raw_bands).items()})
         return fvars
 
     def recompute_formula_series(

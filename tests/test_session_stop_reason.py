@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock
 
+import app.audio_feedback.noise as noise_mod
+from app.audio_feedback.noise import AudioEngine
 from app.session.manager import SessionManager, SessionState
 
 
@@ -60,20 +62,20 @@ def test_set_audio_attaches_engine():
 def test_failure_stop_warble_survives_the_audio_teardown_that_follows_it(monkeypatch):
     # _stop_and_save stops the session (which starts the warble) and calls _audio.stop() on the next
     # line; stop() used to unload the warble milliseconds in, so a stale-data/BT-lost end was silent.
-    from app.audio_feedback.noise import AudioEngine
-
     engine = AudioEngine()
     try:
         played = []
-        monkeypatch.setattr(engine, "_play_sound", lambda path, vol: played.append(MagicMock()) or played[-1])
+        monkeypatch.setattr(noise_mod, "_make_noise_player",
+                            lambda path, loop=True: played.append(MagicMock()) or played[-1])
         chime = MagicMock()
         engine._chime_sound = chime
         mgr = _make_manager()
         mgr._audio = engine
         mgr.stop(reason="stale_data")
-        engine.stop()
         warble = played[-1]
-        warble.stop.assert_not_called()
+        stops = warble.stop.call_count  # the rewind before it plays
+        engine.stop()
+        assert warble.stop.call_count == stops
         warble.unload.assert_not_called()
         chime.unload.assert_called_once()
     finally:

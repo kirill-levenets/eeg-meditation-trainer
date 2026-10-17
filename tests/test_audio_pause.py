@@ -83,8 +83,7 @@ def test_the_pause_button_twice_brings_the_same_sounds_back(engine):
     app._session_manager.pause.side_effect = lambda: setattr(app._session_manager, "state", SessionState.PAUSED)
     app._session_manager.resume.side_effect = lambda: setattr(app._session_manager, "state", SessionState.RUNNING)
     app._live_screen = MagicMock()
-    app._stop_tick_thread = MagicMock()
-    app._start_tick_thread = MagicMock()
+    app._ticker = MagicMock()
     players = dict(engine._feedback_players)
 
     app._on_pause()  # pause

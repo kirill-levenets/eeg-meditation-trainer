@@ -120,7 +120,6 @@ class TestAudioFeedback(unittest.TestCase):
         bell_path = self.gen._bell_path
         self.gen.cleanup()
         self.assertFalse(os.path.exists(bell_path))
-        self.assertIsNone(self.gen._noise_sound)
 
     def test_update_only_sets_internal_volume(self):
         self.gen.set_threshold(100)
@@ -337,7 +336,6 @@ class TestFeedbackChannel(unittest.TestCase):
         self.gen.prepare_feedback({"noise": ("noise", ""), "tone": ("tone", "")}, "noise")
         self.assertEqual(set(self.gen._feedback_players), {"noise", "tone"})
         self.assertEqual(self.gen._active_feedback, "noise")
-        self.assertIs(self.gen._noise_sound, self.gen._feedback_players["noise"])
 
     def test_prepare_active_falls_back_when_id_absent(self):
         self.gen.prepare_feedback({"noise": ("noise", "")}, "tone")
@@ -349,7 +347,6 @@ class TestFeedbackChannel(unittest.TestCase):
         self.gen.set_active_feedback("tone")
         self.assertEqual(self.gen._active_feedback, "tone")
         self.assertEqual(self.gen._feedback_players["noise"].volume, 0.0)
-        self.assertIs(self.gen._noise_sound, self.gen._feedback_players["tone"])
 
     def test_set_active_unknown_is_noop(self):
         self.gen.prepare_feedback({"noise": ("noise", "")}, "noise")
@@ -376,7 +373,6 @@ class TestFeedbackChannel(unittest.TestCase):
         self.gen.stop()
         self.assertTrue(all(p.unloaded for p in players))
         self.assertEqual(self.gen._feedback_players, {})
-        self.assertIsNone(self.gen._noise_sound)
 
     def test_start_plays_all_active_loud_rest_silent(self):
         self.gen.prepare_feedback({"noise": ("noise", ""), "tone": ("tone", "")}, "tone")
@@ -389,3 +385,19 @@ class TestFeedbackChannel(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+def test_cleanup_reports_a_sound_file_it_cannot_remove(monkeypatch):
+    import app.storage.fileops as fileops
+    eng = AudioEngine()
+    warned = []
+    monkeypatch.setattr(fileops.logger, "warning", lambda msg: warned.append(msg))
+
+    def refuse(path):
+        raise PermissionError(13, "Permission denied", path)
+
+    monkeypatch.setattr(fileops.os, "remove", refuse)
+    eng.cleanup()
+    assert warned and all("Could not remove" in m for m in warned)
+    monkeypatch.undo()
+    eng.cleanup()  # the sounds it couldn't remove above

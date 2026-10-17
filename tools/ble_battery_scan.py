@@ -45,7 +45,6 @@ async def enumerate_services(address: str):
         for service in client.services:
             # Highlight known services
             svc_name = ""
-            svc_uuid_short = service.uuid[:8]
             if "180f" in service.uuid:
                 svc_name = " ** BATTERY SERVICE **"
                 battery_found = True

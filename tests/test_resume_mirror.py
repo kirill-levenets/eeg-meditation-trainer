@@ -3,7 +3,7 @@
 The Android screen-lock fix splits live-graph updates into two paths:
 
 - The tick thread mirrors every sample into session-lifetime deques
-  (``_ui_metrics_history`` / ``_ui_band_history`` / ``_ui_raw_waveform``)
+  (``LiveMirror``: ``metrics`` / ``bands`` / ``waveform``)
   regardless of pause state — no Kivy graphics ops, so it is safe while
   the screen is locked.
 - ``_refresh_ui_after_resume`` reloads all three graphs from those
@@ -17,15 +17,21 @@ exact lines the ANR fix introduced — are exercised, not re-implemented.
 """
 
 import time
-from collections import deque
 from unittest.mock import MagicMock
 
 from app.config import APP
 from app.metrics.engine import MetricsEngine
+from app.metrics.formula_slots import FormulaSlots
 from app.session.manager import SessionState
+from app.session.tick_thread import TickThread
 from app.session.timer_state import TimerState
 from app.ui.app_manager import EEGMeditationApp
+from app.ui.live_mirror import LiveMirror
 from app.ui.live_session import METRICS_COLORS
+from tests._headset import make_headset
+from tests._program_run import make_run
+from tests._program_settings import make_programs
+from tests._recorder import make_recorder
 
 BAND_KEYS = ("alpha", "beta", "gamma", "theta", "delta")
 
@@ -78,7 +84,7 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     app._eeg_stream = MagicMock()
     app._metrics_engine = MagicMock()
     app._noise_detector = None  # skip power-line feed branch
-    app._init_formula_slots()
+    app._formulas = FormulaSlots()
     # All slots invalid by default (no formula set)
 
     app._audio = MagicMock()
@@ -87,9 +93,7 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     app._timer_state = MagicMock()
     app._timer_state.tick.return_value = False  # never expire
 
-    app._metrics_buffer = []
-    app._raw_buffer = []
-    app._flush_counter = 0  # 60s flush never triggers within these short tests
+    app._recorder = make_recorder(app)  # its 60s flush never triggers within these short tests
     app._pending_marker = False
     app._on_main = MagicMock()
     app._is_paused = is_paused
@@ -98,24 +102,18 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     # Persistence deps (used by the timer-expiry path via _persist_session_data).
     app._db = MagicMock()
     app._db.checkpoint_session.return_value = 42
-    app._current_session_id = None
     app._current_user_id = 1
     app._make_session_name = MagicMock(return_value="sess")
-    app._tick_stop_event = MagicMock()
-    app._tick_thread = None  # as __init__ leaves it
+    app._ticker = TickThread(lambda dt: None)  # as __init__ leaves it: not started
 
-    app._session_program_active = False
-    app._session_program_segments = []
+    app._program_run = make_run(app)
+    app._program_settings = make_programs(app._db, app._current_user_id)
 
     app._shamatha_active = False
     app._shamatha_streak = 0
     app._shamatha_threshold = 50
 
-    app._ui_metrics_history = deque(maxlen=APP.GRAPH_POINTS_MAX)
-    app._ui_band_history = deque(maxlen=APP.GRAPH_POINTS_MAX)
-    app._ui_raw_waveform = deque(maxlen=512 * 60)
-    app._ui_last_metrics = {}
-    app._ui_last_state = "Neutral"
+    app._mirror = LiveMirror()
     return app
 
 
@@ -132,11 +130,11 @@ def test_tick_appends_to_all_mirror_buffers():
     app = _make_tick_app()
     _drive_tick(app, _raw_sample(), _metrics())
 
-    assert len(app._ui_metrics_history) == 1
-    assert len(app._ui_band_history) == 1
-    assert len(app._ui_raw_waveform) == 3  # waveform of length 3
-    assert app._ui_last_metrics == _metrics()
-    assert app._ui_last_state == "Shamatha"
+    assert len(app._mirror.metrics) == 1
+    assert len(app._mirror.bands) == 1
+    assert len(app._mirror.waveform) == 3  # waveform of length 3
+    assert app._mirror.last_metrics == _metrics()
+    assert app._mirror.last_state == "Shamatha"
 
 
 def test_tick_band_record_aggregates_paired_bands():
@@ -144,7 +142,7 @@ def test_tick_band_record_aggregates_paired_bands():
     raw = _raw_sample(seed=10.0)
     _drive_tick(app, raw, _metrics())
 
-    band = app._ui_band_history[-1]
+    band = app._mirror.bands[-1]
     assert band["alpha"] == raw["alpha1"] + raw["alpha2"]
     assert band["beta"] == raw["beta1"] + raw["beta2"]
     assert band["gamma"] == raw["gamma1"] + raw["gamma2"]
@@ -164,8 +162,8 @@ def test_tick_writes_three_distinct_custom_formula_series():
     app._metrics_engine.compute_sqrt_relative_bands.return_value = dict.fromkeys(
         ("alpha1", "alpha2", "beta1", "beta2", "theta", "delta"), 0.0
     )
-    app._formula_slots[0].set_formula("alpha + beta")        # 120
-    app._formula_slots[1].set_formula("alpha / (beta + 1)")  # 100/21
+    app._formulas.evaluators[0].set_formula("alpha + beta")        # 120
+    app._formulas.evaluators[1].set_formula("alpha / (beta + 1)")  # 100/21
     # slot 2 left invalid → must not be written
 
     metrics = _metrics()
@@ -194,9 +192,9 @@ def test_tick_waveform_fallback_appends_band_sum():
     _drive_tick(app, raw, _metrics())
 
     # No raw waveform → one synthetic point equal to the band-record sum.
-    band = app._ui_band_history[-1]
-    assert len(app._ui_raw_waveform) == 1
-    assert app._ui_raw_waveform[-1] == sum(band.values())
+    band = app._mirror.bands[-1]
+    assert len(app._mirror.waveform) == 1
+    assert app._mirror.waveform[-1] == sum(band.values())
 
 
 def test_tick_stores_metrics_copy_not_reference():
@@ -205,7 +203,7 @@ def test_tick_stores_metrics_copy_not_reference():
     _drive_tick(app, _raw_sample(), metrics)
 
     metrics["shamatha_score"] = 999  # mutate the original after the tick
-    assert app._ui_metrics_history[-1]["shamatha_score"] != 999
+    assert app._mirror.metrics[-1]["shamatha_score"] != 999
 
 
 def test_mirror_fills_while_paused_but_skips_ui_dispatch():
@@ -214,9 +212,9 @@ def test_mirror_fills_while_paused_but_skips_ui_dispatch():
 
     # The whole point of the fix: data still accrues while the screen is
     # locked, but no per-tick UI work is queued onto the (paused) Clock.
-    assert len(app._ui_metrics_history) == 1
-    assert len(app._ui_band_history) == 1
-    assert len(app._ui_raw_waveform) == 3
+    assert len(app._mirror.metrics) == 1
+    assert len(app._mirror.bands) == 1
+    assert len(app._mirror.waveform) == 3
     app._on_main.assert_not_called()
 
 
@@ -224,7 +222,7 @@ def test_unpaused_tick_dispatches_ui_once():
     app = _make_tick_app(is_paused=False)
     _drive_tick(app, _raw_sample(), _metrics())
 
-    assert len(app._ui_metrics_history) == 1
+    assert len(app._mirror.metrics) == 1
     app._on_main.assert_called_once()
 
 
@@ -239,20 +237,17 @@ def _make_resume_app(running: bool = True) -> EEGMeditationApp:
     )
     app._session_manager.elapsed_formatted = "1:23"
     app._live_screen = MagicMock()
+    app._program_run = make_run(app)
     app._settings_screen = MagicMock()
-    app._ui_metrics_history = deque(maxlen=APP.GRAPH_POINTS_MAX)
-    app._ui_band_history = deque(maxlen=APP.GRAPH_POINTS_MAX)
-    app._ui_raw_waveform = deque(maxlen=512 * 60)
-    app._ui_last_metrics = {}
-    app._ui_last_state = "Neutral"
+    app._mirror = LiveMirror()
     return app
 
 
 def _populate(app: EEGMeditationApp, n: int) -> None:
     for i in range(n):
-        app._ui_metrics_history.append(_metrics(seed=float(i)))
+        app._mirror.metrics.append(_metrics(seed=float(i)))
         raw = _raw_sample(seed=float(i))
-        app._ui_band_history.append(
+        app._mirror.bands.append(
             {
                 "alpha": raw["alpha1"] + raw["alpha2"],
                 "beta": raw["beta1"] + raw["beta2"],
@@ -261,9 +256,9 @@ def _populate(app: EEGMeditationApp, n: int) -> None:
                 "delta": raw["delta"],
             }
         )
-        app._ui_raw_waveform.extend(raw["raw_eeg_waveform"])
-    app._ui_last_metrics = _metrics(seed=float(n - 1))
-    app._ui_last_state = "Shamatha"
+        app._mirror.waveform.extend(raw["raw_eeg_waveform"])
+    app._mirror.last_metrics = _metrics(seed=float(n - 1))
+    app._mirror.last_state = "Shamatha"
 
 
 def test_resume_batch_reloads_each_graph_once():
@@ -330,7 +325,7 @@ def test_resume_refreshes_stats_state_and_timer():
     EEGMeditationApp._refresh_ui_after_resume(app)
     ls = app._live_screen
 
-    ls.update_stats.assert_called_once_with(app._ui_last_metrics)
+    ls.update_stats.assert_called_once_with(app._mirror.last_metrics)
     ls.update_state.assert_called_once_with("Shamatha")
     ls.update_timer.assert_called_once_with("1:23")
 
@@ -408,6 +403,7 @@ def _make_btwait_app() -> EEGMeditationApp:
     ts.set_enabled(True)
     ts.set_duration(15)
     app._timer_state = ts
+    app._headset = make_headset(app)
     return app
 
 
@@ -447,7 +443,7 @@ def test_timer_expiry_persists_on_tick_thread():
     app._timer_state.tick.return_value = True  # expire on this tick
     app._timer_state.custom_sound_path = ""
     app._session_manager.stop.return_value = {"duration": 100}
-    app._metrics_buffer = [{"shamatha_score": 1.0}]
+    app._recorder._buffer = [{"shamatha_score": 1.0}]
 
     _drive_tick(app, _raw_sample(), _metrics())
 
@@ -474,9 +470,9 @@ def test_timer_expiry_leaves_no_live_pipeline_behind():
     app._timer_state.tick.return_value = True
     app._timer_state.custom_sound_path = ""
     app._session_manager.stop.return_value = {"duration": 100}
-    app._metrics_buffer = []
+    app._recorder._buffer = []
     app._waiting_for_bt = False
-    app._tick_thread = MagicMock()  # the running SessionTick thread
+    app._ticker._thread = MagicMock()  # the running SessionTick thread
 
     def stop(reason):
         app._session_manager.state = SessionState.IDLE
@@ -486,7 +482,7 @@ def test_timer_expiry_leaves_no_live_pipeline_behind():
 
     _drive_tick(app, _raw_sample(), _metrics())
 
-    assert app._tick_thread is None
+    assert not app._ticker.running
     assert app._session_pipeline_live() is False
 
 
@@ -498,7 +494,7 @@ def test_timer_expiry_persists_before_muting_audio():
     app._timer_state.tick.return_value = True
     app._timer_state.custom_sound_path = ""
     app._session_manager.stop.return_value = {"duration": 100}
-    app._metrics_buffer = [{"shamatha_score": 1.0}]
+    app._recorder._buffer = [{"shamatha_score": 1.0}]
 
     calls = []
     app._session_manager.stop.side_effect = lambda **k: calls.append("stop") or {"duration": 100}
@@ -515,7 +511,7 @@ def test_timer_expiry_updates_existing_session_row():
     app._timer_state.tick.return_value = True
     app._timer_state.custom_sound_path = ""
     app._session_manager.stop.return_value = {"duration": 100}
-    app._current_session_id = 7  # row already created by a prior flush
+    app._recorder.session_id = 7  # row already created by a prior flush
 
     _drive_tick(app, _raw_sample(), _metrics())
 

@@ -8,7 +8,7 @@ labels left-to-right and wraps to new rows, growing its own height.
 from kivy.metrics import dp
 from kivy.uix.stacklayout import StackLayout
 
-from app.ui.theme import F, ThemedLabel
+from app.ui.theme import F, ThemedLabel, fit_width_to_text
 
 
 class LegendBar(StackLayout):
@@ -23,6 +23,12 @@ class LegendBar(StackLayout):
         )
         self._font_size = font_size if font_size is not None else F.TINY
         self.bind(minimum_height=self.setter("height"))
+
+    def show_graph(self, graph, keys=None, active_key: str | None = None) -> None:
+        """A graph's series as entries, in its names and colours: `keys`, or the visible ones; `active_key` gets the »."""
+        keys = graph.visible_keys() if keys is None else keys
+        self.set_items([(graph.series_name(k), graph.series_color(k)) for k in keys],
+                       active_text=graph.series_name(active_key) if active_key else None)
 
     def set_items(self, items: list[tuple[str, tuple]],
                   active_text: str | None = None) -> None:
@@ -43,5 +49,5 @@ class LegendBar(StackLayout):
             )
             # Size each label to its text so the flow layout can pack/wrap them;
             # texture_size resolves after the first render, then width follows.
-            lbl.bind(texture_size=lambda inst, ts: setattr(inst, "width", ts[0] + dp(6)))
+            fit_width_to_text(lbl, dp(6))
             self.add_widget(lbl)

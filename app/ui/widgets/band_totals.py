@@ -15,7 +15,15 @@ from app.ui.theme import ICONS_AVAILABLE, C, F, Icons, S, StyledButton, ThemedLa
 
 BANDS = list(band_spec.BAND_KEYS)
 GROUPS = list(band_spec.GROUP_KEYS)
-_GROUP_COLORS = {
+# The grouped bands' colours and graph scales: every band graph's, and the colours of this table's bars.
+BAND_SCALES = {
+    "alpha": 200000.0,
+    "beta": 100000.0,
+    "gamma": 50000.0,
+    "theta": 200000.0,
+    "delta": 1500000.0,
+}
+BAND_COLORS = {
     "alpha": (0.1, 0.8, 0.4, 1.0),
     "beta": (0.9, 0.7, 0.1, 1.0),
     "gamma": (1.0, 0.3, 0.3, 1.0),
@@ -30,13 +38,10 @@ _W_POWER = 60
 _W_PCT = 44
 
 
-def band_shares(totals: dict[str, float]) -> dict[str, float]:
-    """Each sub-band's share (0..1) of the summed power; zero total -> all zero."""
-    vals = {b: float(totals.get(b, 0.0)) for b in BANDS}
+def band_shares(vals: dict[str, float]) -> dict[str, float]:
+    """Each band's share (0..1) of their summed power; zero total -> all zero."""
     grand = sum(vals.values())
-    if grand <= 0:
-        return dict.fromkeys(BANDS, 0.0)
-    return {b: v / grand for b, v in vals.items()}
+    return {b: (v / grand) if grand > 0 else 0.0 for b, v in vals.items()}
 
 
 def grouped_totals(totals: dict[str, float]) -> dict[str, float]:
@@ -59,10 +64,10 @@ def band_rows(
         spec = band_spec.BANDS
         vals = {b: float(totals.get(b, 0.0)) for b in BANDS}
         order = BANDS
-    grand = sum(vals.values())
+    shares = band_shares(vals)
     rows = [
         {"key": b.key, "name": b.name, "range": range_text(b), "group": b.group, "total": vals[b.key],
-         "share": (vals[b.key] / grand) if grand > 0 else 0.0}
+         "share": shares[b.key]}
         for b in spec
     ]
     if sort_by in ("power", "percent"):
@@ -88,7 +93,7 @@ class Bar(Widget):
     def __init__(self, color, **kwargs):
         super().__init__(**kwargs)
         with self.canvas:
-            self._col = Color(*color)
+            Color(*color)
             self._rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(3)])
         self.bind(pos=self._sync, size=self._sync)
 
@@ -236,7 +241,7 @@ class BandTotalsView(BoxLayout):
                 self._range_labels[key] = line
 
         track = BoxLayout(orientation="horizontal")
-        bar = Bar(_GROUP_COLORS[r["group"]], size_hint_x=r["share"])
+        bar = Bar(BAND_COLORS[r["group"]], size_hint_x=r["share"])
         track.add_widget(bar)
         track.add_widget(Widget(size_hint_x=max(0.0, 1.0 - r["share"])))
 

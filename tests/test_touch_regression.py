@@ -119,7 +119,7 @@ def test_audio_source_pickers_no_dead_zones():
     s = _settings_audio_open()
     try:
         for src, path in (("noise", ""), ("custom", "/tmp/x.wav"), ("heartbeat", "")):
-            s.set_reward_source(src, path)
+            s.audio.set_reward_source(src, path)
             _pump()
             assert not find_dead_zones(s), _describe(find_dead_zones(s))
         bad = find_collapsed_disabled_with_children(s)
@@ -157,3 +157,31 @@ def test_hidden_session_end_card_leaves_no_invisible_buttons_and_start_stop_take
             assert hits == [btn], f"a tap on {btn.text!r} did not reach it"
     finally:
         _unmount(screen)
+
+
+def test_the_profile_form_hides_nothing_in_place_in_any_state():
+    from app.ui.widgets.user_picker import UserPickerForm
+    form = UserPickerForm(on_create=lambda n: None, on_pick_existing=lambda u: None, size_hint=(None, None),
+                          size=(360, 400))
+    _mount(form)
+    try:
+        states = [
+            ("no profiles", lambda: form.populate_users([])),
+            ("profiles", lambda: form.populate_users([{"id": 1, "name": "Mock"}, {"id": 2, "name": "Second"}])),
+            ("name too short", lambda: (setattr(form._name_input, "text", "x"), form._on_create_pressed())),
+            ("duplicate", lambda: form.show_duplicate_error(1, "Mock")),
+            ("hidden again", form.clear),
+        ]
+        for name, reach in states:
+            reach()
+            _pump()
+            assert not find_collapsed_disabled_with_children(form), name
+            assert not find_dead_zones(form), (name, _describe(find_dead_zones(form)))
+            assert not find_invisible_interactive(form), name
+        form.populate_users([])
+        form._name_input.text = "x"
+        form._on_create_pressed()
+        _pump()
+        assert form._btn_use_existing.parent.parent is None  # the short-name message shows no duplicate buttons
+    finally:
+        _unmount(form)

@@ -14,8 +14,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import app.ui.backup_flow as bf
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp, resolve_startup_user, sessions_for_view
+from tests._backup_flow import make_flow
+from tests._recorder import make_recorder
 
 _TMP_DIRS: list[str] = []
 
@@ -122,6 +125,7 @@ def test_on_pause_flushes_settings_normally():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._restoring = False
     app._save_user_settings = MagicMock()
+    app._recorder = MagicMock()  # no session running
     EEGMeditationApp.on_pause(app)
     app._save_user_settings.assert_called_once()
 
@@ -139,7 +143,7 @@ def test_deleting_active_profile_mid_session_discards_it_and_regates():
     app._db = MagicMock()
     app._db.get_all_users.return_value = []       # last profile removed
     app._refresh_profile = MagicMock()
-    app._refresh_saved_programs = MagicMock()
+    app._program_settings = MagicMock()
     app._open_user_gate = MagicMock()
     EEGMeditationApp._on_user_delete(app, 5)
     app._discard_running_session.assert_called_once()  # discarded, not saved-then-orphaned
@@ -156,7 +160,7 @@ def test_deleting_last_profile_in_all_users_view_regates():
     app._db = MagicMock()
     app._db.get_all_users.return_value = []
     app._refresh_profile = MagicMock()
-    app._refresh_saved_programs = MagicMock()
+    app._program_settings = MagicMock()
     app._open_user_gate = MagicMock()
     EEGMeditationApp._on_user_delete(app, 9)
     app._open_user_gate.assert_called_once()
@@ -169,7 +173,7 @@ def test_reopen_gate_when_selection_left_no_user():
     app._current_user_id = None
     app._view_all_users = False
     app._refresh_profile = MagicMock()
-    app._refresh_saved_programs = MagicMock()
+    app._program_settings = MagicMock()
     app._open_user_gate = MagicMock()
     EEGMeditationApp._reopen_gate_if_unresolved(app)
     app._open_user_gate.assert_called_once()
@@ -188,22 +192,23 @@ def test_discard_running_session_deletes_partial_row_and_resets_ui():
     # #1/#5/#12: the 60s flush may already have written a session row under the
     # doomed profile — discard must delete it and reuse the shared UI teardown.
     app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._stop_tick_thread = MagicMock()
+    app._ticker = MagicMock(running=False)
     app._session_manager = MagicMock()
     app._eeg_stream = MagicMock()
     app._audio = MagicMock()
     app._db = MagicMock()
-    app._current_session_id = 42     # partial flush happened
-    app._metrics_buffer = [{"t": 1}]
+    app._recorder = make_recorder(app)
+    app._recorder.session_id = 42     # partial flush happened
+    app._recorder._buffer = [{"t": 1}]
     app._finalize_stop_ui = MagicMock()
     EEGMeditationApp._discard_running_session(app)
     app._db.delete_session.assert_called_once_with(42)   # orphan removed
-    assert app._current_session_id is None
-    assert app._metrics_buffer == []
+    assert app._recorder.session_id is None
+    assert app._recorder._buffer == []
     app._finalize_stop_ui.assert_called_once_with(None, None)  # shared teardown
 
 
-def test_restore_refused_while_session_running():
+def test_restore_refused_while_session_running(monkeypatch):
     # #3: a restore closes the DB and relaunches — a running session would be
     # silently dropped. The entry point must refuse with an explanation.
     from app.session.manager import SessionState
@@ -211,13 +216,14 @@ def test_restore_refused_while_session_running():
     app._session_manager = MagicMock()
     app._session_manager.state = SessionState.RUNNING
     app._info_popup = MagicMock()
-    app._is_android = MagicMock()
-    EEGMeditationApp._on_restore_pressed(app)
+    on_android = MagicMock()
+    monkeypatch.setattr(bf, "_on_android", on_android)
+    make_flow(refused_while_session_runs=app._refused_while_session_runs).on_restore_pressed()
     app._info_popup.assert_called_once()      # explained, not silent
-    app._is_android.assert_not_called()        # restore flow never started
+    on_android.assert_not_called()             # restore flow never started
 
 
-def test_restore_refused_during_bt_connect_window():
+def test_restore_refused_during_bt_connect_window(monkeypatch):
     # round-4: state is IDLE while connecting, but the tick thread is live and
     # the session auto-starts on connect — must still refuse.
     from app.session.manager import SessionState
@@ -225,12 +231,13 @@ def test_restore_refused_during_bt_connect_window():
     app._session_manager = MagicMock()
     app._session_manager.state = SessionState.IDLE
     app._waiting_for_bt = True          # connecting
-    app._tick_thread = MagicMock()
+    app._ticker = MagicMock(running=True)
     app._info_popup = MagicMock()
-    app._is_android = MagicMock()
-    EEGMeditationApp._on_restore_pressed(app)
+    on_android = MagicMock()
+    monkeypatch.setattr(bf, "_on_android", on_android)
+    make_flow(refused_while_session_runs=app._refused_while_session_runs).on_restore_pressed()
     app._info_popup.assert_called_once()
-    app._is_android.assert_not_called()
+    on_android.assert_not_called()
 
 
 def test_delete_active_profile_discards_during_bt_connect():
@@ -242,12 +249,12 @@ def test_delete_active_profile_discards_during_bt_connect():
     app._session_manager = MagicMock()
     app._session_manager.state = SessionState.IDLE
     app._waiting_for_bt = True
-    app._tick_thread = MagicMock()
+    app._ticker = MagicMock(running=True)
     app._discard_running_session = MagicMock()
     app._db = MagicMock()
     app._db.get_all_users.return_value = []
     app._refresh_profile = MagicMock()
-    app._refresh_saved_programs = MagicMock()
+    app._program_settings = MagicMock()
     app._open_user_gate = MagicMock()
     EEGMeditationApp._on_user_delete(app, 5)
     app._discard_running_session.assert_called_once()   # connecting session halted

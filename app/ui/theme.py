@@ -6,10 +6,8 @@ Design direction: calm, focused, minimal — dark theme with soft accents.
 
 import colorsys
 import os
-import struct
 import types
 import weakref
-import zlib
 from collections.abc import Callable
 
 from kivy.animation import Animation
@@ -28,7 +26,6 @@ from kivy.properties import (
 from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.button import Button
 from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
@@ -157,56 +154,6 @@ class Icons:
     PLUS = "\U000F0415"
     REFRESH = "\U000F0450"
     SWAP_HORIZONTAL = "\U000F01B6"
-
-
-# ── Color palette ────────────────────────────────────────────────────
-
-# ── Accordion styling via kv ──────────────────────────────────────────
-
-def _create_solid_png(rgba, path):
-    """Write a 1x1 solid-color PNG file for use as accordion background."""
-    r = int(rgba[0] * 255)
-    g = int(rgba[1] * 255)
-    b = int(rgba[2] * 255)
-    a = int(rgba[3] * 255) if len(rgba) > 3 else 255
-
-    def _chunk(ctype, data):
-        c = ctype + data
-        return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xFFFFFFFF)
-
-    raw = zlib.compress(bytes([0, r, g, b, a]))
-    png = b'\x89PNG\r\n\x1a\n'
-    png += _chunk(b'IHDR', struct.pack('>IIBBBBB', 1, 1, 8, 6, 0, 0, 0))
-    png += _chunk(b'IDAT', raw)
-    png += _chunk(b'IEND', b'')
-    with open(path, 'wb') as f:
-        f.write(png)
-
-
-# Generate solid-color PNGs for accordion backgrounds
-import tempfile as _tempfile
-
-_ACCORDION_DIR = _tempfile.mkdtemp(prefix="eeg_theme_")
-
-
-def get_accordion_bg(color_key="BG_CARD"):
-    """Return path to a solid-color PNG for accordion backgrounds."""
-    color = getattr(C, color_key)
-    name = f"acc_{color_key}.png"
-    path = os.path.join(_ACCORDION_DIR, name)
-    if not os.path.exists(path):
-        _create_solid_png(color, path)
-    return path
-
-
-def style_accordion(accordion):
-    """Apply theme colors to all AccordionItems."""
-    bg_normal = get_accordion_bg("BG_CARD")
-    bg_selected = get_accordion_bg("PRIMARY_DIM")
-    for item in accordion.children:
-        if hasattr(item, 'background_normal'):
-            item.background_normal = bg_normal
-            item.background_selected = bg_selected
 
 
 # ── Theme palettes ───────────────────────────────────────────────────
@@ -599,6 +546,11 @@ def fit_height_to_text(label, extra: float = 0) -> None:
                texture_size=lambda w, v: setattr(w, "height", v[1] + extra))
 
 
+def fit_width_to_text(label, extra: float = 0) -> None:
+    """The label is as wide as its one-line text (plus `extra`), following a text size change."""
+    label.bind(texture_size=lambda w, ts: setattr(w, "width", ts[0] + extra))
+
+
 def fit_row_to_text(row, label, min_height: float) -> None:
     """The row grows with its wrapping label (at least `min_height`), the label and fixed-height controls centred on it."""
     label.size_hint_y = None
@@ -615,10 +567,6 @@ class ThemedLabel(ThemedMixin, Label):
     def __init__(self, **kwargs):
         kwargs.setdefault("font_size", F.px(15))  # Kivy's own default size, at the text size in use
         super().__init__(**kwargs)
-
-
-class ThemedButton(ThemedMixin, Button):
-    """Kivy's Button: its colours follow theme switches and its font the text size."""
 
 
 class ThemedTextInput(ThemedMixin, TextInput):
@@ -1080,6 +1028,35 @@ class FoldChevron(StyledButton):
             self.text = "Show" if folded else "Hide"
 
 
+class Fold:
+    """A section's fold: whether it's folded, its chevron showing it, and a user's toggle reported to `on_change`."""
+
+    def __init__(self, chevron: FoldChevron, apply: Callable[[bool], None]) -> None:
+        self.folded = False
+        self.on_change: Callable[[bool], None] | None = None
+        self._chevron = chevron
+        self._apply = apply
+        chevron.bind(on_release=lambda *_a: self.toggle())
+
+    def set(self, folded: bool) -> None:
+        self.folded = folded
+        self._apply(folded)
+        self._chevron.show_folded(folded)
+
+    def toggle(self) -> None:
+        self.set(not self.folded)
+        if self.on_change:
+            self.on_change(self.folded)
+
+
+def fold_away(parent, body, anchor, folded: bool) -> None:
+    """Detach `body` from `parent` (never hidden in place), or put it back right below `anchor`."""
+    if folded and body.parent is parent:
+        parent.remove_widget(body)
+    elif not folded and body.parent is None:
+        parent.add_widget(body, index=parent.children.index(anchor))
+
+
 class RenameRow(BoxLayout):
     """The inline name editor under a list's row: a field and Save (or Enter) calling `on_save`; its owner places it.
     `max_length` stops the field there while typing."""
@@ -1156,21 +1133,6 @@ class Divider(ThemedMixin, BoxLayout):
             Rectangle(pos=self.pos, size=self.size)
 
 
-class SectionLabel(ThemedLabel):
-    """Section header label with consistent styling."""
-
-    def __init__(self, **kwargs):
-        kwargs.setdefault("font_size", F.H2)
-        kwargs.setdefault("bold", True)
-        kwargs.setdefault("color", C.TEXT_SECONDARY)
-        kwargs.setdefault("size_hint_y", None)
-        kwargs.setdefault("height", S.ROW_SM)
-        kwargs.setdefault("halign", "left")
-        kwargs.setdefault("valign", "middle")
-        super().__init__(**kwargs)
-        self.bind(size=self.setter("text_size"))
-
-
 _MODAL_PAD = dp(12)  # Popup's frame padding, so in-screen modal cards match it
 
 
@@ -1228,7 +1190,6 @@ class ThemedPopup(ThemedMixin, Popup):
         paint_panel(frame)
         self._title_label = next(w for w in frame.children if isinstance(w, Label))
         self._title_label.bold = True
-        self._fits_content = fit
         self._fitted = None  # the content whose minimum_height the height follows
         if fit:  # size_hint=(w, None) and no height: as tall as the content, capped like make_scroll_popup
             self._title_label.bind(height=self._fit_height)
@@ -1432,10 +1393,6 @@ class RevealBox(BoxLayout):
         self._revealed = bool(show)
         self._refresh()
 
-    @property
-    def revealed(self) -> bool:
-        return self._revealed
-
     def _refresh(self) -> None:
         self.clear_widgets()
         if self._revealed:
@@ -1516,20 +1473,6 @@ class PresetRow(BoxLayout):
                 btn.bold = False
 
 
-class IconLabel(ThemedLabel):
-    """Label that renders a text icon character at a given size."""
-
-    def __init__(self, icon="", **kwargs):
-        kwargs.setdefault("font_size", F.H2)
-        kwargs.setdefault("color", C.TEXT_SECONDARY)
-        kwargs.setdefault("size_hint_x", None)
-        kwargs.setdefault("width", dp(28))
-        kwargs.setdefault("halign", "center")
-        kwargs.setdefault("valign", "middle")
-        super().__init__(text=icon, **kwargs)
-        self.bind(size=self.setter("text_size"))
-
-
 class BottomNav(BoxLayout):
     """3-tab bottom navigation bar.
 
@@ -1572,9 +1515,9 @@ class BottomNav(BoxLayout):
         self.canvas.before.clear()
         with self.canvas.before:
             ThemedColor(C.BG_DARK)
-            self._bg = Rectangle(size=self.size, pos=self.pos)
+            Rectangle(size=self.size, pos=self.pos)
             ThemedColor(C.BORDER)
-            self._border = Rectangle(
+            Rectangle(
                 size=(self.size[0], dp(1)),
                 pos=(self.pos[0], self.pos[1] + self.size[1] - dp(1)),
             )

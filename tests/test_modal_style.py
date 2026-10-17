@@ -410,21 +410,20 @@ def test_no_screen_draws_a_fixed_glyph_colour_on_an_accent_fill(theme):
     from app.ui.history_screen import HistoryScreen
     from app.ui.live_session import LiveSessionScreen
     from app.ui.settings_screen import SettingsScreen
-    from app.ui.wizard_screen import WizardScreen
     C.set_theme(theme)
-    live, hist, diary, sett, wiz = LiveSessionScreen(), HistoryScreen(), DiaryScreen(), SettingsScreen(), WizardScreen()
+    live, hist, diary, sett = LiveSessionScreen(), HistoryScreen(), DiaryScreen(), SettingsScreen()
     live._set_view("raw")
     live._set_view("metrics")
     hist.set_view_mode("bars")
     diary._switch_graph_tab("raw")
-    sett.load_program([{"minutes": 10, "target": 50, "formula": "shamatha_score"}], "program")
+    sett.timer.load_program([{"minutes": 10, "target": 50, "formula": "shamatha_score"}], "program")
     sections = [x for x in sett.walk(restrict=True) if type(x).__name__ == "_AccordionSection"]
     bad = []
     for sec in sections:
         sec.open()
         bad += _accent_buttons_with_unreadable_text(sett)
-    sett.set_program_mode("simple")
-    for root in (live, hist, diary, sett, wiz):
+    sett.timer.set_program_mode("simple")
+    for root in (live, hist, diary, sett):
         bad += _accent_buttons_with_unreadable_text(root)
     assert not sorted(set(bad)), sorted(set(bad))
 
@@ -547,7 +546,7 @@ def test_the_in_screen_modals_block_taps_on_the_screen_behind():
 def test_a_popup_given_no_size_keeps_kivys_full_size():
     content = ModalPanel()
     popup = ThemedPopup(title="x", content=content)
-    assert tuple(popup.size_hint) == (1, 1) and not popup._fits_content
+    assert tuple(popup.size_hint) == (1, 1) and popup._fitted is None
 
 
 @pytest.mark.parametrize("theme", list(THEMES))
@@ -572,12 +571,12 @@ def test_the_marker_hotkey_capture_state_is_readable(theme):
     from app.ui.settings_screen import SettingsScreen
     C.set_theme(theme)
     s = SettingsScreen()
-    btn = s._marker_hotkey_btn
-    s._on_marker_hotkey_pressed()
+    btn = s.display._marker_hotkey_btn
+    s.display._on_marker_hotkey_pressed()
     try:
         assert _contrast(btn.text_color, btn.bg_color) == pytest.approx(_best_glyph_contrast(btn.bg_color))
     finally:
-        s._on_hotkey_capture(Window, 109, 0, "m", [])
+        s.display._on_hotkey_capture(Window, 109, 0, "m", [])
     assert tuple(btn.text_color) == tuple(C.PRIMARY)  # back to its resting colour
 
 

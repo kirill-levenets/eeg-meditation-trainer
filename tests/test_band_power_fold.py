@@ -71,7 +71,7 @@ def test_the_folded_table_is_saved_per_profile(app):  # noqa: F811
     a._settings_store = SettingsStore(store, [Setting("band_power_collapsed", False, BOOL[0], BOOL[1],
                                                       lambda: d.band_collapsed, d.set_band_collapsed)])
     d.set_band_collapse_callback(lambda _c: a._persist_user_setting("band_power_collapsed"))
-    d.toggle_band_collapsed()  # "me" folds it
+    d._btn_band_fold.dispatch("on_release")  # "me" folds it
     assert store.get_user_setting(me, "band_power_collapsed") == "True"
     a._settings_store.load(other)
     assert not d.band_collapsed  # the other profile's own state

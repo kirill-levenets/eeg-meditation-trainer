@@ -208,7 +208,7 @@ def test_the_folded_chart_is_saved_per_profile(history, tmp_path):
         a._settings_store = SettingsStore(db, [Setting("history_chart_collapsed", False, BOOL[0], BOOL[1],
                                                        lambda: history.chart_collapsed, history.set_chart_collapsed)])
         history.set_chart_collapse_callback(lambda _c: a._persist_user_setting("history_chart_collapsed"))
-        history._toggle_chart()  # "me" folds it
+        history._btn_collapse.dispatch("on_release")  # "me" folds it
         assert db.get_user_setting(me, "history_chart_collapsed") == "True"
         a._settings_store.load(other)
         assert not history.chart_collapsed  # the other profile's own state

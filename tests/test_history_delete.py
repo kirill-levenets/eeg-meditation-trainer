@@ -8,6 +8,7 @@ import app.ui.app_manager as am
 from app.session.manager import SessionManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.history_screen import HistoryScreen
+from tests._recorder import make_recorder
 
 
 def _sessions(n: int) -> list[dict]:
@@ -166,6 +167,7 @@ def test_a_reload_for_another_view_clears_the_day_filter():
 
 def test_history_keeps_the_day_filter_only_for_the_same_profile_and_view():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._ticker = MagicMock(running=False)  # no session's tick running
     app._db = MagicMock()
     app._history_screen = MagicMock()
     app.show_loading = MagicMock()
@@ -197,10 +199,12 @@ def test_renaming_updates_the_row_and_the_model_in_place():
 
 def _app() -> EEGMeditationApp:
     app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._ticker = MagicMock(running=False)  # no session's tick running
     app._db = MagicMock()
     app._history_screen = MagicMock()
     app._session_manager = SessionManager()  # idle: nothing running to protect
     app._live_screen = MagicMock(summary_session_id=None)
+    app._recorder = make_recorder(app)
     app._audio = MagicMock()
     app._on_main = lambda fn: fn()
     for name in ("_refresh_history", "show_loading", "hide_loading"):

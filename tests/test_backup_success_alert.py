@@ -2,49 +2,52 @@
 
 from unittest.mock import MagicMock
 
-import app.ui.app_manager as am
-from app.ui.app_manager import _BACKUP_SOUND_NOTE, EEGMeditationApp
-
-
-def _make_app():
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._settings_screen = MagicMock()
-    app._info_popup = MagicMock()
-    return app
+import app.ui.backup_flow as bf
+from app.ui.backup_flow import BACKUP_SOUND_NOTE
+from tests._backup_flow import make_flow
 
 
 def test_desktop_success_names_the_file_and_the_sound_note():
-    app = _make_app()
-    app._report_backup_saved("/home/u/eeg_backup_carl_2026-09-29_17-49.db")
-    app._settings_screen.show_backup_status.assert_called_once_with("Backup saved")
-    title, body = app._info_popup.call_args.args
+    flow = make_flow()
+    flow._report_backup_saved("/home/u/eeg_backup_carl_2026-09-29_17-49.db")
+    flow._settings_screen.show_backup_status.assert_called_once_with("Backup saved")
+    title, body = flow._info.call_args.args
     assert title == "Backup saved"
     assert "/home/u/eeg_backup_carl_2026-09-29_17-49.db" in body
-    assert _BACKUP_SOUND_NOTE in body
+    assert BACKUP_SOUND_NOTE in body
 
 
 def test_saf_success_pops_up_without_the_content_uri(monkeypatch):
-    app = _make_app()
-    app._db = MagicMock()
+    flow = make_flow()
     uri = "content://com.android.externalstorage.documents/document/primary%3ADownload%2Fx.db"
-    monkeypatch.setattr(am._backup, "online_backup_to_tempfile", lambda db: "/nonexistent/tmp.db")
-    monkeypatch.setattr(am._saf, "write_file_to_uri", lambda u, p: True)
-    monkeypatch.setattr(am.Clock, "schedule_once", lambda fn, *a: fn(0))
-    app._backup_to_uri_worker(uri)
-    title, body = app._info_popup.call_args.args
+    monkeypatch.setattr(bf._backup, "online_backup_to_tempfile", lambda db: "/nonexistent/tmp.db")
+    monkeypatch.setattr(bf._saf, "write_file_to_uri", lambda u, p: True)
+    monkeypatch.setattr(bf.Clock, "schedule_once", lambda fn, *a: fn(0))
+    flow._backup_to_uri_worker(uri)
+    title, body = flow._info.call_args.args
     assert title == "Backup saved"
     assert uri not in body
-    assert _BACKUP_SOUND_NOTE in body
+    assert BACKUP_SOUND_NOTE in body
 
 
 def test_saf_write_failure_is_reported_not_announced(monkeypatch):
-    app = _make_app()
-    app._db = MagicMock()
+    flow = make_flow()
     reported = []
-    monkeypatch.setattr(am._backup, "online_backup_to_tempfile", lambda db: "/nonexistent/tmp.db")
-    monkeypatch.setattr(am._saf, "write_file_to_uri", lambda u, p: False)
-    monkeypatch.setattr(am.Clock, "schedule_once", lambda fn, *a: fn(0))
-    monkeypatch.setattr(am, "report_soft_error", lambda label, detail, **k: reported.append(label))
-    app._backup_to_uri_worker("content://x")
+    monkeypatch.setattr(bf._backup, "online_backup_to_tempfile", lambda db: "/nonexistent/tmp.db")
+    monkeypatch.setattr(bf._saf, "write_file_to_uri", lambda u, p: False)
+    monkeypatch.setattr(bf.Clock, "schedule_once", lambda fn, *a: fn(0))
+    monkeypatch.setattr(bf, "report_soft_error", lambda label, detail, **k: reported.append(label))
+    flow._backup_to_uri_worker("content://x")
     assert reported == ["backup_failed"]
-    app._info_popup.assert_not_called()
+    flow._info.assert_not_called()
+
+
+def test_the_backup_is_named_for_the_active_profile_after_its_settings_are_saved(monkeypatch):
+    order = []
+    flow = make_flow(user_name=lambda: order.append("name") or "carl",
+                     save_settings=MagicMock(side_effect=lambda: order.append("save")))
+    monkeypatch.setattr(bf, "_on_android", lambda: False)
+    flow._open_backup_save_picker = MagicMock()
+    flow.on_backup_pressed()
+    assert order == ["save", "name"]
+    assert "carl" in flow._open_backup_save_picker.call_args.args[0]

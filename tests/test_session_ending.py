@@ -13,12 +13,16 @@ import app.ui.app_manager as am
 from app.session.manager import SessionManager, SessionState
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
+from app.ui.live_mirror import LiveMirror
+from tests._program_run import make_run
+from tests._recorder import make_recorder
 
 SID = 42
 
 
 def _app() -> EEGMeditationApp:
     app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._ticker = MagicMock(running=False)  # no session's tick running
     app._db = MagicMock()
     app._db.update_session_notes.return_value = True
     app._db.get_session.return_value = None
@@ -28,6 +32,8 @@ def _app() -> EEGMeditationApp:
     app._live_screen.summary_session_id = SID
     app._live_screen.summary_notes = ""
     app._summary_saved_notes = ""
+    app._recorder = make_recorder(app)
+    app._mirror = LiveMirror()
     app._toast = MagicMock()
     app._history_screen = MagicMock()
     app._refresh_history = MagicMock()
@@ -46,7 +52,7 @@ def test_user_stop_confirms_then_takes_the_shared_save_path():
     app = _app()
     app._session_manager = MagicMock(state=SessionState.RUNNING)
     app._waiting_for_bt = False
-    app._stop_tick_thread = MagicMock()
+    app._ticker = MagicMock(running=False)
     app._stop_and_save = MagicMock()
     app._confirm_action = MagicMock()
     app._on_stop()
@@ -61,17 +67,17 @@ def test_user_stop_confirms_then_takes_the_shared_save_path():
 
 def test_user_stop_restores_program_series_and_clears_the_training_marker():
     app = _app()
-    app._stop_tick_thread = MagicMock()
+    app._ticker = MagicMock(running=False)
     app._persist_session_data = MagicMock(return_value={"duration": 30})
-    app._current_session_id = SID
-    for name in ("_reload_live_graphs_from_mirror", "_restore_program_series", "_release_wake_lock",
+    app._recorder.session_id = SID
+    for name in ("_program_run", "_release_wake_lock",
                  "_stop_session_keep_alive_service"):
         setattr(app, name, MagicMock())
     app._timer_state = MagicMock()
     app._session_manager = MagicMock()
     app._stop_and_save(reason="user")
     app._persist_session_data.assert_called_once_with("user")
-    app._restore_program_series.assert_called_once()
+    app._program_run.end.assert_called_once()
     app._live_screen.set_training_series.assert_called_with(None)
     app._live_screen.show_summary.assert_called_once_with(SID, {"duration": 30}, title="")
 
@@ -96,27 +102,28 @@ def _recorded_session(db) -> EEGMeditationApp:
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._db = db
     app._current_user_id = db.create_user("t")
-    app._current_session_id = None
-    app._metrics_buffer = []
-    app._flush_counter = 0
+    app._recorder = make_recorder(app)
+    app._mirror = LiveMirror()
+    app._recorder._buffer = []
+    app._recorder._flush_counter = 0
     app._session_manager = SessionManager()
     app._session_manager.start()
     app._with_score = lambda stats: stats
     app._session_custom_formulas_json = lambda: ""
-    app._session_program_json = lambda: ""
+    app._program_run = make_run()
     app._make_session_name = lambda: "2026-10-05 07:00 - MindWave Mobile"
     app._waiting_for_bt = False
-    app._tick_thread = None
+    app._ticker = MagicMock(running=False)
     app._eeg_stream = MagicMock()
-    for name in ("_stop_tick_thread", "_audio", "_live_screen", "_settings_screen", "_timer_state", "_confirm_action",
-                 "_release_wake_lock", "_stop_session_keep_alive_service", "_reload_live_graphs_from_mirror",
-                 "_mark_history_dirty", "_restore_program_series"):
+    for name in ("_audio", "_live_screen", "_settings_screen", "_timer_state", "_confirm_action",
+                 "_release_wake_lock", "_stop_session_keep_alive_service",
+                 "_mark_history_dirty"):
         setattr(app, name, MagicMock())
     for _ in range(240):
         metrics = {"shamatha_score": 70, "meditation_score": 60}
-        app._record_tick(metrics, {"timestamp": 0.0, **metrics})
+        app._recorder.record(metrics, {"timestamp": 0.0, **metrics})
     app._session_manager._start_time = time.time() - 120
-    app._checkpoint_session()
+    app._recorder.checkpoint()
     return app
 
 
@@ -136,11 +143,11 @@ def test_a_stop_confirmed_after_the_session_ended_another_way_keeps_it(db, ended
     if ended_by == "headset off":  # the stale-data stop queued behind the tap
         app._stop_and_save(reason="stale_data")
     else:  # the tick thread saved the timed session; its UI teardown runs on the main thread
-        app._finalize_stop_ui(app._persist_session_data("timer"), app._current_session_id)
-    saved = _stored(db, app._current_session_id)
+        app._finalize_stop_ui(app._persist_session_data("timer"), app._recorder.session_id)
+    saved = _stored(db, app._recorder.session_id)
     assert saved is not None and saved[0] >= 119 and saved[1] == 240
     on_ok()  # the user confirms the Stop
-    assert _stored(db, app._current_session_id) == saved  # still there, unchanged
+    assert _stored(db, app._recorder.session_id) == saved  # still there, unchanged
 
 
 # --- Delete: only after confirmation, through the shared delete -------------------------------------------------
@@ -326,14 +333,14 @@ def test_ok_right_after_cancel_does_not_run_the_action():
 
 def test_cancelling_stop_restarts_the_tick_only_for_a_running_session():
     app = _app()
-    app._start_tick_thread = MagicMock()
+    app._ticker = MagicMock()
     app._session_manager = MagicMock()
     app._session_manager.state = SessionState.RUNNING
     app._cancel_stop()
-    app._start_tick_thread.assert_called_once()
+    app._ticker.start.assert_called_once()
     app._session_manager.state = SessionState.PAUSED
     app._cancel_stop()
-    app._start_tick_thread.assert_called_once()
+    app._ticker.start.assert_called_once()
 
 
 # --- Storage: a notes save touches only the fields it is given -------------------------------------------------
