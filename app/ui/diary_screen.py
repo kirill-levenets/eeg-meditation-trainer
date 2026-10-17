@@ -156,7 +156,7 @@ def detail_graph_data(rows: list[dict], formula_series: dict[str, list[float]]) 
 class DiaryScreen(Screen):
     """Session detail, opened from History: stats, notes, tags and mood, graphs."""
 
-    on_save_notes = Hook()
+    on_save_notes = Hook(default=False)  # True once saved
     on_export_csv = Hook()
     on_back = Hook()
     on_band_view_change = Hook()  # (mode, sort_by, descending): the app keeps it per profile
@@ -679,7 +679,7 @@ class DiaryScreen(Screen):
                 if now != then}
 
     def _save_notes(self, **fields) -> None:
-        if self._selected_session_id is None or not is_wired(self, "on_save_notes"):
+        if self._selected_session_id is None:
             return
         state = self._notes_state()
         if self.on_save_notes(self._selected_session_id, **fields):

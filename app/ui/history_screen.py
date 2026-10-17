@@ -22,7 +22,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
 from app.logger import logger
-from app.ui.hooks import Hook, is_wired, wire
+from app.ui.hooks import Hook, wire
 from app.ui.period_totals import (
     ALL_TIME,
     day_month,
@@ -104,7 +104,7 @@ class _DayChart(Widget):
 
     on_day_tap = Hook()
     on_swipe = Hook()
-    period_end = Hook()  # the owner's period end; today without one
+    period_source = Hook()  # the owner's period end; today without one
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -127,7 +127,7 @@ class _DayChart(Widget):
         raise NotImplementedError
 
     def _shown_window(self) -> tuple[datetime.date, datetime.date]:
-        return self.window(self.period_end() or _today())
+        return self.window(self.period_source() or _today())
 
     def set_data(self, day_values: dict[str, float]) -> None:
         self._day_values = day_values
@@ -666,7 +666,7 @@ class HistoryScreen(Screen):
                 chart,
                 on_day_tap=self._on_day_tap,
                 on_swipe=self.shift_period,
-                period_end=lambda: self.period_end,
+                period_source=lambda: self.period_end,
             )
             chart.bind(height=self._on_active_widget_height)
         self._graph_wrap.add_widget(self._heatmap)
@@ -942,7 +942,7 @@ class HistoryScreen(Screen):
         self._sync_rows()
 
     def export_selected(self) -> None:
-        if not self._selected_ids or not is_wired(self, "on_export_sessions"):
+        if not self._selected_ids:
             return
         self.on_export_sessions(sorted(self._selected_ids))
 

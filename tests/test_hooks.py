@@ -94,3 +94,8 @@ def test_no_widget_hook_shadows_a_kivy_property_handler():
         for cls in vars(module).values():
             if isinstance(cls, type) and issubclass(cls, EventDispatcher) and cls.__module__ == module.__name__:
                 assert not _clashes(cls), f"{cls.__name__}: {sorted(_clashes(cls))}"
+
+
+def test_a_mutable_default_is_refused():
+    with pytest.raises(TypeError, match="immutable"):
+        Hook(default=[])

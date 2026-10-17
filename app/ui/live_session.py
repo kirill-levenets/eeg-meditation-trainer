@@ -937,8 +937,6 @@ class LiveSessionScreen(Screen):
         self._btn_stop.disabled = True
         self._btn_marker.disabled = True
 
-    # ── Duration preset hooks ──
-
     def _rebuild_band_legend(self) -> None:
         """Repopulate the band legend with only the band graph's visible series."""
         self._band_legend.show_graph(self._band_graph)

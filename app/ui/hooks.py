@@ -7,6 +7,8 @@ class Hook:
     """A widget's slot for one app handler; unset or None, calling it returns `default` (immutable: it's shared)."""
 
     def __init__(self, default: Any = None) -> None:
+        if isinstance(default, (list, dict, set)):
+            raise TypeError("a Hook's default is shared by every widget: give an immutable one")
         self.default = default
         self.name = ""
 
