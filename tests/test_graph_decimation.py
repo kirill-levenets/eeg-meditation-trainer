@@ -99,6 +99,28 @@ def test_kept_runs_are_not_scanned_again(monkeypatch):
     assert len(scanned) == 25
 
 
+
+def test_panning_back_scans_only_the_runs_before_what_is_kept(monkeypatch):
+    values = _noisy(1000, 5)
+    kept = _RunExtremes(8)
+    shown = kept.runs(values, 0, 50, 100)
+    scanned = []
+    real = rg._extremes
+    monkeypatch.setattr(rg, "_extremes", lambda v, a, b: scanned.append(a) or real(v, a, b))
+    assert kept.runs(values, 0, 40, 90)[20:] == shown[:80]
+    assert len(scanned) == 10
+
+
+def test_a_series_keeps_the_runs_of_one_size():
+    g = ScrollableGraphWidget(colors={"a": (1, 1, 1, 1)}, scales={"a": 100.0}, size_hint=(None, None), size=(1000, 300))
+    g._drawing_enabled = False
+    values = _noisy(20000, 6)
+    g.add_points_batch("a", values)
+    for per_px in (6.0, 12.0, 24.0):  # three zooms, three run sizes
+        g._drawn_indices("a", values, 0, per_px)
+    assert list(g._run_extremes) == ["a"]
+    assert g._run_extremes["a"].size == 1 << int(math.log2(24.0 * _run_px(g)))
+
 def _reference(values: list[float], v0: int, size: int) -> list[int]:
     """Every run's min and max, runs cut at absolute multiples of size (part runs at the ends too), and both ends."""
     n = len(values)

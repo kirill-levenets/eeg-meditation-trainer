@@ -91,15 +91,22 @@ class _RunExtremes:
     def runs(self, values: list[float], v0: int, first: int, last: int) -> list[int]:
         """Absolute indices for runs first..last-1, which lie inside values (values[0] is absolute sample v0)."""
         have = self.base + len(self.idx) // 2
-        if first < self.base or first > have:  # shown from before what is kept, or past a gap: start over there
+        if last < self.base or first > have:  # nothing kept touches the window: start over at it
             self.base, self.idx, have = first, [], first
-        elif first - self.base > 2 * (last - first):  # what scrolled out of the buffer
+        if first < self.base:  # panned back: only the runs before what is kept
+            self.idx[:0] = self._scan(values, v0, first, self.base)
+            self.base = first
+        if have < last:
+            self.idx.extend(self._scan(values, v0, have, last))
+        out = self.idx[2 * (first - self.base):2 * (last - self.base)]
+        if first - self.base > 2 * (last - first):  # far behind the window, as runs the buffer has dropped are
             del self.idx[:2 * (first - self.base)]
             self.base = first
+        return out
+
+    def _scan(self, values: list[float], v0: int, first: int, last: int) -> list[int]:
         size = self.size
-        for r in range(have, last):
-            self.idx.extend(v0 + i for i in _extremes(values, r * size - v0, (r + 1) * size - v0))
-        return self.idx[2 * (first - self.base):2 * (last - self.base)]
+        return [v0 + i for r in range(first, last) for i in _extremes(values, r * size - v0, (r + 1) * size - v0)]
 
 
 class ScrollableGraphWidget(Widget):
@@ -141,7 +148,7 @@ class ScrollableGraphWidget(Widget):
         }
         self._visible: dict[str, bool] = dict.fromkeys(colors, True)
         self._appended: dict[str, int] = dict.fromkeys(colors, 0)  # samples ever added: a run's absolute position
-        self._run_extremes: dict[tuple[str, int], _RunExtremes] = {}
+        self._run_extremes: dict[str, _RunExtremes] = {}
         self._gradient_key: str | None = None  # the series drawn in LINE_COLOURS' gradient, not its own colour
         self._scroll_offset: int = 0
         self._total_points: int = 0
@@ -641,9 +648,9 @@ class ScrollableGraphWidget(Widget):
         first, last = -(-v0 // size), (v0 + n) // size
         if last <= first:
             return range(n)
-        kept = self._run_extremes.get((key, size))
-        if kept is None:
-            kept = self._run_extremes[(key, size)] = _RunExtremes(size)
+        kept = self._run_extremes.get(key)
+        if kept is None or kept.size != size:  # one run size per series: a new zoom drops the last one's
+            kept = self._run_extremes[key] = _RunExtremes(size)
         out = [0]
         if first * size > v0:
             out.extend(_extremes(values, 0, first * size - v0))
