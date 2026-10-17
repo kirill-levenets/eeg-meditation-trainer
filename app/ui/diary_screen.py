@@ -17,7 +17,7 @@ from app.eeg.band_spec import BAND_KEYS, GROUP_NAMES, group_powers
 from app.logger import logger, timed
 from app.session.scoring import recorded_score, target_steps
 from app.session.session_program import PROGRAM_FORMULA_KEYS, SessionProgram
-from app.ui.hooks import Hook, is_wired
+from app.ui.hooks import Hook, is_wired, wire
 from app.ui.live_session import (
     METRICS_COLORS,
     METRICS_SCALES,
@@ -415,7 +415,7 @@ class DiaryScreen(Screen):
         # Legend tracks the active graph's visible set; a picker toggle (or a
         # restore) on the displayed graph rebuilds it.
         for g in (self._metrics_graph, self._raw_eeg_graph, self._freq_graph):
-            g.set_visibility_callback(lambda gr=g: self._on_graph_visibility(gr))
+            wire(g, on_series_change=lambda gr=g: self._on_graph_visibility(gr))
 
         # Legend container (wrapping flow layout — handles many series)
         self._legend_container = LegendBar()

@@ -602,7 +602,7 @@ class EEGMeditationApp(App):
 
         # Tap on graph to set marker (Android — no keyboard available)
         if kivy_platform == "android":
-            self._live_screen.graph.set_tap_callback(self._on_marker)
+            wire(self._live_screen.graph, on_tap=self._on_marker)
 
         # Shared fullscreen-expand + series-picker glyphs on every graph
         self._wire_graph_affordances()

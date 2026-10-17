@@ -21,6 +21,7 @@ from app.config import APP
 from app.session.manager import elapsed_clock
 from app.session.scoring import extend_steps
 from app.ui import render_stats
+from app.ui.hooks import Hook
 from app.ui.line_colours import GRADIENT_TOP, LINE_COLOURS, MONO, gradient_texture
 from app.ui.theme import C as TC
 from app.ui.theme import F
@@ -102,6 +103,9 @@ class ScrollableGraphWidget(Widget):
     textures on canvas.
     """
 
+    on_series_change = Hook()  # a series shown, hidden or renamed: the owner's legend follows
+    on_tap = Hook()  # a tap on the plot, not on a glyph (the marker on Android)
+
     def __init__(self, colors: dict[str, tuple], scales: dict[str, float],
                  viewport_seconds: int = 60, show_value_labels: bool = True,
                  show_timestamps: bool = True, sample_rate: float = 0.0,
@@ -156,7 +160,6 @@ class ScrollableGraphWidget(Widget):
         # graph to mark level 100 — the per-metric maximum.
         self._reference_value: Optional[float] = None
         self._start_wall_time: Optional[float] = None
-        self._tap_callback = None
         self._expand_callback = None
         self._expand_closes = False  # in fullscreen the corner glyph is the close cross
         self._pressed_glyph = None  # the rect function of the glyph under a finger, drawn pressed
@@ -165,7 +168,6 @@ class ScrollableGraphWidget(Widget):
         self._pads: tuple[float, float, float, float] = (dp(30), dp(30), dp(20), dp(6))  # left, right, bottom, top
         self._pads_floor: tuple[float, float, float, float] | None = None  # the widest since the data was (re)loaded
         self._fit_restore: tuple[int, int] | None = None  # while the whole data is shown: (width, scroll) to go back to
-        self._visibility_callback = None
         self._touch_moved: bool = False
         self._gfx: InstructionGroup = InstructionGroup()
         self.canvas.add(self._gfx)
@@ -235,8 +237,7 @@ class ScrollableGraphWidget(Widget):
         if metric in self._visible:
             self._visible[metric] = visible
             self._redraw()
-            if self._visibility_callback is not None:
-                self._visibility_callback()
+            self.on_series_change()
 
     def is_visible(self, metric: str) -> bool:
         return self._visible.get(metric, False)
@@ -260,15 +261,10 @@ class ScrollableGraphWidget(Widget):
         """Override a series' friendly label at runtime (custom-formula renames)."""
         self._names[key] = name
         self._redraw()
-        if self._visibility_callback is not None:
-            self._visibility_callback()
+        self.on_series_change()
 
     def series_color(self, key: str) -> tuple:
         return TC.resolve(self._colors.get(key, (1, 1, 1, 1)))
-
-    def set_visibility_callback(self, callback) -> None:
-        """Invoked after any set_visible — lets the owning screen refresh its legend."""
-        self._visibility_callback = callback
 
     def set_scroll_offset(self, offset: int) -> None:
         self._scroll_offset = max(0, min(offset, self.max_scroll))
@@ -921,8 +917,8 @@ class ScrollableGraphWidget(Widget):
             if was_tap and len(self._grabbed_touches) == 0:
                 if glyph is not None:
                     glyph[0](self)
-                elif self._tap_callback:
-                    self._tap_callback()
+                else:
+                    self.on_tap()
             return True
         return super().on_touch_up(touch)
 
@@ -940,10 +936,6 @@ class ScrollableGraphWidget(Widget):
         touch.ungrab(self)
         self.set_scroll_offset(self._touch_start_offset)
         return True
-
-    def set_tap_callback(self, callback) -> None:
-        """Set callback for single tap on the graph (used for marker on Android)."""
-        self._tap_callback = callback
 
     def set_expand_callback(self, callback, closes: bool = False) -> None:
         """The top-right glyph's tap: fullscreen-expand, or with `closes` the close cross; None hides it."""

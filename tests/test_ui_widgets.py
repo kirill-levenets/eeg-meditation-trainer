@@ -352,7 +352,7 @@ class TestScrollableGraphSetSeriesName(unittest.TestCase):
             colors={"custom_formula": (1, 0, 0, 1)},
             scales={"custom_formula": 200.0},
         )
-        g.set_visibility_callback(lambda: fired.append(True))
+        wire(g, on_series_change=lambda: fired.append(True))
         g.set_series_name("custom_formula", "Alpha Ratio")
         self.assertEqual(g.series_name("custom_formula"), "Alpha Ratio")
         self.assertTrue(fired)

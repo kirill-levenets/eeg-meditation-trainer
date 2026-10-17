@@ -17,6 +17,7 @@ from kivy.uix.widget import Widget
 
 from app.eeg.band_spec import BAND_KEYS, GROUP_NAMES, group_powers
 from app.logger import logger
+from app.ui.hooks import wire
 from app.ui.raw_eeg_screen import (
     GraphAwareScrollView,
     ScrollableGraphWidget,
@@ -388,9 +389,7 @@ class LiveSessionScreen(Screen):
         # The on-graph series-picker glyph is wired centrally for every graph by
         # AppManager._wire_graph_affordances. The legend tracks the graph's own
         # visible set: any change (picker toggle or restore) rebuilds it.
-        self._graph.set_visibility_callback(
-            lambda: self._rebuild_metric_legend(self._graph.visible_keys())
-        )
+        wire(self._graph, on_series_change=lambda: self._rebuild_metric_legend(self._graph.visible_keys()))
         self._metrics_container.add_widget(self._graph)
 
         self._legend = LegendBar()
@@ -432,7 +431,7 @@ class LiveSessionScreen(Screen):
         self._raw_container.add_widget(self._band_graph)
 
         self._band_legend = LegendBar()
-        self._band_graph.set_visibility_callback(self._rebuild_band_legend)
+        wire(self._band_graph, on_series_change=self._rebuild_band_legend)
         self._rebuild_band_legend()
         self._raw_container.add_widget(self._band_legend)
 
