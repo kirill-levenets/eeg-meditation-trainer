@@ -662,8 +662,6 @@ class EEGMeditationApp(App):
 
         self._diary_screen.set_save_notes_callback(self._on_save_notes)
         self._diary_screen.set_export_csv_callback(self._on_export_csv)
-        self._diary_screen.set_delete_session_callback(self._on_delete_session)
-        self._diary_screen.set_rename_session_callback(self._on_rename_session)
         self._diary_screen.set_back_callback(self._on_diary_back)
         self._diary_screen.band_view_persist_cb = self._persist_band_view
 
@@ -2201,9 +2199,6 @@ class EEGMeditationApp(App):
     def _on_save_notes(self, session_id: int, notes: str | None = None, tags: str | None = None,
                        mood: int | None = None) -> bool:
         return self._save_session_notes(session_id, notes=notes, tags=tags, mood=mood)
-
-    def _on_delete_session(self, session_id: int) -> None:
-        self._delete_sessions([session_id])
 
     def _delete_sessions(self, session_ids: list[int], on_done: Optional[Callable[[bool], None]] = None) -> None:
         """The one session-delete path (a History row, the selection, the session-end card): one transaction on a worker

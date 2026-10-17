@@ -161,8 +161,6 @@ class DiaryScreen(Screen):
         self.name = "diary"
         self._on_save_notes: Optional[Callable] = None
         self._on_export_csv: Optional[Callable] = None
-        self._on_delete_session: Optional[Callable] = None
-        self._on_rename_session: Optional[Callable] = None
         self._on_back: Optional[Callable] = None
         self._selected_session_id: Optional[int] = None
         self._scored_key: Optional[str] = None  # the series the shown session was scored on, marked in its legend
@@ -436,12 +434,6 @@ class DiaryScreen(Screen):
 
     def set_export_csv_callback(self, callback: Callable) -> None:
         self._on_export_csv = callback
-
-    def set_delete_session_callback(self, callback: Callable) -> None:
-        self._on_delete_session = callback
-
-    def set_rename_session_callback(self, callback: Callable) -> None:
-        self._on_rename_session = callback
 
     def set_back_callback(self, callback: Callable) -> None:
         self._on_back = callback
