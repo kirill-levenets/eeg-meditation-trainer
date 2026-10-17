@@ -3,6 +3,7 @@ import time as _time
 from collections import OrderedDict, deque
 from typing import Optional
 
+from kivy.clock import Clock
 from kivy.core.text import Label as CoreLabel
 from kivy.core.window import Window
 from kivy.graphics import (
@@ -36,6 +37,11 @@ _X_GRID_STEPS_S = (10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200)
 _GLYPH_DRIFT_DP = 20  # a glyph's press survives this much drift; more is a pan (a pan starts at 10)
 _MAX_Y_GRID_LINES = 20  # a fixed grid step far below the scale gives way to a nice one (each line has a label)
 _MIN_X_LABEL_GAP_DP = 70
+# New data redraws a graph no sooner than its last redraw's cost divided by this share of the time: a long fitted
+# session (thousands of points per redraw) then redraws less often instead of taking the main thread. A redraw cheaper
+# than _SLOW_REDRAW_S is never deferred.
+_REDRAW_BUDGET = 0.1
+_SLOW_REDRAW_S = 0.025
 
 
 def _free_label_y(y: float, taken: list[float], low: float, high: float) -> float:
@@ -169,6 +175,9 @@ class ScrollableGraphWidget(Widget):
         self._pads_floor: tuple[float, float, float, float] | None = None  # the widest since the data was (re)loaded
         self._fit_restore: tuple[int, int] | None = None  # while the whole data is shown: (width, scroll) to go back to
         self._touch_moved: bool = False
+        self._redraw_cost: float = 0.0  # the last redraw's duration and end (perf_counter): the data redraw budget
+        self._redraw_end: float = 0.0
+        self._deferred_redraw = None  # the one pending Clock event of a data redraw waiting for its budget
         self._gfx: InstructionGroup = InstructionGroup()
         self.canvas.add(self._gfx)
         self.bind(size=self._redraw, pos=self._redraw)
@@ -287,7 +296,7 @@ class ScrollableGraphWidget(Widget):
             extend_steps(steps, self._total_points - 1, threshold)
             self._threshold_steps = steps
         self._follow_fit()
-        self._redraw()
+        self._redraw_for_data()
 
     def add_points_batch(self, key: str, values: list[float]) -> None:
         """Add multiple points for a single series without per-point redraw."""
@@ -298,7 +307,7 @@ class ScrollableGraphWidget(Widget):
         first_key = next(iter(self._data))
         self._total_points = len(self._data[first_key])
         self._follow_fit()
-        self._redraw()
+        self._redraw_for_data()
 
     def load_static_data(self, series: dict[str, list[float]], new_session: bool = True) -> None:
         """Load pre-recorded data for static display (e.g. diary preview); a live session's reload is the same one."""
@@ -340,14 +349,30 @@ class ScrollableGraphWidget(Widget):
         if enabled:
             self._redraw()
 
+    def _redraw_for_data(self) -> None:
+        """New points: redraw now, or once the last redraw's cost fits the budget (one deferred redraw at most)."""
+        if self._redraw_cost < _SLOW_REDRAW_S:
+            self._redraw()
+            return
+        wait = self._redraw_end + self._redraw_cost / _REDRAW_BUDGET - _time.perf_counter()
+        if wait <= 0:
+            self._redraw()
+        elif self._deferred_redraw is None:
+            self._deferred_redraw = Clock.schedule_once(self._redraw, wait)
+
     def _redraw(self, *args) -> None:
+        if self._deferred_redraw is not None:  # this redraw shows the data the deferred one waited to draw
+            self._deferred_redraw.cancel()
+            self._deferred_redraw = None
         if not self._drawing_enabled:
             return
         t0 = _time.perf_counter()
         try:
             self._draw()
         finally:
-            render_stats.STATS.record_redraw(self._graph_id, _time.perf_counter() - t0)
+            self._redraw_end = _time.perf_counter()
+            self._redraw_cost = self._redraw_end - t0
+            render_stats.STATS.record_redraw(self._graph_id, self._redraw_cost)
 
     def _draw(self) -> None:
         self._gfx.clear()

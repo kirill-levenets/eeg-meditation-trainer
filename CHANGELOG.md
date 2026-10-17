@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A long session's graph slowed the app the longer the session ran** (#104): with the Session graph fitted to the whole session, every new point redrew all of it twice a second, about 60 ms per redraw after 10 minutes on a phone and more after that. A graph whose last redraw was slow now waits before drawing new data, so it takes about a tenth of the main thread at most; your own zoom, scroll and series changes still redraw at once.
 - **A saved formula was deleted without asking**: its **X** in Settings → Custom Formula deleted it at once, while a saved program's asks first. It asks now too.
 - **Picking an existing profile at the first-run popup reset it to mock mode**: a profile without a saved headset came back in mock mode whatever it used before, and a profile named with one letter couldn't be picked at all. A picked profile, or one whose name is typed there, now opens exactly as it was saved.
 - **A too-short profile name covered the name field with buttons**: in Settings → User Profile (and the first-run popup), Create with a one-letter name showed "Name must be at least 2 characters" with the **Use existing** / **Change name** buttons of a duplicate name spilling over the field and Create. Only the message shows now.
