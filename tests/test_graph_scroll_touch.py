@@ -10,6 +10,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
+from app.ui.hooks import wire
 from app.ui.raw_eeg_screen import GraphAwareScrollView, ScrollableGraphWidget
 
 
@@ -132,7 +133,7 @@ def test_the_graph_takes_a_tap_anywhere_it_is_drawn(body_at, frac):
     top = min(gy + graph.height, sv.top)
     y = max(gy, sv.y) + (top - max(gy, sv.y)) * frac  # across the part of the graph inside the viewport
     taps = []
-    graph.set_tap_callback(lambda: taps.append(1))
+    wire(graph, on_tap=lambda: taps.append(1))
     t = UnitTestTouch(gx + graph.width / 2, y)
     t.touch_down()
     assert len(graph._grabbed_touches) == 1  # routed straight to the graph, not via the scroll view's hold
@@ -193,7 +194,7 @@ def test_a_vertical_drag_on_a_graph_outside_any_scroll_view_stays_with_the_graph
     overlay.add_widget(graph)
     Window.add_widget(overlay)
     taps = []
-    graph.set_tap_callback(lambda: taps.append(1))
+    wire(graph, on_tap=lambda: taps.append(1))
     faulthandler.dump_traceback_later(20, exit=True)  # a hang here used to freeze the app
     try:
         _frames()
@@ -209,7 +210,7 @@ def test_a_vertical_drag_on_a_graph_outside_any_scroll_view_stays_with_the_graph
 def test_a_second_finger_swiping_on_the_graph_does_not_steal_the_page_scroll(body_at):
     sv, graph = body_at
     taps = []
-    graph.set_tap_callback(lambda: taps.append(1))
+    wire(graph, on_tap=lambda: taps.append(1))
     gx, gy = graph.to_window(graph.x, graph.y)
     ay = max(gy, sv.y) - 40  # finger A on the stats area below the graph
     assert sv.y < ay < sv.top

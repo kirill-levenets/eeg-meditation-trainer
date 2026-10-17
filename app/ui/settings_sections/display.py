@@ -1,12 +1,11 @@
 """Settings → Display: text size, the scored line's colours, line width, screen rotation and the marker hotkey."""
-from collections.abc import Callable
-from typing import Optional
 
 from kivy.core.window import Keyboard, Window
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.slider import Slider
 
+from app.ui.hooks import Hook
 from app.ui.line_colours import LINE_COLOURS, MONO, GradientStrip
 from app.ui.line_colours import OPTIONS as LINE_OPTIONS
 from app.ui.theme import (
@@ -24,9 +23,12 @@ from app.ui.theme import (
 class DisplaySection:
     """Builds the section's content into `section` and reports the user's actions through its callbacks."""
 
+    on_line_width_change = Hook()
+    on_rotate_screen = Hook()
+    on_text_size = Hook()
+    on_line_colours = Hook()
+
     def __init__(self, section) -> None:
-        self._on_line_width_change: Optional[Callable] = None
-        self._on_rotate_screen: Optional[Callable] = None
         self._build(section)
 
     def _build(self, section) -> None:
@@ -36,7 +38,6 @@ class DisplaySection:
                                height=dp(28))
         ts_label.bind(size=ts_label.setter("text_size"))
         section.add_widget(ts_label)
-        self._on_text_size: Callable[[float], None] | None = None
         self._text_size_presets = PresetRow(items=[(name, scale) for scale, name in TEXT_SIZES],
                                             callback=self._on_text_size_pressed)
         section.add_widget(self._text_size_presets)
@@ -48,7 +49,6 @@ class DisplaySection:
                                size_hint_y=None, height=dp(28))
         lc_label.bind(size=lc_label.setter("text_size"))
         section.add_widget(lc_label)
-        self._on_line_colours: Callable[[str], None] | None = None
         self._line_colour_rows = [PresetRow(items=[(label, name) for name, label in LINE_OPTIONS[i:i + 3]],
                                             callback=self._on_line_colours_pressed, height=dp(34))
                                   for i in (0, 3)]
@@ -138,14 +138,12 @@ class DisplaySection:
     def _on_line_width_slider(self, instance, value) -> None:
         val = round(value, 1)
         self._line_width_value.text = f"{val:.1f}"
-        if self._on_line_width_change:
-            self._on_line_width_change(val)
+        self.on_line_width_change(val)
 
     def _on_rotate_pressed(self, *args) -> None:
         self._current_rotation = (self._current_rotation + 90) % 360
         self._rotate_btn.text = f"Rotate Screen ({self._current_rotation}\u00b0)"
-        if self._on_rotate_screen:
-            self._on_rotate_screen(self._current_rotation)
+        self.on_rotate_screen(self._current_rotation)
 
     def _on_marker_hotkey_pressed(self, *args) -> None:
         """Enter hotkey capture mode — next key press sets the marker hotkey."""
@@ -192,33 +190,19 @@ class DisplaySection:
         self._marker_hotkey = value
         self._marker_hotkey_btn.text = value if value else "(none)"
 
-    def set_line_width_callback(self, callback: Callable) -> None:
-        self._on_line_width_change = callback
-
-    def set_rotate_screen_callback(self, callback: Callable) -> None:
-        self._on_rotate_screen = callback
-
     def _show_text_size(self) -> None:
         """Select the size in use, whoever applied it (this picker or a profile's settings load)."""
         self._text_size_presets.set_selected(F.SCALE)
 
-    def set_text_size_callback(self, callback: Callable[[float], None]) -> None:
-        self._on_text_size = callback
-
     def _on_text_size_pressed(self, size: float) -> None:
         F.set_scale(size)
-        if self._on_text_size:
-            self._on_text_size(size)
+        self.on_text_size(size)
 
     def _show_line_colours(self) -> None:
         """Select the line colours in use, whoever applied them (these rows or a profile's settings load)."""
         for row in self._line_colour_rows:
             row.set_selected(LINE_COLOURS.name)
 
-    def set_line_colours_callback(self, callback: Callable[[str], None]) -> None:
-        self._on_line_colours = callback
-
     def _on_line_colours_pressed(self, name: str) -> None:
         LINE_COLOURS.set(name)
-        if self._on_line_colours:
-            self._on_line_colours(name)
+        self.on_line_colours(name)

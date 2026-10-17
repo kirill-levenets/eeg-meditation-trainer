@@ -14,6 +14,7 @@ from kivy.uix.slider import Slider
 from kivy.uix.widget import Widget
 
 from app.session.what_if import ScoredTicks, Segment, Stats, line_steps, rescore
+from app.ui.hooks import Hook, wire
 from app.ui.theme import (
     C,
     F,
@@ -89,6 +90,8 @@ class _SegmentControl(BoxLayout):
 
 
 class WhatIfPanel(BoxLayout):
+    on_collapse = Hook()  # the user folded the panel (True) or opened it
+
     def __init__(self, on_threshold: Callable[[list[tuple[int, float]] | None], None], **kwargs) -> None:
         super().__init__(orientation="vertical", size_hint_y=None, spacing=dp(4), **kwargs)
         self.bind(minimum_height=self.setter("height"))
@@ -105,6 +108,7 @@ class WhatIfPanel(BoxLayout):
         fit_width_to_text(self._title)
         self._btn_collapse = FoldChevron(size_hint_y=None, height=dp(28))
         self._fold = Fold(self._btn_collapse, lambda _folded: self._show(self._content))
+        wire(self._fold, on_change=lambda folded: self.on_collapse(folded))
         self._btn_reset = StyledButton(text="Reset", font_size=F.SMALL, bg_color=C.BG_CARD,
                                        text_color=C.TEXT_SECONDARY, size_hint=(None, None), width=dp(64),
                                        height=dp(28))
@@ -165,9 +169,6 @@ class WhatIfPanel(BoxLayout):
     def set_collapsed(self, collapsed: bool) -> None:
         """Fold the body away, detached, or bring back what it shows; the header stays."""
         self._fold.set(collapsed)
-
-    def set_collapse_callback(self, cb: Callable[[bool], None]) -> None:
-        self._fold.on_change = cb
 
     def _show_message(self, text: str) -> None:
         """A message in place of the controls: no session to rescore, so Reset has nothing to do either."""

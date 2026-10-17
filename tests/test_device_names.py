@@ -13,6 +13,7 @@ from app.session.manager import SessionManager
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.device_labels import MAX_DEVICE_ALIAS, device_label, device_row_text
+from app.ui.hooks import wire
 from app.ui.settings_screen import SettingsScreen
 from app.ui.theme import C, Icons
 from tests._headset import make_headset
@@ -271,7 +272,7 @@ def test_the_list_learns_which_headset_is_selected_and_which_connected():
 def _settings(selected=BLUE, connected=None) -> SettingsScreen:
     screen = SettingsScreen()
     state = {"selected": selected, "connected": connected}
-    screen.device.set_device_state_callback(lambda: (state["selected"], state["connected"]))
+    wire(screen.device, device_state=lambda: (state["selected"], state["connected"]))
     screen._state = state
     screen.device.populate_bt_devices([{**PAIRED[0], "alias": "Blue"}, {**PAIRED[1], "alias": ""}])
     return screen
@@ -320,7 +321,7 @@ def test_the_pencil_opens_the_name_editor_under_its_row():
 def test_the_editor_starts_from_the_alias_and_saves_through_the_callback():
     screen = _settings()
     saved = []
-    screen.device.set_device_rename_callback(lambda address, name, text: saved.append((address, name, text)))
+    wire(screen.device, on_device_rename=lambda address, name, text: saved.append((address, name, text)))
     screen.device._bt_pencils[BLUE].dispatch("on_release")
     assert screen.device._bt_rename_input.text == "Blue"
     screen.device._bt_rename_input.text = "Blue headset"
@@ -366,6 +367,6 @@ def test_a_rescan_keeps_no_stale_editor():
 def test_tapping_a_row_selects_its_headset():
     screen = _settings()
     picked = []
-    screen.device.set_device_select_callback(lambda address, name: picked.append((address, name)))
+    wire(screen.device, on_device_select=lambda address, name: picked.append((address, name)))
     screen.device._bt_rows[GREY].dispatch("on_release")
     assert picked == [(GREY, "MindWave Mobile")]

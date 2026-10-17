@@ -9,6 +9,7 @@ from app.settings.registry import SettingsStore
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import line_colours_setting
 from app.ui.diary_screen import DiaryScreen
+from app.ui.hooks import wire
 from app.ui.line_colours import (
     DEFAULT,
     GRADIENT_TOP,
@@ -141,7 +142,7 @@ def test_history_colours_the_metric_a_session_was_scored_on():
 def test_picking_line_colours_applies_them_at_once():
     screen = SettingsScreen()
     picked = []
-    screen.display.set_line_colours_callback(picked.append)
+    wire(screen.display, on_line_colours=picked.append)
     plasma = next(btn for row in screen.display._line_colour_rows for btn in row.children if btn._preset_value == "plasma")
     plasma.dispatch("on_release")
     assert picked == ["plasma"] and LINE_COLOURS.name == "plasma"

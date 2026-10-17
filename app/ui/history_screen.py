@@ -7,7 +7,6 @@ to see sessions for that date; tap a session to see full detail.
 
 import datetime
 import math
-from collections.abc import Callable
 from typing import Optional
 
 from kivy.clock import Clock
@@ -23,6 +22,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
 from app.logger import logger
+from app.ui.hooks import Hook, wire
 from app.ui.period_totals import (
     ALL_TIME,
     day_month,
@@ -102,14 +102,15 @@ class _DayChart(Widget):
     sideways swipe pages. Subclasses `_draw` `window(end)` for the period end their owner gives, and record each day's
     rect; a chart off screen doesn't draw until it is back."""
 
+    on_day_tap = Hook()
+    on_swipe = Hook()
+    period_source = Hook()  # the owner's period end; today without one
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.size_hint_y = None
         self._day_values: dict[str, float] = {}  # "YYYY-MM-DD" -> avg_shamatha
         self._cell_positions: dict[str, tuple] = {}
-        self._on_day_tap: Callable | None = None
-        self._on_swipe: Callable[[int], None] | None = None
-        self._period_source: Callable[[], datetime.date] | None = None  # the owner's period end; today without one
         self._selected_date: str | None = None
         self.bind(size=self._redraw, pos=self._redraw)
         C.add_listener(self._redraw)
@@ -126,21 +127,11 @@ class _DayChart(Widget):
         raise NotImplementedError
 
     def _shown_window(self) -> tuple[datetime.date, datetime.date]:
-        return self.window((self._period_source or _today)())
-
-    def set_period_source(self, source: Callable[[], datetime.date]) -> None:
-        self._period_source = source
+        return self.window(self.period_source() or _today())
 
     def set_data(self, day_values: dict[str, float]) -> None:
         self._day_values = day_values
         self._redraw()
-
-    def set_day_tap_callback(self, cb: Callable) -> None:
-        self._on_day_tap = cb
-
-    def set_swipe_callback(self, cb: Callable[[int], None]) -> None:
-        """cb(-1) for a swipe that brings earlier days in, cb(1) for later ones."""
-        self._on_swipe = cb
 
     def on_touch_down(self, touch):
         if touch.is_mouse_scrolling or not self.collide_point(*touch.pos):  # a wheel tick is no tap
@@ -159,8 +150,7 @@ class _DayChart(Widget):
         touch.ungrab(self)
         dx, dy = touch.x - touch.ox, touch.y - touch.oy
         if abs(dx) >= _SWIPE and abs(dx) > abs(dy):
-            if self._on_swipe:
-                self._on_swipe(-1 if dx > 0 else 1)  # dragging the days right brings earlier ones in
+            self.on_swipe(-1 if dx > 0 else 1)  # dragging the days right brings earlier ones in
         elif math.hypot(dx, dy) <= _TAP_SLOP:
             self._tap_day(touch.ox, touch.oy)  # where the finger came down: it aimed there
         return True
@@ -171,8 +161,7 @@ class _DayChart(Widget):
             return
         self._selected_date = day
         self._redraw()
-        if self._on_day_tap:
-            self._on_day_tap(day)
+        self.on_day_tap(day)
 
     def _redraw(self, *args) -> None:
         if self.parent is not None:
@@ -612,25 +601,25 @@ class _SessionList(_StableScrollView, RecycleView):
 class HistoryScreen(Screen):
     """Unified history: calendar heatmap + session list + session detail."""
 
+    on_session_select = Hook()
+    on_delete_sessions = Hook()  # (ids, done) -> done(True) once deleted
+    on_rename_session = Hook()
+    on_export_sessions = Hook()
+    on_view_mode_change = Hook()
+    on_chart_collapse = Hook()  # the user folded the chart (True) or opened it
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.name = "history"
-        self._on_session_select: Optional[Callable] = None
-        self._on_save_notes: Optional[Callable] = None
-        self._on_delete_sessions: Optional[Callable] = None  # (ids, done) -> done(True) once deleted
-        self._on_export_csv: Optional[Callable] = None
-        self._on_rename_session: Optional[Callable] = None
         self._sessions: list[dict] = []
         self._filtered_date: Optional[str] = None
         self._view_mode: str = "calendar"
-        self._on_view_mode_change: Optional[Callable] = None
         self._shown: list[dict] = []  # the sessions the list shows: all of them, or the filtered day's
         self._renaming_sid: int | None = None
         self._settled_log_ev = None
         self._current_header: str = "All sessions"
         self._select_mode: bool = False
         self._selected_ids: set[int] = set()
-        self._on_export_sessions: Optional[Callable] = None
         self._period_offset = 0  # days from today to the chart's period end: 0 is today's page, a page back below it
         self._first_day: datetime.date | None = None  # the first session's: paging back stops once it is shown
         self._build_ui()
@@ -647,6 +636,7 @@ class HistoryScreen(Screen):
         self._btn_collapse = FoldChevron()
         self._chart_fold = Fold(self._btn_collapse,
                                 lambda folded: fold_away(self._root, self._chart_area, self._title_row, folded))
+        wire(self._chart_fold, on_change=lambda folded: self.on_chart_collapse(folded))
         for w in (self._title, self._btn_collapse):
             self._title_row.add_widget(w)
         root.add_widget(self._title_row)
@@ -672,9 +662,12 @@ class HistoryScreen(Screen):
         self._heatmap = CalendarHeatmap()
         self._bars = Last14DaysBars()  # built but NOT parented until the user toggles to the bars view
         for chart in (self._heatmap, self._bars):
-            chart.set_day_tap_callback(self._on_day_tap)
-            chart.set_swipe_callback(self.shift_period)
-            chart.set_period_source(lambda: self.period_end)
+            wire(
+                chart,
+                on_day_tap=self._on_day_tap,
+                on_swipe=self.shift_period,
+                period_source=lambda: self.period_end,
+            )
             chart.bind(height=self._on_active_widget_height)
         self._graph_wrap.add_widget(self._heatmap)
 
@@ -910,31 +903,11 @@ class HistoryScreen(Screen):
         """Fold the chart and the totals away, detached, or bring them back under the title."""
         self._chart_fold.set(collapsed)
 
-    def set_chart_collapse_callback(self, cb: Callable) -> None:
-        self._chart_fold.on_change = cb
-
     _drawn_for: datetime.date | None = None  # the "today" the chart and the totals were last drawn for
 
     def on_pre_enter(self, *_a) -> None:
         if _today() != self._drawn_for:  # the day moved on since the list was drawn: the chart and the totals follow
             self._set_day_data()
-
-    def set_callbacks(
-        self,
-        on_session_select=None,
-        on_save_notes=None,
-        on_delete_sessions=None,
-        on_export_csv=None,
-        on_rename_session=None,
-    ) -> None:
-        self._on_session_select = on_session_select
-        self._on_save_notes = on_save_notes
-        self._on_delete_sessions = on_delete_sessions
-        self._on_export_csv = on_export_csv
-        self._on_rename_session = on_rename_session
-
-    def set_export_sessions_callback(self, callback) -> None:
-        self._on_export_sessions = callback
 
     # ── Multi-select CSV export (issue #7) ──
     @property
@@ -969,9 +942,9 @@ class HistoryScreen(Screen):
         self._sync_rows()
 
     def export_selected(self) -> None:
-        if not self._selected_ids or not self._on_export_sessions:
+        if not self._selected_ids:
             return
-        self._on_export_sessions(sorted(self._selected_ids))
+        self.on_export_sessions(sorted(self._selected_ids))
 
     def delete_selected(self) -> None:
         if self._selected_ids:
@@ -1060,14 +1033,9 @@ class HistoryScreen(Screen):
         # geometry immediately.
         self._cascade_layout()
 
-    def set_view_mode_callback(self, cb: Callable) -> None:
-        """Called with the new mode string when the user toggles."""
-        self._on_view_mode_change = cb
-
     def _on_toggle_pressed(self, mode: str) -> None:
         self.set_view_mode(mode)
-        if self._on_view_mode_change:
-            self._on_view_mode_change(mode)
+        self.on_view_mode_change(mode)
 
     def load_sessions(self, sessions: list[dict], keep_filter: bool = True) -> None:
         """Load all sessions and build heatmap data."""
@@ -1267,8 +1235,7 @@ class HistoryScreen(Screen):
         txt = self._rename_input.text.strip()
         if txt and session is not None and txt != session_label(session):  # unchanged: the stored name stays
             session["session_name"] = txt  # the model row this list shows
-            if self._on_rename_session:
-                self._on_rename_session(sid, txt)
+            self.on_rename_session(sid, txt)
         self._close_rename()
 
     def _confirm_delete(self, session_ids: list[int]) -> None:
@@ -1289,8 +1256,7 @@ class HistoryScreen(Screen):
                 self.set_select_mode(False)
 
         def _delete() -> None:
-            if self._on_delete_sessions:
-                self._on_delete_sessions(list(session_ids), _deleted)
+            self.on_delete_sessions(list(session_ids), _deleted)
 
         confirm_popup("Confirm Delete", f"{what}\nThis can't be undone.", "Delete", _delete, ok_color=C.DANGER)
 
@@ -1318,7 +1284,6 @@ class HistoryScreen(Screen):
                 else:
                     self._confirm_delete([view.sid])
                 return True
-            if self._on_session_select:
-                self._on_session_select(view.sid)
+            self.on_session_select(view.sid)
             return True
         return False

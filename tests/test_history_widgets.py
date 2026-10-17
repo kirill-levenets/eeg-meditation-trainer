@@ -1,6 +1,7 @@
 import datetime
 
 from app.ui.history_screen import Last14DaysBars
+from app.ui.hooks import wire
 
 
 def test_last14_days_bars_instantiates():
@@ -38,7 +39,7 @@ def test_history_screen_view_mode_callback_fires_on_toggle():
     from app.ui.history_screen import HistoryScreen
     screen = HistoryScreen()
     received = []
-    screen.set_view_mode_callback(lambda mode: received.append(mode))
+    wire(screen, on_view_mode_change=lambda mode: received.append(mode))
 
     screen._on_toggle_pressed("bars")
     assert received == ["bars"]

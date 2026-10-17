@@ -11,6 +11,7 @@ from kivy.tests.common import UnitTestTouch
 import app.ui.app_manager as am
 from app.session.what_if import ScoredTicks, Segment
 from app.settings.registry import BOOL, Setting, SettingsStore
+from app.ui.hooks import wire
 from app.ui.theme import Icons
 from app.ui.widgets.what_if import WhatIfPanel
 from tests.test_session_detail_open import app, db  # noqa: F401  (fixtures)
@@ -375,7 +376,7 @@ def test_folding_detaches_the_body_and_unfolding_brings_back_what_it_shows():
     lines = []
     p = _panel(lines)
     states = []
-    p.set_collapse_callback(states.append)
+    wire(p, on_collapse=states.append)
     p._btn_collapse.dispatch("on_release")
     assert p.collapsed and p._controls.parent is None and p._message.parent is None and states == [True]
     assert p._btn_collapse._icon_label.text == Icons.CHEVRON_RIGHT
@@ -420,7 +421,7 @@ def test_the_folded_panel_is_saved_per_profile(app):  # noqa: F811
     # As _build_settings_store declares it, and as build() wires the chevron.
     a._settings_store = SettingsStore(store, [Setting("what_if_collapsed", False, BOOL[0], BOOL[1],
                                                       lambda: panel.collapsed, panel.set_collapsed)])
-    panel.set_collapse_callback(lambda _c: a._persist_user_setting("what_if_collapsed"))
+    wire(panel, on_collapse=lambda _c: a._persist_user_setting("what_if_collapsed"))
     panel._btn_collapse.dispatch("on_release")  # "me" folds it
     assert store.get_user_setting(me, "what_if_collapsed") == "True"
     a._settings_store.load(other)

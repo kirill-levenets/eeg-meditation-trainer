@@ -7,6 +7,7 @@ from kivy.uix.popup import Popup
 
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.backup_flow import BACKUP_SOUND_NOTE
+from app.ui.hooks import wire
 
 RESTORE_TEXT = (
     "Replace the ENTIRE database with this backup?\n\n"
@@ -38,7 +39,7 @@ def _laid_out_words(label) -> list[str]:
 def _open_profile_delete(_text):
     from app.ui.settings_screen import SettingsScreen
     screen = SettingsScreen()
-    screen.set_session_counter(lambda uid: 12)
+    wire(screen, session_counter=lambda uid: 12)
     screen._confirm_user_delete(5, "test")
 
 

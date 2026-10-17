@@ -176,7 +176,7 @@ def test_card_delete_confirmed_removes_the_session_and_stops_the_gong(monkeypatc
 def test_history_row_delete_removes_its_row_in_place(monkeypatch):
     monkeypatch.setattr(am.threading, "Thread", lambda target, **k: MagicMock(start=target))  # the worker, inline
     app = _app()
-    app._on_delete_session(SID)
+    app._delete_sessions([SID])
     app._db.delete_sessions.assert_called_once_with([SID])
     app._history_screen.remove_sessions.assert_called_once_with([SID])
     app._refresh_history.assert_not_called()

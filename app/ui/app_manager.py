@@ -65,6 +65,7 @@ from app.ui.graph_fullscreen import GraphFullscreen
 from app.ui.graph_series import GraphSeries
 from app.ui.headset import Headset, filter_mindwave
 from app.ui.history_screen import HistoryScreen
+from app.ui.hooks import wire
 from app.ui.line_colours import DEFAULT as LINE_DEFAULT
 from app.ui.line_colours import LINE_COLOURS
 from app.ui.line_colours import OPTIONS as LINE_OPTIONS
@@ -591,8 +592,11 @@ class EEGMeditationApp(App):
         self._live_screen.btn_pause.bind(on_release=self._on_pause)
         self._live_screen.btn_stop.bind(on_release=self._on_stop)
         self._live_screen.btn_marker.bind(on_release=self._on_marker)
-        self._live_screen.on_duration_preset = self._program_settings.on_duration_preset
-        self._live_screen.on_program_pick = self._program_settings.on_load
+        wire(
+            self._live_screen,
+            on_duration_preset=self._program_settings.on_duration_preset,
+            on_program_pick=self._program_settings.on_load,
+        )
         self._live_screen.overlay_cancel_btn.bind(on_release=self._on_connect_cancel)
         self._live_screen.overlay_retry_btn.bind(on_release=self._on_connect_retry)
         self._live_screen.summary_ok_btn.bind(on_release=self._on_summary_ok)
@@ -601,41 +605,66 @@ class EEGMeditationApp(App):
 
         # Tap on graph to set marker (Android — no keyboard available)
         if kivy_platform == "android":
-            self._live_screen.graph.set_tap_callback(self._on_marker)
+            wire(self._live_screen.graph, on_tap=self._on_marker)
 
         # Shared fullscreen-expand + series-picker glyphs on every graph
         self._wire_graph_affordances()
 
-        self._settings_screen.set_threshold_callback(self._on_threshold_change)
-        self._settings_screen.audio.set_test_audio_callback(self._on_test_audio)
-        self._settings_screen.audio.set_sinking_alert_callback(self._on_sinking_alert_toggle)
-        self._settings_screen.audio.set_subtle_alert_callback(self._on_subtle_alert_toggle)
-        self._settings_screen.audio.set_disconnect_alert_callback(self._on_disconnect_alert_toggle)
-        self._settings_screen.device.set_device_mode_callback(self._headset.on_mode_toggle)
-        self._settings_screen.device.set_scan_devices_callback(self._headset.on_scan)
-        self._settings_screen.device.set_device_select_callback(self._headset.on_select)
-        self._settings_screen.device.set_device_state_callback(self._headset.state)
-        self._settings_screen.device.set_device_rename_callback(self._headset.on_rename)
-        self._settings_screen.display.set_text_size_callback(self._on_text_size_change)
-        self._settings_screen.display.set_line_colours_callback(self._on_line_colours_change)
-        self._settings_screen.device.set_copy_diagnostics_callback(self._headset.on_copy_diagnostics)
-        self._settings_screen.display.set_line_width_callback(self._on_line_width_change)
-        self._settings_screen.display.set_rotate_screen_callback(self._on_rotate_screen)
-        self._settings_screen.formulas.set_formula_slot_callback(self._formula_settings.on_slot_change)
-        self._settings_screen.formulas.set_save_formula_callback(self._formula_settings.on_save)
-        self._settings_screen.formulas.set_load_formula_callback(self._formula_settings.on_load)
-        self._settings_screen.formulas.set_delete_formula_callback(self._formula_settings.on_delete)
-        self._settings_screen.formulas.set_export_formulas_callback(self._formula_settings.on_export)
-        self._settings_screen.set_audio_metric_callback(self._on_audio_metric_change)
-        self._settings_screen.set_audio_formula_index_callback(self._on_audio_formula_index)
-        self._settings_screen.audio.set_feedback_source_callback(self._on_feedback_source_change)
-        self._settings_screen.audio.set_reward_source_callback(self._on_reward_source_change)
-        self._settings_screen.timer.set_program_mode_callback(self._program_settings.on_mode_change)
-        self._settings_screen.timer.set_program_changed_callback(self._program_settings.on_changed)
-        self._settings_screen.timer.set_program_save_callback(self._program_settings.on_save)
-        self._settings_screen.timer.set_program_load_callback(self._program_settings.on_load)
-        self._settings_screen.timer.set_program_delete_callback(self._program_settings.on_delete)
-        self._settings_screen.set_theme_callback(self._on_theme_change)
+        wire(
+            self._settings_screen,
+            on_threshold_change=self._on_threshold_change,
+            on_audio_metric_change=self._on_audio_metric_change,
+            on_audio_formula_index=self._on_audio_formula_index,
+            on_theme_change=self._on_theme_change,
+            on_profile_switch=self._on_user_switch,
+            on_profile_create=self._on_user_create,
+            on_profile_delete=self._on_user_delete,
+            session_counter=self._count_sessions_for_user,
+        )
+        wire(
+            self._settings_screen.audio,
+            on_test_audio=self._on_test_audio,
+            on_sinking_alert_toggle=self._on_sinking_alert_toggle,
+            on_subtle_alert_toggle=self._on_subtle_alert_toggle,
+            on_disconnect_alert_toggle=self._on_disconnect_alert_toggle,
+            on_feedback_source_change=self._on_feedback_source_change,
+            on_reward_source_change=self._on_reward_source_change,
+        )
+        wire(
+            self._settings_screen.device,
+            on_device_mode_toggle=self._headset.on_mode_toggle,
+            on_scan_devices=self._headset.on_scan,
+            on_device_select=self._headset.on_select,
+            device_state=self._headset.state,
+            on_device_rename=self._headset.on_rename,
+            on_copy_diagnostics=self._headset.on_copy_diagnostics,
+        )
+        wire(
+            self._settings_screen.display,
+            on_text_size=self._on_text_size_change,
+            on_line_colours=self._on_line_colours_change,
+            on_line_width_change=self._on_line_width_change,
+            on_rotate_screen=self._on_rotate_screen,
+        )
+        wire(
+            self._settings_screen.formulas,
+            on_formula_slot_change=self._formula_settings.on_slot_change,
+            on_save_formula=self._formula_settings.on_save,
+            on_load_formula=self._formula_settings.on_load,
+            on_delete_formula=self._formula_settings.on_delete,
+            on_export_formulas=self._formula_settings.on_export,
+        )
+        wire(
+            self._settings_screen.timer,
+            on_program_mode=self._program_settings.on_mode_change,
+            on_program_changed=self._program_settings.on_changed,
+            on_program_save=self._program_settings.on_save,
+            on_program_load=self._program_settings.on_load,
+            on_program_delete=self._program_settings.on_delete,
+            on_test_timer_sound=self._on_test_timer_sound,
+            on_stop_timer_sound=self._on_stop_test_timer_sound,
+            on_timer_sound_change=self._on_timer_sound_change,
+        )
 
         # Keyboard hotkey for marker
         Window.bind(on_key_down=self._on_key_down)
@@ -660,42 +689,25 @@ class EEGMeditationApp(App):
         self._reward_source: str = "none"   # above-threshold reward channel (off by default)
         self._reward_sound_path: str = ""
 
-        self._diary_screen.set_save_notes_callback(self._on_save_notes)
-        self._diary_screen.set_export_csv_callback(self._on_export_csv)
-        self._diary_screen.set_delete_session_callback(self._on_delete_session)
-        self._diary_screen.set_rename_session_callback(self._on_rename_session)
-        self._diary_screen.set_back_callback(self._on_diary_back)
-        self._diary_screen.band_view_persist_cb = self._persist_band_view
-
-        self._history_screen.set_callbacks(
-            on_session_select=self._on_session_select,
+        wire(
+            self._diary_screen,
             on_save_notes=self._on_save_notes,
-            on_delete_sessions=self._delete_sessions,
             on_export_csv=self._on_export_csv,
+            on_back=self._on_diary_back,
+            on_band_view_change=self._persist_band_view,
+            on_band_collapse=lambda _collapsed: self._persist_user_setting("band_power_collapsed"),
+        )
+
+        wire(
+            self._history_screen,
+            on_session_select=self._on_session_select,
+            on_delete_sessions=self._delete_sessions,
             on_rename_session=self._on_rename_session,
+            on_view_mode_change=self._on_history_view_mode_change,
+            on_export_sessions=self._on_export_sessions_csv,
+            on_chart_collapse=lambda _collapsed: self._persist_user_setting("history_chart_collapsed"),
         )
-        self._history_screen.set_view_mode_callback(
-            self._on_history_view_mode_change,
-        )
-        self._history_screen.set_chart_collapse_callback(
-            lambda _collapsed: self._persist_user_setting("history_chart_collapsed"))
-        self._diary_screen.what_if.set_collapse_callback(
-            lambda _collapsed: self._persist_user_setting("what_if_collapsed"))
-        self._diary_screen.set_band_collapse_callback(
-            lambda _collapsed: self._persist_user_setting("band_power_collapsed"))
-        self._history_screen.set_export_sessions_callback(self._on_export_sessions_csv)
-
-        self._settings_screen.timer.set_test_timer_sound_callback(self._on_test_timer_sound)
-        self._settings_screen.timer.set_stop_timer_sound_callback(self._on_stop_test_timer_sound)
-        self._settings_screen.timer.set_timer_sound_change_callback(self._on_timer_sound_change)
-
-        # Profile section in settings
-        self._settings_screen.set_profile_callbacks(
-            on_switch=self._on_user_switch,
-            on_create=self._on_user_create,
-            on_delete=self._on_user_delete,
-        )
-        self._settings_screen.set_session_counter(self._count_sessions_for_user)
+        wire(self._diary_screen.what_if, on_collapse=lambda _collapsed: self._persist_user_setting("what_if_collapsed"))
 
         # Data Backup section
         self._backup_flow = BackupFlow(
@@ -704,8 +716,11 @@ class EEGMeditationApp(App):
             refused_while_session_runs=self._refused_while_session_runs, confirm=self._confirm_action,
             info=self._info_popup, on_db_replaced=self._on_db_replaced,
         )
-        self._settings_screen.set_backup_callback(self._backup_flow.on_backup_pressed)
-        self._settings_screen.set_restore_callback(self._backup_flow.on_restore_pressed)
+        wire(
+            self._settings_screen,
+            on_backup_pressed=self._backup_flow.on_backup_pressed,
+            on_restore_pressed=self._backup_flow.on_restore_pressed,
+        )
 
     def _activate_user(self, uid: int) -> None:
         """Make `uid` the active profile and load its settings; every path that picks a user goes here."""
@@ -2201,9 +2216,6 @@ class EEGMeditationApp(App):
     def _on_save_notes(self, session_id: int, notes: str | None = None, tags: str | None = None,
                        mood: int | None = None) -> bool:
         return self._save_session_notes(session_id, notes=notes, tags=tags, mood=mood)
-
-    def _on_delete_session(self, session_id: int) -> None:
-        self._delete_sessions([session_id])
 
     def _delete_sessions(self, session_ids: list[int], on_done: Optional[Callable[[bool], None]] = None) -> None:
         """The one session-delete path (a History row, the selection, the session-end card): one transaction on a worker

@@ -7,6 +7,7 @@ from kivy.tests.common import UnitTestTouch
 
 from app.settings.registry import BOOL, Setting, SettingsStore
 from app.ui.diary_screen import DiaryScreen
+from app.ui.hooks import wire
 from app.ui.theme import Icons
 from tests.test_session_detail_open import app, db  # noqa: F401  (fixtures)
 
@@ -70,7 +71,7 @@ def test_the_folded_table_is_saved_per_profile(app):  # noqa: F811
     # As _build_settings_store declares it, and as build() wires the chevron.
     a._settings_store = SettingsStore(store, [Setting("band_power_collapsed", False, BOOL[0], BOOL[1],
                                                       lambda: d.band_collapsed, d.set_band_collapsed)])
-    d.set_band_collapse_callback(lambda _c: a._persist_user_setting("band_power_collapsed"))
+    wire(d, on_band_collapse=lambda _c: a._persist_user_setting("band_power_collapsed"))
     d._btn_band_fold.dispatch("on_release")  # "me" folds it
     assert store.get_user_setting(me, "band_power_collapsed") == "True"
     a._settings_store.load(other)

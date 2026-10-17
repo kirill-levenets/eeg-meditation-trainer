@@ -4,6 +4,7 @@ from unittest import mock
 from kivy.metrics import dp
 
 from app.ui.headset import filter_mindwave
+from app.ui.hooks import wire
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.theme import ThemedAccordion
 
@@ -351,7 +352,7 @@ class TestScrollableGraphSetSeriesName(unittest.TestCase):
             colors={"custom_formula": (1, 0, 0, 1)},
             scales={"custom_formula": 200.0},
         )
-        g.set_visibility_callback(lambda: fired.append(True))
+        wire(g, on_series_change=lambda: fired.append(True))
         g.set_series_name("custom_formula", "Alpha Ratio")
         self.assertEqual(g.series_name("custom_formula"), "Alpha Ratio")
         self.assertTrue(fired)
@@ -365,7 +366,7 @@ class TestSettingsTimerSoundRow(unittest.TestCase):
         from app.ui.settings_screen import SettingsScreen
         self.screen = SettingsScreen()
         self.captured = []
-        self.screen.timer.set_timer_sound_change_callback(self.captured.append)
+        wire(self.screen.timer, on_timer_sound_change=self.captured.append)
 
     def test_a_loaded_path_shows_on_the_button_without_a_change(self):
         self.screen.timer.timer_sound_path = "/tmp/bell.wav"
@@ -397,7 +398,7 @@ class TestSettingsTimerSoundRow(unittest.TestCase):
 
     def test_test_button_invokes_callback(self):
         called = []
-        self.screen.timer.set_test_timer_sound_callback(lambda: called.append(True))
+        wire(self.screen.timer, on_test_timer_sound=lambda: called.append(True))
         self.screen.timer._timer_sound_test_btn.dispatch("on_release")
         self.assertEqual(called, [True])
 
@@ -406,8 +407,11 @@ class TestSettingsTimerSoundRow(unittest.TestCase):
         # to interrupt them. The Test button doubles as a Stop button.
         played = []
         stopped = []
-        self.screen.timer.set_test_timer_sound_callback(lambda: played.append(True))
-        self.screen.timer.set_stop_timer_sound_callback(lambda: stopped.append(True))
+        wire(
+            self.screen.timer,
+            on_test_timer_sound=lambda: played.append(True),
+            on_stop_timer_sound=lambda: stopped.append(True),
+        )
 
         self.assertEqual(self.screen.timer._timer_sound_test_btn.text, "Test")
         self.screen.timer._timer_sound_test_btn.dispatch("on_release")
@@ -422,7 +426,7 @@ class TestSettingsTimerSoundRow(unittest.TestCase):
         self.assertEqual(played, [True])  # unchanged
 
     def test_natural_playback_end_resets_button_text(self):
-        self.screen.timer.set_test_timer_sound_callback(lambda: None)
+        wire(self.screen.timer, on_test_timer_sound=lambda: None)
         self.screen.timer._timer_sound_test_btn.dispatch("on_release")
         self.assertEqual(self.screen.timer._timer_sound_test_btn.text, "Stop")
         # Sound.on_stop fires → app_manager calls notify_timer_sound_test_ended.
@@ -446,9 +450,7 @@ class TestSettingsFormulaSlots(unittest.TestCase):
 
     def test_submit_slot_fires_callback_with_index_name_formula(self):
         captured = []
-        self.screen.formulas.set_formula_slot_callback(
-            lambda idx, name, formula: captured.append((idx, name, formula))
-        )
+        wire(self.screen.formulas, on_formula_slot_change=lambda idx, name, formula: captured.append((idx, name, formula)))
         self.screen.formulas._formula_name_inputs[1].text = "  Focus  "
         self.screen.formulas._formula_inputs[1].text = "  alpha + beta  "
         self.screen.formulas._submit_slot(1)
@@ -456,9 +458,7 @@ class TestSettingsFormulaSlots(unittest.TestCase):
 
     def test_save_slot_reuses_library_callback_with_index_name_formula(self):
         captured = []
-        self.screen.formulas.set_save_formula_callback(
-            lambda idx, name, formula: captured.append((idx, name, formula))
-        )
+        wire(self.screen.formulas, on_save_formula=lambda idx, name, formula: captured.append((idx, name, formula)))
         self.screen.formulas._formula_name_inputs[2].text = "Calm"
         self.screen.formulas._formula_inputs[2].text = "theta / (delta + 1)"
         self.screen.formulas._save_slot(2)

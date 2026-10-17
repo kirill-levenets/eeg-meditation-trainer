@@ -1,11 +1,10 @@
 """Settings → Custom Formula: three named formula slots with Apply and Save, the saved formulas with their export, and
 the formula syntax reference."""
-from collections.abc import Callable
-from typing import Optional
 
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 
+from app.ui.hooks import Hook
 from app.ui.settings_sections.common import fill_saved_list, saved_formula_label
 from app.ui.theme import (
     C,
@@ -21,12 +20,13 @@ from app.ui.theme import (
 class FormulaSection:
     """Builds the section's content into `section` and reports the user's actions through its callbacks."""
 
+    on_formula_slot_change = Hook()
+    on_save_formula = Hook()
+    on_load_formula = Hook()
+    on_delete_formula = Hook()
+    on_export_formulas = Hook()
+
     def __init__(self, section) -> None:
-        self._on_formula_slot_change: Optional[Callable] = None
-        self._on_save_formula: Optional[Callable] = None
-        self._on_load_formula: Optional[Callable] = None
-        self._on_delete_formula: Optional[Callable] = None
-        self._on_export_formulas: Optional[Callable] = None
         self.saved: list[dict] = []  # the saved formulas, which a program segment can also pick
         self._build(section)
 
@@ -208,51 +208,31 @@ class FormulaSection:
         section.add_widget(ref)
 
     def _submit_slot(self, idx: int) -> None:
-        if self._on_formula_slot_change:
-            name = self._formula_name_inputs[idx].text.strip()
-            self._on_formula_slot_change(idx, name, self._formula_inputs[idx].text.strip())
+        name = self._formula_name_inputs[idx].text.strip()
+        self.on_formula_slot_change(idx, name, self._formula_inputs[idx].text.strip())
 
     def _save_slot(self, idx: int) -> None:
         """Save a slot's formula to the library, seeding the entry from its name."""
-        if self._on_save_formula:
-            self._on_save_formula(idx, self._formula_name_inputs[idx].text.strip(),
-                                  self._formula_inputs[idx].text.strip())
+        self.on_save_formula(idx, self._formula_name_inputs[idx].text.strip(),
+                             self._formula_inputs[idx].text.strip())
 
     def set_formula_slot_status(self, idx: int, text: str, is_error: bool = False) -> None:
         self._formula_statuses[idx].text = text
         self._formula_statuses[idx].color = C.DANGER if is_error else C.ACCENT
-
-    def set_formula_slot_callback(self, callback: Callable) -> None:
-        self._on_formula_slot_change = callback
 
     def set_formula_slot(self, idx: int, name: str, formula: str) -> None:
         """Reflect a programmatic slot change (load/restore) in the inputs."""
         self._formula_name_inputs[idx].text = name
         self._formula_inputs[idx].text = formula
 
-    def set_save_formula_callback(self, callback: Callable) -> None:
-        self._on_save_formula = callback
-
-    def set_load_formula_callback(self, callback: Callable) -> None:
-        self._on_load_formula = callback
-
-    def set_delete_formula_callback(self, callback: Callable) -> None:
-        self._on_delete_formula = callback
-
-    def set_export_formulas_callback(self, callback: Callable) -> None:
-        self._on_export_formulas = callback
-
     def _on_export_formulas_pressed(self, *args) -> None:
-        if self._on_export_formulas:
-            self._on_export_formulas()
+        self.on_export_formulas()
 
     def _on_load_formula_pressed(self, idx: int) -> None:
-        if self._on_load_formula:
-            self._on_load_formula(idx)
+        self.on_load_formula(idx)
 
     def _on_delete_formula_pressed(self, idx: int) -> None:
-        if self._on_delete_formula:
-            self._on_delete_formula(idx)
+        self.on_delete_formula(idx)
 
     def populate_saved_formulas(self, formulas) -> None:
         """Update the saved formulas list. formulas: [{name, formula}, ...]"""

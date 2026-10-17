@@ -11,6 +11,7 @@ from kivy.metrics import dp
 from app.config import APP
 from app.session.manager import SessionManager
 from app.ui.history_screen import HistoryScreen, _SessionRow
+from app.ui.hooks import wire
 from app.ui.live_mirror import LiveMirror
 from app.ui.session_labels import (
     session_label,
@@ -194,7 +195,7 @@ def test_saved_notes_show_on_the_row_at_once(history):
 
 def test_saving_the_rename_editor_unchanged_writes_nothing(history):
     renamed = []
-    history._on_rename_session = lambda sid, name: renamed.append((sid, name))
+    wire(history, on_rename_session=lambda sid, name: renamed.append((sid, name)))
     history.load_sessions(_sessions())
     _frames()
     history._toggle_rename(1)
@@ -208,7 +209,7 @@ def test_saving_the_rename_editor_unchanged_writes_nothing(history):
 
 def test_the_rename_editor_edits_the_name_and_the_row_keeps_its_date(history):
     renamed = []
-    history._on_rename_session = lambda sid, name: renamed.append((sid, name))
+    wire(history, on_rename_session=lambda sid, name: renamed.append((sid, name)))
     history.load_sessions(_sessions())
     _frames()
     history._toggle_rename(1)

@@ -8,6 +8,7 @@ from kivy.uix.screenmanager import NoTransition, Screen, ScreenManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.diary_screen import DiaryScreen
 from app.ui.history_screen import HistoryScreen
+from app.ui.hooks import wire
 
 SESSION = {"id": 7, "date_time": "2026-09-20T10:00:00", "duration": 600, "avg_shamatha": 55,
            "notes": "calm start", "tags": "morning", "mood_rating": 4}
@@ -25,7 +26,7 @@ def _detail(session: dict = SESSION, saved: bool = True):
         saves.append((sid, notes, tags, mood))
         return saved
 
-    diary.set_save_notes_callback(save)
+    wire(diary, on_save_notes=save)
     diary.show_session_detail(dict(session))
     sm.current = "diary"
     return sm, diary, saves
@@ -105,7 +106,7 @@ def _app() -> EEGMeditationApp:
 def test_an_unrated_session_stays_unrated_when_only_its_notes_change():
     app = _app()
     _sm, diary, _saves = _detail(dict(SESSION, mood_rating=0))  # the slider shows 3
-    diary.set_save_notes_callback(app._on_save_notes)
+    wire(diary, on_save_notes=app._on_save_notes)
     diary._notes_input.text = "notes only"
     diary.flush_notes()
     app._db.update_session_notes.assert_called_once_with(7, notes="notes only", tags=None, mood_rating=None)
@@ -114,7 +115,7 @@ def test_an_unrated_session_stays_unrated_when_only_its_notes_change():
 def test_save_rates_an_unrated_session_as_shown():
     app = _app()
     _sm, diary, _saves = _detail(dict(SESSION, mood_rating=0))  # the slider shows 3
-    diary.set_save_notes_callback(app._on_save_notes)
+    wire(diary, on_save_notes=app._on_save_notes)
     diary._on_save_pressed()
     app._db.update_session_notes.assert_called_once_with(7, notes="calm start", tags="morning", mood_rating=3)
     app._toast.assert_called_once_with("Notes saved")
@@ -128,7 +129,7 @@ def test_a_failed_save_on_leave_is_not_retried_when_the_app_pauses_later(monkeyp
     app = _app()
     app._db.update_session_notes.return_value = False
     sm, diary, _saves = _detail()
-    diary.set_save_notes_callback(app._on_save_notes)
+    wire(diary, on_save_notes=app._on_save_notes)
     app._diary_screen = diary
     app._sm = sm
     diary._notes_input.text = "edited"
@@ -142,7 +143,7 @@ def test_a_failed_save_on_leave_is_not_retried_when_the_app_pauses_later(monkeyp
 def test_app_pause_on_the_detail_saves_an_edit_and_acknowledges_it():
     app = _app()
     _sm, diary, _saves = _detail()
-    diary.set_save_notes_callback(app._on_save_notes)
+    wire(diary, on_save_notes=app._on_save_notes)
     app._diary_screen = diary
     app._sm = _sm
     diary._notes_input.text = "typed before the phone locked"

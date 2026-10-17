@@ -13,6 +13,7 @@ from app.session.manager import elapsed_clock
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.diary_screen import DiaryScreen
 from app.ui.graph_fullscreen import GraphFullscreen
+from app.ui.hooks import wire
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 
 HOUR = 7200  # ticks at 2 a second
@@ -276,7 +277,7 @@ def test_a_drag_that_starts_on_a_glyph_pans_and_fires_nothing():
     g.set_scroll_offset(1000)
     taps, marks = [], []
     g.set_fit_callback(taps.append)
-    g.set_tap_callback(lambda: marks.append(1))
+    wire(g, on_tap=lambda: marks.append(1))
     Window.add_widget(g)
     try:
         _frames()
@@ -547,7 +548,7 @@ def test_a_two_finger_tap_fires_neither_a_glyph_nor_a_marker():
     g = _graph()
     fired, marks = [], []
     g.set_fit_callback(fired.append)
-    g.set_tap_callback(lambda: marks.append(1))
+    wire(g, on_tap=lambda: marks.append(1))
     Window.add_widget(g)
     try:
         _frames()

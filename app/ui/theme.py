@@ -33,6 +33,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 
 from app.logger import logger
+from app.ui.hooks import Hook
 
 # ── Icon font ────────────────────────────────────────────────────────
 
@@ -1031,9 +1032,10 @@ class FoldChevron(StyledButton):
 class Fold:
     """A section's fold: whether it's folded, its chevron showing it, and a user's toggle reported to `on_change`."""
 
+    on_change = Hook()
+
     def __init__(self, chevron: FoldChevron, apply: Callable[[bool], None]) -> None:
         self.folded = False
-        self.on_change: Callable[[bool], None] | None = None
         self._chevron = chevron
         self._apply = apply
         chevron.bind(on_release=lambda *_a: self.toggle())
@@ -1045,8 +1047,7 @@ class Fold:
 
     def toggle(self) -> None:
         self.set(not self.folded)
-        if self.on_change:
-            self.on_change(self.folded)
+        self.on_change(self.folded)
 
 
 def fold_away(parent, body, anchor, folded: bool) -> None:

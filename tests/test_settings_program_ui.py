@@ -1,3 +1,4 @@
+from app.ui.hooks import wire
 from app.ui.settings_screen import SettingsScreen
 
 
@@ -8,7 +9,7 @@ def _screen():
 def test_load_program_populates_without_firing_changed():
     s = _screen()
     changed = []
-    s.timer.set_program_changed_callback(lambda segs: changed.append(segs))
+    wire(s.timer, on_program_changed=lambda segs: changed.append(segs))
     segs = [{"minutes": 10, "target": 50, "formula": "shamatha_score"},
             {"minutes": 5, "target": 70, "formula": "meditation_score"}]
     s.timer.load_program(segs, "program")
@@ -20,7 +21,7 @@ def test_load_program_populates_without_firing_changed():
 def test_add_segment_fires_changed():
     s = _screen()
     changed = []
-    s.timer.set_program_changed_callback(lambda segs: changed.append(segs))
+    wire(s.timer, on_program_changed=lambda segs: changed.append(segs))
     s.timer.load_program([], "program")
     s.timer._add_segment_row()
     assert len(changed) >= 1
@@ -30,7 +31,7 @@ def test_add_segment_fires_changed():
 def test_set_program_mode_does_not_fire_callback():
     s = _screen()
     seen = []
-    s.timer.set_program_mode_callback(lambda m: seen.append(m))
+    wire(s.timer, on_program_mode=lambda m: seen.append(m))
     s.timer.set_program_mode("program")
     assert seen == []                          # programmatic set is silent
     assert s.timer.program_mode == "program"
@@ -53,7 +54,7 @@ def test_custom_formula_segment_roundtrips():
 def test_set_feedback_source_does_not_fire_callback():
     s = _screen()
     fired = []
-    s.audio.set_feedback_source_callback(lambda src, path: fired.append((src, path)))
+    wire(s.audio, on_feedback_source_change=lambda src, path: fired.append((src, path)))
     s.audio.set_feedback_source("custom", "/tmp/x.wav")  # restore -> silent
     assert fired == []
     s.audio._choose_feedback_source("tone")  # user action -> fires, clears stale custom path
@@ -69,7 +70,7 @@ def test_choose_feedback_source_updates_button_label():
 def test_choose_reward_crickets_fires_and_labels():
     s = _screen()
     fired = []
-    s.audio.set_reward_source_callback(lambda src, path: fired.append((src, path)))
+    wire(s.audio, on_reward_source_change=lambda src, path: fired.append((src, path)))
     s.audio._choose_reward_source("heartbeat")
     assert fired == [("heartbeat", "")]
     assert s.audio._reward_source_btn.text == "Crickets"

@@ -1,7 +1,5 @@
 """Settings → Device: the mock or real headset, the paired MindWaves to pick from (each can be renamed), the
 connection status and the diagnostics copy."""
-from collections.abc import Callable
-from typing import Optional
 
 from kivy.clock import Clock
 from kivy.metrics import dp
@@ -9,6 +7,7 @@ from kivy.uix.boxlayout import BoxLayout
 
 from app.config import APP
 from app.ui.device_labels import MAX_DEVICE_ALIAS, device_row_text
+from app.ui.hooks import Hook
 from app.ui.settings_sections.common import checkbox_row
 from app.ui.theme import C, F, Icons, RenameRow, S, StyledButton, ThemedLabel
 
@@ -17,18 +16,19 @@ class DeviceSection:
     """Builds the section's content into `section` and reports the user's actions through its callbacks; `scroll` is
     the Settings scroll view, which focus_device_section brings the section into."""
 
+    on_device_mode_toggle = Hook()
+    on_scan_devices = Hook()
+    on_device_select = Hook()
+    device_state = Hook(default=(None, None))  # (selected, connected) addresses
+    on_device_rename = Hook()
+    on_copy_diagnostics = Hook()
+
     def __init__(self, section, *, scroll) -> None:
         self._scroll = scroll
-        self._on_device_mode_toggle: Optional[Callable] = None
-        self._on_scan_devices: Optional[Callable] = None
-        self._on_device_select: Optional[Callable] = None
-        self._device_state: Callable[[], tuple[str | None, str | None]] | None = None  # (selected, connected) addresses
-        self._on_device_rename: Optional[Callable] = None
         self._bt_devices: dict[str, dict] = {}  # address -> the listed device, with the alias its user gave it
         self._bt_rows: dict[str, StyledButton] = {}
         self._bt_pencils: dict[str, StyledButton] = {}
         self._bt_renaming: str | None = None
-        self._on_copy_diagnostics: Optional[Callable] = None
         self._build(section)
 
     def _build(self, section) -> None:
@@ -121,41 +121,19 @@ class DeviceSection:
         section.add_widget(self._diagnostics_btn)
 
     def _on_device_mode_change(self, checkbox, active) -> None:
-        if self._on_device_mode_toggle:
-            self._on_device_mode_toggle(active)
+        self.on_device_mode_toggle(active)
 
     def _on_scan_pressed(self, *args) -> None:
-        if self._on_scan_devices:
-            self._on_scan_devices()
+        self.on_scan_devices()
 
     def _on_bt_device_pressed(self, btn) -> None:
         address = getattr(btn, "bt_address", "")
         name = getattr(btn, "bt_name", "")
-        if address and self._on_device_select:
-            self._on_device_select(address, name)
-
-    def set_device_mode_callback(self, callback: Callable) -> None:
-        self._on_device_mode_toggle = callback
-
-    def set_scan_devices_callback(self, callback: Callable) -> None:
-        self._on_scan_devices = callback
-
-    def set_device_select_callback(self, callback: Callable) -> None:
-        self._on_device_select = callback
-
-    def set_device_state_callback(self, callback: Callable[[], tuple[str | None, str | None]]) -> None:
-        self._device_state = callback
-
-    def set_device_rename_callback(self, callback: Callable) -> None:
-        """callback(address, bluetooth_name, text)"""
-        self._on_device_rename = callback
-
-    def set_copy_diagnostics_callback(self, callback: Callable) -> None:
-        self._on_copy_diagnostics = callback
+        if address:
+            self.on_device_select(address, name)
 
     def _on_diagnostics_pressed(self, *_args) -> None:
-        if self._on_copy_diagnostics:
-            self._on_copy_diagnostics()
+        self.on_copy_diagnostics()
 
     def populate_bt_devices(self, devices: list) -> None:
         """Populate the BT device list with scan results, each with the `alias` its user gave it."""
@@ -200,7 +178,7 @@ class DeviceSection:
 
     def mark_bt_devices(self) -> None:
         """Fill the selected headset's row and show the link on the connected one's."""
-        selected, connected = self._device_state() if self._device_state else (None, None)
+        selected, connected = self.device_state()
         for address, btn in self._bt_rows.items():
             btn.bg_color = C.ACCENT if address == selected else C.BG_CARD
             btn.set_icon(Icons.BLUETOOTH if address == connected else "")
@@ -240,8 +218,7 @@ class DeviceSection:
             return
         text = self._bt_rename_input.text
         self._close_device_rename()
-        if self._on_device_rename:
-            self._on_device_rename(address, self._bt_devices[address]["name"], text)
+        self.on_device_rename(address, self._bt_devices[address]["name"], text)
 
     def update_device_status(
         self, connected: bool, name: str = "", meta: str = ""
