@@ -29,6 +29,8 @@ The user gate and profiles, the Android back button, error reporting, test guard
 - Linux CI uses system Python (ubuntu-24.04) instead of `actions/setup-python` to get `socket.AF_BLUETOOTH` support.
 - MDI icon font path resolution tries multiple candidates for cross-platform compat (standard, Android, fallback).
 
+- **Java sources** live in `android_src/` (a Gradle source root, `android.add_src`); a service there is declared with `--native-service=<class>` in `p4a.extra_args`, which p4a's manifest template writes without `android:process`. That template line has no `foregroundServiceType`, which targeting API 34+ requires (#23): that needs a newer p4a or a template override.
+
 ## Removed code
 
 - Removed dead code in this iteration: `app/ui/analytics_screen.py`, `app/ui/home_screen.py`, `app/analytics/aggregator.py` — all unreachable from the bottom nav (only Session/History/Settings).

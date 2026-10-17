@@ -411,17 +411,17 @@ class EEGMeditationApp(App):
             logger.warning(f"Failed to release wake lock: {e}")
 
     def _start_session_keep_alive_service(self) -> None:
-        """Start the Android foreground service that protects the session from OS kill."""
+        """Start the session's foreground service: it runs in this process, so the OS keeps this process up."""
         if not hasattr(sys, "getandroidapilevel"):
             return
         try:
             from jnius import autoclass
             PythonActivity = autoclass("org.kivy.android.PythonActivity")
-            service_cls = autoclass("org.eeg.eegmeditation.ServiceSessionkeepalive")
-            service_cls.start(PythonActivity.mActivity, "")
-            logger.info("SessionKeepAlive service started.")
+            service_cls = autoclass("org.eeg.eegmeditation.SessionForegroundService")
+            service_cls.start(PythonActivity.mActivity, "EEG Meditation", "Meditation session in progress")
+            logger.info("Session foreground service started.")
         except Exception as e:
-            logger.warning(f"Failed to start SessionKeepAlive service: {e}")
+            logger.warning(f"Failed to start the session foreground service: {e}")
 
     def _stop_session_keep_alive_service(self) -> None:
         if not hasattr(sys, "getandroidapilevel"):
@@ -429,11 +429,11 @@ class EEGMeditationApp(App):
         try:
             from jnius import autoclass
             PythonActivity = autoclass("org.kivy.android.PythonActivity")
-            service_cls = autoclass("org.eeg.eegmeditation.ServiceSessionkeepalive")
+            service_cls = autoclass("org.eeg.eegmeditation.SessionForegroundService")
             service_cls.stop(PythonActivity.mActivity)
-            logger.info("SessionKeepAlive service stopped.")
+            logger.info("Session foreground service stopped.")
         except Exception as e:
-            logger.warning(f"Failed to stop SessionKeepAlive service: {e}")
+            logger.warning(f"Failed to stop the session foreground service: {e}")
 
     # Map bottom-nav tab keys to screen groups
     _TAB_SCREENS = {
