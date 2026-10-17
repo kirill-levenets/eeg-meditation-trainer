@@ -607,7 +607,17 @@ class EEGMeditationApp(App):
         # Shared fullscreen-expand + series-picker glyphs on every graph
         self._wire_graph_affordances()
 
-        self._settings_screen.set_threshold_callback(self._on_threshold_change)
+        wire(
+            self._settings_screen,
+            on_threshold_change=self._on_threshold_change,
+            on_audio_metric_change=self._on_audio_metric_change,
+            on_audio_formula_index=self._on_audio_formula_index,
+            on_theme_change=self._on_theme_change,
+            on_profile_switch=self._on_user_switch,
+            on_profile_create=self._on_user_create,
+            on_profile_delete=self._on_user_delete,
+            session_counter=self._count_sessions_for_user,
+        )
         wire(
             self._settings_screen.audio,
             on_test_audio=self._on_test_audio,
@@ -641,8 +651,6 @@ class EEGMeditationApp(App):
             on_delete_formula=self._formula_settings.on_delete,
             on_export_formulas=self._formula_settings.on_export,
         )
-        self._settings_screen.set_audio_metric_callback(self._on_audio_metric_change)
-        self._settings_screen.set_audio_formula_index_callback(self._on_audio_formula_index)
         wire(
             self._settings_screen.timer,
             on_program_mode=self._program_settings.on_mode_change,
@@ -654,7 +662,6 @@ class EEGMeditationApp(App):
             on_stop_timer_sound=self._on_stop_test_timer_sound,
             on_timer_sound_change=self._on_timer_sound_change,
         )
-        self._settings_screen.set_theme_callback(self._on_theme_change)
 
         # Keyboard hotkey for marker
         Window.bind(on_key_down=self._on_key_down)
@@ -702,15 +709,6 @@ class EEGMeditationApp(App):
             lambda _collapsed: self._persist_user_setting("band_power_collapsed"))
         self._history_screen.set_export_sessions_callback(self._on_export_sessions_csv)
 
-
-        # Profile section in settings
-        self._settings_screen.set_profile_callbacks(
-            on_switch=self._on_user_switch,
-            on_create=self._on_user_create,
-            on_delete=self._on_user_delete,
-        )
-        self._settings_screen.set_session_counter(self._count_sessions_for_user)
-
         # Data Backup section
         self._backup_flow = BackupFlow(
             self._db, self._settings_screen, user_name=self._current_user_name,
@@ -718,8 +716,11 @@ class EEGMeditationApp(App):
             refused_while_session_runs=self._refused_while_session_runs, confirm=self._confirm_action,
             info=self._info_popup, on_db_replaced=self._on_db_replaced,
         )
-        self._settings_screen.set_backup_callback(self._backup_flow.on_backup_pressed)
-        self._settings_screen.set_restore_callback(self._backup_flow.on_restore_pressed)
+        wire(
+            self._settings_screen,
+            on_backup_pressed=self._backup_flow.on_backup_pressed,
+            on_restore_pressed=self._backup_flow.on_restore_pressed,
+        )
 
     def _activate_user(self, uid: int) -> None:
         """Make `uid` the active profile and load its settings; every path that picks a user goes here."""

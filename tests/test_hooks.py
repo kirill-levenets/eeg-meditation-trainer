@@ -1,7 +1,12 @@
 """A widget's hooks: unset ones do nothing, wire() plugs handlers in by name and refuses a name that isn't a hook."""
+import importlib
+import pkgutil
+
 import pytest
+from kivy.event import EventDispatcher
 from kivy.uix.boxlayout import BoxLayout
 
+import app.ui as ui
 from app.ui.hooks import Hook, is_wired, wire
 
 
@@ -48,3 +53,24 @@ def test_a_name_that_is_no_hook_fails_at_wiring_instead_of_never_firing():
         wire(panel, orientation=print)  # a Kivy property is no hook
     with pytest.raises(AttributeError):
         is_wired(panel, "on_sav")
+
+
+def _clashes(cls: type) -> set[str]:
+    """Hooks named `on_<property>`: Kivy calls such a member whenever that property changes."""
+    props = {name for k in cls.__mro__ for name, v in vars(k).items() if type(v).__name__.endswith("Property")}
+    return {name for name, v in vars(cls).items() if isinstance(v, Hook) and name[3:] in props and name[:3] == "on_"}
+
+
+def test_a_hook_named_after_a_kivy_property_is_caught():
+    class _Bad(BoxLayout):
+        on_orientation = Hook()
+
+    assert _clashes(_Bad) == {"on_orientation"}
+
+
+def test_no_widget_hook_shadows_a_kivy_property_handler():
+    for mod in pkgutil.walk_packages(ui.__path__, "app.ui."):
+        module = importlib.import_module(mod.name)
+        for cls in vars(module).values():
+            if isinstance(cls, type) and issubclass(cls, EventDispatcher) and cls.__module__ == module.__name__:
+                assert not _clashes(cls), f"{cls.__name__}: {sorted(_clashes(cls))}"

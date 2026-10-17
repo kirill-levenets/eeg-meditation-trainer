@@ -1,7 +1,6 @@
 import os
 import threading
 from collections.abc import Callable
-from typing import Optional
 
 from kivy.clock import Clock
 from kivy.metrics import dp
@@ -12,6 +11,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.slider import Slider
 
 from app.config import METRICS
+from app.ui.hooks import Hook
 from app.ui.settings_sections.audio import AudioSection
 from app.ui.settings_sections.common import (
     checkbox_row,
@@ -79,17 +79,20 @@ def _load_help_topics(lang: str = "en") -> list[tuple[str, str]]:
 class SettingsScreen(Screen):
     """Settings screen with threshold, audio controls, device info, and toggles."""
 
+    on_threshold_change = Hook()
+    on_theme_change = Hook()
+    on_audio_metric_change = Hook()
+    on_audio_formula_index = Hook()
+    on_profile_switch = Hook()
+    on_profile_create = Hook()
+    on_profile_delete = Hook()
+    session_counter = Hook(default=0)
+    on_backup_pressed = Hook()
+    on_restore_pressed = Hook()
+
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.name = "settings"
-        self._on_profile_switch: Optional[Callable] = None
-        self._on_profile_create: Optional[Callable] = None
-        self._on_profile_delete: Optional[Callable] = None
-        self._session_counter: Optional[Callable[[int], int]] = None
-        self._on_backup_pressed: Optional[Callable] = None
-        self._on_restore_pressed: Optional[Callable] = None
-        self._on_threshold_change: Optional[Callable] = None
-        self._on_theme_change: Optional[Callable] = None
         self._graph_toggles: dict[str, bool] = {
             "shamatha_score": True,
             "meditation_score": False,
@@ -171,12 +174,8 @@ class SettingsScreen(Screen):
         )
         self._backup_status.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
 
-        self._backup_btn.bind(on_release=lambda *a: (
-            self._on_backup_pressed() if self._on_backup_pressed else None
-        ))
-        self._restore_btn.bind(on_release=lambda *a: (
-            self._on_restore_pressed() if self._on_restore_pressed else None
-        ))
+        self._backup_btn.bind(on_release=lambda *a: self.on_backup_pressed())
+        self._restore_btn.bind(on_release=lambda *a: self.on_restore_pressed())
 
         backup_section.add_widget(self._backup_btn)
         backup_section.add_widget(self._restore_btn)
@@ -241,8 +240,6 @@ class SettingsScreen(Screen):
 
         self._audio_metric_radios: dict[str, CheckBox] = {}
         self._audio_metric_selected: str = "shamatha_score"
-        self._on_audio_metric_change: Optional[Callable] = None
-        self._on_audio_formula_index_cb: Optional[Callable] = None
         self._audio_formula_index_selected: int = 0
         self._audio_formula_index_buttons: list[StyledButton] = []
         audio_metric_options = {
@@ -410,8 +407,7 @@ class SettingsScreen(Screen):
     def _on_slider_value(self, instance, value) -> None:
         val = int(value)
         self._threshold_value_label.text = str(val)
-        if self._on_threshold_change:
-            self._on_threshold_change(val)
+        self.on_threshold_change(val)
 
     def _step_threshold(self, delta: int) -> None:
         """Nudge the threshold by `delta`, clamped to the slider range. Setting
@@ -441,9 +437,6 @@ class SettingsScreen(Screen):
         # True: the slider, the -/+ buttons and the presets never see it, a mouse wheel included (it steps the slider)
         return bool(self._threshold_lock())
 
-    def set_threshold_callback(self, callback: Callable) -> None:
-        self._on_threshold_change = callback
-
     def on_pre_enter(self, *args) -> None:
         # The link may have dropped between sessions, with nothing on screen to report it.
         self.device.mark_bt_devices()
@@ -456,14 +449,12 @@ class SettingsScreen(Screen):
         key = getattr(checkbox, "audio_metric_key", None)
         if key:
             self._audio_metric_selected = key
-            if self._on_audio_metric_change:
-                self._on_audio_metric_change(key)
+            self.on_audio_metric_change(key)
 
     def _on_theme_select(self, btn) -> None:
         name = btn._theme_name
         C.set_theme(name)
-        if self._on_theme_change:
-            self._on_theme_change(name)
+        self.on_theme_change(name)
 
     def _show_active_theme(self) -> None:
         """Highlight the active theme's button, whoever applied it (this selector or a profile's settings load)."""
@@ -473,53 +464,24 @@ class SettingsScreen(Screen):
             btn.text_color = None if active else C.TEXT_SECONDARY
             btn.bold = active
 
-    def set_theme_callback(self, callback: Callable) -> None:
-        self._on_theme_change = callback
-
-    def set_audio_metric_callback(self, callback: Callable) -> None:
-        self._on_audio_metric_change = callback
-
-    def set_audio_formula_index_callback(self, callback: Callable) -> None:
-        self._on_audio_formula_index_cb = callback
-
     def _on_audio_formula_index_pressed(self, btn) -> None:
         idx = getattr(btn, "_slot_idx", 0)
         self.audio_formula_index = idx
-        if self._on_audio_formula_index_cb:
-            self._on_audio_formula_index_cb(idx)
+        self.on_audio_formula_index(idx)
 
     # --- Profile callbacks and methods ---
-
-    def set_profile_callbacks(self, on_switch=None, on_create=None, on_delete=None):
-        self._on_profile_switch = on_switch
-        self._on_profile_create = on_create
-        self._on_profile_delete = on_delete
-
-    def set_session_counter(self, fn):
-        """app_manager wires this to count per-user sessions for the form."""
-        self._session_counter = fn
-
-    def set_backup_callback(self, cb: Callable) -> None:
-        self._on_backup_pressed = cb
-
-    def set_restore_callback(self, cb: Callable) -> None:
-        self._on_restore_pressed = cb
 
     def show_backup_status(self, text: str) -> None:
         self._backup_status.text = text
 
     def _count_user_sessions(self, user_id: int) -> int:
-        if getattr(self, "_session_counter", None) is None:
-            return 0
-        return self._session_counter(user_id)
+        return self.session_counter(user_id)
 
     def _on_form_create_pressed(self, name: str) -> None:
-        if self._on_profile_create:
-            self._on_profile_create(name)
+        self.on_profile_create(name)
 
     def _on_form_pick_existing(self, user_id: int) -> None:
-        if self._on_profile_switch:
-            self._on_profile_switch(user_id)
+        self.on_profile_switch(user_id)
 
     def _on_form_delete_pressed(self, user_id: int) -> None:
         # Look up the name from the most recently populated list
@@ -543,8 +505,7 @@ class SettingsScreen(Screen):
 
         def _do_delete(*args):
             popup.dismiss()
-            if self._on_profile_delete:
-                self._on_profile_delete(user_id)
+            self.on_profile_delete(user_id)
 
         btn_confirm.bind(on_release=_do_delete)
         popup.open()
