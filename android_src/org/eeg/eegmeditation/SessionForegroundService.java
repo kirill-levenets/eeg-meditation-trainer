@@ -12,7 +12,8 @@ import android.os.IBinder;
 
 /**
  * The running session's foreground service, declared without android:process so it runs in the app's own process:
- * a foreground service raises the process that hosts it, and this is the process that runs the session.
+ * a foreground service raises the process that hosts it, and this is the process that runs the session. It never stops
+ * itself: it can't outlive the process, and the session's own ending stops it, after the save.
  */
 public class SessionForegroundService extends Service {
     private static final String CHANNEL_ID = "session";
@@ -41,11 +42,6 @@ public class SessionForegroundService extends Service {
         String text = intent != null ? intent.getStringExtra(EXTRA_TEXT) : null;
         startForeground(NOTIFICATION_ID, buildNotification(title, text));
         return START_NOT_STICKY;  // a session that died stays ended: a revived service would outlive it alone
-    }
-
-    @Override
-    public void onTaskRemoved(Intent rootIntent) {
-        stopSelf();
     }
 
     @Override

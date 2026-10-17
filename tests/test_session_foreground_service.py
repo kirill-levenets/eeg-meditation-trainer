@@ -38,3 +38,10 @@ def test_on_android_a_session_starts_and_stops_the_service_through_its_static_me
     app._stop_session_keep_alive_service()
     assert service.start.call_args.args[0] is activity
     service.stop.assert_called_once_with(activity)
+
+
+def test_the_service_never_stops_itself():
+    # Swiped away mid-session, the app saves in on_stop; the service must keep the process alive until then, and the
+    # session's ending stops it. In the app's process it can't outlive the app.
+    java = (ROOT / "android_src" / "org" / "eeg" / "eegmeditation" / "SessionForegroundService.java").read_text()
+    assert "stopSelf" not in java and "onTaskRemoved" not in java
