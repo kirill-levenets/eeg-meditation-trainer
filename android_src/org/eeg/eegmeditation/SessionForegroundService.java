@@ -21,24 +21,10 @@ public class SessionForegroundService extends Service {
     private static final String EXTRA_TITLE = "title";
     private static final String EXTRA_TEXT = "text";
 
-    // A stop that reaches the system before onStartCommand's startForeground crashes this process ("startForegroundService()
-    // did not then call startForeground()"), so while STARTING a stop is only noted and onStartCommand carries it out.
-    private static final int STOPPED = 0;
-    private static final int STARTING = 1;
-    private static final int FOREGROUND = 2;
-    private static final Object LOCK = new Object();
-    private static int state = STOPPED;
-    private static boolean stopNoted;
+    private static final ServiceStartState STATE = new ServiceStartState();
 
     public static void start(Context context, String title, String text) {
-        int previous;
-        boolean previousNoted;
-        synchronized (LOCK) {
-            previous = state;
-            previousNoted = stopNoted;
-            state = STARTING;
-            stopNoted = false;
-        }
+        ServiceStartState.Before before = STATE.starting();
         Intent intent = new Intent(context, SessionForegroundService.class);
         intent.putExtra(EXTRA_TITLE, title);
         intent.putExtra(EXTRA_TEXT, text);
@@ -49,25 +35,15 @@ public class SessionForegroundService extends Service {
                 context.startService(intent);
             }
         } catch (RuntimeException e) {
-            synchronized (LOCK) {
-                state = previous;  // nothing new is starting: as it was, so a later stop still finds it
-                stopNoted = previousNoted;
-            }
+            STATE.startFailed(before);
             throw e;
         }
     }
 
     public static void stop(Context context) {
-        synchronized (LOCK) {
-            if (state == STARTING) {
-                stopNoted = true;
-            }
-            if (state != FOREGROUND) {
-                return;  // stopping, or a second stop: nothing more to do
-            }
-            state = STOPPED;
+        if (STATE.stop()) {
+            context.stopService(new Intent(context, SessionForegroundService.class));
         }
-        context.stopService(new Intent(context, SessionForegroundService.class));
     }
 
     @Override
@@ -75,13 +51,7 @@ public class SessionForegroundService extends Service {
         String title = intent != null ? intent.getStringExtra(EXTRA_TITLE) : null;
         String text = intent != null ? intent.getStringExtra(EXTRA_TEXT) : null;
         startForeground(NOTIFICATION_ID, buildNotification(title, text));
-        boolean stopNow;
-        synchronized (LOCK) {
-            stopNow = stopNoted;
-            stopNoted = false;
-            state = stopNow ? STOPPED : FOREGROUND;
-        }
-        if (stopNow) {
+        if (STATE.wentForeground()) {
             stopSelf(startId);  // a newer start already queued keeps the service
         }
         return START_NOT_STICKY;  // a session that died stays ended: a revived service would outlive it alone
