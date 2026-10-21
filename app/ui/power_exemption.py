@@ -62,7 +62,8 @@ def _component_intent(package: str, cls: str):
 
 
 def _open_first(intents: list, done: Callable[[bool], None]) -> None:
-    """Open the first of `intents` that resolves and may be opened; `done(False)` when none could be."""
+    """Open the first of `intents` that opens; `done(False)` when none does. No resolveActivity: from Android 11 it can't
+    see other apps' screens, so a screen that is there would be skipped."""
     from android.runnable import run_on_ui_thread
 
     @run_on_ui_thread
@@ -70,12 +71,10 @@ def _open_first(intents: list, done: Callable[[bool], None]) -> None:
         activity = _activity()
         for intent in intents:
             try:
-                if intent.resolveActivity(activity.getPackageManager()) is None:
-                    continue
                 activity.startActivity(intent)
                 done(True)
                 return
-            except Exception as e:  # a screen its app didn't export: try the next
+            except Exception as e:  # not on this phone, or not exported: try the next
                 logger.warning(f"Couldn't open {intent.getComponent() or intent.getAction()}: {e}")
         done(False)
 
@@ -179,15 +178,23 @@ class PowerExemption:
         logger.info("Locked-session settings: the maker's power screen")
         if not _on_android():
             return
-        screens = _APP_LAUNCH_SCREENS if maker_screen(manufacturer()) == "App launch" else ()
-        intents = [_component_intent(package, cls) for package, cls in screens]
-        intents.append(_settings_intent("android.settings.APPLICATION_DETAILS_SETTINGS"))
-        _open_first(intents, self._opened)
+        try:
+            screens = _APP_LAUNCH_SCREENS if maker_screen(manufacturer()) == "App launch" else ()
+            intents = [_component_intent(package, cls) for package, cls in screens]
+            intents.append(_settings_intent("android.settings.APPLICATION_DETAILS_SETTINGS"))
+            _open_first(intents, self._opened)
+        except Exception:
+            logger.exception("Locked-session settings: couldn't build the maker's screens")
+            self._opened(False)
 
     def _open(self, actions: list[tuple[str, bool]]) -> None:
         if not _on_android():
             return
-        _open_first([_settings_intent(action, package) for action, package in actions], self._opened)
+        try:
+            _open_first([_settings_intent(action, package) for action, package in actions], self._opened)
+        except Exception:
+            logger.exception("Locked-session settings: couldn't build the battery screens")
+            self._opened(False)
 
     def _opened(self, ok: bool) -> None:
         if not ok:

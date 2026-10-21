@@ -22,14 +22,17 @@ public class SessionForegroundService extends Service {
     private static final String EXTRA_TEXT = "text";
 
     // A stop that reaches the system before onStartCommand's startForeground crashes this process ("startForegroundService()
-    // did not then call startForeground()"), so until then a stop is only noted and onStartCommand carries it out.
+    // did not then call startForeground()"), so while STARTING a stop is only noted and onStartCommand carries it out.
+    private static final int STOPPED = 0;
+    private static final int STARTING = 1;
+    private static final int FOREGROUND = 2;
     private static final Object LOCK = new Object();
-    private static boolean foreground;
+    private static int state = STOPPED;
     private static boolean stopNoted;
 
     public static void start(Context context, String title, String text) {
         synchronized (LOCK) {
-            foreground = false;
+            state = STARTING;
             stopNoted = false;
         }
         Intent intent = new Intent(context, SessionForegroundService.class);
@@ -44,11 +47,13 @@ public class SessionForegroundService extends Service {
 
     public static void stop(Context context) {
         synchronized (LOCK) {
-            if (!foreground) {
+            if (state == STARTING) {
                 stopNoted = true;
-                return;
             }
-            foreground = false;
+            if (state != FOREGROUND) {
+                return;  // stopping, or a second stop: nothing more to do
+            }
+            state = STOPPED;
         }
         context.stopService(new Intent(context, SessionForegroundService.class));
     }
@@ -60,11 +65,12 @@ public class SessionForegroundService extends Service {
         startForeground(NOTIFICATION_ID, buildNotification(title, text));
         boolean stopNow;
         synchronized (LOCK) {
-            foreground = !stopNoted;
             stopNow = stopNoted;
+            stopNoted = false;
+            state = stopNow ? STOPPED : FOREGROUND;
         }
         if (stopNow) {
-            stopSelf();
+            stopSelf(startId);  // a newer start already queued keeps the service
         }
         return START_NOT_STICKY;  // a session that died stays ended: a revived service would outlive it alone
     }

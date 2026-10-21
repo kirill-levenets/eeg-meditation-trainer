@@ -189,3 +189,43 @@ def test_the_rows_buttons_fit_their_row_at_the_largest_text_size(android):
             assert button.height <= device._power_buttons.height  # a taller one runs into the text above it
     finally:
         F.set_scale(1.0)
+
+
+def _fake_ui_thread(monkeypatch, activity):
+    monkeypatch.setitem(sys.modules, "android", types.SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "android.runnable", types.SimpleNamespace(run_on_ui_thread=lambda fn: fn))
+    monkeypatch.setattr(pe, "_activity", lambda: activity)
+
+
+def test_a_screen_is_tried_by_opening_it_and_a_missing_one_falls_through(monkeypatch):
+    # From Android 11 resolveActivity can't see other apps' screens, so only opening one tells.
+    opened = []
+
+    def start(intent):
+        if intent.name != "app info":
+            raise RuntimeError("ActivityNotFoundException")
+        opened.append(intent.name)
+
+    _fake_ui_thread(monkeypatch, types.SimpleNamespace(startActivity=start, getPackageManager=lambda: "pm"))
+
+    def intent(name):  # resolveActivity returns null, as it does for another app's screen from Android 11
+        return types.SimpleNamespace(name=name, getComponent=lambda: name, getAction=lambda: None,
+                                     resolveActivity=lambda _pm: None)
+
+    results = []
+    pe._open_first([intent("app launch"), intent("app info")], results.append)
+    assert opened == ["app info"] and results == [True]
+    pe._open_first([intent("app launch")], results.append)
+    assert results == [True, False]
+
+
+def test_a_jni_failure_behind_a_button_says_so_instead_of_crashing(android, monkeypatch):
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("JavaException: no such class")
+
+    monkeypatch.setattr(pe, "_settings_intent", broken)
+    monkeypatch.setattr(pe, "_component_intent", broken)
+    power = _power()
+    power.on_battery_settings()
+    power.on_maker_settings()
+    assert power._toast.call_count == 2
