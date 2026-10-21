@@ -31,7 +31,11 @@ public class SessionForegroundService extends Service {
     private static boolean stopNoted;
 
     public static void start(Context context, String title, String text) {
+        int previous;
+        boolean previousNoted;
         synchronized (LOCK) {
+            previous = state;
+            previousNoted = stopNoted;
             state = STARTING;
             stopNoted = false;
         }
@@ -46,7 +50,8 @@ public class SessionForegroundService extends Service {
             }
         } catch (RuntimeException e) {
             synchronized (LOCK) {
-                state = STOPPED;  // nothing is starting: a later stop must not wait for it
+                state = previous;  // nothing new is starting: as it was, so a later stop still finds it
+                stopNoted = previousNoted;
             }
             throw e;
         }
