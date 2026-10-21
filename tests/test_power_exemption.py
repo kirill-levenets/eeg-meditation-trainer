@@ -115,7 +115,10 @@ def test_battery_asks_androids_dialog_then_falls_back_to_the_list(android, monke
     power._toast.assert_called_once()  # none opened: said so, not silence
 
 
-@pytest.mark.parametrize(("maker", "screens"), [("huawei", list(pe._APP_LAUNCH_SCREENS)), ("xiaomi", [])])
+@pytest.mark.parametrize(("maker", "screens"), [
+    ("huawei", [*pe._APP_LAUNCH_SCREENS, "android.intent.action.POWER_USAGE_SUMMARY"]),  # EMUI 12 refuses the first two
+    ("xiaomi", []),
+])
 def test_the_makers_screen_is_app_launch_on_huawei_and_app_info_after_it_or_elsewhere(android, monkeypatch, maker,
                                                                                     screens):
     android.maker = maker

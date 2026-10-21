@@ -191,8 +191,9 @@ Some phones (Huawei, Xiaomi, Samsung and
 others) close background apps anyway. At the
 first start the app shows what to allow:
 Battery (battery optimisation) and, on Huawei,
-App launch: Manage manually, with all three
-switches on. The same buttons are in
+App launch (Settings > Battery > App launch):
+Manage manually, with all three switches on.
+The same buttons are in
 Settings > Device.
 
 ## App Crashes

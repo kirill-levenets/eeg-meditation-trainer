@@ -13,7 +13,8 @@ AGGRESSIVE_MAKERS = frozenset({
     "huawei", "honor", "xiaomi", "redmi", "poco", "oneplus", "samsung", "meizu", "asus", "oppo", "realme", "vivo",
     "wiko", "lenovo", "motorola", "blackview", "tecno",
 })
-# Huawei's Battery › App launch, newest EMUI first; a screen another app may not open falls back to App info.
+# Huawei's Battery › App launch, newest EMUI first. EMUI 12 guards them with a signature permission no other app can
+# hold, so the Battery screen (POWER_USAGE_SUMMARY), where App launch is listed, comes after them.
 _APP_LAUNCH_SCREENS = (
     ("com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"),
     ("com.huawei.systemmanager", "com.huawei.systemmanager.appcontrol.activity.StartupAppControlActivity"),
@@ -95,7 +96,8 @@ def advice(exempt: bool, maker: str) -> list[str]:
         lines.append("Battery: let the app ignore battery optimisation.")
     screen = maker_screen(maker)
     if screen == "App launch":
-        lines.append("App launch: set EEG Meditation to Manage manually, with all three switches on.")
+        lines.append("App launch: in Battery › App launch, set EEG Meditation to Manage manually, with all three "
+                     "switches on.")
     elif screen:
         lines.append("App info: allow EEG Meditation to run in the background, in its battery settings.")
     return lines
@@ -174,13 +176,15 @@ class PowerExemption:
                     ("android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS", False)])
 
     def on_maker_settings(self) -> None:
-        """Huawei's App launch where the phone lets another app open it, otherwise the app's App info."""
+        """Huawei's App launch where the phone lets another app open it, else its Battery screen; App info elsewhere."""
         logger.info("Locked-session settings: the maker's power screen")
         if not _on_android():
             return
         try:
-            screens = _APP_LAUNCH_SCREENS if maker_screen(manufacturer()) == "App launch" else ()
-            intents = [_component_intent(package, cls) for package, cls in screens]
+            intents = []
+            if maker_screen(manufacturer()) == "App launch":
+                intents = [_component_intent(package, cls) for package, cls in _APP_LAUNCH_SCREENS]
+                intents.append(_settings_intent("android.intent.action.POWER_USAGE_SUMMARY", package=False))
             intents.append(_settings_intent("android.settings.APPLICATION_DETAILS_SETTINGS"))
             _open_first(intents, self._opened)
         except Exception:
