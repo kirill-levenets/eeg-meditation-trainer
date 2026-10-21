@@ -36,6 +36,7 @@ def _make_minimal_app():
     app._live_screen = MagicMock()
     app._live_screen.summary_session_id = None  # no session-end card open
     app._recorder = make_recorder(app)
+    app._power = MagicMock()
     return app
 
 

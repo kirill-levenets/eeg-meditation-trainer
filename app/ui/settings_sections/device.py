@@ -1,5 +1,5 @@
 """Settings → Device: the mock or real headset, the paired MindWaves to pick from (each can be renamed), the
-connection status and the diagnostics copy."""
+connection status, what may close a locked session (Android) and the diagnostics copy."""
 
 from kivy.clock import Clock
 from kivy.metrics import dp
@@ -9,7 +9,16 @@ from app.config import APP
 from app.ui.device_labels import MAX_DEVICE_ALIAS, device_row_text
 from app.ui.hooks import Hook
 from app.ui.settings_sections.common import checkbox_row
-from app.ui.theme import C, F, Icons, RenameRow, S, StyledButton, ThemedLabel
+from app.ui.theme import (
+    C,
+    F,
+    Icons,
+    RenameRow,
+    S,
+    StyledButton,
+    ThemedLabel,
+    fit_height_to_text,
+)
 
 
 class DeviceSection:
@@ -22,6 +31,8 @@ class DeviceSection:
     device_state = Hook(default=(None, None))  # (selected, connected) addresses
     on_device_rename = Hook()
     on_copy_diagnostics = Hook()
+    on_battery_settings = Hook()
+    on_maker_settings = Hook()
 
     def __init__(self, section, *, scroll) -> None:
         self._scroll = scroll
@@ -119,6 +130,44 @@ class DeviceSection:
         )
         self._diagnostics_btn.bind(on_release=self._on_diagnostics_pressed)
         section.add_widget(self._diagnostics_btn)
+        self._build_power_box()
+
+    def _build_power_box(self) -> None:
+        """What may close a locked session; attached by show_power_state, so off Android it never shows."""
+        self._power_box = BoxLayout(orientation="vertical", size_hint_y=None, spacing=S.GAP_SM)
+        self._power_box.bind(minimum_height=self._power_box.setter("height"))
+        title = ThemedLabel(text="Locked-screen sessions", font_size=F.BODY, bold=True, color=C.TEXT,
+                            size_hint_y=None, halign="left")
+        fit_height_to_text(title)
+        self._power_label = ThemedLabel(text="", font_size=F.SMALL, color=C.TEXT_MUTED, size_hint_y=None,
+                                        halign="left")
+        fit_height_to_text(self._power_label)
+        self._power_buttons = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP_SM)
+        self._battery_btn = StyledButton(text="Battery", font_size=F.BODY, bg_color=C.PRIMARY_DIM, size_hint_y=None,
+                                         height=dp(36))
+        self._battery_btn.bind(on_release=lambda *_: self.on_battery_settings())
+        self._maker_btn = StyledButton(text="", font_size=F.BODY, bg_color=C.PRIMARY_DIM, size_hint_y=None,
+                                       height=dp(36))
+        self._maker_btn.bind(on_release=lambda *_: self.on_maker_settings())
+        for widget in (title, self._power_label, self._power_buttons):
+            self._power_box.add_widget(widget)
+
+    def show_power_state(self, status: str, *, battery: bool, maker: str | None) -> None:
+        """Show the locked-session row: `status` says where things stand, `battery` offers leaving battery
+        optimisation, `maker` names the maker's own power screen (None: nothing to open)."""
+        self._power_label.text = status
+        self._power_buttons.clear_widgets()
+        if battery:
+            self._power_buttons.add_widget(self._battery_btn)
+        if maker:
+            self._maker_btn.text = maker
+            self._power_buttons.add_widget(self._maker_btn)
+        if self._power_buttons.children and self._power_buttons.parent is None:
+            self._power_box.add_widget(self._power_buttons)
+        elif not self._power_buttons.children and self._power_buttons.parent is not None:
+            self._power_box.remove_widget(self._power_buttons)
+        if self._power_box.parent is None:
+            self._device_section.add_widget(self._power_box, index=1)  # above Copy Diagnostics
 
     def _on_device_mode_change(self, checkbox, active) -> None:
         self.on_device_mode_toggle(active)

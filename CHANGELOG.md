@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Locked-screen sessions: what the phone needs to allow them** (#104): some phones close apps in the background even with the session's notification showing; on Huawei, its power manager did so twice during locked morning sessions. At the first start the app now says what your phone needs and opens the screens: **Battery** (Android's battery optimisation) and, on Huawei and Honor, **App launch** (Manage manually), or **App info** on other makers known for this. Nothing changes unless you allow it there; the same buttons are under Settings › Device › Locked-screen sessions.
+
 - **Choose how the line you train on is coloured** (#94): Settings → Display → **Scored line colours** draws the line of the metric being trained, on the Session screen and in a session's detail in History, in **Mono** (its own colour) or a gradient by its value: **Blue › Red** (as before, the default), **Viridis**, **Plasma**, **Turbo** or **Red › Green**. Each profile keeps its own, and it applies at once to every graph. The line coloured is now the one the session trains (the metric that drives the feedback: Shamatha, a custom formula, or a program segment's), not always Shamatha, and History colours the metric a session was scored on. The gradient now spans the graph's whole 0 to 200 axis (it ran 0 to 100), and every part of it reads at least 3:1 on the current theme: Blue › Red's yellow nearly vanished on the light themes.
 
 ### Removed

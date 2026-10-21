@@ -86,6 +86,8 @@ Tap the swap icon on the right of the stats row to switch between **live** insta
 
 You can start a session, lock the phone, and the session will continue for hours. A persistent notification indicates the session is active. EEG processing, metrics computation, and audio volume adjustments all continue uninterrupted on a background thread — audio keeps playing even while the screen is off. The connection-attempt countdown in the overlay also runs to completion cleanly (no freezing on slow Bluetooth connects). If the connection drops or the session ends unexpectedly, a short warble sound plays so you notice.
 
+Some phones close apps in the background to save battery, notification or not: Huawei, Xiaomi, Samsung, OnePlus, Oppo, Vivo and others. A locked session then ends early, and what was saved up to the last minute is kept. At the first start the app says what your phone needs and opens the screens: **Battery** asks Android to leave the app out of battery optimisation; on Huawei and Honor, **App launch** opens the maker's own setting, where you set EEG Meditation to **Manage manually** with all three switches on (on other makers, **App info**, where its battery or background setting is). Nothing changes unless you allow it there. The same buttons are under **Settings › Device › Locked-screen sessions**.
+
 ### If the app crashes
 
 If an unexpected error occurs, a dialog appears with a pre-filled crash report — already copied to your clipboard. Paste it into a new issue at `github.com/kirill-levenets/eeg-meditation-trainer/issues` and tap **Dismiss & Exit**.
@@ -238,6 +240,7 @@ When Program mode is off, the Simple timer behaves exactly as before.
 - **Scan Paired Devices** — finds paired Bluetooth headsets. Each row shows the headset's name and its address: every MindWave has the same Bluetooth name
 - Tap a device to select it. The row of the headset in use is filled; the connected one shows a Bluetooth sign (with Mock Data on, none is marked). You can't switch headsets while a session runs or connects
 - **Name a headset** — tap the pencil on its row, type a name and tap **Save** (or Enter). The name is the same for every profile on the phone and shows in the device status, on the Session screen and in the names of new sessions. Leave it blank to go back to the Bluetooth name
+- **Locked-screen sessions** (Android) — whether battery optimisation applies to the app, with the buttons that open the phone's settings so sessions can run with the screen locked (see Locked-screen sessions)
 
 ### Threshold
 

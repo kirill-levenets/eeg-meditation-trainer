@@ -82,6 +82,8 @@ ignore = [
 "app/storage/android_saf.py" = ["PLC0415", "BLE001"]
 # pyjnius helpers: lazy pyjnius import
 "app/android_jni.py" = ["PLC0415"]
+# Battery optimisation and the maker's power screens: lazy pyjnius import, broad except for platform safety (logged)
+"app/ui/power_exemption.py" = ["PLC0415", "BLE001"]
 # AST validator/evaluator: deeply branched by design
 "app/metrics/custom_formula.py" = ["BLE001", "PLR0911", "PLR0912"]
 # Android storage resolution

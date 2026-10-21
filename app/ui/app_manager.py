@@ -71,6 +71,7 @@ from app.ui.line_colours import LINE_COLOURS
 from app.ui.line_colours import OPTIONS as LINE_OPTIONS
 from app.ui.live_mirror import LiveMirror
 from app.ui.live_session import LiveSessionScreen
+from app.ui.power_exemption import PowerExemption
 from app.ui.program_run import ProgramRun
 from app.ui.program_settings import ProgramSettings
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
@@ -487,6 +488,7 @@ class EEGMeditationApp(App):
             serial_override=lambda: self.serial_device_override,
             report=lambda label, detail, force=False: report_soft_error(label, detail, app=self, force=force))
         self._headset.load_aliases()
+        self._power = PowerExemption(self._db, self._settings_screen.device, toast=self._toast, main=self._on_main)
 
         self._sm.add_widget(self._live_screen)
         self._sm.add_widget(self._history_screen)
@@ -638,6 +640,8 @@ class EEGMeditationApp(App):
             device_state=self._headset.state,
             on_device_rename=self._headset.on_rename,
             on_copy_diagnostics=self._headset.on_copy_diagnostics,
+            on_battery_settings=self._power.on_battery_settings,
+            on_maker_settings=self._power.on_maker_settings,
         )
         wire(
             self._settings_screen.display,
@@ -876,6 +880,7 @@ class EEGMeditationApp(App):
         self._sm.current = "live_session"
         self._bottom_nav.active_tab = "session"
         self._headset.auto_scan()
+        self._power.offer_once()
         logger.info(f"First run complete: {what}")
 
     def _on_nav_tab(self, tab_key: str) -> None:
@@ -2641,6 +2646,9 @@ class EEGMeditationApp(App):
         except Exception:
             logger.exception("flush_pre_app_errors failed")
         render_stats.start()
+        self._power.refresh()
+        if not self._gate_active():  # a first run offers it once the profile is picked (_finish_first_run)
+            Clock.schedule_once(lambda _dt: self._power.offer_once(), 1.0)
 
     def on_pause(self) -> bool:
         """Android lifecycle: save settings and allow Kivy to pause cleanly.
@@ -2693,6 +2701,7 @@ class EEGMeditationApp(App):
                 and getattr(self, "_gate_popup", None) is None):
             self._open_user_gate(0)
             return
+        self._power.refresh()  # back from the phone's settings, perhaps changed there
         try:
             Clock.schedule_once(lambda dt: self._refresh_ui_after_resume(), 0)
         except Exception:
