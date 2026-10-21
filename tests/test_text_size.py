@@ -399,6 +399,10 @@ def _settings_states(screen):
                                screen._accordion._sections[1].open())
     yield " profiles", lambda: (screen.populate_users([{"id": 1, "name": "Mock"}, {"id": 2, "name": "Second mock"}], 1),
                                 screen._accordion._sections[0].open())
+    yield " locked-screen row", lambda: (  # attached only on Android: shown here by hand
+        screen.device.show_power_state("Android's battery optimisation is on: with the screen locked, the phone may "
+                                       "close the app and end a session.", battery=True, maker="App launch"),
+        screen.device._device_section.open())
 
 
 PROGRAM = [{"minutes": 10, "formula": "shamatha_score", "target": 60, "end_sound": "warble"},

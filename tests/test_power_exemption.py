@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import app.android_jni as android_jni
 import app.ui.power_exemption as pe
 from app.ui.power_exemption import PowerExemption, advice, maker_screen
 from app.ui.settings_screen import SettingsScreen
@@ -28,7 +29,7 @@ def android(monkeypatch):
     """An Android phone whose battery state and maker the test sets."""
     phone = types.SimpleNamespace(exempt=False, maker="huawei")
     monkeypatch.setattr(sys, "getandroidapilevel", lambda: 29, raising=False)
-    monkeypatch.setattr(pe, "is_exempt", lambda: phone.exempt)
+    monkeypatch.setattr(pe, "ignores_battery_optimisation", lambda: phone.exempt)
     monkeypatch.setattr(pe, "manufacturer", lambda: phone.maker)
     return phone
 
@@ -106,8 +107,8 @@ def test_the_alerts_buttons_open_the_screens(android, popups, monkeypatch):
 
 def test_battery_asks_androids_dialog_then_falls_back_to_the_list(android, monkeypatch):
     tried = []
-    monkeypatch.setattr(pe, "_settings_intent", lambda action, package=True: (action, package))
-    monkeypatch.setattr(pe, "_open_first", lambda intents, done: (tried.extend(intents), done(False)))
+    monkeypatch.setattr(pe, "settings_intent", lambda action, package=True: (action, package))
+    monkeypatch.setattr(pe, "open_first", lambda intents, done: (tried.extend(intents), done(False)))
     power = _power()
     power.on_battery_settings()
     assert tried == [("android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS", True),
@@ -122,10 +123,10 @@ def test_battery_asks_androids_dialog_then_falls_back_to_the_list(android, monke
 def test_the_makers_screen_is_app_launch_on_huawei_and_app_info_after_it_or_elsewhere(android, monkeypatch, maker,
                                                                                     screens):
     android.maker = maker
-    monkeypatch.setattr(pe, "_component_intent", lambda package, cls: (package, cls))
-    monkeypatch.setattr(pe, "_settings_intent", lambda action, package=True: action)
+    monkeypatch.setattr(pe, "component_intent", lambda package, cls: (package, cls))
+    monkeypatch.setattr(pe, "settings_intent", lambda action, package=True: action)
     tried = []
-    monkeypatch.setattr(pe, "_open_first", lambda intents, done: tried.extend(intents))
+    monkeypatch.setattr(pe, "open_first", lambda intents, done: tried.extend(intents))
     _power().on_maker_settings()
     assert tried == [*screens, "android.settings.APPLICATION_DETAILS_SETTINGS"]
 
@@ -197,7 +198,7 @@ def test_the_rows_buttons_fit_their_row_at_the_largest_text_size(android):
 def _fake_ui_thread(monkeypatch, activity):
     monkeypatch.setitem(sys.modules, "android", types.SimpleNamespace())
     monkeypatch.setitem(sys.modules, "android.runnable", types.SimpleNamespace(run_on_ui_thread=lambda fn: fn))
-    monkeypatch.setattr(pe, "_activity", lambda: activity)
+    monkeypatch.setattr(android_jni, "activity", lambda: activity)
 
 
 def test_a_screen_is_tried_by_opening_it_and_a_missing_one_falls_through(monkeypatch):
@@ -216,9 +217,9 @@ def test_a_screen_is_tried_by_opening_it_and_a_missing_one_falls_through(monkeyp
                                      resolveActivity=lambda _pm: None)
 
     results = []
-    pe._open_first([intent("app launch"), intent("app info")], results.append)
+    android_jni.open_first([intent("app launch"), intent("app info")], results.append)
     assert opened == ["app info"] and results == [True]
-    pe._open_first([intent("app launch")], results.append)
+    android_jni.open_first([intent("app launch")], results.append)
     assert results == [True, False]
 
 
@@ -226,8 +227,8 @@ def test_a_jni_failure_behind_a_button_says_so_instead_of_crashing(android, monk
     def broken(*_args, **_kwargs):
         raise RuntimeError("JavaException: no such class")
 
-    monkeypatch.setattr(pe, "_settings_intent", broken)
-    monkeypatch.setattr(pe, "_component_intent", broken)
+    monkeypatch.setattr(pe, "settings_intent", broken)
+    monkeypatch.setattr(pe, "component_intent", broken)
     power = _power()
     power.on_battery_settings()
     power.on_maker_settings()
@@ -243,3 +244,17 @@ def test_an_alert_that_fails_to_open_is_still_to_come(android, monkeypatch):
     with pytest.raises(RuntimeError):
         _power(db).offer_once()
     assert pe.SHOWN_KEY not in db.settings
+
+
+
+def test_every_return_to_the_app_refreshes_the_row(monkeypatch):
+    import app.ui.app_manager as am
+    app = am.EEGMeditationApp.__new__(am.EEGMeditationApp)
+    app._power = MagicMock()
+    app._bottom_nav = MagicMock()
+    app._current_user_id = 1
+    scheduled = []
+    monkeypatch.setattr(am.Clock, "schedule_once", lambda fn, _timeout=0: scheduled.append(fn))
+    app.on_resume()
+    app._power.refresh.assert_called_once()  # the user may have changed it in the phone's settings meanwhile
+    assert scheduled  # and after the session's own UI refresh was queued

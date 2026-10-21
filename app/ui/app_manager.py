@@ -2701,11 +2701,11 @@ class EEGMeditationApp(App):
                 and getattr(self, "_gate_popup", None) is None):
             self._open_user_gate(0)
             return
-        self._power.refresh()  # back from the phone's settings, perhaps changed there
         try:
             Clock.schedule_once(lambda dt: self._refresh_ui_after_resume(), 0)
         except Exception:
             logger.exception("on_resume UI refresh failed")
+        self._power.refresh()  # after the session's UI: back from the phone's settings, perhaps changed there
 
     def _refresh_ui_after_resume(self) -> None:
         """Sync UI to current session state after Android resume.

@@ -1,20 +1,23 @@
-"""Whether the phone lets a locked session run: Android's battery optimisation, which the app can check and ask to be
-left out of, and the maker's own power manager, which has no API: the app can only say so and open its screen."""
+"""What may close a locked session: Android's battery optimisation and the maker's power manager, which has no API."""
 import sys
 from collections.abc import Callable
 
-from app.android_jni import java_string
+from app.android_jni import (
+    component_intent,
+    ignores_battery_optimisation,
+    manufacturer,
+    open_first,
+    settings_intent,
+)
 from app.logger import logger
 from app.ui.theme import C, StyledButton, cancel_button, make_message_popup
 
-# Makers whose power managers close background apps, foreground services included (dontkillmyapp.com scores them 3 or
-# worse of 5; Pixel, Nokia and HTC score 0).
+# dontkillmyapp.com scores these makers 3 of 5 or worse: their power managers close foreground services too.
 AGGRESSIVE_MAKERS = frozenset({
     "huawei", "honor", "xiaomi", "redmi", "poco", "oneplus", "samsung", "meizu", "asus", "oppo", "realme", "vivo",
     "wiko", "lenovo", "motorola", "blackview", "tecno",
 })
-# Huawei's Battery › App launch, newest EMUI first. EMUI 12 guards them with a signature permission no other app can
-# hold, so the Battery screen (POWER_USAGE_SUMMARY), where App launch is listed, comes after them.
+# Huawei's App launch, newest EMUI first; EMUI 12 refuses both to other apps, so its Battery screen follows them.
 _APP_LAUNCH_SCREENS = (
     ("com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"),
     ("com.huawei.systemmanager", "com.huawei.systemmanager.appcontrol.activity.StartupAppControlActivity"),
@@ -24,62 +27,6 @@ SHOWN_KEY = "power_alert_shown"  # app-wide: it is the phone's setting, whicheve
 
 def _on_android() -> bool:
     return hasattr(sys, "getandroidapilevel")
-
-
-def _activity():
-    from jnius import autoclass
-    return autoclass("org.kivy.android.PythonActivity").mActivity
-
-
-def manufacturer() -> str:
-    from jnius import autoclass
-    return str(autoclass("android.os.Build").MANUFACTURER or "").lower()
-
-
-def is_exempt() -> bool:
-    """True when battery optimisation leaves the app alone (always below Android 6, which has none)."""
-    if sys.getandroidapilevel() < 23:
-        return True
-    from jnius import autoclass, cast
-    activity = _activity()
-    service = activity.getSystemService(autoclass("android.content.Context").POWER_SERVICE)
-    return bool(cast("android.os.PowerManager", service).isIgnoringBatteryOptimizations(activity.getPackageName()))
-
-
-def _settings_intent(action: str, package: bool = True):
-    from jnius import autoclass
-    Intent = autoclass("android.content.Intent")
-    if not package:
-        return Intent(java_string(action))
-    uri = autoclass("android.net.Uri").parse(java_string(f"package:{_activity().getPackageName()}"))
-    return Intent(java_string(action), uri)
-
-
-def _component_intent(package: str, cls: str):
-    from jnius import autoclass
-    intent = autoclass("android.content.Intent")()
-    intent.setComponent(autoclass("android.content.ComponentName")(java_string(package), java_string(cls)))
-    return intent
-
-
-def _open_first(intents: list, done: Callable[[bool], None]) -> None:
-    """Open the first of `intents` that opens; `done(False)` when none does. No resolveActivity: from Android 11 it can't
-    see other apps' screens, so a screen that is there would be skipped."""
-    from android.runnable import run_on_ui_thread
-
-    @run_on_ui_thread
-    def _run():
-        activity = _activity()
-        for intent in intents:
-            try:
-                activity.startActivity(intent)
-                done(True)
-                return
-            except Exception as e:  # not on this phone, or not exported: try the next
-                logger.warning(f"Couldn't open {intent.getComponent() or intent.getAction()}: {e}")
-        done(False)
-
-    _run()
 
 
 def maker_screen(maker: str) -> str | None:
@@ -104,8 +51,7 @@ def advice(exempt: bool, maker: str) -> list[str]:
 
 
 class PowerExemption:
-    """Settings › Device's locked-session row and the alert at the first start: it explains and opens the screens, the
-    user decides, and nothing changes without them."""
+    """Settings › Device's locked-session row and the first-start alert: they explain; the user decides."""
 
     def __init__(self, db, device_section, *, toast: Callable[[str], None], main: Callable[[Callable], None]) -> None:
         self._db = db
@@ -118,19 +64,19 @@ class PowerExemption:
         if not _on_android():
             return None
         try:
-            return is_exempt(), manufacturer()
+            return ignores_battery_optimisation(), manufacturer()
         except Exception:
             logger.exception("Couldn't read the battery optimisation state")
             return None
 
     def refresh(self) -> None:
-        """Settings › Device's row, after the start and after every return to the app (the user may have changed it)."""
+        """Settings › Device's row, at every start and resume: the user may have changed it in between."""
         state = self._state()
         if state is None:
             return
         exempt, maker = state
         lines = advice(exempt, maker)
-        # Android's own answer: EMUI said exempt while dumpsys deviceidle listed no user app, so the wording names it.
+        # "Android's": EMUI answers exempt while dumpsys deviceidle lists no user app.
         status = ("Android's battery optimisation is off for this app." if exempt else
                   "Android's battery optimisation is on: with the screen locked, the phone may close the app and end a "
                   "session.")
@@ -139,8 +85,7 @@ class PowerExemption:
         self._section.show_power_state(status, battery=not exempt, maker=maker_screen(maker))
 
     def offer_once(self) -> None:
-        """The first start with something left to allow: explain and let the user choose. Shown once; the same buttons
-        stay in Settings › Device."""
+        """Once, at the first start with something left to allow; the same buttons stay in Settings › Device."""
         if self._db.get_setting(SHOWN_KEY):
             return
         state = self._state()
@@ -185,10 +130,10 @@ class PowerExemption:
         try:
             intents = []
             if maker_screen(manufacturer()) == "App launch":
-                intents = [_component_intent(package, cls) for package, cls in _APP_LAUNCH_SCREENS]
-                intents.append(_settings_intent("android.intent.action.POWER_USAGE_SUMMARY", package=False))
-            intents.append(_settings_intent("android.settings.APPLICATION_DETAILS_SETTINGS"))
-            _open_first(intents, self._opened)
+                intents = [component_intent(package, cls) for package, cls in _APP_LAUNCH_SCREENS]
+                intents.append(settings_intent("android.intent.action.POWER_USAGE_SUMMARY", package=False))
+            intents.append(settings_intent("android.settings.APPLICATION_DETAILS_SETTINGS"))
+            open_first(intents, self._opened)
         except Exception:
             logger.exception("Locked-session settings: couldn't build the maker's screens")
             self._opened(False)
@@ -197,7 +142,7 @@ class PowerExemption:
         if not _on_android():
             return
         try:
-            _open_first([_settings_intent(action, package) for action, package in actions], self._opened)
+            open_first([settings_intent(action, package) for action, package in actions], self._opened)
         except Exception:
             logger.exception("Locked-session settings: couldn't build the battery screens")
             self._opened(False)

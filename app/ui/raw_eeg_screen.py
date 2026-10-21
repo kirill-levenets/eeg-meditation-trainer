@@ -37,9 +37,7 @@ _X_GRID_STEPS_S = (10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200)
 _GLYPH_DRIFT_DP = 20  # a glyph's press survives this much drift; more is a pan (a pan starts at 10)
 _MAX_Y_GRID_LINES = 20  # a fixed grid step far below the scale gives way to a nice one (each line has a label)
 _MIN_X_LABEL_GAP_DP = 70
-# New data redraws a graph no sooner than its last redraw's cost divided by this share of the time: a long fitted
-# session (thousands of points per redraw) then redraws less often instead of taking the main thread. A redraw cheaper
-# than _SLOW_REDRAW_S is never deferred.
+# New data waits its last redraw's cost / _REDRAW_BUDGET once a redraw takes _SLOW_REDRAW_S (graphs.md, item 6).
 _REDRAW_BUDGET = 0.1
 _SLOW_REDRAW_S = 0.025
 
@@ -63,9 +61,7 @@ def _x_grid_step(graph_w: float, visible_seconds: float) -> float:
 _MESH_MAX_QUADS = 65535 // 6
 
 
-# A zoomed-out series draws each run of samples' min and max (MinMax). It looks like the full series once it has about
-# 3 points per stroke width (Van Der Donckt et al., IEEE VIS 2023: the image stops improving at canvas width * 3 / line
-# width), and a run draws 2, so a run spans up to 2/3 of the stroke: a thick line on a phone needs few points.
+# A run's min and max are 2 of MinMax's 3 points per stroke width at its elbow, so a run spans 2/3 of the stroke.
 _RUN_STROKES = 2 / 3
 _MIN_RUN = 4  # samples: a shorter run saves too little to be worth folding
 
@@ -78,8 +74,7 @@ def _extremes(values: list[float], start: int, stop: int) -> tuple[int, int]:
 
 
 class _RunExtremes:
-    """One series' min and max per run of `size` samples at fixed absolute positions, kept as data arrives: a redraw
-    reads them instead of scanning every sample, and a run never moves as the series grows (Audacity's summaries)."""
+    """One series' min and max per run of `size` samples at fixed positions, kept as data arrives (as Audacity's)."""
 
     __slots__ = ("size", "base", "idx")
 
