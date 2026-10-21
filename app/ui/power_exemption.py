@@ -130,8 +130,10 @@ class PowerExemption:
             return
         exempt, maker = state
         lines = advice(exempt, maker)
-        status = ("Battery optimisation is off for this app." if exempt else
-                  "Battery optimisation is on: with the screen locked, the phone may close the app and end a session.")
+        # Android's own answer: EMUI said exempt while dumpsys deviceidle listed no user app, so the wording names it.
+        status = ("Android's battery optimisation is off for this app." if exempt else
+                  "Android's battery optimisation is on: with the screen locked, the phone may close the app and end a "
+                  "session.")
         if lines and exempt:
             status += " The phone's own power manager may still close it."
         self._section.show_power_state(status, battery=not exempt, maker=maker_screen(maker))
@@ -148,8 +150,6 @@ class PowerExemption:
         lines = advice(exempt, maker)
         if not lines:
             return
-        self._db.set_setting(SHOWN_KEY, "1")
-        logger.info(f"Locked-session alert shown (exempt={exempt}, maker={maker})")
         message = ("To save battery, your phone may close EEG Meditation while the screen is locked, and a session "
                    "then ends early. To let sessions run:\n\n" + "\n".join(f"• {line}" for line in lines)
                    + "\n\nThe same buttons are in Settings › Device.")
@@ -168,6 +168,8 @@ class PowerExemption:
         popup = make_message_popup("Locked-screen sessions", message, buttons)
         close.bind(on_release=popup.dismiss)
         popup.open()
+        self._db.set_setting(SHOWN_KEY, "1")  # after it opened: an alert that failed to build comes again next start
+        logger.info(f"Locked-session alert shown (exempt={exempt}, maker={maker})")
 
     def on_battery_settings(self) -> None:
         """Android's own dialog to leave the app out of battery optimisation, or its list where there is no dialog."""

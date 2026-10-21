@@ -139,7 +139,7 @@ def test_settings_device_shows_the_row_only_on_android_with_the_buttons_it_needs
     content = device._diagnostics_btn.parent
     assert device._power_box.parent is content
     assert content.children.index(device._power_box) == content.children.index(device._diagnostics_btn) + 1  # above it
-    assert "Battery optimisation is on" in device._power_label.text
+    assert "battery optimisation is on" in device._power_label.text
     assert [b.text for b in reversed(device._power_buttons.children)] == ["Battery", "App launch"]
     android.exempt, android.maker = True, "google"
     power.refresh()
@@ -232,3 +232,14 @@ def test_a_jni_failure_behind_a_button_says_so_instead_of_crashing(android, monk
     power.on_battery_settings()
     power.on_maker_settings()
     assert power._toast.call_count == 2
+
+
+def test_an_alert_that_fails_to_open_is_still_to_come(android, monkeypatch):
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("a widget error")
+
+    monkeypatch.setattr(pe, "make_message_popup", broken)
+    db = _Db()
+    with pytest.raises(RuntimeError):
+        _power(db).offer_once()
+    assert pe.SHOWN_KEY not in db.settings

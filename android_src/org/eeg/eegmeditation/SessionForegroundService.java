@@ -38,10 +38,17 @@ public class SessionForegroundService extends Service {
         Intent intent = new Intent(context, SessionForegroundService.class);
         intent.putExtra(EXTRA_TITLE, title);
         intent.putExtra(EXTRA_TEXT, text);
-        if (Build.VERSION.SDK_INT >= 26) {
-            context.startForegroundService(intent);
-        } else {
-            context.startService(intent);
+        try {
+            if (Build.VERSION.SDK_INT >= 26) {
+                context.startForegroundService(intent);
+            } else {
+                context.startService(intent);
+            }
+        } catch (RuntimeException e) {
+            synchronized (LOCK) {
+                state = STOPPED;  // nothing is starting: a later stop must not wait for it
+            }
+            throw e;
         }
     }
 
