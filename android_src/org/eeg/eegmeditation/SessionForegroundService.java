@@ -12,8 +12,8 @@ import android.os.IBinder;
 
 /**
  * The running session's foreground service, declared without android:process so it runs in the app's own process:
- * a foreground service raises the process that hosts it, and this is the process that runs the session. It never stops
- * itself: it can't outlive the process, and the session's own ending stops it, after the save.
+ * a foreground service raises the process that hosts it, and this is the process that runs the session. It doesn't stop
+ * on its own: it can't outlive the process, and the session's ending stops it, after the save.
  */
 public class SessionForegroundService extends Service {
     private static final String CHANNEL_ID = "session";
@@ -21,7 +21,17 @@ public class SessionForegroundService extends Service {
     private static final String EXTRA_TITLE = "title";
     private static final String EXTRA_TEXT = "text";
 
+    // A stop that reaches the system before onStartCommand's startForeground crashes this process ("startForegroundService()
+    // did not then call startForeground()"), so until then a stop is only noted and onStartCommand carries it out.
+    private static final Object LOCK = new Object();
+    private static boolean foreground;
+    private static boolean stopNoted;
+
     public static void start(Context context, String title, String text) {
+        synchronized (LOCK) {
+            foreground = false;
+            stopNoted = false;
+        }
         Intent intent = new Intent(context, SessionForegroundService.class);
         intent.putExtra(EXTRA_TITLE, title);
         intent.putExtra(EXTRA_TEXT, text);
@@ -33,6 +43,13 @@ public class SessionForegroundService extends Service {
     }
 
     public static void stop(Context context) {
+        synchronized (LOCK) {
+            if (!foreground) {
+                stopNoted = true;
+                return;
+            }
+            foreground = false;
+        }
         context.stopService(new Intent(context, SessionForegroundService.class));
     }
 
@@ -41,6 +58,14 @@ public class SessionForegroundService extends Service {
         String title = intent != null ? intent.getStringExtra(EXTRA_TITLE) : null;
         String text = intent != null ? intent.getStringExtra(EXTRA_TEXT) : null;
         startForeground(NOTIFICATION_ID, buildNotification(title, text));
+        boolean stopNow;
+        synchronized (LOCK) {
+            foreground = !stopNoted;
+            stopNow = stopNoted;
+        }
+        if (stopNow) {
+            stopSelf();
+        }
         return START_NOT_STICKY;  // a session that died stays ended: a revived service would outlive it alone
     }
 

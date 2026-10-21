@@ -1,11 +1,12 @@
-"""The session's foreground service runs in the app's own process (#104): a foreground service raises only the process
-hosting it, and a p4a Python service would get a process of its own."""
+"""The session's foreground service runs in the app's own process: a foreground service raises only the process hosting
+it, and a p4a Python service would get a process of its own."""
 import configparser
 import sys
 import types
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from app.session.manager import SessionState
 from app.ui.app_manager import EEGMeditationApp
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,8 +41,24 @@ def test_on_android_a_session_starts_and_stops_the_service_through_its_static_me
     service.stop.assert_called_once_with(activity)
 
 
-def test_the_service_never_stops_itself():
+def test_the_service_doesnt_stop_when_the_app_is_swiped_away():
     # Swiped away mid-session, the app saves in on_stop; the service must keep the process alive until then, and the
     # session's ending stops it. In the app's process it can't outlive the app.
     java = (ROOT / "android_src" / "org" / "eeg" / "eegmeditation" / "SessionForegroundService.java").read_text()
-    assert "stopSelf" not in java and "onTaskRemoved" not in java
+    assert "onTaskRemoved" not in java
+
+
+def test_closing_the_app_stops_the_service_with_or_without_a_session(monkeypatch):
+    # A start still waiting for the headset is no running session, so _stop_and_save never runs for it.
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._restoring = False
+    app._flush_on_leave = MagicMock()
+    app._session_manager = MagicMock(state=SessionState.IDLE)
+    app._stop_and_save = MagicMock()
+    app._audio = MagicMock()
+    app._db = MagicMock()
+    stopped = []
+    monkeypatch.setattr(app, "_stop_session_keep_alive_service", lambda: stopped.append(True))
+    app.on_stop()
+    app._stop_and_save.assert_not_called()
+    assert stopped == [True]

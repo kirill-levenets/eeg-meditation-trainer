@@ -2758,6 +2758,7 @@ class EEGMeditationApp(App):
                 # entry points refuse to run while a session is active, so this is
                 # defense-in-depth, not a data-loss path.)
                 self._stop_and_save()
+        self._stop_session_keep_alive_service()  # a start still connecting has no session to stop it
         self._audio.cleanup()
         self._db.mark_shutting_down()
         self._db.close()

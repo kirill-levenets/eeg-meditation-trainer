@@ -1,5 +1,5 @@
 """A zoomed-out graph draws each run of samples' min and max, its runs spanning part of the stroke at fixed sample
-positions, so a redraw costs the graph's width and line thickness, not its zoom or the session's length (#70, #104)."""
+positions, so a redraw costs the graph's width and line thickness, not its zoom or the session's length (#70)."""
 
 import math
 import random
