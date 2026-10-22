@@ -8,6 +8,7 @@ import time
 import wave
 from typing import Optional
 
+from app.android_jni import activity, on_android
 from app.config import APP
 from app.logger import logger
 from app.storage.fileops import discard_file
@@ -75,29 +76,6 @@ class _AndroidMediaNoisePlayer:
         self._mp.setVolume(0.0, 0.0)
         self._playing: bool = False
 
-        # Request audio focus so Android treats this as intentional media
-        # playback. Failure is non-fatal; MediaPlayer still plays.
-        self._audio_mgr = None
-        self._focus_request = None
-        try:
-            PythonActivity = autoclass("org.kivy.android.PythonActivity")
-            Context = autoclass("android.content.Context")
-            AudioManager = autoclass("android.media.AudioManager")
-            AudioFocusRequestBuilder = autoclass(
-                "android.media.AudioFocusRequest$Builder"
-            )
-            mgr = PythonActivity.mActivity.getSystemService(Context.AUDIO_SERVICE)
-            self._audio_mgr = mgr
-            focus_request = (
-                AudioFocusRequestBuilder(AudioManager.AUDIOFOCUS_GAIN)
-                .setAudioAttributes(attrs)
-                .build()
-            )
-            self._focus_request = focus_request
-            mgr.requestAudioFocus(focus_request)
-        except Exception as e:
-            logger.warning(f"Audio focus request failed (non-fatal): {e}")
-
     @property
     def volume(self) -> float:
         return self._volume
@@ -139,11 +117,46 @@ class _AndroidMediaNoisePlayer:
             self._mp.release()
         except Exception:
             logger.exception("MediaPlayer release failed")
+
+
+class _AudioFocus:
+    """The app's one audio-focus request: a listener-less request is keyed by the AudioManager, which every player
+    shares, so per-player requests were one client and any player's abandon dropped the app's focus."""
+
+    def __init__(self) -> None:
+        self._mgr = None
+        self._request = None
+
+    def request(self) -> None:
+        """Main thread, when the session's feedback starts; a failure is non-fatal, the players play anyway."""
+        if self._request is not None or not on_android():
+            return
         try:
-            if self._audio_mgr and self._focus_request:
-                self._audio_mgr.abandonAudioFocusRequest(self._focus_request)
+            from jnius import autoclass
+            AudioManager = autoclass("android.media.AudioManager")
+            AudioAttributes = autoclass("android.media.AudioAttributes")
+            attrs = (autoclass("android.media.AudioAttributes$Builder")()
+                     .setUsage(AudioAttributes.USAGE_MEDIA)
+                     .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                     .build())
+            request = (autoclass("android.media.AudioFocusRequest$Builder")(AudioManager.AUDIOFOCUS_GAIN)
+                       .setAudioAttributes(attrs)
+                       .build())
+            mgr = activity().getSystemService(autoclass("android.content.Context").AUDIO_SERVICE)
+            mgr.requestAudioFocus(request)
+            self._mgr, self._request = mgr, request
+        except Exception as e:
+            logger.warning(f"Audio focus request failed (non-fatal): {e}")
+
+    def abandon(self) -> None:
+        """Main thread, at the session's audio stop."""
+        if self._request is None:
+            return
+        try:
+            self._mgr.abandonAudioFocusRequest(self._request)
         except Exception:
-            logger.exception("MediaPlayer abandonAudioFocusRequest failed")
+            logger.exception("Abandoning audio focus failed")
+        self._mgr = self._request = None
 
 
 def _make_noise_player(path: str, loop: bool = True):
@@ -389,6 +402,7 @@ class AudioEngine:
         self._lock = threading.Lock()
         self._ramp_thread: Optional[threading.Thread] = None
         self._ramp_running: bool = False
+        self._focus = _AudioFocus()  # one request for the app, held while the session's feedback plays
         self._prepare_sounds()
 
     def _prepare_sounds(self) -> None:
@@ -508,6 +522,8 @@ class AudioEngine:
         """Play the prepared feedback players looping (active at current volume, rest
         silent). Plays ONLY what prepare_feedback set up — an empty set means every
         channel is Off and must stay silent (no forced rain)."""
+        if self._feedback_players:
+            self._focus.request()
         for sid, player in self._feedback_players.items():
             try:
                 player.volume = self._volume if sid == self._active_feedback else 0.0
@@ -717,6 +733,7 @@ class AudioEngine:
             self._ramp_thread.join(timeout=0.5)
             self._ramp_thread = None
         self._teardown_feedback_players()
+        self._focus.abandon()
         for snd_attr in self._STOP_UNLOADS:
             self._unload_one_shot(snd_attr)
         self._is_playing = False
