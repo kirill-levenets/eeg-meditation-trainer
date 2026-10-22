@@ -26,7 +26,6 @@ class _KivyNoisePlayer:
             raise RuntimeError(f"SoundLoader could not load {path!r}")
         snd.loop = loop
         self._snd = snd
-        self.loop: bool = loop
 
     @property
     def volume(self) -> float:
@@ -74,7 +73,6 @@ class _AndroidMediaNoisePlayer:
         self._mp.prepare()  # synchronous — fine for small WAV files
         self._volume: float = 0.0
         self._mp.setVolume(0.0, 0.0)
-        self.loop: bool = loop
         self._playing: bool = False
 
         # Request audio focus so Android treats this as intentional media
@@ -450,7 +448,6 @@ class AudioEngine:
             resolved = self._feedback_path_for(kind, path)
             try:
                 p = _make_noise_player(resolved)
-                p.loop = True
                 p.volume = 0.0
                 players[sid] = p
             except Exception as e:
@@ -513,7 +510,6 @@ class AudioEngine:
         channel is Off and must stay silent (no forced rain)."""
         for sid, player in self._feedback_players.items():
             try:
-                player.loop = True
                 player.volume = self._volume if sid == self._active_feedback else 0.0
                 player.play()
             except Exception as e:
