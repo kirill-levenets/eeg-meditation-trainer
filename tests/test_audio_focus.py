@@ -2,6 +2,7 @@
 app's focus with any player's release. It is held while the session's feedback plays and while the gong rings
 (transient, other audio ducks), and given up when the last of them stops."""
 import sys
+import threading
 import types
 from unittest.mock import MagicMock
 
@@ -157,3 +158,33 @@ def test_off_android_there_is_no_focus_to_ask_for(jnius):
     focus.hold("session")
     focus.release("session")
     assert not jnius
+
+
+def test_a_session_start_called_off_mid_test_leaves_no_focus_held(jnius, monkeypatch, players):
+    manager = _manager_answering(jnius, monkeypatch, "AUDIOFOCUS_REQUEST_GRANTED")
+    gate = threading.Event()
+    monkeypatch.setattr(noise_mod.time, "sleep", lambda _s: gate.wait(2))
+    engine = AudioEngine()
+    try:
+        engine.test_audio()  # Settings > Audio's Test holds the focus as the session's feedback would
+        assert manager.requestAudioFocus.call_count == 1
+        engine.end_test()  # Start pressed mid-test; the Bluetooth wait is then cancelled: no stop() follows
+        manager.abandonAudioFocusRequest.assert_called_once()
+        assert not engine._ramp_running
+    finally:
+        gate.set()
+        engine.cleanup()
+
+
+def test_a_test_cut_short_by_stop_owns_nothing_after(players, monkeypatch):
+    gate = threading.Event()
+    monkeypatch.setattr(noise_mod.time, "sleep", lambda _s: gate.wait(2))
+    engine = AudioEngine()
+    try:
+        engine.test_audio()
+        engine.stop()
+        assert not engine._test_owns_playing and not engine._is_playing
+    finally:
+        gate.set()
+        engine.cleanup()
+

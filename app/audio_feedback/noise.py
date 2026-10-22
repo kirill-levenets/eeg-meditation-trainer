@@ -212,6 +212,11 @@ class _AudioFocus:
             logger.warning(f"Audio focus request failed (non-fatal, the sound plays anyway): {e}")
 
 
+def _next_frame(fn) -> None:
+    """Run `fn` on Kivy's thread at the next frame."""
+    Clock.schedule_once(lambda _dt: fn(), 0)
+
+
 def _make_noise_player(path: str, loop: bool = True):
     """Return the right player for this platform: a noise loop, or a one-shot alert (loop=False).
 
@@ -714,7 +719,7 @@ class AudioEngine:
                 if called_off:  # released while it was built: the app stopped this sound, nothing failed
                     self._release(snd, attr)
                     if on_end is not None:
-                        Clock.schedule_once(lambda _dt: on_end(), 0)
+                        _next_frame(on_end)
                     return True
                 if old is not None:
                     self._release(old, attr)
@@ -743,7 +748,7 @@ class AudioEngine:
         self._focus.release(attr)
         on_end = self._one_shot_ends.pop(attr, None)
         if on_end is not None:
-            Clock.schedule_once(lambda _dt: on_end(), 0)
+            _next_frame(on_end)
 
     @staticmethod
     def _release(player, attr: str) -> None:
@@ -752,7 +757,7 @@ class AudioEngine:
             player.set_on_end(None)
             if threading.current_thread() is not threading.main_thread():
                 player.volume = 0.0  # silent now: no frame comes while the screen is locked, setVolume is safe here
-                Clock.schedule_once(lambda _dt: AudioEngine._release(player, attr), 0)
+                _next_frame(lambda: AudioEngine._release(player, attr))
                 return
             player.unload()  # stops it first
         except Exception:
@@ -780,13 +785,17 @@ class AudioEngine:
         self._play_prepared()
         logger.info("Audio engine started")
 
-    def pause(self) -> None:
-        """Silence and pause every feedback player but keep the prepared set and its roles for resume(); main thread."""
-        self._is_playing = False  # gates the alert channels and update()
+    def _stop_ramp(self) -> None:
+        """Stop the volume ramp thread and wait for it briefly."""
         self._ramp_running = False
         if self._ramp_thread:
             self._ramp_thread.join(timeout=0.5)
             self._ramp_thread = None
+
+    def pause(self) -> None:
+        """Silence and pause every feedback player but keep the prepared set and its roles for resume(); main thread."""
+        self._is_playing = False  # gates the alert channels and update()
+        self._stop_ramp()
         for sid, player in self._feedback_players.items():
             try:
                 player.volume = 0.0
@@ -823,10 +832,7 @@ class AudioEngine:
 
     def stop(self) -> None:
         """Stop all audio playback."""
-        self._ramp_running = False
-        if self._ramp_thread:
-            self._ramp_thread.join(timeout=0.5)
-            self._ramp_thread = None
+        self._stop_ramp()
         self._teardown_feedback_players()
         self._focus.release("session")  # a gong still ringing keeps it until its end
         for snd_attr in self._STOP_UNLOADS:
@@ -835,6 +841,7 @@ class AudioEngine:
         self._volume = 0.0
         self._target_volume = 0.0
         self._test_active = False
+        self._test_owns_playing = False
 
     def test_audio(self, reward_id: str = "") -> None:
         """Test all audio channels: reward sample → noise volume sweep → bell → chime → disconnect.
@@ -912,7 +919,7 @@ class AudioEngine:
                 return
             self._test_active = False
             if not was_playing:
-                Clock.schedule_once(lambda _dt: self._finish_test(gen), 0)  # it releases MediaPlayers: main thread
+                _next_frame(lambda: self._finish_test(gen))  # it releases MediaPlayers: the main thread's job
             else:
                 self._set_noise_volume(saved_volume)
             logger.info("Audio test complete")
@@ -927,6 +934,8 @@ class AudioEngine:
         if self._test_owns_playing:
             self._test_owns_playing = False
             self._is_playing = False
+            self._stop_ramp()
+            self._focus.release("session")  # the test's hold: a start called off before it plays holds nothing
 
     def _finish_test(self, gen: int) -> None:
         """The test's teardown, on the main thread, unless a session or a new test took the engine over meanwhile."""
@@ -946,7 +955,7 @@ class AudioEngine:
         if self._play_one_shot("_gong", self._timer_bell_path, 1.0, on_end, duck):
             return self._timer_bell_path
         if on_end is not None:
-            Clock.schedule_once(lambda _dt: on_end(), 0)  # nothing plays: the play is over
+            _next_frame(on_end)  # nothing plays: the play is over
         return ""
 
     def stop_timer_bell(self) -> None:

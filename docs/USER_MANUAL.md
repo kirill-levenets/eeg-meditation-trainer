@@ -189,7 +189,7 @@ The Restore replaces your current database and cannot be undone. Use Backup firs
 - Enable/disable toggle
 - Duration slider with presets: 5, 10, 15, 20, 30 minutes
 - When enabled, auto-stops session at the end and plays bell sound
-- **Timer end sound** — the button picks **Default bell** or **Custom file…**, a file of your own picked the same way as a custom feedback sound; it then shows the chosen file. **Test** plays it. While it rings, other apps' audio is lowered. If the app can't play the file, the timer ends with the default bell, and **Test** says so. Choose **Default bell** to go back to the bell.
+- **Timer end sound** — the button picks **Default bell** or **Custom file…**, a file of your own picked the same way as a custom feedback sound; it then shows the chosen file. **Test** plays it. While it rings, other apps' audio is lowered (a session with a feedback sound has already paused it). If the app can't play the file, the timer ends with the default bell, and **Test** says so. Choose **Default bell** to go back to the bell.
 
 #### Session Program
 
