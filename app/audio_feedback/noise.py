@@ -864,7 +864,7 @@ class AudioEngine:
             time.sleep(APP.DISCONNECT_DURATION + 0.3)
             self._test_active = False
             if not was_playing:
-                self.stop()
+                Clock.schedule_once(lambda _dt: self.stop(), 0)  # it releases MediaPlayers: the main thread's job
             else:
                 self._set_noise_volume(saved_volume)
             logger.info("Audio test complete")

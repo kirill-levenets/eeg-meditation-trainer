@@ -3,6 +3,9 @@ import struct
 import threading
 import unittest
 
+from kivy.clock import Clock
+
+import app.audio_feedback.noise as noise_mod
 from app.audio_feedback.noise import (
     AudioEngine,
     _generate_bell_wav,
@@ -401,3 +404,23 @@ def test_cleanup_reports_a_sound_file_it_cannot_remove(monkeypatch):
     assert warned and all("Could not remove" in m for m in warned)
     monkeypatch.undo()
     eng.cleanup()  # the sounds it couldn't remove above
+
+
+def test_the_audio_tests_teardown_runs_on_the_main_thread(monkeypatch):
+    # The sequence runs on a daemon thread; its stop() releases MediaPlayers, which belongs to the main thread.
+    monkeypatch.setattr(noise_mod, "_make_noise_player", lambda path, loop=True: _FakePlayer(path))
+    monkeypatch.setattr(noise_mod.time, "sleep", lambda _s: None)
+    eng = AudioEngine()
+    stops = []
+    monkeypatch.setattr(eng, "stop", lambda: stops.append(threading.current_thread()))
+    eng.test_audio()
+    for _ in range(200):
+        if not eng._test_active:
+            break
+        threading.Event().wait(0.01)
+    assert not eng._test_active
+    assert stops == []
+    Clock.tick()
+    assert stops == [threading.main_thread()]
+    monkeypatch.undo()
+    eng.cleanup()
