@@ -187,7 +187,8 @@ def test_stopping_the_gong_releases_it_and_the_next_one_is_fresh(made, engine):
 
 
 def test_on_desktop_the_apps_own_stop_is_not_the_sounds_end(monkeypatch):
-    sound = SimpleNamespace(loop=False, volume=1.0, length=4.0, play=lambda: None, unload=lambda: None, handlers=[])
+    sound = _sdl_sound("SoundSDL2", 4.0)
+    sound.handlers = []
     sound.bind = lambda on_stop: sound.handlers.append(on_stop)
     sound.stop = lambda: [h(sound) for h in sound.handlers]  # Kivy's Sound fires on_stop for any stop
     monkeypatch.setattr(SoundLoader, "load", lambda _path: sound)
@@ -203,16 +204,50 @@ def test_on_desktop_the_apps_own_stop_is_not_the_sounds_end(monkeypatch):
     assert ended == [1]
 
 
+def _sdl_sound(kind: str, length: float):
+    """A Kivy SDL Sound as SoundLoader returns it: SoundSDL2 for wav/flac/mp3/ogg, MusicSDL2 for MIDI and trackers."""
+    return type(kind, (SimpleNamespace,), {})(loop=False, volume=1.0, length=length, play=lambda: None,
+                                              stop=lambda: None, unload=lambda: None, bind=lambda **_k: None)
+
+
 def test_on_desktop_a_gong_sdl_cannot_decode_rings_the_default(engine, monkeypatch, tmp_path):
     broken = tmp_path / "gong.mp3"
     broken.write_bytes(b"not audio")
-
-    def load(path):
-        # SDL hands back an empty Sound for a file it can't decode, and logs "Unable to load"
-        return SimpleNamespace(loop=False, volume=1.0, length=0 if path == str(broken) else 4.0,
-                               play=lambda: None, stop=lambda: None, unload=lambda: None, bind=lambda **_k: None)
-    monkeypatch.setattr(SoundLoader, "load", load)
+    # SDL hands back an empty Sound for a file it can't decode, and logs "Unable to load"
+    monkeypatch.setattr(SoundLoader, "load", lambda path: _sdl_sound("SoundSDL2", 0 if path == str(broken) else 4.0))
     assert engine.play_timer_sound(str(broken)) == engine._timer_bell_path
+
+
+def test_on_desktop_a_midi_gong_plays_though_sdl_reports_no_length(monkeypatch):
+    monkeypatch.setattr(SoundLoader, "load", lambda _path: _sdl_sound("MusicSDL2", 0))
+    _KivyNoisePlayer("gong.mid", loop=False)  # doesn't raise
+
+
+def test_on_desktop_a_replay_is_not_the_sounds_end(monkeypatch):
+    sound = _sdl_sound("SoundSDL2", 4.0)
+    sound.handlers = []
+    sound.bind = lambda on_stop: sound.handlers.append(on_stop)
+    sound.play = lambda: [h(sound) for h in sound.handlers]  # Kivy's play() stops a sound still playing first
+    monkeypatch.setattr(SoundLoader, "load", lambda _path: sound)
+    player = _KivyNoisePlayer("gong.wav", loop=False)
+    ended = []
+    player.set_on_end(lambda: ended.append(1))
+    player.play()
+    assert ended == []
+
+
+def test_a_new_gong_is_built_outside_the_one_shot_lock(engine, monkeypatch, tmp_path):
+    custom = tmp_path / "gong.wav"
+    custom.write_bytes(b"x")
+    held = []
+
+    def factory(path, loop=True):
+        held.append(engine._one_shot_lock.locked())  # SDL decodes the whole file: a release mustn't wait on it
+        return MagicMock(path=path)
+    monkeypatch.setattr(noise_mod, "_make_noise_player", factory)
+    engine.play_timer_sound()
+    engine.play_timer_sound(str(custom))
+    assert held == [False, False]
 
 
 def test_the_settings_test_button_hears_the_gongs_end():

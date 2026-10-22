@@ -26,7 +26,8 @@ class _KivyNoisePlayer:
     def __init__(self, path: str, loop: bool = True) -> None:
         from kivy.core.audio import SoundLoader
         snd = SoundLoader.load(path)
-        if snd is None or not snd.length:  # SDL loads a file it can't decode as an empty Sound
+        # SoundSDL2 (wav, flac, mp3, ogg) loads a file it can't decode at length 0; MusicSDL2 never reports a length
+        if snd is None or (type(snd).__name__ == "SoundSDL2" and not snd.length):
             raise RuntimeError(f"SoundLoader could not load {path!r}")
         snd.loop = loop
         self._snd = snd
@@ -50,12 +51,16 @@ class _KivyNoisePlayer:
         self._snd.volume = max(0.0, min(1.0, float(v)))
 
     def play(self) -> None:
-        self._snd.play()
+        self._own(self._snd.play)  # Sound.play() first stops a sound still playing
 
     def stop(self) -> None:
+        self._own(self._snd.stop)
+
+    def _own(self, action) -> None:
+        """The app's own play or stop, which fires on_stop like the sound's end does."""
         self._stopping = True
         try:
-            self._snd.stop()
+            action()
         finally:
             self._stopping = False
 
@@ -683,13 +688,16 @@ class AudioEngine:
         try:
             with self._one_shot_lock:
                 snd = getattr(self, attr)
-                if snd is None or self._one_shot_paths.get(attr) != path:
-                    new = _make_noise_player(path, loop=False)  # raises: the kept player stays as it was
-                    if snd is not None:
-                        self._release(snd, attr)
-                    snd = new
+                kept = snd is not None and self._one_shot_paths.get(attr) == path
+            if not kept:
+                # Built outside the lock (SDL decodes the whole file) and before the kept one goes: a failure keeps it.
+                snd = _make_noise_player(path, loop=False)
+                with self._one_shot_lock:
+                    old = getattr(self, attr)
                     setattr(self, attr, snd)
                     self._one_shot_paths[attr] = path
+                if old is not None:
+                    self._release(old, attr)
             snd.volume = volume
             snd.stop()  # rewinds a replay
             if on_end is not None:
