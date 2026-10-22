@@ -617,8 +617,7 @@ class TimerSection:
             self._timer_sound_test_btn.text = "Stop"
 
     def notify_timer_sound_test_ended(self) -> None:
-        """Called by app_manager when the test playback ends naturally
-        (Sound.on_stop fires) so the button text reverts."""
+        """The test gong played to its end: the button reads Test again."""
         self._timer_sound_test_playing = False
         self._timer_sound_test_btn.text = "Test"
 

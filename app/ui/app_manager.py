@@ -2070,28 +2070,9 @@ class EEGMeditationApp(App):
     def _on_test_timer_sound(self) -> None:
         logger.debug(f"Test timer sound, path='{self._timer_state.custom_sound_path}'")
         self._warn_missing_sound_files({}, self._timer_state.custom_sound_path, force=True)
-        self._audio.play_timer_sound(self._timer_state.custom_sound_path)
-        # When the file ends naturally, flip the Settings test button back
-        # from "Stop" to "Test". Sound objects are SoundLoader-backed and
-        # expose an on_stop event; binding here is best-effort because not
-        # every audio backend fires it reliably.
-        snd = self._audio._bell_sound
-        if snd is None:
-            return
-
-        def _on_natural_end(*_):
-            try:
-                Clock.schedule_once(
-                    lambda dt: self._settings_screen.timer.notify_timer_sound_test_ended(),
-                    0,
-                )
-            except Exception:
-                pass
-
-        try:
-            snd.bind(on_stop=_on_natural_end)
-        except Exception:
-            pass
+        # The gong's end flips the Test button back from Stop (the engine calls it on Kivy's thread).
+        self._audio.play_timer_sound(self._timer_state.custom_sound_path,
+                                     on_end=self._settings_screen.timer.notify_timer_sound_test_ended)
 
     def _on_stop_test_timer_sound(self) -> None:
         logger.debug("Stop timer test sound")

@@ -237,9 +237,9 @@ class TestAudioFeedback(unittest.TestCase):
 class TestTimerBellLifecycle(unittest.TestCase):
     """Regression: timer-end gong used to be killed by _audio.stop(). The
     timer-expiry path DEFERS _audio.stop() to a frame AFTER play_timer_sound
-    starts the gong, and stop() stopped+unloaded the shared `_bell_sound` slot
+    starts the gong, and stop() stopped+unloaded the shared gong slot
     — so on desktop (SoundLoader gong) the gong was silenced ~1 frame in. Fix:
-    stop() no longer touches _bell_sound; the gong is owned solely by
+    stop() no longer touches _gong; the gong is owned solely by
     play_timer_sound / stop_timer_bell (summary buttons + new-session start)."""
 
     def setUp(self):
@@ -251,32 +251,32 @@ class TestTimerBellLifecycle(unittest.TestCase):
     def test_stop_does_not_kill_timer_gong(self):
         from unittest.mock import MagicMock
         gong = MagicMock()
-        self.engine._bell_sound = gong
+        self.engine._gong = gong
         self.engine.stop()
         gong.unload.assert_not_called()       # gong must keep ringing past stop()
-        self.assertIs(self.engine._bell_sound, gong)  # slot preserved for stop_timer_bell
+        self.assertIs(self.engine._gong, gong)  # slot preserved for stop_timer_bell
 
     def test_stop_timer_bell_clears_reference(self):
         from unittest.mock import MagicMock
         snd = MagicMock()
-        self.engine._bell_sound = snd
+        self.engine._gong = snd
         self.engine.stop_timer_bell()
         snd.stop.assert_called_once()
         snd.unload.assert_called_once()
-        self.assertIsNone(self.engine._bell_sound)
+        self.assertIsNone(self.engine._gong)
 
     def test_stop_timer_bell_safe_when_nothing_playing(self):
         # Must not raise if the slot is empty.
-        self.engine._bell_sound = None
+        self.engine._gong = None
         self.engine.stop_timer_bell()
-        self.assertIsNone(self.engine._bell_sound)
+        self.assertIsNone(self.engine._gong)
 
     def test_play_timer_sound_after_stop_assigns_fresh_bell(self):
         # The fix relies on this ordering: tear the engine down first,
         # then play the bell. After stop() the slot is None; play_timer_sound
         # creates a fresh Sound that nothing else will preempt.
         self.engine.stop()
-        self.assertIsNone(self.engine._bell_sound)
+        self.assertIsNone(self.engine._gong)
         self.engine.play_timer_sound("")  # default bell path
         # On headless test envs SoundLoader can return None for the WAV
         # backend, so we accept either a Sound or None — what matters is

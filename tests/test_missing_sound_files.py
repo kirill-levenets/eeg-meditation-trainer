@@ -37,7 +37,7 @@ def test_testing_a_missing_gong_warns_instead_of_silently_playing_the_default(mo
     app, reports = _make_app(monkeypatch)
     app._timer_state = MagicMock(custom_sound_path=str(tmp_path / "typo_gong.wav"))
     app._audio = MagicMock()
-    app._audio._bell_sound = None
+    app._settings_screen = MagicMock()
 
     app._on_test_timer_sound()
 
@@ -63,7 +63,7 @@ def test_a_test_button_report_is_not_swallowed_by_an_earlier_session_start_repor
     app._warn_missing_sound_files({"custom": ("custom", str(tmp_path / "gone_rain.wav"))})  # session start
     app._timer_state = MagicMock(custom_sound_path=str(tmp_path / "typo_gong.wav"))
     app._audio = MagicMock()
-    app._audio._bell_sound = None
+    app._settings_screen = MagicMock()
     app._on_test_timer_sound()  # seconds later: the user tests the gong
 
     assert len(shown) == 2 and "typo_gong.wav" in shown[1]
