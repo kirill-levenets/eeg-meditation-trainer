@@ -26,7 +26,7 @@ class _KivyNoisePlayer:
     def __init__(self, path: str, loop: bool = True) -> None:
         from kivy.core.audio import SoundLoader
         snd = SoundLoader.load(path)
-        if snd is None:
+        if snd is None or not snd.length:  # SDL loads a file it can't decode as an empty Sound
             raise RuntimeError(f"SoundLoader could not load {path!r}")
         snd.loop = loop
         self._snd = snd
