@@ -987,10 +987,9 @@ class EEGMeditationApp(App):
 
     def _start_session_common(self) -> None:
         """Shared session startup logic after device is resolved."""
-        # If the user starts a new session while a long custom timer bell
-        # from the previous session is still ringing, kill it so it
-        # doesn't overlap with the new session's noise loop.
+        # The session takes the audio over: the last session's gong stops, and so does a Settings test still running.
         self._audio.stop_timer_bell()
+        self._audio.end_test()
         threshold = self._settings_screen.threshold
         program = self._program_settings.for_session()
         self._cancel_settle("apply_threshold")  # a slider move just before Start: the start applies the slider itself
@@ -1888,6 +1887,8 @@ class EEGMeditationApp(App):
 
     def _on_test_audio(self) -> None:
         """Sample the selected feedback + reward sources, then the alert channels."""
+        if self._refused_while_session_runs("testing the audio", why="The test plays through the session's sounds."):
+            return
         sources, gid, reward_id = self._test_audio_sources()
         self._warn_missing_sound_files(sources, force=True)
         self._audio.prepare_feedback(sources, gid)
@@ -2068,30 +2069,17 @@ class EEGMeditationApp(App):
         self._persist_user_setting_later("timer_sound")
 
     def _on_test_timer_sound(self) -> None:
-        logger.debug(f"Test timer sound, path='{self._timer_state.custom_sound_path}'")
-        self._warn_missing_sound_files({}, self._timer_state.custom_sound_path, force=True)
-        self._audio.play_timer_sound(self._timer_state.custom_sound_path)
-        # When the file ends naturally, flip the Settings test button back
-        # from "Stop" to "Test". Sound objects are SoundLoader-backed and
-        # expose an on_stop event; binding here is best-effort because not
-        # every audio backend fires it reliably.
-        snd = self._audio._bell_sound
-        if snd is None:
-            return
-
-        def _on_natural_end(*_):
-            try:
-                Clock.schedule_once(
-                    lambda dt: self._settings_screen.timer.notify_timer_sound_test_ended(),
-                    0,
-                )
-            except Exception:
-                pass
-
-        try:
-            snd.bind(on_stop=_on_natural_end)
-        except Exception:
-            pass
+        path = self._timer_state.custom_sound_path
+        logger.debug(f"Test timer sound, path='{path}'")
+        self._warn_missing_sound_files({}, path, force=True)
+        # The gong's end flips the Test button back from Stop (the engine calls it on Kivy's thread).
+        played = self._audio.play_timer_sound(path, on_end=self._settings_screen.timer.notify_timer_sound_test_ended)
+        if not played:
+            report_soft_error("timer_sound_unplayable", "The timer sound can't be played.", app=self, force=True)
+        elif path and played != path and os.path.isfile(path):
+            report_soft_error("timer_sound_unplayable",
+                              f"Custom timer sound can't be played: {path!r} - using the default gong instead.",
+                              app=self, force=True)
 
     def _on_stop_test_timer_sound(self) -> None:
         logger.debug("Stop timer test sound")

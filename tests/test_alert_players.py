@@ -95,17 +95,20 @@ def test_on_android_a_gong_whose_media_player_fails_stays_silent_rather_than_use
     engine = AudioEngine()
     try:
         _on_tick_thread(engine.play_timer_sound)
-        assert engine._timer_bell_player is None
+        assert engine._gong is None
         soundloader.assert_not_called()
     finally:
         engine.cleanup()
 
 
-def test_on_android_the_settings_gong_test_on_the_main_thread_still_falls_back(broken_media_player, soundloader):
+def test_on_android_the_settings_gong_test_plays_what_the_timer_end_will(broken_media_player, soundloader):
+    # The gong's kept player is replayed at the timer end on the tick thread, where SoundLoader freezes a locked app;
+    # and a file MediaPlayer can't play is silent there, so a SoundLoader test would promise a gong that never comes.
     engine = AudioEngine()
     try:
         engine.play_timer_sound()
-        soundloader.assert_called_once()
+        assert engine._gong is None
+        soundloader.assert_not_called()
     finally:
         engine.cleanup()
 

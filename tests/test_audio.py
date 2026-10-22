@@ -2,7 +2,11 @@ import os
 import struct
 import threading
 import unittest
+from unittest.mock import MagicMock
 
+from kivy.clock import Clock
+
+import app.audio_feedback.noise as noise_mod
 from app.audio_feedback.noise import (
     AudioEngine,
     _generate_bell_wav,
@@ -11,6 +15,7 @@ from app.audio_feedback.noise import (
     _generate_tone_wav,
 )
 from app.config import APP
+from app.ui.app_manager import EEGMeditationApp
 
 
 def _pcm_samples(pcm: bytes) -> tuple[int, ...]:
@@ -237,9 +242,9 @@ class TestAudioFeedback(unittest.TestCase):
 class TestTimerBellLifecycle(unittest.TestCase):
     """Regression: timer-end gong used to be killed by _audio.stop(). The
     timer-expiry path DEFERS _audio.stop() to a frame AFTER play_timer_sound
-    starts the gong, and stop() stopped+unloaded the shared `_bell_sound` slot
+    starts the gong, and stop() stopped+unloaded the shared gong slot
     — so on desktop (SoundLoader gong) the gong was silenced ~1 frame in. Fix:
-    stop() no longer touches _bell_sound; the gong is owned solely by
+    stop() no longer touches _gong; the gong is owned solely by
     play_timer_sound / stop_timer_bell (summary buttons + new-session start)."""
 
     def setUp(self):
@@ -251,32 +256,32 @@ class TestTimerBellLifecycle(unittest.TestCase):
     def test_stop_does_not_kill_timer_gong(self):
         from unittest.mock import MagicMock
         gong = MagicMock()
-        self.engine._bell_sound = gong
+        self.engine._gong = gong
         self.engine.stop()
         gong.unload.assert_not_called()       # gong must keep ringing past stop()
-        self.assertIs(self.engine._bell_sound, gong)  # slot preserved for stop_timer_bell
+        self.assertIs(self.engine._gong, gong)  # slot preserved for stop_timer_bell
 
     def test_stop_timer_bell_clears_reference(self):
         from unittest.mock import MagicMock
         snd = MagicMock()
-        self.engine._bell_sound = snd
+        self.engine._gong = snd
         self.engine.stop_timer_bell()
-        snd.stop.assert_called_once()
-        snd.unload.assert_called_once()
-        self.assertIsNone(self.engine._bell_sound)
+        snd.set_on_end.assert_called_once_with(None)  # its end no longer ends a play
+        snd.unload.assert_called_once()  # each player's unload() stops it first
+        self.assertIsNone(self.engine._gong)
 
     def test_stop_timer_bell_safe_when_nothing_playing(self):
         # Must not raise if the slot is empty.
-        self.engine._bell_sound = None
+        self.engine._gong = None
         self.engine.stop_timer_bell()
-        self.assertIsNone(self.engine._bell_sound)
+        self.assertIsNone(self.engine._gong)
 
     def test_play_timer_sound_after_stop_assigns_fresh_bell(self):
         # The fix relies on this ordering: tear the engine down first,
         # then play the bell. After stop() the slot is None; play_timer_sound
         # creates a fresh Sound that nothing else will preempt.
         self.engine.stop()
-        self.assertIsNone(self.engine._bell_sound)
+        self.assertIsNone(self.engine._gong)
         self.engine.play_timer_sound("")  # default bell path
         # On headless test envs SoundLoader can return None for the WAV
         # backend, so we accept either a Sound or None — what matters is
@@ -401,3 +406,114 @@ def test_cleanup_reports_a_sound_file_it_cannot_remove(monkeypatch):
     assert warned and all("Could not remove" in m for m in warned)
     monkeypatch.undo()
     eng.cleanup()  # the sounds it couldn't remove above
+
+
+def test_the_audio_tests_teardown_runs_on_the_main_thread(monkeypatch):
+    # The sequence runs on a daemon thread; its stop() releases MediaPlayers, which belongs to the main thread.
+    monkeypatch.setattr(noise_mod, "_make_noise_player", lambda path, loop=True: _FakePlayer(path))
+    monkeypatch.setattr(noise_mod.time, "sleep", lambda _s: None)
+    eng = AudioEngine()
+    stops = []
+    monkeypatch.setattr(eng, "stop", lambda: stops.append(threading.current_thread()))
+    eng.test_audio()
+    for _ in range(200):
+        if not eng._test_active:
+            break
+        threading.Event().wait(0.01)
+    assert not eng._test_active
+    assert stops == []
+    Clock.tick()
+    assert stops == [threading.main_thread()]
+    monkeypatch.undo()
+    eng.cleanup()
+
+
+def _sequence_thread():
+    return next(t for t in threading.enumerate() if getattr(getattr(t, "_target", None), "__name__", "") == "_run_sequence")
+
+
+def _gated_test(monkeypatch, eng, gate):
+    """Start the Settings test with every sleep held at `gate`; record the alerts it plays and its stop."""
+    monkeypatch.setattr(noise_mod, "_make_noise_player", lambda path, loop=True: _FakePlayer(path))
+    monkeypatch.setattr(noise_mod.time, "sleep", lambda _s: gate.wait(2))
+    played, stops = [], []
+    for name in ("_play_bell", "_play_chime", "_play_disconnect"):
+        monkeypatch.setattr(eng, name, lambda n=name: played.append(n))
+    monkeypatch.setattr(eng, "stop", lambda: stops.append(1))
+    eng.test_audio()
+    return played, stops, _sequence_thread()
+
+
+def test_a_session_taking_the_engine_over_ends_the_settings_test(monkeypatch):
+    eng = AudioEngine()
+    gate = threading.Event()
+    played, stops, seq = _gated_test(monkeypatch, eng, gate)
+    eng.end_test()  # the session's start, mid-sweep
+    assert not eng._is_playing  # handed back: the session's start() isn't skipped
+    gate.set()
+    seq.join(2)
+    Clock.tick()
+    assert (played, stops) == ([], [])  # no more alerts over the session, and no teardown of its players
+    monkeypatch.undo()
+    eng.cleanup()
+
+
+def test_a_session_starting_during_the_alerts_stops_them(monkeypatch):
+    eng = AudioEngine()
+    monkeypatch.setattr(noise_mod, "_make_noise_player", lambda path, loop=True: _FakePlayer(path))
+    monkeypatch.setattr(noise_mod.time, "sleep", lambda _s: None)
+    played = []
+
+    def bell():
+        played.append("_play_bell")
+        eng.end_test()  # the session starts while the bell rings
+    monkeypatch.setattr(eng, "_play_bell", bell)
+    for name in ("_play_chime", "_play_disconnect"):
+        monkeypatch.setattr(eng, name, lambda n=name: played.append(n))
+    eng.test_audio()
+    _sequence_thread().join(2)
+    assert played == ["_play_bell"]  # no chime or warble over the session
+    monkeypatch.undo()
+    eng.cleanup()
+
+
+def test_a_session_starting_after_the_test_ends_keeps_its_players(monkeypatch):
+    eng = AudioEngine()
+    gate = threading.Event()
+    gate.set()
+    played, stops, seq = _gated_test(monkeypatch, eng, gate)
+    seq.join(2)
+    assert len(played) == 3
+    eng.end_test()  # the session starts in the frame before the test's teardown runs
+    Clock.tick()
+    assert stops == []
+    monkeypatch.undo()
+    eng.cleanup()
+
+
+def test_a_test_restarted_supersedes_the_one_running(monkeypatch):
+    eng = AudioEngine()
+    gate = threading.Event()
+    played, stops, first = _gated_test(monkeypatch, eng, gate)
+    eng.test_audio()  # Test pressed again mid-test
+    second = next(t for t in threading.enumerate() if t is not first and t.is_alive()
+                  and getattr(getattr(t, "_target", None), "__name__", "") == "_run_sequence")
+    gate.set()
+    first.join(2)
+    second.join(2)
+    Clock.tick()
+    assert len(played) == 3 and stops == [1]  # one sequence's alerts, one teardown: no session thought to be playing
+    monkeypatch.undo()
+    eng.cleanup()
+
+
+def test_the_settings_audio_test_is_refused_while_a_session_runs(monkeypatch):
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    monkeypatch.setattr(EEGMeditationApp, "_session_pipeline_live", lambda self: True)  # running, paused or connecting
+    app._info_popup = MagicMock()
+    app._audio = MagicMock()
+    app._on_test_audio()
+    app._audio.prepare_feedback.assert_not_called()  # it would replace the session's players
+    app._audio.test_audio.assert_not_called()
+    assert app._info_popup.call_args.args[0] == "Session in progress"
+

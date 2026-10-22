@@ -189,7 +189,7 @@ The Restore replaces your current database and cannot be undone. Use Backup firs
 - Enable/disable toggle
 - Duration slider with presets: 5, 10, 15, 20, 30 minutes
 - When enabled, auto-stops session at the end and plays bell sound
-- **Timer end sound** — the button picks **Default bell** or **Custom file…**, a file of your own picked the same way as a custom feedback sound; it then shows the chosen file. **Test** plays it. Choose **Default bell** to go back to the bell.
+- **Timer end sound** — the button picks **Default bell** or **Custom file…**, a file of your own picked the same way as a custom feedback sound; it then shows the chosen file. **Test** plays it. While it rings, other apps' audio is lowered (a session with a feedback sound has already paused it). If the app can't play the file, the timer ends with the default bell, and **Test** says so. Choose **Default bell** to go back to the bell.
 
 #### Session Program
 
@@ -263,7 +263,7 @@ When Program mode is off, the Simple timer behaves exactly as before.
   - **Crickets** — a soft cricket chirp about once every 10 seconds (rather than a continuous sound), as a "you're doing well / still here" cue while you hold above the threshold; like the other reward sources it grows louder the deeper above threshold you go.
 
   Use the reward channel for a positive "you've reached shamatha" cue that builds as you deepen. The two channels cross-fade cleanly at the threshold; set either to **Off** for silence on that side.
-- **Test Audio** — previews the selected reward sound (incl. Crickets), then a feedback sweep + bell + chime + warble
+- **Test Audio** — previews the selected reward sound (incl. Crickets), then a feedback sweep + bell + chime + warble. Not during a session (stop it first); starting a session ends a test still playing
 - Toggle sinking alert bell, distraction chime, disconnect warble
 - Volume uses log scaling — rises quickly at first, then flattens (max 0.3)
 
