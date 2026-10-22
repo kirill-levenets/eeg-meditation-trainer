@@ -106,6 +106,39 @@ def test_a_timer_gong_over_a_test_gong_ends_the_test_once(made, engine):
     assert ended == [1]
 
 
+def test_a_stop_while_the_gong_is_being_built_calls_it_off(made, engine, monkeypatch):
+    building, release_build = threading.Event(), threading.Event()
+
+    def slow_factory(path, loop=True):
+        building.set()
+        release_build.wait(2)  # MediaPlayer.prepare(), or SDL decoding a long file
+        made.append(MagicMock(path=path))
+        return made[-1]
+    monkeypatch.setattr(noise_mod, "_make_noise_player", slow_factory)
+    played = []
+    tick = threading.Thread(target=lambda: played.append(engine.play_timer_sound()))  # the timer's end
+    tick.start()
+    assert building.wait(2)
+    engine.stop_timer_bell()  # the end card's OK, or a new session, meanwhile
+    release_build.set()
+    tick.join(2)
+    assert played == [engine._timer_bell_path]  # called off, not failed: no fallback
+    assert len(made) == 1 and engine._gong is None
+    made[0].play.assert_not_called()
+    Clock.tick()
+    made[0].unload.assert_called_once()
+
+
+def test_a_kept_player_that_cant_start_is_built_afresh(made, engine):
+    engine._play_chime()
+    made[0].play.side_effect = RuntimeError("MediaPlayer in its Error state")  # e.g. the media server died
+    engine._play_chime()
+    assert engine._chime_sound is None
+    made[0].unload.assert_called_once()
+    engine._play_chime()
+    assert len(made) == 2 and engine._chime_sound is made[1]
+
+
 def test_releasing_the_gong_ends_its_test(made, engine):
     ended = []
     engine.play_timer_sound(on_end=lambda: ended.append(1))

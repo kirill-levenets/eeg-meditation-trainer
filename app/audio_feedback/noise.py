@@ -169,7 +169,7 @@ def _completion_listener(on_complete):
 
 
 class _AudioFocus:
-    """The app's one audio-focus request: listener-less per-player requests were one client, any abandon dropped it."""
+    """The app's one audio-focus request, held while the session's feedback plays."""
 
     def __init__(self) -> None:
         self._mgr = None
@@ -444,6 +444,7 @@ class AudioEngine:
         self._gong: object = None  # the timer-end gong, the same way
         self._one_shot_paths: dict[str, str] = {}  # the file each kept one-shot player plays
         self._one_shot_ends: dict[str, Callable[[], None]] = {}  # the on_end of each one-shot's current play
+        self._one_shot_gens: dict[str, int] = {}  # bumped by each release: a player built meanwhile is called off
         self._one_shot_lock = threading.Lock()
         self._lock = threading.Lock()
         self._ramp_thread: Optional[threading.Thread] = None
@@ -689,15 +690,27 @@ class AudioEngine:
             with self._one_shot_lock:
                 snd = getattr(self, attr)
                 kept = snd is not None and self._one_shot_paths.get(attr) == path
+                gen = self._one_shot_gens.get(attr, 0)
             if not kept:
                 # Built outside the lock (SDL decodes the whole file) and before the kept one goes: a failure keeps it.
                 snd = _make_noise_player(path, loop=False)
                 with self._one_shot_lock:
-                    old = getattr(self, attr)
-                    setattr(self, attr, snd)
-                    self._one_shot_paths[attr] = path
+                    called_off = self._one_shot_gens.get(attr, 0) != gen
+                    if not called_off:
+                        old = getattr(self, attr)
+                        setattr(self, attr, snd)
+                        self._one_shot_paths[attr] = path
+                if called_off:  # released while it was built: the app stopped this sound, nothing failed
+                    self._release(snd, attr)
+                    if on_end is not None:
+                        Clock.schedule_once(lambda _dt: on_end(), 0)
+                    return True
                 if old is not None:
                     self._release(old, attr)
+        except Exception as e:
+            logger.warning(f"Failed to open sound {path}: {e}")
+            return False
+        try:
             snd.volume = volume
             snd.stop()  # rewinds a replay
             if on_end is not None:
@@ -708,6 +721,7 @@ class AudioEngine:
         except Exception as e:
             self._one_shot_ends.pop(attr, None)
             logger.warning(f"Failed to play sound {path}: {e}")
+            self._unload_one_shot(attr)  # a player that can't start is built afresh next time
             return False
 
     def _end_one_shot(self, attr: str) -> None:
@@ -895,14 +909,14 @@ class AudioEngine:
         if self._play_one_shot("_gong", self._timer_bell_path, 1.0, on_end):
             return self._timer_bell_path
         if on_end is not None:
-            Clock.schedule_once(lambda _dt: on_end(), 0)  # nothing plays: the Test button reads Test again
+            Clock.schedule_once(lambda _dt: on_end(), 0)  # nothing plays: the play is over
         return ""
 
     def stop_timer_bell(self) -> None:
-        """Stop and release the gong (summary buttons, a new session, the Settings Stop); main thread."""
+        """Stop and release the gong, or call off one still being built; main thread."""
         if self._gong is not None:
-            self._unload_one_shot("_gong")
             logger.info("Timer gong released")
+        self._unload_one_shot("_gong")
 
     def _unload_one_shot(self, attr: str) -> None:
         """Stop and release a one-shot sound; an alert replays its player instead of releasing it on each play."""
@@ -910,6 +924,7 @@ class AudioEngine:
             snd = getattr(self, attr, None)
             setattr(self, attr, None)
             self._one_shot_paths.pop(attr, None)
+            self._one_shot_gens[attr] = self._one_shot_gens.get(attr, 0) + 1
         self._end_one_shot(attr)
         if snd:
             self._release(snd, attr)
