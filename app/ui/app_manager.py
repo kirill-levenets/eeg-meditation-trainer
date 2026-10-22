@@ -18,7 +18,8 @@ from kivy.uix.modalview import ModalView
 from kivy.uix.screenmanager import ScreenManager, SlideTransition
 from kivy.utils import platform as kivy_platform
 
-from app.android_jni import java_string
+from app.android_jni import activity as android_activity
+from app.android_jni import java_string, on_android
 from app.audio_feedback.noise import AudioEngine
 from app.config import APP
 from app.crash_handler import (
@@ -71,6 +72,7 @@ from app.ui.line_colours import LINE_COLOURS
 from app.ui.line_colours import OPTIONS as LINE_OPTIONS
 from app.ui.live_mirror import LiveMirror
 from app.ui.live_session import LiveSessionScreen
+from app.ui.power_exemption import PowerExemption
 from app.ui.program_run import ProgramRun
 from app.ui.program_settings import ProgramSettings
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
@@ -411,29 +413,26 @@ class EEGMeditationApp(App):
             logger.warning(f"Failed to release wake lock: {e}")
 
     def _start_session_keep_alive_service(self) -> None:
-        """Start the Android foreground service that protects the session from OS kill."""
-        if not hasattr(sys, "getandroidapilevel"):
+        """Start the session's foreground service: it runs in this process, so the OS keeps this process up."""
+        if not on_android():
             return
         try:
             from jnius import autoclass
-            PythonActivity = autoclass("org.kivy.android.PythonActivity")
-            service_cls = autoclass("org.eeg.eegmeditation.ServiceSessionkeepalive")
-            service_cls.start(PythonActivity.mActivity, "")
-            logger.info("SessionKeepAlive service started.")
+            service_cls = autoclass("org.eeg.eegmeditation.SessionForegroundService")
+            service_cls.start(android_activity(), "EEG Meditation", "Meditation session in progress")
+            logger.info("Session foreground service started.")
         except Exception as e:
-            logger.warning(f"Failed to start SessionKeepAlive service: {e}")
+            logger.warning(f"Failed to start the session foreground service: {e}")
 
     def _stop_session_keep_alive_service(self) -> None:
-        if not hasattr(sys, "getandroidapilevel"):
+        if not on_android():
             return
         try:
             from jnius import autoclass
-            PythonActivity = autoclass("org.kivy.android.PythonActivity")
-            service_cls = autoclass("org.eeg.eegmeditation.ServiceSessionkeepalive")
-            service_cls.stop(PythonActivity.mActivity)
-            logger.info("SessionKeepAlive service stopped.")
+            autoclass("org.eeg.eegmeditation.SessionForegroundService").stop(android_activity())
+            logger.info("Session foreground service stopped.")
         except Exception as e:
-            logger.warning(f"Failed to stop SessionKeepAlive service: {e}")
+            logger.warning(f"Failed to stop the session foreground service: {e}")
 
     # Map bottom-nav tab keys to screen groups
     _TAB_SCREENS = {
@@ -487,6 +486,7 @@ class EEGMeditationApp(App):
             serial_override=lambda: self.serial_device_override,
             report=lambda label, detail, force=False: report_soft_error(label, detail, app=self, force=force))
         self._headset.load_aliases()
+        self._power = PowerExemption(self._db, self._settings_screen.device, toast=self._toast, main=self._on_main)
 
         self._sm.add_widget(self._live_screen)
         self._sm.add_widget(self._history_screen)
@@ -638,6 +638,8 @@ class EEGMeditationApp(App):
             device_state=self._headset.state,
             on_device_rename=self._headset.on_rename,
             on_copy_diagnostics=self._headset.on_copy_diagnostics,
+            on_battery_settings=self._power.on_battery_settings,
+            on_maker_settings=self._power.on_maker_settings,
         )
         wire(
             self._settings_screen.display,
@@ -876,6 +878,7 @@ class EEGMeditationApp(App):
         self._sm.current = "live_session"
         self._bottom_nav.active_tab = "session"
         self._headset.auto_scan()
+        self._power.offer_once()
         logger.info(f"First run complete: {what}")
 
     def _on_nav_tab(self, tab_key: str) -> None:
@@ -2641,6 +2644,9 @@ class EEGMeditationApp(App):
         except Exception:
             logger.exception("flush_pre_app_errors failed")
         render_stats.start()
+        self._power.refresh()
+        if not self._gate_active():  # a first run offers it once the profile is picked (_finish_first_run)
+            Clock.schedule_once(lambda _dt: self._power.offer_once(), 1.0)
 
     def on_pause(self) -> bool:
         """Android lifecycle: save settings and allow Kivy to pause cleanly.
@@ -2697,6 +2703,7 @@ class EEGMeditationApp(App):
             Clock.schedule_once(lambda dt: self._refresh_ui_after_resume(), 0)
         except Exception:
             logger.exception("on_resume UI refresh failed")
+        self._power.refresh()  # after the session's UI: back from the phone's settings, perhaps changed there
 
     def _refresh_ui_after_resume(self) -> None:
         """Sync UI to current session state after Android resume.
@@ -2758,6 +2765,7 @@ class EEGMeditationApp(App):
                 # entry points refuse to run while a session is active, so this is
                 # defense-in-depth, not a data-loss path.)
                 self._stop_and_save()
+        self._stop_session_keep_alive_service()  # a start still connecting has no session to stop it
         self._audio.cleanup()
         self._db.mark_shutting_down()
         self._db.close()
