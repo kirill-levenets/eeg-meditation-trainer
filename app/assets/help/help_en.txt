@@ -110,7 +110,8 @@ Configure in Audio section above
 
 The timer's end sound (Settings → Timer) is picked
 the same way: Default bell or Custom file...; Test
-plays it.
+plays it. A file the phone can't play rings the
+default bell, and Test says so.
 
 ## Themes
 

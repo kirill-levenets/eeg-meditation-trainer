@@ -6,6 +6,7 @@ import tempfile
 import threading
 import time
 import wave
+from collections.abc import Callable
 from typing import Optional
 
 from kivy.clock import Clock
@@ -97,7 +98,7 @@ class _AndroidMediaNoisePlayer:
     def set_on_end(self, callback) -> None:
         """Called on Android's main thread when a one-shot plays to its end (a loop never ends)."""
         self._on_end = callback
-        if callback is not None and self._listener is None:
+        if self._listener is None:
             self._listener = _completion_listener(self._ended)
             self._mp.setOnCompletionListener(self._listener)
 
@@ -164,8 +165,7 @@ def _completion_listener(on_complete):
 
 
 class _AudioFocus:
-    """The app's one audio-focus request: a listener-less request is keyed by the AudioManager, which every player
-    shares, so per-player requests were one client and any player's abandon dropped the app's focus."""
+    """The app's one audio-focus request: listener-less per-player requests were one client, any abandon dropped it."""
 
     def __init__(self) -> None:
         self._mgr = None
@@ -408,8 +408,6 @@ class AudioEngine:
     _STOP_UNLOADS: tuple[str, ...] = ("_chime_sound",)
 
     # Volume interpolation: ramp toward target in small steps
-    _GONG_VOLUME: float = 1.0
-
     _RAMP_INTERVAL: float = 0.025  # 25ms between steps (40 updates/sec)
     _RAMP_SPEED: float = 0.6  # max volume change per second
 
@@ -444,6 +442,7 @@ class AudioEngine:
         self._disconnect_sound: object = None
         self._gong: object = None  # the timer-end gong, the same way
         self._one_shot_paths: dict[str, str] = {}  # the file each kept one-shot player plays
+        self._one_shot_ends: dict[str, Callable[[], None]] = {}  # the on_end of each one-shot's current play
         self._one_shot_lock = threading.Lock()
         self._lock = threading.Lock()
         self._ramp_thread: Optional[threading.Thread] = None
@@ -682,30 +681,41 @@ class AudioEngine:
             return True
         return False
 
-    def _play_one_shot(self, attr: str, path: str, volume: float, on_end=None) -> None:
-        """Replay a one-shot's kept player (on Android a MediaPlayer: SoundLoader freezes a locked app); a new file gets a
-        new player. `on_end` runs on Kivy's thread when it plays to its end; None clears an earlier one."""
+    def _play_one_shot(self, attr: str, path: str, volume: float, on_end=None) -> bool:
+        """Replay a one-shot's kept player, a new file in a new one (a MediaPlayer on Android); False if it can't play."""
+        self._end_one_shot(attr)  # a replay ends the play before it
         try:
             with self._one_shot_lock:
                 snd = getattr(self, attr)
                 if snd is not None and self._one_shot_paths.get(attr) != path:
                     self._retire(snd)
                     snd = None
+                    setattr(self, attr, None)
                 if snd is None:
                     snd = _make_noise_player(path, loop=False)
                     setattr(self, attr, snd)
                     self._one_shot_paths[attr] = path
-            snd.set_on_end(None if on_end is None else (lambda: Clock.schedule_once(lambda _dt: on_end(), 0)))
             snd.volume = volume
             snd.stop()  # rewinds a replay
+            if on_end is not None:
+                self._one_shot_ends[attr] = on_end
+                snd.set_on_end(lambda: self._end_one_shot(attr))
             snd.play()
+            return True
         except Exception as e:
+            self._one_shot_ends.pop(attr, None)
             logger.warning(f"Failed to play sound {path}: {e}")
+            return False
+
+    def _end_one_shot(self, attr: str) -> None:
+        """A one-shot's play is over (played out, replayed or released): its on_end runs once, on Kivy's thread."""
+        on_end = self._one_shot_ends.pop(attr, None)
+        if on_end is not None:
+            Clock.schedule_once(lambda _dt: on_end(), 0)
 
     @staticmethod
     def _retire(player) -> None:
-        """Release a player no longer kept: now on the main thread, else on its next frame (release() on the tick
-        thread deadlocks while the screen is locked)."""
+        """Release a replaced player, on the main thread: release() on the tick thread deadlocks during a lock."""
         def _release(*_args):
             try:
                 player.stop()
@@ -872,12 +882,16 @@ class AudioEngine:
         t = threading.Thread(target=_run_sequence, daemon=True)
         t.start()
 
-    def play_timer_sound(self, custom_path: str = "", on_end=None) -> None:
-        """The timer-end gong, one kept player replayed like an alert: it sounds with the screen locked and is safe on
-        the tick thread. `on_end` (Kivy's thread) tells the Settings Test that it played to its end."""
-        path = custom_path if (custom_path and os.path.isfile(custom_path)) else self._timer_bell_path
-        self._play_one_shot("_gong", path, self._GONG_VOLUME, on_end)
+    def play_timer_sound(self, custom_path: str = "", on_end=None) -> bool:
+        """The timer-end gong, replayed like an alert, safe on the tick thread; False if the custom sound can't play."""
         logger.info("Timer gong")
+        custom = custom_path if (custom_path and os.path.isfile(custom_path)) else ""
+        if custom and self._play_one_shot("_gong", custom, 1.0, on_end):
+            return True
+        # A custom file the player can't open rings the default gong, as a missing one does.
+        if not self._play_one_shot("_gong", self._timer_bell_path, 1.0, on_end) and on_end is not None:
+            Clock.schedule_once(lambda _dt: on_end(), 0)  # nothing plays: the Test button reads Test again
+        return not custom
 
     def stop_timer_bell(self) -> None:
         """Stop and release the gong (summary buttons, a new session, the Settings Stop); main thread."""
@@ -891,6 +905,7 @@ class AudioEngine:
             snd = getattr(self, attr, None)
             setattr(self, attr, None)
             self._one_shot_paths.pop(attr, None)
+        self._end_one_shot(attr)
         if not snd:
             return
         try:

@@ -78,10 +78,59 @@ def test_the_gongs_end_reaches_kivys_thread(made, engine):
     assert ended == [1]
 
 
-def test_a_gong_without_on_end_clears_the_tests(made, engine):
-    engine.play_timer_sound(on_end=lambda: None)
-    engine.play_timer_sound()  # the timer's end after a test: the Test button isn't waiting any more
-    assert made[0].set_on_end.call_args.args[0] is None
+def test_a_timer_gong_over_a_test_gong_ends_the_test_once(made, engine):
+    ended = []
+    engine.play_timer_sound(on_end=lambda: ended.append(1))
+    player_end = made[0].set_on_end.call_args.args[0]
+    engine.play_timer_sound()  # the timer ends while the Settings Test still rings
+    Clock.tick()
+    assert ended == [1]
+    player_end()  # the timer's gong plays out: the Test isn't waiting any more
+    Clock.tick()
+    assert ended == [1]
+
+
+def test_releasing_the_gong_ends_its_test(made, engine):
+    ended = []
+    engine.play_timer_sound(on_end=lambda: ended.append(1))
+    engine.stop_timer_bell()  # a session start or a summary button while the Test rings
+    Clock.tick()
+    assert ended == [1]
+
+
+def _failing_for(bad_path, made):
+    def factory(path, loop=True):
+        if path == bad_path:
+            raise RuntimeError("MediaPlayer can't prepare it")
+        made.append(MagicMock(path=path))
+        return made[-1]
+    return factory
+
+
+def test_a_custom_gong_that_cant_play_rings_the_default(made, engine, tmp_path, monkeypatch):
+    bad = tmp_path / "gong.xyz"
+    bad.write_bytes(b"x")
+    monkeypatch.setattr(noise_mod, "_make_noise_player", _failing_for(str(bad), made))
+    engine.play_timer_sound()
+    ended = []
+    assert engine.play_timer_sound(str(bad), on_end=lambda: ended.append(1)) is False
+    assert [p.path for p in made] == [engine._timer_bell_path] * 2
+    assert engine._gong is made[1]  # the retired player isn't kept when its replacement fails
+    made[0].unload.assert_called_once()
+    made[1].play.assert_called_once()
+    Clock.tick()
+    assert ended == []  # the default gong rings for the Test
+    made[1].set_on_end.call_args.args[0]()
+    Clock.tick()
+    assert ended == [1]
+
+
+def test_when_no_gong_can_play_the_test_still_ends(made, engine, monkeypatch):
+    monkeypatch.setattr(noise_mod, "_make_noise_player", _failing_for(engine._timer_bell_path, made))
+    ended = []
+    engine.play_timer_sound(on_end=lambda: ended.append(1))
+    Clock.tick()
+    assert ended == [1]
 
 
 def test_stopping_the_gong_releases_it_and_the_next_one_is_fresh(made, engine):
@@ -115,3 +164,17 @@ def test_the_settings_test_button_hears_the_gongs_end():
     app._on_test_timer_sound()
     on_end = app._audio.play_timer_sound.call_args.kwargs["on_end"]
     assert on_end == app._settings_screen.timer.notify_timer_sound_test_ended
+
+
+
+def test_the_settings_test_says_when_the_timer_sound_cant_play(monkeypatch):
+    reported = []
+    monkeypatch.setattr("app.ui.app_manager.report_soft_error", lambda label, *a, **k: reported.append(label))
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._timer_state = MagicMock(custom_sound_path="/sdcard/gong.xyz")
+    app._audio = MagicMock()
+    app._audio.play_timer_sound.return_value = False
+    app._settings_screen = MagicMock()
+    app._warn_missing_sound_files = MagicMock()
+    app._on_test_timer_sound()
+    assert reported == ["timer_sound_unplayable"]
