@@ -2072,7 +2072,10 @@ class EEGMeditationApp(App):
         logger.debug(f"Test timer sound, path='{path}'")
         self._warn_missing_sound_files({}, path, force=True)
         # The gong's end flips the Test button back from Stop (the engine calls it on Kivy's thread).
-        if not self._audio.play_timer_sound(path, on_end=self._settings_screen.timer.notify_timer_sound_test_ended):
+        played = self._audio.play_timer_sound(path, on_end=self._settings_screen.timer.notify_timer_sound_test_ended)
+        if not played:
+            report_soft_error("timer_sound_unplayable", "The timer sound can't be played.", app=self, force=True)
+        elif path and played != path and os.path.isfile(path):
             report_soft_error("timer_sound_unplayable",
                               f"Custom timer sound can't be played: {path!r} - using the default gong instead.",
                               app=self, force=True)

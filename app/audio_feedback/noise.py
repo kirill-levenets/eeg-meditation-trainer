@@ -67,6 +67,16 @@ class _KivyNoisePlayer:
             logger.exception("SoundLoader stop or unload failed")
 
 
+def _media_attributes():
+    """The players' audio attributes, which the focus request names too: USAGE_MEDIA plays through a lock."""
+    from jnius import autoclass
+    AudioAttributes = autoclass("android.media.AudioAttributes")
+    return (autoclass("android.media.AudioAttributes$Builder")()
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+            .build())
+
+
 class _AndroidMediaNoisePlayer:
     """MediaPlayer-backed player. USAGE_MEDIA so it keeps playing through
     screen lock (SDL_mixer/SoundLoader is silenced while locked). Used for the
@@ -75,17 +85,9 @@ class _AndroidMediaNoisePlayer:
     def __init__(self, path: str, loop: bool = True) -> None:
         from jnius import autoclass
         MediaPlayer = autoclass("android.media.MediaPlayer")
-        AudioAttributes = autoclass("android.media.AudioAttributes")
-        AudioAttributesBuilder = autoclass("android.media.AudioAttributes$Builder")
 
         self._mp = MediaPlayer()  # a failed setup leaves it to GC: its finalizer releases it, off the tick thread
-        attrs = (
-            AudioAttributesBuilder()
-            .setUsage(AudioAttributes.USAGE_MEDIA)
-            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-            .build()
-        )
-        self._mp.setAudioAttributes(attrs)
+        self._mp.setAudioAttributes(_media_attributes())
         self._mp.setDataSource(path)
         self._mp.setLooping(loop)
         self._mp.prepare()  # synchronous — fine for small WAV files
@@ -121,11 +123,8 @@ class _AndroidMediaNoisePlayer:
             pass
 
     def play(self) -> None:
-        try:
-            self._mp.start()
-            self._playing = True
-        except Exception:
-            pass
+        self._mp.start()
+        self._playing = True
 
     def stop(self) -> None:
         try:
@@ -178,13 +177,8 @@ class _AudioFocus:
         try:
             from jnius import autoclass
             AudioManager = autoclass("android.media.AudioManager")
-            AudioAttributes = autoclass("android.media.AudioAttributes")
-            attrs = (autoclass("android.media.AudioAttributes$Builder")()
-                     .setUsage(AudioAttributes.USAGE_MEDIA)
-                     .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                     .build())
             request = (autoclass("android.media.AudioFocusRequest$Builder")(AudioManager.AUDIOFOCUS_GAIN)
-                       .setAudioAttributes(attrs)
+                       .setAudioAttributes(_media_attributes())
                        .build())
             mgr = activity().getSystemService(autoclass("android.content.Context").AUDIO_SERVICE)
             mgr.requestAudioFocus(request)
@@ -725,6 +719,7 @@ class AudioEngine:
         if threading.current_thread() is threading.main_thread():
             _release()
         else:
+            player.volume = 0.0  # silent now: a frame doesn't come while the screen is locked, setVolume is safe here
             Clock.schedule_once(_release, 0)
 
     def _play_bell(self) -> None:
@@ -882,16 +877,18 @@ class AudioEngine:
         t = threading.Thread(target=_run_sequence, daemon=True)
         t.start()
 
-    def play_timer_sound(self, custom_path: str = "", on_end=None) -> bool:
-        """The timer-end gong, replayed like an alert, safe on the tick thread; False if the custom sound can't play."""
+    def play_timer_sound(self, custom_path: str = "", on_end=None) -> str:
+        """The timer-end gong, replayed like an alert, safe on the tick thread; returns the file it plays, "" if none."""
         logger.info("Timer gong")
         custom = custom_path if (custom_path and os.path.isfile(custom_path)) else ""
         if custom and self._play_one_shot("_gong", custom, 1.0, on_end):
-            return True
+            return custom
         # A custom file the player can't open rings the default gong, as a missing one does.
-        if not self._play_one_shot("_gong", self._timer_bell_path, 1.0, on_end) and on_end is not None:
+        if self._play_one_shot("_gong", self._timer_bell_path, 1.0, on_end):
+            return self._timer_bell_path
+        if on_end is not None:
             Clock.schedule_once(lambda _dt: on_end(), 0)  # nothing plays: the Test button reads Test again
-        return not custom
+        return ""
 
     def stop_timer_bell(self) -> None:
         """Stop and release the gong (summary buttons, a new session, the Settings Stop); main thread."""

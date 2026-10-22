@@ -1,5 +1,6 @@
 """The timer-end gong is a one-shot like the alerts: one kept player, replayed; a new file gets a new player and the
 old is released on the main thread; its end reaches the Settings Test button through on_end."""
+import sys
 import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -9,7 +10,11 @@ from kivy.clock import Clock
 from kivy.core.audio import SoundLoader
 
 import app.audio_feedback.noise as noise_mod
-from app.audio_feedback.noise import AudioEngine, _KivyNoisePlayer
+from app.audio_feedback.noise import (
+    AudioEngine,
+    _AndroidMediaNoisePlayer,
+    _KivyNoisePlayer,
+)
 from app.ui.app_manager import EEGMeditationApp
 
 
@@ -64,6 +69,7 @@ def test_from_the_tick_thread_the_old_gong_is_released_on_the_next_frame_not_the
     engine.play_timer_sound()
     _on_tick_thread(lambda: engine.play_timer_sound(str(custom)))
     made[0].unload.assert_not_called()  # release() on the tick thread deadlocks while the screen is locked
+    assert made[0].volume == 0.0  # silent meanwhile: no frame comes while the screen is locked
     Clock.tick()
     made[0].unload.assert_called_once()
 
@@ -113,7 +119,7 @@ def test_a_custom_gong_that_cant_play_rings_the_default(made, engine, tmp_path, 
     monkeypatch.setattr(noise_mod, "_make_noise_player", _failing_for(str(bad), made))
     engine.play_timer_sound()
     ended = []
-    assert engine.play_timer_sound(str(bad), on_end=lambda: ended.append(1)) is False
+    assert engine.play_timer_sound(str(bad), on_end=lambda: ended.append(1)) == engine._timer_bell_path
     assert [p.path for p in made] == [engine._timer_bell_path] * 2
     assert engine._gong is made[1]  # the retired player isn't kept when its replacement fails
     made[0].unload.assert_called_once()
@@ -125,10 +131,32 @@ def test_a_custom_gong_that_cant_play_rings_the_default(made, engine, tmp_path, 
     assert ended == [1]
 
 
+def test_a_gong_that_wont_start_has_not_played(made, engine, tmp_path, monkeypatch):
+    custom = tmp_path / "gong.wav"
+    custom.write_bytes(b"x")
+
+    def factory(path, loop=True):
+        made.append(MagicMock(path=path))
+        if path == str(custom):
+            made[-1].play.side_effect = RuntimeError("start() in a bad state")
+        return made[-1]
+    monkeypatch.setattr(noise_mod, "_make_noise_player", factory)
+    assert engine.play_timer_sound(str(custom)) == engine._timer_bell_path
+
+
+def test_an_android_player_whose_start_fails_says_so(monkeypatch):
+    monkeypatch.setitem(sys.modules, "jnius", SimpleNamespace(autoclass=lambda _name: MagicMock()))
+    player = _AndroidMediaNoisePlayer("gong.wav", loop=False)
+    player._mp.start.side_effect = RuntimeError("IllegalStateException")
+    with pytest.raises(RuntimeError):
+        player.play()
+    assert not player._playing
+
+
 def test_when_no_gong_can_play_the_test_still_ends(made, engine, monkeypatch):
     monkeypatch.setattr(noise_mod, "_make_noise_player", _failing_for(engine._timer_bell_path, made))
     ended = []
-    engine.play_timer_sound(on_end=lambda: ended.append(1))
+    assert engine.play_timer_sound(on_end=lambda: ended.append(1)) == ""
     Clock.tick()
     assert ended == [1]
 
@@ -167,14 +195,25 @@ def test_the_settings_test_button_hears_the_gongs_end():
 
 
 
-def test_the_settings_test_says_when_the_timer_sound_cant_play(monkeypatch):
+@pytest.mark.parametrize("custom, exists, played, said", [
+    ("gong.xyz", True, "default", "Custom timer sound can't be played"),  # the default rang instead
+    ("gong.xyz", True, "", "The timer sound can't be played."),  # nothing rang
+    ("", False, "", "The timer sound can't be played."),
+    ("gong.xyz", True, "custom", None),
+    ("gong.xyz", False, "default", None),  # missing: _warn_missing_sound_files says so
+    ("", False, "default", None),
+])
+def test_the_settings_test_says_what_it_could_not_play(monkeypatch, tmp_path, custom, exists, played, said):
     reported = []
-    monkeypatch.setattr("app.ui.app_manager.report_soft_error", lambda label, *a, **k: reported.append(label))
+    monkeypatch.setattr("app.ui.app_manager.report_soft_error", lambda label, detail, **k: reported.append(detail))
+    path = str(tmp_path / custom) if custom else ""
+    if exists:
+        (tmp_path / custom).write_bytes(b"x")
     app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._timer_state = MagicMock(custom_sound_path="/sdcard/gong.xyz")
+    app._timer_state = MagicMock(custom_sound_path=path)
     app._audio = MagicMock()
-    app._audio.play_timer_sound.return_value = False
+    app._audio.play_timer_sound.return_value = {"default": "/tmp/timer_bell.wav", "custom": path, "": ""}[played]
     app._settings_screen = MagicMock()
     app._warn_missing_sound_files = MagicMock()
     app._on_test_timer_sound()
-    assert reported == ["timer_sound_unplayable"]
+    assert [d.split(":")[0] if ":" in d else d for d in reported] == ([said] if said else [])
