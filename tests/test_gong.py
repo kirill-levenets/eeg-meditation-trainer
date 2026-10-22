@@ -61,6 +61,7 @@ def test_a_new_gong_file_gets_a_new_player_and_the_old_is_released_on_the_main_t
     engine.play_timer_sound(str(custom))
     assert [p.path for p in made] == [engine._timer_bell_path, str(custom)]
     made[0].unload.assert_called_once()  # this test runs on the main thread
+    made[0].set_on_end.assert_called_with(None)  # the old player's end can't end the new play
 
 
 def test_from_the_tick_thread_the_old_gong_is_released_on_the_next_frame_not_there(made, engine, tmp_path):
@@ -153,6 +154,13 @@ def test_an_android_player_whose_start_fails_says_so(monkeypatch):
     assert not player._playing
 
 
+def test_releasing_an_android_player_builds_no_listener(monkeypatch):
+    monkeypatch.setitem(sys.modules, "jnius", SimpleNamespace(autoclass=lambda _name: MagicMock()))
+    player = _AndroidMediaNoisePlayer("chime.wav", loop=False)
+    player.set_on_end(None)  # _release on an alert that never had one
+    player._mp.setOnCompletionListener.assert_not_called()
+
+
 def test_when_no_gong_can_play_the_test_still_ends(made, engine, monkeypatch):
     monkeypatch.setattr(noise_mod, "_make_noise_player", _failing_for(engine._timer_bell_path, made))
     ended = []
@@ -180,6 +188,9 @@ def test_on_desktop_the_apps_own_stop_is_not_the_sounds_end(monkeypatch):
     player.stop()  # the replay's rewind, or Stop pressed
     assert ended == []
     sound.stop()  # the sound reaching its end stops itself
+    assert ended == [1]
+    player.set_on_end(None)  # released or replaced
+    sound.stop()
     assert ended == [1]
 
 

@@ -37,20 +37,21 @@ def test_a_player_never_asks_for_focus(jnius):
     assert "android.media.AudioManager" not in jnius
 
 
-def test_the_session_asks_for_focus_once_and_gives_it_up_at_stop(players):
+def test_the_session_holds_focus_while_its_feedback_plays(players):
     engine = AudioEngine()
     try:
         engine._focus = MagicMock()
         engine.prepare_feedback({"noise": ("noise", "")}, "noise")
         engine.start()
+        assert (engine._focus.request.call_count, engine._focus.abandon.call_count) == (1, 0)
         engine.pause()
+        assert engine._focus.abandon.call_count == 1  # nothing plays while paused
         engine.resume()
         engine._play_bell()
         engine.play_alert()
-        assert engine._focus.request.call_count == 2  # start and resume; _AudioFocus makes the second a no-op
-        engine._focus.abandon.assert_not_called()  # an alert or a pause keeps the session's focus
+        assert (engine._focus.request.call_count, engine._focus.abandon.call_count) == (2, 1)  # an alert keeps it
         engine.stop()
-        engine._focus.abandon.assert_called_once()
+        assert engine._focus.abandon.call_count == 2
     finally:
         engine.cleanup()
 
@@ -66,10 +67,26 @@ def test_a_session_with_every_channel_off_asks_for_nothing(players):
         engine.cleanup()
 
 
-def test_the_focus_is_one_request_given_up_once(jnius, monkeypatch):
+def _manager_answering(jnius, monkeypatch, answer: str) -> MagicMock:
     manager = MagicMock()
+    manager.requestAudioFocus.return_value = getattr(jnius.setdefault("android.media.AudioManager", MagicMock()), answer)
     monkeypatch.setattr(noise_mod, "on_android", lambda: True)
     monkeypatch.setattr(noise_mod, "activity", lambda: MagicMock(getSystemService=lambda _name: manager))
+    return manager
+
+
+def test_a_refused_request_is_asked_again(jnius, monkeypatch):
+    manager = _manager_answering(jnius, monkeypatch, "AUDIOFOCUS_REQUEST_FAILED")  # during a call
+    focus = _AudioFocus()
+    focus.request()
+    focus.request()  # resume
+    assert manager.requestAudioFocus.call_count == 2
+    focus.abandon()
+    manager.abandonAudioFocusRequest.assert_not_called()
+
+
+def test_the_focus_is_one_request_given_up_once(jnius, monkeypatch):
+    manager = _manager_answering(jnius, monkeypatch, "AUDIOFOCUS_REQUEST_GRANTED")
     focus = _AudioFocus()
     focus.request()
     focus.request()

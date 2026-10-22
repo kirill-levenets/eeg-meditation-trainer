@@ -264,8 +264,8 @@ class TestTimerBellLifecycle(unittest.TestCase):
         snd = MagicMock()
         self.engine._gong = snd
         self.engine.stop_timer_bell()
-        snd.stop.assert_called_once()
-        snd.unload.assert_called_once()
+        snd.set_on_end.assert_called_once_with(None)  # its end no longer ends a play
+        snd.unload.assert_called_once()  # each player's unload() stops it first
         self.assertIsNone(self.engine._gong)
 
     def test_stop_timer_bell_safe_when_nothing_playing(self):

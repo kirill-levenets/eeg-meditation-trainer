@@ -100,7 +100,7 @@ class _AndroidMediaNoisePlayer:
     def set_on_end(self, callback) -> None:
         """Called on Android's main thread when a one-shot plays to its end (a loop never ends)."""
         self._on_end = callback
-        if self._listener is None:
+        if callback is not None and self._listener is None:
             self._listener = _completion_listener(self._ended)
             self._mp.setOnCompletionListener(self._listener)
 
@@ -181,7 +181,9 @@ class _AudioFocus:
                        .setAudioAttributes(_media_attributes())
                        .build())
             mgr = activity().getSystemService(autoclass("android.content.Context").AUDIO_SERVICE)
-            mgr.requestAudioFocus(request)
+            if mgr.requestAudioFocus(request) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED:
+                logger.info("Audio focus refused (a call?); the next start or resume asks again")
+                return
             self._mgr, self._request = mgr, request
         except Exception as e:
             logger.warning(f"Audio focus request failed (non-fatal): {e}")
@@ -682,7 +684,7 @@ class AudioEngine:
             with self._one_shot_lock:
                 snd = getattr(self, attr)
                 if snd is not None and self._one_shot_paths.get(attr) != path:
-                    self._retire(snd)
+                    self._retire(snd, attr)
                     snd = None
                     setattr(self, attr, None)
                 if snd is None:
@@ -708,19 +710,22 @@ class AudioEngine:
             Clock.schedule_once(lambda _dt: on_end(), 0)
 
     @staticmethod
-    def _retire(player) -> None:
+    def _retire(player, attr: str) -> None:
         """Release a replaced player, on the main thread: release() on the tick thread deadlocks during a lock."""
-        def _release(*_args):
-            try:
-                player.stop()
-                player.unload()
-            except Exception:
-                logger.exception("Failed to release a replaced one-shot player")
         if threading.current_thread() is threading.main_thread():
-            _release()
+            AudioEngine._release(player, attr)
         else:
             player.volume = 0.0  # silent now: a frame doesn't come while the screen is locked, setVolume is safe here
-            Clock.schedule_once(_release, 0)
+            Clock.schedule_once(lambda _dt: AudioEngine._release(player, attr), 0)
+
+    @staticmethod
+    def _release(player, attr: str) -> None:
+        """Release a one-shot player (unload stops it first); its end no longer ends a play."""
+        try:
+            player.set_on_end(None)
+            player.unload()
+        except Exception:
+            logger.exception(f"Failed to release {attr}")
 
     def _play_bell(self) -> None:
         """Play the sinking bell WAV."""
@@ -757,6 +762,7 @@ class AudioEngine:
                 player.stop()
             except Exception:
                 logger.exception(f"pause: feedback player {sid!r} failed")
+        self._focus.abandon()  # nothing plays while paused: resume asks again
         logger.info("Audio engine paused")
 
     def resume(self) -> None:
@@ -903,13 +909,8 @@ class AudioEngine:
             setattr(self, attr, None)
             self._one_shot_paths.pop(attr, None)
         self._end_one_shot(attr)
-        if not snd:
-            return
-        try:
-            snd.stop()
-            snd.unload()
-        except Exception:
-            logger.exception(f"Failed to stop/unload {attr}")
+        if snd:
+            self._release(snd, attr)
 
     def play_connect_sound(self) -> None:
         """Play a chime to confirm device connected."""
