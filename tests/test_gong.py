@@ -71,6 +71,15 @@ def test_from_the_tick_thread_the_old_gong_is_released_on_the_next_frame_not_the
     _on_tick_thread(lambda: engine.play_timer_sound(str(custom)))
     made[0].unload.assert_not_called()  # release() on the tick thread deadlocks while the screen is locked
     assert made[0].volume == 0.0  # silent meanwhile: no frame comes while the screen is locked
+    made[0].set_on_end.assert_called_with(None)  # and its end can't end the new play meanwhile
+    Clock.tick()
+    made[0].unload.assert_called_once()
+
+
+def test_stopping_the_gong_from_the_tick_thread_releases_it_on_the_next_frame(made, engine):
+    engine.play_timer_sound()
+    _on_tick_thread(engine.stop_timer_bell)
+    made[0].unload.assert_not_called()
     Clock.tick()
     made[0].unload.assert_called_once()
 
@@ -121,13 +130,13 @@ def test_a_custom_gong_that_cant_play_rings_the_default(made, engine, tmp_path, 
     engine.play_timer_sound()
     ended = []
     assert engine.play_timer_sound(str(bad), on_end=lambda: ended.append(1)) == engine._timer_bell_path
-    assert [p.path for p in made] == [engine._timer_bell_path] * 2
-    assert engine._gong is made[1]  # the retired player isn't kept when its replacement fails
-    made[0].unload.assert_called_once()
-    made[1].play.assert_called_once()
+    assert [p.path for p in made] == [engine._timer_bell_path]  # the kept player stays: nothing rebuilt
+    assert engine._gong is made[0] and engine._one_shot_paths["_gong"] == engine._timer_bell_path
+    made[0].unload.assert_not_called()
+    assert made[0].play.call_count == 2
     Clock.tick()
     assert ended == []  # the default gong rings for the Test
-    made[1].set_on_end.call_args.args[0]()
+    made[0].set_on_end.call_args.args[0]()
     Clock.tick()
     assert ended == [1]
 

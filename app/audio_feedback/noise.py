@@ -683,12 +683,11 @@ class AudioEngine:
         try:
             with self._one_shot_lock:
                 snd = getattr(self, attr)
-                if snd is not None and self._one_shot_paths.get(attr) != path:
-                    self._retire(snd, attr)
-                    snd = None
-                    setattr(self, attr, None)
-                if snd is None:
-                    snd = _make_noise_player(path, loop=False)
+                if snd is None or self._one_shot_paths.get(attr) != path:
+                    new = _make_noise_player(path, loop=False)  # raises: the kept player stays as it was
+                    if snd is not None:
+                        self._release(snd, attr)
+                    snd = new
                     setattr(self, attr, snd)
                     self._one_shot_paths[attr] = path
             snd.volume = volume
@@ -710,20 +709,15 @@ class AudioEngine:
             Clock.schedule_once(lambda _dt: on_end(), 0)
 
     @staticmethod
-    def _retire(player, attr: str) -> None:
-        """Release a replaced player, on the main thread: release() on the tick thread deadlocks during a lock."""
-        if threading.current_thread() is threading.main_thread():
-            AudioEngine._release(player, attr)
-        else:
-            player.volume = 0.0  # silent now: a frame doesn't come while the screen is locked, setVolume is safe here
-            Clock.schedule_once(lambda _dt: AudioEngine._release(player, attr), 0)
-
-    @staticmethod
     def _release(player, attr: str) -> None:
-        """Release a one-shot player (unload stops it first); its end no longer ends a play."""
+        """Release a one-shot player on the main thread (release() elsewhere deadlocks during a lock); it ends no play."""
         try:
             player.set_on_end(None)
-            player.unload()
+            if threading.current_thread() is not threading.main_thread():
+                player.volume = 0.0  # silent now: no frame comes while the screen is locked, setVolume is safe here
+                Clock.schedule_once(lambda _dt: AudioEngine._release(player, attr), 0)
+                return
+            player.unload()  # stops it first
         except Exception:
             logger.exception(f"Failed to release {attr}")
 
