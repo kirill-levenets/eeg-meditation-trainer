@@ -987,10 +987,9 @@ class EEGMeditationApp(App):
 
     def _start_session_common(self) -> None:
         """Shared session startup logic after device is resolved."""
-        # If the user starts a new session while a long custom timer bell
-        # from the previous session is still ringing, kill it so it
-        # doesn't overlap with the new session's noise loop.
+        # The session takes the audio over: the last session's gong stops, and so does a Settings test still running.
         self._audio.stop_timer_bell()
+        self._audio.end_test()
         threshold = self._settings_screen.threshold
         program = self._program_settings.for_session()
         self._cancel_settle("apply_threshold")  # a slider move just before Start: the start applies the slider itself
@@ -1888,6 +1887,8 @@ class EEGMeditationApp(App):
 
     def _on_test_audio(self) -> None:
         """Sample the selected feedback + reward sources, then the alert channels."""
+        if self._refused_while_session_runs("testing the audio", why="The test plays through the session's sounds."):
+            return
         sources, gid, reward_id = self._test_audio_sources()
         self._warn_missing_sound_files(sources, force=True)
         self._audio.prepare_feedback(sources, gid)

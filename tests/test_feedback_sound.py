@@ -55,8 +55,9 @@ def test_global_feedback_id_resolves_source():
     assert app._global_feedback_id() == "noise"         # falls back to rain
 
 
-def test_on_test_audio_prepares_selected_source():
+def test_on_test_audio_prepares_selected_source(monkeypatch):
     from unittest.mock import MagicMock
+    monkeypatch.setattr(EEGMeditationApp, "_session_pipeline_live", lambda self: False)  # no session: not refused
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._feedback_source, app._feedback_sound_path = "tone", ""
     app._audio = MagicMock()

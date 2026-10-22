@@ -429,6 +429,8 @@ class AudioEngine:
         self._subtle_alert_enabled: bool = False
         self._disconnect_alert_enabled: bool = APP.DISCONNECT_ALERT_ENABLED
         self._test_active: bool = False
+        self._test_gen: int = 0  # bumped by end_test(): a test sequence started under an older one stops
+        self._test_owns_playing: bool = False  # the test set _is_playing; end_test() hands it back
         self._rate: int = APP.WHITE_NOISE_SAMPLE_RATE
         self._tmpdir: str = tempfile.mkdtemp(prefix="eeg_audio_")
         self._noise_path = os.path.join(self._tmpdir, "noise.wav")
@@ -829,11 +831,14 @@ class AudioEngine:
         armed, it is previewed first (players are near loop start, so the cricket
         chirp is caught) before the below-channel sweep.
         """
+        self.end_test()  # a test restarted supersedes the one running
         was_playing = self._is_playing
         saved_volume = self._volume
         if not was_playing:
             self._is_playing = True
+            self._test_owns_playing = True
         self._test_active = True
+        gen = self._test_gen
         # The Test button demos the rain sweep; prepare a player if a session
         # hasn't (a real session prepares from the user's config, respecting Off).
         if not self._feedback_players:
@@ -843,10 +848,13 @@ class AudioEngine:
             self._start_noise_loop()
         logger.info("Audio test: started")
 
+        def live() -> bool:
+            return self._test_active and self._test_gen == gen
+
         def _run_sequence():
             # Reward sample first: the loop just started, so the reward player is near
             # position 0 and the cricket chirp (~0.2s in) is heard within this window.
-            if self._test_active and reward_id and reward_id in self._feedback_players:
+            if live() and reward_id and reward_id in self._feedback_players:
                 logger.info(f"Audio test: reward sample ({reward_id})")
                 self._reward_feedback = reward_id
                 self._reward_target_volume = self._max_volume
@@ -856,6 +864,8 @@ class AudioEngine:
                 except Exception:
                     logger.exception("Audio test: reward player volume set failed")
                 time.sleep(APP.AUDIO_TEST_DURATION + 1.0)  # long enough to catch one cricket chirp
+                if not live():
+                    return  # a session has the reward channel now
                 self._reward_target_volume = 0.0
                 try:
                     rp.volume = 0.0
@@ -868,36 +878,49 @@ class AudioEngine:
             n_steps = int(sweep_duration / step_interval)
             half = n_steps // 2
             for i in range(n_steps):
-                if not self._test_active:
-                    break
+                if not live():
+                    return
                 if i <= half:
                     vol = self._max_volume * (i / half)
                 else:
                     vol = self._max_volume * (1.0 - (i - half) / (n_steps - half))
                 self._set_noise_volume(vol)
                 time.sleep(step_interval)
-            # Bell (sinking alert)
             self._set_noise_volume(0.0)
-            logger.info("Audio test: sinking bell")
-            self._play_bell()
-            time.sleep(APP.BELL_DURATION + 0.3)
-            # Chime (subtle distraction)
-            logger.info("Audio test: subtle distraction chime")
-            self._play_chime()
-            time.sleep(APP.CHIME_DURATION + 0.3)
-            # Disconnect alert (harsh warble)
-            logger.info("Audio test: disconnect alert")
-            self._play_disconnect()
-            time.sleep(APP.DISCONNECT_DURATION + 0.3)
+            for name, play, length in (("sinking bell", self._play_bell, APP.BELL_DURATION),
+                                       ("subtle distraction chime", self._play_chime, APP.CHIME_DURATION),
+                                       ("disconnect alert", self._play_disconnect, APP.DISCONNECT_DURATION)):
+                if not live():
+                    return
+                logger.info(f"Audio test: {name}")
+                play()
+                time.sleep(length + 0.3)
+            if not live():
+                return
             self._test_active = False
             if not was_playing:
-                Clock.schedule_once(lambda _dt: self.stop(), 0)  # it releases MediaPlayers: the main thread's job
+                Clock.schedule_once(lambda _dt: self._finish_test(gen), 0)  # it releases MediaPlayers: main thread
             else:
                 self._set_noise_volume(saved_volume)
             logger.info("Audio test complete")
 
         t = threading.Thread(target=_run_sequence, daemon=True)
         t.start()
+
+    def end_test(self) -> None:
+        """Stop a running Settings test where it is and call off its teardown: a session takes the engine over."""
+        self._test_gen += 1
+        self._test_active = False
+        if self._test_owns_playing:
+            self._test_owns_playing = False
+            self._is_playing = False
+
+    def _finish_test(self, gen: int) -> None:
+        """The test's teardown, on the main thread, unless a session or a new test took the engine over meanwhile."""
+        if gen != self._test_gen:
+            return
+        self._test_owns_playing = False
+        self.stop()
 
     def play_timer_sound(self, custom_path: str = "", on_end=None) -> str:
         """The timer-end gong, replayed like an alert, safe on the tick thread; returns the file it plays, "" if none."""

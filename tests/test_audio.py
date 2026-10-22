@@ -2,6 +2,7 @@ import os
 import struct
 import threading
 import unittest
+from unittest.mock import MagicMock
 
 from kivy.clock import Clock
 
@@ -14,6 +15,7 @@ from app.audio_feedback.noise import (
     _generate_tone_wav,
 )
 from app.config import APP
+from app.ui.app_manager import EEGMeditationApp
 
 
 def _pcm_samples(pcm: bytes) -> tuple[int, ...]:
@@ -424,3 +426,94 @@ def test_the_audio_tests_teardown_runs_on_the_main_thread(monkeypatch):
     assert stops == [threading.main_thread()]
     monkeypatch.undo()
     eng.cleanup()
+
+
+def _sequence_thread():
+    return next(t for t in threading.enumerate() if getattr(getattr(t, "_target", None), "__name__", "") == "_run_sequence")
+
+
+def _gated_test(monkeypatch, eng, gate):
+    """Start the Settings test with every sleep held at `gate`; record the alerts it plays and its stop."""
+    monkeypatch.setattr(noise_mod, "_make_noise_player", lambda path, loop=True: _FakePlayer(path))
+    monkeypatch.setattr(noise_mod.time, "sleep", lambda _s: gate.wait(2))
+    played, stops = [], []
+    for name in ("_play_bell", "_play_chime", "_play_disconnect"):
+        monkeypatch.setattr(eng, name, lambda n=name: played.append(n))
+    monkeypatch.setattr(eng, "stop", lambda: stops.append(1))
+    eng.test_audio()
+    return played, stops, _sequence_thread()
+
+
+def test_a_session_taking_the_engine_over_ends_the_settings_test(monkeypatch):
+    eng = AudioEngine()
+    gate = threading.Event()
+    played, stops, seq = _gated_test(monkeypatch, eng, gate)
+    eng.end_test()  # the session's start, mid-sweep
+    assert not eng._is_playing  # handed back: the session's start() isn't skipped
+    gate.set()
+    seq.join(2)
+    Clock.tick()
+    assert (played, stops) == ([], [])  # no more alerts over the session, and no teardown of its players
+    monkeypatch.undo()
+    eng.cleanup()
+
+
+def test_a_session_starting_during_the_alerts_stops_them(monkeypatch):
+    eng = AudioEngine()
+    monkeypatch.setattr(noise_mod, "_make_noise_player", lambda path, loop=True: _FakePlayer(path))
+    monkeypatch.setattr(noise_mod.time, "sleep", lambda _s: None)
+    played = []
+
+    def bell():
+        played.append("_play_bell")
+        eng.end_test()  # the session starts while the bell rings
+    monkeypatch.setattr(eng, "_play_bell", bell)
+    for name in ("_play_chime", "_play_disconnect"):
+        monkeypatch.setattr(eng, name, lambda n=name: played.append(n))
+    eng.test_audio()
+    _sequence_thread().join(2)
+    assert played == ["_play_bell"]  # no chime or warble over the session
+    monkeypatch.undo()
+    eng.cleanup()
+
+
+def test_a_session_starting_after_the_test_ends_keeps_its_players(monkeypatch):
+    eng = AudioEngine()
+    gate = threading.Event()
+    gate.set()
+    played, stops, seq = _gated_test(monkeypatch, eng, gate)
+    seq.join(2)
+    assert len(played) == 3
+    eng.end_test()  # the session starts in the frame before the test's teardown runs
+    Clock.tick()
+    assert stops == []
+    monkeypatch.undo()
+    eng.cleanup()
+
+
+def test_a_test_restarted_supersedes_the_one_running(monkeypatch):
+    eng = AudioEngine()
+    gate = threading.Event()
+    played, stops, first = _gated_test(monkeypatch, eng, gate)
+    eng.test_audio()  # Test pressed again mid-test
+    second = next(t for t in threading.enumerate() if t is not first and t.is_alive()
+                  and getattr(getattr(t, "_target", None), "__name__", "") == "_run_sequence")
+    gate.set()
+    first.join(2)
+    second.join(2)
+    Clock.tick()
+    assert len(played) == 3 and stops == [1]  # one sequence's alerts, one teardown: no session thought to be playing
+    monkeypatch.undo()
+    eng.cleanup()
+
+
+def test_the_settings_audio_test_is_refused_while_a_session_runs(monkeypatch):
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    monkeypatch.setattr(EEGMeditationApp, "_session_pipeline_live", lambda self: True)  # running, paused or connecting
+    app._info_popup = MagicMock()
+    app._audio = MagicMock()
+    app._on_test_audio()
+    app._audio.prepare_feedback.assert_not_called()  # it would replace the session's players
+    app._audio.test_audio.assert_not_called()
+    assert app._info_popup.call_args.args[0] == "Session in progress"
+
