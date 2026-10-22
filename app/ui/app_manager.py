@@ -18,7 +18,8 @@ from kivy.uix.modalview import ModalView
 from kivy.uix.screenmanager import ScreenManager, SlideTransition
 from kivy.utils import platform as kivy_platform
 
-from app.android_jni import java_string
+from app.android_jni import activity as android_activity
+from app.android_jni import java_string, on_android
 from app.audio_feedback.noise import AudioEngine
 from app.config import APP
 from app.crash_handler import (
@@ -413,25 +414,22 @@ class EEGMeditationApp(App):
 
     def _start_session_keep_alive_service(self) -> None:
         """Start the session's foreground service: it runs in this process, so the OS keeps this process up."""
-        if not hasattr(sys, "getandroidapilevel"):
+        if not on_android():
             return
         try:
             from jnius import autoclass
-            PythonActivity = autoclass("org.kivy.android.PythonActivity")
             service_cls = autoclass("org.eeg.eegmeditation.SessionForegroundService")
-            service_cls.start(PythonActivity.mActivity, "EEG Meditation", "Meditation session in progress")
+            service_cls.start(android_activity(), "EEG Meditation", "Meditation session in progress")
             logger.info("Session foreground service started.")
         except Exception as e:
             logger.warning(f"Failed to start the session foreground service: {e}")
 
     def _stop_session_keep_alive_service(self) -> None:
-        if not hasattr(sys, "getandroidapilevel"):
+        if not on_android():
             return
         try:
             from jnius import autoclass
-            PythonActivity = autoclass("org.kivy.android.PythonActivity")
-            service_cls = autoclass("org.eeg.eegmeditation.SessionForegroundService")
-            service_cls.stop(PythonActivity.mActivity)
+            autoclass("org.eeg.eegmeditation.SessionForegroundService").stop(android_activity())
             logger.info("Session foreground service stopped.")
         except Exception as e:
             logger.warning(f"Failed to stop the session foreground service: {e}")

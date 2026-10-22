@@ -64,7 +64,7 @@ def test_the_advice_follows_what_the_phone_needs(exempt, maker, want):
 
 
 def test_off_android_nothing_is_offered(monkeypatch, popups):
-    monkeypatch.delattr(sys, "getandroidapilevel", raising=False)
+    monkeypatch.delattr(sys, "getandroidapilevel", raising=False)  # on_android() reads it
     db = _Db()
     _power(db).offer_once()
     assert popups == [] and db.settings == {}
@@ -235,15 +235,20 @@ def test_a_jni_failure_behind_a_button_says_so_instead_of_crashing(android, monk
     assert power._toast.call_count == 2
 
 
-def test_an_alert_that_fails_to_open_is_still_to_come(android, monkeypatch):
+def test_an_alert_that_fails_to_open_doesnt_take_the_app_down_and_comes_again(android, monkeypatch):
+    tries = []
+
     def broken(*_args, **_kwargs):
+        tries.append(1)
         raise RuntimeError("a widget error")
 
     monkeypatch.setattr(pe, "make_message_popup", broken)
     db = _Db()
-    with pytest.raises(RuntimeError):
-        _power(db).offer_once()
+    power = _power(db)
+    power.offer_once()  # at start-up, from a Clock callback: raising here would crash every start
     assert pe.SHOWN_KEY not in db.settings
+    power.offer_once()
+    assert len(tries) == 2  # the next start tries again
 
 
 
@@ -258,3 +263,15 @@ def test_every_return_to_the_app_refreshes_the_row(monkeypatch):
     app.on_resume()
     app._power.refresh.assert_called_once()  # the user may have changed it in the phone's settings meanwhile
     assert scheduled  # and after the session's own UI refresh was queued
+
+
+def test_without_the_activity_a_screen_says_it_couldnt_open(monkeypatch):
+    def gone():
+        raise RuntimeError("JavaException: no activity")
+
+    monkeypatch.setitem(sys.modules, "android", types.SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "android.runnable", types.SimpleNamespace(run_on_ui_thread=lambda fn: fn))
+    monkeypatch.setattr(android_jni, "activity", gone)
+    results = []
+    android_jni.open_first(["any screen"], results.append)
+    assert results == [False]  # so the button's toast still comes

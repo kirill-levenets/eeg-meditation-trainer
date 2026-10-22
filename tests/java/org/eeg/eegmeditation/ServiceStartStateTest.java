@@ -34,6 +34,8 @@ public final class ServiceStartStateTest {
         s.stop();
         s.starting();
         check(!s.wentForeground(), "the first start's going foreground leaves the new start's service up");
+        check(s.state() == ServiceStartState.STARTING, "still starting: the new start's own call is to come");
+        check(!s.wentForeground(), "the new start's going foreground keeps it");
         check(s.state() == ServiceStartState.FOREGROUND, "in the foreground for the new start");
 
         // A start that throws from stopped: nothing is starting, so a stop has nothing to do.
@@ -56,6 +58,23 @@ public final class ServiceStartStateTest {
         s.stop();
         s.startFailed(s.starting());
         check(s.wentForeground(), "the earlier start's noted stop is carried out");
+
+        // Two starts pending, then a stop: it is the latest start's, so its going foreground stops the service.
+        s = new ServiceStartState();
+        s.starting();
+        s.stop();
+        s.starting();
+        s.stop();
+        check(!s.wentForeground(), "the first start's going foreground leaves the stop to the second");
+        check(s.wentForeground(), "the second start's going foreground carries out the stop");
+        check(s.state() == ServiceStartState.STOPPED, "stopped after both");
+
+        // Two starts pending and no stop: the service stays up after both.
+        s = new ServiceStartState();
+        s.starting();
+        s.starting();
+        check(!s.wentForeground() && !s.wentForeground(), "neither start stops it");
+        check(s.state() == ServiceStartState.FOREGROUND, "in the foreground");
 
         // A stop with nothing running leaves nothing behind for the next start.
         s = new ServiceStartState();

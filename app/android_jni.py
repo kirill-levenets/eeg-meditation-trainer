@@ -12,6 +12,10 @@ def java_string(text: str):
     return autoclass("java.lang.String")(text)
 
 
+def on_android() -> bool:
+    return hasattr(sys, "getandroidapilevel")
+
+
 def activity():
     from jnius import autoclass
     return autoclass("org.kivy.android.PythonActivity").mActivity
@@ -55,7 +59,12 @@ def open_first(intents: list, done: Callable[[bool], None]) -> None:
 
     @run_on_ui_thread
     def _run():
-        app = activity()
+        try:
+            app = activity()
+        except Exception:
+            logger.exception("Couldn't reach the app's activity")
+            done(False)
+            return
         for intent in intents:
             try:
                 app.startActivity(intent)

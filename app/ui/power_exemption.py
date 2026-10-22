@@ -1,11 +1,11 @@
 """What may close a locked session: Android's battery optimisation and the maker's power manager, which has no API."""
-import sys
 from collections.abc import Callable
 
 from app.android_jni import (
     component_intent,
     ignores_battery_optimisation,
     manufacturer,
+    on_android,
     open_first,
     settings_intent,
 )
@@ -23,10 +23,6 @@ _APP_LAUNCH_SCREENS = (
     ("com.huawei.systemmanager", "com.huawei.systemmanager.appcontrol.activity.StartupAppControlActivity"),
 )
 SHOWN_KEY = "power_alert_shown"  # app-wide: it is the phone's setting, whichever profile is using it
-
-
-def _on_android() -> bool:
-    return hasattr(sys, "getandroidapilevel")
 
 
 def maker_screen(maker: str) -> str | None:
@@ -61,7 +57,7 @@ class PowerExemption:
 
     def _state(self) -> tuple[bool, str] | None:
         """(exempt, maker) on Android; None off it or when Android can't be asked."""
-        if not _on_android():
+        if not on_android():
             return None
         try:
             return ignores_battery_optimisation(), manufacturer()
@@ -95,25 +91,29 @@ class PowerExemption:
         lines = advice(exempt, maker)
         if not lines:
             return
-        message = ("To save battery, your phone may close EEG Meditation while the screen is locked, and a session "
-                   "then ends early. To let sessions run:\n\n" + "\n".join(f"• {line}" for line in lines)
-                   + "\n\nThe same buttons are in Settings › Device.")
-        buttons = []
-        if not exempt:
-            battery = StyledButton(text="Battery", bg_color=C.ACCENT)
-            battery.bind(on_release=lambda *_: self.on_battery_settings())
-            buttons.append(battery)
-        screen = maker_screen(maker)
-        if screen:
-            maker_btn = StyledButton(text=screen, bg_color=C.ACCENT)
-            maker_btn.bind(on_release=lambda *_: self.on_maker_settings())
-            buttons.append(maker_btn)
-        close = cancel_button("Close")
-        buttons.append(close)
-        popup = make_message_popup("Locked-screen sessions", message, buttons)
-        close.bind(on_release=popup.dismiss)
-        popup.open()
-        self._db.set_setting(SHOWN_KEY, "1")  # after it opened: an alert that failed to build comes again next start
+        try:
+            message = ("To save battery, your phone may close EEG Meditation while the screen is locked, and a session "
+                       "then ends early. To let sessions run:\n\n" + "\n".join(f"• {line}" for line in lines)
+                       + "\n\nThe same buttons are in Settings › Device.")
+            buttons = []
+            if not exempt:
+                battery = StyledButton(text="Battery", bg_color=C.ACCENT)
+                battery.bind(on_release=lambda *_: self.on_battery_settings())
+                buttons.append(battery)
+            screen = maker_screen(maker)
+            if screen:
+                maker_btn = StyledButton(text=screen, bg_color=C.ACCENT)
+                maker_btn.bind(on_release=lambda *_: self.on_maker_settings())
+                buttons.append(maker_btn)
+            close = cancel_button("Close")
+            buttons.append(close)
+            popup = make_message_popup("Locked-screen sessions", message, buttons)
+            close.bind(on_release=popup.dismiss)
+            popup.open()
+        except Exception:  # at start-up: an alert that can't be shown must not take the app down
+            logger.exception("Locked-session alert: couldn't show it; it comes again at the next start")
+            return
+        self._db.set_setting(SHOWN_KEY, "1")  # after it opened: one that failed comes again at the next start
         logger.info(f"Locked-session alert shown (exempt={exempt}, maker={maker})")
 
     def on_battery_settings(self) -> None:
@@ -125,7 +125,7 @@ class PowerExemption:
     def on_maker_settings(self) -> None:
         """Huawei's App launch where the phone lets another app open it, else its Battery screen; App info elsewhere."""
         logger.info("Locked-session settings: the maker's power screen")
-        if not _on_android():
+        if not on_android():
             return
         try:
             intents = []
@@ -139,7 +139,7 @@ class PowerExemption:
             self._opened(False)
 
     def _open(self, actions: list[tuple[str, bool]]) -> None:
-        if not _on_android():
+        if not on_android():
             return
         try:
             open_first([settings_intent(action, package) for action, package in actions], self._opened)
