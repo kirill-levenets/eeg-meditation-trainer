@@ -169,39 +169,47 @@ def _completion_listener(on_complete):
 
 
 class _AudioFocus:
-    """The app's one audio-focus request, held while the session's feedback plays."""
+    """The app's one audio-focus request (listener-less requests are one client), held while any holder plays."""
 
     def __init__(self) -> None:
         self._mgr = None
         self._request = None
+        self._holders: set[str] = set()
+        self._lock = threading.Lock()  # the session holds on the main thread, the gong on the tick or Android's
 
-    def request(self) -> None:
-        """Main thread, when the session's feedback starts; a failure is non-fatal, the players play anyway."""
-        if self._request is not None or not on_android():
-            return
+    def hold(self, holder: str, gain: str = "AUDIOFOCUS_GAIN") -> None:
+        """`holder` plays: ask for focus unless held; the first holder's `gain` stands. Refused, the next hold asks."""
+        with self._lock:
+            self._holders.add(holder)
+            if self._request is None and on_android():
+                self._ask(gain)
+
+    def release(self, holder: str) -> None:
+        """`holder` stopped playing; the last one out gives the focus up."""
+        with self._lock:
+            self._holders.discard(holder)
+            if self._holders or self._request is None:
+                return
+            try:
+                self._mgr.abandonAudioFocusRequest(self._request)
+            except Exception:
+                logger.exception("Abandoning audio focus failed")
+            self._mgr = self._request = None
+
+    def _ask(self, gain: str) -> None:
         try:
             from jnius import autoclass
             AudioManager = autoclass("android.media.AudioManager")
-            request = (autoclass("android.media.AudioFocusRequest$Builder")(AudioManager.AUDIOFOCUS_GAIN)
+            request = (autoclass("android.media.AudioFocusRequest$Builder")(getattr(AudioManager, gain))
                        .setAudioAttributes(_media_attributes())
                        .build())
             mgr = activity().getSystemService(autoclass("android.content.Context").AUDIO_SERVICE)
             if mgr.requestAudioFocus(request) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED:
-                logger.info("Audio focus refused (a call?); the next start or resume asks again")
+                logger.info("Audio focus refused (a call?); the next start, resume or gong asks again")
                 return
             self._mgr, self._request = mgr, request
         except Exception as e:
-            logger.warning(f"Audio focus request failed (non-fatal): {e}")
-
-    def abandon(self) -> None:
-        """Main thread, at the session's audio stop."""
-        if self._request is None:
-            return
-        try:
-            self._mgr.abandonAudioFocusRequest(self._request)
-        except Exception:
-            logger.exception("Abandoning audio focus failed")
-        self._mgr = self._request = None
+            logger.warning(f"Audio focus request failed (non-fatal, the sound plays anyway): {e}")
 
 
 def _make_noise_player(path: str, loop: bool = True):
@@ -572,7 +580,7 @@ class AudioEngine:
         silent). Plays ONLY what prepare_feedback set up — an empty set means every
         channel is Off and must stay silent (no forced rain)."""
         if self._feedback_players:
-            self._focus.request()
+            self._focus.hold("session")
         for sid, player in self._feedback_players.items():
             try:
                 player.volume = self._volume if sid == self._active_feedback else 0.0
@@ -685,8 +693,9 @@ class AudioEngine:
             return True
         return False
 
-    def _play_one_shot(self, attr: str, path: str, volume: float, on_end=None) -> bool:
-        """Replay a one-shot's kept player, a new file in a new one (a MediaPlayer on Android); False if it can't play."""
+    def _play_one_shot(self, attr: str, path: str, volume: float, on_end=None, focus: str = "") -> bool:
+        """Replay a one-shot's kept player, a new file in a new one (a MediaPlayer on Android); False if it can't play.
+        With `focus` (a gain), the app's audio focus is held for it until its play is over."""
         self._end_one_shot(attr)  # a replay ends the play before it
         try:
             with self._one_shot_lock:
@@ -717,7 +726,10 @@ class AudioEngine:
             snd.stop()  # rewinds a replay
             if on_end is not None:
                 self._one_shot_ends[attr] = on_end
+            if on_end is not None or focus:
                 snd.set_on_end(lambda: self._end_one_shot(attr))
+            if focus:
+                self._focus.hold(attr, focus)
             snd.play()
             return True
         except Exception as e:
@@ -727,7 +739,8 @@ class AudioEngine:
             return False
 
     def _end_one_shot(self, attr: str) -> None:
-        """A one-shot's play is over (played out, replayed or released): its on_end runs once, on Kivy's thread."""
+        """A one-shot's play is over (played out, replayed or released): its focus goes, its on_end runs once."""
+        self._focus.release(attr)
         on_end = self._one_shot_ends.pop(attr, None)
         if on_end is not None:
             Clock.schedule_once(lambda _dt: on_end(), 0)
@@ -780,7 +793,7 @@ class AudioEngine:
                 player.stop()
             except Exception:
                 logger.exception(f"pause: feedback player {sid!r} failed")
-        self._focus.abandon()  # nothing plays while paused: resume asks again
+        self._focus.release("session")  # nothing plays while paused: resume asks again
         logger.info("Audio engine paused")
 
     def resume(self) -> None:
@@ -815,7 +828,7 @@ class AudioEngine:
             self._ramp_thread.join(timeout=0.5)
             self._ramp_thread = None
         self._teardown_feedback_players()
-        self._focus.abandon()
+        self._focus.release("session")  # a gong still ringing keeps it until its end
         for snd_attr in self._STOP_UNLOADS:
             self._unload_one_shot(snd_attr)
         self._is_playing = False
@@ -926,10 +939,11 @@ class AudioEngine:
         """The timer-end gong, replayed like an alert, safe on the tick thread; returns the file it plays, "" if none."""
         logger.info("Timer gong")
         custom = custom_path if (custom_path and os.path.isfile(custom_path)) else ""
-        if custom and self._play_one_shot("_gong", custom, 1.0, on_end):
+        duck = "AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK"  # other audio dips while it rings, and comes back after
+        if custom and self._play_one_shot("_gong", custom, 1.0, on_end, duck):
             return custom
         # A custom file the player can't open rings the default gong, as a missing one does.
-        if self._play_one_shot("_gong", self._timer_bell_path, 1.0, on_end):
+        if self._play_one_shot("_gong", self._timer_bell_path, 1.0, on_end, duck):
             return self._timer_bell_path
         if on_end is not None:
             Clock.schedule_once(lambda _dt: on_end(), 0)  # nothing plays: the play is over
