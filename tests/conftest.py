@@ -5,10 +5,17 @@ import sys
 os.environ.setdefault("KCFG_GRAPHICS_MAXFPS", "0")
 
 import pytest
+from kivy import properties
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.config import APP, METRICS, SIGMOID
+
+# Kivy's 3.12 wheel (Cython < 3.0.3) leaks the traceback of every exception caught inside it, and these Python-2-only
+# methods raise AttributeError on each pos/size read; without them Kivy takes the same fallback without raising.
+for _cls in (properties.ObservableReferenceList, properties.ObservableList):
+    if "__setslice__" in vars(_cls):
+        delattr(_cls, "__setslice__")
 
 
 def pytest_addoption(parser):

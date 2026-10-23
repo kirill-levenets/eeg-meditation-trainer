@@ -19,7 +19,13 @@ The user gate and profiles, the Android back button, error reporting, test guard
 ## Tests
 
 - `tests/test_silent_failure_guardrail.py` is an AST guardrail run on every `pytest` (issue #29 invariant): it scans `app/` and fails on a **silent user-gate return** (`if not self._current_user_id: return/pass` with no user-feedback call) or a **discarded bool-returning DB write** (`add_saved_program`/`add_saved_formula` result ignored). A legitimately-silent site is grandfathered with a standalone `# silent-ok: <reason>` marker (not a ruff noqa code) that must carry a reason. The gate itself is opened by the single `_open_user_gate(delay)` (build / on_resume / self-delete all route through it) and its decision is `resolve_startup_user(db)`.
-- `conftest.py` only sets `sys.path` — no shared fixtures.
+- `conftest.py` sets `KCFG_GRAPHICS_MAXFPS=0` before Kivy loads: tests pump frames themselves, and the 60 fps cap only slept between them.
+  It adds `--run-slow` (tests marked `slow` are skipped without it; the pre-push run passes it) and `_restore_config`, so a test's change to `APP`/`METRICS`/`SIGMOID` doesn't reach the next file.
+  It also removes Kivy's Python-2-only `ObservableList`/`ObservableReferenceList.__setslice__`.
+  Kivy 2.3.0's Python 3.12 wheel is built with Cython ≤ 3.0.0, which leaks the traceback of every exception caught inside compiled code (fixed in Cython 3.0.3, cython#5724).
+  Those methods always raise AttributeError and Kivy calls them on every `pos`/`size` read and change, so over a run the leaked tracebacks grew to millions of objects that every full collection rescanned; without them Kivy takes its `__setitem__` fallback directly.
+  The rest of the leak, `WeakProxy.__ref__` raising on dead proxies while Kivy unbinds a dropped widget, stays: removing it would mean copying Kivy's code.
+  The app keeps Kivy as it is: it builds its screens once, so its leak stays small.
 
 ## Build and CI
 
