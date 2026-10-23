@@ -1,5 +1,6 @@
 import os
 import sys
+import tempfile
 
 # Tests pump frames themselves (EventLoop.idle loops): Kivy's 60 fps cap would sleep ~12 ms in each.
 os.environ.setdefault("KCFG_GRAPHICS_MAXFPS", "0")
@@ -33,6 +34,15 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "slow" in item.keywords:
             item.add_marker(skip)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _temp_files_in_basetemp(tmp_path_factory):
+    """Temp files the code under test leaves (each AudioEngine's sound folder) go to pytest's rotated basetemp."""
+    saved = tempfile.tempdir
+    tempfile.tempdir = str(tmp_path_factory.mktemp("tmp"))
+    yield
+    tempfile.tempdir = saved
 
 
 @pytest.fixture(autouse=True)
