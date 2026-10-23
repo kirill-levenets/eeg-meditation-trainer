@@ -4,7 +4,8 @@ Compare your meditation formula output against the NeuroSky Windows app ("EEG Me
 
 ## Overview
 
-The MindWave headset only supports one Bluetooth connection at a time. Two approaches:
+The MindWave headset only supports one Bluetooth connection at a time.
+Two approaches:
 
 1. **Simultaneous** (recommended) — splitter feeds both apps the same live stream
 2. **Record & replay** — record a session, replay to each app separately
@@ -34,7 +35,8 @@ This single script:
 4. Prints **READY!** when both apps are receiving data
 5. Auto-restarts the splitter if BT connection drops
 
-Click **Start** in both apps when you see the READY message. Press **Ctrl+C** to stop everything.
+Click **Start** in both apps when you see the READY message.
+Press **Ctrl+C** to stop everything.
 
 You can also pass a custom MAC address:
 ```bash
@@ -63,7 +65,8 @@ ln -sf $(readlink -f /tmp/mindwave_a) ~/.wine/dosdevices/com1
 echo "COM1 -> $(readlink ~/.wine/dosdevices/com1)"
 ```
 
-Click **Start** in both apps. Press Ctrl+C in Terminal 1 to stop everything.
+Click **Start** in both apps.
+Press Ctrl+C in Terminal 1 to stop everything.
 
 > **Important:** Wine resets `com1 -> /dev/rfcomm0` on every startup.
 > You must re-link com1 **after** launching Wine, every time.
@@ -110,7 +113,8 @@ python3 tools/replay.py session.eeg --loop
 python main.py --serial /tmp/mindwave_replay
 ```
 
-Both apps process the exact same EEG data. Compare the results.
+Both apps process the exact same EEG data.
+Compare the results.
 
 ### Replay Options
 
@@ -126,7 +130,8 @@ python3 tools/replay.py session.eeg --device /dev/rfcomm0
 ```
 
 > **Note:** At each loop boundary the Wine app may briefly show "low battery"
-> as the stream restarts. Use longer recordings (3-5 min) to minimize this.
+> as the stream restarts.
+> Use longer recordings (3-5 min) to minimize this.
 
 ---
 

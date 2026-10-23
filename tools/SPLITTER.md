@@ -60,7 +60,8 @@ Clone the NeuroSky MindWave data stream to two applications simultaneously — u
    - Pair 1: `COM10 ↔ COM11`
    - Pair 2: `COM12 ↔ COM13`
 
-   In the com0com GUI, click "Add Pair" and set the port names. Make sure "enable buffer overrun" is checked for both sides.
+   In the com0com GUI, click "Add Pair" and set the port names.
+   Make sure "enable buffer overrun" is checked for both sides.
 
 ### Step 2: Run the splitter
 
@@ -79,7 +80,8 @@ Output:
 
 ### Step 3: Point each app at its paired port
 
-The splitter writes to COM10 and COM12. Each app reads from the **other end** of the pair:
+The splitter writes to COM10 and COM12.
+Each app reads from the **other end** of the pair:
 
 ```
 MindWave (COM5) → splitter reads

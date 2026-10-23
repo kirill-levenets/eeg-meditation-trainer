@@ -1,44 +1,93 @@
 # EEG Meditation Trainer
 
-Cross-platform application for training Shamatha meditation using EEG neurofeedback from NeuroSky MindWave Mobile 2. Built with Python/Kivy for Android, Linux, Windows, and macOS.
+Cross-platform application for training Shamatha meditation using EEG neurofeedback from NeuroSky MindWave Mobile 2.
+Built with Python/Kivy for Android, Linux, Windows, and macOS.
 
 Inspired by the [EEG meditation research and Vernihor formula](https://scriptures.ru/yoga/eeg_voprosy_i_otvety.htm) from scriptures.ru.
 
 ## Features
 
-- **Real-time EEG visualization** — Live scrollable graph with Y-axis up to 200, horizontal grid lines every 20 units, real-time value labels, X-axis with relative and wall-clock timestamps, dashed threshold line that steps where the threshold changed (a moved slider, a program's segments) — live and in History, session start time display
+- **Real-time EEG visualization**
+  — Live scrollable graph with Y-axis up to 200, horizontal grid lines every 20 units, real-time value labels, X-axis with relative and wall-clock timestamps, dashed threshold line that steps where the threshold changed (a moved slider, a program's segments)
+  — live and in History, session start time display
 - **Raw EEG data tab** — Oscillating EEG waveform (512Hz) + aggregated frequency band plots with adaptive Y-axis scaling; both graphs synchronized for linked scrolling and zooming
-- **Scrollable graphs** — All graphs support touch drag/slide scrolling and pinch-to-zoom (Android) / mouse wheel zoom (desktop); every graph fits the whole session with one tap (the Session screen's as it grows); its buttons sit in the plot's corners and its margins take only what its labels need; time labels read hours past an hour; chunked line rendering; vertical + horizontal grid lines
-- **Meditation scoring** — Vernihor shamatha formula `(avg(ratio, 4) * 0.75 - 0.3) * 100` with sqrt-normalized relative band units and duplicate-sample deduplication; verified against original Windows app (MSE ~28); Distraction and Sinking ported from the original Vernihor app (alpha-gated, shamatha-modulated; Sinking additionally gamma-damped); Subtle Distraction (short-window variance with warmup guard); native NeuroSky eSense Attention & Meditation
+- **Scrollable graphs** — All graphs support touch drag/slide scrolling and pinch-to-zoom (Android) / mouse wheel zoom (desktop);
+  every graph fits the whole session with one tap (the Session screen's as it grows);
+  its buttons sit in the plot's corners and its margins take only what its labels need;
+  time labels read hours past an hour;
+  chunked line rendering;
+  vertical + horizontal grid lines
+- **Meditation scoring** — Vernihor shamatha formula `(avg(ratio, 4) * 0.75 - 0.3) * 100` with sqrt-normalized relative band units and duplicate-sample deduplication;
+  verified against original Windows app (MSE ~28);
+  Distraction and Sinking ported from the original Vernihor app (alpha-gated, shamatha-modulated; Sinking additionally gamma-damped);
+  Subtle Distraction (short-window variance with warmup guard);
+  native NeuroSky eSense Attention & Meditation
 - **Session markers** — Place vertical markers on all graphs during a session to tag significant moments; markers stored in DB, displayed in diary previews, exported in CSV as a separate column
-- **Multi-channel audio engine** — Ch1: selectable continuous feedback sound (Rain noise, built-in Tone drone, or a custom audio file — wav/mp3/ogg/flac/m4a); volume log-scales with the active metric. An above-threshold **reward** channel that fades in as you exceed the threshold, with an extra **Crickets** source — a soft cricket chirp about once every 10 s as a "still here / doing well" cue. Ch2: tingsha bell for sinking alerts; Ch3: chime for subtle distraction; Ch4: warble for disconnect alert. Configurable audio control metric (Meditation, Shamatha, NS Meditation, NS Attention, Custom Formula slot 1/2/3; falls back to shamatha if the selected slot is invalid). Feedback and reward sources are chosen via a picker in Settings → Audio; custom file browsable via a file picker
-- **Scoring against the threshold in force** — moving the threshold during a session moves the feedback sound, Time Above Threshold, Longest Streak and the SHAMATHA badge together, once the slider stays put for half a second; every recorded tick stores the metric it was scored on, its value and the threshold in force (also in CSV exports), and the session cards list the thresholds in order ("70 › 85")
+- **Multi-channel audio engine** — Ch1: selectable continuous feedback sound (Rain noise, built-in Tone drone, or a custom audio file — wav/mp3/ogg/flac/m4a); volume log-scales with the active metric.
+  An above-threshold **reward** channel that fades in as you exceed the threshold, with an extra **Crickets** source — a soft cricket chirp about once every 10 s as a "still here / doing well" cue.
+  Ch2: tingsha bell for sinking alerts; Ch3: chime for subtle distraction; Ch4: warble for disconnect alert.
+  Configurable audio control metric (Meditation, Shamatha, NS Meditation, NS Attention, Custom Formula slot 1/2/3; falls back to shamatha if the selected slot is invalid).
+  Feedback and reward sources are chosen via a picker in Settings → Audio; custom file browsable via a file picker
+- **Scoring against the threshold in force** — moving the threshold during a session moves the feedback sound, Time Above Threshold, Longest Streak and the SHAMATHA badge together, once the slider stays put for half a second;
+  every recorded tick stores the metric it was scored on, its value and the threshold in force (also in CSV exports), and the session cards list the thresholds in order ("70 › 85")
 - **Meditation timer** — Configurable duration (1-120 min) with presets, countdown display, auto-stop, end sound picker (default bell or your own file) with a test button
-- **Session Program** — Settings → Timer **Simple | Program** toggle: Program mode lets you define an ordered list of timed segments, each with its own formula (Shamatha, Meditation, NS Attention, NS Meditation, or any saved custom formula), target level, and end-cue sound (Chime or Warble). The program's total duration drives the session timer; a transition chime plays at each segment boundary and the target/audio-driver update live. The live graph highlights the currently-trained series and plots each segment's formula; a stepped threshold line tracks per-segment targets on both the live and diary graphs. Programs are saved by name (unique; re-saving the same name overwrites with a confirmation dialog; load and delete also confirm). The duration button on the Session screen shows **P** in program mode and opens a quick Programs picker to switch or inspect the active program — the loaded program's name is displayed. The program that ran is recorded per session so the diary can replay the stepped threshold. Each segment also has a **Feedback** picker (Default / Rain / Tone / Custom file); "Default" inherits the global Audio selection. The feedback source switches at each segment boundary, lock-safely.
+- **Session Program** — Settings → Timer **Simple | Program** toggle:
+  Program mode lets you define an ordered list of timed segments, each with its own formula (Shamatha, Meditation, NS Attention, NS Meditation, or any saved custom formula), target level, and end-cue sound (Chime or Warble).
+  The program's total duration drives the session timer; a transition chime plays at each segment boundary and the target/audio-driver update live.
+  The live graph highlights the currently-trained series and plots each segment's formula; a stepped threshold line tracks per-segment targets on both the live and diary graphs.
+  Programs are saved by name (unique; re-saving the same name overwrites with a confirmation dialog; load and delete also confirm).
+  The duration button on the Session screen shows **P** in program mode and opens a quick Programs picker to switch or inspect the active program — the loaded program's name is displayed.
+  The program that ran is recorded per session so the diary can replay the stepped threshold.
+  Each segment also has a **Feedback** picker (Default / Rain / Tone / Custom file); "Default" inherits the global Audio selection.
+  The feedback source switches at each segment boundary, lock-safely.
 - **Session duration picker on Live Session** — Dedicated duration button next to Start shows the active choice (`▼ 10 min` / `▼ Free`) and opens a modal preset picker (5 / 10 / 15 / 20 min / Free); current preset highlighted
 - **State classification** — Stable Focus, Subtle Distraction, Gross Distraction, Sinking, Neutral
-- **NeuroSky MindWave Mobile 2** — Bluetooth RFCOMM on Android (pyjnius) and Linux (Python socket); ThinkGear protocol parser; background reader thread; BT connection wait with status display; paired device scanning, marking the headset in use and the connected one, with a name of your own for each headset
-- **Settings panel** — ThemedAccordion sections: User Profile, Timer, Device, Threshold (max 180), Audio, Display (text size: Normal / Large / Larger; scored line colours: mono or one of five gradients; per profile), Custom Formula, Theme selector; preset buttons under sliders; profile and timer inline; all persisted per user
-- **Custom formula engine** — Up to 3 named custom formula slots, each a Python-style expression with band powers, combined/normalized bands, sqrt-relative bands, computed metrics, math functions, and windowed `avg(expr, N)`; AST-parsed with whitelist validation; save/load formula library per user; one slot drives the audio noise channel; all 3 share a Y-axis (scale 200); on-graph picker has a "Choose…" button per slot to assign from the library without opening Settings
-- **Session diary** — Notes, tags, mood rating (saved with Save Notes, or automatically when you leave the session), CSV export with file save dialog, tabbed signal preview (Metrics / Raw EEG / Frequencies) with markers and threshold line; a Try another threshold slider (one per segment for a program) recalculates time above threshold and the longest streak at another threshold, view only; inline rename/delete moved to history list; session names include device type
+- **NeuroSky MindWave Mobile 2** — Bluetooth RFCOMM on Android (pyjnius) and Linux (Python socket);
+  ThinkGear protocol parser;
+  background reader thread;
+  BT connection wait with status display;
+  paired device scanning, marking the headset in use and the connected one, with a name of your own for each headset
+- **Settings panel** — ThemedAccordion sections:
+  User Profile, Timer, Device, Threshold (max 180), Audio, Display (text size: Normal / Large / Larger; scored line colours: mono or one of five gradients; per profile), Custom Formula, Theme selector;
+  preset buttons under sliders;
+  profile and timer inline;
+  all persisted per user
+- **Custom formula engine** — Up to 3 named custom formula slots, each a Python-style expression with band powers, combined/normalized bands, sqrt-relative bands, computed metrics, math functions, and windowed `avg(expr, N)`;
+  AST-parsed with whitelist validation;
+  save/load formula library per user;
+  one slot drives the audio noise channel;
+  all 3 share a Y-axis (scale 200);
+  on-graph picker has a "Choose…" button per slot to assign from the library without opening Settings
+- **Session diary** — Notes, tags, mood rating (saved with Save Notes, or automatically when you leave the session), CSV export with file save dialog, tabbed signal preview (Metrics / Raw EEG / Frequencies) with markers and threshold line;
+  a Try another threshold slider (one per segment for a program) recalculates time above threshold and the longest streak at another threshold, view only;
+  inline rename/delete moved to history list;
+  session names include device type
 - **Full signal storage** — Raw bands, computed metrics, native NeuroSky values, markers — all per-tick in SQLite with automatic schema migration
 - **CSV export** — Full session data with file chooser dialog; includes marker column
 - **Mock EEG simulation** — NeuroSky-compatible: band powers, 512Hz raw waveform, eSense values; state machine with smooth transitions
 - **User profiles** — Multiple profiles with per-user sessions, settings, and formulas; last user persisted; diary disabled until user selected
 - **Session guards** — Start blocked without user or device; every ending (Stop, timer, lost signal) saves the session; the end card adds notes or deletes the session after a confirmation
 - **Navigation** — 3-tab bottom navigation (Session / History / Settings) with Material Design icons
-- **First run** — on first launch, create a profile or pick an existing one, so a restored database doesn't lose history; a single paired MindWave is then selected automatically, several open Settings → Device to pick one, and with none the app runs on simulated EEG (demo mode)
+- **First run** — on first launch, create a profile or pick an existing one, so a restored database doesn't lose history;
+  a single paired MindWave is then selected automatically, several open Settings → Device to pick one, and with none the app runs on simulated EEG (demo mode)
 - **Existing-user picker** — The first-run popup and Settings → User Profile share one form: pick an existing profile or type a new name; duplicate names trigger an inline "Use existing 'X'" / "Change name" choice (DB enforces unique names)
 - **Session end summary** — Post-session overlay with stats and quick notes field
-- **History view** — Calendar heatmap (GitHub-style by avg shamatha) **or** 14-day bar chart, toggleable per user, paged back in time with arrows or a sideways swipe (back to the first session, a tap on the dates returns to today); tap a day in either to filter the session list. A totals table under the chart sums the day, week and month around today or the tapped day, and all time: total time, time on target and best streak. A chevron folds the chart and the totals away so the list gets the screen. Each session row shows its date and start time, the metric it was scored on with its average, the duration, the longest streak and the first line of its notes
+- **History view** — Calendar heatmap (GitHub-style by avg shamatha) **or** 14-day bar chart, toggleable per user, paged back in time with arrows or a sideways swipe (back to the first session, a tap on the dates returns to today);
+  tap a day in either to filter the session list.
+  A totals table under the chart sums the day, week and month around today or the tapped day, and all time: total time, time on target and best streak.
+  A chevron folds the chart and the totals away so the list gets the screen.
+  Each session row shows its date and start time, the metric it was scored on with its average, the duration, the longest streak and the first line of its notes
 - **Theme system** — 4 themes (Dark Blue, Dark Green, Light Cream, Light Green) with live refresh; custom styled widgets with rounded corners
 - **App icon** — Custom EEG brainwave icon and Android presplash
 - **macOS support** — Native build via PyInstaller
 - **Android storage** — Tries /sdcard/EEGMeditation, falls back to app-private storage if permission denied
-- **Desktop DB location** — Linux `~/.local/share/EEGMeditation/`, Windows `%APPDATA%\EEGMeditation\`, macOS `~/Library/Application Support/EEGMeditation/`; one-time migration of any pre-existing DB at the old project-root / next-to-binary path
-- **Manual Backup / Restore** — Settings → Data Backup writes a transaction-safe copy of your sessions (SQLite online backup API) to `Documents/EEGMeditation/` on Android (Telegram-/MTP-friendly) or a user-chosen location on desktop; Restore validates the file then force-restarts the app
+- **Desktop DB location** — Linux `~/.local/share/EEGMeditation/`, Windows `%APPDATA%\EEGMeditation\`, macOS `~/Library/Application Support/EEGMeditation/`;
+  one-time migration of any pre-existing DB at the old project-root / next-to-binary path
+- **Manual Backup / Restore** — Settings → Data Backup writes a transaction-safe copy of your sessions (SQLite online backup API) to `Documents/EEGMeditation/` on Android (Telegram-/MTP-friendly) or a user-chosen location on desktop;
+  Restore validates the file then force-restarts the app
 - **Adaptive landscape layout** — fixed graph height when viewport is tall; scroll mode when short (graph would fall below dp(400)); controls live inside the scrollable body.
-- **Multi-hour locked-screen sessions on Android** — foreground service + partial wake lock keeps the session running with the screen off; EEG compute and audio volume updates run on a daemon thread independent of Kivy's main loop. On phones whose maker closes background apps anyway (Huawei, Xiaomi, Samsung, …), the app explains at first start what to allow (battery optimisation; Huawei's App launch) and keeps the buttons in Settings → Device.
+- **Multi-hour locked-screen sessions on Android** — foreground service + partial wake lock keeps the session running with the screen off; EEG compute and audio volume updates run on a daemon thread independent of Kivy's main loop.
+  On phones whose maker closes background apps anyway (Huawei, Xiaomi, Samsung, …), the app explains at first start what to allow (battery optimisation; Huawei's App launch) and keeps the buttons in Settings → Device.
 - **Audio continues playing through screen lock on Android** — noise channel uses `MediaPlayer` (`USAGE_MEDIA` audio attributes) instead of SDL2 mixer so it survives screen lock.
 - **Global crash handler** — in-app dialog with a pre-formatted crash report copied to clipboard.
 - **Toggle bottom stats card** between live metrics and session aggregates.
@@ -154,7 +203,8 @@ Requires Python 3.10+, `build-essential`, `pkg-config`.
 buildozer android debug deploy run logcat
 ```
 
-Requires Python 3.10+, JDK 17. First build downloads Android SDK/NDK (~1.5 GB).
+Requires Python 3.10+, JDK 17.
+First build downloads Android SDK/NDK (~1.5 GB).
 
 System deps (Ubuntu/Debian):
 ```bash
@@ -197,7 +247,10 @@ All tunable parameters in `app/config.py`:
 
 ## Disclaimer
 
-This software is provided for educational and personal exploration purposes only. It is **not a medical device** and must not be used for medical diagnosis, treatment, or any clinical purpose. EEG data from consumer-grade headsets (NeuroSky MindWave) is inherently noisy and should not be relied upon for health decisions. Use at your own risk.
+This software is provided for educational and personal exploration purposes only.
+It is **not a medical device** and must not be used for medical diagnosis, treatment, or any clinical purpose.
+EEG data from consumer-grade headsets (NeuroSky MindWave) is inherently noisy and should not be relied upon for health decisions.
+Use at your own risk.
 
 ## Tech Stack
 
