@@ -14,6 +14,10 @@ from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.textinput import TextInput
 
+from app.ui.diary_screen import DiaryScreen
+from app.ui.history_screen import HistoryScreen
+from app.ui.live_session import LiveSessionScreen
+from app.ui.settings_screen import SettingsScreen
 from app.ui.theme import (
     _FG_DARK,
     _FG_LIGHT,
@@ -29,6 +33,7 @@ from app.ui.theme import (
     make_message_popup,
     make_scroll_popup,
 )
+from tests._shared_screens import SharedScreens, sections
 from tests.test_theme_switch import _own_instructions, stale_colours
 
 
@@ -37,6 +42,12 @@ def _restore_theme():
     saved = C.theme_name
     yield
     C.set_theme(saved)
+
+
+@pytest.fixture(scope="module")
+def screens():
+    """This module's SharedScreens, released with it."""
+    return SharedScreens()
 
 
 def _pump(n: int = 8) -> None:
@@ -129,11 +140,10 @@ def test_an_open_popup_follows_a_theme_switch():
 
 
 @pytest.mark.parametrize("theme", list(THEMES))
-def test_the_in_screen_modals_are_the_same_panel_with_readable_text(theme):
-    from app.ui.live_session import LiveSessionScreen
+def test_the_in_screen_modals_are_the_same_panel_with_readable_text(theme, screens):
     from app.ui.widgets.loading_overlay import LoadingOverlay
     C.set_theme(theme)
-    screen = LiveSessionScreen()
+    screen = screens(LiveSessionScreen)
     loading = LoadingOverlay()
     Window.add_widget(screen)
     Window.add_widget(loading)
@@ -165,7 +175,6 @@ _PORTRAIT, _LANDSCAPE = (dp(360), dp(780)), (dp(732), dp(360))
 
 @pytest.fixture
 def end_card():
-    from app.ui.live_session import LiveSessionScreen
     old = Window.size
     screen = LiveSessionScreen()
     Window.add_widget(screen)
@@ -353,12 +362,9 @@ def test_a_selected_button_glyph_is_auto_and_readable_on_its_fill(theme):
 
 
 @pytest.mark.parametrize("theme", list(THEMES))
-def test_the_app_selected_states_are_readable(theme):
-    from app.ui.history_screen import HistoryScreen
-    from app.ui.live_session import LiveSessionScreen
-    from app.ui.settings_screen import SettingsScreen
+def test_the_app_selected_states_are_readable(theme, screens):
     C.set_theme(theme)
-    live, hist, sett = LiveSessionScreen(), HistoryScreen(), SettingsScreen()
+    live, hist, sett = screens(LiveSessionScreen), screens(HistoryScreen), screens(SettingsScreen)
     live._set_view("raw")
     live._set_view("metrics")
     hist.set_view_mode("bars")
@@ -405,21 +411,17 @@ def _accent_buttons_with_unreadable_text(root) -> list[str]:
 
 
 @pytest.mark.parametrize("theme", list(THEMES))
-def test_no_screen_draws_a_fixed_glyph_colour_on_an_accent_fill(theme):
-    from app.ui.diary_screen import DiaryScreen
-    from app.ui.history_screen import HistoryScreen
-    from app.ui.live_session import LiveSessionScreen
-    from app.ui.settings_screen import SettingsScreen
+def test_no_screen_draws_a_fixed_glyph_colour_on_an_accent_fill(theme, screens):
     C.set_theme(theme)
-    live, hist, diary, sett = LiveSessionScreen(), HistoryScreen(), DiaryScreen(), SettingsScreen()
+    live, hist, diary, sett = (screens(LiveSessionScreen), screens(HistoryScreen), screens(DiaryScreen),
+                               screens(SettingsScreen))
     live._set_view("raw")
     live._set_view("metrics")
     hist.set_view_mode("bars")
     diary._switch_graph_tab("raw")
     sett.timer.load_program([{"minutes": 10, "target": 50, "formula": "shamatha_score"}], "program")
-    sections = [x for x in sett.walk(restrict=True) if type(x).__name__ == "_AccordionSection"]
     bad = []
-    for sec in sections:
+    for sec in sections(sett):
         sec.open()
         bad += _accent_buttons_with_unreadable_text(sett)
     sett.timer.set_program_mode("simple")
@@ -478,7 +480,6 @@ def test_the_diagnostic_dialog_falls_back_to_plain_widgets_if_the_themed_one_fai
 def test_the_session_end_card_scrolls_rather_than_clipping_on_a_short_screen():
     from kivy.uix.scrollview import ScrollView
 
-    from app.ui.live_session import LiveSessionScreen
     screen = LiveSessionScreen()
     Window.add_widget(screen)
     try:
@@ -500,7 +501,6 @@ def test_the_session_end_card_scrolls_rather_than_clipping_on_a_short_screen():
 
 
 def test_the_connection_card_has_no_blank_slot_for_a_hidden_retry():
-    from app.ui.live_session import LiveSessionScreen
     screen = LiveSessionScreen()
     Window.add_widget(screen)
     try:
@@ -521,7 +521,6 @@ def test_the_connection_card_has_no_blank_slot_for_a_hidden_retry():
 def test_the_in_screen_modals_block_taps_on_the_screen_behind():
     from kivy.tests.common import UnitTestTouch
 
-    from app.ui.live_session import LiveSessionScreen
     screen = LiveSessionScreen()
     Window.add_widget(screen)
     hits = []
@@ -550,10 +549,9 @@ def test_a_popup_given_no_size_keeps_kivys_full_size():
 
 
 @pytest.mark.parametrize("theme", list(THEMES))
-def test_the_export_result_message_is_readable(theme):
-    from app.ui.diary_screen import DiaryScreen
+def test_the_export_result_message_is_readable(theme, screens):
     C.set_theme(theme)
-    screen = DiaryScreen()
+    screen = screens(DiaryScreen)
     for success in (True, False):
         screen._show_export_result("Saved to /tmp/session_1.csv" if success else "Export error:\nno space",
                                    success=success)
@@ -567,10 +565,9 @@ def test_the_export_result_message_is_readable(theme):
 
 
 @pytest.mark.parametrize("theme", list(THEMES))
-def test_the_marker_hotkey_capture_state_is_readable(theme):
-    from app.ui.settings_screen import SettingsScreen
+def test_the_marker_hotkey_capture_state_is_readable(theme, screens):
     C.set_theme(theme)
-    s = SettingsScreen()
+    s = screens(SettingsScreen)
     btn = s.display._marker_hotkey_btn
     s.display._on_marker_hotkey_pressed()
     try:
@@ -581,7 +578,6 @@ def test_the_marker_hotkey_capture_state_is_readable(theme):
 
 
 def test_the_session_end_card_opens_at_its_top():
-    from app.ui.live_session import LiveSessionScreen
     screen = LiveSessionScreen()
     Window.add_widget(screen)
     try:
