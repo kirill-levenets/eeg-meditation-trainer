@@ -68,8 +68,8 @@ def scored_ticks(session: dict, rows: list[dict], formula_series: dict[str, list
                  replay_formulas: FormulaReplay | None = None) -> ScoredTicks | None:
     """What each tick was scored on and against: its stored record, or for an older session its saved metric
     (meditation before it was saved, #51) at its threshold, or its program's segments, their formulas run through
-    `replay_formulas`. None when it can't be replayed: a formula the replay couldn't rebuild (its stored column is
-    stale), a program that can't be read or has no tick."""
+    `replay_formulas`. None when it can't be replayed: a formula the replay couldn't rebuild (formulas aren't stored
+    per tick), a program that can't be read or has no tick."""
     if session.get("session_program"):
         return _program_ticks(session["session_program"], rows, formula_series, replay_formulas)
     target = float(session.get("threshold_used") or 0)
