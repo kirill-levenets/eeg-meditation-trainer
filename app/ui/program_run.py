@@ -7,9 +7,9 @@ from app.logger import logger
 from app.metrics.custom_formula import CustomFormulaEvaluator, evaluate_series
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
+    RunnablePlan,
     SessionProgram,
-    program_evaluators,
-    program_plan,
+    runnable_plan,
     segment_target,
 )
 from app.ui.live_session import SERIES_NAMES
@@ -21,14 +21,13 @@ def program_line_name(custom: dict) -> str:
     return f"Program: {name}" if name else "Program"
 
 
-def show_program_series(graph, prog: SessionProgram) -> None:
+def show_program_series(graph, plan: RunnablePlan) -> None:
     """Set the graph to EXACTLY the program's metric set and label each program custom line. Shared by a program
     session's start and the idle preview."""
-    keys, custom_slots, _ = program_plan(prog)
-    for slot, custom in custom_slots:
+    for slot, custom in plan.customs:
         graph.set_series_name(slot, program_line_name(custom))
     for k in graph.series_keys():
-        graph.set_visible(k, k in keys)
+        graph.set_visible(k, k in plan.keys)
 
 
 class ProgramRun:
@@ -39,18 +38,20 @@ class ProgramRun:
     """
 
     def __init__(self, session_manager, audio, live_screen, *, on_main: Callable[[Callable[[], object]], None],
-                 formula_vars: Callable[[dict, dict], dict]) -> None:
+                 formula_vars: Callable[[dict, dict], dict], warn: Callable[[str, str], None]) -> None:
         self._session_manager = session_manager
         self._audio = audio
         self._live_screen = live_screen
         self._on_main = on_main
         self._formula_vars = formula_vars
+        self._warn = warn  # (title, message): a popup that stays until read, as the meditator may not be looking
         self.program: SessionProgram | None = None
         self.name = ""  # the program's name at the start; Settings may load or save another during the session
         self.audio_key = ""  # the active segment's metric; transient, never written to the user's baseline
         self.formula_evs: dict[str, CustomFormulaEvaluator] = {}  # slot key -> evaluator, one per distinct custom
         self.seg_idx = -1
         self._segment_keys: list[str] = []  # metric key driven by each segment
+        self.unrunnable: list[str] = []  # the program's custom formulas that don't compile: their segments use shamatha
         self._feedback_ids: list[str] = []  # feedback source of each segment
         self._prev_visibility: dict[str, bool] = {}  # live-graph visibility before the program
 
@@ -73,15 +74,21 @@ class ProgramRun:
         self.audio_key = ""
         self.formula_evs = {}
         self._segment_keys = []
+        self.unrunnable = []
         self._feedback_ids = feedback_ids
         if prog is None:
             return
         graph = self._live_screen.graph
         # Snapshot every catalog key's visibility so stop restores exactly.
         self._prev_visibility = {k: graph.is_visible(k) for k in graph.series_keys()}
-        show_program_series(graph, prog)
-        _, _, self._segment_keys = program_plan(prog)
-        self.formula_evs = program_evaluators(prog)
+        plan = runnable_plan(prog)
+        show_program_series(graph, plan)
+        self._segment_keys, self.formula_evs, self.unrunnable = plan.segment_keys, plan.evaluators, plan.unrunnable
+        if self.unrunnable:
+            logger.warning(f"Program formulas that can't run, their segments use shamatha: {self.unrunnable}")
+            listed = ", ".join(f'"{name}"' for name in self.unrunnable)
+            self._warn("Formula error in this program", f"Can't run {listed}: Shamatha is used instead.\n"
+                                                        "Settings › Timer / Program edits the program.")
 
     def end(self) -> None:
         """Restore the live graph to its pre-program visibility and drop the program custom-formula
@@ -93,6 +100,7 @@ class ProgramRun:
         self.name = ""
         self.formula_evs = {}
         self._segment_keys = []
+        self.unrunnable = []
         self._feedback_ids = []
         self.audio_key = ""
         prev = self._prev_visibility or dict.fromkeys(PROGRAM_FORMULA_KEYS, False)

@@ -29,6 +29,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **A program segment whose formula couldn't run played maximum noise** (#102):
+  **Save** in Settings → Custom Formula stored any text, and a program segment could pick a saved formula that doesn't compile; the segment then drove the feedback, and was scored, on a value that read 0.
+  Such a segment now drives and is scored on Shamatha, and a message at the session's start names the formula; a session's detail reads its segments as the session ran them.
+  **Save** now refuses a formula that doesn't compile and shows its error.
 - **The in-app help was always in English, partly out of date, and drew its menu paths as empty boxes**:
   Settings › Help & Troubleshooting now shows in Ukrainian on a phone set to Ukrainian (on a computer, when `LANGUAGE` or `LANG` is Ukrainian).
   It now matches the app: the session-length choices, the program editor and its sounds, the "No EEG data received" message, the alerts being off until enabled, the formula variables.

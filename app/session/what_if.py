@@ -10,9 +10,9 @@ from functools import cached_property
 from app.metrics.custom_formula import CustomFormulaEvaluator
 from app.session.scoring import TICK_SECONDS, GoalAccrual, extend_steps, target_steps
 from app.session.session_program import (
+    PROGRAM_FORMULA_KEYS,
     SessionProgram,
-    program_evaluators,
-    program_plan,
+    runnable_plan,
     segment_target,
 )
 
@@ -93,13 +93,18 @@ def _program_ticks(program_json: str, rows: list[dict], formula_series: dict[str
     except (ValueError, TypeError):
         return None
     n = len(rows)
-    _, _, keys = program_plan(program)
+    plan = runnable_plan(program)
+    record = _has_record(rows)
+    # The plan the session ran: a formula that can't compile scores Shamatha, where older builds scored its own line
+    # (read as 0); a record showing that line, or no record at all, is from one of them.
+    dead = set(plan.planned_keys) - set(plan.segment_keys)
+    older = not record or bool(dead and any(r["score_key"] in dead for r in rows))
+    keys = plan.planned_keys if older else plan.segment_keys
     scored_on = [(key, segment_target(seg)) for key, seg in zip(keys, program.segments)]
     by_minutes = [tick for tick, _ in program.threshold_steps(1 / TICK_SECONDS)]
-    record = _has_record(rows)
     starts = _recorded_starts(scored_on, by_minutes, rows) if record else by_minutes
     ends = [min(end, n) for end in [*starts[1:], n]]
-    segments = [Segment(key, target, start, end, _formula_name(seg), i)
+    segments = [Segment(key, target, start, end, _formula_name(seg) if key in PROGRAM_FORMULA_KEYS else "", i)
                 for i, ((key, target), seg, start, end) in enumerate(zip(scored_on, program.segments, starts, ends))
                 if start < end]  # a segment the session never reached, or that the switch after it skipped
     if not segments:
@@ -107,9 +112,8 @@ def _program_ticks(program_json: str, rows: list[dict], formula_series: dict[str
     segments[-1] = replace(segments[-1], end=n)
     if record:
         return ScoredTicks([r["score_value"] for r in rows], [r["score_target"] for r in rows], segments)
-    evaluators = program_evaluators(program)
-    if evaluators and replay_formulas is not None:
-        formula_series = {**formula_series, **replay_formulas(evaluators)}
+    if plan.evaluators and replay_formulas is not None:
+        formula_series = {**formula_series, **replay_formulas(plan.evaluators)}
     values: list[float] = []
     targets: list[float] = []
     for segment in segments:

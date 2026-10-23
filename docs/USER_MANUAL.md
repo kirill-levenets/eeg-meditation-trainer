@@ -305,6 +305,7 @@ Loading a program switches to Program mode.
 - The metrics graph shows the program's lines: each segment's metric or formula.
   Other lines are hidden while it runs (switch any back on in the series list; that isn't saved) and come back as they were when it stops.
   In Program mode the Session screen shows the program's lines before Start too.
+- A formula with an error (one saved before Save checked it) can't run: its segments use Shamatha, and a message at the start names it.
 - At each boundary the ending segment's end cue plays, and the target, the scored metric and the feedback sound switch to the next segment's.
   Time above target counts against each segment's own target.
 - The legend marks the active segment's metric in bold with **»**.
@@ -381,7 +382,7 @@ Three slots (**Formula 1**, **2** and **3**), each with:
 - **name**: the label of its series on the graphs and in a session's detail
 - **formula**: a Python-style expression of band powers, normalized bands, computed metrics and math functions, with `avg(expr, N)` for a moving average
 - **Apply**: evaluates it; a status line shows the current value or the error
-- **Save**: stores it in your formula library under the slot's name
+- **Save**: stores it in your formula library under the slot's name; a formula with an error isn't saved, and the status line shows the error
 
 To put a saved formula into a slot without opening Settings, tap **Choose…** on that slot's row in the live metrics graph's series list.
 Settings → Threshold picks which slot drives the feedback sound.

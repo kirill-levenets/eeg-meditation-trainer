@@ -4,6 +4,7 @@ import os
 from collections.abc import Callable
 
 from app.logger import logger
+from app.metrics.custom_formula import CustomFormulaEvaluator
 from app.metrics.formula_slots import (
     FORMULA_KEYS,
     FormulaSlots,
@@ -74,13 +75,18 @@ class FormulaSettings:
             self.persist(uid)
 
     def on_save(self, idx: int, name: str, formula: str) -> None:
-        """Save a slot's formula to the user's saved library, named by the slot."""
+        """Save a slot's formula to the user's saved library, named by the slot. One that doesn't compile is refused:
+        a program segment can pick any saved formula."""
         uid = self._user_id()
         if not uid:
             self._section.set_formula_slot_status(idx, "No user selected", is_error=True)
             return
         if not formula:
             self._section.set_formula_slot_status(idx, "Nothing to save", is_error=True)
+            return
+        ok, err = CustomFormulaEvaluator().set_formula(formula)
+        if not ok:
+            self._section.set_formula_slot_status(idx, f"Error: {err}", is_error=True)
             return
         # Fall back to a truncated formula as the display name when none is given.
         label = name or (formula[:40] + ("..." if len(formula) > 40 else ""))

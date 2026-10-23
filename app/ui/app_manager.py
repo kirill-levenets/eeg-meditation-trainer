@@ -452,7 +452,7 @@ class EEGMeditationApp(App):
 
         self._live_screen = LiveSessionScreen()
         self._program_run = ProgramRun(self._session_manager, self._audio, self._live_screen, on_main=self._on_main,
-                                       formula_vars=self._eval_formula_vars)
+                                       formula_vars=self._eval_formula_vars, warn=self._info_popup)
         self._settings_screen = SettingsScreen()
         self._history_screen = HistoryScreen()
         self._diary_screen = DiaryScreen()

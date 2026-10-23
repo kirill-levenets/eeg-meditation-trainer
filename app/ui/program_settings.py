@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 from app.logger import logger
 from app.session.manager import SessionState
-from app.session.session_program import SessionProgram
+from app.session.session_program import SessionProgram, runnable_plan
 from app.ui.program_run import show_program_series
 from app.ui.settings_sections.common import saved_program_label
 from app.ui.theme import C
@@ -75,7 +75,7 @@ class ProgramSettings:
         if not uid:
             return  # silent-ok: idle live-graph preview; nothing to show without a user
         if self.governs_live_series():
-            show_program_series(self._live_screen.graph, self.program())
+            show_program_series(self._live_screen.graph, runnable_plan(self.program()))
             self._live_screen.set_training_series(None)  # no active segment in idle
         else:
             self._show_saved_series(uid)

@@ -284,6 +284,10 @@ a bold "»". The live graph and the session
 detail's graph show a stepped threshold line
 that follows each segment's target.
 
+A segment whose formula has an error uses
+Shamatha, and a message at the session's start
+names the formula.
+
 ## Try Another Threshold (session detail)
 
 Open a session in History. Under its stats,
@@ -310,6 +314,9 @@ Settings > Custom Formula has three named slots.
 Each slot (Formula 1/2/3) has a name field, an
 expression input, Apply (evaluate) and Save (to
 the library).
+
+Save refuses a formula with an error and shows
+the error under its slot.
 
 The expression is a Python-style formula. Available
 variables include band powers (alpha1, alpha2,

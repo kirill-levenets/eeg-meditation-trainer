@@ -1,8 +1,13 @@
 from app.session.session_program import (
     SessionProgram,
     program_evaluators,
+    program_plan,
+    runnable_plan,
     segment_target,
 )
+
+BROKEN = {"name": "Broken", "formula": "alpha1 +"}
+CALM = {"name": "Calm", "formula": "100 * s_alpha1"}
 
 
 def _prog():
@@ -74,6 +79,34 @@ def test_program_evaluators_arm_one_per_valid_custom_formula():
                            {"minutes": 1, "target": 50, "formula": {"name": "bad", "formula": "100 *"}},
                            {"minutes": 1, "target": 50, "formula": "shamatha_score"}])
     assert list(program_evaluators(prog)) == ["program_formula"]  # "bad" is a slot with no evaluator
+
+
+def test_a_formula_that_cant_run_moves_every_segment_of_it_to_shamatha_and_keeps_the_others_slots():
+    prog = SessionProgram([{"minutes": 1, "formula": BROKEN}, {"minutes": 1, "formula": CALM},
+                           {"minutes": 1, "formula": BROKEN}, {"minutes": 1, "formula": "meditation_score"}])
+    plan = runnable_plan(prog)
+    assert plan.segment_keys == ["shamatha_score", "program_formula_2", "shamatha_score", "meditation_score"]
+    assert plan.planned_keys == ["program_formula", "program_formula_2", "program_formula", "meditation_score"]
+    assert plan.keys == {"shamatha_score", "program_formula_2", "meditation_score"}  # no line for Broken
+    assert plan.customs == [("program_formula_2", CALM)] and list(plan.evaluators) == ["program_formula_2"]
+    assert plan.unrunnable == ["Broken"]  # once, though two segments use it
+
+
+def test_a_program_whose_formulas_all_run_is_its_plan():
+    prog = SessionProgram([{"minutes": 1, "formula": CALM}, {"minutes": 1, "formula": "shamatha_score"}])
+    plan, (keys, customs, segment_keys) = runnable_plan(prog), program_plan(prog)
+    assert (plan.keys, plan.customs, plan.segment_keys, plan.planned_keys) == (keys, customs, segment_keys,
+                                                                            segment_keys)
+    assert plan.unrunnable == []
+
+
+def test_a_fourth_formula_shares_the_last_slot_and_its_fate():
+    # More than three distinct formulas reuse the last slot: they drive what that slot runs.
+    prog = SessionProgram([{"minutes": 1, "formula": {"name": f"F{i}", "formula": f"alpha1 * {i}"}} for i in (1, 2)]
+                          + [{"minutes": 1, "formula": BROKEN}, {"minutes": 1, "formula": CALM}])
+    plan = runnable_plan(prog)
+    assert plan.segment_keys == ["program_formula", "program_formula_2", "shamatha_score", "shamatha_score"]
+    assert plan.unrunnable == ["Broken"]
 
 
 def test_a_segments_target_is_a_whole_number_50_when_missing():

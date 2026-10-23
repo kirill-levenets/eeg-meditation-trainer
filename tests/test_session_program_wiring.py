@@ -1,3 +1,9 @@
+from unittest.mock import MagicMock
+
+import pytest
+
+from app.metrics.formula_slots import FormulaSlots
+from app.session.session_program import SessionProgram
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.program_run import ProgramRun
@@ -152,6 +158,54 @@ def test_program_custom_formula_plots_and_marks():
     graph.set_series_name.assert_any_call("program_formula", "Program: AlphaPwr")  # "Program: <formula>"
     graph.set_visible.assert_any_call("program_formula", True)            # shown on graph
     app._live_screen.set_training_series.assert_called_with("program_formula")  # legend-marked
+
+
+def test_a_segment_whose_formula_cant_run_drives_and_shows_shamatha():
+    # #102: a saved formula that doesn't compile got a series slot but no evaluator, so its key read 0 every tick:
+    # constant maximum noise, the segment scored against 0, the legend marking an empty line.
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._audio = MagicMock()
+    app._session_manager = MagicMock()
+    app._session_manager.elapsed_seconds = 0
+    graph = MagicMock()
+    graph.series_keys.return_value = ["shamatha_score", "program_formula", "program_formula_2"]
+    app._live_screen = MagicMock()
+    app._live_screen.graph = graph
+    app._formulas = FormulaSlots()
+    app._audio_metric_key = "shamatha_score"
+    app._program_run = run = make_run(app)
+    run.begin(SessionProgram([{"minutes": 1, "target": 120, "formula": {"name": "Broken", "formula": "alpha1 +"}},
+                              {"minutes": 1, "target": 80, "formula": {"name": "AlphaPwr", "formula": "alpha1"}}]),
+              [], "")
+
+    metrics = {"shamatha_score": 50}
+    run.tick(metrics, {"alpha1": 80.0})
+
+    assert run.audio_key == "shamatha_score"
+    assert metrics.get(app._audio_drive_key(), 0) == 50  # what the tick sounds: shamatha, not 0
+    app._session_manager.set_active_goal.assert_called_with("shamatha_score", 120)  # scored on what it sounds
+    app._live_screen.set_training_series.assert_called_with("shamatha_score")
+    assert run.unrunnable == ["Broken"]  # the session's start tells the user
+    shown = {c.args[0]: c.args[1] for c in graph.set_visible.call_args_list}
+    assert shown == {"shamatha_score": True, "program_formula": False, "program_formula_2": True}
+    assert metrics["program_formula_2"] == 80.0  # the segment whose formula runs keeps its own line
+
+
+@pytest.mark.parametrize("formulas, listed", [
+    ([{"name": "Broken", "formula": "alpha1 +"}], '"Broken"'),
+    ([{"name": "A", "formula": "alpha1 +"}, {"name": "B", "formula": "*"}], '"A", "B"'),  # no plural to get wrong
+    ([{"name": "Calm", "formula": "alpha1 * 2"}], None),
+])
+def test_a_program_start_names_the_formulas_that_cant_run_in_a_popup(formulas, listed):
+    # A toast is gone in two seconds and was clipped at the larger text sizes; a meditator may not be looking.
+    warn = MagicMock()
+    run = make_run(warn=warn)
+    run.begin(SessionProgram([{"minutes": 1, "target": 50, "formula": f} for f in formulas]), [], "P")
+    if listed is None:
+        warn.assert_not_called()
+    else:
+        warn.assert_called_once_with("Formula error in this program", f"Can't run {listed}: Shamatha is used instead."
+                                     "\nSettings › Timer / Program edits the program.")
 
 
 def test_program_shows_exactly_its_metric_set_whole_session():

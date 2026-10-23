@@ -7,7 +7,11 @@ import pytest
 
 import app.ui.graph_series as graph_series
 from app.metrics.formula_slots import FormulaSlots
-from app.session.session_program import SessionProgram, program_evaluators
+from app.session.session_program import (
+    SessionProgram,
+    program_evaluators,
+    runnable_plan,
+)
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.diary_screen import DiaryScreen
 from app.ui.live_session import SERIES_NAMES, LiveSessionScreen
@@ -47,8 +51,8 @@ def test_the_detail_starts_from_the_defaults_not_the_session_screens_names(app):
 
 def test_a_programs_labels_go_when_it_ends(app):
     graph = app._live_screen.graph
-    show_program_series(graph, SessionProgram([{"minutes": 5, "target": 60,
-                                                "formula": {"name": "Deep", "formula": "alpha1"}}]))
+    show_program_series(graph, runnable_plan(SessionProgram([{"minutes": 5, "target": 60,
+                                                              "formula": {"name": "Deep", "formula": "alpha1"}}])))
     assert graph.series_name("program_formula") == "Program: Deep"
     app._program_run.end()
     assert graph.series_name("program_formula") == "Program"
