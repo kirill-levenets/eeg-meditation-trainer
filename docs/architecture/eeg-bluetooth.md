@@ -90,7 +90,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `tests/test_bt_wait_reconnect.py` replays those timings on a fake clock.
   Android reads are one bulk `InputStream.read(buf, 0, n)` per chunk, the buffer sized to the read (pyjnius marshals the whole array both ways, so a reused oversized buffer is slower), replacing ~4000 byte-at-a-time JNI calls/s at the 512 Hz raw rate;
   the reader thread runs at Android priority −8 (the NeuroSky SDK reader's MAX_PRIORITY).
-  `_log_throughput` logs `BT throughput: N B/s, N B/read, backlog high-water N B` every 30 s. Healthy is ≈4132 B/s (512 raw packets × 8 B + one 36 B eSense packet per second); a high-water that keeps rising means the reader is losing.
+  `_log_throughput` logs `BT throughput: N B/s, N B/read, backlog high-water N B` every 30 s.
+  Healthy is ≈4132 B/s (512 raw packets × 8 B + one 36 B eSense packet per second); a high-water that keeps rising means the reader is losing.
   A flat ~2 KB high-water during a live session (≈0.5 s stalls from ~60 s in) tracks Kivy rendering:
   it vanished for a whole screen lock while the tick thread and DB kept running (measured 2026-09-26) — the main thread holding the GIL during graph redraws.
   `app/ui/render_stats.py` measures it:

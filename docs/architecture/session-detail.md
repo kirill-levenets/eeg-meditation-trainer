@@ -76,7 +76,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   — and builds each graph's series, the raw-EEG tail and the markers off the main thread (`diary_screen.detail_graph_data`, pure).
   `_fill_detail(token, steps)` then puts one section in per frame (`Clock.schedule_once(…, 0)` from a callback runs next frame), the shown tab's graph first (`graph_fill_order`), through `DiaryScreen.fill_graph`.
   Every open takes a load token (`_detail_load`):
-  a result for an earlier open, or for a detail no longer on screen (Back, another tab), is dropped, so opening B right after A shows only B. A failed load reports `session_detail_load_failed` and the sections say "Couldn't load this session's data."
+  a result for an earlier open, or for a detail no longer on screen (Back, another tab), is dropped, so opening B right after A shows only B.
+  A failed load reports `session_detail_load_failed` and the sections say "Couldn't load this session's data."
   — the stats and notes keep working.
   `load_metrics_preview(rows)` is the same builder and fills, synchronously (tests, `_inject_session_formulas`).
   Desktop, a 2-hour session (14,400 ticks): on screen after 1.72 s behind the spinner → 0.07 s;

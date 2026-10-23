@@ -89,15 +89,17 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   No storage permission, survives uninstall, works API 29→34+.
   `android_saf` routes results via a request-code registry bound once to `android.activity.on_activity_result`; all pyjnius imports are function-local so it imports cleanly off-Android.
   Desktop backup/restore worker catches `(OSError, sqlite3.Error)`;
-  the SAF worker catches broadly (pyjnius boundary) and `report_soft_error`s. Restore **refuses to run while a session is active**
+  the SAF worker catches broadly (pyjnius boundary) and `report_soft_error`s.
+  Restore **refuses to run while a session is active**
   — running, paused, OR still in the BT-connect wait (`_session_pipeline_live()`: state RUNNING/PAUSED, `_waiting_for_bt`, or a live tick thread; the same window `_on_user_delete` discards on active-profile delete).
   Checked at `BackupFlow.on_restore_pressed` and again in `_do_restore_and_restart` (the DB shutdown would silently drop the session);
   a close or copy failure there surfaces `report_soft_error` and calls `DatabaseManager.reopen()` (clears the shutting-down latch and reconnects the **same** object — the settings store and every other holder keep a live reference;
   swapping in a new manager left them on the null connection, so every later settings write was silently dropped).
   `make_backup` refuses a target that resolves to the live DB (the desktop save picker opens in the DB folder;
   `os.replace` would leave the open connection writing to the swapped-out file).
-  `_do_restore_and_restart` validates the file (must contain `users` and `sessions` tables), `mark_shutting_down()`s + closes the live DB, copies over `APP.DB_PATH`,
-  then force-restarts via the "Please relaunch" popup (`_show_relaunch_popup`, re-shown from `on_resume` if Android resumes the process instead of killing it) → `App.stop()` (in-memory caches reference the old DB, simpler to restart).
+  Restore validates the file (`validate_backup`: it must contain `users` and `sessions` tables) in `_confirm_restore`, before it asks;
+  on OK, `_do_restore_and_restart` `mark_shutting_down()`s + closes the live DB, and `restore_backup` validates again and copies over `APP.DB_PATH` (a failure reopens the same manager);
+  then it force-restarts via the "Please relaunch" popup (`_show_relaunch_popup`, re-shown from `on_resume` if Android resumes the process instead of killing it) → `App.stop()` (in-memory caches reference the old DB, simpler to restart).
   A `backup()` on the shut-down DB raises `sqlite3.OperationalError` (a silent no-op would write an EMPTY backup the user later restores).
   Desktop uses Kivy `FileChooserListView` save/open popups.
   **Mid-session backup freshness (issue #30):** `BackupFlow.on_backup_pressed` calls `_save_user_settings()` (main thread) before dispatching to the SAF/desktop worker, so a backup taken mid-session isn't a stale pause/stop snapshot;

@@ -32,7 +32,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   — `add_point` / `add_points_batch` (a live session growing), `load_static_data` / `clear_data` (another session: going back then lands at its end).
   A tap fits the graph's zoom group together (`toggle_fit`, over its `_sync_group`).
   Raw EEG holds only its last minute, so fitted it shows that;
-  a session longer than the 3 h buffer (`GRAPH_POINTS_MAX`) shows its last 3 h. Any `_set_viewport` — a pinch, the wheel, a linked graph's zoom — ends the fit;
+  a session longer than the 3 h buffer (`GRAPH_POINTS_MAX`) shows its last 3 h.
+  Any `_set_viewport` — a pinch, the wheel, a linked graph's zoom — ends the fit;
   a zoom from a fit starts from the group's widest fitted span (`_zoom_base`), not the zoomed graph's own (raw EEG's is capped at its minute).
   A live session's reload after a screen lock is the same session (`load_static_data(..., new_session=False)`): the fit's way back and the margins carry on.
   A fitted long session redraws at about the cost of the default window: the fold (5) bounds what it draws by the graph's width and line.

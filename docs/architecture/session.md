@@ -113,7 +113,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   That includes swiping the app away mid-session:
   Android kills a swiped-away process at once only if it has no foreground service, so the service keeps the process alive while `on_stop` saves the session (a stopSelf in `onTaskRemoved` would drop that protection before the save).
   A stop that arrives before `onStartCommand` has called `startForeground` (a start refused or cancelled at once) is only noted, and `onStartCommand` stops the service right after going foreground, with `stopSelf(startId)` so a start queued behind it keeps the service:
-  stopping it earlier makes Android crash the hosting process, which is the app's. `ServiceStartState` (`android_src/`, no Android imports) holds that state:
+  stopping it earlier makes Android crash the hosting process, which is the app's.
+  `ServiceStartState` (`android_src/`, no Android imports) holds that state:
   a start → starting;
   going foreground → foreground, or stopped with `stopSelf(startId)` when a stop was noted;
   a stop → `stopService` in the foreground, noted while starting, nothing when stopped (so a second stop does nothing);
