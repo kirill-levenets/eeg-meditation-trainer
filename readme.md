@@ -120,8 +120,11 @@ source venv/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Run tests (236 tests)
+# Run tests (skips the ones marked slow)
 python -m pytest tests/ -v
+
+# Run all tests including the slow ones: before every push
+python -m pytest tests/ --run-slow
 
 # Run application
 python main.py

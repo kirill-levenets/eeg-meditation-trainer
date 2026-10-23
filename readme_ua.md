@@ -104,8 +104,11 @@ source venv/bin/activate
 # Встановити залежності
 pip install -r requirements.txt
 
-# Запустити тести
+# Запустити тести (без позначених як slow)
 python -m pytest tests/ -v
+
+# Запустити всі тести разом з повільними: перед кожним push
+python -m pytest tests/ --run-slow
 
 # Запустити додаток
 python main.py

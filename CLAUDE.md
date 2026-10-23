@@ -15,8 +15,11 @@ python main.py
 # Run with serial device (e.g. from mindwave-splitter)
 python main.py --serial /tmp/mindwave_b
 
-# Run all tests
+# Run all tests (skips the ones marked slow)
 python -m pytest tests/ -v
+
+# Run all tests including the slow ones: before every push
+python -m pytest tests/ --run-slow
 
 # Run a single test file
 python -m pytest tests/test_engine.py -v
