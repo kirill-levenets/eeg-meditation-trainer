@@ -21,12 +21,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Removed
 
+- **History's All Users view**: no screen could open it since the Profile screen went (#48).
+  Settings › User Profile now reads "Current: none" while no profile is active (it said "All Users").
 - **`ProfileScreen`, `WizardScreen`, `RawEEGScreen` and the legacy mock headset (`mock_stream.py`)** (#48) — unreachable: the three screens were built and filled at every start but never shown, and nothing imported the old mock.
   Profiles are managed in Settings → User Profile, first run is the profile popup, raw EEG is the Session screen's **Raw EEG** view.
   The user manual and READMEs described a 2-step first-run wizard; they now describe the profile popup and how the headset is picked.
 
 ### Fixed
 
+- **The in-app help was always in English, partly out of date, and drew its menu paths as empty boxes**:
+  Settings › Help & Troubleshooting now shows in Ukrainian on a phone set to Ukrainian (on a computer, when `LANGUAGE` or `LANG` is Ukrainian).
+  It now matches the app: the session-length choices, the program editor and its sounds, the "No EEG data received" message, the alerts being off until enabled, the formula variables.
+  Its "Settings → Audio" paths drew the arrow as an empty box (the app's font has no arrows); they read "Settings > Audio".
 - **The timer sound's Test button stayed on Stop after the sound ended on Android** (#103).
   It reads Test again when the gong ends.
 - **A second timer gong could play over the first** (#103): testing the timer sound twice, or a timer ending while a test gong still rang, left the first one playing and holding its player.

@@ -2,6 +2,8 @@
 
 Clone the NeuroSky MindWave data stream to two applications simultaneously — useful for running the original NeuroSky app and this trainer side by side to compare/calibrate metrics.
 
+Other options: `--channel N` (Linux RFCOMM channel, default 1), `--baudrate N` (Windows, default 57600), `--record FILE` (Linux: save the stream for `tools/replay.py`).
+
 ---
 
 ## Linux Setup
@@ -15,7 +17,7 @@ Clone the NeuroSky MindWave data stream to two applications simultaneously — u
 
 1. **Find your MindWave MAC address:**
    ```bash
-   bluetoothctl paired-devices
+   bluetoothctl paired-devices   # or: bluetoothctl devices Paired
    # Example output: Device AA:BB:CC:DD:EE:FF MindWave Mobile
    ```
 
@@ -32,11 +34,14 @@ Clone the NeuroSky MindWave data stream to two applications simultaneously — u
 
 3. **Point each app at its port:**
    - Original app → `/dev/pts/3`
-   - EEG Meditation Trainer → `/dev/pts/4`
+   - EEG Meditation Trainer → `/dev/pts/4`: `python main.py --serial /dev/pts/4`
 
-   For this trainer, modify the device address in settings to use the PTY path, or connect via the serial port directly by updating `neurosky_stream.py` to accept a serial device path.
+   An app that needs full serial ioctl support (Wine) needs `--socat`, which creates `/tmp/mindwave_a` and `/tmp/mindwave_b` instead: see [COMPARISON.md](COMPARISON.md).
 
 4. **Stop:** Press `Ctrl+C`
+
+`./tools/splitter_linux.sh` does steps 1-2 in one command:
+it checks Python, `bluetoothctl` and the bluetooth service, finds the paired MindWave by name (or lets you pick a paired device) and starts the splitter with two PTY outputs.
 
 ---
 
@@ -90,7 +95,7 @@ MindWave (COM5) → splitter reads
 ```
 
 - **Original NeuroSky app** → set its COM port to **COM11**
-- **EEG Meditation Trainer** → set its COM port to **COM13**
+- **EEG Meditation Trainer** → set its COM port to **COM13** (`python main.py --serial COM13`)
 
 ### How to redirect the original app to COM11
 
@@ -110,6 +115,10 @@ If the app auto-detects the MindWave on a fixed port (e.g. it always uses COM5):
 
 Press `Ctrl+C` in the splitter terminal.
 
+`tools\splitter_windows.bat` does steps 2-3 in one command:
+it checks Python, installs pyserial if missing, checks the com0com driver (and prints its setup if it's missing) and finds the MindWave's COM port by name;
+then it shows the port mapping (COM10→COM11, COM12→COM13) and how to redirect an app that auto-detects a fixed port, and starts the splitter.
+
 ---
 
 ## Troubleshooting
@@ -122,27 +131,3 @@ Press `Ctrl+C` in the splitter terminal.
 | `pyserial` not found | `pip install pyserial` |
 | Linux: `Permission denied` on BT | `sudo usermod -aG bluetooth $USER` then re-login |
 | Linux: `Connection refused` | Make sure MindWave is turned on and paired (`bluetoothctl connect AA:BB:...`) |
-
-
-##   splitter_linux.sh — one command does everything:
-  1. Checks Python and bluetoothctl are installed
-  2. Checks bluetooth service is running
-  3. Scans paired devices, auto-detects MindWave by name
-  4. Lets you pick a device if not auto-detected
-  5. Launches the splitter with two PTY outputs
-
-##  splitter_windows.bat — one command does everything:
-  1. Checks Python is installed
-  2. Installs pyserial if missing
-  3. Checks com0com driver is installed (prints full setup instructions if not)
-  4. Scans for MindWave COM port via WMI, auto-detects by name
-  5. Shows the port mapping (COM10→COM11, COM12→COM13)
-  6. Prints instructions for redirecting apps that auto-detect a fixed port
-  7. Launches the splitter
-
-##  Usage:
-### Linux
-./tools/splitter_linux.sh
-
-### Windows
-tools\splitter_windows.bat

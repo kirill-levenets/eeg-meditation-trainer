@@ -257,17 +257,17 @@ def test_a_failed_delete_leaves_the_end_card_and_its_notes(db, monkeypatch):
 # ---- History: Delete N in select mode, through the one confirm ----
 
 
-def _sessions(n: int, users=(1,)) -> list[dict]:
+def _sessions(n: int) -> list[dict]:
     return [
-        {"id": i, "user_id": users[i % len(users)], "date_time": f"2026-09-{28 - i // 2:02d}T{10 + i % 2}:00:00",
+        {"id": i, "user_id": 1, "date_time": f"2026-09-{28 - i // 2:02d}T{10 + i % 2}:00:00",
          "duration": 600, "avg_shamatha": 50, "session_name": f"Session {i}"}
         for i in range(n)
     ]
 
 
-def _history(n: int = 6, users=(1,)) -> HistoryScreen:
+def _history(n: int = 6) -> HistoryScreen:
     h = HistoryScreen()
-    h.load_sessions(_sessions(n, users))
+    h.load_sessions(_sessions(n))
     return h
 
 
@@ -317,15 +317,6 @@ def test_delete_n_asks_with_the_count_and_the_days(confirm):
     text, buttons = confirm(h.delete_selected)
     assert "Delete 3 sessions from 2026-09-26 to 2026-09-28?" in text and "can't be undone" in text
     assert list(buttons) == ["Delete", "Cancel"]  # the order every confirm in the app uses
-
-
-@pytest.mark.parametrize("users, note", [((1, 2), "2 profiles"), ((1, None), None)])
-def test_the_confirm_names_several_profiles_in_the_all_users_view(confirm, users, note):
-    h = _history(users=users)
-    h.set_select_mode(True)
-    h.select_all_shown()
-    text, _buttons = confirm(h.delete_selected)
-    assert (note in text) if note else ("profiles" not in text)  # a session with no profile isn't another profile
 
 
 def test_cancel_deletes_nothing_and_confirm_deletes_the_selection_then_leaves_select_mode(confirm):
@@ -399,7 +390,6 @@ def test_history_does_not_list_the_running_session_until_it_ends(db, monkeypatch
     finished, running = _session(db, me), _session(db, me)
     app, _deferred, _done = _app(db, monkeypatch)
     app._current_user_id = me
-    app._view_all_users = False
     app._history_view = None
     app._history_screen = HistoryScreen()
     app._session_manager.start()

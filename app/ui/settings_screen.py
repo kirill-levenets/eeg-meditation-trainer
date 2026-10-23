@@ -1,4 +1,5 @@
 import os
+import re
 import threading
 from collections.abc import Callable
 
@@ -10,7 +11,9 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.slider import Slider
 
+from app import android_jni
 from app.config import METRICS
+from app.logger import logger
 from app.ui.hooks import Hook
 from app.ui.settings_sections.audio import AudioSection
 from app.ui.settings_sections.common import (
@@ -39,6 +42,29 @@ from app.ui.theme import (
 )
 from app.ui.widgets.user_picker import UserPickerForm
 
+HELP_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "help")
+_HELP_FILE_LANG = {"uk": "ua"}  # the help files' suffix where it isn't the ISO 639 code
+
+
+def help_language() -> str:
+    """The first wanted language with a help file, else English: Android's locale, or LANGUAGE's list in order and then
+    the first of LC_ALL / LC_MESSAGES / LANG (Windows and macOS builds usually set none of these)."""
+    try:
+        if android_jni.on_android():
+            wanted = [android_jni.language()]
+        else:
+            first_set = next((os.environ[v] for v in ("LC_ALL", "LC_MESSAGES", "LANG") if os.environ.get(v)), "")
+            wanted = [*os.environ.get("LANGUAGE", "").split(":"), first_set]
+    except Exception:  # noqa: BLE001 - the help falls back to English rather than break the Settings screen
+        logger.exception("Device language lookup failed; help in English")
+        wanted = []
+    for tag in wanted:
+        code = re.match(r"[A-Za-z]*", tag).group().lower()
+        code = _HELP_FILE_LANG.get(code, code)
+        if code and os.path.exists(os.path.join(HELP_DIR, f"help_{code}.txt")):
+            return code
+    return "en"
+
 
 def _load_help_topics(lang: str = "en") -> list[tuple[str, str]]:
     """Load help topics from app/assets/help/help_{lang}.txt.
@@ -46,13 +72,10 @@ def _load_help_topics(lang: str = "en") -> list[tuple[str, str]]:
     File format: sections separated by '## Title' lines.
     Returns list of (title, body) tuples.
     """
-    help_dir = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)), "assets", "help",
-    )
-    path = os.path.join(help_dir, f"help_{lang}.txt")
+    path = os.path.join(HELP_DIR, f"help_{lang}.txt")
     if not os.path.exists(path):
         # Fallback to English
-        path = os.path.join(help_dir, "help_en.txt")
+        path = os.path.join(HELP_DIR, "help_en.txt")
     if not os.path.exists(path):
         return [("Help", "Help file not found")]
 
@@ -116,7 +139,7 @@ class SettingsScreen(Screen):
         profile_section = accordion.add_section("User Profile", collapsed=False)
 
         self._profile_current_label = ThemedLabel(
-            text="No user selected",
+            text="Current: none",
             font_size=F.BODY,
             color=C.PRIMARY,
             bold=True,
@@ -371,7 +394,7 @@ class SettingsScreen(Screen):
 
         # --- Help section (loaded from app/assets/help/) ---
         help_section = accordion.add_section("Help & Troubleshooting", collapsed=True)
-        help_topics = _load_help_topics()
+        help_topics = _load_help_topics(help_language())
         for topic_title, topic_text in help_topics:
             topic_label = ThemedLabel(
                 text=f"[b]{topic_title}[/b]",
@@ -513,13 +536,8 @@ class SettingsScreen(Screen):
     def populate_users(self, users, current_user_id=None):
         """Fill the user picker form."""
         self._user_picker_form.populate_users(users)
-        if current_user_id is None:
-            self._profile_current_label.text = "Current: All Users"
-        else:
-            for u in users:
-                if u["id"] == current_user_id:
-                    self._profile_current_label.text = f"Current: {u['name']}"
-                    break
+        name = next((u["name"] for u in users if u["id"] == current_user_id), "none")  # none: the gate is up
+        self._profile_current_label.text = f"Current: {name}"
 
     @property
     def audio_metric(self) -> str:

@@ -13,7 +13,6 @@ def _make_app(state: SessionState) -> EEGMeditationApp:
     app._waiting_for_bt = False
     app._ticker = MagicMock(running=False)
     app._current_user_id = 1
-    app._view_all_users = False
     app._db = MagicMock()
     app._db.get_user.return_value = {"name": "B"}
     app._info_popup = MagicMock()
@@ -33,13 +32,6 @@ def test_switch_is_refused_while_a_session_runs():
     app._load_user_settings.assert_not_called()
     app._info_popup.assert_called_once()
     app._refresh_profile.assert_called_once()
-
-
-def test_all_users_view_is_refused_while_a_session_runs():
-    app = _make_app(SessionState.PAUSED)
-    app._on_user_switch(None)
-    assert app._current_user_id == 1
-    assert app._view_all_users is False
 
 
 def test_switch_proceeds_when_idle():

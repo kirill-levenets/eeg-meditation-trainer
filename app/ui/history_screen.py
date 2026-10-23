@@ -1045,7 +1045,7 @@ class HistoryScreen(Screen):
         # A selection holds only this list's sessions: another profile's would be exported with it.
         self._selected_ids &= {s.get("id") for s in sessions}
         self._update_selection_buttons()
-        if not keep_filter:  # another profile or the All Users view: its own history, from today
+        if not keep_filter:  # another profile: its own history, from today
             self._set_filter(None)
             self._set_period(0)
         self._set_day_data()
@@ -1253,9 +1253,6 @@ class HistoryScreen(Screen):
             days = sorted({session_day(s) for s in sessions})
             span = "" if not days else f" on {days[0]}" if len(days) == 1 else f" from {days[0]} to {days[-1]}"
             what = f"Delete {format_count(len(session_ids), 'session')}{span}?"
-            profiles = {s.get("user_id") for s in sessions} - {None}
-            if len(profiles) > 1:
-                what += f"\nThey are from {format_count(len(profiles), 'profile')}."
         def _deleted(ok: bool) -> None:
             if ok and self._select_mode:
                 self.set_select_mode(False)

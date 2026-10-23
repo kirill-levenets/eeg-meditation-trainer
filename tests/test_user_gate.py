@@ -10,6 +10,7 @@ slip through into a usable-but-unset state.
 import os
 import shutil
 import tempfile
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -17,6 +18,7 @@ import pytest
 import app.ui.backup_flow as bf
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp, resolve_startup_user, sessions_for_view
+from app.ui.settings_screen import SettingsScreen
 from tests._backup_flow import make_flow
 from tests._recorder import make_recorder
 
@@ -93,20 +95,14 @@ def _two_users_with_sessions(db) -> tuple[int, int]:
 def test_view_shows_only_the_current_users_sessions():
     db = _fresh()
     a, _b = _two_users_with_sessions(db)
-    rows = sessions_for_view(db, a, show_all=False)
+    rows = sessions_for_view(db, a)
     assert len(rows) == 2 and all(r["user_id"] == a for r in rows)
-
-
-def test_all_users_view_shows_every_session():
-    db = _fresh()
-    _two_users_with_sessions(db)
-    assert len(sessions_for_view(db, None, show_all=True)) == 3
 
 
 def test_unset_user_shows_nothing_never_leaks_all_profiles():
     db = _fresh()
     _two_users_with_sessions(db)
-    assert sessions_for_view(db, None, show_all=False) == []
+    assert sessions_for_view(db, None) == []
 
 
 # --- gate enforcement: an unresolved user disables the app until selection ---
@@ -136,7 +132,6 @@ def test_deleting_active_profile_mid_session_discards_it_and_regates():
     from app.session.manager import SessionState
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._current_user_id = 5
-    app._view_all_users = False
     app._session_manager = MagicMock()
     app._session_manager.state = SessionState.RUNNING
     app._discard_running_session = MagicMock()
@@ -151,11 +146,10 @@ def test_deleting_active_profile_mid_session_discards_it_and_regates():
     app._open_user_gate.assert_called_once()            # re-gate
 
 
-def test_deleting_last_profile_in_all_users_view_regates():
-    # #4: current is None (All-Users), deleting the last profile must still gate.
+def test_deleting_the_last_profile_while_none_is_active_regates():
+    # #4: no profile is active and the last one goes: the app must still gate, never be usable with zero profiles.
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._current_user_id = None
-    app._view_all_users = True
     app._session_manager = MagicMock()
     app._db = MagicMock()
     app._db.get_all_users.return_value = []
@@ -164,14 +158,20 @@ def test_deleting_last_profile_in_all_users_view_regates():
     app._open_user_gate = MagicMock()
     EEGMeditationApp._on_user_delete(app, 9)
     app._open_user_gate.assert_called_once()
-    assert app._view_all_users is False
+
+
+@pytest.mark.parametrize("current, shown", [(2, "Current: B"), (None, "Current: none"), (9, "Current: none")])
+def test_settings_names_the_active_profile_or_none(current, shown):
+    # None while the gate is up; an id the list doesn't hold must not leave the previous profile's name showing.
+    stub = SimpleNamespace(_user_picker_form=MagicMock(), _profile_current_label=SimpleNamespace(text="Current: A"))
+    SettingsScreen.populate_users(stub, [{"id": 1, "name": "A"}, {"id": 2, "name": "B"}], current)
+    assert stub._profile_current_label.text == shown
 
 
 def test_reopen_gate_when_selection_left_no_user():
     # #5: a failed pick/create at the gate must not strand the app (nav disabled, no popup).
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._current_user_id = None
-    app._view_all_users = False
     app._refresh_profile = MagicMock()
     app._program_settings = MagicMock()
     app._open_user_gate = MagicMock()
@@ -182,7 +182,6 @@ def test_reopen_gate_when_selection_left_no_user():
 def test_reopen_gate_noop_when_user_resolved():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._current_user_id = 3
-    app._view_all_users = False
     app._open_user_gate = MagicMock()
     EEGMeditationApp._reopen_gate_if_unresolved(app)
     app._open_user_gate.assert_not_called()
@@ -245,7 +244,6 @@ def test_delete_active_profile_discards_during_bt_connect():
     from app.session.manager import SessionState
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._current_user_id = 5
-    app._view_all_users = False
     app._session_manager = MagicMock()
     app._session_manager.state = SessionState.IDLE
     app._waiting_for_bt = True
@@ -279,7 +277,6 @@ def test_gate_active_during_schedule_window_before_popup_exists():
     app._bottom_nav = MagicMock()
     app._bottom_nav.disabled = True
     app._current_user_id = None
-    app._view_all_users = False
     assert EEGMeditationApp._gate_active(app) is True
 
 
@@ -288,7 +285,6 @@ def test_gate_not_active_when_user_resolved():
     app._bottom_nav = MagicMock()
     app._bottom_nav.disabled = False
     app._current_user_id = 3
-    app._view_all_users = False
     assert EEGMeditationApp._gate_active(app) is False
 
 

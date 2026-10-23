@@ -3,15 +3,18 @@
 1. Create a profile (Settings > User Profile)
 2. Turn on your MindWave headset
 3. Pair it in system Bluetooth settings
-4. Go to Session tab; tap the chevron on Start
-   to open the duration picker (5/10/15/20 min
-   or Free), then press Start
+4. Go to Session tab. The button next to Start
+   shows the length (10m, 1h, ∞ = no timer, P =
+   a program): tap it to pick 5, 10, 15, 20 or
+   30 min, 1 h, 1 h 30 min, 2 h, Free or
+   Programs…, then press Start
 5. The app auto-detects and connects
 6. Meditate! Audio feedback guides you
 7. When your shamatha score holds at or above
    your threshold, the status (top right) lights
    up as a green "SHAMATHA" badge
-8. "Time above threshold" and "Streak" count the
+8. Time above threshold (>Thresh in the live
+   stats) and the streak (Streak) count the
    metric that drives the sound (Settings >
    Threshold > Audio control metric), marked » in
    the graph legend when that line is shown. It
@@ -30,10 +33,11 @@
 If the device won't connect:
 
 1. Check battery — the #1 cause of connection problems.
-   Replace the AAA battery if headset connects but
-   shows "not streaming". Use NiMH rechargeable (1.2V),
-   ignore the red LED (calibrated for 1.5V alkaline).
-   Avoid Li-ion 1.5V rechargeable batteries.
+   Replace the AAA battery if the headset connects
+   but the app says "No EEG data received". Use
+   NiMH rechargeable (1.2V) and ignore the red LED
+   (calibrated for 1.5V alkaline). Avoid Li-ion
+   1.5V rechargeable batteries.
 2. Check Bluetooth — enabled on phone, headset paired
 3. Clean skin and sensors — wash forehead with soap,
    wipe sensor pads with alcohol pad
@@ -42,7 +46,8 @@ If the device won't connect:
 5. Close other BT apps — only one app can
    hold the RFCOMM connection at a time
 6. Restart headset — turn off, wait 5s, turn on
-7. "Connected but not streaming" — weak battery.
+7. "No EEG data received" after connecting —
+   weak battery.
    BT radio works on less power than the EEG chip.
    Replace the battery.
 8. Test with manufacturer's app — if it also
@@ -83,7 +88,7 @@ For good EEG signal:
 
 ## Audio Feedback
 
-Two feedback channels in Settings → Audio. Tap a
+Two feedback channels in Settings > Audio. Tap a
 channel to open a picker; Custom file... picks your
 own audio (wav/mp3/ogg/flac/m4a; on Android in the
 system file picker, and the app keeps a copy):
@@ -101,14 +106,15 @@ two cross-fade at the threshold. Set either to Off
 for no sound on that side. Volume rises on a log
 curve, max 0.3.
 
-Alert sounds:
+Alert sounds, each off until you enable it in
+the Audio section above:
 - Bell = sinking/dullness detected
 - Chime = subtle distraction
-- Warble = device disconnected
+- Warble = headset disconnected or signal lost
+  (a session that stops because no data arrives
+  warbles anyway)
 
-Configure in Audio section above
-
-The timer's end sound (Settings → Timer) is picked
+The timer's end sound (Settings > Timer / Program) is picked
 the same way: Default bell or Custom file...; Test
 plays it. A file the app can't play rings the
 default bell, and Test says so.
@@ -175,18 +181,19 @@ closes it.
 EEG Meditation Trainer v1.5.0
 Shamatha meditation with neurofeedback
 
-Open source — contributions welcome
+Open source. Bug reports and ideas are welcome
+as GitHub issues; code contributions aren't
+accepted.
 Not a medical device
 
 ## Locked-Screen Sessions (Android)
 
 You can start a session, lock the screen, and
 EEG processing and audio feedback continue
-uninterrupted. The noise channel uses Android
-MediaPlayer so it survives screen lock. A
-persistent notification stays visible while
-the session is active. If the session stops
-unexpectedly, a warble sound plays to alert you.
+uninterrupted. A persistent notification stays
+visible while the session is active. If the
+session stops unexpectedly, a warble sound
+plays to alert you.
 
 Some phones (Huawei, Xiaomi, Samsung and
 others) close background apps anyway. At the
@@ -206,7 +213,7 @@ issue so we can fix it.
 
 ## Data Backup
 
-Settings → Data Backup → tap "Backup database"
+Settings > Data Backup > tap "Backup database"
 to write a copy of all profiles, sessions and
 settings to a file. You choose where to save it
 (on Android a system save dialog opens); the
@@ -239,46 +246,43 @@ History.
 
 ## Session Program
 
-Settings → Timer → Simple | Program toggle.
-"Enable Timer" is only shown in Simple mode.
+Settings > Timer / Program > Simple | Program
+toggle. "Enable Timer" is only shown in Simple
+mode.
 
-Program mode lets you build a sequence of timed
-segments, each with its own formula, target level,
-and end-cue sound. At each boundary a transition
-chime plays and the target and audio-driver update
-to the next segment's settings. The session
-auto-stops when the last segment ends.
+Program mode builds a sequence of timed
+segments, each with its own metric, target,
+end cue and feedback sound. At each boundary
+the ending segment's end cue plays, and the
+target and the sound switch to the next
+segment's. The session stops when the last
+segment ends, with the timer's end sound.
 
-Each segment row: duration (minutes), formula
+Each segment row: Min (its length), Metric
 (Shamatha / Meditation / NS Attention / NS
-Meditation / saved custom formula), target level,
-end cue (Chime or Warble).
+Meditation / a saved custom formula), Target,
+End cue (Chime or Warble), Feedback (Default /
+Rain / Tone / Custom file...; Default uses the
+Audio setting), and X to remove it.
 
 Add rows with "+ Add Segment". Save the whole
-program by name — re-saving under the same name
-overwrites it. Load and delete ask for confirmation.
-The editor shows the name of the currently
-loaded program. Saved programs appear in a list
-you can tap to reload.
+program by name; re-saving under the same name
+overwrites it. Loading another program asks
+first only when the editor has unsaved changes;
+deleting one always asks. The editor shows the
+loaded program's name, and saved programs
+appear in a list you can tap to load.
 
 On the Session screen, the button next to Start
-shows "P" in program mode. Tap it → Programs…
-to quick-load a saved program; the list highlights
-the currently loaded one.
+shows "P" in program mode. Tap it, then
+Programs…, to quick-load a saved program; the
+list highlights the loaded one.
 
 During a program the graph shows each segment's
-metric. The legend marks the active segment with
-a bold "»"; a chime plays at each segment change
-and the gong sounds at the end.
-
-The live session graph and the diary graph both
-show a stepped threshold line that follows each
-segment's target.
-
-Each segment row has a Feedback picker
-(Default / Rain / Tone / Custom) — "Default"
-uses the global Audio setting. The source
-switches at each segment boundary.
+metric, and the legend marks the active one with
+a bold "»". The live graph and the session
+detail's graph show a stepped threshold line
+that follows each segment's target.
 
 ## Try Another Threshold (session detail)
 
@@ -302,19 +306,23 @@ away; it stays folded for your profile.
 
 ## Custom Formulas
 
-Settings → Custom Formula has three named slots.
-Each slot has a name field, an expression input,
-Apply (evaluate), and Save (to library).
+Settings > Custom Formula has three named slots.
+Each slot (Formula 1/2/3) has a name field, an
+expression input, Apply (evaluate) and Save (to
+the library).
 
 The expression is a Python-style formula. Available
-variables include band powers (alpha, beta, theta,
-delta, gamma), normalized bands (alpha_norm etc.),
-computed scores (shamatha_score, meditation_score,
-distraction, sinking), and windowed avg(expr, N).
+variables include band powers (alpha1, alpha2,
+beta1, beta2, theta, delta, gamma1, gamma2, and the
+sums alpha, beta, gamma), normalized bands
+(alpha_norm etc.), sqrt-normalized bands
+(s_alpha1, s_beta2 etc.), computed scores
+(shamatha_score, meditation_score, distraction,
+sinking), and windowed avg(expr, N).
 
-One slot drives the audio noise channel. Select it
+One slot can drive the feedback sound. Select it
 with the [1][2][3] buttons next to the
-"Custom Formula" option in Settings → Threshold.
+"Custom Formula" option in Settings > Threshold.
 If that slot's formula is invalid, audio falls back
 to shamatha.
 
@@ -328,6 +336,6 @@ Settings, use the "Choose..." button on the matching
 custom-formula row in the on-graph series picker
 (the list icon in the top-left of the metrics graph).
 
-The diary replays the formulas from each session —
+A session's detail replays its own formulas:
 opening a past session shows the names and series
 that were active at that time.

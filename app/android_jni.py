@@ -21,6 +21,12 @@ def activity():
     return autoclass("org.kivy.android.PythonActivity").mActivity
 
 
+def language() -> str:
+    """The device's language as an ISO 639 code ("uk", "en", ...)."""
+    from jnius import autoclass
+    return str(autoclass("java.util.Locale").getDefault().getLanguage() or "")
+
+
 def manufacturer() -> str:
     from jnius import autoclass
     return str(autoclass("android.os.Build").MANUFACTURER or "").lower()

@@ -5,66 +5,64 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 ## Session screen
 
-- **Session screen** (`live_session.py`):
-  Metrics/Raw EEG toggle (inline, no separate screen), connection overlay with status + countdown, session end summary card with quick notes (`show_summary(sid, stats, title=)`:
-  Duration, the `session_score_rows` rows, Time Above Threshold and Longest Streak, 22 dp lines with no gap (`_set_summary_rows` attaches as many pooled rows as the session has).
+- **Session screen** (`live_session.py`): Metrics/Raw EEG toggle (inline, no separate screen), connection overlay with status + countdown, and the session-end summary card with quick notes.
+  `show_summary(sid, stats, title=)` fills the card: Duration, the `session_score_rows` rows, Time Above Threshold and Longest Streak, 22 dp lines with no gap (`_set_summary_rows` attaches as many pooled rows as the session has).
   `_layout_summary` arranges it by the card's width, re-run on every width change, so a phone turned with the card open re-flows it with the typed notes kept:
-  from 520 dp inside the card (a landscape phone, ~670) two columns
-  — the stats left, the notes field over **Save notes** right (the field takes the column's remaining ~78 dp, a few lines)
-  — else one column, the stats over the notes field, which is as tall as Save notes beside it;
+  from 520 dp inside the card (a landscape phone, ~670) two columns, the stats left and the notes field over **Save notes** right (the field takes the stats' height less Save notes, a few lines);
+  else one column, the stats over the notes field, two lines of its text tall (`_notes_h`, `F.box(44)`: Save notes' height at the normal text size), with Save notes beside it;
   Delete and OK under both.
   The title follows the arrangement by the same rule, `_summary_in_two_columns`, applied to its own width, which spans the card's inside (`_fit_summary_title`, so it can't depend on which of the two width changes Kivy dispatches first):
-  `Session saved · <session_title>` on one line over two columns, the name on a line of its own under `Session saved` over one, either cut with an ellipsis to its line (`_cut_to_width`), never wrapped further).
-  Bottom-bar action buttons (Start/Pause/Stop/Mark) use a 2-row vertical layout (icon on top, text on bottom) via `StyledButton(vertical=True)`.
-  Adaptive landscape layout: `_compute_graph_height_adaptive` uses a fixed graph height when viewport is tall, or switches to scroll mode when the graph would fall below `dp(400)`.
-  Bottom bar lives inside the body ScrollView.
+  `Session saved · <session_title>` on one line over two columns, the name on a line of its own under `Session saved` over one, either cut with an ellipsis to its line (`_cut_to_width`), never wrapped further.
+  Bottom-bar action buttons (Start/Pause/Stop/Mark) put the icon over the text (`StyledButton(vertical=True)`).
+  Adaptive landscape layout: `_compute_graph_height_adaptive` uses a fixed graph height when the viewport is tall, or switches to scroll mode when the graph would fall below `dp(400)`.
+  The bottom bar lives inside the body ScrollView.
 - **The Session screen shows one profile's session.**
   `_live_display_uid` is the profile whose session the screen shows (graphs, readout, end card): set at Start, cleared by `_abort_bt_wait` when the start never became a session (the Start already emptied the display).
   `_drop_shown_session` takes it off the screen:
-  the end card, if open, closes through `_close_summary` (notes saved unless the session is gone, bell stopped
-  — the one way every card closes, OK included), then `_clear_live_display` empties the graphs, their mirrors and the readout (`LiveSessionScreen.clear_readout`: what a fresh screen shows).
+  the end card, if open, closes through `_close_summary` (notes saved unless the session is gone, bell stopped; the one way every card closes, OK included);
+  then `_clear_live_display` empties the graphs, their mirrors and the readout (`LiveSessionScreen.clear_readout`: what a fresh screen shows).
   It runs when another profile is picked (`_activate_user`), when that profile is deleted, and when History deletes the shown session (`_recorder.session_id`, kept after the stop).
-  Re-picking the shown profile resets nothing — `_on_user_switch` allows that mid-session, and a reset there wiped the running session's graph — and neither does the All-Users view, which shows every profile's sessions.
+  Re-picking the shown profile resets nothing (`_on_user_switch` allows that mid-session, and a reset there would wipe the running session's graph).
   An idle threshold change (#83) clears the display but keeps the owner, so a later switch still closes an open card.
   The readout's AVG view renders the averages cached with the last tick, refreshed once more at the session's end (ticks are skipped while locked), and `set_stats_mode` redraws the strip when a profile's LIVE/AVG choice loads.
-- Live Session layout uses `_compute_graph_height_adaptive`: fixed graph height when viewport is tall, scroll mode when the graph would fall below `dp(400)` (landscape).
-  The bottom bar lives inside the body ScrollView.
-- Stats card toggle: tapping the swap icon flips all 5 slots between live instant values and session aggregates (`avg_shamatha`, `avg_meditation`, `time_above_threshold`, `time_shamatha_90`, `longest_streak`).
-  Mode persists per user via the existing JSON user-settings column.
-- **Shamatha-reached status emphasis** (issue #13) — while the live `shamatha_score` holds at/above the session threshold the header status label becomes a bold `SHAMATHA` on a green `C.SHAMATHA` rounded pill;
+- Stats card toggle: the LIVE/AVG button flips all 5 slots between live instant values and session aggregates (`avg_shamatha`, `avg_meditation`, `time_above_threshold`, `time_shamatha_90`, `longest_streak`).
+  The mode persists per profile as the `stats_view_mode` setting.
+- **Shamatha-reached status emphasis** (issue #13): while the live `shamatha_score` holds at/above the session threshold the header status label becomes a bold `SHAMATHA` on a green `C.SHAMATHA` rounded pill;
   otherwise it shows the classified state.
-  The pill is a `Color`+`RoundedRectangle` in `_state_label.canvas.before` sized to the text (`_position_shamatha_chip`, bound to the label's `texture_size`);
-  `set_shamatha(active)` toggles its alpha and the text/`readable_fg(C.SHAMATHA)` color, and `update_state` records `_last_state` but skips restyling while the chip is active (the tick stream can't overwrite it).
+  The pill is a `Color`+`RoundedRectangle` in `_state_label.canvas.before` sized to the text (`_position_shamatha_chip`, bound to the label's `texture_size`).
+  `set_shamatha(active)` toggles its alpha and the text/`readable_fg(C.SHAMATHA)` colour; `update_state` records `_last_state` but skips restyling while the chip is active, so the tick stream can't overwrite it.
   Crossing is detected by the pure `AppManager._shamatha_transition(active, above, streak, enter_ticks=3, exit_ticks=3)` on the tick thread (debounced: 3 ticks / 1.5 s each way against 2 Hz noise);
   only the *change* is dispatched to `set_shamatha`.
-  Gated on the threshold in force — not per-segment program targets: a program's start puts its first segment's target in force (`_put_threshold_in_force`), and that gates the pill for the whole run.
+  Gated on the threshold in force, not per-segment program targets: a program's start puts its first segment's target in force (`_put_threshold_in_force`), and that gates the pill for the whole run.
   Reset at session start/stop and re-synced on Android resume.
-  The pill's `Color` stays a plain instruction (its alpha is the on/off toggle; a `ThemedColor` would reset it on a switch) — `C.SHAMATHA` is the same in every palette, so it needs no repaint.
+  The pill's `Color` stays a plain instruction (its alpha is the on/off toggle; a `ThemedColor` would reset it on a switch): `C.SHAMATHA` is the same in every palette, so it needs no repaint.
 
 ## Settings screen
 
-- **Settings screen** (`settings_screen.py`): `ThemedAccordion` sections — User Profile, **Timer / Program**, Device, Data Backup, Threshold (max 180), Audio, Display, Custom Formula, Theme selector.
-  The larger sections are their own classes in `settings_sections/`, built into their accordion section and reached as attributes of the screen (`settings_screen.formulas` is `FormulaSection`, `.timer` is `TimerSection`, `.device` is `DeviceSection`, `.audio` is `AudioSection`, `.display` is `DisplaySection`);
+- **Settings screen** (`settings_screen.py`): `ThemedAccordion` sections:
+  User Profile, **Timer / Program**, Device, Data Backup, Threshold (max 180), Audio, Display, Custom Formula, Theme, Developer Tools (crash triggers), Help & Troubleshooting (`help_language()`: Android's locale, or on desktop `LANGUAGE`'s list and then `LC_ALL`/`LC_MESSAGES`/`LANG`; the first language with a help file, else English; Windows and macOS builds usually set none of these).
+  The larger sections are their own classes in `settings_sections/`, built into their accordion section and reached as attributes of the screen:
+  `settings_screen.formulas` is `FormulaSection`, `.timer` is `TimerSection`, `.device` is `DeviceSection`, `.audio` is `AudioSection`, `.display` is `DisplaySection`;
   what more than one section builds with is in `settings_sections/common.py`.
-  User Profile section uses the shared `UserPickerForm`; Data Backup has Backup/Restore buttons.
-  (Graph series selection moved to the on-graph picker; `_graph_toggles` remains only as the first-run default set.)
-  Custom Formula section has **three named slots** (Slot 1/2/3), each with name input, expression input, Apply, Save, and per-slot status.
-  A `[1][2][3]` button group below the "Custom Formula" audio-metric radio selects which slot drives noise (the `on_audio_formula_index` hook → `_on_audio_formula_index` in `app_manager`).
-  **Timer / Program section** has a **Simple | Program** toggle: Simple = single duration + Enable-Timer checkbox;
-  Program = segment editor (`TimerSection`, `settings_sections/timer.py`:
-  `_segments_box`, rows with duration, formula, target, end-cue picker (Chime/Warble), feedback-source picker) + loaded-program label (`_program_loaded_label`) + saved-programs library (save/load/delete named programs).
-  The toggle swaps `_simple_box` or `_program_box` into `_mode_content_box` via `clear_widgets()`/`add_widget()` — a zero-height disabled container still lets children overflow and swallow taps, so the inactive box must be fully detached.
+  User Profile uses the shared `UserPickerForm`; Data Backup has Backup/Restore buttons.
+  Graph series are picked on the graph (the series picker); `_graph_toggles` is only the first-run default set.
+  Custom Formula has **three named slots** (Formula 1/2/3, named Custom 1–3 by default), each with name input, expression input, Apply, Save, and per-slot status.
+  In Threshold, a `[1][2][3]` button group below the "Custom Formula" audio-metric radio selects which slot drives the audio (the `on_audio_formula_index` hook → `_on_audio_formula_index` in `app_manager`).
+  **Timer / Program** has a **Simple | Program** toggle: Simple = single duration + Enable-Timer checkbox;
+  Program = the segment editor (`TimerSection`, `settings_sections/timer.py`: `_segments_box`, rows with duration, formula, target, end-cue picker (Chime/Warble), feedback-source picker);
+  with it the loaded-program label (`_program_loaded_label`) and the saved-programs library (save/load/delete named programs).
+  The toggle swaps `_simple_box` or `_program_box` into `_mode_content_box` via `clear_widgets()`/`add_widget()`: a zero-height disabled container still lets children overflow and swallow taps, so the inactive box must be fully detached.
 - **Locked-screen sessions** (Settings → Device, Android):
   whether battery optimisation applies to the app and the buttons that open the phone's settings, from `PowerExemption.refresh` ([app-platform](app-platform.md#background-running-android)).
   `DeviceSection.show_power_state` attaches the row, so off Android it never shows; a row with nothing to open has no button row.
-- **Device list** (Settings → Device).
-  One row per paired device, `device_row_text(alias or Bluetooth name, address)` (`app/ui/device_labels.py`): every MindWave advertises the same name, so the address tells rows apart.
+- **Device list** (Settings → Device): one row per paired device, `device_row_text(alias or Bluetooth name, address)` (`app/ui/device_labels.py`): every MindWave advertises the same name, so the address tells rows apart.
   - **Marks:** the selected headset's row has the accent fill and the connected one the Bluetooth glyph (`DeviceSection.mark_bt_devices`); in mock mode no headset is in use, so none is marked.
     The screen reads them from `Headset.state()` (`app/ui/headset.py`, the app's `_headset`) whenever it shows device status:
     a list populate, `update_device_status`, and `on_pre_enter`, since the link can drop between sessions with nothing on screen.
     Every row is built with the glyph so its slot exists (`StyledButton` makes an icon label only at construction) and `set_icon("")` blanks it.
   - **Names:** the pencil opens the inline editor History's rename uses (`theme.RenameRow`, stopping at `MAX_DEVICE_ALIAS` while typing) under the row;
-    Save or Enter calls `Headset.on_rename(address, bluetooth_name, text)`, which stores the alias and relabels the row (`relabel_bt_device`) and, for the headset in use, the status line and the Session screen's label (`Headset.show_selected`, which a pick in the list goes through too).
+    Save or Enter calls `Headset.on_rename(address, bluetooth_name, text)`, which stores the alias and relabels the row (`relabel_bt_device`);
+    for the headset in use it also relabels the status line and the Session screen's label (`Headset.show_selected`, which a pick in the list goes through too).
     Aliases are app-wide, not per profile: `bt_device_aliases`, a JSON `{address: alias}` in `app_settings` (`get_json_setting`), because a headset is the same object whichever profile uses it;
     the selected headset stays per profile (`bt_device_address`).
     Blank, or the Bluetooth name itself, drops an alias, and one is cut to `MAX_DEVICE_ALIAS` (24) characters to keep its row on one line.
@@ -75,6 +73,5 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 - **First run is the user gate's popup** (`_show_first_run_popup`, see [app-platform](app-platform.md#user-gate-and-profiles)): a `UserPickerForm` to create a profile or pick an existing one (e.g. after a restore) without retyping the name.
   It is a Popup, not a Screen, because a TextInput inside a Screen doesn't get keyboard focus on some Android devices.
-  A new profile (`_complete_first_run`) starts on the mock;
-  a picked one (`_on_pick_existing_user`) keeps its own headset and mode;
+  A new profile (`_complete_first_run`) starts on the mock; a picked one (`_on_pick_existing_user`) keeps its own headset and mode;
   both leave through `_finish_first_run`, and `Headset.auto_scan`, which scans only while the stream has no headset set, selects a single paired MindWave or opens Settings → Device to pick among several.

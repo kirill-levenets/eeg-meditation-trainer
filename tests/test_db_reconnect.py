@@ -84,7 +84,7 @@ def test_use_after_shutdown_is_a_benign_noop_not_a_crash():
     db.close()
     db.set_setting("theme", "Dark Green")     # must not raise
     assert db.get_setting("theme") is None    # no reconnect while shutting down
-    assert db.get_all_sessions() == []
+    assert db.get_all_sessions(1) == []
 
 
 def test_backup_during_shutdown_raises_not_silent_empty_file():

@@ -1,14 +1,10 @@
 # Android release signing (CI)
 
 GitHub release APKs are signed with **one fixed release keystore** so users can **update in place without losing data**.
-(Debug builds are signed with an ephemeral per-machine key — Android then refuses the in-place update and the user must uninstall, which wipes the app-private database.
-Consistent signing is what makes "download the new APK and install over the old one" preserve sessions/settings.)
+A debug build is signed with an ephemeral per-machine key: Android refuses to install it over an APK signed with another key, and the uninstall it needs wipes the app-private database.
 
-> **The keystore is the app's permanent identity.
-> If you lose it you can never
-> ship an update that installs over an existing install again.**
-> Back it up
-> (offline + password manager).
+> **The keystore is the app's permanent identity: if you lose it you can never ship an update that installs over an existing install again.**
+> Back it up (offline + password manager).
 > Do not commit it.
 
 ## One-time setup
@@ -31,11 +27,11 @@ Consistent signing is what makes "download the new APK and install over the old 
    ```
 
 The release workflow (`.github/workflows/release.yml`) decodes the keystore from `ANDROID_KEYSTORE_BASE64`, exports the `P4A_RELEASE_*` variables, and runs `buildozer android release` → a signed APK.
-Without the secrets it falls back to a debug build and emits a warning (not update-safe).
+Without the secrets it builds a debug APK and emits a warning (not update-safe).
 
 ## Notes
 
 - `buildozer.spec` sets `android.release_artifact = apk` for GitHub/sideload.
   For a Google Play upload, switch it to `aab` and use the same keystore as the **upload key** (enroll in Play App Signing on first upload).
-- The **first** release-signed build is itself a signature change vs. any debug-signed build already installed (e.g. 1.2/1.3 from earlier CI), so that one update still forces an uninstall.
-  Every release after it updates in place.
+- An installed debug-signed APK (a local debug build, or a CI build made without the secrets) can't be updated by a release-signed one: that one update still forces an uninstall.
+  Every release-signed APK after it updates in place.

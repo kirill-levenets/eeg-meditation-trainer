@@ -154,7 +154,7 @@ The linked file explains the mechanism.
   `tests/test_theme_switch.py` and `tests/test_modal_style.py` fail on direct Kivy imports. → [ui-theme](docs/architecture/ui-theme.md#navigation-and-theme)
 - Decorative strokes (press ring, graph glyphs, borders) contrast with the surface they are drawn on (`C.TEXT`), not the element's fill; text on a fill uses `readable_fg(fill)`.
   Check all four themes.
-- Roboto in this build has no arrows or geometric triangles (`→`, `↑↓`, `▶` render as tofu): use `›`, `»`, or MDI `Icons` font markup.
+- Roboto in this build has no arrows or geometric triangles (`→`, `↑↓`, `▶` render as tofu): use `›`, `»`, or MDI `Icons` font markup; `tests/test_help.py` checks the help files against the font.
 - Kivy holds a lambda strongly (`Clock.schedule_once`: until it runs; `bind`: as long as the object it is bound on) and a bound method weakly:
   hand a method to anything that outlives the widget (the Clock, `Window`, a global cache), or the widget lives as long as that.
   Anything Kivy caches globally (RecycleView rows) holds its owner by `weakref`. → [history](docs/architecture/history.md#session-list)
@@ -233,7 +233,7 @@ When modifying features, UI, commands, architecture, or build process, update th
 - `docs/USER_MANUAL_UA.md` — Ukrainian user manual: mirror English manual changes.
 - `app/assets/help/help_en.txt` — In-app help content (English).
   Update when features, connection flow, or settings change.
-- `app/assets/help/help_ua.txt` — In-app help content (Ukrainian): mirror English help changes.
+- `app/assets/help/help_ua.txt` — In-app help content (Ukrainian, shown for a Ukrainian Android or desktop locale): mirror English help changes, on-screen labels in English as the app shows them.
 - `CHANGELOG.md` — Release history in Keep a Changelog format.
   Add entries under `[Unreleased]` as you commit; promote to a new version section when tagging.
 - `IMPROVEMENTS.md` — Roadmap.

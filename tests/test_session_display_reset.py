@@ -100,18 +100,6 @@ def test_re_picking_the_shown_profile_keeps_its_session_even_mid_session():
     app._load_user_settings.assert_called_once_with(1)
 
 
-def test_back_from_all_users_to_the_shown_profile_keeps_its_session():
-    app = _owner_app(active=None, shown=1)
-    app._activate_user(1)
-    app._drop_shown_session.assert_not_called()
-
-
-def test_from_all_users_to_another_profile_drops_the_shown_session():
-    app = _owner_app(active=None, shown=1)
-    app._activate_user(2)
-    app._drop_shown_session.assert_called_once_with(keep_notes=True)
-
-
 def test_a_cold_start_shows_nothing_to_drop():
     app = _owner_app(active=None, shown=None)
     app._activate_user(1)
@@ -171,7 +159,6 @@ def _deleting_app(shown) -> EEGMeditationApp:
     app._db = MagicMock()
     app._db.get_all_users.return_value = [{"id": 2}]
     app._current_user_id = 2
-    app._view_all_users = False
     app._live_display_uid = shown
     for name in ("_session_pipeline_live", "_mark_history_dirty", "_refresh_profile", "_program_settings",
                  "_open_user_gate", "_drop_shown_session"):
