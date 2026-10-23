@@ -40,7 +40,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 ## Settings screen
 
 - **Settings screen** (`settings_screen.py`): `ThemedAccordion` sections:
-  User Profile, **Timer / Program**, Device, Data Backup, Threshold (max 180), Audio, Display, Custom Formula, Theme, Developer Tools (crash triggers), Help & Troubleshooting.
+  User Profile, **Timer / Program**, Device, Data Backup, Threshold (max 180), Audio, Display, Custom Formula, Theme, Developer Tools (crash triggers), Help & Troubleshooting (`help_language()`: `help_ua.txt` on a Ukrainian-language device, `help_en.txt` otherwise).
   The larger sections are their own classes in `settings_sections/`, built into their accordion section and reached as attributes of the screen:
   `settings_screen.formulas` is `FormulaSection`, `.timer` is `TimerSection`, `.device` is `DeviceSection`, `.audio` is `AudioSection`, `.display` is `DisplaySection`;
   what more than one section builds with is in `settings_sections/common.py`.

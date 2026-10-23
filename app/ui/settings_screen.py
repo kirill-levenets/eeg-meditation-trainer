@@ -10,7 +10,9 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.slider import Slider
 
+from app import android_jni
 from app.config import METRICS
+from app.logger import logger
 from app.ui.hooks import Hook
 from app.ui.settings_sections.audio import AudioSection
 from app.ui.settings_sections.common import (
@@ -38,6 +40,22 @@ from app.ui.theme import (
     make_message_popup,
 )
 from app.ui.widgets.user_picker import UserPickerForm
+
+_HELP_FILE_LANG = {"uk": "ua"}  # the help files' suffix where it isn't the ISO 639 code
+
+
+def help_language() -> str:
+    """The help's language: the device's on Android, else the LANGUAGE / LC_ALL / LC_MESSAGES / LANG setting."""
+    try:
+        if android_jni.on_android():
+            code = android_jni.language()
+        else:
+            code = next((os.environ[v] for v in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG") if os.environ.get(v)), "")
+    except Exception:  # noqa: BLE001 - the help falls back to English rather than break the Settings screen
+        logger.exception("Device language lookup failed; help in English")
+        code = ""
+    code = code.split(":")[0].split(".")[0].split("_")[0].split("-")[0].lower()
+    return _HELP_FILE_LANG.get(code, code) or "en"
 
 
 def _load_help_topics(lang: str = "en") -> list[tuple[str, str]]:
@@ -371,7 +389,7 @@ class SettingsScreen(Screen):
 
         # --- Help section (loaded from app/assets/help/) ---
         help_section = accordion.add_section("Help & Troubleshooting", collapsed=True)
-        help_topics = _load_help_topics()
+        help_topics = _load_help_topics(help_language())
         for topic_title, topic_text in help_topics:
             topic_label = ThemedLabel(
                 text=f"[b]{topic_title}[/b]",

@@ -398,6 +398,7 @@ A change applies at once.
 ### Help & Troubleshooting
 
 The in-app help: quick start, connection troubleshooting, supported devices, sensor tips and more.
+It shows in your device's language: Ukrainian on a device set to Ukrainian, English otherwise.
 
 ---
 
