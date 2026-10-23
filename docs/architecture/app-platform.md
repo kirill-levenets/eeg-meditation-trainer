@@ -86,6 +86,8 @@ After dropping a requirement, delete that package from `python-installs/` and th
 site-packages live inside `lib/arm64-v8a/libpybundle.so`, a tar inside the APK.
 CI builds start clean and are unaffected.
 
+- The Windows dependencies are one list, `requirements_windows.txt`, which `build_windows.bat` and the CI job both install:
+  it pins `kivy[base]` and lets Kivy choose its `kivy_deps` (Kivy 2.3.0 requires `kivy-deps.sdl2 ~=0.7.0`, so an explicit 0.8 pin can't resolve), and adds `pywin32` for the spec's `win32timezone`.
 - Windows CI build sets `KIVY_DOC=1` in the PyInstaller spec (`eeg_meditation.spec`) to prevent GL init on the headless runner;
   Kivy data paths (`kivy_install/data/`, `kivy_install/modules/`) are constructed manually instead of importing `kivy.tools.packaging.pyinstaller_hooks`.
 - Linux CI uses system Python (ubuntu-24.04) instead of `actions/setup-python` to get `socket.AF_BLUETOOTH` support.

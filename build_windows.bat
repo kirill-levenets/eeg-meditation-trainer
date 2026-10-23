@@ -31,11 +31,7 @@ call build_venv\Scripts\activate.bat
 
 echo Installing dependencies...
 python -m pip install --upgrade pip
-pip install kivy[base]==2.3.0 kivy_deps.sdl2 kivy_deps.glew
-pip install pillow==10.4.0
-pip install pyserial==3.5
-pip install pyinstaller==6.11.1
-pip install pywin32
+pip install -r requirements_windows.txt
 
 echo.
 echo === Building executable ===

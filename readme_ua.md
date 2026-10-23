@@ -192,7 +192,7 @@ REM Результат: dist\EEG_Meditation_Trainer\EEG_Meditation_Trainer.exe
 ```
 
 Потрібні Windows 10/11 і Python 3.10-3.12 з [python.org](https://www.python.org/downloads/) у `PATH` (`python --version` має працювати).
-Скрипт видаляє `build\` і `dist\`, створює `build_venv`, встановлює зафіксовані залежності й pywin32 і запускає `python -m PyInstaller eeg_meditation.spec --noconfirm`.
+Скрипт видаляє `build\` і `dist\`, створює `build_venv`, встановлює `requirements_windows.txt` і запускає `python -m PyInstaller eeg_meditation.spec --noconfirm`.
 Для дистрибуції заархівуйте всю папку `dist\EEG_Meditation_Trainer\`: exe запускається з неї без встановленого Python.
 
 - **Відсутні DLL**: перевірте, що встановлені `kivy_deps.sdl2` і `kivy_deps.glew`; spec-файл включає їхні бінарники.
