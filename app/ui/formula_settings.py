@@ -80,9 +80,8 @@ class FormulaSettings:
     def on_save(self, idx: int, name: str, formula: str) -> None:
         """Save a slot's formula to the user's saved library, named by the slot. One that doesn't compile is refused:
         a program segment can pick any saved formula."""
-        uid = self._user_id()
-        if not uid:
-            self._section.set_formula_slot_status(idx, "No user selected", is_error=True)
+        uid = self._require_user("save a formula")
+        if uid is None:
             return
         if not formula:
             self._section.set_formula_slot_status(idx, "Nothing to save", is_error=True)
@@ -137,9 +136,8 @@ class FormulaSettings:
     def on_export(self) -> None:
         """Export the saved formulas to a text file where the user can open it, as the session exports deliver theirs:
         Documents/EEGMeditation on Android (through MediaStore), ~/Documents/EEGMeditation on desktop."""
-        uid = self._user_id()
-        if not uid:
-            self._section.set_formula_slot_status(0, "No user selected", is_error=True)
+        uid = self._require_user("export formulas")
+        if uid is None:
             return
         formulas = self._db.get_saved_formulas(uid)
         if not formulas:

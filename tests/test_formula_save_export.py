@@ -1,5 +1,5 @@
-"""Settings › Custom Formula's Save and Export (#102): a formula that doesn't compile isn't saved, and Export reaches
-the Documents folder the session exports use."""
+"""Settings › Custom Formula's Save and Export (#102): a formula that doesn't compile isn't saved, Export reaches the
+Documents folder the session exports use, and both ask for a profile as Load and Delete do."""
 import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -41,6 +41,15 @@ def test_a_formula_that_compiles_is_saved(make):
     fs, _app, db, uid = make()
     fs.on_save(0, "Alpha", "alpha1 * 2")
     assert db.get_saved_formulas(uid) == [{"name": "Alpha", "formula": "alpha1 * 2"}]
+
+
+@pytest.mark.parametrize("action, call", [("save a formula", lambda fs: fs.on_save(0, "A", "alpha1")),
+                                          ("export formulas", lambda fs: fs.on_export())])
+def test_save_and_export_without_a_profile_ask_for_one_as_load_and_delete_do(make, action, call):
+    fs, app, _db, _uid = make(profile=False)
+    call(fs)
+    app._require_user.assert_called_once_with(action)
+    fs._section.set_formula_slot_status.assert_not_called()  # the popup says it, not a slot's status line
 
 
 def test_export_delivers_to_documents_and_leaves_no_private_copy(make, tmp_path, monkeypatch):

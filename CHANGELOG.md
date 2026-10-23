@@ -35,6 +35,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   **Save** now refuses a formula that doesn't compile and shows its error.
 - **The formulas Export wrote where they couldn't be opened on Android** (#102): Settings → Custom Formula's export went to the app's private storage.
   It now goes to `Documents/EEGMeditation/` (on a computer, `~/Documents/EEGMeditation/`), as a session's CSV does, and an export that fails says so.
+  Without an active profile, Save and Export now ask for one, as Load and Delete do, instead of a slot's status line reading "No user selected".
 - **The in-app help was always in English, partly out of date, and drew its menu paths as empty boxes**:
   Settings › Help & Troubleshooting now shows in Ukrainian on a phone set to Ukrainian (on a computer, when `LANGUAGE` or `LANG` is Ukrainian).
   It now matches the app: the session-length choices, the program editor and its sounds, the "No EEG data received" message, the alerts being off until enabled, the formula variables.
