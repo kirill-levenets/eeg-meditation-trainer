@@ -219,8 +219,11 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 **All documentation files must stay in sync with code changes.**
 When modifying features, UI, commands, architecture, or build process, update the relevant docs in the same commit or PR:
 
+**Markdown is one sentence per line**, so an edit diffs as the sentences it changed: a sentence over ~240 characters breaks at its clauses (`;`, `:`, an em dash), never in a table or code block.
+`tests/test_docs_format.py` fails on a prose line over 400 characters and on `CLAUDE.md` over 30,000.
+
 - `CLAUDE.md` — Commands, module map, invariants, shared paths.
-  Loaded into every Claude Code session together with `~/.claude/CLAUDE.md` (150k-character combined cap), so keep it under ~30k characters: a new rule gets one line here and its explanation in the subsystem's architecture file.
+  Loaded into every Claude Code session together with `~/.claude/CLAUDE.md` (150k-character combined cap), so keep it under 30k characters (tested): a new rule gets one line here and its explanation in the subsystem's architecture file.
 - `docs/architecture/*.md` — How each subsystem works and why ([index](docs/architecture/README.md)).
   Update the subsystem's file when its design changes.
   Describe the current design; what it used to do and dated measurements belong in the commit message or `CHANGELOG.md`, unless they explain a constraint that still holds.
