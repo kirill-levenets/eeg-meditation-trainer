@@ -5,14 +5,15 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 ## Engine
 
-- **Audio feedback** (`app/audio_feedback/noise.py`): 4-channel engine — selectable continuous feedback (log-scaled volume, MAX_VOLUME=0.3), tingsha bell (sinking), chime (subtle distraction), warble (disconnect alert).
-  Uses Kivy SoundLoader with crossfaded WAV generation.
-  On Android, the feedback channel and the **timer-end gong** use `MediaPlayer` (with `USAGE_MEDIA` audio attributes) instead of SDL_mixer so they keep playing through screen lock; SoundLoader/SDL is silenced while locked.
-  So do the alerts (the sinking bell, the chime, which is also the connect sound and a program segment's end cue, and the warble):
+- **Audio feedback** (`app/audio_feedback/noise.py`): 4-channel engine, its built-in sounds synthesized as WAV files (the rain and tone loops crossfaded at their ends):
+  selectable continuous feedback, tingsha bell (sinking), chime (subtle distraction; also the connect sound and a program segment's end cue, `play_transition_cue()`), warble (disconnect alert).
+  Desktop plays everything through Kivy's `SoundLoader`.
+  On Android the feedback loops, the **timer-end gong** and the alerts use `MediaPlayer` (`USAGE_MEDIA` audio attributes), not SDL_mixer, so they keep playing through screen lock; SoundLoader/SDL is silenced while locked.
   `_play_one_shot` keeps one `_make_noise_player(path, loop=False)` player per alert and replays it from its start.
-  The timer gong is the same kind of one-shot (`_gong`), and its file can change (a custom sound):
-  a one-shot asked for another file gets a new player, built before the old one goes, so a file that can't be opened leaves the kept player as it was, and outside `_one_shot_lock`, since SDL decodes a whole file at load and a release waits on that lock.
-  Each release bumps that one-shot's generation (`_one_shot_gens`), so a player still being built when the app stops the sound (the end card's OK, a new session) is called off and released instead of stored;
+  The timer gong (`_gong`) is the same kind of one-shot, and its file can change (a custom sound):
+  a one-shot asked for another file gets a new player, built before the old one goes, so a file that can't be opened leaves the kept player as it was.
+  The new player is built outside `_one_shot_lock`: SDL decodes a whole file at load, and a release waits on that lock.
+  Each unload (`_unload_one_shot`) bumps that one-shot's generation (`_one_shot_gens`), so a player still being built when the app stops the sound (the end card's OK, a new session) is called off and released instead of stored;
   nothing failed, so the gong doesn't fall back.
   A kept player whose start fails is dropped, and the next play builds a fresh one.
   Every one-shot release goes through `_release`, which owns the thread rule: at once on the main thread;
@@ -21,48 +22,45 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   it played to its end (a MediaPlayer completion listener on Android, `_completion_listener`, a pyjnius `OnCompletionListener`;
   the Sound's `on_stop` on desktop, minus the stops the app makes itself: a replay's rewind, Stop), another play replaced it, or the player was released.
   `_release` clears a player's end hook first, before any deferral, and then `unload()` stops it, so a released player's end never ends the next play.
-  The Settings timer Test passes one, so its button reads Test again however the gong stops.
-  A custom gong the player can't open rings the default gong instead, as a missing file does (on desktop SDL loads a file it can't decode as an empty Sound, so `_KivyNoisePlayer` treats a `SoundSDL2` (wav, flac, mp3, ogg) of zero length as can't-open; `MusicSDL2` (MIDI, trackers) never reports a length);
+  The Settings timer Test passes an `on_end`, so its button reads Test again however the gong stops.
+  A custom gong the player can't open rings the default gong instead, as a missing file does.
+  On desktop SDL loads a file it can't decode as an empty Sound, so `_KivyNoisePlayer` treats a `SoundSDL2` (wav, flac, mp3, ogg) of zero length as can't-open; `MusicSDL2` (MIDI, trackers) never reports a length.
   `play_timer_sound` returns the file it played ("" for none), and the Test reports a custom file it couldn't play, or no sound at all (`timer_sound_unplayable`).
-  Desktop plays everything through `SoundLoader`.
-  `AudioEngine.mute()` is a non-blocking volume→0 (setVolume only) safe to call from the tick thread during lock.
-  **Selectable feedback source** (issue #10): `AudioEngine.prepare_feedback(sources, active_id)` (main-thread) pre-instantiates one looping player per distinct source id (`"noise"`, `"tone"`, `"heartbeat"`, or a custom file path);
+  **Selectable feedback source** (#10): `AudioEngine.prepare_feedback(sources, active_id)` (main thread) pre-instantiates one looping player per distinct source id (`"noise"`, `"tone"`, `"heartbeat"`, or a custom file path);
   `set_active_feedback(source_id)` is setVolume-only — the active player goes to the modulated volume, all others go to 0.
-  No player is created or released mid-session; switching is tick-/lock-safe under the same deadlock-avoidance rule as `mute()`.
-  **Pause keeps the player set** (#37):
-  `_on_pause` calls `AudioEngine.pause()` (volume 0 + `player.stop()` on every prepared player, ramp stopped, `_is_playing=False` so the bell/chime alert gates and `update()` go quiet) and `resume()` (replays the same players through `_play_prepared`, the ramp restores each role's last target)
-  — never `stop()`/`start()`, because `stop()` tears the prepared set down and only `_start_session_common`'s `prepare_feedback` + `set_reward` rebuild it, so Resume used to leave both channels silent for the rest of the session (with the alerts still firing, which read as "the sound changed").
-  `stop()` remains the real session-end teardown.
-  The `"tone"` source generates a harmonic-pad drone (fundamental + fifth) lazily at session start.
-  The `"heartbeat"` source (issue #11 — stable internal id; the timbre is **Crickets**) generates a looping `_NOISE_BUFFER_SECONDS`-long WAV that is a silent bed with one `_HEARTBEAT_PULSE_SECONDS` (0.1s) cricket chirp
-  — a high tonal carrier (~4.8kHz) + 2nd harmonic gated by a ~40Hz half-wave amplitude trill, Hann-windowed to zero at both ends (`_generate_heartbeat_wav`, cached at `_heartbeat_path`)
-  — so a periodic ~10s chirp rides the same continuous looping player + volume ramp with **no** tick-loop scheduling;
-  loop edges stay silent → gapless.
-  It's **reward-only** (offered in the reward picker as "Crickets", not the below-feedback picker).
+  No player is created or released mid-session, so switching is tick- and lock-safe, like `mute()`.
+  **Pause keeps the player set** (#37): `_on_pause` calls `AudioEngine.pause()` and `resume()`, never `stop()`/`start()`.
+  `pause()` sets every prepared player to volume 0 and stops it, stops the ramp and clears `_is_playing`, so the bell/chime alert gates and `update()` go quiet;
+  `resume()` replays the same players (`_play_prepared`), and the ramp restores each role's last target.
+  `stop()`, the session-end teardown, tears the prepared set down, which only `_start_session_common`'s `prepare_feedback` + `set_reward` rebuild, so both channels would stay silent after Resume.
+  The `"tone"` source is a harmonic-pad drone (fundamental + fifth), generated on first use.
+  The `"heartbeat"` source (#11 — stable internal id; the timbre is **Crickets**) is a looping `_NOISE_BUFFER_SECONDS`-long (10 s) WAV: a silent bed with one `_HEARTBEAT_PULSE_SECONDS` (0.1 s) cricket chirp
+  — a high tonal carrier (~4.8 kHz) + 2nd harmonic gated by a ~40 Hz half-wave amplitude trill, Hann-windowed to zero at both ends (`_generate_heartbeat_wav`, cached at `_heartbeat_path`)
+  — so a chirp every ~10 s rides the same looping player + volume ramp with **no** tick-loop scheduling, and the silent loop edges keep it gapless.
+  It's **reward-only**: `_REWARD_SOURCE_OPTIONS` offers it as "Crickets", `_FEEDBACK_SOURCE_OPTIONS` doesn't.
   `test_audio(reward_id)` previews the reward source first (players are near loop start so the chirp is caught) before the below-channel sweep.
   The test prepares its own players over whatever is prepared, so the app refuses it while a session runs, is paused or connects (`_refused_while_session_runs`);
   a session start ends a test still playing (`end_test()`, next to `stop_timer_bell()` in `_start_session_common`):
-  its sequence stops where it is, by a generation token checked before each step, its deferred teardown (`_finish_test`) is called off, and `_is_playing`, which the test set, goes back, so the session's `start()` isn't skipped.
-  A test started again supersedes the one running the same way; `_on_test_audio`/`_test_audio_sources` prepare both the below and reward sources.
+  its sequence stops where it is, by a generation token (`_test_gen`) checked before each step;
+  its deferred teardown (`_finish_test`) is called off;
+  and `_is_playing`, which the test set, goes back, so the session's `start()` isn't skipped.
+  A test started again supersedes the running one the same way; `_on_test_audio`/`_test_audio_sources` prepare both the below and reward sources.
   `EEGMeditationApp._feedback_plan` / `_source_spec` / `_feedback_source_id` / `_global_feedback_id` resolve the global setting and per-segment override (`""` inherits global);
   `ProgramRun._enter_segment` calls `set_active_feedback` at each boundary.
-  Persisted per-user: `feedback_source` (`"noise"` / `"tone"` / `"custom"`) and `feedback_sound_path`.
-  **Dual-zone feedback** (issues #12, #9): two metric-keyed channels driven from one `update(score)`.
-  The **below** channel is the existing noise (`compute_volume`: log curve, 0 at/above threshold).
+  Persisted per-user: `feedback_source` (`"none"` / `"noise"` / `"tone"` / `"custom"`, default `"noise"`) and `feedback_sound_path`.
+  **Dual-zone feedback** (#12, #9): two metric-keyed channels driven from one `update(score)`.
+  The **below** channel is the selected feedback source (`compute_volume`: log curve, 0 at/above threshold).
   The **above-threshold reward** channel (`compute_reward_volume`: mirror log curve rising 0→max over `[threshold, threshold + APP.REWARD_SPAN(=30)]`, clamped) is a second prepared player designated by `set_reward(source_id)` (`""`=none).
   Both zones are 0 exactly at the threshold → clean cross-fade.
-  The ramp loop now drives **every** prepared player toward its role target (below→`_target_volume`, reward→`_reward_target_volume`, others→0); volume-only, tick/lock-safe.
+  The ramp loop drives **every** prepared player toward its role target (below→`_target_volume`, reward→`_reward_target_volume`, others→0); volume-only, tick/lock-safe.
   A channel source of `"none"`/`""` (`_source_spec`→`("none","")`) instantiates no player; `prepare_feedback` skips `kind=="none"`, and `_resolve_active("" | "none")` returns `""` so a None **below** channel never grabs the reward player.
-  `_teardown_feedback_players`/`stop` reset `_reward_feedback`, so `set_reward` must be called **after** `prepare_feedback` at session start (the order `_start_session_common` uses).
+  `_teardown_feedback_players` (run by `prepare_feedback` and `stop`) resets `_reward_feedback`, so `set_reward` must be called **after** `prepare_feedback` at session start (the order `_start_session_common` uses).
   Reward is **global only** — programs keep per-segment switching on the below channel; reward stays armed across segments.
-  `EEGMeditationApp._reward_id()` resolves the reward source (custom-missing → silent, unlike noise→rain).
+  `EEGMeditationApp._reward_id()` resolves the reward source: a custom selection with no file is silent, where the below channel falls back to rain.
   Persisted per-user: `reward_source` (`"none"`/`"noise"`/`"tone"`/`"heartbeat"`/`"custom"`, default `"none"`) + `reward_sound_path`; `_on_reward_source_change` mirrors `_on_feedback_source_change`.
-  Subsumes #9.
-  **Source selection UI**:
-  both the feedback and reward sources are chosen through a shared **popup picker** (`settings_sections.common.open_source_picker(title, options, on_choose)` → `AudioSection._choose_feedback_source`/`_choose_reward_source` → `_apply_*_source`), not a button row
-  — one picker button per channel showing the current label (`common.source_label`);
-  `"custom"` opens the file chooser directly (no separate custom-path row / RevealBox).
-  `_FEEDBACK_SOURCE_OPTIONS` omits Crickets; `_REWARD_SOURCE_OPTIONS` includes it.
+  **Source selection UI**: one button per channel, showing the current label (`common.source_label`), opens the shared popup picker:
+  `settings_sections.common.open_source_picker(title, options, on_choose)` → `AudioSection._choose_feedback_source`/`_choose_reward_source` → `_apply_*_source`;
+  `"custom"` opens the file chooser directly.
 - **Custom sound files** are picked through `settings_sections.common.open_audio_file_chooser`, the one picker for the feedback, reward, timer and segment sounds.
   The desktop uses Kivy's file browser.
   On Android an app can't list `/data` (the `~` of an app with no `HOME`), or shared storage by path (scoped storage; the app holds no storage permission), so the picker is the system one, `android_saf.open_document(_AUDIO_TYPES)`:
@@ -74,7 +72,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The copy's path is what plays (`MediaPlayer`) and is saved, so the sound survives restarts and the original being moved or deleted, with no persistable URI grant.
   A read that fails reports `sound_pick_failed` and leaves nothing behind.
   Copies are never deleted: one replaced or no longer used stays in `sounds/`.
-- Volume curve uses log scaling (`k=9`): rises fast initially, flattens near max (0.3).
+- Volume uses log scaling (`_log_rise`, `k=9`): rises fast initially, flattens near the max (`APP.MAX_VOLUME` = 0.3).
   Prevents harsh noise at low scores.
 
 ## Threading and teardown
@@ -82,29 +80,28 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 - **Android MediaPlayer teardown must never run on the tick thread.**
   `MediaPlayer`'s event handler lives on the main Looper, which is paused while the screen is locked, so `release()`/`stop()` from the daemon tick thread deadlocks against it (hung tick thread → session never saved, noise never stops).
   `setVolume()` has no Looper sync and is safe from the tick thread.
-  Rule: silence on the tick thread with `AudioEngine.mute()`; defer the real `AudioEngine.stop()` / gong `release()` to the main thread.
-  The Settings **Test audio** sequence runs on a daemon thread, so its closing `stop()` is scheduled on the main thread too (`Clock.schedule_once`).
-  The timer-end path persists the session on the tick thread *before* any audio call so a hang can never cost the session.
+  Rule: silence on the tick thread with `AudioEngine.mute()` (non-blocking volume→0, setVolume only); defer the real `AudioEngine.stop()` / gong `release()` to the main thread.
+  The Settings **Test audio** sequence runs on a daemon thread, so its closing `stop()` runs on the main thread too (`_next_frame` → `_finish_test`).
+  The timer-end path (`_end_by_timer`) persists the session on the tick thread *before* any audio call so a hang can never cost the session.
 - **No SoundLoader (SDL_mixer) call off the main thread on Android.**
   While the app is paused (screen locked), SDL holds its audio device's mixer lock until it resumes (`ANDROIDAUDIO_PauseDevices`), and Kivy's `audio_sdl2` calls SDL_mixer without releasing the GIL.
-  A SoundLoader play or stop from the tick thread blocks on that lock with the GIL held, every Python thread stops, and the resume that would free the lock needs the GIL:
-  a program's first segment end cue under a lock froze the app this way, with an ANR on unlock.
+  A SoundLoader play or stop from the tick thread blocks on that lock with the GIL held, every Python thread stops, and the resume that would free the lock needs the GIL: the app freezes, with an ANR on unlock.
   So the alerts the tick plays are MediaPlayers there (above), and one whose MediaPlayer fails stays silent rather than fall back to SoundLoader (`_make_noise_player` raises for `loop=False`).
   The gong is that same kept player, replayed at the timer end on the tick thread, so the Settings Test doesn't fall back either: it plays what the timer end will, and a custom file MediaPlayer can't play rings the default gong in both.
   A noise loop still falls back: it is created and started on the main thread, and the tick only sets its volume, which takes no lock.
-  Each keeps its one player because the main thread, where a MediaPlayer is released, doesn't run while the screen is locked: a player per alert (cooldowns of 15–20 s) would pile up unreleased all through a long locked session.
-- **Audio focus is the engine's, not a player's.** Players never request it: a request with no listener is keyed by the `AudioManager`, which every player shares, so per-player requests were one client that any player's release abandoned.
+  Each alert keeps its one player because the main thread, where a MediaPlayer is released, doesn't run while the screen is locked: a player per alert (cooldowns of 15–20 s) would pile up unreleased all through a long locked session.
+- **Audio focus is the engine's, not a player's.** Players never request it:
+  a request with no listener is keyed by the `AudioManager`, which every player shares, so per-player requests would be one client that any player's release abandons.
   `_AudioFocus` is the app's one request, kept while any holder plays and abandoned when the last one leaves (`hold`/`release`).
   The session's feedback holds it with `AUDIOFOCUS_GAIN` from its start or resume (`_start_noise_loop`, main thread; a session with every channel off asks for none) to `pause()` or `stop()`:
   nothing plays while paused, and Resume takes the focus back from an app that started playing meanwhile.
-  The timer gong holds it while it rings (`_play_one_shot(..., focus=AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)`, on the tick thread at a timer end), from its start until its play is over (`_end_one_shot`:
+  The timer gong holds it (`_play_one_shot(..., focus=AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)`, on the tick thread at a timer end) from its start until its play is over (`_end_one_shot`:
   played out, replayed or released), so other audio dips under it and comes back after, the Settings Test included.
   Under a screen lock the gong's end reaches the app only at unlock (the completion listener runs on the paused main Looper), so its hold lasts until then, as the session's does (its `stop()` waits for the main thread too).
-  The first holder's gain stands: a gong at a session's end keeps the session's full focus until it has rung, although `stop()` came first.
+  The first holder's gain stands: a gong at a session's end keeps the session's full focus until it has rung, although `stop()` released the session's hold.
   A refused request (during a call) isn't kept, so the next hold asks again.
   The alerts hold none: they ring under the session's.
 - `AudioEngine.stop()` unloads only `_STOP_UNLOADS` (the chime) and deliberately leaves the two **session-end cues**, which start just before it runs:
-  `_gong` (the timer gong — the timer-expiry path calls `stop()` on the main thread one frame after `play_timer_sound()`, so stopping would unload the gong before it plays) and `_disconnect_sound` (the failure warble
-  — `_stop_and_save` calls `_audio.stop()` on the line after `SessionManager.stop(reason)` plays it, so a stale-data/BT-lost end used to be silent).
-  Gong lifecycle is owned by `play_timer_sound` / `stop_timer_bell`; the alert players are released (`_unload_one_shot`, main thread) by `cleanup()` at app exit, the chime also by `stop()`.
-  `play_transition_cue()` is the separate segment-boundary chime.
+  `_gong` (the timer gong — `_end_by_timer` rings it on the tick thread and the main thread runs `stop()` a frame later, so unloading it would cut the gong off) and `_disconnect_sound` (the failure warble
+  — `_stop_and_save` calls `_audio.stop()` right after `_persist_session_data`, whose `SessionManager.stop(reason)` plays it, so unloading it would silence a stale-data/BT-lost end).
+  The gong's lifecycle is owned by `play_timer_sound` / `stop_timer_bell`; the alert players are released (`_unload_one_shot`, main thread) by `cleanup()` at app exit, the chime also by `stop()`.
