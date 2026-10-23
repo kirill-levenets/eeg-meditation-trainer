@@ -1,6 +1,7 @@
 # Architecture
 
-How each subsystem works and why. [CLAUDE.md](../../CLAUDE.md) holds the commands, the module map and the invariants; read the file for a subsystem before changing it, and update it in the same commit as the change.
+How each subsystem works and why.
+[CLAUDE.md](../../CLAUDE.md) holds the commands, the module map and the invariants; read the file for a subsystem before changing it, and update it in the same commit as the change.
 
 | File | Covers | Main code |
 |---|---|---|
