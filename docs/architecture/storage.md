@@ -96,7 +96,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   swapping in a new manager left them on the null connection, so every later settings write was silently dropped).
   `make_backup` refuses a target that resolves to the live DB (the desktop save picker opens in the DB folder;
   `os.replace` would leave the open connection writing to the swapped-out file).
-  validates the file (must contain `users` and `sessions` tables), `mark_shutting_down()`s + closes the live DB, copies over `APP.DB_PATH`,
+  `_do_restore_and_restart` validates the file (must contain `users` and `sessions` tables), `mark_shutting_down()`s + closes the live DB, copies over `APP.DB_PATH`,
   then force-restarts via the "Please relaunch" popup (`_show_relaunch_popup`, re-shown from `on_resume` if Android resumes the process instead of killing it) → `App.stop()` (in-memory caches reference the old DB, simpler to restart).
   A `backup()` on the shut-down DB raises `sqlite3.OperationalError` (a silent no-op would write an EMPTY backup the user later restores).
   Desktop uses Kivy `FileChooserListView` save/open popups.
