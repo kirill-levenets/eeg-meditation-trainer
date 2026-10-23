@@ -71,6 +71,10 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   without them Kivy takes its `__setitem__` fallback directly.
   The rest of the leak, `WeakProxy.__ref__` raising on dead proxies while Kivy unbinds a dropped widget, stays: removing it would mean copying Kivy's code.
   The app keeps Kivy as it is: it builds its screens once, so its leak stays small.
+- `tests/test_docs_format.py` keeps tracked Markdown one sentence per line, so an edit diffs as the sentences it changed:
+  it fails on a prose line over 400 characters (tables and fenced code are exempt, and a code fence must close) and on `CLAUDE.md` over `CLAUDE_MD_MAX` (30,000), since every Claude Code session loads it.
+  It lists the files with `git ls-files`, so untracked local notes (`IMPROVEMENTS.md`) aren't judged, and it skips outside a git checkout.
+  A failure is fixed by breaking the line at a sentence or clause boundary: a single newline inside a paragraph renders as a space.
 
 ## Build and CI
 

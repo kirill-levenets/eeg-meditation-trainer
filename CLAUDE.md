@@ -180,7 +180,8 @@ The linked file explains the mechanism.
 - **The app is never usable without an active user**: `build()` gates on `resolve_startup_user(db)`; per-user handlers use `_require_user(action)`; every profile pick goes through `_activate_user(uid)`.
   A silent user-gate return or an ignored bool DB write fails `tests/test_silent_failure_guardrail.py` unless marked `# silent-ok: <reason>`. → [app-platform](docs/architecture/app-platform.md#user-gate-and-profiles)
 - Scalar per-user settings are `Setting` descriptors in `app/settings/registry.py`;
-  `SettingsStore.load` always applies a value (stored or default), so no profile inherits another's. Add a new scalar setting as a descriptor, not a hand-written save/load. → [storage](docs/architecture/storage.md#per-user-settings)
+  `SettingsStore.load` always applies a value (stored or default), so no profile inherits another's.
+  Add a new scalar setting as a descriptor, not a hand-written save/load. → [storage](docs/architecture/storage.md#per-user-settings)
 
 ### Shared paths — reuse, don't add a second
 
@@ -219,9 +220,6 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 **All documentation files must stay in sync with code changes.**
 When modifying features, UI, commands, architecture, or build process, update the relevant docs in the same commit or PR:
 
-**Markdown is one sentence per line**, so an edit diffs as the sentences it changed: a sentence over ~240 characters breaks at its clauses (`;`, `:`, an em dash), never in a table or code block.
-`tests/test_docs_format.py` fails on a prose line over 400 characters and on `CLAUDE.md` over 30,000.
-
 - `CLAUDE.md` — Commands, module map, invariants, shared paths.
   Loaded into every Claude Code session together with `~/.claude/CLAUDE.md` (150k-character combined cap), so keep it under 30k characters (tested): a new rule gets one line here and its explanation in the subsystem's architecture file.
 - `docs/architecture/*.md` — How each subsystem works and why ([index](docs/architecture/README.md)).
@@ -242,3 +240,7 @@ When modifying features, UI, commands, architecture, or build process, update th
   Mark items as completed when implemented; add new ideas as they emerge.
 - `pyproject.toml` — Ruff config.
   Run `ruff check app/ tests/ main.py` before every commit; all checks must pass.
+
+**Tracked `.md` files are one sentence per line**, so an edit diffs as the sentences it changed: a sentence over ~240 characters breaks at its clauses (`;`, `:`, an em dash), never in a table or code block.
+`tests/test_docs_format.py` fails on a prose line over 400 characters → [app-platform](docs/architecture/app-platform.md#tests).
+PR and issue bodies are the opposite: GitHub renders their single newlines as line breaks, so a paragraph stays on one line there.
