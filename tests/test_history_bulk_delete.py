@@ -399,7 +399,6 @@ def test_history_does_not_list_the_running_session_until_it_ends(db, monkeypatch
     finished, running = _session(db, me), _session(db, me)
     app, _deferred, _done = _app(db, monkeypatch)
     app._current_user_id = me
-    app._view_all_users = False
     app._history_view = None
     app._history_screen = HistoryScreen()
     app._session_manager.start()

@@ -59,7 +59,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
     a tap on the dates goes back to today.
     `_place_totals` places the row with the table: upright, over the chart inside `_graph_wrap`, so `_graph_row` is the chart's height plus `_PERIOD_H` (`_fit_graph_row`);
     sideways, over the table in `_side_col` beside the chart, which is taller than both, so the list loses nothing.
-    Switching views keeps the period end; another profile or the All Users view (`load_sessions(keep_filter=False)`) starts at today, like the day filter.
+    Switching views keeps the period end; another profile (`load_sessions(keep_filter=False)`) starts at today, like the day filter.
   - **Touches:** `_DayChart` grabs a touch on the chart, a wheel tick excepted, and decides on the lift.
     A sideways move of at least `_SWIPE` (40 dp), more sideways than vertical, pages (right brings earlier days in);
     one within `_TAP_SLOP` (20 dp) is a tap on the day under where the finger came down;
@@ -96,7 +96,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Scroll programmatically through the effect (`effect_y.reset(effect_y.max * y)`): an assigned `scroll_y` leaves the effect's value behind and its next update moves the list back.
   Any other ScrollView whose content changes while the user may be scrolling needs the same override.
   The day filter has one owner, `_set_filter(date | None)` (the filtered day, both charts' highlight, the Show-all button).
-  A reload of the same profile and view keeps it (`load_sessions(..., keep_filter=)`, decided by `AppManager._history_view`); another profile or the All-Users view clears it.
+  A reload of the same profile keeps it (`load_sessions(..., keep_filter=)`, decided by `AppManager._history_view`); another profile clears it.
   `_activate_user` and `_on_user_delete` mark History dirty.
   `_sync_date_row` lays out the list heading's row: Show All attached only while a day is picked, Select only outside select mode, each detached otherwise;
   a button hidden in place would keep its room beside the heading, which then wraps, and its taps.

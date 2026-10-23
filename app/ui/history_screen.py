@@ -1045,7 +1045,7 @@ class HistoryScreen(Screen):
         # A selection holds only this list's sessions: another profile's would be exported with it.
         self._selected_ids &= {s.get("id") for s in sessions}
         self._update_selection_buttons()
-        if not keep_filter:  # another profile or the All Users view: its own history, from today
+        if not keep_filter:  # another profile: its own history, from today
             self._set_filter(None)
             self._set_period(0)
         self._set_day_data()

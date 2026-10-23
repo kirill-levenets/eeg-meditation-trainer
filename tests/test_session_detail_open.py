@@ -48,7 +48,6 @@ def app(db, monkeypatch):
     a = EEGMeditationApp.__new__(EEGMeditationApp)
     a._db = db
     a._current_user_id = uid
-    a._view_all_users = False
     a._diary_screen = DiaryScreen()
     sm = ScreenManager(transition=NoTransition())
     sm.add_widget(Screen(name="history"))

@@ -19,7 +19,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   — never a crash, never a reopen that resurrects a closed process or clobbers a freshly-restored DB.
   `on_stop` and `_do_restore_and_restart` both `mark_shutting_down()` before `close()`.
   `delete_user` **purges** the user's metrics, sessions and `user_{id}_*` settings explicitly, in order:
-  FKs are declared but not enforced (no `PRAGMA foreign_keys`/cascade), and its sessions would otherwise surface in the All-Users view, its metrics and settings rows orphaned.
+  FKs are declared but not enforced (no `PRAGMA foreign_keys`/cascade), and its sessions, metrics and settings rows would otherwise stay orphaned.
   The settings go by GLOB, not LIKE, so the literal `_` in the key prefix isn't a wildcard.
   The confirm (`SettingsScreen._confirm_user_delete`) states the profile's session count and that they are deleted with it.
 - The DB opens with `check_same_thread=False` so the daemon tick thread can write metric batches — and that shared connection is why **every runtime write goes through `DatabaseManager._write()`**:

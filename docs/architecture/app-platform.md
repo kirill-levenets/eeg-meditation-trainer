@@ -10,17 +10,15 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   after a reinstall, a restored DB, a deleted active profile or a corrupt `last_user_id`, users exist but none is current.
   `_open_user_gate(delay)` is its one entry (build, `on_resume`, a profile delete, a failed gate pick):
   it disables the bottom nav synchronously (no cold-start tap window) and opens the blocking `_show_first_run_popup` (`self._gate_popup`, made un-escapable in `_on_keyboard`).
-  `on_resume` re-enters the gate if the process resumed unset (not All-Users); deleting the active profile, or the last one, re-enters it too.
+  `on_resume` re-enters the gate if the process resumed unset; deleting the active profile, or the last one, re-enters it too.
   Per-user handlers use `_require_user(action)` (surfaces a message, returns the uid or `None`) instead of a bare silent `return`:
   `ProgramSettings.on_save`/`on_load`/`on_delete`, `FormulaSettings.on_load`/`on_delete`, the series picker's saved-formula Choose;
   in `ProgramSettings` an empty name and a full library (`_save`) surface a message too.
-  History/Diary go through `sessions_for_view(db, uid, show_all)`:
-  the deliberate "Show All Users" view (`_view_all_users`, set only by `_on_user_switch(None)`) queries all sessions, a concrete user queries their own, and an **unset** user returns `[]`:
-  `_current_user_id=None` never leaks every profile's sessions.
-  **Every path that picks a profile goes through `_activate_user(uid)`** (sets the id, clears `_view_all_users`, stores `last_user_id`, loads the settings):
+  History/Diary go through `sessions_for_view(db, uid)`: the active profile's sessions, and `[]` for an **unset** user, so `_current_user_id=None` never leaks every profile's sessions (`get_all_sessions(None)` lists them all).
+  **Every path that picks a profile goes through `_activate_user(uid)`** (sets the id, stores `last_user_id`, loads the settings):
   startup restore, the first-run popup's create (`_complete_first_run`) or pick (`_on_pick_existing_user`), and `_on_user_switch`.
   An activation that skipped the load would leave the previous profile's (or the default) values in memory under the new one, for the next flush (e.g. the pre-backup save) to write over its stored settings.
-  `_on_user_switch` to another profile, the All-Users view included, is refused through `_refused_while_session_runs` while `_session_pipeline_live()` ("Session in progress", the picker snapped back via `_refresh_profile`):
+  `_on_user_switch` to another profile is refused through `_refused_while_session_runs` while `_session_pipeline_live()` ("Session in progress", the picker snapped back via `_refresh_profile`):
   the running session owns its loaded timer/threshold/sound settings and saves under the profile it started with.
 - `DatabaseManager.create_user` raises `UserExistsError(user_id, name)` on a duplicate.
   The first-run popup and Settings → User Profile use the shared `UserPickerForm` widget (`app/ui/widgets/user_picker.py`);

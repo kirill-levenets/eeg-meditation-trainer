@@ -22,7 +22,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   the end card, if open, closes through `_close_summary` (notes saved unless the session is gone, bell stopped; the one way every card closes, OK included);
   then `_clear_live_display` empties the graphs, their mirrors and the readout (`LiveSessionScreen.clear_readout`: what a fresh screen shows).
   It runs when another profile is picked (`_activate_user`), when that profile is deleted, and when History deletes the shown session (`_recorder.session_id`, kept after the stop).
-  Re-picking the shown profile resets nothing (`_on_user_switch` allows that mid-session, and a reset there would wipe the running session's graph), and neither does the All-Users view, which shows every profile's sessions.
+  Re-picking the shown profile resets nothing (`_on_user_switch` allows that mid-session, and a reset there would wipe the running session's graph).
   An idle threshold change (#83) clears the display but keeps the owner, so a later switch still closes an open card.
   The readout's AVG view renders the averages cached with the last tick, refreshed once more at the session's end (ticks are skipped while locked), and `set_stats_mode` redraws the strip when a profile's LIVE/AVG choice loads.
 - Stats card toggle: the LIVE/AVG button flips all 5 slots between live instant values and session aggregates (`avg_shamatha`, `avg_meditation`, `time_above_threshold`, `time_shamatha_90`, `longest_streak`).

@@ -513,13 +513,8 @@ class SettingsScreen(Screen):
     def populate_users(self, users, current_user_id=None):
         """Fill the user picker form."""
         self._user_picker_form.populate_users(users)
-        if current_user_id is None:
-            self._profile_current_label.text = "Current: All Users"
-        else:
-            for u in users:
-                if u["id"] == current_user_id:
-                    self._profile_current_label.text = f"Current: {u['name']}"
-                    break
+        name = next((u["name"] for u in users if u["id"] == current_user_id), "none")  # none: the gate is up
+        self._profile_current_label.text = f"Current: {name}"
 
     @property
     def audio_metric(self) -> str:

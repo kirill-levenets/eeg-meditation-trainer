@@ -176,16 +176,9 @@ def startup_theme(db) -> str:
     return startup_value(db, theme_setting(theme_seed(db)))
 
 
-def sessions_for_view(db, current_uid: Optional[int], show_all: bool) -> list:
-    """Sessions to display: every user's when the deliberate All-Users view is
-    on, the current user's when a concrete user is active, and NONE when unset —
-    an unset user must never fall through to `get_all_sessions(None)` and leak
-    every profile's sessions."""
-    if show_all:
-        return db.get_all_sessions(user_id=None)
-    if current_uid:
-        return db.get_all_sessions(user_id=current_uid)
-    return []
+def sessions_for_view(db, current_uid: Optional[int]) -> list:
+    """The active profile's sessions, NONE when unset: `get_all_sessions(None)` would list every profile's."""
+    return db.get_all_sessions(user_id=current_uid) if current_uid else []
 
 
 class EEGMeditationApp(App):
@@ -225,10 +218,6 @@ class EEGMeditationApp(App):
         self._loading_settings: bool = False
         self._settle_triggers: dict = {}  # input name -> its settle trigger (_after_settle)
         self._settle_fns: dict = {}  # input name -> the function its trigger runs (the latest one given)
-        # True only for the deliberate "Show All Users" aggregate history view,
-        # distinct from _current_user_id=None (unset). Keeps the unset state from
-        # ever querying all profiles' sessions (cross-profile leak).
-        self._view_all_users: bool = False
         self._formulas: FormulaSlots = FormulaSlots()
         self._audio_formula_index: int = 0  # the slot that drives the sound when the custom formula does
         self.serial_device_override: Optional[str] = None
@@ -729,7 +718,6 @@ class EEGMeditationApp(App):
         if self._live_display_uid not in (None, uid):  # the Session screen shows another profile's session
             self._drop_shown_session(keep_notes=True)
         self._current_user_id = uid
-        self._view_all_users = False
         self._db.set_setting("last_user_id", str(uid))
         self._load_user_settings(uid)
         self._mark_history_dirty()  # History still lists the previous profile's sessions
@@ -776,18 +764,16 @@ class EEGMeditationApp(App):
 
     def _gate_active(self) -> bool:
         """True while the app is gated on user selection — nav disabled, no concrete
-        user, not the deliberate All-Users view. Covers both the popup-open state and
-        the schedule window before the popup exists, so the gate is un-escapable throughout."""
+        user. Covers both the popup-open state and the schedule window before the
+        popup exists, so the gate is un-escapable throughout."""
         nav = getattr(self, "_bottom_nav", None)
-        return bool(nav is not None and nav.disabled
-                    and not getattr(self, "_current_user_id", None)
-                    and not getattr(self, "_view_all_users", False))
+        return bool(nav is not None and nav.disabled and not getattr(self, "_current_user_id", None))
 
     def _reopen_gate_if_unresolved(self) -> None:
         """After a gate create/pick attempt, re-open the gate if no concrete user
         ended up set (invalid name, or a stale/deleted profile row) — otherwise the
         popup is gone, nav stays disabled, and the app is stranded with no user."""
-        if not self._current_user_id and not self._view_all_users:
+        if not self._current_user_id:
             self._refresh_profile()  # drop any stale row from the picker list
             self._open_user_gate(0)
 
@@ -887,9 +873,9 @@ class EEGMeditationApp(App):
         self._switch_screen(screen_name)
 
     def _switch_screen(self, name: str) -> None:
-        if name == "diary" and not self._current_user_id and not self._view_all_users:
-            # silent-ok: unreachable post-gate; All-Users browse and any
-            # concrete user pass. Defensive block against a should-not-happen unset.
+        if name == "diary" and not self._current_user_id:
+            # silent-ok: unreachable post-gate; any concrete user passes.
+            # Defensive block against a should-not-happen unset.
             logger.debug("Diary switch blocked: no user selected")
             return
         logger.debug(f"Screen switch: {name}")
@@ -2180,7 +2166,7 @@ class EEGMeditationApp(App):
     def _persist_band_view(self, mode: str, sort_by: str, descending: bool) -> None:
         """Persist the diary band-table view (mode/sort) per user."""
         if not self._current_user_id:
-            return  # silent-ok: view-pref persistence; no concrete user (All-Users) = nothing to save
+            return  # silent-ok: view-pref persistence; no concrete user = nothing to save
         self._db.set_user_json_setting(
             self._current_user_id, "band_breakdown_view",
             {"mode": mode, "sort": sort_by, "desc": descending},
@@ -2318,26 +2304,25 @@ class EEGMeditationApp(App):
     _start_attempt: int = 0
     _wait_attempt: int = 0  # the attempt the BT wait belongs to, taken on the main thread when it begins
     _history_dirty: bool = True
-    _history_view: Optional[tuple] = None  # (profile, all-users) History last loaded; a day filter survives only that
+    _history_view: Optional[int] = None  # the profile History last loaded; a day filter survives only that
 
     def _refresh_history(self, force: bool = False) -> None:
         if not force and not self._history_dirty:
             return
         with timed("history.get_all_sessions"):
-            sessions = sessions_for_view(self._db, self._current_user_id, self._view_all_users)
+            sessions = sessions_for_view(self._db, self._current_user_id)
         if self._session_pipeline_live():
             # The running session's row exists from its first checkpoint, with stats as of that checkpoint: History
             # lists finished sessions only, and the ending marks History dirty so it appears then.
             sessions = [s for s in sessions if s.get("id") != self._recorder.session_id]
-        view = (self._current_user_id, self._view_all_users)
-        self._history_screen.load_sessions(sessions, keep_filter=view == self._history_view)
-        self._history_view = view
+        self._history_screen.load_sessions(sessions, keep_filter=self._current_user_id == self._history_view)
+        self._history_view = self._current_user_id
         self._history_dirty = False
 
     def _mark_history_dirty(self) -> None:
         self._history_dirty = True
 
-    def _on_user_switch(self, user_id: Optional[int]) -> None:
+    def _on_user_switch(self, user_id: int) -> None:
         """Switch the active user profile."""
         # The running session owns the loaded settings and saves under its own profile.
         if user_id != self._current_user_id and self._refused_while_session_runs("switching profiles"):
@@ -2345,15 +2330,10 @@ class EEGMeditationApp(App):
             return
         # Save current user's settings before switching
         self._save_user_settings()
-        if user_id:
-            user = self._db.get_user(user_id)
-            name = user["name"] if user else "Unknown"
-            self._activate_user(user_id)
-            logger.info(f"Switched to user: {name} (id={user_id})")
-        else:
-            self._current_user_id = None
-            self._view_all_users = True  # deliberate All-Users view
-            logger.info("Switched to: All Users")
+        user = self._db.get_user(user_id)
+        name = user["name"] if user else "Unknown"
+        self._activate_user(user_id)
+        logger.info(f"Switched to user: {name} (id={user_id})")
         self._mark_history_dirty()
         self._refresh_profile()
 
@@ -2438,14 +2418,12 @@ class EEGMeditationApp(App):
         self._db.delete_user(user_id)
         if user_id == self._live_display_uid:  # its session went with it: the card has nothing left to save
             self._drop_shown_session(keep_notes=False)
-        self._mark_history_dirty()  # its sessions are gone (the All-Users view lists them)
+        self._mark_history_dirty()
         remaining = self._db.get_all_users()
-        # Re-enter the gate when no usable active user is left: the active profile
-        # was deleted, OR the last profile was removed while in the All-Users view
-        # (which would otherwise leave the app usable with zero users, no gate).
+        # Re-enter the gate when no usable active user is left: the active profile was deleted, or no profile is left
+        # at all (the app is never usable with zero users).
         if deleted_active or not remaining:
             self._current_user_id = None
-            self._view_all_users = False
             self._refresh_profile()
             self._program_settings.refresh_saved()  # drop the deleted user's programs from the UI now
             self._open_user_gate(0)
@@ -2678,12 +2656,11 @@ class EEGMeditationApp(App):
             self._show_relaunch_popup()
             return
         # Re-validate the user gate: if the process survived a background/kill
-        # in an unset state (not the deliberate All-Users view) and no gate is
-        # already up, re-enter it rather than resume usable with no user.
+        # in an unset state and no gate is already up, re-enter it rather than
+        # resume usable with no user.
         # getattr guards keep this safe if on_resume fires before build() runs.
         if (getattr(self, "_bottom_nav", None) is not None
                 and getattr(self, "_current_user_id", None) is None
-                and not getattr(self, "_view_all_users", False)
                 and getattr(self, "_gate_popup", None) is None):
             self._open_user_gate(0)
             return

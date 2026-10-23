@@ -1,7 +1,7 @@
 """delete_user must purge the user's sessions, metrics, and settings — not orphan them.
 
-Regression: delete_user ran only DELETE FROM users, leaving orphan sessions (visible in
-the All-Users view), orphan metrics, and orphan user_{id}_* settings rows forever."""
+Regression: delete_user ran only DELETE FROM users, leaving orphan sessions, orphan metrics, and orphan
+user_{id}_* settings rows forever."""
 import os
 import tempfile
 
