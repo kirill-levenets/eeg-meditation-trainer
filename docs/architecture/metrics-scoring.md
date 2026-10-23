@@ -34,7 +34,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   It falls back to `shamatha_score` for an invalid (empty or unparsable) formula slot **or** a `PROGRAM_FORMULA_KEYS` value outside a program: both are absent from `metrics`, so they would read 0 → constant max noise.
   `_baseline_audio_metric(key)` keeps program slots out of the persisted/baseline `audio_metric`, sanitizing on both save and load (load also heals a leaked value).
   On the *live metrics* graph the series picker has a **Choose…** button on each custom-formula row, which opens the saved-formula library (`GraphSeries._choose_saved_formula(slot_idx, toggle_btn)`).
-  The chosen entry goes to `FormulaSettings.assign_saved(slot_idx, entry)`, which sets the evaluator, the graph name and visibility (`on_slot_change`, persisted) and the Settings UI in one step.
+  The chosen entry goes to `FormulaSettings.assign_saved(slot_idx, entry)`, which sets the evaluator, the graph name and visibility (`on_slot_change`, persisted) and the Settings UI in one step;
+  the picker's row then re-reads its name and state from the graph (`_show_row`, as every row does).
   All three formula series share one Y-axis (scale 200, reference at 100).
 - Every checkpoint (`SessionRecorder.checkpoint`: the 60 s flush, leaving the app, a backup, the final save) records the active custom formulas so the diary can replay them:
   the row's `custom_formulas` comes from `_session_row_fields()` → `_session_custom_formulas_json()` (`FormulaSlots.session_record`), a JSON string of the valid slots (`slot`, `name`, `formula`, `visible`, `drove_audio`).

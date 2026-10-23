@@ -502,7 +502,7 @@ class EEGMeditationApp(App):
         self._fullscreen = GraphFullscreen(float_root)
         self._graph_series = GraphSeries(
             self._db, self._live_screen.graph, self._formulas, self._program_run, self._program_settings,
-            self._formula_settings, self._fullscreen, graphs=self._all_graphs,
+            self._formula_settings, graphs=self._all_graphs,
             legacy_defaults=self._settings_screen._graph_toggles, user_id=lambda: self._current_user_id,
             require_user=self._require_user)
         self._last_back_time = 0.0  # for double-back-to-exit on the root screen

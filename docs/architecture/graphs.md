@@ -53,7 +53,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   It lists a program's line only on the live graph while its program runs and computes it (`ProgramRun.computes(key)`: the program's valid custom formulas).
   Each graph carries a `graph_id` (`live_metrics`, `live_band`, `diary_metrics`, `diary_freq`, …) and its selection persists per graph as `graph_series_<graph_id>` (JSON, per user);
   the live metrics graph migrates legacy `toggle_<key>` rows when it has no JSON yet, other graphs default to all visible.
-  `set_visible` fires the graph's `on_series_change` hook, so the owning screen's legend (visible-filtered) follows any picker toggle or restore; a picker toggle also refreshes the fullscreen legend (`GraphFullscreen.refresh_legend`).
+  `set_visible` and `set_series_name` fire the graph's `on_series_change` hook, so the owning screen's legend (visible-filtered) follows any picker toggle, Choose…, restore or program segment.
+  While the graph is fullscreen, `GraphFullscreen` chains its own legend (`_series_changed` → `refresh_legend`) after the owner's handler and wires the owner's back on close.
   The formula slots' validity gate (`FormulaSlots.for_key(key).is_valid`) applies only to the live metrics graph: the detail's formula lines are recorded data and toggle freely.
 - **Scored line colours** (#94, `app/ui/line_colours.py`):
   one series per graph, `set_gradient_series(key)`, is drawn coloured by its value instead of its own colour, in the profile's `LINE_COLOURS`:
