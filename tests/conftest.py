@@ -1,6 +1,9 @@
 import os
 import sys
 
+# Tests pump frames themselves (EventLoop.idle loops): Kivy's 60 fps cap would sleep ~12 ms in each.
+os.environ.setdefault("KCFG_GRAPHICS_MAXFPS", "0")
+
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
