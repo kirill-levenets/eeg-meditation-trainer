@@ -5,49 +5,52 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 ## Model and storage
 
-- **Session Program** (`app/session/session_program.py`): headless model — `SessionProgram` holds an ordered list of segments (duration, formula key, target, end-cue);
-  exposes `total_seconds`, `segment_at(elapsed)`, `boundaries()`, and `threshold_steps(sample_rate)` (list of `(start_tick, target)` tuples in tick-index space, consumed by the graph).
+- **Session Program** (`app/session/session_program.py`): headless model.
+  `SessionProgram` holds an ordered list of segments (minutes, formula, target, end cue, feedback source);
+  it exposes `total_seconds`, `segment_at(elapsed)`, `boundaries` and `threshold_steps(sample_rate)` (`(start_tick, target)` tuples in tick-index space, for the graph).
   Settings → Timer has a **Simple | Program** toggle;
-  Program mode reveals a segment editor (add/delete rows, formula picker with built-ins + saved custom formulas, target, end-cue) and a saved-programs library (save by name, load by tap, delete).
-  Active program persists as `session_program` (JSON, per-user); `timer_mode` (`"simple"` | `"program"`) persists as a flat KV setting.
-- `sessions.session_program` column stores the JSON-serialized `SessionProgram` for each session (empty string when no program ran).
-  `saved_programs` per-user library uses `get/add/update/remove_saved_program` in `DatabaseManager` (JSON list in the user-settings KV store under key `user_{id}_saved_programs`).
-- `ProgramSettings` (`app/ui/program_settings.py`, the app's `_program_settings`) holds what Settings → Timer edits:
-  `mode` (`simple`/`program`), the editor's `segments` and its `name`, persisted per-user as `timer_mode`, the program JSON and `session_program_name` (flat KV);
-  the name is restored on user load;
-  shown in Settings via `set_program_name` and surfaced in the live-session duration picker.
+  Program mode shows a segment editor (add/delete rows, formula picker with built-ins + saved custom formulas, target, end cue, feedback) and a saved-programs library (save by name, load by tap, delete).
+- `ProgramSettings` (`app/ui/program_settings.py`, the app's `_program_settings`) holds what Settings → Timer edits: `mode` (`simple`/`program`), the editor's `segments` and its `name`.
+  They persist per user as `timer_mode` and `session_program_name` (flat KV) and `session_program` (JSON), and are restored on profile load;
+  the name shows in Settings through `set_program_name` and in the Session screen's duration picker.
+- The `sessions.session_program` column stores the JSON segments of the program each session started with (`ProgramRun.segments_json`; empty when none ran).
+  The saved-programs library uses `get/add/update/remove_saved_program` in `DatabaseManager` (a JSON list in the user-settings KV store under `user_{id}_saved_programs`).
 
 ## Live series
 
-- **Program shows EXACTLY its metric set, the whole session**
-  — the live graph catalog (`live_session.METRICS_COLORS`/`METRICS_SCALES`/`SERIES_NAMES`) carries `"meditation_score"` (color `C.MED_SCORE`, scale 100, label `"Meditation"`, so a "Meditation" segment is plottable
-  — defaults **hidden** via first-run `_graph_toggles` + `GraphSeries.restore`'s `key in sel`) and **three** program-custom lines `PROGRAM_FORMULA_KEYS = ("program_formula","program_formula_2","program_formula_3")` (colors `C.WARM`/`C.WARM2`/`C.WARM3`, scale 200), one per **distinct** custom formula in a program.
+- **Program shows EXACTLY its metric set, the whole session.**
+  The live graph catalog (`live_session.METRICS_COLORS`/`METRICS_SCALES`/`SERIES_NAMES`) carries `"meditation_score"` (colour `C.MED_SCORE`, scale 100, label `"Meditation"`), so a "Meditation" segment is plottable;
+  it defaults to **hidden** (the first-run `_graph_toggles`, through `GraphSeries.restore`'s `key in sel`).
+  It also carries **three** program-custom lines, `PROGRAM_FORMULA_KEYS = ("program_formula","program_formula_2","program_formula_3")` (colours `C.WARM`/`C.WARM2`/`C.WARM3`, scale 200), one per **distinct** custom formula in a program.
   `program_plan(prog)` (`app/session/session_program.py`, with `PROGRAM_FORMULA_KEYS`; the what-if replay uses it too) returns `(program_keys, custom_slots, segment_keys)`:
-  the set of series to show, the `(slot_key, custom_dict)` map for each distinct custom (capped at 3), and the metric key each segment drives (built-in key or its custom's slot).
-  `ProgramRun` (`app/ui/program_run.py`, the app's `_program_run`) holds the running program: `active` from the start's `begin(prog, feedback_ids)` until `end()`.
+  the set of series to show, the `(slot_key, custom_dict)` for each distinct custom (capped at 3), and the metric key each segment drives (a built-in key or its custom's slot).
+  `ProgramRun` (`app/ui/program_run.py`, the app's `_program_run`) holds the running program: `active` from the start's `begin(prog, feedback_ids, name)` until `end()`.
   `begin` snapshots prior visibility, shows EXACTLY `program_keys` (`show_program_series` hides the rest), arms one persistent evaluator per custom into `formula_evs[slot]` (`program_evaluators(prog)`), and stores each segment's metric key.
   Each program line is shown the **whole** program and evaluated every tick (`tick` runs `formula_evs` into `metrics[slot]` through `custom_formula.evaluate_series`, as the Settings formulas are).
-  `_enter_segment` repoints audio/goal/marker to the segment's key (a built-in key or a program slot); `_segment_ui` only relabels/shows a custom segment's line and moves the `»` marker (built-in segments touch no visibility).
+  `_enter_segment` repoints audio, goal and marker to the segment's key (a built-in key or a program slot);
+  `_segment_ui` only relabels and shows a custom segment's line and moves the `»` marker (a built-in segment touches no visibility).
   `end` restores the snapshot, resets all program-slot labels, and force-hides all `PROGRAM_FORMULA_KEYS`.
-- `PROGRAM_FORMULA_KEYS` stay out of persistence (`GraphSeries.persist`, which `_save_user_settings` runs through `persist_all`, filters them via `k not in PROGRAM_FORMULA_KEYS`;
-  `GraphSeries.restore`/`apply_saved` force-hide them) so they never leak into `graph_series_*`.
-  `GraphSeries.present_picker` lists them (as `Program: <name>`) **only while a program is active** on the live graph.
-  Idle preview (`ProgramSettings.refresh_live_series`, wired through `sync_picker`): in program mode with a loaded program it shows the program's set via `show_program_series` before Start;
+- `PROGRAM_FORMULA_KEYS` stay out of persistence, so they never leak into `graph_series_*`:
+  `GraphSeries.persist` (which `_save_user_settings` runs through `persist_all`) filters them out, and `GraphSeries.restore`/`apply_saved` force-hide them.
+  `GraphSeries.present_picker` lists one (as `Program: <name>`) on the live graph **only while the running program computes it** (`ProgramRun.computes`).
+  Idle preview (`ProgramSettings.refresh_live_series`, run by `sync_picker`, not while a session runs): in program mode with a loaded program it shows the program's set via `show_program_series` before Start;
   otherwise `GraphSeries.apply_saved` restores the user's saved selection.
-  A running program (`ProgramRun.active`) or `governs_live_series()` gates persistence so a program's visible set never overwrites the saved manual selection:
-  Settings → Timer can go back to simple during a program session, while the graph still shows the program's set.
-- Legend "training now" marker — `LegendBar.set_items(items, active_text=None)` bolds the matching item and prefixes it with `"» "` (the `»` glyph; geometric triangles render as tofu in this Kivy/Roboto build).
-  `LiveSessionScreen.set_training_series(key)` propagates the active key to the legend; `ProgramRun._segment_ui` calls it on each segment boundary crossing, and clears it (`None`) at session start/stop.
+  A running program (`ProgramRun.active`) or `governs_live_series()` stops `persist` for the live graph, so a program's visible set never overwrites the saved manual selection:
+  Settings → Timer can go back to simple during a program session while the graph still shows the program's set.
+- Legend "training now" marker: `LegendBar.set_items(items, active_text=None)` bolds the matching item and prefixes it with `"» "` (geometric triangles render as tofu in this Kivy/Roboto build).
+  `LiveSessionScreen.set_training_series(key)` passes the active key to the legend;
+  `ProgramRun._segment_ui` sets it at each segment boundary crossing, and `_start_session_common` and `_undo_session_setup` clear it (`None`).
 
 ## Settings and pickers
 
-- Settings Timer / Program swap — the Enable-Timer checkbox lives in `_simple_box` (hidden in program mode).
-  `_program_loaded_label` shows `"Loaded: <name>"` via `set_program_name(name)` (`TimerSection`).
-  `_segments_box` holds segment rows in program insertion order top→bottom.
-- `ProgramSettings.sync_picker` — syncs the `_DurationPickerButton` label on the session screen: `"P"` (large) in program mode, duration string in simple mode.
-  Re-synced whenever the screen is entered and whenever Settings timer changes.
-  The duration popup includes a `"Programs…"` button wired via `LiveSessionScreen.set_session_programs(programs, current_name)` for quick-loading a saved program and showing the loaded name with the current one highlighted.
-- Per-segment **feedback source picker** (issue #10): each program segment row has a "Feedback" column — a live picker with Default / Rain / Tone / Custom file.
+- Settings Timer / Program swap: `_mode_content_box` holds either `_simple_box`, which has the Enable-Timer checkbox (a program forces the timer on), or `_program_box`; the other is detached from the tree.
+  `_program_loaded_label` shows `"Loaded: <name>"` via `TimerSection.set_program_name(name)`.
+  `_segments_box` holds the segment rows in insertion order, top to bottom.
+- `ProgramSettings.sync_picker` syncs the Session screen's `_DurationPickerButton` label: a large `"P"` in program mode with a loaded program, else the duration.
+  It re-syncs on entering the Session screen, on profile load and on each mode change, program load or duration pick.
+  The duration popup's `"Programs…"` button (`"Program: <name>"` once one is loaded) lists the saved programs, the loaded one highlighted, and loads the one picked (`ProgramSettings.on_load`);
+  `LiveSessionScreen.set_session_programs(programs, current_name)` gives it the list and the name.
+- Per-segment **feedback source picker** (issue #10): each segment row has a "Feedback" column, a picker with Default / Rain / Tone / Custom file.
   "Default" inherits the global Settings → Audio selection.
   The source switches at each segment boundary via `set_active_feedback` (setVolume-only, tick-/lock-safe).
   See [audio.md](audio.md) for the engine architecture.
