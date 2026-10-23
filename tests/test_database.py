@@ -71,10 +71,12 @@ class TestStorageIntegration(unittest.TestCase):
         self.assertIsNone(session)
 
     def test_get_all_sessions_ordered(self):
-        self.db.save_session({"duration": 60, "threshold_used": 50})
-        self.db.save_session({"duration": 120, "threshold_used": 60})
-        sessions = self.db.get_all_sessions()
-        self.assertEqual(len(sessions), 2)
+        uid = self.db.create_user("Alice")
+        for duration, day in ((120, "2026-09-02"), (60, "2026-09-01"), (90, "2026-09-03")):
+            sid = self.db.save_session({"duration": duration, "threshold_used": 50}, user_id=uid)
+            self.db._conn.execute("UPDATE sessions SET date_time = ? WHERE id = ?", (f"{day}T10:00:00", sid))
+        sessions = self.db.get_all_sessions(uid)
+        self.assertEqual([s["duration"] for s in sessions], [90, 120, 60])  # newest first
 
     def test_create_user(self):
         uid = self.db.create_user("Alice")

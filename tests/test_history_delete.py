@@ -157,7 +157,7 @@ def test_a_day_tap_highlights_the_day_in_both_views_and_reset_clears_both():
     assert h._btn_show_all.parent is None  # detached, not hidden in place: it would still take the row's room and taps
 
 
-def test_a_reload_for_another_view_clears_the_day_filter():
+def test_a_reload_for_another_profile_clears_the_day_filter():
     h = _loaded(6)
     h._on_day_tap("2026-09-27")
     h.load_sessions(_sessions(4), keep_filter=False)  # another profile
@@ -166,7 +166,7 @@ def test_a_reload_for_another_view_clears_the_day_filter():
     assert h._btn_show_all.parent is None
 
 
-def test_history_keeps_the_day_filter_only_for_the_same_profile_and_view():
+def test_history_keeps_the_day_filter_only_for_the_same_profile():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._ticker = MagicMock(running=False)  # no session's tick running
     app._db = MagicMock()

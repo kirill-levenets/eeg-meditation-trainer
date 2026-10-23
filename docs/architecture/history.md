@@ -37,7 +37,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `set_select_mode(on)` re-syncs the rows on screen so each gains a leading checkbox and drops its rename/delete (attached and detached, not hidden in place, which keeps the touch layer clean; no row is rebuilt, see [Session list](#session-list)).
   In select mode the `_list_touch_down` router toggles a row's selection on tap, and Select all selects every session in the current filter, including rows never shown.
   A `RevealBox` action bar (Export N / Delete N / Select all / Cancel) is attached only in select mode.
-  **Delete N** (#57) → `delete_selected()` → `_confirm_delete(ids)`, the one confirm for a row's delete and the selection (one session: its `session_title`; several: the count, the days and, when they span profiles, how many);
+  **Delete N** (#57) → `delete_selected()` → `_confirm_delete(ids)`, the one confirm for a row's delete and the selection (one session: its `session_title`; several: the count and the days);
   then `on_delete_sessions(ids, done)`: `done(True)` ends select mode, a failure keeps the selection.
   The confirm is the shared `theme.confirm_popup`, which decides once: Kivy still delivers taps to a popup while it fades out, so a Delete tapped during the fade after Cancel would otherwise delete the selection.
   A selection survives a day-filter change, as Export's does: the count on the button and the confirm's day span show what goes.

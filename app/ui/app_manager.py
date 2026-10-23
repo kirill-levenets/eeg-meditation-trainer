@@ -176,8 +176,8 @@ def startup_theme(db) -> str:
     return startup_value(db, theme_setting(theme_seed(db)))
 
 
-def sessions_for_view(db, current_uid: Optional[int]) -> list:
-    """The active profile's sessions, NONE when unset: `get_all_sessions(None)` would list every profile's."""
+def sessions_for_view(db, current_uid: int | None) -> list:
+    """The active profile's sessions; none while no profile is active."""
     return db.get_all_sessions(user_id=current_uid) if current_uid else []
 
 
@@ -2304,7 +2304,7 @@ class EEGMeditationApp(App):
     _start_attempt: int = 0
     _wait_attempt: int = 0  # the attempt the BT wait belongs to, taken on the main thread when it begins
     _history_dirty: bool = True
-    _history_view: Optional[int] = None  # the profile History last loaded; a day filter survives only that
+    _history_view: int | None = None  # the profile History last loaded; a day filter survives only that
 
     def _refresh_history(self, force: bool = False) -> None:
         if not force and not self._history_dirty:
@@ -2334,7 +2334,6 @@ class EEGMeditationApp(App):
         name = user["name"] if user else "Unknown"
         self._activate_user(user_id)
         logger.info(f"Switched to user: {name} (id={user_id})")
-        self._mark_history_dirty()
         self._refresh_profile()
 
     def _on_history_view_mode_change(self, mode: str) -> None:

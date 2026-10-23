@@ -371,17 +371,9 @@ class DatabaseManager:
             rows,
         )
 
-    def get_all_sessions(self, user_id: Optional[int] = None) -> list[dict]:
-        """Return sessions ordered by date descending, optionally filtered by user."""
-        if user_id is not None:
-            cursor = self._conn.execute(
-                "SELECT * FROM sessions WHERE user_id = ? ORDER BY date_time DESC",
-                (user_id,),
-            )
-        else:
-            cursor = self._conn.execute(
-                "SELECT * FROM sessions ORDER BY date_time DESC"
-            )
+    def get_all_sessions(self, user_id: int) -> list[dict]:
+        """One profile's sessions, newest first: no caller may list every profile's."""
+        cursor = self._conn.execute("SELECT * FROM sessions WHERE user_id = ? ORDER BY date_time DESC", (user_id,))
         return [dict(row) for row in cursor.fetchall()]
 
     def get_session(self, session_id: int) -> Optional[dict]:

@@ -134,7 +134,7 @@ class SettingsScreen(Screen):
         profile_section = accordion.add_section("User Profile", collapsed=False)
 
         self._profile_current_label = ThemedLabel(
-            text="No user selected",
+            text="Current: none",
             font_size=F.BODY,
             color=C.PRIMARY,
             bold=True,

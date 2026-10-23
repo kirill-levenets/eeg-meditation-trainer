@@ -1253,9 +1253,6 @@ class HistoryScreen(Screen):
             days = sorted({session_day(s) for s in sessions})
             span = "" if not days else f" on {days[0]}" if len(days) == 1 else f" from {days[0]} to {days[-1]}"
             what = f"Delete {format_count(len(session_ids), 'session')}{span}?"
-            profiles = {s.get("user_id") for s in sessions} - {None}
-            if len(profiles) > 1:
-                what += f"\nThey are from {format_count(len(profiles), 'profile')}."
         def _deleted(ok: bool) -> None:
             if ok and self._select_mode:
                 self.set_select_mode(False)

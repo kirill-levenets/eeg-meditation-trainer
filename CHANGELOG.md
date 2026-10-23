@@ -21,6 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Removed
 
+- **History's All Users view**: no screen could open it since the Profile screen went (#48).
+  Settings › User Profile now reads "Current: none" while no profile is active (it said "All Users").
 - **`ProfileScreen`, `WizardScreen`, `RawEEGScreen` and the legacy mock headset (`mock_stream.py`)** (#48) — unreachable: the three screens were built and filled at every start but never shown, and nothing imported the old mock.
   Profiles are managed in Settings → User Profile, first run is the profile popup, raw EEG is the Session screen's **Raw EEG** view.
   The user manual and READMEs described a 2-step first-run wizard; they now describe the profile popup and how the headset is picked.
