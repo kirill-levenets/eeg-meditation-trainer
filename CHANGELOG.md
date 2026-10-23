@@ -29,6 +29,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **The in-app help was always in English, partly out of date, and drew its menu paths as empty boxes**:
+  Settings › Help & Troubleshooting now shows in Ukrainian on a phone set to Ukrainian (on a computer, when `LANGUAGE` or `LANG` is Ukrainian).
+  It now matches the app: the session-length choices, the program editor and its sounds, the "No EEG data received" message, the alerts being off until enabled, the formula variables.
+  Its "Settings → Audio" paths drew the arrow as an empty box (the app's font has no arrows); they read "Settings > Audio".
 - **The timer sound's Test button stayed on Stop after the sound ended on Android** (#103).
   It reads Test again when the gong ends.
 - **A second timer gong could play over the first** (#103): testing the timer sound twice, or a timer ending while a test gong still rang, left the first one playing and holding its player.

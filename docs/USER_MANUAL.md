@@ -398,7 +398,8 @@ A change applies at once.
 ### Help & Troubleshooting
 
 The in-app help: quick start, connection troubleshooting, supported devices, sensor tips and more.
-It shows in your device's language: Ukrainian on a device set to Ukrainian, English otherwise.
+On Android it shows in the phone's language: Ukrainian on a phone set to Ukrainian, English otherwise.
+On a computer it follows the `LANGUAGE` or `LANG` setting (Linux); the Windows and macOS builds show English.
 
 ---
 

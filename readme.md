@@ -38,6 +38,7 @@ Inspired by the [EEG meditation research and Vernihor formula](https://scripture
   Settings → Device lists the paired headsets, marks the one in use and the connected one, and lets you name each.
 - **Settings panel** — accordion sections: User Profile, Timer / Program, Device, Data Backup, Threshold (20-180), Audio, Display, Custom Formula, Theme, Developer Tools, Help & Troubleshooting;
   preset buttons under the sliders; settings are saved per profile.
+  Help & Troubleshooting shows in Ukrainian on a phone set to Ukrainian, English otherwise.
   Display holds the text size (Normal / Large / Larger), the scored line's colours (mono or one of five gradients), line width, screen rotation and the marker hotkey.
 - **Custom formula engine** — 3 named slots, each with a name, an expression, Apply, Save and a status line;
   an expression is Python-style over band powers, combined, normalized and sqrt-relative bands, computed metrics, math functions and windowed `avg(expr, N)`, AST-parsed against a whitelist;

@@ -1,4 +1,5 @@
 import os
+import re
 import threading
 from collections.abc import Callable
 
@@ -41,21 +42,28 @@ from app.ui.theme import (
 )
 from app.ui.widgets.user_picker import UserPickerForm
 
+HELP_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "help")
 _HELP_FILE_LANG = {"uk": "ua"}  # the help files' suffix where it isn't the ISO 639 code
 
 
 def help_language() -> str:
-    """The help's language: the device's on Android, else the LANGUAGE / LC_ALL / LC_MESSAGES / LANG setting."""
+    """The first wanted language with a help file, else English: Android's locale, or LANGUAGE's list in order and then
+    the first of LC_ALL / LC_MESSAGES / LANG (Windows and macOS builds usually set none of these)."""
     try:
         if android_jni.on_android():
-            code = android_jni.language()
+            wanted = [android_jni.language()]
         else:
-            code = next((os.environ[v] for v in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG") if os.environ.get(v)), "")
+            first_set = next((os.environ[v] for v in ("LC_ALL", "LC_MESSAGES", "LANG") if os.environ.get(v)), "")
+            wanted = [*os.environ.get("LANGUAGE", "").split(":"), first_set]
     except Exception:  # noqa: BLE001 - the help falls back to English rather than break the Settings screen
         logger.exception("Device language lookup failed; help in English")
-        code = ""
-    code = code.split(":")[0].split(".")[0].split("_")[0].split("-")[0].lower()
-    return _HELP_FILE_LANG.get(code, code) or "en"
+        wanted = []
+    for tag in wanted:
+        code = re.match(r"[A-Za-z]*", tag).group().lower()
+        code = _HELP_FILE_LANG.get(code, code)
+        if code and os.path.exists(os.path.join(HELP_DIR, f"help_{code}.txt")):
+            return code
+    return "en"
 
 
 def _load_help_topics(lang: str = "en") -> list[tuple[str, str]]:
@@ -64,13 +72,10 @@ def _load_help_topics(lang: str = "en") -> list[tuple[str, str]]:
     File format: sections separated by '## Title' lines.
     Returns list of (title, body) tuples.
     """
-    help_dir = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)), "assets", "help",
-    )
-    path = os.path.join(help_dir, f"help_{lang}.txt")
+    path = os.path.join(HELP_DIR, f"help_{lang}.txt")
     if not os.path.exists(path):
         # Fallback to English
-        path = os.path.join(help_dir, "help_en.txt")
+        path = os.path.join(HELP_DIR, "help_en.txt")
     if not os.path.exists(path):
         return [("Help", "Help file not found")]
 

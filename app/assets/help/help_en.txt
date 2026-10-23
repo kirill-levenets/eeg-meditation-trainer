@@ -13,7 +13,8 @@
 7. When your shamatha score holds at or above
    your threshold, the status (top right) lights
    up as a green "SHAMATHA" badge
-8. "Time above threshold" and "Streak" count the
+8. Time above threshold (>Thresh in the live
+   stats) and the streak (Streak) count the
    metric that drives the sound (Settings >
    Threshold > Audio control metric), marked » in
    the graph legend when that line is shown. It

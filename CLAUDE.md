@@ -233,7 +233,7 @@ When modifying features, UI, commands, architecture, or build process, update th
 - `docs/USER_MANUAL_UA.md` — Ukrainian user manual: mirror English manual changes.
 - `app/assets/help/help_en.txt` — In-app help content (English).
   Update when features, connection flow, or settings change.
-- `app/assets/help/help_ua.txt` — In-app help content (Ukrainian, shown on a Ukrainian-language device): mirror English help changes, on-screen labels in English as the app shows them.
+- `app/assets/help/help_ua.txt` — In-app help content (Ukrainian, shown for a Ukrainian Android or desktop locale): mirror English help changes, on-screen labels in English as the app shows them.
 - `CHANGELOG.md` — Release history in Keep a Changelog format.
   Add entries under `[Unreleased]` as you commit; promote to a new version section when tagging.
 - `IMPROVEMENTS.md` — Roadmap.

@@ -1,13 +1,15 @@
 """The in-app help: in the device's language, the Ukrainian topics mirroring the English, every character drawable."""
 import pathlib
+import re
 
 import kivy
 import pytest
 
 from app import android_jni
 from app.ui import settings_screen
-from app.ui.settings_screen import _load_help_topics, help_language
+from app.ui.settings_screen import SettingsScreen, _load_help_topics, help_language
 from tests._font_glyphs import font_codepoints
+from tests._shared_screens import sections
 
 HELP_DIR = pathlib.Path(settings_screen.__file__).resolve().parent.parent / "assets" / "help"
 FONTS = pathlib.Path(kivy.__path__[0]) / "data" / "fonts"
@@ -22,15 +24,27 @@ def test_every_help_character_has_a_glyph_in_roboto(name):
         assert not missing, f"{name} draws as empty boxes in {font}: {missing}"
 
 
-def test_the_ukrainian_help_has_the_english_topics():
-    assert len(_load_help_topics("ua")) == len(_load_help_topics("en")) == 18
+def test_the_ukrainian_help_mirrors_the_english_topic_by_topic():
+    en, ua = _load_help_topics("en"), _load_help_topics("ua")
+    assert len(ua) == len(en)
+    for (en_title, en_body), (_ua_title, ua_body) in zip(en, ua, strict=True):
+        assert re.findall(r"\d+", ua_body) == re.findall(r"\d+", en_body), en_title  # the same facts, in order
+
+
+def test_settings_builds_its_help_in_the_help_language(monkeypatch):
+    monkeypatch.setattr(settings_screen, "help_language", lambda: "ua")
+    screen = SettingsScreen()
+    next(sec for sec in sections(screen) if sec._header.text.startswith("Help")).open()  # a folded section is detached
+    titles = [w.text for w in screen.walk(restrict=True) if getattr(w, "text", "").startswith("[b]")]
+    assert f"[b]{_load_help_topics('ua')[0][0]}[/b]" in titles
 
 
 @pytest.mark.parametrize("env, lang", [
     ({"LANG": "uk_UA.UTF-8"}, "ua"),
     ({"LANGUAGE": "uk:en", "LANG": "en_US.UTF-8"}, "ua"),  # LANGUAGE's first choice wins
-    ({"LC_ALL": "de_DE.UTF-8"}, "de"),  # no help_de.txt: the loader falls back to English
-    ({"LANG": "C"}, "c"),
+    ({"LANGUAGE": "ru:uk"}, "ua"),  # no Russian help: the next language in the list
+    ({"LC_ALL": "de_DE.UTF-8", "LANG": "uk_UA.UTF-8"}, "en"),  # LC_ALL overrides LANG; no German help
+    ({"LANG": "C"}, "en"),
     ({}, "en"),
 ])
 def test_the_help_follows_the_desktop_locale(monkeypatch, env, lang):

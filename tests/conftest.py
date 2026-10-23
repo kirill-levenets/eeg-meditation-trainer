@@ -53,6 +53,12 @@ def _temp_files_in_basetemp(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _english_help(monkeypatch):
+    """Settings builds its help in the shell's language: every test sees the English one."""
+    monkeypatch.setenv("LANGUAGE", "en")
+
+
+@pytest.fixture(autouse=True)
 def _restore_config():
     """A test that changes the global config (APP.USE_MOCK_DEVICE, a threshold) must not leave it to the next file."""
     saved = [(cfg, dict(vars(cfg))) for cfg in (APP, METRICS, SIGMOID)]
