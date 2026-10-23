@@ -1,149 +1,112 @@
 # EEG Meditation Trainer
 
-Cross-platform application for training Shamatha meditation using EEG neurofeedback from NeuroSky MindWave Mobile 2.
-Built with Python/Kivy for Android, Linux, Windows, and macOS.
+Cross-platform application for training Shamatha meditation with EEG neurofeedback from a NeuroSky MindWave Mobile 2.
+Built with Python/Kivy for Android, Linux, Windows and macOS.
 
 Inspired by the [EEG meditation research and Vernihor formula](https://scriptures.ru/yoga/eeg_voprosy_i_otvety.htm) from scriptures.ru.
 
 ## Features
 
-- **Real-time EEG visualization**
-  — Live scrollable graph with Y-axis up to 200, horizontal grid lines every 20 units, real-time value labels, X-axis with relative and wall-clock timestamps, dashed threshold line that steps where the threshold changed (a moved slider, a program's segments)
-  — live and in History, session start time display
-- **Raw EEG data tab** — Oscillating EEG waveform (512Hz) + aggregated frequency band plots with adaptive Y-axis scaling; both graphs synchronized for linked scrolling and zooming
-- **Scrollable graphs** — All graphs support touch drag/slide scrolling and pinch-to-zoom (Android) / mouse wheel zoom (desktop);
-  every graph fits the whole session with one tap (the Session screen's as it grows);
-  its buttons sit in the plot's corners and its margins take only what its labels need;
-  time labels read hours past an hour;
-  chunked line rendering;
-  vertical + horizontal grid lines
-- **Meditation scoring** — Vernihor shamatha formula `(avg(ratio, 4) * 0.75 - 0.3) * 100` with sqrt-normalized relative band units and duplicate-sample deduplication;
-  verified against original Windows app (MSE ~28);
-  Distraction and Sinking ported from the original Vernihor app (alpha-gated, shamatha-modulated; Sinking additionally gamma-damped);
-  Subtle Distraction (short-window variance with warmup guard);
-  native NeuroSky eSense Attention & Meditation
-- **Session markers** — Place vertical markers on all graphs during a session to tag significant moments; markers stored in DB, displayed in diary previews, exported in CSV as a separate column
-- **Multi-channel audio engine** — Ch1: selectable continuous feedback sound (Rain noise, built-in Tone drone, or a custom audio file — wav/mp3/ogg/flac/m4a); volume log-scales with the active metric.
-  An above-threshold **reward** channel that fades in as you exceed the threshold, with an extra **Crickets** source — a soft cricket chirp about once every 10 s as a "still here / doing well" cue.
-  Ch2: tingsha bell for sinking alerts; Ch3: chime for subtle distraction; Ch4: warble for disconnect alert.
-  Configurable audio control metric (Meditation, Shamatha, NS Meditation, NS Attention, Custom Formula slot 1/2/3; falls back to shamatha if the selected slot is invalid).
-  Feedback and reward sources are chosen via a picker in Settings → Audio; custom file browsable via a file picker
+- **Real-time EEG visualization** — a scrollable graph with the Y-axis up to 200, horizontal grid lines every 20 and vertical ones on the time axis, live value labels, and elapsed and wall-clock time on the X-axis;
+  a dashed threshold line steps where the threshold changed (a moved slider, a program's segments), live and in History.
+- **Raw EEG view** — the Session screen's Metrics / Raw EEG toggle shows the 512 Hz raw waveform and a frequency-band chart with an adaptive Y-axis.
+- **Scrollable graphs** — drag to scroll, pinch (Android) or mouse wheel (desktop) to zoom, and the graphs of one screen zoom together;
+  one tap fits the whole session (the Session screen's as it grows), another opens a graph full screen;
+  a graph's buttons sit in its corners, its margins take only what its labels need, and time labels read hours past an hour.
+- **Meditation scoring** — the Vernihor shamatha formula ([below](#shamatha-formula)), matched against the original Windows app (MSE ~28);
+  Distraction and Sinking ported from the original Vernihor app (alpha-gated, shamatha-modulated; Sinking also gamma-damped);
+  Subtle Distraction (short-window variance with a warm-up guard); NeuroSky's own eSense Attention and Meditation.
+- **State classification** — Stable Focus, Subtle Distraction, Gross Distraction, Sinking, Neutral.
+- **Session markers** — **Mark** puts a vertical marker on all graphs; markers are saved with the session, shown on its graphs in History and exported as a CSV column.
+- **Multi-channel audio** — a below-threshold feedback sound (Off, Rain, Tone, or your own wav/mp3/ogg/flac/m4a file) whose volume log-scales with the scored metric;
+  a reward sound that fades in above the threshold (Off, Rain, Tone, Crickets — a soft chirp about every 10 s — or a file);
+  a tingsha bell for sinking, a chime for subtle distraction and a warble for a lost connection.
+  Settings → Audio picks the sounds; Settings → Threshold picks the metric that drives the feedback and reward sounds:
+  Shamatha, NS Meditation, NS Attention or a Custom Formula slot (1/2/3; an invalid slot falls back to Shamatha).
 - **Scoring against the threshold in force** — moving the threshold during a session moves the feedback sound, Time Above Threshold, Longest Streak and the SHAMATHA badge together, once the slider stays put for half a second;
-  every recorded tick stores the metric it was scored on, its value and the threshold in force (also in CSV exports), and the session cards list the thresholds in order ("70 › 85")
-- **Meditation timer** — Configurable duration (1-120 min) with presets, countdown display, auto-stop, end sound picker (default bell or your own file) with a test button
-- **Session Program** — Settings → Timer **Simple | Program** toggle:
-  Program mode lets you define an ordered list of timed segments, each with its own formula (Shamatha, Meditation, NS Attention, NS Meditation, or any saved custom formula), target level, and end-cue sound (Chime or Warble).
-  The program's total duration drives the session timer; a transition chime plays at each segment boundary and the target/audio-driver update live.
-  The live graph highlights the currently-trained series and plots each segment's formula; a stepped threshold line tracks per-segment targets on both the live and diary graphs.
-  Programs are saved by name (unique; re-saving the same name overwrites with a confirmation dialog; load and delete also confirm).
-  The duration button on the Session screen shows **P** in program mode and opens a quick Programs picker to switch or inspect the active program — the loaded program's name is displayed.
-  The program that ran is recorded per session so the diary can replay the stepped threshold.
-  Each segment also has a **Feedback** picker (Default / Rain / Tone / Custom file); "Default" inherits the global Audio selection.
-  The feedback source switches at each segment boundary, lock-safely.
-- **Session duration picker on Live Session** — Dedicated duration button next to Start shows the active choice (`▼ 10 min` / `▼ Free`) and opens a modal preset picker (5 / 10 / 15 / 20 min / Free); current preset highlighted
-- **State classification** — Stable Focus, Subtle Distraction, Gross Distraction, Sinking, Neutral
-- **NeuroSky MindWave Mobile 2** — Bluetooth RFCOMM on Android (pyjnius) and Linux (Python socket);
-  ThinkGear protocol parser;
-  background reader thread;
-  BT connection wait with status display;
-  paired device scanning, marking the headset in use and the connected one, with a name of your own for each headset
-- **Settings panel** — ThemedAccordion sections:
-  User Profile, Timer, Device, Threshold (max 180), Audio, Display (text size: Normal / Large / Larger; scored line colours: mono or one of five gradients; per profile), Custom Formula, Theme selector;
-  preset buttons under sliders;
-  profile and timer inline;
-  all persisted per user
-- **Custom formula engine** — Up to 3 named custom formula slots, each a Python-style expression with band powers, combined/normalized bands, sqrt-relative bands, computed metrics, math functions, and windowed `avg(expr, N)`;
-  AST-parsed with whitelist validation;
-  save/load formula library per user;
-  one slot drives the audio noise channel;
-  all 3 share a Y-axis (scale 200);
-  on-graph picker has a "Choose…" button per slot to assign from the library without opening Settings
-- **Session diary** — Notes, tags, mood rating (saved with Save Notes, or automatically when you leave the session), CSV export with file save dialog, tabbed signal preview (Metrics / Raw EEG / Frequencies) with markers and threshold line;
-  a Try another threshold slider (one per segment for a program) recalculates time above threshold and the longest streak at another threshold, view only;
-  inline rename/delete moved to history list;
-  session names include device type
-- **Full signal storage** — Raw bands, computed metrics, native NeuroSky values, markers — all per-tick in SQLite with automatic schema migration
-- **CSV export** — Full session data with file chooser dialog; includes marker column
-- **Mock EEG simulation** — NeuroSky-compatible: band powers, 512Hz raw waveform, eSense values; state machine with smooth transitions
-- **User profiles** — Multiple profiles with per-user sessions, settings, and formulas; last user persisted; diary disabled until user selected
-- **Session guards** — Start blocked without user or device; every ending (Stop, timer, lost signal) saves the session; the end card adds notes or deletes the session after a confirmation
-- **Navigation** — 3-tab bottom navigation (Session / History / Settings) with Material Design icons
-- **First run** — on first launch, create a profile or pick an existing one, so a restored database doesn't lose history;
-  a single paired MindWave is then selected automatically, several open Settings → Device to pick one, and with none the app runs on simulated EEG (demo mode)
-- **Existing-user picker** — The first-run popup and Settings → User Profile share one form: pick an existing profile or type a new name; duplicate names trigger an inline "Use existing 'X'" / "Change name" choice (DB enforces unique names)
-- **Session end summary** — Post-session overlay with stats and quick notes field
-- **History view** — Calendar heatmap (GitHub-style by avg shamatha) **or** 14-day bar chart, toggleable per user, paged back in time with arrows or a sideways swipe (back to the first session, a tap on the dates returns to today);
+  every recorded tick stores the metric it was scored on, its value and the threshold in force (also in CSV exports), and the session cards list the thresholds in order ("70 › 85").
+- **Meditation timer** — 1-120 min with presets, on/off, countdown, auto-stop, and an end sound (default bell or your own file) with a test button.
+  The duration button next to Start shows the choice ("10m", "1h", "∞" for Free, "P" for a program) and opens a picker: 5, 10, 15, 20, 30 min, 1 h, 1 h 30 min, 2 h, Free, or a saved program.
+- **Session Program** — Settings → Timer / Program has a **Simple | Program** toggle; a program is an ordered list of timed segments.
+  Each segment has its own formula (Shamatha, Meditation, NS Attention, NS Meditation or a saved custom formula), target, end cue (Chime or Warble) and feedback sound (Default, the Audio setting; Rain; Tone; a file).
+  The program's total duration runs the session timer; at each boundary the segment's end cue plays and the target, scored metric and feedback sound switch, also with the screen locked.
+  The live graph shows each segment's formula and marks the one in training; a stepped threshold line follows the targets live and in History, which keeps the program each session ran.
+  Programs are saved under unique names; overwriting, loading or deleting one asks first.
+- **NeuroSky MindWave Mobile 2** — Bluetooth Classic RFCOMM on Android (pyjnius) and Linux (Python socket), the headset's COM port on Windows (pyserial), or a serial device given with `--serial`;
+  a ThinkGear parser (8 band powers, attention, meditation, signal quality, 512 Hz raw wave) on a background reader thread that reconnects after a read error.
+  At Start the app waits for the connection and the first data and shows its status;
+  Settings → Device lists the paired headsets, marks the one in use and the connected one, and lets you name each.
+- **Settings panel** — accordion sections: User Profile, Timer / Program, Device, Data Backup, Threshold (20-180), Audio, Display, Custom Formula, Theme, Developer Tools, Help & Troubleshooting;
+  preset buttons under the sliders; settings are saved per profile.
+  Display holds the text size (Normal / Large / Larger), the scored line's colours (mono or one of five gradients), line width, screen rotation and the marker hotkey.
+- **Custom formula engine** — 3 named slots, each with a name, an expression, Apply, Save and a status line;
+  an expression is Python-style over band powers, combined, normalized and sqrt-relative bands, computed metrics, math functions and windowed `avg(expr, N)`, AST-parsed against a whitelist;
+  a formula library per profile; any slot can drive the audio; all 3 share one Y-axis (scale 200);
+  the graph's series picker has a "Choose…" button per slot to assign a library formula without opening Settings.
+- **Session detail** — notes, tags and mood (saved with Save Notes, or when you leave the session) and CSV export;
+  a whole-session band power table and tabbed graphs (Metrics / Raw EEG / Frequencies) with markers and the threshold line;
+  a Try another threshold slider (one per segment for a program) recalculates time above threshold and the longest streak, view only.
+  A session is named after its start time and headset; rename and delete are in the History list.
+- **Full signal storage** — raw bands, computed metrics, native NeuroSky values and markers, per tick, in SQLite with automatic schema migration; a running session is saved every minute.
+- **CSV export** — a session's full data with a marker column: on desktop to a folder you pick, on Android to `Documents/EEGMeditation/`; History's select mode exports several sessions as one ZIP.
+- **Mock EEG simulation** — NeuroSky-compatible band powers from a state machine (relaxed, focused, drowsy, distracted, deep calm) with smooth transitions, a 128 Hz synthesized raw waveform and eSense values.
+- **User profiles** — sessions, settings and formulas per profile; the last profile opens at start, and the app can't be used without one.
+- **Session guards** — Start needs a profile and, with no headset selected, scans the paired ones first; every ending (Stop, timer, lost signal) saves the session.
+- **Navigation** — 3-tab bottom navigation (Session / History / Settings) with Material Design icons.
+- **First run** — create a profile or pick an existing one, so a restored database doesn't lose history;
+  a single paired MindWave is then selected automatically, several open Settings → Device to pick one, and with none the app runs on simulated EEG (demo mode).
+- **Existing-user picker** — the first-run popup and Settings → User Profile share one form: pick an existing profile or type a new name;
+  a duplicate name offers "Use existing 'X'" or "Change name" inline (the DB enforces unique names).
+- **Session end summary** — an end card with the stats and a notes field, which can also delete the session after a confirmation.
+- **History view** — a calendar heatmap (GitHub-style, by average shamatha) or a 14-day bar chart (each profile keeps its choice);
+  arrows or a sideways swipe page it back in time, as far as the first session, and a tap on the dates returns to today;
   tap a day in either to filter the session list.
   A totals table under the chart sums the day, week and month around today or the tapped day, and all time: total time, time on target and best streak.
   A chevron folds the chart and the totals away so the list gets the screen.
-  Each session row shows its date and start time, the metric it was scored on with its average, the duration, the longest streak and the first line of its notes
-- **Theme system** — 4 themes (Dark Blue, Dark Green, Light Cream, Light Green) with live refresh; custom styled widgets with rounded corners
-- **App icon** — Custom EEG brainwave icon and Android presplash
-- **macOS support** — Native build via PyInstaller
-- **Android storage** — Tries /sdcard/EEGMeditation, falls back to app-private storage if permission denied
-- **Desktop DB location** — Linux `~/.local/share/EEGMeditation/`, Windows `%APPDATA%\EEGMeditation\`, macOS `~/Library/Application Support/EEGMeditation/`;
-  one-time migration of any pre-existing DB at the old project-root / next-to-binary path
-- **Manual Backup / Restore** — Settings → Data Backup writes a transaction-safe copy of your sessions (SQLite online backup API) to `Documents/EEGMeditation/` on Android (Telegram-/MTP-friendly) or a user-chosen location on desktop;
-  Restore validates the file then force-restarts the app
-- **Adaptive landscape layout** — fixed graph height when viewport is tall; scroll mode when short (graph would fall below dp(400)); controls live inside the scrollable body.
-- **Multi-hour locked-screen sessions on Android** — foreground service + partial wake lock keeps the session running with the screen off; EEG compute and audio volume updates run on a daemon thread independent of Kivy's main loop.
+  Each session row shows its date and start time, the metric it was scored on with its average, the duration, the longest streak and the first line of its notes.
+  Select mode exports or deletes several sessions at once.
+- **Theme system** — 4 themes (Dark Blue, Dark Green, Light Cream, Light Green) with live refresh; custom styled widgets with rounded corners.
+- **App icon** — custom EEG brainwave icon and Android presplash.
+- **Database location** — Android app-private storage; Linux `~/.local/share/EEGMeditation/` (or `$XDG_DATA_HOME/EEGMeditation/`), Windows `%APPDATA%\EEGMeditation\`, macOS `~/Library/Application Support/EEGMeditation/`;
+  a database at an older location (`/sdcard/EEGMeditation` on Android, the project root or next to the binary on desktop) is copied in once.
+- **Manual Backup / Restore** — Settings → Data Backup writes a transaction-safe copy of the database (SQLite online backup API) to a file you choose in Android's save dialog or a desktop file dialog;
+  Restore validates the file, replaces the database and closes the app for a relaunch.
+- **Adaptive landscape layout** — fixed graph height when the viewport is tall, scroll mode when it is short (the graph would fall below dp(400)); the controls sit inside the scrollable body.
+- **Multi-hour locked-screen sessions on Android** — a foreground service and a partial wake lock keep the session running with the screen off;
+  EEG compute and audio volume updates run on a daemon thread independent of Kivy's main loop, and audio plays through the lock as Android `MediaPlayer`s (`USAGE_MEDIA`) instead of the SDL2 mixer.
   On phones whose maker closes background apps anyway (Huawei, Xiaomi, Samsung, …), the app explains at first start what to allow (battery optimisation; Huawei's App launch) and keeps the buttons in Settings → Device.
-- **Audio continues playing through screen lock on Android** — noise channel uses `MediaPlayer` (`USAGE_MEDIA` audio attributes) instead of SDL2 mixer so it survives screen lock.
-- **Global crash handler** — in-app dialog with a pre-formatted crash report copied to clipboard.
-- **Toggle bottom stats card** between live metrics and session aggregates.
+- **Global crash handler** — an in-app dialog with a pre-formatted crash report copied to the clipboard.
+- **Bottom stats toggle** — the stats card switches between live metrics and session aggregates.
 
 ## Documentation
 
-- [User Manual (English)](docs/USER_MANUAL.md)
-- [User Manual (Ukrainian)](docs/USER_MANUAL_UA.md)
-- [Formula Comparison Tools](tools/COMPARISON.md)
+- [User Manual (English)](docs/USER_MANUAL.md), [User Manual (Ukrainian)](docs/USER_MANUAL_UA.md)
+- [Architecture](docs/architecture/README.md): how each subsystem works and why
+- [Android release signing](docs/ANDROID_SIGNING.md)
+- [Formula comparison tools](tools/COMPARISON.md), [EEG stream splitter](tools/SPLITTER.md)
+- [Changelog](CHANGELOG.md), [Contributing](CONTRIBUTING.md)
 
 ## Project Structure
 
 ```
+main.py              # Entry point; --serial PATH reads a serial device instead of Bluetooth
 app/
-├── ui/
-│   ├── theme.py                # Colors, fonts, styled widgets, ThemedAccordion
-│   ├── app_manager.py          # Main app, screen routing, session lifecycle
-│   ├── live_session.py         # Session screen (metrics + raw EEG toggle)
-│   ├── history_screen.py       # Calendar/14-Day toggle + session list
-│   ├── session_labels.py       # A session's title, score line and notes line (History rows, session detail)
-│   ├── settings_screen.py      # Accordion settings: User Profile, Timer, Device, Data Backup, …
-│   ├── diary_screen.py         # Session detail view with graphs
-│   ├── raw_eeg_screen.py       # ScrollableGraphWidget
-│   └── widgets/
-│       └── user_picker.py      # Shared UserPickerForm (first-run popup, settings)
-├── assets/
-│   ├── fonts/                   # Material Design Icons font
-│   └── icons/                   # App icon (PNG/ICO/ICNS) + presplash
-├── eeg/                    # EEG data sources
-│   ├── mock_stream_v2.py       # Frequency-based EEG synthesis (active mock)
-│   ├── neurosky_stream.py      # Real Bluetooth RFCOMM + ThinkGear parser
-│   ├── band_spec.py            # The 8 bands and 5 groups: key, name, Hz range
-│   └── buffer.py               # Rolling average and variance buffers
-├── metrics/                # Signal processing
-│   ├── engine.py               # Shamatha formula, sinking, distraction, state classification
-│   ├── custom_formula.py       # AST-parsed user formula engine with avg() support
-│   └── noise_detector.py       # Power line noise (50/60Hz) detection
-├── audio_feedback/
-│   └── noise.py                # 4-channel audio: white noise, bell, chime, warble
-├── session/
-│   ├── manager.py              # Start/Pause/Resume/Stop state machine
-│   ├── session_program.py      # SessionProgram headless model (segments, boundaries, threshold steps)
-│   └── timer_state.py          # Headless countdown timer
-├── storage/
-│   ├── database.py             # SQLite: sessions, metrics, users, settings, CSV export
-│   └── backup.py               # make_backup / validate_backup / restore_backup
-├── config.py               # Sigmoid params, thresholds, app constants, Android+Desktop DB paths
-├── crash_handler.py        # Global error UI; report_soft_error + pre-app error queue
-└── logger.py               # Centralized logging
-
-tools/
-├── splitter.py             # BT stream splitter for simultaneous app comparison
-├── replay.py               # Replay recorded .eeg sessions
-├── run_comparison.sh       # One-script simultaneous comparison with Wine app
-└── COMPARISON.md           # Comparison setup documentation
+├── config.py        # Tunable parameters (SIGMOID, METRICS, APP), DB paths
+├── eeg/             # Headset streams (Bluetooth, serial, mock), ThinkGear parser, bands
+├── metrics/         # MetricsEngine, custom formulas, noise detection
+├── session/         # Session state machine, 2 Hz tick, checkpoints, scoring, programs
+├── audio_feedback/  # AudioEngine: feedback, alerts, timer gong
+├── storage/         # SQLite, backup and restore, file and Android storage helpers
+├── settings/        # Per-profile settings registry
+├── ui/              # The app (app_manager.py), screens, theme, widgets
+└── assets/          # Icon font, in-app help, app icon and presplash
+android_src/         # The session's Android foreground service (Java)
+docs/                # User manuals, architecture, Android release signing
+tests/               # pytest suite
+tools/               # Bluetooth diagnostics, stream splitter, replay, side-by-side comparison
 ```
+
+Module by module: `CLAUDE.md`'s module map and [docs/architecture](docs/architecture/README.md).
 
 ## Shamatha Formula
 
@@ -159,6 +122,8 @@ Where:
 - `avg(ratio, 4)` — rolling average over 4 unique NeuroSky samples (1Hz)
 - Duplicate samples from 2Hz polling are skipped
 
+Distraction, Sinking and Subtle Distraction are in [metrics-scoring.md](docs/architecture/metrics-scoring.md).
+
 ## Setup (Desktop Development)
 
 ```bash
@@ -166,8 +131,8 @@ Where:
 python3 -m venv venv
 source venv/bin/activate
 
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies: requirements.txt runs the app, requirements_dev.txt adds the tests and build tools
+pip install -r requirements_dev.txt
 
 # Run tests (skips the ones marked slow)
 python -m pytest tests/ -v
@@ -189,22 +154,28 @@ python main.py --serial /tmp/mindwave_b
 ```bash
 ./build_linux.sh
 # Output: dist/EEG_Meditation_Trainer/EEG_Meditation_Trainer
+# Package: tar czf EEG_Meditation_Trainer_linux.tar.gz -C dist EEG_Meditation_Trainer
 ```
 
-Requires Python 3.10+, `build-essential`, `pkg-config`.
+Requires Python 3.10-3.12, `build-essential`, `pkg-config`.
+The script creates `build_venv`, installs the pinned Kivy, Pillow and PyInstaller, and builds with PyInstaller.
 
 ### Android
 
 ```bash
-./build_android.sh            # debug build
+./build_android.sh            # debug build: bin/eegmeditation-*-debug.apk
 ./build_android.sh release    # release build
 
-# Deploy and run
-buildozer android debug deploy run logcat
+# Install, or deploy and run with the log (buildozer is in build_venv_android, which the script creates)
+adb install bin/eegmeditation-*-debug.apk
+buildozer android deploy run logcat
 ```
 
-Requires Python 3.10+, JDK 17.
-First build downloads Android SDK/NDK (~1.5 GB).
+Requires Python 3.10-3.12 and JDK 17 (check with `java -version`).
+The first build downloads the Android SDK/NDK (~1.5 GB) and takes 15-30 min.
+To use an SDK/NDK you already have, set `android.sdk_path` and `android.ndk_path` in `buildozer.spec`.
+After a build error, run `buildozer android clean` and build again.
+Release signing in CI: [docs/ANDROID_SIGNING.md](docs/ANDROID_SIGNING.md).
 
 System deps (Ubuntu/Debian):
 ```bash
@@ -220,15 +191,27 @@ build_windows.bat
 REM Output: dist\EEG_Meditation_Trainer\EEG_Meditation_Trainer.exe
 ```
 
-Requires Python 3.10-3.12 from python.org.
+Requires Windows 10/11 and Python 3.10-3.12 from [python.org](https://www.python.org/downloads/), on `PATH` (`python --version` must work).
+The script deletes `build\` and `dist\`, creates `build_venv`, installs the pinned dependencies and pywin32, and runs `python -m PyInstaller eeg_meditation.spec --noconfirm`.
+To distribute, zip the whole `dist\EEG_Meditation_Trainer\` folder: the exe runs from it without a Python install.
+
+- **Missing DLLs**: check that `kivy_deps.sdl2` and `kivy_deps.glew` are installed; the spec bundles their binaries.
+- **Black screen at start**: set `console=True` in `eeg_meditation.spec` to see the errors.
 
 ### macOS
 
+macOS builds run in CI (the `build-macos` job in `.github/workflows/release.yml`); a local build follows that job:
+
 ```bash
-# macOS (CI only, or local with Homebrew SDL2)
-# brew install sdl2 sdl2_image sdl2_mixer sdl2_ttf
-# pyinstaller --windowed --icon app/assets/icons/icon.icns main.py
+brew install sdl2 sdl2_image sdl2_mixer sdl2_ttf pkg-config
+pip install kivy==2.3.0 pillow==10.4.0 pyinstaller==6.11.1
+pyinstaller --name "EEG_Meditation_Trainer" --noconfirm --clean --onedir --windowed \
+    --icon app/assets/icons/icon.icns main.py
+# Output: dist/EEG_Meditation_Trainer/
 ```
+
+Add the job's `--hidden-import` flags, then copy Kivy's `data` and `modules` into the bundle as its next step does.
+Requires Python 3.10-3.12, macOS 13+.
 
 ### CI
 
@@ -237,13 +220,15 @@ Requires Python 3.10-3.12 from python.org.
 gh workflow run release.yml -f platform=linux  # or windows, macos, android, all
 ```
 
+Pushing a `v*` tag builds all four platforms and publishes a GitHub release with their packages.
+
 ## Configuration
 
 All tunable parameters in `app/config.py`:
 
-- **SigmoidConfig** — k and midpoint for each sigmoid normalization
-- **MetricsConfig** — Cmax, rolling window size, threshold defaults, limits
-- **AppConfig** — Update frequency (2Hz), graph window (5min), flush interval, audio settings
+- **SigmoidConfig** — k and midpoint of the subtle-distraction sigmoid
+- **MetricsConfig** — Cmax, rolling window size, threshold default, limits
+- **AppConfig** — update frequency (2 Hz), graph window and session limit (3 h), flush interval, audio and alert settings, DB path
 
 ## Disclaimer
 
@@ -255,7 +240,7 @@ Use at your own risk.
 ## Tech Stack
 
 - **Python 3.10-3.12** — Core language
-- **Kivy 2.3** — Cross-platform UI + SoundLoader audio (Android, Linux, Windows, macOS)
+- **Kivy 2.3.0** — Cross-platform UI; audio through SoundLoader on desktop and Android's `MediaPlayer` on Android
 - **SQLite** — Session, metrics, user profile storage
 - **Buildozer** — Android packaging
 - **PyInstaller** — Desktop executable packaging (Linux, Windows, macOS)

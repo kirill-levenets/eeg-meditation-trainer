@@ -15,21 +15,21 @@ Two approaches:
 - MindWave Mobile paired via `bluetoothctl`
 - Wine installed (`wine --version`)
 - `socat` installed (`sudo apt install socat`)
-- Windows app at `~/eegmeditation/`
-- Your MindWave MAC address (use `bluetoothctl paired-devices`)
+- Windows app at `~/eegmeditation/` (`run_comparison.sh` takes another folder from `WINE_APP_DIR`)
+- Your MindWave MAC address: `bluetoothctl paired-devices`, or `bluetoothctl devices Paired` where that command is missing
 
 ---
 
 ## Option A: Simultaneous (One Script)
 
-Power on the MindWave (LED should blink), then:
+Power on the MindWave (LED should blink), then run the script with its MAC address:
 
 ```bash
-./tools/run_comparison.sh
+./tools/run_comparison.sh AA:BB:CC:DD:EE:FF
 ```
 
 This single script:
-1. Starts the splitter (connects to MindWave via BT, records to `.eeg` file)
+1. Releases any `rfcomm` binding (`sudo`), then starts the splitter (connects to MindWave via BT, records to `session_<date>_<time>.eeg` in the repo root)
 2. Launches your app (reads from `/tmp/mindwave_b`)
 3. Launches the Wine app and fixes the COM1 symlink after Wine initializes
 4. Prints **READY!** when both apps are receiving data
@@ -37,11 +37,7 @@ This single script:
 
 Click **Start** in both apps when you see the READY message.
 Press **Ctrl+C** to stop everything.
-
-You can also pass a custom MAC address:
-```bash
-./tools/run_comparison.sh AA:BB:CC:DD:EE:FF
-```
+The script's log goes to `tools/bt_logs/`.
 
 ## Option B: Simultaneous (Manual Terminals)
 
@@ -129,10 +125,6 @@ python3 tools/replay.py session.eeg
 python3 tools/replay.py session.eeg --device /dev/rfcomm0
 ```
 
-> **Note:** At each loop boundary the Wine app may briefly show "low battery"
-> as the stream restarts.
-> Use longer recordings (3-5 min) to minimize this.
-
 ---
 
 ## Running the Windows App Directly (No Splitter)
@@ -158,11 +150,10 @@ sudo rfcomm release 0
 |---------|----------|
 | `Device or resource busy` when starting splitter | Another app holds the BT connection. Stop your app / release rfcomm: `sudo rfcomm release 0` |
 | Wine says "No headset found" | COM1 symlink is wrong. Check: `readlink ~/.wine/dosdevices/com1` — must point to a `/dev/pts/N` that exists. Re-run the `ln -sf` command **after** launching Wine |
-| Wine resets com1 on launch | This always happens. Always re-link after Wine starts: `ln -sf $(readlink -f /tmp/mindwave_a) ~/.wine/dosdevices/com1` |
 | Splitter dies / BT timeout | MindWave went to sleep or out of range. Power-cycle headset (off 5s, on). The `run_comparison.sh` script auto-restarts the splitter |
 | Replay shows "Recording is empty" | The `.eeg` file was not written. Re-record with `--record` flag |
 | MindWave won't connect | Power-cycle the headset. Check `bluetoothctl info AA:BB:CC:DD:EE:FF` — should show Paired: yes |
-| Low battery warning in Wine app | Loop boundary in replay, or BT reconnect. Use longer recordings |
+| Low battery warning in Wine app | The stream restarted: a replay loop boundary or a BT reconnect. Use longer recordings (3-5 min) |
 | Your app ignores `--serial` flag | `KIVY_NO_ARGS=1` must be set before Kivy imports (already in `main.py`) |
 | Your app shows "Connecting..." but logs show connected | Wait a few seconds — band power packets arrive once/second. The UI updates after receiving the first valid EEG data |
 
