@@ -16,6 +16,7 @@ from app.audio_feedback.noise import (
 )
 from app.config import APP
 from app.ui.app_manager import EEGMeditationApp
+from tests._audio_sequence import record_sequences, sequence_sleep
 
 
 def _pcm_samples(pcm: bytes) -> tuple[int, ...]:
@@ -411,7 +412,7 @@ def test_cleanup_reports_a_sound_file_it_cannot_remove(monkeypatch):
 def test_the_audio_tests_teardown_runs_on_the_main_thread(monkeypatch):
     # The sequence runs on a daemon thread; its stop() releases MediaPlayers, which belongs to the main thread.
     monkeypatch.setattr(noise_mod, "_make_noise_player", lambda path, loop=True: _FakePlayer(path))
-    monkeypatch.setattr(noise_mod.time, "sleep", lambda _s: None)
+    sequence_sleep(monkeypatch, record_sequences(monkeypatch), lambda _s: None)
     eng = AudioEngine()
     stops = []
     monkeypatch.setattr(eng, "stop", lambda: stops.append(threading.current_thread()))
@@ -428,24 +429,11 @@ def test_the_audio_tests_teardown_runs_on_the_main_thread(monkeypatch):
     eng.cleanup()
 
 
-def _record_sequences(monkeypatch) -> list:
-    """The Settings test's sequence threads, kept as they start: a quick one is gone before a search would find it."""
-    started, base = [], threading.Thread
-
-    class Recording(base):
-        def start(self):
-            if getattr(getattr(self, "_target", None), "__name__", "") == "_run_sequence":
-                started.append(self)
-            super().start()
-    monkeypatch.setattr(threading, "Thread", Recording)
-    return started
-
-
 def _gated_test(monkeypatch, eng, gate):
     """Start the Settings test with every sleep held at `gate`; record the alerts it plays and its stop."""
-    sequences = _record_sequences(monkeypatch)
+    sequences = record_sequences(monkeypatch)
     monkeypatch.setattr(noise_mod, "_make_noise_player", lambda path, loop=True: _FakePlayer(path))
-    monkeypatch.setattr(noise_mod.time, "sleep", lambda _s: gate.wait(2))
+    sequence_sleep(monkeypatch, sequences, lambda _s: gate.wait(2))
     played, stops = [], []
     for name in ("_play_bell", "_play_chime", "_play_disconnect"):
         monkeypatch.setattr(eng, name, lambda n=name: played.append(n))
@@ -470,9 +458,9 @@ def test_a_session_taking_the_engine_over_ends_the_settings_test(monkeypatch):
 
 def test_a_session_starting_during_the_alerts_stops_them(monkeypatch):
     eng = AudioEngine()
-    sequences = _record_sequences(monkeypatch)
+    sequences = record_sequences(monkeypatch)
     monkeypatch.setattr(noise_mod, "_make_noise_player", lambda path, loop=True: _FakePlayer(path))
-    monkeypatch.setattr(noise_mod.time, "sleep", lambda _s: None)
+    sequence_sleep(monkeypatch, sequences, lambda _s: None)
     played = []
 
     def bell():
