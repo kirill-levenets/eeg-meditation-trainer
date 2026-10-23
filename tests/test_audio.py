@@ -16,6 +16,7 @@ from app.audio_feedback.noise import (
 )
 from app.config import APP
 from app.ui.app_manager import EEGMeditationApp
+from tests._audio_sequence import record_sequences, sequence_sleep
 
 
 def _pcm_samples(pcm: bytes) -> tuple[int, ...]:
@@ -411,7 +412,7 @@ def test_cleanup_reports_a_sound_file_it_cannot_remove(monkeypatch):
 def test_the_audio_tests_teardown_runs_on_the_main_thread(monkeypatch):
     # The sequence runs on a daemon thread; its stop() releases MediaPlayers, which belongs to the main thread.
     monkeypatch.setattr(noise_mod, "_make_noise_player", lambda path, loop=True: _FakePlayer(path))
-    monkeypatch.setattr(noise_mod.time, "sleep", lambda _s: None)
+    sequence_sleep(monkeypatch, record_sequences(monkeypatch), lambda _s: None)
     eng = AudioEngine()
     stops = []
     monkeypatch.setattr(eng, "stop", lambda: stops.append(threading.current_thread()))
@@ -428,30 +429,27 @@ def test_the_audio_tests_teardown_runs_on_the_main_thread(monkeypatch):
     eng.cleanup()
 
 
-def _sequence_thread():
-    return next(t for t in threading.enumerate() if getattr(getattr(t, "_target", None), "__name__", "") == "_run_sequence")
-
-
 def _gated_test(monkeypatch, eng, gate):
     """Start the Settings test with every sleep held at `gate`; record the alerts it plays and its stop."""
+    sequences = record_sequences(monkeypatch)
     monkeypatch.setattr(noise_mod, "_make_noise_player", lambda path, loop=True: _FakePlayer(path))
-    monkeypatch.setattr(noise_mod.time, "sleep", lambda _s: gate.wait(2))
+    sequence_sleep(monkeypatch, sequences, lambda _s: gate.wait(2))
     played, stops = [], []
     for name in ("_play_bell", "_play_chime", "_play_disconnect"):
         monkeypatch.setattr(eng, name, lambda n=name: played.append(n))
     monkeypatch.setattr(eng, "stop", lambda: stops.append(1))
     eng.test_audio()
-    return played, stops, _sequence_thread()
+    return played, stops, sequences
 
 
 def test_a_session_taking_the_engine_over_ends_the_settings_test(monkeypatch):
     eng = AudioEngine()
     gate = threading.Event()
-    played, stops, seq = _gated_test(monkeypatch, eng, gate)
+    played, stops, sequences = _gated_test(monkeypatch, eng, gate)
     eng.end_test()  # the session's start, mid-sweep
     assert not eng._is_playing  # handed back: the session's start() isn't skipped
     gate.set()
-    seq.join(2)
+    sequences[0].join(2)
     Clock.tick()
     assert (played, stops) == ([], [])  # no more alerts over the session, and no teardown of its players
     monkeypatch.undo()
@@ -460,8 +458,9 @@ def test_a_session_taking_the_engine_over_ends_the_settings_test(monkeypatch):
 
 def test_a_session_starting_during_the_alerts_stops_them(monkeypatch):
     eng = AudioEngine()
+    sequences = record_sequences(monkeypatch)
     monkeypatch.setattr(noise_mod, "_make_noise_player", lambda path, loop=True: _FakePlayer(path))
-    monkeypatch.setattr(noise_mod.time, "sleep", lambda _s: None)
+    sequence_sleep(monkeypatch, sequences, lambda _s: None)
     played = []
 
     def bell():
@@ -471,7 +470,7 @@ def test_a_session_starting_during_the_alerts_stops_them(monkeypatch):
     for name in ("_play_chime", "_play_disconnect"):
         monkeypatch.setattr(eng, name, lambda n=name: played.append(n))
     eng.test_audio()
-    _sequence_thread().join(2)
+    sequences[0].join(2)
     assert played == ["_play_bell"]  # no chime or warble over the session
     monkeypatch.undo()
     eng.cleanup()
@@ -481,8 +480,8 @@ def test_a_session_starting_after_the_test_ends_keeps_its_players(monkeypatch):
     eng = AudioEngine()
     gate = threading.Event()
     gate.set()
-    played, stops, seq = _gated_test(monkeypatch, eng, gate)
-    seq.join(2)
+    played, stops, sequences = _gated_test(monkeypatch, eng, gate)
+    sequences[0].join(2)
     assert len(played) == 3
     eng.end_test()  # the session starts in the frame before the test's teardown runs
     Clock.tick()
@@ -494,13 +493,12 @@ def test_a_session_starting_after_the_test_ends_keeps_its_players(monkeypatch):
 def test_a_test_restarted_supersedes_the_one_running(monkeypatch):
     eng = AudioEngine()
     gate = threading.Event()
-    played, stops, first = _gated_test(monkeypatch, eng, gate)
+    played, stops, sequences = _gated_test(monkeypatch, eng, gate)
     eng.test_audio()  # Test pressed again mid-test
-    second = next(t for t in threading.enumerate() if t is not first and t.is_alive()
-                  and getattr(getattr(t, "_target", None), "__name__", "") == "_run_sequence")
     gate.set()
-    first.join(2)
-    second.join(2)
+    for seq in sequences:
+        seq.join(2)
+    assert len(sequences) == 2
     Clock.tick()
     assert len(played) == 3 and stops == [1]  # one sequence's alerts, one teardown: no session thought to be playing
     monkeypatch.undo()

@@ -6,7 +6,11 @@ from kivy.metrics import dp
 from app.ui.headset import filter_mindwave
 from app.ui.hooks import wire
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
+from app.ui.settings_sections.device import DeviceSection
+from app.ui.settings_sections.formulas import FormulaSection
+from app.ui.settings_sections.timer import TimerSection
 from app.ui.theme import ThemedAccordion
+from tests._settings_section import settings_section
 
 
 class _FakeTouch:
@@ -363,43 +367,42 @@ class TestSettingsTimerSoundRow(unittest.TestCase):
     loaded path shows on it without counting as a change, and a pick reaches TimerState through the change callback."""
 
     def setUp(self):
-        from app.ui.settings_screen import SettingsScreen
-        self.screen = SettingsScreen()
+        self.timer = settings_section(lambda section, _scroll: TimerSection(section, saved_formulas=lambda: []))
         self.captured = []
-        wire(self.screen.timer, on_timer_sound_change=self.captured.append)
+        wire(self.timer, on_timer_sound_change=self.captured.append)
 
     def test_a_loaded_path_shows_on_the_button_without_a_change(self):
-        self.screen.timer.timer_sound_path = "/tmp/bell.wav"
-        self.assertEqual(self.screen.timer.timer_sound_path, "/tmp/bell.wav")
-        self.assertEqual(self.screen.timer._timer_sound_btn.text, "Custom: bell.wav")
+        self.timer.timer_sound_path = "/tmp/bell.wav"
+        self.assertEqual(self.timer.timer_sound_path, "/tmp/bell.wav")
+        self.assertEqual(self.timer._timer_sound_btn.text, "Custom: bell.wav")
         self.assertEqual(self.captured, [])
 
     def test_default_bell_clears_the_custom_file(self):
-        self.screen.timer.timer_sound_path = "/tmp/bell.wav"
-        self.screen.timer._choose_timer_sound("")
-        self.assertEqual(self.screen.timer.timer_sound_path, "")
-        self.assertEqual(self.screen.timer._timer_sound_btn.text, "Default bell")
+        self.timer.timer_sound_path = "/tmp/bell.wav"
+        self.timer._choose_timer_sound("")
+        self.assertEqual(self.timer.timer_sound_path, "")
+        self.assertEqual(self.timer._timer_sound_btn.text, "Default bell")
         self.assertEqual(self.captured, [""])
 
     def test_custom_file_takes_the_picked_file(self):
         import app.ui.settings_sections.timer as timer
         with mock.patch.object(timer, "open_audio_file_chooser", lambda on_select, **_k: on_select("/tmp/gong.mp3")):
-            self.screen.timer._choose_timer_sound("custom")
-        self.assertEqual(self.screen.timer.timer_sound_path, "/tmp/gong.mp3")
-        self.assertEqual(self.screen.timer._timer_sound_btn.text, "Custom: gong.mp3")
+            self.timer._choose_timer_sound("custom")
+        self.assertEqual(self.timer.timer_sound_path, "/tmp/gong.mp3")
+        self.assertEqual(self.timer._timer_sound_btn.text, "Custom: gong.mp3")
         self.assertEqual(self.captured, ["/tmp/gong.mp3"])
 
     def test_the_button_offers_default_bell_and_a_custom_file(self):
         import app.ui.settings_sections.common as common
         offered = []
         with mock.patch.object(common, "make_scroll_popup", lambda title, rows, **_k: offered.extend(rows) or mock.Mock()):
-            self.screen.timer._timer_sound_btn.dispatch("on_release")
+            self.timer._timer_sound_btn.dispatch("on_release")
         self.assertEqual([b.text for b in offered], ["Default bell", "Custom file..."])
 
     def test_test_button_invokes_callback(self):
         called = []
-        wire(self.screen.timer, on_test_timer_sound=lambda: called.append(True))
-        self.screen.timer._timer_sound_test_btn.dispatch("on_release")
+        wire(self.timer, on_test_timer_sound=lambda: called.append(True))
+        self.timer._timer_sound_test_btn.dispatch("on_release")
         self.assertEqual(called, [True])
 
     def test_test_button_toggles_to_stop_then_back(self):
@@ -408,31 +411,31 @@ class TestSettingsTimerSoundRow(unittest.TestCase):
         played = []
         stopped = []
         wire(
-            self.screen.timer,
+            self.timer,
             on_test_timer_sound=lambda: played.append(True),
             on_stop_timer_sound=lambda: stopped.append(True),
         )
 
-        self.assertEqual(self.screen.timer._timer_sound_test_btn.text, "Test")
-        self.screen.timer._timer_sound_test_btn.dispatch("on_release")
-        self.assertEqual(self.screen.timer._timer_sound_test_btn.text, "Stop")
+        self.assertEqual(self.timer._timer_sound_test_btn.text, "Test")
+        self.timer._timer_sound_test_btn.dispatch("on_release")
+        self.assertEqual(self.timer._timer_sound_test_btn.text, "Stop")
         self.assertEqual(played, [True])
         self.assertEqual(stopped, [])
 
         # Second tap stops playback and reverts text.
-        self.screen.timer._timer_sound_test_btn.dispatch("on_release")
-        self.assertEqual(self.screen.timer._timer_sound_test_btn.text, "Test")
+        self.timer._timer_sound_test_btn.dispatch("on_release")
+        self.assertEqual(self.timer._timer_sound_test_btn.text, "Test")
         self.assertEqual(stopped, [True])
         self.assertEqual(played, [True])  # unchanged
 
     def test_natural_playback_end_resets_button_text(self):
-        wire(self.screen.timer, on_test_timer_sound=lambda: None)
-        self.screen.timer._timer_sound_test_btn.dispatch("on_release")
-        self.assertEqual(self.screen.timer._timer_sound_test_btn.text, "Stop")
+        wire(self.timer, on_test_timer_sound=lambda: None)
+        self.timer._timer_sound_test_btn.dispatch("on_release")
+        self.assertEqual(self.timer._timer_sound_test_btn.text, "Stop")
         # Sound.on_stop fires → app_manager calls notify_timer_sound_test_ended.
-        self.screen.timer.notify_timer_sound_test_ended()
-        self.assertEqual(self.screen.timer._timer_sound_test_btn.text, "Test")
-        self.assertFalse(self.screen.timer._timer_sound_test_playing)
+        self.timer.notify_timer_sound_test_ended()
+        self.assertEqual(self.timer._timer_sound_test_btn.text, "Test")
+        self.assertFalse(self.timer._timer_sound_test_playing)
 
 
 class TestSettingsFormulaSlots(unittest.TestCase):
@@ -440,41 +443,40 @@ class TestSettingsFormulaSlots(unittest.TestCase):
     name input, formula input, and status label."""
 
     def setUp(self):
-        from app.ui.settings_screen import SettingsScreen
-        self.screen = SettingsScreen()
+        self.formulas = settings_section(lambda section, _scroll: FormulaSection(section))
 
     def test_settings_has_three_formula_slots(self):
-        self.assertEqual(len(self.screen.formulas._formula_inputs), 3)
-        self.assertEqual(len(self.screen.formulas._formula_name_inputs), 3)
-        self.assertEqual(len(self.screen.formulas._formula_statuses), 3)
+        self.assertEqual(len(self.formulas._formula_inputs), 3)
+        self.assertEqual(len(self.formulas._formula_name_inputs), 3)
+        self.assertEqual(len(self.formulas._formula_statuses), 3)
 
     def test_submit_slot_fires_callback_with_index_name_formula(self):
         captured = []
-        wire(self.screen.formulas, on_formula_slot_change=lambda idx, name, formula: captured.append((idx, name, formula)))
-        self.screen.formulas._formula_name_inputs[1].text = "  Focus  "
-        self.screen.formulas._formula_inputs[1].text = "  alpha + beta  "
-        self.screen.formulas._submit_slot(1)
+        wire(self.formulas, on_formula_slot_change=lambda idx, name, formula: captured.append((idx, name, formula)))
+        self.formulas._formula_name_inputs[1].text = "  Focus  "
+        self.formulas._formula_inputs[1].text = "  alpha + beta  "
+        self.formulas._submit_slot(1)
         self.assertEqual(captured, [(1, "Focus", "alpha + beta")])
 
     def test_save_slot_reuses_library_callback_with_index_name_formula(self):
         captured = []
-        wire(self.screen.formulas, on_save_formula=lambda idx, name, formula: captured.append((idx, name, formula)))
-        self.screen.formulas._formula_name_inputs[2].text = "Calm"
-        self.screen.formulas._formula_inputs[2].text = "theta / (delta + 1)"
-        self.screen.formulas._save_slot(2)
+        wire(self.formulas, on_save_formula=lambda idx, name, formula: captured.append((idx, name, formula)))
+        self.formulas._formula_name_inputs[2].text = "Calm"
+        self.formulas._formula_inputs[2].text = "theta / (delta + 1)"
+        self.formulas._save_slot(2)
         self.assertEqual(captured, [(2, "Calm", "theta / (delta + 1)")])
 
     def test_set_formula_slot_reflects_into_inputs(self):
-        self.screen.formulas.set_formula_slot(0, "MyName", "alpha")
-        self.assertEqual(self.screen.formulas._formula_name_inputs[0].text, "MyName")
-        self.assertEqual(self.screen.formulas._formula_inputs[0].text, "alpha")
+        self.formulas.set_formula_slot(0, "MyName", "alpha")
+        self.assertEqual(self.formulas._formula_name_inputs[0].text, "MyName")
+        self.assertEqual(self.formulas._formula_inputs[0].text, "alpha")
 
     def test_set_formula_slot_status_routes_to_the_right_slot(self):
         from app.ui.theme import C
-        self.screen.formulas.set_formula_slot_status(1, "boom", is_error=True)
-        self.assertEqual(self.screen.formulas._formula_statuses[1].text, "boom")
-        self.assertEqual(tuple(self.screen.formulas._formula_statuses[1].color), tuple(C.DANGER))
-        self.assertEqual(self.screen.formulas._formula_statuses[0].text, "")  # slot 0 untouched
+        self.formulas.set_formula_slot_status(1, "boom", is_error=True)
+        self.assertEqual(self.formulas._formula_statuses[1].text, "boom")
+        self.assertEqual(tuple(self.formulas._formula_statuses[1].color), tuple(C.DANGER))
+        self.assertEqual(self.formulas._formula_statuses[0].text, "")  # slot 0 untouched
 
 
 class TestAccordionGrandchildGrowth(unittest.TestCase):
@@ -545,30 +547,29 @@ class TestAccordionGrandchildGrowth(unittest.TestCase):
 
 
 class TestSettingsDevicePicker(unittest.TestCase):
-    """Multi-device routing surface on SettingsScreen."""
+    """Multi-device routing surface in Settings' Device section."""
 
     def setUp(self):
-        from app.ui.settings_screen import SettingsScreen
-        self.screen = SettingsScreen()
+        self.device = settings_section(lambda section, scroll: DeviceSection(section, scroll=scroll))
 
     def test_focus_device_section_shows_banner_and_opens_section(self):
         # Device section starts collapsed. focus_device_section should open it
         # and set the banner text + non-zero height.
-        self.assertTrue(self.screen.device._device_section._collapsed)
-        self.screen.device.focus_device_section("Pick one of 3 devices")
-        self.assertFalse(self.screen.device._device_section._collapsed)
+        self.assertTrue(self.device._device_section._collapsed)
+        self.device.focus_device_section("Pick one of 3 devices")
+        self.assertFalse(self.device._device_section._collapsed)
         self.assertEqual(
-            self.screen.device._device_picker_banner.text, "Pick one of 3 devices",
+            self.device._device_picker_banner.text, "Pick one of 3 devices",
         )
-        self.assertGreater(self.screen.device._device_picker_banner.height, 0)
+        self.assertGreater(self.device._device_picker_banner.height, 0)
 
     def test_update_device_status_connected_clears_banner(self):
-        self.screen.device.focus_device_section("Pick one")
-        self.assertGreater(self.screen.device._device_picker_banner.height, 0)
+        self.device.focus_device_section("Pick one")
+        self.assertGreater(self.device._device_picker_banner.height, 0)
         # Once a device is connected, the prompt must disappear.
-        self.screen.device.update_device_status(True, name="MindWave A")
-        self.assertEqual(self.screen.device._device_picker_banner.text, "")
-        self.assertEqual(self.screen.device._device_picker_banner.height, 0)
+        self.device.update_device_status(True, name="MindWave A")
+        self.assertEqual(self.device._device_picker_banner.text, "")
+        self.assertEqual(self.device._device_picker_banner.height, 0)
 
 
 class TestFilterMindwave(unittest.TestCase):

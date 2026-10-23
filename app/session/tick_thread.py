@@ -7,6 +7,8 @@ from collections.abc import Callable
 from app.config import APP
 from app.logger import logger
 
+_STOP_JOIN_SECONDS = 1.0  # how long stop() waits for a tick in progress
+
 
 class TickThread:
     """At most one tick thread runs: start() is a no-op while one is alive, and each thread gets its own stop event."""
@@ -45,7 +47,7 @@ class TickThread:
         t = self._thread
         self._thread = None
         if t is not None and t.is_alive() and t is not threading.current_thread():
-            t.join(timeout=1.0)
+            t.join(timeout=_STOP_JOIN_SECONDS)
         logger.debug("SessionTick thread stopped")
 
     def _loop(self, stop: threading.Event) -> None:

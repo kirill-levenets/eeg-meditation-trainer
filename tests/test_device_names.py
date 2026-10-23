@@ -3,6 +3,7 @@ and the connected one, and each headset can be given its own name, used wherever
 
 import os
 import tempfile
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -15,8 +16,10 @@ from app.ui.app_manager import EEGMeditationApp
 from app.ui.device_labels import MAX_DEVICE_ALIAS, device_label, device_row_text
 from app.ui.hooks import wire
 from app.ui.settings_screen import SettingsScreen
+from app.ui.settings_sections.device import DeviceSection
 from app.ui.theme import C, Icons
 from tests._headset import make_headset
+from tests._settings_section import settings_section
 
 BLUE = "00:11:22:33:44:01"
 GREY = "00:11:22:33:44:02"
@@ -269,13 +272,18 @@ def test_the_list_learns_which_headset_is_selected_and_which_connected():
 # ---- the Settings list ----
 
 
-def _settings(selected=BLUE, connected=None) -> SettingsScreen:
-    screen = SettingsScreen()
+def _listed(device, selected, connected) -> dict:
+    """Two paired headsets in the Device list; the returned state is what device_state reports."""
     state = {"selected": selected, "connected": connected}
-    wire(screen.device, device_state=lambda: (state["selected"], state["connected"]))
-    screen._state = state
-    screen.device.populate_bt_devices([{**PAIRED[0], "alias": "Blue"}, {**PAIRED[1], "alias": ""}])
-    return screen
+    wire(device, device_state=lambda: (state["selected"], state["connected"]))
+    device.populate_bt_devices([{**PAIRED[0], "alias": "Blue"}, {**PAIRED[1], "alias": ""}])
+    return state
+
+
+def _settings(selected=BLUE, connected=None) -> SimpleNamespace:
+    """The Device section alone, as Settings builds it."""
+    device = settings_section(lambda section, scroll: DeviceSection(section, scroll=scroll))
+    return SimpleNamespace(device=device, _state=_listed(device, selected, connected))
 
 
 def test_the_list_names_each_row_by_its_alias_and_address():
@@ -294,7 +302,8 @@ def test_the_selected_row_is_filled_and_the_connected_one_shows_the_link():
 
 
 def test_the_marks_follow_the_connection_whenever_the_status_changes():
-    screen = _settings(selected=BLUE, connected=None)
+    screen = SettingsScreen()  # the whole screen: its on_pre_enter is under test
+    screen._state = _listed(screen.device, BLUE, None)
     assert screen.device._bt_rows[BLUE].icon == ""
     screen._state["connected"] = BLUE
     screen.device.update_device_status(True, name="Blue")

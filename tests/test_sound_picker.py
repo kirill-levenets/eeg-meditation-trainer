@@ -53,12 +53,12 @@ def _settle(done, seconds: float = 3.0) -> None:
         time.sleep(0.01)
 
 
-def _pick(uri, phone, seconds: float = 3.0) -> list[str]:
-    """Pick `uri` through the shared sound picker: the paths it hands back."""
+def _pick(uri, phone, seconds: float = 3.0, until=None) -> list[str]:
+    """Pick `uri` through the shared sound picker: the paths it hands back, once one arrives or `until()` holds."""
     phone["picks"].append(uri)
     got: list[str] = []
     common.open_audio_file_chooser(got.append)
-    _settle(lambda: got, seconds)
+    _settle(lambda: got or (until is not None and until()), seconds)
     return got
 
 
@@ -126,7 +126,7 @@ def test_a_sound_that_cannot_be_read_is_reported_and_leaves_nothing_behind(phone
     reports = []
     monkeypatch.setattr(saf, "read_uri_to_file", read)
     monkeypatch.setattr(common, "report_soft_error", lambda label, detail="", **k: reports.append(label))
-    assert _pick(BOWL, phone) == []
+    assert _pick(BOWL, phone, until=lambda: reports) == []  # the report comes after the partial copy is removed
     assert reports == ["sound_pick_failed"]
     assert [p for p in _sounds().rglob("*") if p.is_file()] == []
 

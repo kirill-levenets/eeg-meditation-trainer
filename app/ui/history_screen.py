@@ -7,6 +7,7 @@ to see sessions for that date; tap a session to see full detail.
 
 import datetime
 import math
+import weakref
 from typing import Optional
 
 from kivy.clock import Clock
@@ -533,7 +534,8 @@ class _SessionRow(RecycleDataViewBehavior, BoxLayout):
         self.add_widget(self._card)
 
     def on_parent(self, _row, parent):
-        owner = getattr(self, "_owner", None)
+        ref = getattr(self, "_owner", None)
+        owner = ref() if ref is not None else None
         if owner is None:
             return
         if parent is not None:
@@ -548,7 +550,7 @@ class _SessionRow(RecycleDataViewBehavior, BoxLayout):
 
     def refresh_view_attrs(self, rv, index, data):
         # Size and position come from the layout; nothing else in the data is a view property.
-        self._owner = rv.owner
+        self._owner = weakref.ref(rv.owner)  # weak: Kivy keeps unused rows in a global cache, which mustn't keep the screen
         self.sid = data["sid"]
         self._name_label.text = data["name"]
         self._stats_label.text = data["stats"]
@@ -1146,7 +1148,10 @@ class HistoryScreen(Screen):
         self._close_rename()
         self._shown = sessions
         self._show_items()
-        self._settled_log_ev = Clock.schedule_once(lambda _dt: self._log_list_state("settled"), 1.0)
+        self._settled_log_ev = Clock.schedule_once(self._log_settled, 1.0)  # a method: Clock holds it weakly
+
+    def _log_settled(self, _dt) -> None:
+        self._log_list_state("settled")
 
     def _item(self, session: dict) -> dict:
         sid = session.get("id", 0)

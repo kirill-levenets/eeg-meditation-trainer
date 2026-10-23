@@ -524,7 +524,7 @@ def _layout(root, where: str) -> list[tuple]:
              round(w.width, 1), round(w.height, 1)) for w in root.walk()]
 
 
-@pytest.mark.parametrize("switch", ["before", "after"])
+@pytest.mark.parametrize("switch", ["before", pytest.param("after", marks=pytest.mark.slow)])
 def test_a_screen_switched_to_a_size_is_laid_out_as_one_built_at_it(phone, switch):
     """Whether the size changes before a section is opened (its content detached) or while it is shown."""
     F.set_scale(LARGEST)
@@ -537,6 +537,7 @@ def test_a_screen_switched_to_a_size_is_laid_out_as_one_built_at_it(phone, switc
 PHONE_DENSITY = "2.75"  # px per dp on the test phone
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(os.environ.get("KIVY_METRICS_DENSITY") == PHONE_DENSITY, reason="the phone-density run itself")
 def test_the_largest_size_also_fits_at_a_phones_pixel_density():
     """Text is drawn in whole pixels: a text that just fits at 1 px per dp can wrap at 2.75 (History's Cal, the 14-day

@@ -10,6 +10,7 @@ import pytest
 
 import app.audio_feedback.noise as noise_mod
 from app.audio_feedback.noise import AudioEngine, _AndroidMediaNoisePlayer, _AudioFocus
+from tests._audio_sequence import record_sequences, sequence_sleep
 
 DUCK = "AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK"
 
@@ -163,7 +164,7 @@ def test_off_android_there_is_no_focus_to_ask_for(jnius):
 def test_a_session_start_called_off_mid_test_leaves_no_focus_held(jnius, monkeypatch, players):
     manager = _manager_answering(jnius, monkeypatch, "AUDIOFOCUS_REQUEST_GRANTED")
     gate = threading.Event()
-    monkeypatch.setattr(noise_mod.time, "sleep", lambda _s: gate.wait(2))
+    sequence_sleep(monkeypatch, record_sequences(monkeypatch), lambda _s: gate.wait(2))
     engine = AudioEngine()
     try:
         engine.test_audio()  # Settings > Audio's Test holds the focus as the session's feedback would
@@ -178,7 +179,7 @@ def test_a_session_start_called_off_mid_test_leaves_no_focus_held(jnius, monkeyp
 
 def test_a_test_cut_short_by_stop_owns_nothing_after(players, monkeypatch):
     gate = threading.Event()
-    monkeypatch.setattr(noise_mod.time, "sleep", lambda _s: gate.wait(2))
+    sequence_sleep(monkeypatch, record_sequences(monkeypatch), lambda _s: gate.wait(2))
     engine = AudioEngine()
     try:
         engine.test_audio()

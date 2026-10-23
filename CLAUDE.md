@@ -15,8 +15,11 @@ python main.py
 # Run with serial device (e.g. from mindwave-splitter)
 python main.py --serial /tmp/mindwave_b
 
-# Run all tests
+# Run all tests (skips the ones marked slow)
 python -m pytest tests/ -v
+
+# Run all tests including the slow ones: before every push
+python -m pytest tests/ --run-slow
 
 # Run a single test file
 python -m pytest tests/test_engine.py -v
@@ -99,6 +102,7 @@ Each rule exists because breaking it caused a real defect. The linked file expla
 - **Colours carry their theme role.** Read them from `C.X` (a `list()` copy freezes the colour); canvas code uses `ThemedColor` / `C.resolve()` and registers palette-dependent redraws with `C.add_listener`. Labels, text inputs, popups and file choosers come from `theme.py` (`ThemedLabel`, `ThemedTextInput`, `ThemedPopup`, `ThemedFileChooser`); `tests/test_theme_switch.py` and `tests/test_modal_style.py` fail on direct Kivy imports. → [ui-theme](docs/architecture/ui-theme.md#navigation-and-theme)
 - Decorative strokes (press ring, graph glyphs, borders) contrast with the surface they are drawn on (`C.TEXT`), not the element's fill; text on a fill uses `readable_fg(fill)`. Check all four themes.
 - Roboto in this build has no arrows or geometric triangles (`→`, `↑↓`, `▶` render as tofu): use `›`, `»`, or MDI `Icons` font markup.
+- Kivy holds a lambda strongly (`Clock.schedule_once`: until it runs; `bind`: as long as the object it is bound on) and a bound method weakly: hand a method to anything that outlives the widget (the Clock, `Window`, a global cache), or the widget lives as long as that. Anything Kivy caches globally (RecycleView rows) holds its owner by `weakref`. → [history](docs/architecture/history.md#session-list)
 - A ScrollView whose content changes while the user may be scrolling needs `_StableScrollView`'s bounds override; scroll programmatically with `effect_y.reset(...)`, never by assigning `scroll_y`. → [history](docs/architecture/history.md#session-list)
 - Graph touch hit-tests are in window coordinates (`to_window`); `GraphAwareScrollView` delivers touches in the graph's parent frame. A Kivy `Mesh` is capped at 65535 indices — split at `_MESH_MAX_QUADS`. `size_hint`/`size` are live `ReferenceListProperty`s — `list()` copy before overriding. → [graphs](docs/architecture/graphs.md)
 

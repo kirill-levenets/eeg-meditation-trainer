@@ -1,12 +1,20 @@
 """History draws only the session rows on screen (#42): the list is a RecycleView over the shown sessions' data."""
 
 import datetime
+import gc
+import types
+import weakref
 from unittest.mock import MagicMock
 
 import pytest
+from kivy._clock import ClockEvent, CyClockBase
 from kivy.base import EventLoop
+from kivy.clock import Clock
+from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.tests.common import UnitTestTouch
+from kivy.uix.recycleview.views import _cached_views
+from kivy.weakproxy import WeakProxy as KivyWeakProxy
 
 import app.ui.app_manager as app_manager
 from app.session.manager import SessionManager
@@ -32,7 +40,6 @@ def _frames(n: int = 10) -> None:
 
 @pytest.fixture
 def history():
-    from kivy.core.window import Window
     EventLoop.ensure_window()
     h = HistoryScreen()
     Window.add_widget(h)
@@ -67,6 +74,50 @@ def _offset_from_top(h: HistoryScreen) -> float:
 
 
 # ---- only the rows on screen exist ----
+
+
+_WEAK_PROXIES = (*weakref.ProxyTypes, KivyWeakProxy)
+_NOT_WALKED = (type, types.ModuleType, weakref.ref, CyClockBase)
+
+
+def _strongly_reaches(starts, target, limit: int = 50_000) -> bool:
+    """True if `target` is reachable from `starts` through strong references, past modules and classes."""
+    seen, stack = set(), list(starts)
+    while stack and len(seen) < limit:
+        obj = stack.pop()
+        if obj is target:
+            return True
+        kind = type(obj)  # not isinstance: on a dead weak proxy it raises ReferenceError
+        if id(obj) in seen or issubclass(kind, _NOT_WALKED) or kind in _WEAK_PROXIES:
+            continue
+        seen.add(id(obj))
+        if kind is dict and "__name__" in obj and "__builtins__" in obj:
+            continue  # a module's globals
+        if kind is ClockEvent:  # its own callback only: next/prev/clock chain every pending event in the process
+            stack.extend((obj.callback, obj.weak_callback))
+            continue
+        stack.extend(gc.get_referents(obj))
+    assert not stack, f"the walk stopped at {len(seen)} objects (limit {limit}), short of an answer"
+    return False
+
+
+def test_kivys_row_cache_and_clock_hold_the_history_screen_only_weakly():
+    # Kivy keeps unused rows in a global cache and pending Clock functions strongly: neither may pin the screen,
+    # or every dropped screen stays alive and re-renders its labels on each text size or theme change.
+    EventLoop.ensure_window()
+    h = HistoryScreen()
+    Window.add_widget(h)
+    try:
+        h.load_sessions(_sessions(6))
+        _frames()
+        h.load_sessions(_sessions(2))  # the rows no longer shown go to Kivy's view cache
+        _frames()
+        cached = _cached_views[_SessionRow]
+        assert any(row._owner() is h for row in cached)  # this screen's rows, not an earlier test's
+        assert not _strongly_reaches(cached, h)
+        assert not _strongly_reaches(Clock.get_events(), h)  # the events as stored, not their resolved callbacks
+    finally:
+        Window.remove_widget(h)
 
 
 def test_only_the_rows_on_screen_are_widgets(history):

@@ -23,6 +23,7 @@ from app.ui.theme import (
     ThemedLabel,
     ThemedTextInput,
 )
+from tests._shared_screens import SharedScreens, sections
 
 PAIRS = [("Light Cream", "Dark Blue"), ("Dark Blue", "Light Cream"), ("Dark Green", "Light Green")]
 
@@ -106,6 +107,12 @@ def _mount(widget: Widget) -> None:
 def _unmount(widget: Widget) -> None:
     from kivy.core.window import Window
     Window.remove_widget(widget)
+
+
+@pytest.fixture(scope="module")
+def screens():
+    """This module's SharedScreens, released with it."""
+    return SharedScreens()
 
 
 # ---- the mechanism ----
@@ -341,10 +348,10 @@ def _drain_history(h) -> None:
 
 
 @pytest.mark.parametrize("old, new", PAIRS)
-def test_live_session_screen_repaints(old, new):
+def test_live_session_screen_repaints(old, new, screens):
     from app.ui.live_session import LiveSessionScreen
     C.set_theme(old)
-    screen = LiveSessionScreen()
+    screen = screens(LiveSessionScreen)
     _mount(screen)
     try:
         C.set_theme(new)
@@ -364,10 +371,10 @@ def test_live_session_screen_repaints(old, new):
 
 
 @pytest.mark.parametrize("old, new", PAIRS)
-def test_history_screen_repaints_in_both_views_and_select_mode(old, new):
+def test_history_screen_repaints_in_both_views_and_select_mode(old, new, screens):
     from app.ui.history_screen import HistoryScreen
     C.set_theme(old)
-    h = HistoryScreen()
+    h = screens(HistoryScreen)
     _mount(h)
     try:
         h.load_sessions(_history_sessions(8))
@@ -384,10 +391,10 @@ def test_history_screen_repaints_in_both_views_and_select_mode(old, new):
 
 
 @pytest.mark.parametrize("old, new", PAIRS)
-def test_session_detail_repaints(old, new):
+def test_session_detail_repaints(old, new, screens):
     from app.ui.diary_screen import DiaryScreen
     C.set_theme(old)
-    screen = DiaryScreen()
+    screen = screens(DiaryScreen)
     _mount(screen)
     try:
         screen.show_session_detail({"id": 1, "date_time": "2026-09-20T10:00:00", "duration": 600,
@@ -412,10 +419,10 @@ def test_session_detail_repaints(old, new):
 
 
 @pytest.mark.parametrize("old, new", PAIRS)
-def test_settings_screen_repaints_every_section(old, new):
+def test_settings_screen_repaints_every_section(old, new, screens):
     from app.ui.settings_screen import SettingsScreen
     C.set_theme(old)
-    s = SettingsScreen()
+    s = screens(SettingsScreen)
     _mount(s)
     segments = [{"minutes": 10, "target": 50, "formula": "shamatha_score"},
                 {"minutes": 5, "target": 60, "formula": "meditation_score"}]
@@ -424,13 +431,13 @@ def test_settings_screen_repaints_every_section(old, new):
     s.timer.set_program_mode("simple")  # the program editor is built, then detached
     try:
         C.set_theme(new)
-        _assert_repainted(s, old, new, "all sections collapsed")
-        sections = [x for x in s.walk() if type(x).__name__ == "_AccordionSection"]
-        assert sections
-        for sec in sections:
+        _assert_repainted(s, old, new, "sections as built")
+        secs = sections(s)
+        assert secs
+        for sec in secs:
             sec.open()
             _assert_repainted(s, old, new, f"{sec._header.text} open")
-        timer = next(sec for sec in sections if sec._header.text.startswith("Timer"))
+        timer = next(sec for sec in secs if sec._header.text.startswith("Timer"))
         timer.open()
         s.timer.set_program_mode("program")
         _assert_repainted(s, old, new, "Timer in Program mode, built before the switch")
