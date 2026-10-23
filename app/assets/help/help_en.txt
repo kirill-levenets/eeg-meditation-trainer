@@ -316,7 +316,11 @@ expression input, Apply (evaluate) and Save (to
 the library).
 
 Save refuses a formula with an error and shows
-the error under its slot.
+the error under its slot. Saved Formulas below
+the slots is your library: tap one to put it in
+the first empty slot, or its X to delete it.
+Export to .txt writes the library's formulas,
+one per line, to Documents/EEGMeditation.
 
 The expression is a Python-style formula. Available
 variables include band powers (alpha1, alpha2,

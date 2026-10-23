@@ -3,6 +3,7 @@ formulas."""
 import os
 from collections.abc import Callable
 
+from app.crash_handler import report_soft_error
 from app.logger import logger
 from app.metrics.custom_formula import CustomFormulaEvaluator
 from app.metrics.formula_slots import (
@@ -11,6 +12,8 @@ from app.metrics.formula_slots import (
     default_name,
     read_active,
 )
+from app.storage.android_share import copy_to_documents
+from app.storage.fileops import discard_file
 from app.ui.settings_sections.common import saved_formula_label
 from app.ui.theme import format_count
 
@@ -132,7 +135,8 @@ class FormulaSettings:
         logger.info(f"Saved formula #{index} deleted")
 
     def on_export(self) -> None:
-        """Export saved formulas to a text file."""
+        """Export the saved formulas to a text file where the user can open it, as the session exports deliver theirs:
+        Documents/EEGMeditation on Android (through MediaStore), ~/Documents/EEGMeditation on desktop."""
         uid = self._user_id()
         if not uid:
             self._section.set_formula_slot_status(0, "No user selected", is_error=True)
@@ -141,13 +145,24 @@ class FormulaSettings:
         if not formulas:
             self._section.set_formula_slot_status(0, "No formulas to export", is_error=True)
             return
-        export_dir = os.path.dirname(self._db._db_path)
-        path = os.path.join(export_dir, f"formulas_user_{uid}.txt")
-        with open(path, "w") as f:
-            for entry in formulas:
-                f.write(f"{entry['formula']}\n")
-        self._section.set_formula_slot_status(0, f"Exported to {os.path.basename(path)}")
-        logger.info(f"Exported {format_count(len(formulas), 'formula')} to {path}")
+        name = f"formulas_user_{uid}.txt"
+        private = os.path.join(os.path.dirname(self._db._db_path), name)
+        why = "the copy failed (see the log)"
+        try:
+            with open(private, "w", encoding="utf-8") as f:
+                for entry in formulas:
+                    f.write(f"{entry['formula']}\n")
+            shared = copy_to_documents(private, display_name=name)
+        except OSError as e:
+            logger.exception("Formula export failed")
+            shared, why = None, str(e)
+        finally:
+            discard_file(private)
+        if shared is None:
+            report_soft_error("formula_export_failed", f"Couldn't export the formulas to Documents: {why}", force=True)
+            return
+        self._section.set_formula_slot_status(0, f"Exported to {shared}")
+        logger.info(f"Exported {format_count(len(formulas), 'formula')} to {shared}")
 
     def refresh_saved(self) -> None:
         """Refresh the saved formulas list in settings UI."""
