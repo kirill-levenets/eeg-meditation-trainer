@@ -34,6 +34,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   The app now uses the SDL2 clipboard on Linux.
   Ctrl+C and Ctrl+V work as before; middle-click paste into the app's text fields is gone, and selecting text there no longer fills the middle-click selection.
   A copy, such as the crash report, can be pasted only while the app is open, unless the desktop keeps clipboard history; the crash dialog now says to paste before closing it.
+- **The crash and diagnostic dialogs cut their message off at a larger text size** (#118): the message now takes the height its text needs.
 - **The in-app help was always in English, partly out of date, and drew its menu paths as empty boxes**:
   Settings › Help & Troubleshooting now shows in Ukrainian on a phone set to Ukrainian (on a computer, when `LANGUAGE` or `LANG` is Ukrainian).
   It now matches the app: the session-length choices, the program editor and its sounds, the "No EEG data received" message, the alerts being off until enabled, the formula variables.
