@@ -173,7 +173,8 @@ The linked file explains the mechanism.
   A file the app keeps is copied in by `android_saf.import_document`. → [storage](docs/architecture/storage.md#backup-and-restore)
 - A Python `str` passed to an overloaded Java method crosses pyjnius as `android_jni.java_string(text)`. → [app-platform](docs/architecture/app-platform.md#android-back-button)
 - `on_pause()` always returns `True` (returning `False` stops the app).
-- Kivy's Linux clipboard is SDL2 (its in-app dummy the last resort) with no cut buffer, set by `kivy_providers.clipboard_without_commands()` before any text input: its xclip/xsel probe waits with no timeout and hung the app at startup; `tests/test_linux_clipboard.py`. → [app-platform](docs/architecture/app-platform.md#linux-clipboard)
+- Kivy's Linux clipboard is SDL2 (its in-app dummy the last resort) with no cut buffer, set by `kivy_providers.clipboard_without_commands()` before any text input:
+  its xclip/xsel probe waits with no timeout and hung the app at startup; `tests/test_linux_clipboard.py`. → [app-platform](docs/architecture/app-platform.md#linux-clipboard)
 - Never `except (PermissionError, OSError): pass`: surface it through `report_soft_error` (or `crash_handler.queue_pre_app_error` before the app exists).
 
 ### Users and settings

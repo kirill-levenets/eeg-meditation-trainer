@@ -9,6 +9,7 @@ import sys
 import kivy
 import pytest
 
+from app.logger import logger
 from app.ui import kivy_providers
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -42,9 +43,11 @@ def test_the_first_text_input_never_runs_a_clipboard_command(tmp_path):
 
 @pytest.fixture
 def stock_options(monkeypatch):
-    """Kivy's own provider lists, before the app limits them; the test's changes are undone after it."""
+    """Kivy's own provider options, before the app limits them (no cutbuffer key: every cut buffer may be picked); the
+    test's changes are undone after it."""
     monkeypatch.setitem(kivy.kivy_options, "clipboard", ("xsel", "xclip", "sdl2", "dummy"))
-    monkeypatch.setitem(kivy.kivy_options, "cutbuffer", ("xclip", "xsel"))
+    monkeypatch.setitem(kivy.kivy_options, "cutbuffer", ())  # so the undo restores the key's value, or its absence
+    monkeypatch.delitem(kivy.kivy_options, "cutbuffer")
     monkeypatch.delitem(sys.modules, "kivy.core.clipboard", raising=False)
     return kivy.kivy_options
 
@@ -54,14 +57,14 @@ def test_on_linux_the_clipboard_is_sdl2_then_kivys_dummy_and_there_is_no_cut_buf
     kivy_providers.clipboard_without_commands()
     assert stock_options["clipboard"] == ("sdl2", "dummy")
     assert stock_options["cutbuffer"] == ()
-    assert caplog.records == []
+    assert [r for r in caplog.records if r.name == logger.name] == []
 
 
 def test_a_clipboard_kivy_already_picked_is_logged(monkeypatch, stock_options, caplog):
     monkeypatch.setattr(kivy_providers, "kivy_platform", "linux")
     monkeypatch.setitem(sys.modules, "kivy.core.clipboard", object())
     kivy_providers.clipboard_without_commands()
-    assert [r.levelname for r in caplog.records] == ["ERROR"]
+    assert [r.levelname for r in caplog.records if r.name == logger.name] == ["ERROR"]
 
 
 @pytest.mark.parametrize("platform", ["android", "win", "macosx"])
@@ -69,4 +72,4 @@ def test_other_platforms_keep_kivys_providers(monkeypatch, stock_options, platfo
     monkeypatch.setattr(kivy_providers, "kivy_platform", platform)
     kivy_providers.clipboard_without_commands()
     assert stock_options["clipboard"] == ("xsel", "xclip", "sdl2", "dummy")
-    assert stock_options["cutbuffer"] == ("xclip", "xsel")
+    assert "cutbuffer" not in stock_options

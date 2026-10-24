@@ -62,9 +62,10 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   bare `xsel` reads its stdin when that isn't a terminal and asks the X selection's owner, so an open stdin or an owner that never answers hung the app (#118), and a stdin that isn't a terminal cleared the user's selection.
   `KIVY_CLIPBOARD=sdl2` alone isn't enough: the cut buffer is picked from xclip and xsel whatever it says.
   SDL2 reads the clipboard itself, with a 1 s timeout (SDL 2.28.5, bundled with the Kivy 2.3.0 wheel); Kivy builds a text input's clipboard at construction only on Linux, so Android and the other desktops are untouched.
-  The cost: no cut buffer, so no middle-click paste or select-to-copy in text inputs, and Kivy logs one CRITICAL "no Cutbuffer provider" line per start;
+  The cost: no cut buffer, so no middle-click paste or select-to-copy in text inputs, and Kivy logs one CRITICAL "Unable to find any valuable Cutbuffer provider" line per start;
   SDL2 holds a copy only while the app runs, so without a clipboard manager it is gone at exit.
-  `tests/test_linux_clipboard.py` builds the first text input through the app's import chain with stand-in commands that never answer.
+  `tests/test_linux_clipboard.py` builds the first text input through the app's import chain with stand-in commands that never answer,
+  and unit-tests `clipboard_without_commands()` on Linux, after Kivy has already picked a clipboard, and on the other platforms.
 
 ## Tests
 
