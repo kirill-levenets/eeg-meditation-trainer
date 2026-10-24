@@ -240,10 +240,10 @@ class CrashDialog:
         root = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12))
         if fatal:
             banner_text = (
-                "The app hit an unexpected error. The report below has been "
-                "copied to your clipboard. Paste it into a new GitHub issue at "
-                "github.com/kirill-levenets/eeg-meditation-trainer/issues so we "
-                "can fix it."
+                "The app hit an unexpected error. The report below is copied to "
+                "your clipboard: paste it into a new GitHub issue at "
+                "github.com/kirill-levenets/eeg-meditation-trainer/issues before "
+                "you close this window."
             )
         else:
             banner_text = (

@@ -85,7 +85,7 @@ Read it before changing that subsystem.
   `history_screen.py`, `period_totals.py` → [history](docs/architecture/history.md);
   `diary_screen.py` (session detail) → [session-detail](docs/architecture/session-detail.md);
   `session_labels.py` → [session](docs/architecture/session.md)
-- `app/crash_handler.py`, `app/logger.py`, `app/android_jni.py` → [app-platform](docs/architecture/app-platform.md)
+- `app/crash_handler.py`, `app/logger.py`, `app/android_jni.py`, `app/ui/kivy_providers.py` (the Kivy providers the app picks itself) → [app-platform](docs/architecture/app-platform.md)
 - `android_src/` — `SessionForegroundService` (Java), the session's foreground service, in the app's own process; its start/stop state is `ServiceStartState`, tested with `javac` (`tests/test_service_start_state.py`).
   `tools/` — BT diagnostics (`bt_test.py`, `ble_battery_scan.py`).
 
@@ -154,7 +154,6 @@ The linked file explains the mechanism.
   `tests/test_theme_switch.py` and `tests/test_modal_style.py` fail on direct Kivy imports. → [ui-theme](docs/architecture/ui-theme.md#navigation-and-theme)
 - Decorative strokes (press ring, graph glyphs, borders) contrast with the surface they are drawn on (`C.TEXT`), not the element's fill; text on a fill uses `readable_fg(fill)`.
   Check all four themes.
-- Kivy's Linux clipboard is SDL2 only, set in `theme` before any text input (`_clipboard_without_commands`): its xclip/xsel probe waits with no timeout and hung the app at startup. → [ui-theme](docs/architecture/ui-theme.md)
 - Roboto in this build has no arrows or geometric triangles (`→`, `↑↓`, `▶` render as tofu): use `›`, `»`, or MDI `Icons` font markup; `tests/test_help.py` checks the help files against the font.
 - Kivy holds a lambda strongly (`Clock.schedule_once`: until it runs; `bind`: as long as the object it is bound on) and a bound method weakly:
   hand a method to anything that outlives the widget (the Clock, `Window`, a global cache), or the widget lives as long as that.
@@ -174,6 +173,7 @@ The linked file explains the mechanism.
   A file the app keeps is copied in by `android_saf.import_document`. → [storage](docs/architecture/storage.md#backup-and-restore)
 - A Python `str` passed to an overloaded Java method crosses pyjnius as `android_jni.java_string(text)`. → [app-platform](docs/architecture/app-platform.md#android-back-button)
 - `on_pause()` always returns `True` (returning `False` stops the app).
+- Kivy's Linux clipboard is SDL2 only, set by `kivy_providers.clipboard_without_commands()` before any text input: its xclip/xsel probe waits with no timeout and hung the app at startup; `tests/test_linux_clipboard.py`. → [app-platform](docs/architecture/app-platform.md#linux-clipboard)
 - Never `except (PermissionError, OSError): pass`: surface it through `report_soft_error` (or `crash_handler.queue_pre_app_error` before the app exists).
 
 ### Users and settings

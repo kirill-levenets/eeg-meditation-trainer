@@ -30,9 +30,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 
 - **The desktop app could hang at startup on Linux** (#118): building its first text field made Kivy test the `xsel` command, which waits with no timeout on its input, or on the window that holds the selection.
-  Started from a script or tool that keeps its input open, the app never showed a window; a desktop launcher's start also cleared the text you had selected elsewhere.
-  The app now uses the SDL2 clipboard on Linux. Ctrl+C and Ctrl+V work as before;
-  middle-click paste into the app's text fields is gone, and a copy, such as the crash report, can be pasted only while the app is open, unless the desktop keeps clipboard history.
+  Started from a script or tool that keeps its input open, the app's window stayed blank and never responded; a desktop launcher's start also cleared the text you had selected elsewhere.
+  The app now uses the SDL2 clipboard on Linux.
+  Ctrl+C and Ctrl+V work as before; middle-click paste into the app's text fields is gone, and selecting text there no longer fills the middle-click selection.
+  A copy, such as the crash report, can be pasted only while the app is open, unless the desktop keeps clipboard history; the crash dialog now says to paste before closing it.
 - **The in-app help was always in English, partly out of date, and drew its menu paths as empty boxes**:
   Settings › Help & Troubleshooting now shows in Ukrainian on a phone set to Ukrainian (on a computer, when `LANGUAGE` or `LANG` is Ukrainian).
   It now matches the app: the session-length choices, the program editor and its sounds, the "No EEG data received" message, the alerts being off until enabled, the formula variables.

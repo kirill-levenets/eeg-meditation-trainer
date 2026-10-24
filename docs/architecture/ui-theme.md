@@ -124,14 +124,6 @@ With no active user the first-run popup (the user gate) is shown.
   without it such a list is clipped to the height the content had when the section opened.
 - `theme.CenteredTextInput`: a `ThemedTextInput` with `halign="center"` (native Kivy 2.3) and vertical centring by padding (`_recenter` sets `padding[1]`/`padding[3]` to `(height - line_height) / 2` on each resize, since Kivy has no `valign`).
   All single-line inputs use it; the two multi-line fields (diary notes, the end card's quick notes) are plain `ThemedTextInput`s.
-- **Linux clipboard**: importing `theme` limits Kivy's clipboard to SDL2 (`_clipboard_without_commands`: `kivy_options["clipboard"] = ("sdl2",)`, `kivy_options["cutbuffer"] = ()`), before any text input asks for one.
-  Kivy otherwise picks xclip or xsel by running them and waits with no timeout: bare `xsel` reads its stdin when that isn't a terminal and asks the X selection's owner,
-  so an open stdin or an owner that never answers hung the first text input (#118), and a stdin that isn't a terminal cleared the user's selection.
-  `KIVY_CLIPBOARD=sdl2` alone isn't enough: the cut buffer is picked from xclip and xsel whatever it says.
-  SDL2 reads the clipboard itself, with a 1 s timeout (SDL 2.28.5, bundled with the Kivy 2.3.0 wheel).
-  The cost: no cut buffer, so no middle-click paste or select-to-copy in text inputs, and Kivy logs one CRITICAL "no Cutbuffer provider" line per start;
-  SDL2 holds a copy only while the app runs, so without a clipboard manager it is gone at exit.
-  `tests/test_linux_clipboard.py` builds the first text input with stand-in commands that never answer.
 - **Hooks** (`app/ui/hooks.py`): a handler the app plugs into a widget is a `Hook` declared on the widget's class (`on_test_audio = Hook()`; a query takes a default: `device_state = Hook(default=(None, None))`), and the widget calls it directly:
   unset, or set to None, it does nothing and returns its default, so no call needs a None guard.
   The app plugs handlers in with `wire(widget, on_x=handler, …)`, one call per widget, which raises at once on a name that isn't a hook: a misspelt wiring fails at `build()` instead of never firing.

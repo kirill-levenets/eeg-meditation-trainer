@@ -10,7 +10,6 @@ import types
 import weakref
 from collections.abc import Callable
 
-import kivy
 from kivy.animation import Animation
 from kivy.clock import Clock
 from kivy.core.text import Label as CoreLabel
@@ -32,10 +31,12 @@ from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
-from kivy.utils import platform
 
 from app.logger import logger
 from app.ui.hooks import Hook
+from app.ui.kivy_providers import clipboard_without_commands
+
+clipboard_without_commands()  # before any text input asks Kivy for its clipboard
 
 # ── Icon font ────────────────────────────────────────────────────────
 
@@ -570,17 +571,6 @@ class ThemedLabel(ThemedMixin, Label):
     def __init__(self, **kwargs):
         kwargs.setdefault("font_size", F.px(15))  # Kivy's own default size, at the text size in use
         super().__init__(**kwargs)
-
-
-def _clipboard_without_commands() -> None:
-    """Kivy picks a Linux clipboard by running xclip or xsel and waits on that with no timeout, so a command waiting on
-    stdin or on the X selection hung the first text input; SDL2 reads it itself, with a timeout."""
-    if platform == "linux":
-        kivy.kivy_options["clipboard"] = ("sdl2",)
-        kivy.kivy_options["cutbuffer"] = ()  # Kivy's middle-click paste comes only from those commands
-
-
-_clipboard_without_commands()  # before any text input asks Kivy for its clipboard
 
 
 class ThemedTextInput(ThemedMixin, TextInput):
