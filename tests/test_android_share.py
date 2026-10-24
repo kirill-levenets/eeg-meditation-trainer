@@ -35,9 +35,26 @@ class _Uri:
         return self.text
 
 
+class _Cursor:
+    def __init__(self, columns):
+        self.columns, self.closed = columns, False
+
+    def getColumnIndex(self, column):
+        return list(self.columns).index(column) if column in self.columns else -1
+
+    def moveToFirst(self):
+        return True
+
+    def getString(self, index):
+        return list(self.columns.values())[index]
+
+    def close(self):
+        self.closed = True
+
+
 class _Resolver:
-    def __init__(self):
-        self.stream = _Stream()
+    def __init__(self, stored=None):
+        self.stream, self.stored, self.cursor = _Stream(), stored or {}, None
 
     def insert(self, _collection, values):
         self.values = values
@@ -45,6 +62,10 @@ class _Resolver:
 
     def openOutputStream(self, _uri):
         return self.stream
+
+    def query(self, uri, *_rest):
+        self.cursor = _Cursor({"_id": 7, "_display_name": self.stored[uri]})
+        return self.cursor
 
 
 @pytest.fixture
@@ -58,6 +79,8 @@ def android(monkeypatch):
             "android.provider.MediaStore$Files": types.SimpleNamespace(getContentUri=lambda _volume: "content://x"),
             "android.os.Environment": types.SimpleNamespace(DIRECTORY_DOCUMENTS="Documents"),
             "android.os.Build$VERSION": types.SimpleNamespace(SDK_INT=33),
+            "android.net.Uri": types.SimpleNamespace(parse=lambda text: text),
+            "android.provider.OpenableColumns": types.SimpleNamespace(DISPLAY_NAME="_display_name"),
         }
         jnius = types.ModuleType("jnius")
         jnius.autoclass = classes.__getitem__
@@ -75,6 +98,15 @@ def test_a_name_mediastore_changed_is_the_one_reported(android, tmp_path, monkey
     monkeypatch.setattr(android_saf, "query_display_name", stored.get)  # the one display-name reader
     assert android_share.copy_to_documents(str(private)) == "Documents/EEGMeditation/formulas_user_4 (1).txt"
     assert resolver.stream.data == b"alpha1\n"
+
+
+def test_the_shared_display_name_reader_reads_mediastores_row(android, tmp_path):
+    private = tmp_path / "formulas_user_4.txt"
+    private.write_text("alpha1\n")
+    resolver = _Resolver(stored={"content://media/external/file/7": "formulas_user_4 (2).txt"})
+    android(resolver)
+    assert android_share.copy_to_documents(str(private)) == "Documents/EEGMeditation/formulas_user_4 (2).txt"
+    assert resolver.cursor.closed
 
 
 def test_a_failed_name_lookup_reports_the_name_asked_for_not_a_failure(android, tmp_path, monkeypatch):
