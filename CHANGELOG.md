@@ -38,6 +38,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **In a program, the scored line's colours jumped at each segment** (#113): the new segment's line took the gradient over the whole graph and the last segment's lost it.
+  Each part of the graph now keeps the colouring of the line its segment trained, live, after a screen lock and in the session's detail in History.
 - **The timer length or "P" beside Start was hard to read** (#113): it was drawn in the theme's text colour on Start's green, light on light in the dark themes.
   It now takes the colour Start's own text takes, dimmed with it while a session runs.
 - **The Session screen's stats row ran its values together at a larger text size** (#113): at Large or Larger on a phone, an average touched the time beside it ("82.41m 00s").

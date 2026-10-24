@@ -27,7 +27,7 @@ from app.session.tick_thread import TickThread
 from app.session.timer_state import TimerState
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.live_mirror import LiveMirror
-from app.ui.live_session import METRICS_COLORS
+from app.ui.live_session import METRICS_COLORS, LiveSessionScreen
 from tests._headset import make_headset
 from tests._program_run import make_run
 from tests._program_settings import make_programs
@@ -329,6 +329,16 @@ def test_resume_refreshes_stats_state_and_timer():
     ls.update_state.assert_called_once_with("Shamatha")
     ls.update_timer.assert_called_once_with("1:23")
 
+
+
+def test_a_reload_keeps_each_points_colouring():
+    """A screen lock's reload redraws the line as it was scored, segment by segment (#113)."""
+    mirror = LiveMirror()
+    for key in ["shamatha_score"] * 3 + ["custom_formula"] * 2:
+        mirror.record(_metrics(seed=1.0), 50, _raw_sample(seed=1.0), key)
+    screen = LiveSessionScreen()
+    mirror.reload_into(screen)
+    assert screen.graph.gradient_steps == [(0, "shamatha_score"), (3, "custom_formula")]
 
 def test_resume_skips_entirely_when_not_running():
     app = _make_resume_app(running=False)

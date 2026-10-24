@@ -1568,10 +1568,11 @@ class EEGMeditationApp(App):
         if marker_pending:
             self._pending_marker = False
             full_record["marker"] = 1
-        target = self._recorder.record(metrics, full_record)
-        if target is None:  # the session paused or stopped while this tick was read: it isn't part of it
+        score = self._recorder.record(metrics, full_record)
+        if score is None:  # the session paused or stopped while this tick was read: it isn't part of it
             self._pending_marker |= marker_pending  # the marker goes on the next recorded tick
             return
+        target, scored_on = score["score_target"], score["score_key"]
 
         # Audio is thread-safe — update directly
         self._audio.update(metrics.get(drive_key, 0))
@@ -1579,8 +1580,8 @@ class EEGMeditationApp(App):
             self._audio.update_sinking(metrics.get("sinking", 0))
             self._audio.update_subtle_distraction(metrics.get("subtle_distraction", 0))
 
-        self._mirror.record(metrics, target, raw_sample)  # kept even while the screen is locked
-        self._show_tick(metrics, raw_sample, target, marker_pending, scored)
+        self._mirror.record(metrics, target, raw_sample, scored_on)  # kept even while the screen is locked
+        self._show_tick(metrics, raw_sample, target, scored_on, marker_pending, scored)
 
         # Timer countdown — tick() is pure counter, no UI
         if self._timer_state.tick(APP.UPDATE_FREQUENCY):
@@ -1667,7 +1668,7 @@ class EEGMeditationApp(App):
                      f"dist={metrics.get('distraction', 0):.0f} "
                      f"native_med={native_med:.0f}{bat_str}")
 
-    def _show_tick(self, metrics: dict, raw_sample: dict, target: float, marker_pending: bool,
+    def _show_tick(self, metrics: dict, raw_sample: dict, target: float, scored_on: str, marker_pending: bool,
                    scored: str | None) -> None:
         """Tick thread: queue the tick's Session screen update for the main thread, unless the screen is locked."""
         elapsed_fmt = self._session_manager.elapsed_formatted
@@ -1684,10 +1685,10 @@ class EEGMeditationApp(App):
 
         def _ui_update(
             m=metrics, rs=raw_sample, ef=elapsed_fmt, mp=marker_pending,
-            sa=self._shamatha_active, sc=sham_changed, sk=self._scored_mark(scored), tg=target,
+            sa=self._shamatha_active, sc=sham_changed, sk=self._scored_mark(scored), tg=target, on=scored_on,
             score=self._session_manager.live_score(),
         ) -> None:
-            self._live_screen.graph.add_point(m, threshold=tg)
+            self._live_screen.graph.add_point(m, threshold=tg, scored=on)  # its line coloured from this point
             self._live_screen.update_stats(score)
             self._live_screen.update_state(m.get("state", "Neutral"))
             if sc:

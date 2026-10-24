@@ -374,6 +374,7 @@ Loading a program switches to Program mode.
 - **Scored line colours**: how the line of the metric you train on is coloured on the graphs (the Session screen's, and a session's in History).
   **Mono** gives it its own colour; a gradient colours it by its value from 0 to 200: **Blue › Red** (the default), **Viridis**, **Plasma**, **Turbo** or **Red › Green**.
   A gradient keeps every part of the line readable on the current theme.
+  In a program each part of the graph colours the line its segment trained, and a new segment leaves what is already drawn as it was.
   It applies at once.
 - **Line Width**: a slider from 0.5 to 4.0, with presets.
 - **Rotate Screen**: each tap turns the screen 90° (0, 90, 180, 270).

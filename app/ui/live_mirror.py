@@ -4,7 +4,7 @@ from collections import deque
 
 from app.config import APP
 from app.eeg.band_spec import GROUP_KEYS, group_powers
-from app.session.scoring import target_steps
+from app.session.scoring import scored_steps, target_steps
 from app.ui.live_session import METRICS_COLORS
 
 
@@ -20,9 +20,10 @@ class LiveMirror:
         self.last_metrics: dict = {}
         self.last_state: str = "Neutral"
 
-    def record(self, metrics: dict, target: float, raw_sample: dict) -> None:
-        """Tick thread: one tick's metrics with its target, its band groups and its raw waveform."""
-        self.metrics.append({**metrics, "score_target": target})
+    def record(self, metrics: dict, target: float, raw_sample: dict, scored: str | None = None) -> None:
+        """Tick thread: one tick's metrics with its target and the series it was scored on, its band groups and its raw
+        waveform."""
+        self.metrics.append({**metrics, "score_target": target, "score_key": scored})
         bands = group_powers(lambda k: raw_sample.get(k, 0.0))
         self.bands.append(bands)
         waveform = raw_sample.get("raw_eeg_waveform")
@@ -49,6 +50,7 @@ class LiveMirror:
             live_screen.graph.load_static_data({key: [d.get(key, 0.0) for d in metrics] for key in METRICS_COLORS},
                                                new_session=False)
             live_screen.graph.set_threshold_steps(target_steps(d.get("score_target") for d in metrics))
+            live_screen.graph.set_gradient_steps(scored_steps(d.get("score_key") for d in metrics))
         if bands:
             live_screen.band_graph.load_static_data({key: [d.get(key, 0.0) for d in bands] for key in GROUP_KEYS},
                                                     new_session=False)

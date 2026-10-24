@@ -57,15 +57,17 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   a fullscreen graph's legend follows it too ([Fullscreen](#fullscreen)).
   The formula slots' validity gate (`FormulaSlots.for_key(key).is_valid`) applies only to the live metrics graph: the detail's formula lines are recorded data and toggle freely.
 - **Scored line colours** (#94, `app/ui/line_colours.py`):
-  one series per graph, `set_gradient_series(key)`, is drawn coloured by its value instead of its own colour, in the profile's `LINE_COLOURS`:
+  the series a point was scored on is drawn there coloured by its value instead of its own colour, in the profile's `LINE_COLOURS`:
   Mono (its own colour after all), Blue › Red (the default, HSV hue 240° › 0°), Viridis, Plasma, Turbo or Red › Green, the last four sampled from matplotlib's and ColorBrewer's palettes as colour stops (no matplotlib on Android).
   The gradient spans 0 → `GRADIENT_TOP` = 200, the metrics graph's axis.
   Every colour is drawn with `theme.with_contrast(rgb, graph background)`:
   as published where it reads 3:1 (WCAG's minimum for graphics), otherwise the nearest lightness of the same hue that does, so a gradient's dark or pale end can't vanish on any of the four themes (Blue › Red's yellow reads 1.1:1 on the light ones).
   Each gradient and background has one cached texture (`gradient_texture`); a theme switch redraws every graph, a new choice (`LINE_COLOURS.add_listener`) every graph with a gradient series.
-  The Session screen colours the series being trained, `set_training_series(key)`, the one the legend marks with »: in a simple session the drive key, in a program its segment's;
-  the series keeps its colours when the marker clears between sessions, and before the first session it is Shamatha.
-  The session detail colours the metric the session was scored on (`recorded_score`); a key that is no series of the graph (a program session's "program", a session from before #51) colours none.
+  The graph keeps `(first point, series)` steps (`set_gradient_steps`; `set_gradient_series(key)` is one step at 0), and `_split_at_spans` draws each series in runs, the gradient only over its own steps:
+  a program's next segment colours its series from the boundary on and recolours nothing drawn before it (#113).
+  Live, `add_point(values, threshold, scored)` extends the steps with the key each tick was scored on, as it extends the threshold steps, and `LiveMirror` keeps that key so a screen lock's reload redraws the same colours;
+  `set_training_series` only moves the legend's » and the stats bar's title, and `clear_data` drops the steps with the points.
+  The session detail colours by its stored ticks' `score_key` (`scoring.scored_steps`), else the metric the session was scored on (`recorded_score`); a key that is no series of the graph (a program session's "program" from before per-tick keys, a session from before #51) colours none.
   Settings → Display shows the six as two `PresetRow`s, each gradient with a `GradientStrip` of itself as the graphs draw it on the current theme; the choice is the per-profile `line_colours` setting.
 - `ScrollableGraphWidget.set_threshold_steps(steps)` draws the dashed threshold line piecewise, along a list of `(start_tick, target)` steps;
   steps take precedence over `set_threshold(value)`'s single line, and `set_threshold_steps(None)` reverts to it.
@@ -83,7 +85,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   the `CoreLabel` is kept, not just its texture, because it is the texture's reload observer after an Android GL context loss.
   (2) The X grid step is `_x_grid_step(graph_w, visible_seconds)`, the smallest of 10 s … 2 h that keeps time labels ≥70 dp apart.
   Each label is `elapsed_clock` (`app/session/manager.py`, the Session timer's too): `MM:SS` under an hour, `H:MM:SS` from one (`75:00` would read as minutes).
-  (3) A gradient series (`set_gradient_series`, the scored line) is one `Mesh`, one draw call per frame:
+  (3) A gradient run (the scored line, over its steps) is one `Mesh`, one draw call per frame:
   a quad per segment plus a square patch per vertex (Kivy's `Line.width` is the half-thickness, so the patch half-size is `dp(line_width)`);
   each vertex's texture v is its value over `GRADIENT_TOP` (200) in the 1×64 `gradient_texture(name, graph background)` (clamp-to-edge, refilled by a reload observer).
   It is split at `_MESH_MAX_QUADS` = 65535 // 6 = 10922 quads, because Kivy caps a Mesh at 65535 *indices* (GLES2, enforced on Android; 6 per quad);

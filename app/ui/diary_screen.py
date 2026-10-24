@@ -14,7 +14,7 @@ from kivy.uix.widget import Widget
 from app.config import APP
 from app.eeg.band_spec import BAND_KEYS, GROUP_NAMES, group_powers
 from app.logger import logger, timed
-from app.session.scoring import recorded_score, target_steps
+from app.session.scoring import recorded_score, scored_steps, target_steps
 from app.session.session_program import PROGRAM_FORMULA_KEYS, SessionProgram
 from app.ui.hooks import Hook, is_wired, wire
 from app.ui.live_session import (
@@ -150,7 +150,8 @@ def detail_graph_data(rows: list[dict], formula_series: dict[str, list[float]]) 
     # The raw graph holds only the tail (from raw_start): its markers are offset to it.
     raw_markers = [(i - raw_start) * _SAMPLES_PER_TICK for i in markers if i >= raw_start]
     return {"metrics": (metrics_series, markers), "raw": ({"eeg": synth}, raw_markers), "freq": (freq_series, markers),
-            "threshold_steps": target_steps(row.get("score_target") for row in rows)}  # None: rows without targets
+            "threshold_steps": target_steps(row.get("score_target") for row in rows),  # None: rows without targets
+            "gradient_steps": scored_steps(row.get("score_key") for row in rows)}  # a program's, segment by segment
 
 
 class DiaryScreen(Screen):
@@ -591,6 +592,8 @@ class DiaryScreen(Screen):
             graph.set_markers(markers)
             if section == "metrics" and data["threshold_steps"]:  # else the line the open drew from the session row
                 graph.set_threshold_steps(data["threshold_steps"])
+            if section == "metrics" and data["gradient_steps"]:  # else the series the open coloured from the row
+                graph.set_gradient_steps(data["gradient_steps"])
             graph.set_scroll_offset(0)  # at the end, so the user sees the latest data and can drag back
         self._ready.add(section)
         if section == self._active_graph_tab:

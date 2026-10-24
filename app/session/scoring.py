@@ -46,6 +46,11 @@ def target_steps(targets: Iterable[float | None]) -> list[tuple[int, float]] | N
     return steps or None
 
 
+def scored_steps(keys: Iterable[str | None]) -> list[tuple[int, str]] | None:
+    """[(first tick, series), ...]: the series each tick was scored on, read as target_steps reads its targets."""
+    return target_steps(keys)
+
+
 def recorded_score(session: dict) -> tuple[str, str, float | None] | None:
     """(metric key, display name, average) a stored session was scored on, or None for a row from before #51, which
     saved none: nothing is deduced for it."""

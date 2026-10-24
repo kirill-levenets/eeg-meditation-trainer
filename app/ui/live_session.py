@@ -371,7 +371,6 @@ class LiveSessionScreen(Screen):
         # visually marked even when custom_formula (scale 200) widens
         # max_scale and pushes 100 into the middle of the graph.
         self._graph.set_reference_line(100.0)
-        self._graph.set_gradient_series("shamatha_score")  # until a session reports the series it trains
         # The on-graph series-picker glyph is wired centrally for every graph by
         # AppManager._wire_graph_affordances. The legend tracks the graph's own
         # visible set: any change (picker toggle or restore) rebuilds it.
@@ -716,10 +715,9 @@ class LiveSessionScreen(Screen):
 
     def set_training_series(self, key) -> None:
         """Mark the series currently driving the program target (bold + »), or
-        pass None/a non-plotted key to clear the marker. The series keeps the line colours after the marker clears."""
+        pass None/a non-plotted key to clear the marker. The line colours come with each point (add_point's `scored`),
+        so a new mark recolours nothing already drawn."""
         self._training_key = key
-        if key is not None:
-            self._graph.set_gradient_series(key)
         self._rebuild_metric_legend(self._graph.visible_keys())
         self._render_stats()  # the bar's first title names it
 

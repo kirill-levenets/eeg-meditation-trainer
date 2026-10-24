@@ -45,7 +45,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   A running program (`ProgramRun.active`) or `governs_live_series()` stops `persist` for the live graph, so a program's visible set never overwrites the saved manual selection:
   Settings → Timer can go back to simple during a program session while the graph still shows the program's set.
 - Legend "training now" marker: `LegendBar.set_items(items, active_text=None)` bolds the matching item and prefixes it with `"» "` (geometric triangles render as tofu in this Kivy/Roboto build).
-  `LiveSessionScreen.set_training_series(key)` passes the active key to the legend;
+  `LiveSessionScreen.set_training_series(key)` passes the active key to the legend (the line's colouring comes per point with the tick's scored key, [graphs](graphs.md));
   `ProgramRun._segment_ui` sets it at each segment boundary crossing, and `_start_session_common` and `_undo_session_setup` clear it (`None`).
 
 ## Settings and pickers

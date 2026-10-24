@@ -32,15 +32,16 @@ class SessionRecorder:
             self._flush_counter = 0
             self.session_id = None
 
-    def record(self, metrics: dict, full_record: dict) -> float | None:
-        """Score a tick and buffer its stamped row, as one step for a checkpoint: its target, or None if not scored."""
+    def record(self, metrics: dict, full_record: dict) -> dict | None:
+        """Score a tick and buffer its stamped row, as one step for a checkpoint: what it was scored on (score_key,
+        score_value, score_target), or None if not scored."""
         with self._lock:
             score = self._session_manager.add_metric(metrics)
             if not score:
                 return None
             full_record.update(score)
             self._buffer.append(full_record)
-        return score["score_target"]
+        return score
 
     def flush_tick(self) -> None:
         """Every FLUSH_INTERVAL_SECONDS of ticks, checkpoint the session: its row as well as its data."""
