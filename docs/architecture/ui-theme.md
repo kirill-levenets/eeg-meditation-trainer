@@ -97,7 +97,7 @@ With no active user the first-run popup (the user gate) is shown.
     A cap is added only where a test fails without it.
 
   `test_no_text_outgrows_a_box_at_the_largest_size_that_it_fits_at_normal` builds the main screens at both sizes in a 360 dp frame and fails on any text that fits its box at the normal size and not at the largest:
-  the Session screen, with no timer and a 105 min one, and its saved card; History in both views, with a day picked; every Settings section, a program's segments, a filled profile list and the locked-screen row; the session detail; the bottom nav.
+  the Session screen, with no timer and a 105 min one, and its saved card; History in both views, with a day picked; every Settings section, a program's segments, a filled profile list and the locked-screen row; the session detail; the bottom nav; the crash and diagnostic dialogs.
   It measures the text, not the label's texture, which is exactly the box when the text area is pinned to it (and cut).
   A centred line has room above and below its letters, so a box up to 0.3 em shorter only trims that; a pinned label must also fit 1 dp narrower, since a text with nothing spare wraps at another density.
   A text field must hold its text or hint (wrapped when multi-line, from the top down, so no room is allowed).

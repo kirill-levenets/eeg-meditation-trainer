@@ -34,6 +34,9 @@ from kivy.uix.textinput import TextInput
 
 from app.logger import logger
 from app.ui.hooks import Hook
+from app.ui.kivy_providers import clipboard_without_commands
+
+clipboard_without_commands()  # before any text input asks Kivy for its clipboard
 
 # ── Icon font ────────────────────────────────────────────────────────
 

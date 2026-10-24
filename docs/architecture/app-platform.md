@@ -1,6 +1,6 @@
 # App lifecycle, platform and build
 
-The user gate and profiles, the Android back button, error reporting, test guardrails, and build/CI specifics.
+The user gate and profiles, the Android back button, error reporting, the Linux clipboard, test guardrails, and build/CI specifics.
 Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); this file holds how the subsystem works and why.
 
 ## User gate and profiles
@@ -43,7 +43,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 ## Errors and diagnostics
 
 - Global crash handler (`app/crash_handler.py`) installs `sys.excepthook`, `threading.excepthook`, and a Kivy `ExceptionManager` handler;
-  all three funnel into a modal dialog that auto-copies a markdown report to the clipboard.
+  all three funnel into a modal dialog that auto-copies a markdown report to the clipboard;
+  on Linux that copy lasts only while the app runs ([Linux clipboard](#linux-clipboard)), so the fatal banner says to paste it before closing.
   Dismiss exits via `app.stop()`.
   `report_soft_error(label, detail, *, app=None, force=False)` reports handled-but-significant errors in the same dialog with a non-fatal banner and a "Close" button (no `app.stop`), gated by a 60 s per-label cooldown against spam.
   It reports BT connect failures and other handled failures (e.g. failed saves, backup/restore), and Settings → Device's **Copy Diagnostics** passes `force=True` to bypass the cooldown.
@@ -51,6 +52,20 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Wrap a block to benchmark it.
   On the device it needs a temporary `os.environ["EEG_PERF"] = "1"` at the top of `main.py`, since p4a passes no host environment to the app (`p4a_env_vars.txt` holds only p4a's own vars); then grep logcat for `[PERF]`.
   Timing that must always be on stays aggregated instead (see `render_stats` in [eeg-bluetooth.md](eeg-bluetooth.md)).
+
+## Linux clipboard
+
+- `theme` calls `kivy_providers.clipboard_without_commands()` on import, before any text input asks Kivy for a clipboard:
+  on Linux it limits Kivy's providers to SDL2 (`kivy_options["clipboard"] = ("sdl2", "dummy")`, `kivy_options["cutbuffer"] = ()`), and logs an error if Kivy had already picked one.
+  `dummy` is Kivy's in-app clipboard, the last resort if SDL2's can't load: copy and paste would then work only inside the app, and the crash dialog's copy would not reach other apps.
+  Kivy otherwise picks xclip or xsel by running them when the first text input is built, waiting with no timeout:
+  bare `xsel` reads its stdin when that isn't a terminal and asks the X selection's owner, so an open stdin or an owner that never answers hung the app (#118), and a stdin that isn't a terminal cleared the user's selection.
+  `KIVY_CLIPBOARD=sdl2` alone isn't enough: the cut buffer is picked from xclip and xsel whatever it says.
+  SDL2 reads the clipboard itself, with a 1 s timeout (SDL 2.28.5, bundled with the Kivy 2.3.0 wheel); Kivy builds a text input's clipboard at construction only on Linux, so Android and the other desktops are untouched.
+  The cost: no cut buffer, so no middle-click paste or select-to-copy in text inputs, and Kivy logs one CRITICAL "Unable to find any valuable Cutbuffer provider" line per start;
+  SDL2 holds a copy only while the app runs, so without a clipboard manager it is gone at exit.
+  `tests/test_linux_clipboard.py` builds the first text input through the app's import chain with stand-in commands that never answer,
+  and unit-tests `clipboard_without_commands()` on Linux, after Kivy has already picked a clipboard, and on the other platforms.
 
 ## Tests
 

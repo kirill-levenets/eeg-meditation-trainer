@@ -202,7 +202,7 @@ def report_soft_error(
 class CrashDialog:
     """Modal popup that auto-copies the crash report to the clipboard.
 
-    `fatal=True` (default): banner says the app hit an unexpected error and
+    `fatal=True` (default): the title says the app hit an unexpected error and
     Dismiss exits the app — used for true crashes from sys/thread/Kivy hooks.
     `fatal=False`: used for soft errors and on-demand diagnostics; banner is
     informational and Dismiss simply closes the popup without stopping the app.
@@ -237,13 +237,14 @@ class CrashDialog:
         from kivy.uix.boxlayout import BoxLayout  # noqa: PLC0415
         from kivy.uix.scrollview import ScrollView  # noqa: PLC0415
 
+        from app.ui.theme import fit_height_to_text  # noqa: PLC0415
+
         root = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12))
         if fatal:
             banner_text = (
-                "The app hit an unexpected error. The report below has been "
-                "copied to your clipboard. Paste it into a new GitHub issue at "
-                "github.com/kirill-levenets/eeg-meditation-trainer/issues so we "
-                "can fix it."
+                "Paste the report below, already copied to your clipboard, into a "
+                "new GitHub issue at github.com/kirill-levenets/eeg-meditation-trainer/issues "
+                "before you close this window."
             )
         else:
             banner_text = (
@@ -254,11 +255,10 @@ class CrashDialog:
         banner = make["label"](
             text=banner_text,
             size_hint_y=None,
-            height=dp(72),
             halign="left",
             valign="top",
         )
-        banner.bind(size=banner.setter("text_size"))
+        fit_height_to_text(banner)
         root.add_widget(banner)
 
         scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False)
@@ -281,13 +281,13 @@ class CrashDialog:
             height=dp(48),
             spacing=dp(8),
         )
-        btn_copy = make["action"]("Copied \u2713")
+        btn_copy = make["action"]("Copied")
         btn_dismiss = make["danger"]("Dismiss & Exit") if fatal else make["dismiss"]("Close")
 
         def _on_copy(_btn):
             try:
                 Clipboard.copy(report)
-                btn_copy.text = "Copied \u2713"
+                btn_copy.text = "Copied"
             except Exception:  # noqa: BLE001
                 btn_copy.text = "Copy failed"
 

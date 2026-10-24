@@ -21,6 +21,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
+from app.crash_handler import CrashDialog, _themed_makers
 from app.settings.registry import Setting, SettingsStore
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import startup_text_size, text_size_setting
@@ -419,6 +420,14 @@ def _only_state(_widget):
     yield "", None
 
 
+def _crash_dialog(fatal: bool):
+    """The crash dialog's content, out of its popup."""
+    report = "Traceback (most recent call last):\n  File \"mock.py\", line 1, in <module>\nValueError: mock"
+    content = CrashDialog._build(report, None, fatal, "", _themed_makers()).content
+    content.parent.remove_widget(content)
+    return content
+
+
 # (where, build, states): each screen, and the states it is checked in, one after another on the same build.
 VIEWS = [
     ("session", LiveSessionScreen, _session_states),
@@ -427,6 +436,8 @@ VIEWS = [
     ("session detail", DiaryScreen, _detail_states),
     ("bottom nav", lambda: BottomNav(tabs=[("Session", "session"), ("History", "history"), ("Settings", "settings")],
                                      callback=lambda *_a: None), _only_state),
+    ("crash dialog", lambda: _crash_dialog(True), _only_state),
+    ("diagnostic dialog", lambda: _crash_dialog(False), _only_state),
 ]
 
 

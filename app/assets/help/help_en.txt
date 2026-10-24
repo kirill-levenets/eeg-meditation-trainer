@@ -209,7 +209,9 @@ Settings > Device.
 If the app hits an unexpected error, a crash dialog
 will appear with the full report already copied to
 your clipboard. Please paste it into a new GitHub
-issue so we can fix it.
+issue so we can fix it. Do it before you close
+the dialog: on Linux the copy can be lost when
+the app closes.
 
 ## Data Backup
 
