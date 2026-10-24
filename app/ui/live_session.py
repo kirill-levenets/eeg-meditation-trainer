@@ -44,6 +44,7 @@ from app.ui.theme import (
     text_width,
 )
 from app.ui.widgets.band_totals import BAND_COLORS, BAND_SCALES
+from app.ui.widgets.choice_toggle import ChoiceToggle
 from app.ui.widgets.legend import LegendBar
 
 _DURATION_PRESETS = [
@@ -358,20 +359,10 @@ class LiveSessionScreen(Screen):
         root.add_widget(self._alert_label)
 
         # ── View toggle: Metrics / Raw EEG ──
-        view_toggle = BoxLayout(size_hint_y=None, height=dp(28), spacing=S.GAP_SM)
-        self._btn_view_metrics = StyledButton(
-            text="Metrics", bg_color=C.PRIMARY, height=dp(28),
-            font_size=F.SMALL,
-        )
-        self._btn_view_raw = StyledButton(
-            text="Raw EEG", bg_color=C.BG_CARD, height=dp(28),
-            font_size=F.SMALL, text_color=C.TEXT_SECONDARY,
-        )
-        self._btn_view_metrics.bind(on_release=lambda *a: self._set_view("metrics"))
-        self._btn_view_raw.bind(on_release=lambda *a: self._set_view("raw"))
-        view_toggle.add_widget(self._btn_view_metrics)
-        view_toggle.add_widget(self._btn_view_raw)
-        root.add_widget(view_toggle)
+        self._view_toggle = ChoiceToggle([("metrics", "Metrics"), ("raw", "Raw EEG")], "metrics", self._set_view,
+                                         button={"height": dp(28), "font_size": F.SMALL},
+                                         size_hint_y=None, height=dp(28), spacing=S.GAP_SM)
+        root.add_widget(self._view_toggle)
 
         # ── Metrics view (default) ──
         self._metrics_container = BoxLayout(orientation="vertical", spacing=S.GAP_SM)
@@ -743,18 +734,8 @@ class LiveSessionScreen(Screen):
             g.set_drawing_enabled(False)
         for g in self._view_graphs(view):
             g.set_drawing_enabled(True)
-        if view == "raw":
-            self._graph_area.add_widget(self._raw_container)
-            self._btn_view_raw.bg_color = C.PRIMARY
-            self._btn_view_raw.text_color = None
-            self._btn_view_metrics.bg_color = C.BG_CARD
-            self._btn_view_metrics.text_color = C.TEXT_SECONDARY
-        else:
-            self._graph_area.add_widget(self._metrics_container)
-            self._btn_view_metrics.bg_color = C.PRIMARY
-            self._btn_view_metrics.text_color = None
-            self._btn_view_raw.bg_color = C.BG_CARD
-            self._btn_view_raw.text_color = C.TEXT_SECONDARY
+        self._graph_area.add_widget(self._raw_container if view == "raw" else self._metrics_container)
+        self._view_toggle.show(view)
         self._active_view = view
 
     def _rebuild_metric_legend(self, enabled_keys: list) -> None:

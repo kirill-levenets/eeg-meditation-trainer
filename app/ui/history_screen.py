@@ -62,6 +62,7 @@ from app.ui.theme import (
     format_duration,
 )
 from app.ui.touch_utils import point_in_rect
+from app.ui.widgets.choice_toggle import ChoiceToggle
 
 
 def _today() -> datetime.date:
@@ -677,31 +678,10 @@ class HistoryScreen(Screen):
 
         # Toggle column on the right — fixed 40dp wide, two compact buttons
         # stacked vertically.
-        toggle_col = BoxLayout(
-            orientation="vertical",
-            size_hint_x=None,
-            width=dp(40),
-            spacing=dp(4),
-        )
-        self._btn_calendar = StyledButton(
-            text="Cal",
-            bg_color=C.PRIMARY,
-            font_size=F.SMALL,
-            bold=True,
-        )
-        self._btn_bars = StyledButton(
-            text="14d",
-            bg_color=C.BG_CARD,
-            text_color=C.TEXT_SECONDARY,
-            font_size=F.SMALL,
-            bold=False,
-        )
-        self._btn_calendar.bind(on_release=lambda *a: self._on_toggle_pressed("calendar"))
-        self._btn_bars.bind(on_release=lambda *a: self._on_toggle_pressed("bars"))
-        toggle_col.add_widget(self._btn_calendar)
-        toggle_col.add_widget(self._btn_bars)
-        self._graph_row.add_widget(toggle_col)
-        self._toggle_col = toggle_col
+        self._toggle_col = ChoiceToggle([("calendar", "Cal"), ("bars", "14d")], "calendar", self._on_toggle_pressed,
+                                        button={"font_size": F.SMALL}, orientation="vertical", size_hint_x=None,
+                                        width=dp(40), spacing=dp(4))
+        self._graph_row.add_widget(self._toggle_col)
 
         # The chart and the totals fold away together: one block, detached when folded.
         self._chart_area = BoxLayout(orientation="vertical", size_hint_y=None, spacing=S.GAP)
@@ -1014,21 +994,10 @@ class HistoryScreen(Screen):
             cal_h = 7 * (cell + self._heatmap.CELL_GAP) + self._heatmap.TOP_MARGIN
             self._heatmap.height = cal_h
             self._graph_wrap.add_widget(self._heatmap)
-            self._btn_calendar.bg_color = C.PRIMARY
-            self._btn_calendar.text_color = None
-            self._btn_calendar.bold = True
-            self._btn_bars.bg_color = C.BG_CARD
-            self._btn_bars.text_color = C.TEXT_SECONDARY
-            self._btn_bars.bold = False
         else:
             self._bars.height = dp(132)
             self._graph_wrap.add_widget(self._bars)
-            self._btn_calendar.bg_color = C.BG_CARD
-            self._btn_calendar.text_color = C.TEXT_SECONDARY
-            self._btn_calendar.bold = False
-            self._btn_bars.bg_color = C.PRIMARY
-            self._btn_bars.text_color = None
-            self._btn_bars.bold = True
+        self._toggle_col.show(mode)
         self._active_chart()._redraw()  # it didn't draw while off screen
         self._fit_graph_row()
         # Force the synchronous layout cascade so the user sees the new

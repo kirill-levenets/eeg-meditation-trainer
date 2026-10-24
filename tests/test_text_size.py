@@ -147,7 +147,8 @@ def test_narrow_buttons_keep_their_text_on_one_line_at_the_largest_size():
     row = settings.timer._segments_box.children[0]
     column = 0.16 * (dp(360) - 2 * S.PAGE_PAD - 5 * S.GAP_SM)
     end_cue = next(w for w in row.children if getattr(w, "text", "") == "Warble")
-    for btn, width in ((history._btn_calendar, dp(40)), (history._btn_bars, dp(40)), (preset, dp(38)),
+    cal, bars = history._toggle_col.buttons["calendar"], history._toggle_col.buttons["bars"]
+    for btn, width in ((cal, dp(40)), (bars, dp(40)), (preset, dp(38)),
                        (end_cue, column), (row._feedback_btn, column)):
         btn.size_hint_x, btn.width = None, width
         assert _fits(btn.text, btn._label.font_size, width, btn.padding[0], btn._label.bold), btn.text

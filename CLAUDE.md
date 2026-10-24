@@ -205,6 +205,7 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 · modal surface `paint_panel`
 · screen background `fill_background`
 · fold button `theme.FoldChevron`
+· a switch between views `widgets.choice_toggle.ChoiceToggle`
 · label height `fit_height_to_text`
 · label width `fit_width_to_text`
 · row height `fit_row_to_text`
