@@ -61,12 +61,10 @@ class FormulaSettings:
                 and self._scoring_locked("changing the formula it is scored on")):
             self._section.set_formula_slot(idx, self._formulas.names[idx], ev.formula)
             return ""  # the refusal says why itself
-        if formula:
-            _, error = compile_formula(formula)
-            if error:
-                logger.warning(f"Formula slot {idx} refused {formula!r}: {error}")
-                self._section.set_formula_slot_status(idx, f"Error: {error}", is_error=True)
-                return error
+        error = self._refusal(formula)
+        if error:
+            self._section.set_formula_slot_status(idx, f"Error: {error}", is_error=True)
+            return error
         self._formulas.names[idx] = name or default_name(idx)
         self._graph.set_series_name(key, self._formulas.names[idx])
         if not formula:
@@ -93,15 +91,24 @@ class FormulaSettings:
         if not formula:
             self._section.set_formula_slot_status(idx, "Nothing to save", is_error=True)
             return
-        _, error = compile_formula(formula)
+        error = self._refusal(formula)
         if error:
-            logger.warning(f"Formula not saved, {formula!r}: {error}")
             self._section.set_formula_slot_status(idx, f"Error: {error}", is_error=True)
             return
         # Fall back to a truncated formula as the display name when none is given.
         label = name or (formula[:40] + ("..." if len(formula) > 40 else ""))
         save_under_unique_name("formula", self._db.get_saved_formulas(uid), label, "this formula",
                                lambda index: self._save(idx, index, label, formula), self._confirm)
+
+    @staticmethod
+    def _refusal(formula: str) -> str:
+        """Why `formula` can't run, logged; "" when it can, or when there is none."""
+        if not formula:
+            return ""
+        _, error = compile_formula(formula)
+        if error:
+            logger.warning(f"Formula {formula!r} can't run: {error}")
+        return error
 
     def _save(self, idx: int, index: int | None, label: str, formula: str) -> None:
         """Add (index None) or overwrite a saved formula by its name, and say so under the slot."""
@@ -128,15 +135,16 @@ class FormulaSettings:
             self.assign_saved(self._formulas.first_empty(), formulas[index])
 
     def assign_saved(self, idx: int, entry: dict) -> None:
-        """Assign a saved {name, formula} entry to slot idx (a tap in Saved Formulas or Choose…), show it, and persist.
-        One that doesn't compile (saved before Save checked) leaves the slot as it was, its inputs showing what it
-        runs, and a popup says why: neither list is near the slot's status line."""
-        name = entry.get("name", "")
-        error = self.on_slot_change(idx, name, entry.get("formula", ""))
-        self._section.set_formula_slot(idx, self._formulas.names[idx], self._formulas.evaluators[idx].formula)
+        """Assign a saved {name, formula} entry to slot idx, show it, and persist. One that doesn't compile (saved
+        before Save checked) changes neither the slot nor its inputs, and a popup says why: the list it was picked
+        from is far from the slot's status line."""
+        formula = entry.get("formula", "") or ""
+        error = self._refusal(formula)
         if error:
-            self._section.set_formula_slot_status(idx, "")  # the popup says it; the slot runs what it ran
-            self._info("Can't use this formula", f'"{name}" can\'t run: {error}')
+            self._info("Can't use this formula", f'"{saved_formula_label(idx, entry)}" can\'t run: {error}')
+            return
+        self.on_slot_change(idx, entry.get("name", ""), formula)
+        self._section.set_formula_slot(idx, self._formulas.names[idx], self._formulas.evaluators[idx].formula)
 
     def on_delete(self, index: int) -> None:
         """Delete a saved formula, after a confirmation as a saved program's delete asks."""

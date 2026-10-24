@@ -6,7 +6,7 @@ from app.ui.program_run import ProgramRun
 
 
 def make_run(app=None, *, program=None, name: str = "", audio_key: str = "", session_manager=None, audio=None,
-             live_screen=None, info=None) -> ProgramRun:
+             live_screen=None, info=None, on_main=None) -> ProgramRun:
     """Its session manager, audio and live screen are the app's when it has them; its popup is the app's, read when
     it shows one."""
     def dep(given, attr):
@@ -15,7 +15,7 @@ def make_run(app=None, *, program=None, name: str = "", audio_key: str = "", ses
         return MagicMock() if given is None else given
 
     run = ProgramRun(dep(session_manager, "_session_manager"), dep(audio, "_audio"), dep(live_screen, "_live_screen"),
-                     on_main=lambda fn: fn(), formula_vars=lambda raw, metrics: {**raw, **metrics},
+                     on_main=on_main or (lambda fn: fn()), formula_vars=lambda raw, metrics: {**raw, **metrics},
                      info=info or (MagicMock() if app is None else lambda title, msg: app._info_popup(title, msg)))
     run.program = program
     run.name = name

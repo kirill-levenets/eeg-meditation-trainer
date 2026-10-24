@@ -387,11 +387,11 @@ Three slots (**Formula 1**, **2** and **3**), each with:
   a name already in the library asks before overwriting that formula, as saving a program does
 
 **Saved Formulas** below the slots is your library: tap one to put it into the first empty slot (Formula 1 when all three are in use), or its **X** to delete it (after a confirmation).
+A saved formula with an error (one saved before Save checked it) can't go into a slot, from this list or through **Choose…**: the slot and its fields stay as they were, and a message says why.
 **Export to .txt** writes the library's formulas, one per line, to `Documents/EEGMeditation/formulas_user_<n>.txt` (on a computer, `~/Documents/EEGMeditation/`), and a message says where.
 On Android, exporting again keeps the earlier file and names the new one with a number, such as `formulas_user_1 (1).txt`.
 
 To put a saved formula into a slot without opening Settings, tap **Choose…** on that slot's row in the live metrics graph's series list.
-A saved formula with an error (one saved before Save checked it) can't go into a slot: the slot stays as it was, and a message says why.
 Settings → Threshold picks which slot drives the feedback sound.
 
 All three formula series share one Y-axis (0–200, reference line at 100), so keep their values in a range comparable to the other metrics.

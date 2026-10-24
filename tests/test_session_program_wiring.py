@@ -210,8 +210,7 @@ def test_a_program_start_names_the_formulas_that_cant_run_in_a_popup(formulas, l
 def test_the_start_popup_waits_for_the_next_frame():
     # The start finishes its setup first, whatever the popup does.
     queued, info = [], MagicMock()
-    run = ProgramRun(MagicMock(), MagicMock(), MagicMock(), on_main=queued.append,
-                     formula_vars=lambda raw, metrics: {**raw, **metrics}, info=info)
+    run = make_run(on_main=queued.append, info=info)
     run.begin(SessionProgram([{"minutes": 1, "target": 50, "formula": {"name": "Broken", "formula": "*"}}]), [], "P")
     info.assert_not_called()
     assert len(queued) == 1
