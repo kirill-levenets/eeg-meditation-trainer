@@ -498,7 +498,7 @@ class SettingsScreen(Screen):
     def show_backup_status(self, text: str) -> None:
         self._backup_status.text = text
 
-    def _count_user_sessions(self, user_id: int) -> int:
+    def _count_user_sessions(self, user_id: int) -> int | None:
         return self.session_counter(user_id)
 
     def _on_form_create_pressed(self, name: str) -> None:
@@ -519,8 +519,9 @@ class SettingsScreen(Screen):
     def _confirm_user_delete(self, user_id, user_name):
         """Show confirmation before deleting a user."""
         n = self._count_user_sessions(user_id)
+        sessions = "Its sessions" if n is None else f"Its {format_count(n, 'session')}"  # None: the count failed
         message = (f'Delete profile "{user_name}"?\n\n'
-                   f"Its {format_count(n, 'session')} and all its settings will be permanently deleted.\n"
+                   f"{sessions} and all its settings will be permanently deleted.\n"
                    "This cannot be undone.")
         btn_cancel = cancel_button()
         btn_confirm = StyledButton(text="Delete", icon=Icons.DELETE, bg_color=C.DANGER)

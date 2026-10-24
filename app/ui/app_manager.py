@@ -1287,7 +1287,8 @@ class EEGMeditationApp(App):
         if stats:
             self._live_screen.update_timer(elapsed_clock(stats.get("duration", 0)))
         self._mark_history_dirty()
-        self._settings_screen.refresh_profile_counts()  # a timer can end a session while Settings shows them
+        if getattr(getattr(self, "_sm", None), "current", None) == "settings":  # a timer can end it there
+            self._settings_screen.refresh_profile_counts()  # else entering Settings redraws them
         if stats and session_id:
             self._summary_saved_notes = ""
             try:
@@ -2321,13 +2322,14 @@ class EEGMeditationApp(App):
     def _mark_history_dirty(self) -> None:
         self._history_dirty = True
 
+    def _running_session_id(self) -> int | None:
+        """The running session's row, which History lists and Settings counts only once it ends: it exists from the
+        first checkpoint, with stats as of that checkpoint (the ending marks History dirty)."""
+        return self._recorder.session_id if self._session_pipeline_live() else None
+
     def _finished_sessions(self, uid: int | None) -> list:
-        """`uid`'s sessions as History lists and Settings counts them: the running session's row exists from its first
-        checkpoint, with stats as of that checkpoint, and joins them when it ends (which marks History dirty)."""
-        sessions = sessions_for_view(self._db, uid)
-        if self._session_pipeline_live():
-            sessions = [s for s in sessions if s.get("id") != self._recorder.session_id]
-        return sessions
+        running = self._running_session_id()
+        return [s for s in sessions_for_view(self._db, uid) if running is None or s.get("id") != running]
 
     def _on_user_switch(self, user_id: int) -> None:
         """Switch the active user profile."""
@@ -2349,8 +2351,13 @@ class EEGMeditationApp(App):
             return  # silent-ok: pref persistence; view already changed, no user to save to
         self._db.set_user_setting(self._current_user_id, "history_view_mode", mode)
 
-    def _count_sessions_for_user(self, user_id: int) -> int:
-        return len(self._finished_sessions(user_id))
+    def _count_sessions_for_user(self, user_id: int) -> int | None:
+        """The sessions History lists for the profile, or None (a row without its count) when the read fails."""
+        try:
+            return self._db.count_sessions(user_id, self._running_session_id())
+        except sqlite3.Error:
+            logger.exception(f"Profile {user_id}'s sessions couldn't be counted")
+            return None
 
     # --- Data Backup (app/ui/backup_flow.py) ---
 

@@ -24,8 +24,9 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The first-run popup and Settings → User Profile use the shared `UserPickerForm` widget (`app/ui/widgets/user_picker.py`);
   its "Use existing 'X'" button goes through `_on_pick_existing_user(user_id)` at the gate, and in Settings switches profile through `_on_user_switch`.
   The picked profile is activated by id as it is (`_activate_user`: its own headset and mock/real mode); typing an existing name at the gate picks it the same way, so first run never overwrites a profile's settings.
-  Each row reads its profile's session count as it is drawn (`session_counter`, the sessions History lists: `_finished_sessions` leaves out the running one);
-  Settings draws the rows again each time it is entered and when a session ends, which a timer can do while Settings is shown.
+  Each row reads its profile's session count as it is drawn (`session_counter`: `count_sessions`, one `COUNT(*)` leaving out `_running_session_id()`, so the sessions History lists);
+  a failed read logs and shows the row without its count.
+  Settings draws the rows again each time it is entered, and at a session's end when it is the screen shown (a timer can end a session there).
 
 ## Android back button
 
