@@ -5,7 +5,7 @@ import types
 
 import pytest
 
-from app.storage import android_share
+from app.storage import android_saf, android_share
 
 
 class _Values(dict):
@@ -27,37 +27,24 @@ class _Stream:
         pass
 
 
-class _Cursor:
-    def __init__(self, name):
-        self.name, self.closed = name, False
+class _Uri:
+    def __init__(self, text):
+        self.text = text
 
-    def moveToFirst(self):
-        return self.name is not None
-
-    def getString(self, _column):
-        return self.name
-
-    def close(self):
-        self.closed = True
+    def toString(self):
+        return self.text
 
 
 class _Resolver:
-    def __init__(self, stored, lookup_fails=False):
-        self.stored, self.lookup_fails, self.stream, self.cursor = stored, lookup_fails, _Stream(), None
+    def __init__(self):
+        self.stream = _Stream()
 
     def insert(self, _collection, values):
         self.values = values
-        return "content://media/external/file/7"
+        return _Uri("content://media/external/file/7")
 
     def openOutputStream(self, _uri):
         return self.stream
-
-    def query(self, _uri, projection, *_rest):
-        if self.lookup_fails:
-            raise RuntimeError("JVM exception")
-        assert projection == ["_display_name"]
-        self.cursor = _Cursor(self.stored)
-        return self.cursor
 
 
 @pytest.fixture
@@ -79,17 +66,23 @@ def android(monkeypatch):
     return install
 
 
-def test_a_name_mediastore_changed_is_the_one_reported(android, tmp_path):
+def test_a_name_mediastore_changed_is_the_one_reported(android, tmp_path, monkeypatch):
     private = tmp_path / "formulas_user_4.txt"
     private.write_text("alpha1\n")
-    resolver = _Resolver(stored="formulas_user_4 (1).txt")
+    resolver = _Resolver()
     android(resolver)
+    stored = {"content://media/external/file/7": "formulas_user_4 (1).txt"}
+    monkeypatch.setattr(android_saf, "query_display_name", stored.get)  # the one display-name reader
     assert android_share.copy_to_documents(str(private)) == "Documents/EEGMeditation/formulas_user_4 (1).txt"
-    assert resolver.stream.data == b"alpha1\n" and resolver.cursor.closed
+    assert resolver.stream.data == b"alpha1\n"
 
 
-def test_a_failed_name_lookup_reports_the_name_asked_for_not_a_failure(android, tmp_path):
+def test_a_failed_name_lookup_reports_the_name_asked_for_not_a_failure(android, tmp_path, monkeypatch):
     private = tmp_path / "session_3.csv"
     private.write_text("t,v\n")
-    android(_Resolver(stored=None, lookup_fails=True))
+    android(_Resolver())
+
+    def jvm_fails(_uri):
+        raise RuntimeError("JVM exception")
+    monkeypatch.setattr(android_saf, "query_display_name", jvm_fails)
     assert android_share.copy_to_documents(str(private)) == "Documents/EEGMeditation/session_3.csv"
