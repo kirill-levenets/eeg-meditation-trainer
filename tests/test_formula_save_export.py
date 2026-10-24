@@ -44,18 +44,26 @@ def test_a_formula_that_compiles_is_saved(make):
     assert db.get_saved_formulas(uid) == [{"name": "Alpha", "formula": "alpha1 * 2"}]
 
 
-@pytest.mark.parametrize("via", ["apply", "choose"])
+@pytest.mark.parametrize("via", ["apply", "choose", "library"])
 def test_a_formula_that_doesnt_compile_leaves_the_slot_as_it_was(make, via):
     fs, app, db, uid = make()
-    fs.on_slot_change(0, "Mine", "alpha1")
+    for slot in range(3):  # all in use: a tap in Saved Formulas goes to the first slot
+        fs.on_slot_change(slot, f"Mine{slot}", "alpha1")
     saved = db.get_user_json_setting(uid, "active_formulas")
     fs._graph.reset_mock()
+    fs._section.reset_mock()
     if via == "apply":
         assert fs.on_slot_change(0, "Broken", "alpha1 +").startswith("Syntax error")
-    else:
-        fs.assign_saved(0, {"name": "Broken", "formula": "alpha1 +"})  # saved before Save checked
-        assert app._info_popup.call_args.args[0] == "Can't use this formula"  # the picker shows no slot status
-    assert (app._formulas.names[0], app._formulas.evaluators[0].formula) == ("Mine", "alpha1")
+    else:  # an entry saved before Save checked; neither list is near the slot's status line
+        if via == "choose":
+            fs.assign_saved(0, {"name": "Broken", "formula": "alpha1 +"})
+        else:
+            db.add_saved_formula(uid, "Broken", "alpha1 +")
+            fs.on_load(0)
+        assert app._info_popup.call_args.args[0] == "Can't use this formula"
+        fs._section.set_formula_slot.assert_called_with(0, "Mine0", "alpha1")  # the inputs show what it runs
+        assert fs._section.set_formula_slot_status.call_args.args == (0, "")  # no stale error under it
+    assert (app._formulas.names[0], app._formulas.evaluators[0].formula) == ("Mine0", "alpha1")
     fs._graph.set_series_name.assert_not_called()
     fs._graph.set_visible.assert_not_called()  # its line stays as it was
     assert db.get_user_json_setting(uid, "active_formulas") == saved

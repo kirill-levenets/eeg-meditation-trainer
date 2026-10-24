@@ -122,20 +122,17 @@ class FormulaSettings:
             return
         formulas = self._db.get_saved_formulas(uid)
         if 0 <= index < len(formulas):
-            entry = formulas[index]
-            formula = entry["formula"]
-            name = entry.get("name", "") or ""
-            slot = self._formulas.first_empty()
-            self._section.set_formula_slot(slot, name, formula)
-            self.on_slot_change(slot, name, formula)
+            self.assign_saved(self._formulas.first_empty(), formulas[index])
 
     def assign_saved(self, idx: int, entry: dict) -> None:
-        """Assign a saved {name, formula} entry to slot idx, show it, and persist. One that doesn't compile (saved
-        before Save checked) leaves the slot as it was, and a popup says why: the picker shows no slot status."""
+        """Assign a saved {name, formula} entry to slot idx (a tap in Saved Formulas or Choose…), show it, and persist.
+        One that doesn't compile (saved before Save checked) leaves the slot as it was, its inputs showing what it
+        runs, and a popup says why: neither list is near the slot's status line."""
         name = entry.get("name", "")
         error = self.on_slot_change(idx, name, entry.get("formula", ""))
         self._section.set_formula_slot(idx, self._formulas.names[idx], self._formulas.evaluators[idx].formula)
         if error:
+            self._section.set_formula_slot_status(idx, "")  # the popup says it; the slot runs what it ran
             self._info("Can't use this formula", f'"{name}" can\'t run: {error}')
 
     def on_delete(self, index: int) -> None:

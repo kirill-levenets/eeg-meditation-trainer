@@ -37,7 +37,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   It now goes to `Documents/EEGMeditation/` (on a computer, `~/Documents/EEGMeditation/`), and a message says where it went, or why it failed.
   Without an active profile, Save and Export now ask for one, as Load and Delete do, instead of a slot's status line reading "No user selected".
 - **A formula with an error renamed the slot it was put into** (#102): **Apply**, a tap in **Saved Formulas** or **Choose…** gave the slot the new name, and saved it, while the slot kept running its old formula.
-  The slot now stays as it was, and **Choose…** says why in a message.
+  The slot now stays as it was, and a message says why.
 - **Saved formulas could share a name** (#102): **Save** added a second formula under a name already in the library.
   Saving under an existing name now asks before overwriting it, as saving a program does.
 - **Exporting again on Android named the earlier file** (#102): Android keeps a file already in `Documents/EEGMeditation/` and stores the new one as "name (1)", while the message named the earlier file.
