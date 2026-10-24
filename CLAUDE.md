@@ -154,6 +154,7 @@ The linked file explains the mechanism.
   `tests/test_theme_switch.py` and `tests/test_modal_style.py` fail on direct Kivy imports. → [ui-theme](docs/architecture/ui-theme.md#navigation-and-theme)
 - Decorative strokes (press ring, graph glyphs, borders) contrast with the surface they are drawn on (`C.TEXT`), not the element's fill; text on a fill uses `readable_fg(fill)`.
   Check all four themes.
+- Kivy's Linux clipboard is SDL2 only, set in `theme` before any text input (`_clipboard_without_commands`): its xclip/xsel probe waits with no timeout and hung the app at startup. → [ui-theme](docs/architecture/ui-theme.md)
 - Roboto in this build has no arrows or geometric triangles (`→`, `↑↓`, `▶` render as tofu): use `›`, `»`, or MDI `Icons` font markup; `tests/test_help.py` checks the help files against the font.
 - Kivy holds a lambda strongly (`Clock.schedule_once`: until it runs; `bind`: as long as the object it is bound on) and a bound method weakly:
   hand a method to anything that outlives the widget (the Clock, `Window`, a global cache), or the widget lives as long as that.

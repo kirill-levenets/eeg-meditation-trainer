@@ -121,6 +121,7 @@ The same buttons are under Settings → Device → **Locked-screen sessions**.
 
 A dialog shows the crash report, already copied to your clipboard.
 Paste it into a new issue at `github.com/kirill-levenets/eeg-meditation-trainer/issues`, then tap **Dismiss & Exit**.
+On Linux the copy lasts only while the app is open, unless your desktop keeps clipboard history, so paste it first.
 
 ---
 
