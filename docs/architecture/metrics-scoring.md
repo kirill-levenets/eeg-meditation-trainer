@@ -27,7 +27,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Save refuses a formula that doesn't compile, since a program segment can pick any saved formula ([programs](programs.md#live-series)).
   A slot's Apply, a tap in Saved Formulas and Choose… leave the slot as it was when the formula doesn't compile: `on_slot_change` checks before it renames, and returns the error;
   `assign_saved`, the one path of a tap in Saved Formulas and of Choose…, checks first (`_refusal`) and shows the error in a popup, since neither list is near the slot's status line:
-  it changes neither the slot nor its inputs, so a draft typed there stays.
+  a formula that doesn't compile changes neither the slot nor its inputs, so a draft typed there stays
+  (a scoring-lock refusal puts the inputs back to the formula the session is scored on, as it does for Apply).
   A profile's load leaves a slot empty when its stored formula doesn't compile (`FormulaSlots.load`), where a failed set would have kept the last profile's formula.
   Saved formulas and programs keep unique names through `settings_sections.common.save_under_unique_name`: a new name is added, an existing one is overwritten after a confirmation.
   Export writes the library to a private file and delivers it with `copy_to_documents` ([storage](storage.md#exports-to-shared-storage)): `Documents/EEGMeditation/` through MediaStore on Android, `~/Documents/EEGMeditation/` on desktop.

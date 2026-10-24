@@ -324,6 +324,11 @@ delete it. Export to .txt writes the library's
 formulas, one per line, to
 Documents/EEGMeditation.
 
+Apply with a formula that has an error leaves the
+slot as it was, and so does a saved formula with
+an error (one saved before Save checked it): a
+message says why.
+
 The expression is a Python-style formula. Available
 variables include band powers (alpha1, alpha2,
 beta1, beta2, theta, delta, gamma1, gamma2, and the
