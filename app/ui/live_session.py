@@ -37,6 +37,7 @@ from app.ui.theme import (
     ThemedLabel,
     ThemedTextInput,
     cancel_button,
+    dimmed_fg,
     fill_background,
     fit_width_to_text,
     format_duration,
@@ -238,9 +239,10 @@ class _DurationPickerButton(BoxLayout):
         with self.canvas.before:
             Color(*bg)
             RoundedRectangle(pos=self.pos, size=self.size, radius=[S.RADIUS])
-        label_color = C.TEXT_MUTED if self.disabled else C.TEXT
-        self._text_label.color = label_color
-        self._chevron_label.color = label_color
+        # The glyph Start's own text takes on the same fill: a pressed fill keeps it, as a StyledButton's does.
+        label_color = dimmed_fg(bg) if self.disabled else readable_fg(C.ACCENT)
+        for label in (self._text_label, self._chevron_label):
+            label.color = label.disabled_color = label_color
 
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos):

@@ -638,6 +638,12 @@ def readable_fg(bg):
     return _FG_DARK if _contrast(_FG_DARK, bg) >= _contrast(_FG_LIGHT, bg) else _FG_LIGHT
 
 
+def dimmed_fg(bg) -> list[float]:
+    """A disabled control's glyph on its greyed bg: 60 % of the readable one, legible (~4:1) without reading as live."""
+    tgt = readable_fg(bg)
+    return [tgt[i] * 0.6 + bg[i] * 0.4 for i in range(3)] + [1]
+
+
 def with_contrast(rgb, bg, floor: float = 3.0) -> tuple[float, float, float]:
     """rgb, or as close to it as reaches floor:1 (WCAG) on bg: the same hue and saturation, lighter on a dark bg and
     darker on a light one."""
@@ -931,11 +937,7 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
         # leaves the glyph alone (only the background dims). Kivy's Label draws
         # `disabled_color` (default white@.3 -> invisible on light cards) when disabled,
         # so set it too, not just `color`.
-        if self.disabled:
-            tgt = readable_fg(bg)
-            fg = [tgt[i] * 0.6 + bg[i] * 0.4 for i in range(3)] + [1]
-        else:
-            fg = list(self.text_color)
+        fg = dimmed_fg(bg) if self.disabled else list(self.text_color)
         self._label.color = fg
         self._label.disabled_color = fg
         if self._icon_label:

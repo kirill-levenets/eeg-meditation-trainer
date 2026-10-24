@@ -38,6 +38,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **The timer length or "P" beside Start was hard to read** (#113): it was drawn in the theme's text colour on Start's green, light on light in the dark themes.
+  It now takes the colour Start's own text takes, dimmed with it while a session runs.
 - **The Session screen's stats row ran its values together at a larger text size** (#113): at Large or Larger on a phone, an average touched the time beside it ("82.41m 00s").
   The row now has three wider slots whose text keeps to them.
 - **Settings › User Profile showed old session counts** (#113): a profile's count changed only when profiles were switched, created or deleted.

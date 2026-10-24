@@ -372,6 +372,22 @@ def test_the_app_selected_states_are_readable(theme, screens):
         assert _contrast(btn.text_color, btn.bg_color) == pytest.approx(_best_glyph_contrast(btn.bg_color)), btn.text
 
 
+
+@pytest.mark.parametrize("theme", list(THEMES))
+def test_starts_timer_part_draws_its_text_as_start_does(theme, screens):
+    """The timer length or "P" beside Start, and its chevron: the glyph Start's own text takes, enabled or not."""
+    C.set_theme(theme)
+    live = screens(LiveSessionScreen)
+    pill, start = live._btn_duration_expand, live.btn_start
+    try:
+        for disabled in (False, True):
+            pill.disabled = start.disabled = disabled
+            _pump()
+            for label in (pill._text_label, pill._chevron_label):
+                assert list(label.color) == pytest.approx(list(start._label.color)), (disabled, label.text)
+    finally:
+        pill.disabled = start.disabled = False
+
 def test_a_popup_without_a_height_is_as_tall_as_its_content_capped():
     from kivy.uix.boxlayout import BoxLayout
     content = BoxLayout(orientation="vertical", size_hint_y=None)
