@@ -224,6 +224,7 @@ Each profile remembers the view and the sort.
 The chevron right after the **Band Power** title folds the table away (tap it again to bring it back); each profile remembers whether it was folded.
 
 **Export CSV** saves the session's data under a file name you can change (`session_<id>.csv`): on Android into `Documents/EEGMeditation/`, on desktop into a folder you pick.
+On Android a name already there gets a number (`session_<id> (1).csv`), and the message names the file written.
 Each row also says what it was scored on: `score_key` (the metric), `score_value` (its value) and `score_target` (the threshold in force); these are empty for sessions recorded before the app saved them.
 
 ---
@@ -306,6 +307,7 @@ Loading a program switches to Program mode.
 - The metrics graph shows the program's lines: each segment's metric or formula.
   Other lines are hidden while it runs (switch any back on in the series list; that isn't saved) and come back as they were when it stops.
   In Program mode the Session screen shows the program's lines before Start too.
+- A formula with an error (one saved before Save checked it) can't run: its segments use Shamatha, and a message at the start names it.
 - At each boundary the ending segment's end cue plays, and the target, the scored metric and the feedback sound switch to the next segment's.
   Time above target counts against each segment's own target.
 - The legend marks the active segment's metric in bold with **»**.
@@ -381,8 +383,14 @@ Three slots (**Formula 1**, **2** and **3**), each with:
 
 - **name**: the label of its series on the graphs and in a session's detail
 - **formula**: a Python-style expression of band powers, normalized bands, computed metrics and math functions, with `avg(expr, N)` for a moving average
-- **Apply**: evaluates it; a status line shows the current value or the error
-- **Save**: stores it in your formula library under the slot's name
+- **Apply**: evaluates it; a status line shows the current value or the error, and a formula with an error leaves the slot as it was
+- **Save**: stores it in your formula library under the slot's name; a formula with an error isn't saved, and the status line shows the error;
+  a name already in the library asks before overwriting that formula, as saving a program does
+
+**Saved Formulas** below the slots is your library: tap one to put it into the first empty slot (Formula 1 when all three are in use), or its **X** to delete it (after a confirmation).
+A saved formula with an error (one saved before Save checked it) can't go into a slot, from this list or through **Choose…**: the slot and its fields stay as they were, and a message says why.
+**Export to .txt** writes the library's formulas, one per line, to `Documents/EEGMeditation/formulas_user_<n>.txt` (on a computer, `~/Documents/EEGMeditation/`), and a message says where.
+On Android, exporting again keeps the earlier file and names the new one with a number, such as `formulas_user_1 (1).txt`.
 
 To put a saved formula into a slot without opening Settings, tap **Choose…** on that slot's row in the live metrics graph's series list.
 Settings → Threshold picks which slot drives the feedback sound.

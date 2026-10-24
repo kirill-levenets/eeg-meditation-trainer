@@ -10,7 +10,7 @@ How each subsystem works and why.
 | [session.md](session.md) | Session state machine, tick thread, session names and labels, checkpoints (#30), the session ending path, timer, screen lock | `app/session/manager.py`, `app/session/timer_state.py`, `app/ui/app_manager.py`, `app/ui/session_labels.py`, `android_src/` |
 | [programs.md](programs.md) | Session programs: model, live series, Settings and picker controls, per-segment feedback | `app/session/session_program.py`, `app/ui/app_manager.py`, `app/ui/settings_screen.py` |
 | [audio.md](audio.md) | Audio engine: below/reward channels, cues, timer gong, MediaPlayer threading | `app/audio_feedback/noise.py` |
-| [storage.md](storage.md) | SQLite, write lock, DB paths and migrations, per-user settings registry, backup/restore and SAF | `app/storage/`, `app/settings/registry.py` |
+| [storage.md](storage.md) | SQLite, write lock, DB paths and migrations, per-user settings registry, backup/restore and SAF, exports to shared storage | `app/storage/`, `app/settings/registry.py` |
 | [ui-theme.md](ui-theme.md) | Navigation, theme system and colour roles, shared widgets, modals | `app/ui/theme.py`, `app/ui/widgets/` |
 | [graphs.md](graphs.md) | `ScrollableGraphWidget`: fit, threshold steps, drawing cost, touch routing, fullscreen | `app/ui/raw_eeg_screen.py`, `app/ui/touch_utils.py` |
 | [live-session-and-settings.md](live-session-and-settings.md) | Session screen, Settings screen, first run | `app/ui/live_session.py`, `app/ui/settings_screen.py` |

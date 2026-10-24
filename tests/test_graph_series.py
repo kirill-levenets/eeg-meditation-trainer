@@ -2,23 +2,23 @@ import os
 import tempfile
 import types
 import unittest
-
-from kivy.uix.floatlayout import FloatLayout
+from unittest.mock import MagicMock
 
 from app.metrics.formula_slots import FormulaSlots
 from app.storage.database import DatabaseManager
+from app.ui import graph_series
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.diary_screen import (
     METRICS_PREVIEW_COLORS,
     METRICS_PREVIEW_SCALES,
 )
-from app.ui.graph_fullscreen import GraphFullscreen
 from app.ui.live_session import (
     METRICS_COLORS,
     METRICS_SCALES,
     SERIES_NAMES,
 )
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
+from app.ui.theme import StyledButton
 from app.ui.widgets.band_totals import BAND_COLORS, BAND_SCALES
 from tests._formula_settings import make_formula_settings
 from tests._graph_series import make_graph_series
@@ -52,7 +52,6 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         self.app._db = DatabaseManager(db_path=self.db_path)
         self.uid = self.app._db.create_user("Alice")
         self.app._current_user_id = self.uid
-        self.app._fullscreen = GraphFullscreen(FloatLayout())
 
         self.app._live_screen = _FakeLive()
         self.app._diary_screen = _FakeDiary()
@@ -245,3 +244,45 @@ def test_the_live_screen_and_a_sessions_detail_draw_a_series_in_one_colour():
         assert detail._metrics_graph.series_color(key) == live.graph.series_color(key), key
     for key in BAND_COLORS:
         assert detail._freq_graph.series_color(key) == live.band_graph.series_color(key), key
+
+
+class _LiveGraph:
+    """The live metrics graph as the picker and Settings use it: its series' names and visibility."""
+
+    def __init__(self):
+        self.names, self.shown = {}, {}
+
+    def set_series_name(self, key, name):
+        self.names[key] = name
+
+    def series_name(self, key):
+        return self.names.get(key, key)
+
+    def set_visible(self, key, visible):
+        self.shown[key] = visible
+
+    def is_visible(self, key):
+        return self.shown.get(key, False)
+
+
+def test_choosing_a_saved_formula_renames_its_picker_row_at_once(tmp_path, monkeypatch):
+    # The open picker's row follows Choose at once, as the graph line and the legend do.
+    db = DatabaseManager(db_path=str(tmp_path / "t.db"))
+    uid = db.create_user("A")
+    db.add_saved_formula(uid, "Calm", "alpha1 * 2")
+    graph = _LiveGraph()
+    app = types.SimpleNamespace(_db=db, _formulas=FormulaSlots(), _current_user_id=uid, _require_user=lambda _a: uid,
+                                _audio_metric_key="shamatha_score", _live_screen=types.SimpleNamespace(graph=graph))
+    app._formula_settings = make_formula_settings(app)
+    series = make_graph_series(app, graphs=lambda: [graph])
+    shown_rows = []
+    monkeypatch.setattr(graph_series, "make_scroll_popup",
+                        lambda title, rows, **kw: shown_rows.extend(rows) or MagicMock())
+    row = StyledButton(text="Formula 1")
+
+    series._choose_saved_formula(0, row)
+    shown_rows[0].dispatch("on_release")
+    db.close()
+
+    assert graph.series_name("custom_formula") == "Calm"
+    assert row.text == "Calm"  # the open picker's row says what the line and the legend say

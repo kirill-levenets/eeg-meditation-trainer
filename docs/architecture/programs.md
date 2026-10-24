@@ -15,7 +15,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   the name shows in Settings through `set_program_name` and in the Session screen's duration picker.
 - The `sessions.session_program` column stores the JSON segments of the program each session started with (`ProgramRun.segments_json`; empty when none ran).
   The saved-programs library uses `get/add/update/remove_saved_program` in `DatabaseManager` (a JSON list in the user-settings KV store under `user_{id}_saved_programs`).
-  Program Save upserts by name, so re-saving an already-loaded program overwrites it; load reflects the name back so the next save goes to the same record.
+  Program Save keeps names unique (`save_under_unique_name`, shared with saved formulas): an existing name is overwritten after a confirmation;
+  load reflects the name back so the next save goes to the same record.
 
 ## Live series
 
@@ -23,10 +24,15 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The live graph catalog (`live_session.METRICS_COLORS`/`METRICS_SCALES`/`SERIES_NAMES`) carries `"meditation_score"` (colour `C.MED_SCORE`, scale 100, label `"Meditation"`), so a "Meditation" segment is plottable;
   it defaults to **hidden** (the first-run `_graph_toggles`, through `GraphSeries.restore`'s `key in sel`).
   It also carries **three** program-custom lines, `PROGRAM_FORMULA_KEYS = ("program_formula","program_formula_2","program_formula_3")` (colours `C.WARM`/`C.WARM2`/`C.WARM3`, scale 200), one per **distinct** custom formula in a program.
-  `program_plan(prog)` (`app/session/session_program.py`, with `PROGRAM_FORMULA_KEYS`; the what-if replay uses it too) returns `(program_keys, custom_slots, segment_keys)`:
+  `program_plan(prog)` (`app/session/session_program.py`, with `PROGRAM_FORMULA_KEYS`) returns `(program_keys, custom_slots, segment_keys)`:
   the set of series to show, the `(slot_key, custom_dict)` for each distinct custom (capped at 3), and the metric key each segment drives (a built-in key or its custom's slot).
+  `runnable_plan(prog)` is that plan as a session runs it: a custom formula that doesn't compile (`compile_formula` gives it no evaluator) gets no line, and its segments drive, show and are scored on `shamatha_score`.
+  A slot nothing computes is absent from `metrics` and would read 0 → constant max noise; Settings → Custom Formula's Save refuses such a formula, but one saved before it can still be in a program.
+  The plan keeps `program_plan`'s keys as `planned_keys`: older builds scored such a formula on its own slot, and the what-if replay reads their sessions by them ([session-detail](session-detail.md)).
+  `ProgramRun.begin` names the plan's `unrunnable` formulas in a popup (`info`, the app's `_info_popup`), a frame later so the start finishes its setup first:
+  it stays until read, as a meditator who pressed Start may not be looking.
   `ProgramRun` (`app/ui/program_run.py`, the app's `_program_run`) holds the running program: `active` from the start's `begin(prog, feedback_ids, name)` until `end()`.
-  `begin` snapshots prior visibility, shows EXACTLY `program_keys` (`show_program_series` hides the rest), arms one persistent evaluator per custom into `formula_evs[slot]` (`program_evaluators(prog)`), and stores each segment's metric key.
+  `begin` snapshots prior visibility, shows EXACTLY the runnable plan's keys (`show_program_series(graph, plan)` hides the rest), arms one persistent evaluator per custom that compiles into `formula_evs[slot]`, and stores each segment's metric key.
   Each program line is shown the **whole** program and evaluated every tick (`tick` runs `formula_evs` into `metrics[slot]` through `custom_formula.evaluate_series`, as the Settings formulas are).
   `_enter_segment` repoints audio, goal and marker to the segment's key (a built-in key or a program slot);
   `_segment_ui` only relabels and shows a custom segment's line and moves the `»` marker (a built-in segment touches no visibility).

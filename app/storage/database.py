@@ -656,6 +656,9 @@ class DatabaseManager:
     def add_saved_formula(self, user_id: int, name: str, formula: str) -> bool:
         return self._add_saved(user_id, "saved_formulas", {"name": name, "formula": formula}, self._MAX_SAVED_FORMULAS)
 
+    def update_saved_formula(self, user_id: int, index: int, name: str, formula: str) -> bool:
+        return self._replace_saved(user_id, "saved_formulas", index, {"name": name, "formula": formula})
+
     def remove_saved_formula(self, user_id: int, index: int) -> None:
         self._remove_saved(user_id, "saved_formulas", index)
 

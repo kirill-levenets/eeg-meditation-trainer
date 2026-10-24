@@ -452,7 +452,7 @@ class EEGMeditationApp(App):
 
         self._live_screen = LiveSessionScreen()
         self._program_run = ProgramRun(self._session_manager, self._audio, self._live_screen, on_main=self._on_main,
-                                       formula_vars=self._eval_formula_vars)
+                                       formula_vars=self._eval_formula_vars, info=self._info_popup)
         self._settings_screen = SettingsScreen()
         self._history_screen = HistoryScreen()
         self._diary_screen = DiaryScreen()
@@ -467,7 +467,7 @@ class EEGMeditationApp(App):
             self._db, self._settings_screen.formulas, self._live_screen.graph, self._formulas,
             user_id=lambda: self._current_user_id, require_user=self._require_user,
             scoring_locked=self._scoring_locked, audio_key=lambda: self._audio_metric_key,
-            confirm_saved_delete=self._confirm_saved_delete)
+            confirm=self._confirm_action, info=self._info_popup, confirm_saved_delete=self._confirm_saved_delete)
         self._headset = Headset(
             self._db, self._real_stream, self._settings_screen.device, self._live_screen,
             user_id=lambda: self._current_user_id, refused_while_session_runs=self._refused_while_session_runs,
@@ -502,7 +502,7 @@ class EEGMeditationApp(App):
         self._fullscreen = GraphFullscreen(float_root)
         self._graph_series = GraphSeries(
             self._db, self._live_screen.graph, self._formulas, self._program_run, self._program_settings,
-            self._formula_settings, self._fullscreen, graphs=self._all_graphs,
+            self._formula_settings, graphs=self._all_graphs,
             legacy_defaults=self._settings_screen._graph_toggles, user_id=lambda: self._current_user_id,
             require_user=self._require_user)
         self._last_back_time = 0.0  # for double-back-to-exit on the root screen

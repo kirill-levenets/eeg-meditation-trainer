@@ -3,6 +3,7 @@ from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 
+from app.ui.hooks import is_wired, wire
 from app.ui.theme import C, fill_background
 from app.ui.widgets.legend import LegendBar
 
@@ -18,6 +19,7 @@ class GraphFullscreen:
         self._legend = None
         self._graph = None
         self._close = None  # the restore closure, set while a graph is fullscreen
+        self._owner_series_change = None  # the graph's own on_series_change, chained while it is fullscreen
 
     @property
     def is_open(self) -> bool:
@@ -57,9 +59,13 @@ class GraphFullscreen:
         self._root.add_widget(overlay)
         self._overlay = overlay
         self._graph = graph
+        self._owner_series_change = graph.on_series_change if is_wired(graph, "on_series_change") else None
+        wire(graph, on_series_change=self._series_changed)
 
         def _restore(*_a):
             self._close = None
+            wire(graph, on_series_change=self._owner_series_change)
+            self._owner_series_change = None
             self._root.remove_widget(overlay)
             if graph.parent is not None:
                 graph.parent.remove_widget(graph)
@@ -85,8 +91,14 @@ class GraphFullscreen:
         self._close()
         return True
 
+    def _series_changed(self) -> None:
+        """A series shown, hidden or renamed: the owner's legend and the fullscreen one follow."""
+        if self._owner_series_change is not None:
+            self._owner_series_change()
+        self.refresh_legend()
+
     def refresh_legend(self) -> None:
-        """Rebuild the fullscreen legend after a series toggle (if fullscreen)."""
+        """Rebuild the fullscreen legend (if fullscreen)."""
         if self._overlay is None or self._graph is None:
             return
         self._content.remove_widget(self._legend)

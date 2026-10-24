@@ -18,4 +18,4 @@ def make_graph_series(app, **deps) -> GraphSeries:
                 "user_id": lambda: app._current_user_id, "require_user": lambda action: app._require_user(action)}
     return GraphSeries(attr("_db", MagicMock), MagicMock() if live_screen is None else live_screen.graph,
                        app._formulas, attr("_program_run", make_run), attr("_program_settings", make_programs),
-                       attr("_formula_settings", MagicMock), attr("_fullscreen", MagicMock), **{**defaults, **deps})
+                       attr("_formula_settings", MagicMock), **{**defaults, **deps})

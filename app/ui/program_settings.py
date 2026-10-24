@@ -4,10 +4,9 @@ from collections.abc import Callable
 
 from app.logger import logger
 from app.session.manager import SessionState
-from app.session.session_program import SessionProgram
+from app.session.session_program import SessionProgram, runnable_plan
 from app.ui.program_run import show_program_series
-from app.ui.settings_sections.common import saved_program_label
-from app.ui.theme import C
+from app.ui.settings_sections.common import save_under_unique_name, saved_program_label
 
 
 class ProgramSettings:
@@ -75,7 +74,7 @@ class ProgramSettings:
         if not uid:
             return  # silent-ok: idle live-graph preview; nothing to show without a user
         if self.governs_live_series():
-            show_program_series(self._live_screen.graph, self.program())
+            show_program_series(self._live_screen.graph, runnable_plan(self.program()))
             self._live_screen.set_training_series(None)  # no active segment in idle
         else:
             self._show_saved_series(uid)
@@ -122,19 +121,8 @@ class ProgramSettings:
         uid = self._require_user("save a program")
         if uid is None:
             return
-        progs = self._db.get_saved_programs(uid)
-        existing = next((i for i, p in enumerate(progs) if p.get("name") == name), None)
-        if existing is not None:
-            self._confirm(
-                "Overwrite program",
-                f"A program named '{name}' already exists.\n"
-                f"Overwrite it with the current segments?",
-                "Overwrite",
-                lambda: self._save(existing, name),
-                ok_color=C.WARM,
-            )
-        else:
-            self._save(None, name)
+        save_under_unique_name("program", self._db.get_saved_programs(uid), name, "the current segments",
+                               lambda index: self._save(index, name), self._confirm)
 
     def _save(self, index, name: str) -> None:
         """Add (index=None) or overwrite (index set) a saved program by name."""

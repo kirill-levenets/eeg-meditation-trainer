@@ -130,7 +130,8 @@ The linked file explains the mechanism.
 - **A session is scored on the metric that drives the feedback sound** (`_audio_drive_key()`).
   The Settings threshold takes effect only through `_put_threshold_in_force` (the slider and profile load go through `_apply_threshold`). → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
 - `ProgramRun.audio_key` is transient and never written to `_audio_metric_key`; `PROGRAM_FORMULA_KEYS` are never persisted to `graph_series_*` or the baseline audio metric.
-  A leaked program key reads as 0 → constant max noise. → [programs](docs/architecture/programs.md)
+  A program runs, and is replayed, on `runnable_plan`: a custom formula that doesn't compile gets no line and its segments use Shamatha.
+  A leaked program key, or one nothing computes, reads as 0 → constant max noise. → [programs](docs/architecture/programs.md)
 
 ### Audio
 
@@ -192,6 +193,9 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 · Session delete `_delete_sessions(ids)`
 · notes `_save_session_notes`
 · confirm `theme.confirm_popup` (via `_confirm_action`)
+· save under a unique name `settings_sections.common.save_under_unique_name`
+· whether a formula can run `custom_formula.compile_formula`
+· a saved formula into a slot `FormulaSettings.assign_saved`
 · message `make_message_popup` / `_info_popup`
 · list picker `make_scroll_popup`
 · sound source picker `settings_sections.common.open_source_picker`

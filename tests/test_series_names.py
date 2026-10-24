@@ -7,7 +7,7 @@ import pytest
 
 import app.ui.graph_series as graph_series
 from app.metrics.formula_slots import FormulaSlots
-from app.session.session_program import SessionProgram, program_evaluators
+from app.session.session_program import SessionProgram, runnable_plan
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.diary_screen import DiaryScreen
 from app.ui.live_session import SERIES_NAMES, LiveSessionScreen
@@ -16,6 +16,7 @@ from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from tests._formula_settings import make_formula_settings
 from tests._graph_series import make_graph_series
 from tests._program_run import make_run
+from tests._program_settings import make_programs
 
 PAST_NAMES = {"custom_formula": "Old beta", "custom_formula_2": "Custom 2", "custom_formula_3": "Custom 3"}
 
@@ -45,10 +46,19 @@ def test_the_detail_starts_from_the_defaults_not_the_session_screens_names(app):
     assert SERIES_NAMES["custom_formula"] == "Custom 1"
 
 
+def test_the_idle_preview_shows_shamatha_for_a_formula_that_cant_run(app):
+    programs = make_programs(MagicMock(), 1, live_screen=app._live_screen)
+    programs.mode = "program"
+    programs.segments = [{"minutes": 5, "target": 60, "formula": {"name": "Broken", "formula": "alpha1 +"}}]
+    programs.refresh_live_series()
+    graph = app._live_screen.graph
+    assert graph.visible_keys() == ["shamatha_score"]  # what the start will drive; no line for "Broken"
+
+
 def test_a_programs_labels_go_when_it_ends(app):
     graph = app._live_screen.graph
-    show_program_series(graph, SessionProgram([{"minutes": 5, "target": 60,
-                                                "formula": {"name": "Deep", "formula": "alpha1"}}]))
+    show_program_series(graph, runnable_plan(SessionProgram([{"minutes": 5, "target": 60,
+                                                              "formula": {"name": "Deep", "formula": "alpha1"}}])))
     assert graph.series_name("program_formula") == "Program: Deep"
     app._program_run.end()
     assert graph.series_name("program_formula") == "Program"
@@ -89,7 +99,7 @@ def test_a_program_of_built_in_metrics_lists_no_program_lines(app, monkeypatch):
 def test_a_program_lists_only_the_lines_it_computes(app, monkeypatch):
     segments = [{"minutes": 5, "target": 60, "formula": {"name": "Deep", "formula": "alpha1"}},
                 {"minutes": 5, "target": 60, "formula": "shamatha_score"}]
-    assert list(program_evaluators(SessionProgram(segments))) == ["program_formula"]
+    assert list(runnable_plan(SessionProgram(segments)).evaluators) == ["program_formula"]
     _run_program(app, segments)
     assert [row for row in _picker_rows(app, monkeypatch) if row.startswith("Program")] == ["Program: Deep"]
 

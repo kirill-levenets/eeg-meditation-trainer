@@ -16,8 +16,10 @@ from app.ui.theme import (
 )
 
 
-def _show_row_state(btn, visible: bool) -> None:
-    """A picker row's look: filled and bold while its series shows."""
+def _show_row(btn, graph, key: str) -> None:
+    """A picker row's look: the series' current name, filled and bold while it shows."""
+    btn.text = graph.series_name(key)
+    visible = graph.is_visible(key)
     btn.bg_color = C.ACCENT if visible else C.BG_CARD
     btn.text_color = None if visible else C.TEXT_SECONDARY
     btn.bold = visible
@@ -28,7 +30,7 @@ class GraphSeries:
     runs and computes it; a program's own series set is never saved as the profile's selection."""
 
     def __init__(self, db, live_graph, formulas: FormulaSlots, program_run, program_settings, formula_settings,
-                 fullscreen, *, graphs: Callable[[], tuple], legacy_defaults: dict[str, bool],
+                 *, graphs: Callable[[], tuple], legacy_defaults: dict[str, bool],
                  user_id: Callable[[], int | None], require_user: Callable[[str], int | None]) -> None:
         self._db = db
         self._live_graph = live_graph
@@ -36,7 +38,6 @@ class GraphSeries:
         self._program_run = program_run
         self._program_settings = program_settings
         self._formula_settings = formula_settings
-        self._fullscreen = fullscreen
         self._graphs = graphs
         self._legacy_defaults = legacy_defaults
         self._user_id = user_id
@@ -55,8 +56,8 @@ class GraphSeries:
         for key in graph.series_keys():
             if key in PROGRAM_FORMULA_KEYS and not (is_live and self._program_run.computes(key)):
                 continue  # program-controlled: listed only while its program runs and computes it
-            btn = StyledButton(text=graph.series_name(key), height=dp(44))
-            _show_row_state(btn, graph.is_visible(key))
+            btn = StyledButton(height=dp(44))
+            _show_row(btn, graph, key)
             btn.bind(on_release=lambda b, k=key: self._toggle(graph, k, b))
             if is_live and key in FORMULA_KEYS:
                 row = BoxLayout(orientation="horizontal", spacing=S.GAP_SM, height=dp(44), size_hint_y=None)
@@ -81,7 +82,7 @@ class GraphSeries:
 
     def _choose_saved_formula(self, slot_idx: int, toggle_btn) -> None:
         """Open a second popup listing saved formulas; selecting one assigns it to
-        slot_idx and refreshes the picker's toggle button to its new visible state."""
+        slot_idx and refreshes the picker's toggle button to its new name and visible state."""
         uid = self._require_user("choose a saved formula")
         if uid is None:
             return
@@ -90,7 +91,7 @@ class GraphSeries:
         def _choose(entry):
             inner_popup.dismiss()
             self._formula_settings.assign_saved(slot_idx, entry)
-            _show_row_state(toggle_btn, self._live_graph.is_visible(FORMULA_KEYS[slot_idx]))
+            _show_row(toggle_btn, self._live_graph, FORMULA_KEYS[slot_idx])
 
         rows = []
         if not formulas:
@@ -120,9 +121,8 @@ class GraphSeries:
         ev = self._formulas.for_key(key)
         if ev is not None and graph is self._live_graph:
             visible = visible and ev.is_valid
-        graph.set_visible(key, visible)  # fires the owning screen's legend refresh
-        self._fullscreen.refresh_legend()
-        _show_row_state(btn, graph.is_visible(key))
+        graph.set_visible(key, visible)  # fires the legends' refresh, the fullscreen one too
+        _show_row(btn, graph, key)
 
     def _pickable(self) -> list:
         """The graphs with a picker: an id to save under and more than one series to choose from."""

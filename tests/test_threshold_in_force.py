@@ -280,6 +280,14 @@ def _start(program: bool, monkeypatch, prepare=None, **before) -> EEGMeditationA
     return a
 
 
+def test_starting_a_program_with_a_formula_that_cant_run_says_so(monkeypatch):
+    def prepare(app_):
+        app_._program_settings.segments = [{"minutes": 5, "target": 60, "formula": {"name": "Broken", "formula": "*"}}]
+        app_._info_popup = MagicMock()
+    a = _start(True, monkeypatch, prepare=prepare)
+    assert [c.args[0] for c in a._info_popup.call_args_list] == ["Formula error in this program"]
+
+
 @pytest.mark.parametrize("program, first_target", [(False, 70), (True, 60)])
 def test_a_session_start_clears_the_last_sessions_steps(program, first_target, monkeypatch):
     # Both kinds step their line from the ticks: a program no longer draws its segments upfront.
