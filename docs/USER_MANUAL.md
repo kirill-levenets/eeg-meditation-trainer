@@ -96,10 +96,12 @@ Start a new session to continue.
 
 ### Bottom stats toggle
 
-The stats row under the graph shows live values: Shamatha, Distraction, Sinking, NS Attn and NS Med.
-Its **LIVE** / **AVG** button switches to the session's averages and times:
-**Avg Sham**, **Avg Med**, **>Thresh** (time above the threshold), **≥90** (time with Shamatha at 90 or more) and **Streak** (the longest one above the threshold).
-Your choice is remembered.
+The stats row under the graph follows the metric the session is scored on, the one the feedback sound follows.
+**LIVE** shows its value now, the **Threshold** it is scored against and the current **Streak** above it.
+**AVG** shows the numbers the end-of-session card will show: the **Average**, the time **Above threshold** and the **Longest streak**.
+In a program the row follows each segment's metric and target; its average is the running segment's (**Segment avg**), since segments can use different metrics, while the times are the whole session's.
+Tap **LIVE** or **AVG** to switch; your choice is remembered.
+Distraction, Sinking and the NeuroSky values can be shown on the graph from its series list.
 
 ### Locked-screen sessions (Android)
 

@@ -182,7 +182,7 @@ def test_a_segment_whose_formula_cant_run_drives_and_shows_shamatha():
 
     assert run.audio_key == "shamatha_score"
     assert metrics.get(app._audio_drive_key(), 0) == 50  # what the tick sounds: shamatha, not 0
-    app._session_manager.set_active_goal.assert_called_with("shamatha_score", 120)  # scored on what it sounds
+    app._session_manager.start_segment.assert_called_with("shamatha_score", 120)  # scored on what it sounds
     app._live_screen.set_training_series.assert_called_with("shamatha_score")
     assert run._info.call_args.args[0] == "Formula error in this program"  # the session's start says which
     shown = {c.args[0]: c.args[1] for c in graph.set_visible.call_args_list}

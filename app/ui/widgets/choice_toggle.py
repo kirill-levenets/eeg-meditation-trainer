@@ -8,8 +8,9 @@ from app.ui.theme import C, StyledButton
 
 
 class ChoiceToggle(BoxLayout):
-    """One button per choice, all shown: the chosen one filled and bold, the others muted on the card. A tap on another
-    choice shows it and calls on_choose(key); `show` marks a choice made elsewhere (a loaded profile) without the call."""
+    """One button per choice, all shown: the chosen one filled and bold, the others outlined and muted, which reads on a
+    card as on the screen. A tap on another choice shows it and calls on_choose(key); `show` marks a choice made
+    elsewhere (a loaded profile) without the call."""
 
     def __init__(self, choices: list[tuple[str, str]], chosen: str, on_choose: Callable[[str], None], *,
                  button: dict, **layout) -> None:
@@ -27,7 +28,8 @@ class ChoiceToggle(BoxLayout):
         self.chosen = key
         for k, btn in self.buttons.items():
             on = k == key
-            btn.bg_color = C.PRIMARY if on else C.BG_CARD
+            btn.outline = not on
+            btn.bg_color = C.PRIMARY if on else C.TEXT_SECONDARY  # unchosen: the outline's colour, as its text's
             btn.text_color = None if on else C.TEXT_SECONDARY  # None: the glyph colour that reads on the fill
             btn.bold = on
 

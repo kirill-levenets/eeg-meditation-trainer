@@ -1,24 +1,25 @@
 """A profile pick, a session start or an idle threshold change leaves the Session screen showing no earlier session."""
+from dataclasses import replace
 from unittest.mock import MagicMock
 
 import app.ui.app_manager as am
+from app.session.manager import LiveScore
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.live_mirror import LiveMirror
 from app.ui.live_session import LiveSessionScreen
 from tests._recorder import make_recorder
 
 METRICS = {"shamatha_score": 71, "distraction": 22, "sinking": 9, "native_attention": 55, "native_meditation": 63}
-STATS = {"avg_shamatha": 64.2, "avg_meditation": 58.0, "time_above_threshold": 120, "time_shamatha_90": 30,
-         "longest_streak": 48}
+SCORE = LiveScore(value=71, target=60, streak=12, average=64.4, segmented=False, time_above=120, longest_streak=48)
 
 
 def _texts(screen) -> list[str]:
-    return [label.text for label in screen._stat_labels.values()]
+    return [label.text for label in screen._stat_labels]
 
 
 def _finished_screen() -> LiveSessionScreen:
     screen = LiveSessionScreen()
-    screen.update_stats(METRICS)
+    screen.update_stats(SCORE)
     screen.set_start_time(1_760_000_000.0)
     screen.update_timer("05:00")
     screen.update_state("FINISHED")
@@ -39,25 +40,22 @@ def test_clear_readout_shows_what_a_fresh_screen_shows():
     assert screen._timer_label.text == "00:01"  # no start time of the last session in front of it
 
 
-def _running_app(monkeypatch):
-    app = MagicMock()
-    app._session_manager.compute_statistics.return_value = STATS
-    monkeypatch.setattr("app.ui.live_session.App.get_running_app", lambda: app)
+def _choose_avg(monkeypatch, screen) -> None:
+    monkeypatch.setattr("app.ui.live_session.App.get_running_app", MagicMock)  # the choice is saved with the profile
+    screen._stats_toggle.buttons["aggregate"].dispatch("on_release")
 
 
-def test_the_avg_toggle_shows_the_last_sessions_averages(monkeypatch):
-    _running_app(monkeypatch)
+def test_the_avg_switch_shows_the_last_sessions_numbers(monkeypatch):
     screen = _finished_screen()
-    screen._toggle_stats_mode()
-    assert "64.2" in _texts(screen)
+    _choose_avg(monkeypatch, screen)
+    assert "64" in _texts(screen)
 
 
-def test_the_avg_toggle_after_a_clear_shows_no_sessions_averages(monkeypatch):
-    _running_app(monkeypatch)
+def test_the_avg_switch_after_a_clear_shows_no_sessions_numbers(monkeypatch):
     screen = _finished_screen()
     screen.clear_readout()
-    screen._toggle_stats_mode()
-    assert "64.2" not in _texts(screen)
+    _choose_avg(monkeypatch, screen)
+    assert "64" not in _texts(screen)
 
 
 def test_clear_live_display_empties_the_graphs_their_mirrors_and_the_readout():
@@ -181,41 +179,21 @@ def test_deleting_another_profile_leaves_the_shown_session():
 def test_a_profiles_stats_view_redraws_the_strip_not_just_the_button():
     screen = LiveSessionScreen()
     screen.set_stats_mode("aggregate")
-    assert [label.text for label in screen._stat_title_labels.values()][0] == "Avg Sham"
+    assert screen._stat_title_labels[0].text == "Average"
 
 
-def test_the_end_of_a_session_locked_since_its_first_minute_shows_its_whole_averages(monkeypatch):
-    late = dict(STATS, avg_shamatha=71.5)
-    running = MagicMock()
-    running._session_manager.compute_statistics.return_value = STATS
-    monkeypatch.setattr("app.ui.live_session.App.get_running_app", lambda: running)
+def test_the_end_of_a_session_locked_since_its_first_minute_shows_its_whole_numbers():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._live_screen = _finished_screen()  # its readout cached at the first minute
-    running._session_manager.compute_statistics.return_value = late  # the timer ran out while locked
+    app._live_screen = _finished_screen()  # its readout as of the first minute
+    app._session_manager = MagicMock()
+    app._session_manager.live_score.return_value = replace(SCORE, average=81.5)  # the timer ran out while locked
     app._mirror = LiveMirror()
     app._mirror.last_metrics = METRICS
     for name in ("_undo_session_setup", "_mark_history_dirty", "_settings_screen"):
         setattr(app, name, MagicMock())
     app._finalize_stop_ui({"duration": 1800}, None)
     app._live_screen.set_stats_mode("aggregate")
-    assert "71.5" in _texts(app._live_screen)
-
-
-def test_a_failing_average_is_logged_once_until_it_recovers(monkeypatch):
-    running = MagicMock()
-    monkeypatch.setattr("app.ui.live_session.App.get_running_app", lambda: running)
-    logged = MagicMock()
-    monkeypatch.setattr("app.ui.live_session.logger.exception", logged)
-    screen = LiveSessionScreen()
-    running._session_manager.compute_statistics.side_effect = ValueError("bad accumulator")
-    screen.update_stats(METRICS)
-    screen.update_stats(METRICS)
-    running._session_manager.compute_statistics.side_effect = None
-    running._session_manager.compute_statistics.return_value = STATS
-    screen.update_stats(METRICS)
-    running._session_manager.compute_statistics.side_effect = ValueError("bad accumulator")
-    screen.update_stats(METRICS)
-    assert logged.call_count == 2
+    assert "82" in _texts(app._live_screen)
 
 
 def test_a_start_that_never_connected_leaves_no_owner():

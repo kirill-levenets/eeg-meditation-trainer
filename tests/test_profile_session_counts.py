@@ -25,7 +25,8 @@ def test_entering_settings_reads_the_counts_again():
 
 def test_the_end_of_a_session_redraws_them():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
-    for name in ("_live_screen", "_mirror", "_settings_screen", "_undo_session_setup", "_mark_history_dirty"):
+    for name in ("_live_screen", "_mirror", "_session_manager", "_settings_screen", "_undo_session_setup",
+                 "_mark_history_dirty"):
         setattr(app, name, MagicMock())
     app._finalize_stop_ui({}, None)
     app._settings_screen.refresh_profile_counts.assert_called_once_with()

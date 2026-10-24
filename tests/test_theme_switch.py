@@ -356,7 +356,7 @@ def test_live_session_screen_repaints(old, new, screens):
     try:
         C.set_theme(new)
         _assert_repainted(screen, old, new, "idle")
-        screen._toggle_stats_mode()
+        screen.set_stats_mode("aggregate")
         _assert_repainted(screen, old, new, "stats card in the other mode")
         screen.show_overlay("Connecting...")
         _assert_repainted(screen, old, new, "connection overlay")

@@ -22,6 +22,7 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
 from app.crash_handler import CrashDialog, _themed_makers
+from app.session.manager import LiveScore
 from app.settings.registry import Setting, SettingsStore
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import startup_text_size, text_size_setting
@@ -376,9 +377,17 @@ def _frames(n: int = 6) -> None:
         EventLoop.idle()
 
 
+# The widest values the stats bar shows: a slot that can't hold one runs it into the next (#113).
+WIDE_SCORE = LiveScore(value=188, target=120, streak=3599, average=187.55, segmented=True, time_above=3599,
+                       longest_streak=3599)
+
+
 def _session_states(screen):
     yield "", None
     yield " a 105 min timer", lambda: screen.refresh_duration_preset(True, 105)
+    yield " a filled stats bar", lambda: (screen.graph.set_series_name("custom_formula", "Alpha calm, evening"),
+                                          screen.set_training_series("custom_formula"), screen.update_stats(WIDE_SCORE))
+    yield " its AVG side", lambda: screen.set_stats_mode("aggregate")
     yield " saved card", lambda: screen.show_summary(
         1, {"duration": 1500, "threshold_used": 60, "avg_shamatha": 72, "time_above_threshold": 610,
             "longest_streak": 270}, title="2026-10-10 07:30 - Mock with a name too long for one line")

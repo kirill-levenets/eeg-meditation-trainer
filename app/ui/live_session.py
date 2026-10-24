@@ -17,12 +17,13 @@ from kivy.uix.widget import Widget
 
 from app.eeg.band_spec import BAND_KEYS, GROUP_NAMES, group_powers
 from app.logger import logger
+from app.session.manager import NO_SCORE, LiveScore
 from app.ui.hooks import Hook, wire
 from app.ui.raw_eeg_screen import (
     GraphAwareScrollView,
     ScrollableGraphWidget,
 )
-from app.ui.session_labels import session_score_rows
+from app.ui.session_labels import average_text, session_score_rows
 from app.ui.theme import (
     ICONS_AVAILABLE,
     C,
@@ -131,25 +132,16 @@ def _compute_graph_height_adaptive(
     return max(viewport_h, min_graph_floor)
 
 
-def _format_stats_slots(
-    mode: str, metrics: dict, stats: dict
-) -> tuple[list[str], list[str]]:
-    """Return (titles, values) for the 5 bottom-row slots."""
+def _format_stats_slots(mode: str, name: str, score: LiveScore) -> tuple[list[str], list[str]]:
+    """(titles, values) of the stats bar's three slots, on the metric the session is scored on: LIVE, its value, the
+    threshold and the streak now; AVG, the end card's numbers so far (a program's average is its running segment's)."""
     if mode == "aggregate":
-        titles = ["Avg Sham", "Avg Med", ">Thresh", "\u226590", "Streak"]
-        values = [
-            f"{stats.get('avg_shamatha', 0.0):.1f}",
-            f"{stats.get('avg_meditation', 0.0):.1f}",
-            format_duration(int(stats.get("time_above_threshold", 0))),
-            format_duration(int(stats.get("time_shamatha_90", 0))),
-            format_duration(int(stats.get("longest_streak", 0))),
-        ]
-        return titles, values
-    # live mode (default)
-    titles = ["Shamatha", "Distraction", "Sinking", "NS Attn", "NS Med"]
-    keys = ["shamatha_score", "distraction", "sinking", "native_attention", "native_meditation"]
-    values = [str(int(round(metrics.get(k, 0)))) for k in keys]
-    return titles, values
+        average = "-" if score.average is None else average_text(score.average)
+        return (["Segment avg" if score.segmented else "Average", "Above threshold", "Longest streak"],
+                [average, format_duration(int(score.time_above)), format_duration(int(score.longest_streak))])
+    value = "-" if score.value is None else str(int(round(score.value)))
+    target = "-" if score.target is None else f"{score.target:g}"
+    return [name, "Threshold", "Streak"], [value, target, format_duration(int(score.streak))]
 
 
 def _cut_to_width(text: str, label) -> str:
@@ -281,9 +273,7 @@ class LiveSessionScreen(Screen):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.name = "live_session"
-        self._last_metrics: dict = {}
-        self._last_stats: dict = {}  # the session averages shown with them, for the AVG toggle
-        self._stats_failing = False
+        self._last_score = NO_SCORE  # what the stats bar shows, kept for the LIVE / AVG switch
         self._build_ui()
         # Scroll height tracking is persistent (the widget itself lives for the screen's lifetime)
         self._scroll.bind(height=self._reflow)
@@ -436,54 +426,29 @@ class LiveSessionScreen(Screen):
         for g in self._view_graphs("raw"):
             g.set_drawing_enabled(False)
 
-        # ── Stats row ──
-        stats_card = Card(
-            orientation="horizontal",
-            size_hint_y=None,
-            height=dp(56),
-            bg_color=C.BG_CARD,
-        )
+        # ── Stats row: three slots on the scored metric, and the LIVE / AVG switch ──
+        stats_card = Card(orientation="horizontal", size_hint_y=None, height=dp(64), bg_color=C.BG_CARD)
         self._stats_card = stats_card
-        self._stat_labels: dict[str, ThemedLabel] = {}
-        stat_items = [
-            ("shamatha_score", "Shamatha"),
-            ("distraction", "Distraction"),
-            ("sinking", "Sinking"),
-            ("native_attention", "NS Attn"),
-            ("native_meditation", "NS Med"),
-        ]
-        self._stat_title_labels: dict = {}
-        self._stat_keys_in_order = [k for k, _ in stat_items]
-        for key, title in stat_items:
+        self._stat_title_labels: list[ThemedLabel] = []
+        self._stat_labels: list[ThemedLabel] = []
+        for _slot in range(3):
             box = BoxLayout(orientation="vertical")
-            title_lbl = ThemedLabel(
-                text=title, font_size=F.capped(F.TINY, 1.1), color=C.TEXT_MUTED,  # "Distraction" in a fifth of 360 dp
-                size_hint_y=0.4,
-            )
-            value_lbl = ThemedLabel(
-                text="0", font_size=F.H2, bold=True,
-                color=C.TEXT,
-                size_hint_y=0.6,
-            )
-            box.add_widget(title_lbl)
-            box.add_widget(value_lbl)
-            self._stat_title_labels[key] = title_lbl
-            self._stat_labels[key] = value_lbl
+            title = ThemedLabel(font_size=F.capped(F.TINY, 1.1), color=C.TEXT_MUTED, size_hint_y=0.4, halign="center",
+                                valign="middle", shorten=True, shorten_from="right")
+            title.bind(size=title.setter("text_size"))  # a long formula name is cut, not run into the next slot
+            value = ThemedLabel(font_size=F.capped(F.H2), bold=True, color=C.TEXT, size_hint_y=0.6)  # "59m 59s"
+            box.add_widget(title)
+            box.add_widget(value)
+            self._stat_title_labels.append(title)
+            self._stat_labels.append(value)
             stats_card.add_widget(box)
 
         self._stats_mode = "live"
-        toggle_box = BoxLayout(orientation="vertical", size_hint_x=None, width=dp(56))
-        toggle_box.add_widget(Widget())  # spacer, matches title_lbl size_hint_y=0.4
-        self._btn_stats_toggle = StyledButton(
-            text="LIVE",
-            size_hint_y=0.6,
-            font_size=F.capped(F.SMALL),  # the stat strip's toggle, as short as its titles
-            bg_color=C.BG_CARD,
-        )
-        toggle_box.add_widget(self._btn_stats_toggle)
-        self._btn_stats_toggle.bind(on_release=self._toggle_stats_mode)
-        stats_card.add_widget(toggle_box)
-        self._apply_stats_mode_styling()
+        self._stats_toggle = ChoiceToggle([("live", "LIVE"), ("aggregate", "AVG")], "live", self._choose_stats_mode,
+                                          button={"size_hint_y": 1, "font_size": F.capped(F.SMALL)},
+                                          orientation="vertical", size_hint_x=None, width=dp(56), spacing=dp(2))
+        stats_card.add_widget(self._stats_toggle)
+        self._render_stats()
 
         # Scrollable body: graph + stats
         self._scroll = GraphAwareScrollView(size_hint=(1, 1), do_scroll_x=False)
@@ -754,6 +719,7 @@ class LiveSessionScreen(Screen):
         if key is not None:
             self._graph.set_gradient_series(key)
         self._rebuild_metric_legend(self._graph.visible_keys())
+        self._render_stats()  # the bar's first title names it
 
     @property
     def graph(self) -> ScrollableGraphWidget:
@@ -800,9 +766,8 @@ class LiveSessionScreen(Screen):
 
     def clear_readout(self) -> None:
         """Back to the readout a fresh screen shows: no session's numbers, timer, start time, state or alert."""
-        self._last_metrics = {}
-        self._last_stats = {}
-        self._render_stats({}, {})
+        self._last_score = NO_SCORE
+        self._render_stats()
         self._start_time_str = ""
         self._graph.set_start_wall_time(None)
         self._timer_label.text = "00:00"
@@ -863,18 +828,9 @@ class LiveSessionScreen(Screen):
         self._shamatha_rect.pos = (cx - w / 2, cy - h / 2)
         self._shamatha_rect.size = (w, h)
 
-    def update_stats(self, metrics: dict[str, float]) -> None:
-        self._last_metrics = metrics
-        app = App.get_running_app()
-        try:
-            self._last_stats = app._session_manager.compute_statistics() if app is not None else {}
-            self._stats_failing = False
-        except Exception:
-            if not self._stats_failing:  # once until it recovers: this runs at 2 Hz
-                logger.exception("Session averages could not be computed")
-            self._stats_failing = True
-            self._last_stats = {}
-        self._render_stats(metrics, self._last_stats)
+    def update_stats(self, score: LiveScore) -> None:
+        self._last_score = score
+        self._render_stats()
 
     def update_device_status(
         self, connected: bool, device_name: str = "", connecting: bool = False
@@ -1208,8 +1164,8 @@ class LiveSessionScreen(Screen):
     def summary_session_id(self):
         return self._summary_session_id
 
-    def _toggle_stats_mode(self, *_args) -> None:
-        self.set_stats_mode("aggregate" if self._stats_mode == "live" else "live")
+    def _choose_stats_mode(self, mode: str) -> None:
+        self.set_stats_mode(mode)
         try:
             App.get_running_app()._save_user_settings()
         except Exception:
@@ -1218,19 +1174,12 @@ class LiveSessionScreen(Screen):
     def set_stats_mode(self, mode: str) -> None:
         """Show the stats strip as live values or session averages, redrawn at once."""
         self._stats_mode = mode if mode in ("live", "aggregate") else "live"
-        self._apply_stats_mode_styling()
-        self._render_stats(self._last_metrics, self._last_stats)
+        self._stats_toggle.show(self._stats_mode)
+        self._render_stats()
 
-    def _apply_stats_mode_styling(self) -> None:
-        active = self._stats_mode == "aggregate"
-        try:
-            self._btn_stats_toggle.bg_color = C.PRIMARY if active else C.BG_CARD
-            self._btn_stats_toggle.text = "AVG" if active else "LIVE"
-        except Exception:
-            pass
-
-    def _render_stats(self, metrics: dict, stats: dict) -> None:
-        titles, values = _format_stats_slots(self._stats_mode, metrics=metrics, stats=stats)
-        for i, key in enumerate(self._stat_keys_in_order):
-            self._stat_labels[key].text = values[i]
-            self._stat_title_labels[key].text = titles[i]
+    def _render_stats(self) -> None:
+        """The bar on the series the legend marks as scored, by its name on the graph."""
+        name = self._graph.series_name(self._training_key) if self._training_key else "Score"
+        titles, values = _format_stats_slots(self._stats_mode, name, self._last_score)
+        for title, value, title_text, value_text in zip(self._stat_title_labels, self._stat_labels, titles, values):
+            title.text, value.text = title_text, value_text

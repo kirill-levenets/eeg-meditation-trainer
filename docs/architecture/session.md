@@ -7,6 +7,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 - **Session lifecycle** (`app/session/manager.py`): the Start/Pause/Resume/Stop state machine.
   `SessionManager` holds the elapsed time, scores each tick (`add_metric`) and computes the end stats (`compute_statistics`); the app wires it to the stream, engine, audio and recorder.
+  `live_score()` is the score so far from running totals (the last tick's value and target, the streaks, the time above, the average since the program's segment began or the session started), for the stats bar every tick.
   It tracks `time_shamatha_90` (time with the shamatha score >= 90, independent of the user's threshold).
   `SessionManager.stop(reason)` plays a short warble alert only for **failure** terminations (`stale_data`, `bt_lost`, `error`); `user` and `timer` are planned stops and stay silent (`timer` plays its own gong).
 - The session tick runs on a Python daemon thread (`SessionTick`) instead of Kivy `Clock`, so EEG compute, audio volume updates and DB flushes continue while the Android screen is locked.

@@ -92,7 +92,7 @@ With no active user the first-run popup (the user gate) is shown.
     `padding=` fixes the sides instead;
   - where the box can't grow with its text (a fixed strip of columns, a status line), the text is `F.capped(size)`: it follows the text size up to `F.CAPPED_MAX` (120 %), or a cap of its own.
     Capped: the Session screen's status line and timer length (the bottom bar's width is fixed: grown to 150 %, "105m" would squeeze Start onto two lines on the phone);
-    its stat strip's titles (110 %, "Distraction" in a fifth of a 360 dp phone) and LIVE toggle; a program's segment row and its header.
+    its stats bar's titles (110 %, "Above threshold" in a third of a 360 dp phone), values and LIVE / AVG switch; a program's segment row and its header.
     Everything else grows to 150 %.
     A cap is added only where a test fails without it.
 
@@ -113,7 +113,7 @@ With no active user the first-run popup (the user gate) is shown.
 - **Icons** (`app/assets/fonts/materialdesignicons-webfont.ttf`): Material Design Icons font, registered as `'Icons'`; the `ICONS_AVAILABLE` flag allows a graceful fallback if the font is missing.
 - **App icons** (`app/assets/icons/`): Generated EEG brainwave icon (512/192/128/48 PNG + ICO + ICNS), presplash for Android.
 - **Shared widgets** (`widgets/`): `UserPickerForm` (the first-run popup and Settings → User Profile): the existing profiles, a name input, and for a duplicate name an inline "Use existing 'X'" / "Change name" choice.
-  `ChoiceToggle` (`widgets/choice_toggle.py`) is a switch whose every position shows what it picks: one button per choice, the chosen one filled and bold, the others muted on the card;
+  `ChoiceToggle` (`widgets/choice_toggle.py`) is a switch whose every position shows what it picks: one button per choice, the chosen one filled and bold, the others outlined and muted, so they read on a card as on the screen;
   the Session screen's Metrics / Raw EEG and History's Cal / 14d use it, each with its own button size.
   `LoadingOverlay` (`widgets/loading_overlay.py`) is the app-global modal spinner (status + animated dots on the theme's `ModalPanel` over a dim);
   it is mounted by wrapping the app root in a `FloatLayout` and shown via `EEGMeditationApp.show_loading(text, delay=0.0)`/`hide_loading()`.

@@ -16,7 +16,8 @@ def test_both_positions_are_shown_with_the_chosen_one_filled():
     toggle = _toggle([])
     assert [b.text for b in reversed(toggle.children)] == ["LIVE", "AVG"]
     assert _filled(toggle) == ["live"]
-    assert list(toggle.buttons["aggregate"].text_color) == list(C.TEXT_SECONDARY)
+    other = toggle.buttons["aggregate"]
+    assert other.outline and list(other.text_color) == list(other.bg_color) == list(C.TEXT_SECONDARY)
 
 
 def test_a_tap_on_the_other_position_chooses_it():

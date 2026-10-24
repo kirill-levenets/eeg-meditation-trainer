@@ -1,5 +1,6 @@
 import json
 import time
+from dataclasses import dataclass
 from enum import Enum
 
 from app.logger import logger
@@ -12,6 +13,22 @@ class SessionState(Enum):
     PAUSED = "PAUSED"
     FINISHED = "FINISHED"
 
+
+
+@dataclass(frozen=True)
+class LiveScore:
+    """The session's score as the stats bar shows it; value and target are None before its first scored tick."""
+
+    value: float | None  # the last tick's, on the metric it was scored on
+    target: float | None
+    streak: float
+    average: float | None  # since the segment began (a program scores each on its own metric), else the session's
+    segmented: bool  # a program's: the average is its running segment's
+    time_above: float
+    longest_streak: float
+
+
+NO_SCORE = LiveScore(None, None, 0.0, None, False, 0.0, 0.0)
 
 
 def elapsed_clock(seconds: float) -> str:
@@ -33,6 +50,10 @@ class SessionManager:
         self._goal = GoalAccrual()  # time above / longest streak on the scored metric
         self._score_sum: float = 0.0  # the scored metric's per-tick values, for avg_score
         self._score_ticks: int = 0
+        self._segment_sum: float = 0.0  # the same since the program's segment began, for the live average
+        self._segment_ticks: int = 0
+        self._segmented = False
+        self._last_scored: tuple[float, float] | None = None  # the last tick's (value, target)
         self._time_shamatha_90: float = 0.0
         self._threshold_used: int = 50  # at Start: the session row's threshold_used
         self._threshold: float = 50  # in force: the Settings threshold, which can change mid-session
@@ -49,6 +70,11 @@ class SessionManager:
         """Score the session on this metric from now on: against `target` (a program segment), else the threshold."""
         self._active_metric = metric_key
         self._active_target = target
+
+    def start_segment(self, metric_key: str, target: float) -> None:
+        """A program segment begins: scored on its metric against its target, its live average from nothing."""
+        self.set_active_goal(metric_key, target)
+        self._segment_sum, self._segment_ticks, self._segmented = 0.0, 0, True
 
     @property
     def threshold(self) -> float:
@@ -152,6 +178,9 @@ class SessionManager:
         extend_steps(self._target_steps, self._score_ticks, goal)
         self._score_sum += value
         self._score_ticks += 1
+        self._segment_sum += value
+        self._segment_ticks += 1
+        self._last_scored = (value, goal)
         if metric.get("shamatha_score", 0) >= 90:
             self._time_shamatha_90 += 0.5
         return {"score_key": self._active_metric, "score_value": value, "score_target": goal}
@@ -202,10 +231,19 @@ class SessionManager:
             "score_targets": json.dumps([target for _tick, target in self._target_steps]) if self._target_steps else "",
         }
 
+    def live_score(self) -> LiveScore:
+        """The score so far, from running totals: the stats bar reads it every tick."""
+        value, target = self._last_scored or (None, None)
+        average = self._segment_sum / self._segment_ticks if self._segment_ticks else None
+        return LiveScore(value, target, self._goal.current_streak, average, self._segmented, self._goal.time_above,
+                         self._goal.longest_streak)
+
     def _reset_scoring(self) -> None:
         self._goal = GoalAccrual()
         self._score_sum = 0.0
         self._score_ticks = 0
+        self._segment_sum, self._segment_ticks, self._segmented = 0.0, 0, False
+        self._last_scored = None
         self._target_steps = []
 
     def reset(self) -> None:

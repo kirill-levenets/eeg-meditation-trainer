@@ -19,6 +19,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   The line coloured is now the one the session trains (the metric that drives the feedback: Shamatha, a custom formula, or a program segment's), not always Shamatha, and History colours the metric a session was scored on.
   The gradient now spans the graph's whole 0 to 200 axis (it ran 0 to 100), and every part of it reads at least 3:1 on the current theme: Blue › Red's yellow nearly vanished on the light themes.
 
+### Changed
+
+- **The Session screen's stats row follows the metric the session is scored on** (#113), as the end-of-session card does.
+  LIVE shows its value, the threshold and the current streak; AVG the average, the time above the threshold and the longest streak.
+  It used to show Shamatha and four fixed values, and its averages were Shamatha's even when a session trained a formula.
+  In a program it follows each segment, its average the running segment's.
+  LIVE and AVG are both shown, the chosen one filled; the Metrics / Raw EEG and Cal / 14d switches look the same.
+  Distraction, Sinking and the NeuroSky values stay available as graph series.
+
 ### Removed
 
 - **History's All Users view**: no screen could open it since the Profile screen went (#48).
@@ -29,6 +38,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **The Session screen's stats row ran its values together at a larger text size** (#113): at Large or Larger on a phone, an average touched the time beside it ("82.41m 00s").
+  The row now has three wider slots whose text keeps to them.
 - **Settings › User Profile showed old session counts** (#113): a profile's count changed only when profiles were switched, created or deleted.
   It is now read again each time Settings opens and when a session ends, and it counts the sessions History lists, so a running session joins it when it ends.
 - **A program segment whose formula couldn't run played maximum noise** (#102):

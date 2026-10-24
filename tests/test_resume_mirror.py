@@ -325,7 +325,7 @@ def test_resume_refreshes_stats_state_and_timer():
     EEGMeditationApp._refresh_ui_after_resume(app)
     ls = app._live_screen
 
-    ls.update_stats.assert_called_once_with(app._mirror.last_metrics)
+    ls.update_stats.assert_called_once_with(app._session_manager.live_score())  # the score kept while locked
     ls.update_state.assert_called_once_with("Shamatha")
     ls.update_timer.assert_called_once_with("1:23")
 

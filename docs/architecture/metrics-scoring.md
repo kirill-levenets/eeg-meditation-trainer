@@ -78,7 +78,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   For a program it sets `"program"`, the name the program had when the session started (`ProgramRun.name`, `"Program"` if unsaved; Settings may load or save another during the session) and a NULL `avg_score`.
   `ProgramRun.tick` (called in `_update_tick`, program mode only) detects a boundary crossing with the pure `ProgramRun.transition` helper;
   `_enter_segment` then fires the prior segment's end cue (`AudioEngine.play_transition_cue()` chime, or warble), sets the **transient** `audio_key` to the segment's metric key (precomputed by `begin`);
-  it also calls `set_active_goal` and moves the legend marker.
+  it also calls `start_segment` (`set_active_goal`, and the live average starts over: a program's segments differ in metric) and moves the legend marker.
   `audio_key` must not overwrite the user's persisted `_audio_metric_key`: a program slot would leak into the baseline, and a later simple session would read that absent key as 0 → constant max noise.
   Every program custom line is evaluated every tick (persistent `formula_evs`, see [programs.md](programs.md)).
   Auto-stop reuses the timer-expiry path: the program total seeds the timer at session start.

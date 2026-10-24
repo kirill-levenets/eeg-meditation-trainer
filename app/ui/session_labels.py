@@ -40,7 +40,7 @@ def session_title(session: dict) -> str:
     return f"{when} - {label}" if label else when
 
 
-def _average(value) -> str:
+def average_text(value) -> str:
     """An average as History's row, the session detail and the end card all show it."""
     return f"{value or 0:.0f}"
 
@@ -52,10 +52,10 @@ def session_stats_line(session: dict) -> str:
     duration = format_duration(int(session.get("duration", 0) or 0))
     score = recorded_score(session)
     if score is None:
-        return f"Shamatha {_average(session.get('avg_shamatha'))} · {duration}"
+        return f"Shamatha {average_text(session.get('avg_shamatha'))} · {duration}"
     _key, name, avg = score
     # No average for a program (one metric per segment, on different scales) or a session with no scored tick.
-    parts = [name if avg is None else f"{name} {_average(avg)}", duration]
+    parts = [name if avg is None else f"{name} {average_text(avg)}", duration]
     streak = int(session.get("longest_streak", 0) or 0)
     if streak:
         parts.append(f"Streak {format_duration(streak)}")
@@ -91,9 +91,9 @@ def session_score_rows(session: dict) -> list[tuple[str, str]]:
     threshold = session.get("threshold_used", 0) or 0
     score = recorded_score(session)
     if score is None:
-        return [("Avg Shamatha", _average(session.get("avg_shamatha"))), ("Threshold Used", str(threshold))]
+        return [("Avg Shamatha", average_text(session.get("avg_shamatha"))), ("Threshold Used", str(threshold))]
     key, name, avg = score
     if key == "program":
         return [("Metric", name if name == "Program" else f"{name} (program)"), ("Threshold", "Per segment")]
-    average = [] if avg is None else [("Average", _average(avg))]  # None: no tick was scored
+    average = [] if avg is None else [("Average", average_text(avg))]  # None: no tick was scored
     return [("Metric", name), *average, ("Threshold", _targets_text(session))]

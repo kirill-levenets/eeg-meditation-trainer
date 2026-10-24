@@ -1280,7 +1280,7 @@ class EEGMeditationApp(App):
             self._mirror.reload_into(self._live_screen)
         except Exception:
             logger.exception("graph reload on stop failed")
-        self._live_screen.update_stats(self._mirror.last_metrics)  # the whole session's averages: no tick ran while locked
+        self._live_screen.update_stats(self._session_manager.live_score())  # the whole session's: no tick ran while locked
         self._undo_session_setup()
         self._live_screen.update_state("FINISHED")
         # Sync the header timer to the final duration (it froze at lock time).
@@ -1685,9 +1685,10 @@ class EEGMeditationApp(App):
         def _ui_update(
             m=metrics, rs=raw_sample, ef=elapsed_fmt, mp=marker_pending,
             sa=self._shamatha_active, sc=sham_changed, sk=self._scored_mark(scored), tg=target,
+            score=self._session_manager.live_score(),
         ) -> None:
             self._live_screen.graph.add_point(m, threshold=tg)
-            self._live_screen.update_stats(m)
+            self._live_screen.update_stats(score)
             self._live_screen.update_state(m.get("state", "Neutral"))
             if sc:
                 self._live_screen.set_shamatha(sa)
@@ -2699,7 +2700,7 @@ class EEGMeditationApp(App):
         try:
             self._mirror.reload_into(self._live_screen)
             if self._mirror.last_metrics:
-                self._live_screen.update_stats(self._mirror.last_metrics)
+                self._live_screen.update_stats(self._session_manager.live_score())
                 self._live_screen.update_state(self._mirror.last_state)
                 self._live_screen.set_shamatha(self._shamatha_active)
         except Exception:

@@ -153,7 +153,7 @@ class ProgramRun:
             line_name = program_line_name(formula)
         target = segment_target(seg)
         self.audio_key = metric_key
-        self._session_manager.set_active_goal(metric_key, target)
+        self._session_manager.start_segment(metric_key, target)
         self._audio.set_threshold(target)
         if 0 <= idx < len(self._feedback_ids):
             self._audio.set_active_feedback(self._feedback_ids[idx])
