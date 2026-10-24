@@ -49,16 +49,22 @@ class FormulaSettings:
         for i, (name, ev) in enumerate(zip(self._formulas.names, self._formulas.evaluators)):
             self._section.set_formula_slot(i, name, ev.formula)
 
-    def on_slot_change(self, idx: int, name: str, formula: str) -> None:
-        """Apply a slot's name+formula; a valid one shows its line (you typed a formula, you want to see it). A
-        profile's load goes through `load`, which leaves visibility to the saved series selection."""
+    def on_slot_change(self, idx: int, name: str, formula: str) -> str:
+        """Apply a slot's name+formula; a valid one shows its line (you typed a formula, you want to see it), and one
+        that doesn't compile leaves the slot as it was and returns why. A profile's load goes through `load`, which
+        leaves visibility to the saved series selection."""
         ev = self._formulas.evaluators[idx]
         key = FORMULA_KEYS[idx]
         # The slot the sound is set to is what a running session is scored on (or its shamatha fallback, while empty).
         if (key == self._audio_key() and formula != ev.formula
                 and self._scoring_locked("changing the formula it is scored on")):
             self._section.set_formula_slot(idx, self._formulas.names[idx], ev.formula)
-            return
+            return ""  # the refusal says why itself
+        if formula:
+            _, error = compile_formula(formula)
+            if error:
+                self._section.set_formula_slot_status(idx, f"Error: {error}", is_error=True)
+                return error
         self._formulas.names[idx] = name or default_name(idx)
         self._graph.set_series_name(key, self._formulas.names[idx])
         if not formula:
@@ -67,17 +73,14 @@ class FormulaSettings:
             self._section.set_formula_slot_status(idx, "Formula cleared")
             logger.info(f"Custom formula slot {idx} cleared")
         else:
-            ok, err = ev.set_formula(formula)
-            if ok:
-                self._graph.set_visible(key, True)  # fires the graph's visibility callback → legend rebuilds
-                self._section.set_formula_slot_status(idx, "Formula active")
-                logger.info(f"Custom formula slot {idx} applied: {formula}")
-            else:
-                self._graph.set_visible(key, False)
-                self._section.set_formula_slot_status(idx, f"Error: {err}", is_error=True)
+            ev.set_formula(formula)
+            self._graph.set_visible(key, True)  # fires the graph's visibility callback → legend rebuilds
+            self._section.set_formula_slot_status(idx, "Formula active")
+            logger.info(f"Custom formula slot {idx} applied: {formula}")
         uid = self._user_id()
         if uid:
             self.persist(uid)
+        return ""
 
     def on_save(self, idx: int, name: str, formula: str) -> None:
         """Save a slot's formula to the user's saved library, named by the slot. One that doesn't compile is refused:
@@ -117,9 +120,13 @@ class FormulaSettings:
             self.on_slot_change(slot, name, formula)
 
     def assign_saved(self, idx: int, entry: dict) -> None:
-        """Assign a saved {name, formula} entry to slot idx, show it, and persist."""
-        self.on_slot_change(idx, entry.get("name", ""), entry.get("formula", ""))
+        """Assign a saved {name, formula} entry to slot idx, show it, and persist. One that doesn't compile (saved
+        before Save checked) leaves the slot as it was, and a popup says why: the picker shows no slot status."""
+        name = entry.get("name", "")
+        error = self.on_slot_change(idx, name, entry.get("formula", ""))
         self._section.set_formula_slot(idx, self._formulas.names[idx], self._formulas.evaluators[idx].formula)
+        if error:
+            self._info("Can't use this formula", f'"{name}" can\'t run: {error}')
 
     def on_delete(self, index: int) -> None:
         """Delete a saved formula, after a confirmation as a saved program's delete asks."""

@@ -36,6 +36,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **The formulas Export wrote where they couldn't be opened on Android** (#102): Settings → Custom Formula's export went to the app's private storage.
   It now goes to `Documents/EEGMeditation/` (on a computer, `~/Documents/EEGMeditation/`), and a message says where it went, or why it failed.
   Without an active profile, Save and Export now ask for one, as Load and Delete do, instead of a slot's status line reading "No user selected".
+- **A formula with an error renamed the slot it was put into** (#102): **Apply**, a tap in **Saved Formulas** or **Choose…** gave the slot the new name, and saved it, while the slot kept running its old formula.
+  The slot now stays as it was, and **Choose…** says why in a message.
 - **The graph's series list kept a formula slot's old name after Choose…** (#102): choosing a saved formula renamed the line and the legend, but its row in the list kept the old name until the list was reopened.
   On a fullscreen graph the legend kept it too; it now follows every rename and every series shown or hidden.
 - **The in-app help was always in English, partly out of date, and drew its menu paths as empty boxes**:

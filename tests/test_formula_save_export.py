@@ -1,5 +1,5 @@
-"""Settings › Custom Formula's Save and Export (#102): a formula that doesn't compile isn't saved, Export reaches the
-Documents folder and says so in a popup, and both ask for a profile as Load and Delete do."""
+"""Settings › Custom Formula (#102): a formula that doesn't compile isn't saved and doesn't change a slot, Export
+reaches the Documents folder and says so in a popup, and Save and Export ask for a profile as Load and Delete do."""
 import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -42,6 +42,23 @@ def test_a_formula_that_compiles_is_saved(make):
     fs, _app, db, uid = make()
     fs.on_save(0, "Alpha", "alpha1 * 2")
     assert db.get_saved_formulas(uid) == [{"name": "Alpha", "formula": "alpha1 * 2"}]
+
+
+@pytest.mark.parametrize("via", ["apply", "choose"])
+def test_a_formula_that_doesnt_compile_leaves_the_slot_as_it_was(make, via):
+    fs, app, db, uid = make()
+    fs.on_slot_change(0, "Mine", "alpha1")
+    saved = db.get_user_json_setting(uid, "active_formulas")
+    fs._graph.reset_mock()
+    if via == "apply":
+        assert fs.on_slot_change(0, "Broken", "alpha1 +").startswith("Syntax error")
+    else:
+        fs.assign_saved(0, {"name": "Broken", "formula": "alpha1 +"})  # saved before Save checked
+        assert app._info_popup.call_args.args[0] == "Can't use this formula"  # the picker shows no slot status
+    assert (app._formulas.names[0], app._formulas.evaluators[0].formula) == ("Mine", "alpha1")
+    fs._graph.set_series_name.assert_not_called()
+    fs._graph.set_visible.assert_not_called()  # its line stays as it was
+    assert db.get_user_json_setting(uid, "active_formulas") == saved
 
 
 @pytest.mark.parametrize("action, call", [("save a formula", lambda fs: fs.on_save(0, "A", "alpha1")),

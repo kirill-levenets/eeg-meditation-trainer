@@ -25,6 +25,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   a slot's apply, the saved formulas' save/load/delete/export, and the profile's load (slots, graph names, Settings inputs) and persist.
   Whether a formula can run is one check, `custom_formula.compile_formula` (an evaluator, or None and why), shared by Save, a slot and a program's plan.
   Save refuses a formula that doesn't compile, since a program segment can pick any saved formula ([programs](programs.md#live-series)).
+  A slot's Apply, a tap in Saved Formulas and Choose… leave the slot as it was when the formula doesn't compile: `on_slot_change` checks before it renames, and returns the error;
+  `assign_saved` (Choose…) shows it in a popup, since the picker shows no slot status.
   Export writes the library to a private file and delivers it with `copy_to_documents` ([storage](storage.md#exports-to-shared-storage)): `Documents/EEGMeditation/` through MediaStore on Android, `~/Documents/EEGMeditation/` on desktop.
   A popup says where (`info`, the app's `_info_popup`), as the backup's does: slot 1's status line is far from the button and clipped at the larger text sizes.
   Each tick `evaluate_into` writes every valid slot into `metrics` through `custom_formula.evaluate_series`, the same function a running program's formulas use.
