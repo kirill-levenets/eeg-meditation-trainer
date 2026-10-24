@@ -388,6 +388,17 @@ def test_starts_timer_part_draws_its_text_as_start_does(theme, screens):
     finally:
         pill.disabled = start.disabled = False
 
+
+@pytest.mark.parametrize("theme", list(THEMES))
+def test_an_outlined_button_keeps_its_card_fill_while_pressed(theme):
+    """Its text is often the border's colour (a switch's unchosen side, a profile's X): a fill of that colour hid it."""
+    C.set_theme(theme)
+    btn = StyledButton(text="AVG", outline=True, bg_color=C.TEXT_SECONDARY, text_color=C.TEXT_SECONDARY)
+    btn.state = "down"
+    fill = next(i for i in btn.canvas.before.children if type(i).__name__ in ("Color", "ThemedColor"))
+    assert list(fill.rgba)[:3] == pytest.approx(list(C.BG_CARD)[:3])
+    assert _contrast(btn._label.color, fill.rgba) >= 3.0
+
 def test_a_popup_without_a_height_is_as_tall_as_its_content_capped():
     from kivy.uix.boxlayout import BoxLayout
     content = BoxLayout(orientation="vertical", size_hint_y=None)

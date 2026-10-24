@@ -38,6 +38,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **Pressing an outlined button hid its label** (#113): a profile's X, or a switch's unchosen side, filled with its own text colour while held; it now keeps its card fill and its border thickens.
 - **In a program, the scored line's colours jumped at each segment** (#113): the new segment's line took the gradient over the whole graph and the last segment's lost it.
   Each part of the graph now keeps the colouring of the line its segment trained, live, after a screen lock and in the session's detail in History.
 - **The timer length or "P" beside Start was hard to read** (#113): it was drawn in the theme's text colour on Start's green, light on light in the dark themes.
