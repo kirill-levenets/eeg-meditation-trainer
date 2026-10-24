@@ -40,6 +40,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   The slot now stays as it was, and **Choose…** says why in a message.
 - **Saved formulas could share a name** (#102): **Save** added a second formula under a name already in the library.
   Saving under an existing name now asks before overwriting it, as saving a program does.
+- **Exporting again on Android named the earlier file** (#102): Android keeps a file already in `Documents/EEGMeditation/` and stores the new one as "name (1)", while the message named the earlier file.
+  The message of a session's **Export CSV** and of the formulas' Export now names the file written.
 - **The graph's series list kept a formula slot's old name after Choose…** (#102): choosing a saved formula renamed the line and the legend, but its row in the list kept the old name until the list was reopened.
   On a fullscreen graph the legend kept it too; it now follows every rename and every series shown or hidden.
 - **The in-app help was always in English, partly out of date, and drew its menu paths as empty boxes**:

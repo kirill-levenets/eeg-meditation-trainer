@@ -122,3 +122,5 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 - A file the user exports to open elsewhere (a session's CSV on Android, the bulk sessions ZIP, the saved formulas) goes through `android_share.copy_to_documents(private_path, display_name=…)`:
   on Android through MediaStore into `Documents/EEGMeditation/`, with no storage permission; on desktop a copy into `~/Documents/EEGMeditation/` that replaces a file of the same name.
+  MediaStore keeps a file already there and stores a clashing name as "name (1)", so the helper reads the stored name back (`_stored_name`) and returns that path for the export's message;
+  a failed read-back returns the requested name, since the file is written.

@@ -109,12 +109,27 @@ def _copy_android_mediastore(private_path: str, subfolder: str,
         output_stream.flush()
         output_stream.close()
 
-        shared_path = f"Documents/{subfolder}/{display_name}"
+        shared_path = f"Documents/{subfolder}/{_stored_name(resolver, uri) or display_name}"
         logger.info(f"Copied to shared storage: {shared_path}")
         return shared_path
 
     except Exception as e:
         logger.error(f"MediaStore copy failed: {e}", exc_info=True)
+        return None
+
+
+def _stored_name(resolver, uri) -> str | None:
+    """The name MediaStore gave the file: one that clashes with a file already there is stored as "name (1).txt"."""
+    try:
+        cursor = resolver.query(uri, ["_display_name"], None, None, None)
+        if cursor is None:
+            return None
+        try:
+            return cursor.getString(0) if cursor.moveToFirst() else None
+        finally:
+            cursor.close()
+    except Exception as e:  # the file is written: report the name asked for rather than a failure
+        logger.warning(f"MediaStore name lookup failed: {e}")
         return None
 
 
