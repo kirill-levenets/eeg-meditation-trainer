@@ -95,8 +95,7 @@ def _program_ticks(program_json: str, rows: list[dict], formula_series: dict[str
     n = len(rows)
     plan = runnable_plan(program)
     record = _has_record(rows)
-    # The plan the session ran: a formula that can't compile scores Shamatha, where older builds scored its own line
-    # (read as 0); a record showing that line, or no record at all, is from one of them.
+    # Older builds scored a formula that can't compile on its own line: a record showing it, or none, is theirs.
     dead = set(plan.planned_keys) - set(plan.segment_keys)
     older = not record or bool(dead and any(r["score_key"] in dead for r in rows))
     keys = plan.planned_keys if older else plan.segment_keys

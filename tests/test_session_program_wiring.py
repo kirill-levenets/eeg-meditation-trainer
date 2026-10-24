@@ -161,8 +161,7 @@ def test_program_custom_formula_plots_and_marks():
 
 
 def test_a_segment_whose_formula_cant_run_drives_and_shows_shamatha():
-    # #102: a saved formula that doesn't compile got a series slot but no evaluator, so its key read 0 every tick:
-    # constant maximum noise, the segment scored against 0, the legend marking an empty line.
+    # Its segments sound, show and are scored on Shamatha, never on a key nothing computes (0: constant max noise).
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._audio = MagicMock()
     app._session_manager = MagicMock()
@@ -173,7 +172,7 @@ def test_a_segment_whose_formula_cant_run_drives_and_shows_shamatha():
     app._live_screen.graph = graph
     app._formulas = FormulaSlots()
     app._audio_metric_key = "shamatha_score"
-    app._program_run = run = make_run(app)
+    app._program_run = run = make_run(app, info=MagicMock())
     run.begin(SessionProgram([{"minutes": 1, "target": 120, "formula": {"name": "Broken", "formula": "alpha1 +"}},
                               {"minutes": 1, "target": 80, "formula": {"name": "AlphaPwr", "formula": "alpha1"}}]),
               [], "")
@@ -185,7 +184,7 @@ def test_a_segment_whose_formula_cant_run_drives_and_shows_shamatha():
     assert metrics.get(app._audio_drive_key(), 0) == 50  # what the tick sounds: shamatha, not 0
     app._session_manager.set_active_goal.assert_called_with("shamatha_score", 120)  # scored on what it sounds
     app._live_screen.set_training_series.assert_called_with("shamatha_score")
-    assert run.unrunnable == ["Broken"]  # the session's start tells the user
+    assert run._info.call_args.args[0] == "Formula error in this program"  # the session's start says which
     shown = {c.args[0]: c.args[1] for c in graph.set_visible.call_args_list}
     assert shown == {"shamatha_score": True, "program_formula": False, "program_formula_2": True}
     assert metrics["program_formula_2"] == 80.0  # the segment whose formula runs keeps its own line
@@ -198,13 +197,13 @@ def test_a_segment_whose_formula_cant_run_drives_and_shows_shamatha():
 ])
 def test_a_program_start_names_the_formulas_that_cant_run_in_a_popup(formulas, listed):
     # A toast is gone in two seconds and was clipped at the larger text sizes; a meditator may not be looking.
-    warn = MagicMock()
-    run = make_run(warn=warn)
+    info = MagicMock()
+    run = make_run(info=info)
     run.begin(SessionProgram([{"minutes": 1, "target": 50, "formula": f} for f in formulas]), [], "P")
     if listed is None:
-        warn.assert_not_called()
+        info.assert_not_called()
     else:
-        warn.assert_called_once_with("Formula error in this program", f"Can't run {listed}: Shamatha is used instead."
+        info.assert_called_once_with("Formula error in this program", f"Can't run {listed}: Shamatha is used instead."
                                      "\nSettings › Timer / Program edits the program.")
 
 

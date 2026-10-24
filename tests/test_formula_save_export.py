@@ -1,5 +1,5 @@
 """Settings › Custom Formula's Save and Export (#102): a formula that doesn't compile isn't saved, Export reaches the
-Documents folder the session exports use, and both ask for a profile as Load and Delete do."""
+Documents folder and says so in a popup, and both ask for a profile as Load and Delete do."""
 import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -22,7 +22,8 @@ def make(tmp_path):
         dbs.append(db)
         uid = db.create_user("A") if profile else None
         app = SimpleNamespace(_db=db, _formulas=FormulaSlots(), _current_user_id=uid,
-                              _require_user=MagicMock(return_value=uid), _audio_metric_key="shamatha_score")
+                              _require_user=MagicMock(return_value=uid), _audio_metric_key="shamatha_score",
+                              _confirm_action=MagicMock(), _info_popup=MagicMock())
         return make_formula_settings(app), app, db, uid
     yield build
     for db in dbs:
@@ -53,7 +54,7 @@ def test_save_and_export_without_a_profile_ask_for_one_as_load_and_delete_do(mak
 
 
 def test_export_delivers_to_documents_and_leaves_no_private_copy(make, tmp_path, monkeypatch):
-    fs, _app, db, uid = make()
+    fs, app, db, uid = make()
     db.add_saved_formula(uid, "Alpha", "alpha1 * 2")
     delivered = {}
 
@@ -65,12 +66,20 @@ def test_export_delivers_to_documents_and_leaves_no_private_copy(make, tmp_path,
     name = f"formulas_user_{uid}.txt"
     assert delivered == {name: "alpha1 * 2\n"}
     assert not os.path.exists(tmp_path / name)  # the private copy is gone once it's delivered
-    fs._section.set_formula_slot_status.assert_called_with(0, f"Exported to Documents/EEGMeditation/{name}")
+    # A popup, not slot 1's status line: it is far from the button, and clipped at the larger text sizes.
+    app._info_popup.assert_called_once_with("Export complete",
+                                            f"Exported 1 formula to:\nDocuments/EEGMeditation/{name}")
+
+
+def test_an_export_with_nothing_saved_says_so_in_a_popup(make):
+    fs, app, _db, _uid = make()
+    fs.on_export()
+    assert app._info_popup.call_args.args[0] == "Nothing to export"
 
 
 @pytest.mark.parametrize("failure, why", [("write", "No space left on device"), ("deliver", "see the log")])
 def test_an_export_that_fails_says_so_and_why(make, tmp_path, monkeypatch, failure, why):
-    fs, _app, db, uid = make()
+    fs, app, db, uid = make()
     db.add_saved_formula(uid, "Alpha", "alpha1")
     reports = []
     monkeypatch.setattr(formula_settings, "report_soft_error",
@@ -83,4 +92,5 @@ def test_an_export_that_fails_says_so_and_why(make, tmp_path, monkeypatch, failu
     fs.on_export()  # must not raise out of the button's handler
     assert [label for label, _ in reports] == ["formula_export_failed"]
     assert why in reports[0][1]
+    app._info_popup.assert_not_called()
     assert not os.path.exists(tmp_path / f"formulas_user_{uid}.txt")  # nothing left in app storage either

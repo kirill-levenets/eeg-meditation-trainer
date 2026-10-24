@@ -191,6 +191,7 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 · Session delete `_delete_sessions(ids)`
 · notes `_save_session_notes`
 · confirm `theme.confirm_popup` (via `_confirm_action`)
+· whether a formula can run `custom_formula.compile_formula`
 · message `make_message_popup` / `_info_popup`
 · list picker `make_scroll_popup`
 · sound source picker `settings_sections.common.open_source_picker`

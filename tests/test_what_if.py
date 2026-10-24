@@ -322,7 +322,7 @@ def test_an_older_session_without_a_record_on_a_formula_that_cant_run_is_not_sco
 
 
 def test_a_segment_whose_formula_couldnt_run_is_found_and_named_by_the_shamatha_it_scored():
-    # #102: the session drove that segment on Shamatha and recorded it so; the replay looked for the formula's line.
+    # The session drove that segment on Shamatha and recorded it so: the replay finds it there.
     program = [PROGRAM[0], {"minutes": 1, "target": 95, "formula": {"name": "Broken", "formula": "alpha1 +"}}]
     keys = ["shamatha_score"] * 235
     _stats, rows = _live(SEG1[5:] + SEG2, [90] * 115 + [95] * 120, keys)  # 5 ticks dropped: the switch at 115

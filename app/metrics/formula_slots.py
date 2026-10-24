@@ -3,7 +3,11 @@ of them."""
 import json
 from collections.abc import Callable
 
-from app.metrics.custom_formula import CustomFormulaEvaluator, evaluate_series
+from app.metrics.custom_formula import (
+    CustomFormulaEvaluator,
+    compile_formula,
+    evaluate_series,
+)
 
 FORMULA_KEYS: tuple[str, ...] = ("custom_formula", "custom_formula_2", "custom_formula_3")
 
@@ -84,9 +88,8 @@ def recorded_formulas(session: dict) -> tuple[dict, dict]:
             if not isinstance(slot, int) or not 0 <= slot < len(FORMULA_KEYS):
                 continue
             key = FORMULA_KEYS[slot]
-            ev = CustomFormulaEvaluator()
-            ev.set_formula(d.get("formula", "") or "")
-            if ev.is_valid:
+            ev, _ = compile_formula(d.get("formula", "") or "")
+            if ev is not None:
                 evaluators[key] = ev
                 names[key] = d.get("name") or default_name(slot)
     return evaluators, names

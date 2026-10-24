@@ -6,9 +6,9 @@ from app.ui.program_run import ProgramRun
 
 
 def make_run(app=None, *, program=None, name: str = "", audio_key: str = "", session_manager=None, audio=None,
-             live_screen=None, warn=None) -> ProgramRun:
-    """Its session manager, audio and live screen are the app's when it has them; its warning is the app's popup,
-    read when it warns."""
+             live_screen=None, info=None) -> ProgramRun:
+    """Its session manager, audio and live screen are the app's when it has them; its popup is the app's, read when
+    it shows one."""
     def dep(given, attr):
         if given is None:
             given = getattr(app, attr, None)
@@ -16,7 +16,7 @@ def make_run(app=None, *, program=None, name: str = "", audio_key: str = "", ses
 
     run = ProgramRun(dep(session_manager, "_session_manager"), dep(audio, "_audio"), dep(live_screen, "_live_screen"),
                      on_main=lambda fn: fn(), formula_vars=lambda raw, metrics: {**raw, **metrics},
-                     warn=warn or (MagicMock() if app is None else lambda title, msg: app._info_popup(title, msg)))
+                     info=info or (MagicMock() if app is None else lambda title, msg: app._info_popup(title, msg)))
     run.program = program
     run.name = name
     run.audio_key = audio_key

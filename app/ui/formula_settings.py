@@ -5,7 +5,7 @@ from collections.abc import Callable
 
 from app.crash_handler import report_soft_error
 from app.logger import logger
-from app.metrics.custom_formula import CustomFormulaEvaluator
+from app.metrics.custom_formula import compile_formula
 from app.metrics.formula_slots import (
     FORMULA_KEYS,
     FormulaSlots,
@@ -24,7 +24,8 @@ class FormulaSettings:
 
     def __init__(self, db, section, live_graph, formulas: FormulaSlots, *, user_id: Callable[[], int | None],
                  require_user: Callable[[str], int | None], scoring_locked: Callable[[str], bool],
-                 audio_key: Callable[[], str], confirm_saved_delete: Callable[..., None]) -> None:
+                 audio_key: Callable[[], str], info: Callable[[str, str], None],
+                 confirm_saved_delete: Callable[..., None]) -> None:
         self._db = db
         self._section = section  # Settings' FormulaSection
         self._graph = live_graph
@@ -33,6 +34,7 @@ class FormulaSettings:
         self._require_user = require_user
         self._scoring_locked = scoring_locked
         self._audio_key = audio_key
+        self._info = info
         self._confirm_saved_delete = confirm_saved_delete
 
     def persist(self, user_id: int) -> None:
@@ -86,9 +88,9 @@ class FormulaSettings:
         if not formula:
             self._section.set_formula_slot_status(idx, "Nothing to save", is_error=True)
             return
-        ok, err = CustomFormulaEvaluator().set_formula(formula)
-        if not ok:
-            self._section.set_formula_slot_status(idx, f"Error: {err}", is_error=True)
+        _, error = compile_formula(formula)
+        if error:
+            self._section.set_formula_slot_status(idx, f"Error: {error}", is_error=True)
             return
         # Fall back to a truncated formula as the display name when none is given.
         label = name or (formula[:40] + ("..." if len(formula) > 40 else ""))
@@ -134,14 +136,14 @@ class FormulaSettings:
         logger.info(f"Saved formula #{index} deleted")
 
     def on_export(self) -> None:
-        """Export the saved formulas to a text file where the user can open it, as the session exports deliver theirs:
-        Documents/EEGMeditation on Android (through MediaStore), ~/Documents/EEGMeditation on desktop."""
+        """Export the saved formulas to a text file where the user can open it, as the bulk session export delivers
+        its ZIP: Documents/EEGMeditation on Android (through MediaStore), ~/Documents/EEGMeditation on desktop."""
         uid = self._require_user("export formulas")
         if uid is None:
             return
         formulas = self._db.get_saved_formulas(uid)
         if not formulas:
-            self._section.set_formula_slot_status(0, "No formulas to export", is_error=True)
+            self._info("Nothing to export", "There are no saved formulas to export.")
             return
         name = f"formulas_user_{uid}.txt"
         private = os.path.join(os.path.dirname(self._db._db_path), name)
@@ -159,7 +161,7 @@ class FormulaSettings:
         if shared is None:
             report_soft_error("formula_export_failed", f"Couldn't export the formulas to Documents: {why}", force=True)
             return
-        self._section.set_formula_slot_status(0, f"Exported to {shared}")
+        self._info("Export complete", f"Exported {format_count(len(formulas), 'formula')} to:\n{shared}")
         logger.info(f"Exported {format_count(len(formulas), 'formula')} to {shared}")
 
     def refresh_saved(self) -> None:

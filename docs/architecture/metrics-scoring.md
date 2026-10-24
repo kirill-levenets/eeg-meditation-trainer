@@ -23,8 +23,10 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `FormulaSlots` (`app/metrics/formula_slots.py`, the app's `_formulas`) holds them: `evaluators[i]`, the display names `names[i]` (default `"Custom 1/2/3"`), and `for_key(key)`, which maps a series key to its `CustomFormulaEvaluator`.
   Settings → Custom Formula edits them through `FormulaSettings` (`app/ui/formula_settings.py`, the app's `_formula_settings`):
   a slot's apply, the saved formulas' save/load/delete/export, and the profile's load (slots, graph names, Settings inputs) and persist.
+  Whether a formula can run is one check, `custom_formula.compile_formula` (an evaluator, or None and why), shared by Save, a slot and a program's plan.
   Save refuses a formula that doesn't compile, since a program segment can pick any saved formula ([programs](programs.md#live-series)).
-  Export writes the library to a private file and delivers it with `copy_to_documents`, as a session's CSV is: `Documents/EEGMeditation/` through MediaStore on Android, `~/Documents/EEGMeditation/` on desktop.
+  Export writes the library to a private file and delivers it with `copy_to_documents` ([storage](storage.md#exports-to-shared-storage)): `Documents/EEGMeditation/` through MediaStore on Android, `~/Documents/EEGMeditation/` on desktop.
+  A popup says where (`info`, the app's `_info_popup`), as the backup's does: slot 1's status line is far from the button and clipped at the larger text sizes.
   Each tick `evaluate_into` writes every valid slot into `metrics` through `custom_formula.evaluate_series`, the same function a running program's formulas use.
   Slot names reach the graph via `graph.set_series_name(key, name)`.
   Active names and expressions persist as `active_formulas` (JSON list of `{name, formula}`, per user), the audio-driving slot index as `audio_formula_index` (flat KV string, per user).

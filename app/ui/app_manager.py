@@ -452,7 +452,7 @@ class EEGMeditationApp(App):
 
         self._live_screen = LiveSessionScreen()
         self._program_run = ProgramRun(self._session_manager, self._audio, self._live_screen, on_main=self._on_main,
-                                       formula_vars=self._eval_formula_vars, warn=self._info_popup)
+                                       formula_vars=self._eval_formula_vars, info=self._info_popup)
         self._settings_screen = SettingsScreen()
         self._history_screen = HistoryScreen()
         self._diary_screen = DiaryScreen()
@@ -467,7 +467,7 @@ class EEGMeditationApp(App):
             self._db, self._settings_screen.formulas, self._live_screen.graph, self._formulas,
             user_id=lambda: self._current_user_id, require_user=self._require_user,
             scoring_locked=self._scoring_locked, audio_key=lambda: self._audio_metric_key,
-            confirm_saved_delete=self._confirm_saved_delete)
+            info=self._info_popup, confirm_saved_delete=self._confirm_saved_delete)
         self._headset = Headset(
             self._db, self._real_stream, self._settings_screen.device, self._live_screen,
             user_id=lambda: self._current_user_id, refused_while_session_runs=self._refused_while_session_runs,

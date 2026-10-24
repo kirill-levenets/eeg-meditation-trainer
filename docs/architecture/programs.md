@@ -25,10 +25,11 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   It also carries **three** program-custom lines, `PROGRAM_FORMULA_KEYS = ("program_formula","program_formula_2","program_formula_3")` (colours `C.WARM`/`C.WARM2`/`C.WARM3`, scale 200), one per **distinct** custom formula in a program.
   `program_plan(prog)` (`app/session/session_program.py`, with `PROGRAM_FORMULA_KEYS`) returns `(program_keys, custom_slots, segment_keys)`:
   the set of series to show, the `(slot_key, custom_dict)` for each distinct custom (capped at 3), and the metric key each segment drives (a built-in key or its custom's slot).
-  `runnable_plan(prog)` is that plan as a session runs it: a custom formula that doesn't compile (`program_evaluators` arms none for it) gets no line, and its segments drive, show and are scored on `shamatha_score`.
+  `runnable_plan(prog)` is that plan as a session runs it: a custom formula that doesn't compile (`compile_formula` gives it no evaluator) gets no line, and its segments drive, show and are scored on `shamatha_score`.
   A slot nothing computes is absent from `metrics` and would read 0 → constant max noise; Settings → Custom Formula's Save refuses such a formula, but one saved before it can still be in a program.
   The plan keeps `program_plan`'s keys as `planned_keys`: older builds scored such a formula on its own slot, and the what-if replay reads their sessions by them ([session-detail](session-detail.md)).
-  `ProgramRun.begin` names the `unrunnable` formulas in a popup (`warn`, the app's `_info_popup`): it stays until read, as a meditator who pressed Start may not be looking.
+  `ProgramRun.begin` names the plan's `unrunnable` formulas in a popup (`info`, the app's `_info_popup`), a frame later so the start finishes its setup first:
+  it stays until read, as a meditator who pressed Start may not be looking.
   `ProgramRun` (`app/ui/program_run.py`, the app's `_program_run`) holds the running program: `active` from the start's `begin(prog, feedback_ids, name)` until `end()`.
   `begin` snapshots prior visibility, shows EXACTLY the runnable plan's keys (`show_program_series(graph, plan)` hides the rest), arms one persistent evaluator per custom that compiles into `formula_evs[slot]`, and stores each segment's metric key.
   Each program line is shown the **whole** program and evaluated every tick (`tick` runs `formula_evs` into `metrics[slot]` through `custom_formula.evaluate_series`, as the Settings formulas are).

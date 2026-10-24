@@ -53,8 +53,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   It lists a program's line only on the live graph while its program runs and computes it (`ProgramRun.computes(key)`: the program's valid custom formulas).
   Each graph carries a `graph_id` (`live_metrics`, `live_band`, `diary_metrics`, `diary_freq`, …) and its selection persists per graph as `graph_series_<graph_id>` (JSON, per user);
   the live metrics graph migrates legacy `toggle_<key>` rows when it has no JSON yet, other graphs default to all visible.
-  `set_visible` and `set_series_name` fire the graph's `on_series_change` hook, so the owning screen's legend (visible-filtered) follows any picker toggle, Choose…, restore or program segment.
-  While the graph is fullscreen, `GraphFullscreen` chains its own legend (`_series_changed` → `refresh_legend`) after the owner's handler and wires the owner's back on close.
+  `set_visible` and `set_series_name` fire the graph's `on_series_change` hook, so the owning screen's legend (visible-filtered) follows any picker toggle, Choose…, restore or program segment;
+  a fullscreen graph's legend follows it too ([Fullscreen](#fullscreen)).
   The formula slots' validity gate (`FormulaSlots.for_key(key).is_valid`) applies only to the live metrics graph: the detail's formula lines are recorded data and toggle freely.
 - **Scored line colours** (#94, `app/ui/line_colours.py`):
   one series per graph, `set_gradient_series(key)`, is drawn coloured by its value instead of its own colour, in the profile's `LINE_COLOURS`:
@@ -145,4 +145,6 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   into a full-window `FloatLayout` overlay on `self._float_root` with `size_hint=(1,1)` + `pos_hint={"x":0,"y":0}`, so it reaches every edge, where a `Popup` insets its content with chrome.
   Reparenting keeps the single `Window.on_mouse_down` bind and the live `add_point` feed, so a running session's graph updates live in fullscreen.
   While fullscreen the expand glyph is the close cross (`closes=True`); it, Android back and Esc (`_on_keyboard` → `GraphFullscreen.close`) restore the graph to its original parent and index and give it the expand glyph back.
+  While fullscreen, `GraphFullscreen` chains its own legend onto the graph's `on_series_change` (`_series_changed`: the owner's handler if one is wired, then `refresh_legend`) and wires the owner's handler back on close.
+  A handler wired to the graph while it is fullscreen would be replaced on close: only the owning screen wires it, once at build.
   **Capture `list(size_hint)`/`list(size)` copies before overriding**: they are live `ReferenceListProperty`s, and a bare reference tracks the `(1,1)` you set and breaks restore.

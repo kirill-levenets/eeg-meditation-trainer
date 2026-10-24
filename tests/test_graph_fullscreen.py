@@ -4,7 +4,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 
 from app.ui.graph_fullscreen import GraphFullscreen
-from app.ui.hooks import wire
+from app.ui.hooks import is_wired, wire
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.theme import StyledButton
 
@@ -56,8 +56,7 @@ class TestGraphFullscreen(unittest.TestCase):
         self.assertNotIn(overlay, app._root.children)
 
     def test_the_legend_follows_each_rename_and_toggle_and_close_hands_the_hook_back(self):
-        # #102: Choose renamed a formula slot's line, but the fullscreen legend kept the old name: it followed only the
-        # picker's toggle.
+        # The fullscreen legend follows every rename and toggle of its graph, as the owning screen's legend does.
         app = GraphFullscreen(FloatLayout())
         parent = BoxLayout()
         g = ScrollableGraphWidget(colors={"a": (1, 0, 0, 1), "b": (0, 1, 0, 1)}, scales={"a": 100.0, "b": 100.0})
@@ -80,6 +79,17 @@ class TestGraphFullscreen(unittest.TestCase):
         g.set_series_name("a", "Deep")
         self.assertEqual(len(owner), 3)
         self.assertIsNone(app._legend)
+
+    def test_a_graph_no_screen_listens_to_follows_too_and_close_leaves_it_unwired(self):
+        app, parent, g = self._make()
+        app.present(g)
+        g.set_series_name("a", "Calm")
+        self.assertTrue(any("Calm" in getattr(w, "text", "") for w in app._legend.walk()))
+        g._expand_callback(g)  # close
+        self.assertFalse(is_wired(g, "on_series_change"))
+        app.present(g)  # and again: the chain is set up afresh
+        g.set_series_name("a", "Deep")
+        self.assertTrue(any("Deep" in getattr(w, "text", "") for w in app._legend.walk()))
 
     def test_present_is_reentrant_guarded(self):
         app, parent, g = self._make()

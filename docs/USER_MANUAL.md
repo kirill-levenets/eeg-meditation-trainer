@@ -385,7 +385,7 @@ Three slots (**Formula 1**, **2** and **3**), each with:
 - **Save**: stores it in your formula library under the slot's name; a formula with an error isn't saved, and the status line shows the error
 
 **Saved Formulas** below the slots is your library: tap one to put it into the first empty slot (Formula 1 when all three are in use), or its **X** to delete it (after a confirmation).
-**Export to .txt** writes the library's formulas, one per line, to `Documents/EEGMeditation/formulas_user_<n>.txt` (on a computer, `~/Documents/EEGMeditation/`).
+**Export to .txt** writes the library's formulas, one per line, to `Documents/EEGMeditation/formulas_user_<n>.txt` (on a computer, `~/Documents/EEGMeditation/`), and a message says where.
 
 To put a saved formula into a slot without opening Settings, tap **Choose…** on that slot's row in the live metrics graph's series list.
 Settings → Threshold picks which slot drives the feedback sound.

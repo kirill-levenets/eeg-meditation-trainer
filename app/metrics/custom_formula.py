@@ -102,7 +102,7 @@ class CustomFormulaEvaluator:
         if len(formula) > _MAX_FORMULA_LEN:
             err = f"Formula too long (max {_MAX_FORMULA_LEN} chars)"
             self._last_error = err
-            logger.warning(f"Custom formula rejected: {err}")
+            logger.debug(f"Custom formula rejected: {err}")
             return False, err
 
         try:
@@ -110,14 +110,14 @@ class CustomFormulaEvaluator:
         except SyntaxError as e:
             err = f"Syntax error: {e.msg}"
             self._last_error = err
-            logger.warning(f"Custom formula syntax error: {err}")
+            logger.debug(f"Custom formula syntax error: {err}")
             return False, err
 
         # Validate AST nodes
         ok, err = self._validate_ast(tree.body)
         if not ok:
             self._last_error = err
-            logger.warning(f"Custom formula validation error: {err}")
+            logger.debug(f"Custom formula validation error: {err}")
             return False, err
 
         self._formula = formula
@@ -125,7 +125,7 @@ class CustomFormulaEvaluator:
         self._last_error = ""
         self._history.clear()
         self._avg_exprs = self._collect_avg_exprs(tree.body)
-        logger.info(f"Custom formula set: {formula}")
+        logger.debug(f"Custom formula set: {formula}")
         return True, ""
 
     def push_variables(self, variables: dict[str, float]) -> None:
@@ -325,6 +325,13 @@ class CustomFormulaEvaluator:
         if not values:
             return 0.0
         return sum(values) / len(values)
+
+
+def compile_formula(formula: str) -> tuple[CustomFormulaEvaluator | None, str]:
+    """A ready evaluator, or None and why the formula can't run (an empty one can't): Save, a slot and a program agree."""
+    ev = CustomFormulaEvaluator()
+    ok, err = ev.set_formula(formula)
+    return (ev, "") if ok and ev.is_valid else (None, err or "Empty formula")
 
 
 def evaluate_series(evaluators: Mapping[str, CustomFormulaEvaluator], metrics: dict,

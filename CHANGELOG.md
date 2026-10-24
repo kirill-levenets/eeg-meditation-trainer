@@ -34,7 +34,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   Such a segment now drives and is scored on Shamatha, and a message at the session's start names the formula; a session's detail reads its segments as the session ran them.
   **Save** now refuses a formula that doesn't compile and shows its error.
 - **The formulas Export wrote where they couldn't be opened on Android** (#102): Settings → Custom Formula's export went to the app's private storage.
-  It now goes to `Documents/EEGMeditation/` (on a computer, `~/Documents/EEGMeditation/`), as a session's CSV does, and an export that fails says so.
+  It now goes to `Documents/EEGMeditation/` (on a computer, `~/Documents/EEGMeditation/`), and a message says where it went, or why it failed.
   Without an active profile, Save and Export now ask for one, as Load and Delete do, instead of a slot's status line reading "No user selected".
 - **The graph's series list kept a formula slot's old name after Choose…** (#102): choosing a saved formula renamed the line and the legend, but its row in the list kept the old name until the list was reopened.
   On a fullscreen graph the legend kept it too; it now follows every rename and every series shown or hidden.

@@ -4,8 +4,6 @@ import types
 import unittest
 from unittest.mock import MagicMock
 
-from kivy.uix.floatlayout import FloatLayout
-
 from app.metrics.formula_slots import FormulaSlots
 from app.storage.database import DatabaseManager
 from app.ui import graph_series
@@ -14,7 +12,6 @@ from app.ui.diary_screen import (
     METRICS_PREVIEW_COLORS,
     METRICS_PREVIEW_SCALES,
 )
-from app.ui.graph_fullscreen import GraphFullscreen
 from app.ui.live_session import (
     METRICS_COLORS,
     METRICS_SCALES,
@@ -55,7 +52,6 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         self.app._db = DatabaseManager(db_path=self.db_path)
         self.uid = self.app._db.create_user("Alice")
         self.app._current_user_id = self.uid
-        self.app._fullscreen = GraphFullscreen(FloatLayout())
 
         self.app._live_screen = _FakeLive()
         self.app._diary_screen = _FakeDiary()
@@ -270,7 +266,7 @@ class _LiveGraph:
 
 
 def test_choosing_a_saved_formula_renames_its_picker_row_at_once(tmp_path, monkeypatch):
-    # #102: Choose renamed the graph line and the legend at once, but the picker's row kept the old name until reopened.
+    # The open picker's row follows Choose at once, as the graph line and the legend do.
     db = DatabaseManager(db_path=str(tmp_path / "t.db"))
     uid = db.create_user("A")
     db.add_saved_formula(uid, "Calm", "alpha1 * 2")

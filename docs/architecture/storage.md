@@ -117,3 +117,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   a second `report_soft_error` while the first's dialog is pending is dropped.
   The Test buttons pass `force=True` (user-initiated, like Copy Diagnostics):
   the label's 60 s cooldown after a session-start report can't hide the file the user just tested, so `play_timer_sound`'s fallback to the default gong is never silent.
+
+## Exports to shared storage
+
+- A file the user exports to open elsewhere (a session's CSV on Android, the bulk sessions ZIP, the saved formulas) goes through `android_share.copy_to_documents(private_path, display_name=…)`:
+  on Android through MediaStore into `Documents/EEGMeditation/`, with no storage permission; on desktop a copy into `~/Documents/EEGMeditation/` that replaces a file of the same name.

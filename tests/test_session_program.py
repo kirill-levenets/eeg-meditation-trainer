@@ -1,6 +1,5 @@
 from app.session.session_program import (
     SessionProgram,
-    program_evaluators,
     program_plan,
     runnable_plan,
     segment_target,
@@ -74,11 +73,11 @@ def test_time_above_threshold_follows_active_goal():
     assert sm._time_above_threshold == 1.0  # two ticks @ 0.5s above goal
 
 
-def test_program_evaluators_arm_one_per_valid_custom_formula():
+def test_a_program_arms_one_evaluator_per_custom_formula_that_compiles():
     prog = SessionProgram([{"minutes": 1, "target": 50, "formula": {"name": "ok", "formula": "100 * s_alpha1"}},
                            {"minutes": 1, "target": 50, "formula": {"name": "bad", "formula": "100 *"}},
                            {"minutes": 1, "target": 50, "formula": "shamatha_score"}])
-    assert list(program_evaluators(prog)) == ["program_formula"]  # "bad" is a slot with no evaluator
+    assert list(runnable_plan(prog).evaluators) == ["program_formula"]  # "bad" gets no evaluator
 
 
 def test_a_formula_that_cant_run_moves_every_segment_of_it_to_shamatha_and_keeps_the_others_slots():
