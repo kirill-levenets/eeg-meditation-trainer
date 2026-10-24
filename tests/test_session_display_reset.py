@@ -194,7 +194,7 @@ def test_the_end_of_a_session_locked_since_its_first_minute_shows_its_whole_aver
     running._session_manager.compute_statistics.return_value = late  # the timer ran out while locked
     app._mirror = LiveMirror()
     app._mirror.last_metrics = METRICS
-    for name in ("_undo_session_setup", "_mark_history_dirty"):
+    for name in ("_undo_session_setup", "_mark_history_dirty", "_settings_screen"):
         setattr(app, name, MagicMock())
     app._finalize_stop_ui({"duration": 1800}, None)
     app._live_screen.set_stats_mode("aggregate")

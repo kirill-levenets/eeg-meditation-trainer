@@ -170,6 +170,10 @@ class UserPickerForm(BoxLayout):
         self._users = users
         self._render_filtered_list(self._name_input.text)
 
+    def redraw(self) -> None:
+        """The rows again, for the same users and filter: each row's session count is read anew."""
+        self._render_filtered_list(self._name_input.text)
+
     def _render_filtered_list(self, query: str) -> None:
         """Re-render the existing-profiles dropdown with users whose name
         contains `query` (case-insensitive). Empty query shows all."""

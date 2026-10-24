@@ -463,6 +463,7 @@ class SettingsScreen(Screen):
     def on_pre_enter(self, *args) -> None:
         # The link may have dropped between sessions, with nothing on screen to report it.
         self.device.mark_bt_devices()
+        self.refresh_profile_counts()  # sessions saved or deleted since the list was drawn
 
     # --- Audio threshold metric picker ---
 
@@ -532,6 +533,10 @@ class SettingsScreen(Screen):
 
         btn_confirm.bind(on_release=_do_delete)
         popup.open()
+
+    def refresh_profile_counts(self) -> None:
+        """Draw the profile rows again: each reads its session count as it is drawn."""
+        self._user_picker_form.redraw()
 
     def populate_users(self, users, current_user_id=None):
         """Fill the user picker form."""

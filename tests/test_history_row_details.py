@@ -407,8 +407,8 @@ def test_the_end_card_is_titled_with_the_saved_session(monkeypatch):
     app._db = MagicMock()
     app._db.get_session.return_value = {"id": 9, "date_time": "2026-10-03T20:05:46.25",
                                         "session_name": "2026-10-03 20:05 - MindWave Mobile"}
-    for name in ("_undo_session_setup", "_mark_history_dirty"):
-        monkeypatch.setattr(app, name, MagicMock())
+    for name in ("_undo_session_setup", "_mark_history_dirty", "_settings_screen"):
+        monkeypatch.setattr(app, name, MagicMock(), raising=False)
     app._finalize_stop_ui({"duration": 96}, 9)
     app._live_screen.show_summary.assert_called_once_with(
         9, {"duration": 96}, title="2026-10-03 20:05 - MindWave Mobile")
@@ -487,7 +487,7 @@ def test_a_failed_title_read_still_shows_the_end_card(monkeypatch):
     app._mirror = LiveMirror()
     app._db = MagicMock()
     app._db.get_session.side_effect = sqlite3.OperationalError("disk I/O error")
-    for name in ("_undo_session_setup", "_mark_history_dirty"):
-        monkeypatch.setattr(app, name, MagicMock())
+    for name in ("_undo_session_setup", "_mark_history_dirty", "_settings_screen"):
+        monkeypatch.setattr(app, name, MagicMock(), raising=False)
     app._finalize_stop_ui({"duration": 96}, 9)  # the session is saved; only its title couldn't be read
     app._live_screen.show_summary.assert_called_once_with(9, {"duration": 96}, title="")

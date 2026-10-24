@@ -1287,6 +1287,7 @@ class EEGMeditationApp(App):
         if stats:
             self._live_screen.update_timer(elapsed_clock(stats.get("duration", 0)))
         self._mark_history_dirty()
+        self._settings_screen.refresh_profile_counts()  # a timer can end a session while Settings shows them
         if stats and session_id:
             self._summary_saved_notes = ""
             try:
@@ -2310,17 +2311,21 @@ class EEGMeditationApp(App):
         if not force and not self._history_dirty:
             return
         with timed("history.get_all_sessions"):
-            sessions = sessions_for_view(self._db, self._current_user_id)
-        if self._session_pipeline_live():
-            # The running session's row exists from its first checkpoint, with stats as of that checkpoint: History
-            # lists finished sessions only, and the ending marks History dirty so it appears then.
-            sessions = [s for s in sessions if s.get("id") != self._recorder.session_id]
+            sessions = self._finished_sessions(self._current_user_id)
         self._history_screen.load_sessions(sessions, keep_filter=self._current_user_id == self._history_view)
         self._history_view = self._current_user_id
         self._history_dirty = False
 
     def _mark_history_dirty(self) -> None:
         self._history_dirty = True
+
+    def _finished_sessions(self, uid: int | None) -> list:
+        """`uid`'s sessions as History lists and Settings counts them: the running session's row exists from its first
+        checkpoint, with stats as of that checkpoint, and joins them when it ends (which marks History dirty)."""
+        sessions = sessions_for_view(self._db, uid)
+        if self._session_pipeline_live():
+            sessions = [s for s in sessions if s.get("id") != self._recorder.session_id]
+        return sessions
 
     def _on_user_switch(self, user_id: int) -> None:
         """Switch the active user profile."""
@@ -2343,7 +2348,7 @@ class EEGMeditationApp(App):
         self._db.set_user_setting(self._current_user_id, "history_view_mode", mode)
 
     def _count_sessions_for_user(self, user_id: int) -> int:
-        return len(self._db.get_all_sessions(user_id=user_id))
+        return len(self._finished_sessions(user_id))
 
     # --- Data Backup (app/ui/backup_flow.py) ---
 

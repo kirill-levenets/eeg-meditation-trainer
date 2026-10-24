@@ -80,7 +80,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   On success the Session screen drops a deleted session it shows (`_drop_shown_session`: the end card, whose notes would have no session to save to, closes with its gong, and the display clears).
   `HistoryScreen.remove_sessions(ids)` removes those rows and model entries in place (see the session list in [history.md](history.md)): no rebuild, no spinner, wherever the user is.
   History never lists the running session: its row exists from the first checkpoint, with that checkpoint's stats, and a History reload during the session would list it with them, frozen there until the next reload.
-  `_refresh_history` drops `_recorder.session_id` while `_session_pipeline_live()`, and `_finalize_stop_ui` marks History dirty, so the session appears once it ends.
+  `_finished_sessions` (History's list and Settings' profile counts) drops `_recorder.session_id` while `_session_pipeline_live()`, and `_finalize_stop_ui` marks History dirty, so the session appears once it ends.
   `_delete_sessions` also refuses it (`_recorder.session_id` among the ids while live): its next checkpoints would write ticks for no session.
 
 ## Timer

@@ -29,6 +29,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **Settings › User Profile showed old session counts** (#113): a profile's count changed only when profiles were switched, created or deleted.
+  It is now read again each time Settings opens and when a session ends, and it counts the sessions History lists, so a running session joins it when it ends.
 - **A program segment whose formula couldn't run played maximum noise** (#102):
   **Save** in Settings → Custom Formula stored any text, and a program segment could pick a saved formula that doesn't compile; the segment then drove the feedback, and was scored, on a value that read 0.
   Such a segment now drives and is scored on Shamatha, and a message at the session's start names the formula; a session's detail reads its segments as the session ran them.
