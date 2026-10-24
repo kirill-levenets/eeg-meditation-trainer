@@ -3,6 +3,7 @@ of them."""
 import json
 from collections.abc import Callable
 
+from app.logger import logger
 from app.metrics.custom_formula import (
     CustomFormulaEvaluator,
     compile_formula,
@@ -33,7 +34,11 @@ class FormulaSlots:
         for i, ev in enumerate(self.evaluators):
             entry = active[i] if i < len(active) and isinstance(active[i], dict) else {}
             self.names[i] = entry.get("name") or default_name(i)
-            ev.set_formula(entry.get("formula", "") or "")
+            formula = entry.get("formula", "") or ""
+            ok, error = ev.set_formula(formula)
+            if not ok:  # a failed set keeps the last profile's formula: this one's slot stays empty
+                logger.warning(f"Formula slot {i} loaded empty, {formula!r} can't run: {error}")
+                ev.set_formula("")
 
     def active(self) -> list[dict]:
         """Every slot's name and formula, as the active_formulas setting stores them."""
@@ -88,7 +93,9 @@ def recorded_formulas(session: dict) -> tuple[dict, dict]:
             if not isinstance(slot, int) or not 0 <= slot < len(FORMULA_KEYS):
                 continue
             key = FORMULA_KEYS[slot]
-            ev, _ = compile_formula(d.get("formula", "") or "")
+            ev, error = compile_formula(d.get("formula", "") or "")
+            if error:
+                logger.warning(f"A recorded formula can't be replayed, {d.get('formula')!r}: {error}")
             if ev is not None:
                 evaluators[key] = ev
                 names[key] = d.get("name") or default_name(slot)

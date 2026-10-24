@@ -102,7 +102,6 @@ class CustomFormulaEvaluator:
         if len(formula) > _MAX_FORMULA_LEN:
             err = f"Formula too long (max {_MAX_FORMULA_LEN} chars)"
             self._last_error = err
-            logger.debug(f"Custom formula rejected: {err}")
             return False, err
 
         try:
@@ -110,14 +109,12 @@ class CustomFormulaEvaluator:
         except SyntaxError as e:
             err = f"Syntax error: {e.msg}"
             self._last_error = err
-            logger.debug(f"Custom formula syntax error: {err}")
             return False, err
 
         # Validate AST nodes
         ok, err = self._validate_ast(tree.body)
         if not ok:
             self._last_error = err
-            logger.debug(f"Custom formula validation error: {err}")
             return False, err
 
         self._formula = formula
@@ -125,7 +122,6 @@ class CustomFormulaEvaluator:
         self._last_error = ""
         self._history.clear()
         self._avg_exprs = self._collect_avg_exprs(tree.body)
-        logger.debug(f"Custom formula set: {formula}")
         return True, ""
 
     def push_variables(self, variables: dict[str, float]) -> None:

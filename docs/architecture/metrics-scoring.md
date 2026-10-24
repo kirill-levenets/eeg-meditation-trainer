@@ -28,6 +28,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   A slot's Apply, a tap in Saved Formulas and Choose… leave the slot as it was when the formula doesn't compile: `on_slot_change` checks before it renames, and returns the error;
   `assign_saved`, the one path of a tap in Saved Formulas and of Choose…, checks first (`_refusal`) and shows the error in a popup, since neither list is near the slot's status line:
   it changes neither the slot nor its inputs, so a draft typed there stays.
+  A profile's load leaves a slot empty when its stored formula doesn't compile (`FormulaSlots.load`), where a failed set would have kept the last profile's formula.
   Saved formulas and programs keep unique names through `settings_sections.common.save_under_unique_name`: a new name is added, an existing one is overwritten after a confirmation.
   Export writes the library to a private file and delivers it with `copy_to_documents` ([storage](storage.md#exports-to-shared-storage)): `Documents/EEGMeditation/` through MediaStore on Android, `~/Documents/EEGMeditation/` on desktop.
   A popup says where (`info`, the app's `_info_popup`), as the backup's does: slot 1's status line is far from the button and clipped at the larger text sizes.
