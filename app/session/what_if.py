@@ -2,7 +2,6 @@
 recorded (every tick against its own target) it gives back the recorded time above threshold and longest streak. One
 control for a simple session, one per segment for a program. View only: nothing is written."""
 
-import json
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from functools import cached_property
@@ -11,7 +10,7 @@ from app.metrics.custom_formula import CustomFormulaEvaluator
 from app.session.scoring import TICK_SECONDS, GoalAccrual, extend_steps, target_steps
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
-    SessionProgram,
+    recorded_program,
     runnable_plan,
     segment_target,
 )
@@ -49,7 +48,7 @@ class ScoredTicks:
         return target_steps(self.targets) or []
 
 
-_FORMULA_KEYS = ("custom_formula", "program_formula")  # prefixes of series computed, not stored per tick
+COMPUTED_SERIES = ("custom_formula", "program_formula")  # prefixes of series computed, not stored per tick
 
 
 def _has_record(rows: list[dict]) -> bool:
@@ -59,7 +58,7 @@ def _has_record(rows: list[dict]) -> bool:
 
 def _values(key: str, rows: list[dict], formula_series: dict[str, list[float]]) -> list[float] | None:
     """A metric's value per tick: its stored column, or a formula's replayed series (None when it wasn't replayed)."""
-    if key.startswith(_FORMULA_KEYS):
+    if key.startswith(COMPUTED_SERIES):
         return list(formula_series[key]) if key in formula_series else None
     return [r.get(key) or 0.0 for r in rows]
 
@@ -88,9 +87,8 @@ def scored_ticks(session: dict, rows: list[dict], formula_series: dict[str, list
 def _program_ticks(program_json: str, rows: list[dict], formula_series: dict[str, list[float]],
                    replay_formulas: FormulaReplay | None) -> ScoredTicks | None:
     """A program's ticks on its segments: where the record shows each switch, else by minutes as the graph's steps."""
-    try:
-        program = SessionProgram(json.loads(program_json))
-    except (ValueError, TypeError):
+    program = recorded_program(program_json)
+    if program is None:
         return None
     n = len(rows)
     plan = runnable_plan(program)
@@ -111,8 +109,9 @@ def _program_ticks(program_json: str, rows: list[dict], formula_series: dict[str
     segments[-1] = replace(segments[-1], end=n)
     if record:
         return ScoredTicks([r["score_value"] for r in rows], [r["score_target"] for r in rows], segments)
-    if plan.evaluators and replay_formulas is not None:
-        formula_series = {**formula_series, **replay_formulas(plan.evaluators)}
+    missing = {key: ev for key, ev in plan.evaluators.items() if key not in formula_series}  # the graph's are given
+    if missing and replay_formulas is not None:
+        formula_series = {**formula_series, **replay_formulas(missing)}
     values: list[float] = []
     targets: list[float] = []
     for segment in segments:

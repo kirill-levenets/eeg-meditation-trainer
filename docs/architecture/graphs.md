@@ -68,6 +68,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Live, `add_point(values, threshold, scored)` extends the steps with the key each tick was scored on, as it extends the threshold steps, and `LiveMirror` keeps that key so a screen lock's reload redraws the same colours;
   `set_training_series` only moves the legend's » and the stats bar's title, and `clear_data` drops the steps with the points.
   The session detail colours by its stored ticks' `score_key` (`scoring.scored_steps`), else the metric the session was scored on (`recorded_score`); a key that is no series of the graph (a program session's "program" from before per-tick keys, a session from before #51) colours none.
+  The detail graph has the program formula lines too, shown for a program session ([session-detail](session-detail.md)), so a segment that trained one is coloured there as it was live.
   Settings → Display shows the six as two `PresetRow`s, each gradient with a `GradientStrip` of itself as the graphs draw it on the current theme; the choice is the per-profile `line_colours` setting.
 - `ScrollableGraphWidget.set_threshold_steps(steps)` draws the dashed threshold line piecewise, along a list of `(start_tick, target)` steps;
   steps take precedence over `set_threshold(value)`'s single line, and `set_threshold_steps(None)` reverts to it.

@@ -2,12 +2,14 @@
 theme's graph background; the Session screen colours the series being trained, History the one a session was scored
 on; each profile keeps its choice and a change reaches every graph at once."""
 
+import json
+
 import pytest
 from kivy.graphics import Line, Mesh
 
 from app.settings.registry import SettingsStore
 from app.storage.database import DatabaseManager
-from app.ui.app_manager import line_colours_setting
+from app.ui.app_manager import EEGMeditationApp, line_colours_setting
 from app.ui.diary_screen import DiaryScreen, detail_graph_data
 from app.ui.hooks import wire
 from app.ui.line_colours import (
@@ -183,6 +185,31 @@ def test_a_programs_detail_colours_each_segment_as_it_was_scored():
     detail.fill_graph("metrics", data)
     assert detail._metrics_graph.gradient_steps == [(0, "shamatha_score"), (3, "custom_formula")]
 
+
+
+def test_a_program_sessions_detail_draws_its_formula_line_as_the_session_did():
+    """A segment that trained a program formula: History draws that line, named as the Session screen named it, in the
+    gradient over its own segment (#113); a simple session opened next shows no program line."""
+    program = [{"minutes": 1, "target": 50, "formula": "shamatha_score"},
+               {"minutes": 1, "target": 60, "formula": {"name": "Calm", "formula": "alpha1"}}]
+    session = {"id": 3, "date_time": "2026-10-10T09:30:00", "duration": 2, "score_metric_key": "program",
+               "score_metric_name": "Deep", "session_program": json.dumps(program)}
+    evaluators, names = EEGMeditationApp._session_formulas(session)
+    assert "program_formula" in evaluators and names["program_formula"] == "Program: Calm"
+    rows = [{"timestamp": float(i), "score_target": 50, "score_key": key}
+            for i, key in enumerate(["shamatha_score"] * 2 + ["program_formula"] * 2)]
+    replayed = {"program_formula": [10.0, 20.0, 30.0, 40.0]}
+    detail = DiaryScreen()
+    detail.show_session_detail(session)
+    detail.set_session_formulas(replayed, names)
+    detail.fill_graph("metrics", detail_graph_data(rows, replayed))
+    graph = detail._metrics_graph
+    assert graph.is_visible("program_formula") and graph.series_name("program_formula") == "Program: Calm"
+    assert list(graph._data["program_formula"]) == [10.0, 20.0, 30.0, 40.0]
+    assert graph._gradient_spans("program_formula", 0, 4) == [(2, 4)]
+    assert graph._gradient_spans("shamatha_score", 0, 4) == [(0, 2)]
+    detail.set_session_formulas({}, EEGMeditationApp._session_formulas({"id": 4})[1])
+    assert not graph.is_visible("program_formula")
 
 def test_picking_line_colours_applies_them_at_once():
     screen = SettingsScreen()

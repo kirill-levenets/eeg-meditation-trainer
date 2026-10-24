@@ -42,6 +42,8 @@ from app.session.manager import SessionManager, SessionState, elapsed_clock
 from app.session.recorder import SessionRecorder
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
+    recorded_program,
+    runnable_plan,
     segment_target,
 )
 from app.session.tick_thread import TickThread
@@ -73,7 +75,7 @@ from app.ui.line_colours import OPTIONS as LINE_OPTIONS
 from app.ui.live_mirror import LiveMirror
 from app.ui.live_session import LiveSessionScreen
 from app.ui.power_exemption import PowerExemption
-from app.ui.program_run import ProgramRun
+from app.ui.program_run import ProgramRun, program_line_name
 from app.ui.program_settings import ProgramSettings
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.session_labels import session_title, start_stamp
@@ -2105,7 +2107,7 @@ class EEGMeditationApp(App):
         token = self._detail_load
         d = self._diary_screen
         with timed("diary.open"):
-            d.set_session_formulas({}, recorded_formulas(session)[1])  # the legend's names from the first frame
+            d.set_session_formulas({}, self._session_formulas(session)[1])  # the legend's names from the first frame
             d.show_session_detail(session)
             d.set_metrics_threshold(float(session.get("threshold_used", 50)))
             d.set_program(session.get("session_program", ""))
@@ -2180,9 +2182,21 @@ class EEGMeditationApp(App):
                                   rows: list[dict] | None = None) -> tuple[dict, dict]:
         """Recompute the session's recorded formula series + names from its band powers, over `rows` when already
         read. Pure DB + compute, no Kivy — safe to call off the main thread."""
-        evaluators, names = recorded_formulas(session)
+        evaluators, names = self._session_formulas(session)
         series = self._db.recompute_formula_series(session_id, evaluators, rows) if evaluators else {}
         return series, names
+
+    @staticmethod
+    def _session_formulas(session: dict) -> tuple[dict, dict]:
+        """The session's formula lines, ({series key: evaluator}, {series key: name}): its Settings slots' and, for a
+        program session, its program's, named as the Session screen named them while it ran."""
+        evaluators, names = recorded_formulas(session)
+        program = recorded_program(session.get("session_program") or "")
+        if program is not None:
+            plan = runnable_plan(program)
+            evaluators = {**evaluators, **plan.evaluators}
+            names = {**names, **{slot: program_line_name(custom) for slot, custom in plan.customs}}
+        return evaluators, names
 
     def _inject_session_formulas(self, session_id: int, session: dict) -> None:
         """Recompute + apply the session's recorded formulas (synchronous)."""

@@ -1,6 +1,7 @@
 """Headless session-program model: ordered timed segments with per-segment
 target + driving formula. Pure logic (no Kivy), mirrors timer_state.py."""
 
+import json
 from typing import NamedTuple
 
 from app.metrics.custom_formula import CustomFormulaEvaluator, compile_formula
@@ -64,6 +65,15 @@ class SessionProgram:
             steps.append((tick, segment_target(s)))
             tick += int(_minutes(s) * 60 * sample_rate)
         return steps
+
+
+def recorded_program(program_json: str) -> SessionProgram | None:
+    """The program a session recorded (its session_program), or None for a simple session or a record that can't be read."""
+    try:
+        program = SessionProgram(json.loads(program_json)) if program_json else None
+    except (ValueError, TypeError):
+        return None
+    return program or None
 
 
 # Program-driven custom-formula lines: one per distinct custom formula in a program.

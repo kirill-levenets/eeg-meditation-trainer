@@ -349,7 +349,8 @@ def test_a_program_whose_ticks_stored_their_scoring_replays_no_formula(app, monk
     monkeypatch.setattr(a._db, "recompute_formula_series", lambda *args: replays.append(args) or {})
     _open(a, workers, sid)
     panel = a._diary_screen._what_if
-    assert replays == [] and _results(panel) == ("1m 00s", "1m 00s")
+    # One replay, the graph's line of the program formula; the what-if reads the stored scoring and replays nothing.
+    assert [list(args[1]) for args in replays] == [["program_formula"]] and _results(panel) == ("1m 00s", "1m 00s")
 
 
 # ---- folding the panel away ----

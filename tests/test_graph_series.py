@@ -5,13 +5,10 @@ import unittest
 from unittest.mock import MagicMock
 
 from app.metrics.formula_slots import FormulaSlots
+from app.session.session_program import PROGRAM_FORMULA_KEYS
 from app.storage.database import DatabaseManager
 from app.ui import graph_series
 from app.ui.app_manager import EEGMeditationApp
-from app.ui.diary_screen import (
-    METRICS_PREVIEW_COLORS,
-    METRICS_PREVIEW_SCALES,
-)
 from app.ui.live_session import (
     METRICS_COLORS,
     METRICS_SCALES,
@@ -38,7 +35,7 @@ class _FakeLive:
 
 class _FakeDiary:
     def __init__(self):
-        self._metrics_graph = _g(METRICS_PREVIEW_COLORS, METRICS_PREVIEW_SCALES, "diary_metrics")
+        self._metrics_graph = _g(METRICS_COLORS, METRICS_SCALES, "diary_metrics")
         self._raw_eeg_graph = _g({"eeg": (1, 1, 1, 1)}, {"eeg": 500.0}, "diary_raw")
         self._freq_graph = _g(BAND_COLORS, BAND_SCALES, "diary_freq")
 
@@ -102,9 +99,10 @@ class TestGraphSeriesPersistence(unittest.TestCase):
 
         self.assertTrue(self.graph.is_visible("native_attention"))
         self.assertFalse(self.graph.is_visible("shamatha_score"))
-        # Diary graphs ignore the legacy live-only keys → default to all-visible.
+        # Diary graphs ignore the legacy live-only keys → default to all-visible, but a program's lines, which follow
+        # the session shown.
         diary_m = self.app._diary_screen._metrics_graph
-        self.assertEqual(set(diary_m.visible_keys()), set(diary_m.series_keys()))
+        self.assertEqual(set(diary_m.visible_keys()), set(diary_m.series_keys()) - set(PROGRAM_FORMULA_KEYS))
 
     def test_first_run_defaults(self):
         self.app._graph_series.restore(self.uid)
@@ -240,7 +238,7 @@ def test_the_live_screen_and_a_sessions_detail_draw_a_series_in_one_colour():
     from app.ui.diary_screen import DiaryScreen
     from app.ui.live_session import LiveSessionScreen
     live, detail = LiveSessionScreen(), DiaryScreen()
-    for key in METRICS_PREVIEW_COLORS:
+    for key in METRICS_COLORS:
         assert detail._metrics_graph.series_color(key) == live.graph.series_color(key), key
     for key in BAND_COLORS:
         assert detail._freq_graph.series_color(key) == live.band_graph.series_color(key), key
