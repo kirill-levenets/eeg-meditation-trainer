@@ -52,3 +52,19 @@ def test_saving_under_a_name_that_exists_asks_then_overwrites_it_in_place(db, li
     asked[0][1]()  # Overwrite
     assert [entry["name"] for entry in saved()] == ["Calm", "Deep"]  # in place, still one "Calm"
     assert new in str(saved()[0][field])
+
+
+def test_an_overwrite_of_an_entry_gone_meanwhile_writes_nothing_and_claims_nothing(db):
+    uid = db.create_user("A")
+    asked = []
+    app = SimpleNamespace(_db=db, _formulas=FormulaSlots(), _current_user_id=uid, _require_user=lambda _a: uid,
+                          _audio_metric_key="shamatha_score", _info_popup=MagicMock(),
+                          _confirm_action=lambda title, message, ok_text, on_ok, **kw: asked.append(on_ok))
+    settings = make_formula_settings(app)
+    settings.on_save(0, "Calm", "alpha1")
+    settings.on_save(0, "Calm", "alpha2")
+    db.remove_saved_formula(uid, 0)
+    settings._section.reset_mock()
+    asked[0]()  # Overwrite, its index now past the list's end
+    assert db.get_saved_formulas(uid) == []
+    settings._section.set_formula_slot_status.assert_not_called()  # no "Formula saved" for a write that didn't happen

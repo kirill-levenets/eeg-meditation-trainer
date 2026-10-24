@@ -207,6 +207,18 @@ def test_a_program_start_names_the_formulas_that_cant_run_in_a_popup(formulas, l
                                      "\nSettings › Timer / Program edits the program.")
 
 
+def test_the_start_popup_waits_for_the_next_frame():
+    # The start finishes its setup first, whatever the popup does.
+    queued, info = [], MagicMock()
+    run = ProgramRun(MagicMock(), MagicMock(), MagicMock(), on_main=queued.append,
+                     formula_vars=lambda raw, metrics: {**raw, **metrics}, info=info)
+    run.begin(SessionProgram([{"minutes": 1, "target": 50, "formula": {"name": "Broken", "formula": "*"}}]), [], "P")
+    info.assert_not_called()
+    assert len(queued) == 1
+    queued[0]()
+    assert info.call_args.args[0] == "Formula error in this program"
+
+
 def test_program_shows_exactly_its_metric_set_whole_session():
     """A program shows EXACTLY its metric set for the whole session — built-in
     series + one program-formula line for its custom formula, shown throughout (not

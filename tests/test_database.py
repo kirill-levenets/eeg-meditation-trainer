@@ -386,5 +386,17 @@ def test_saved_programs_roundtrip(tmp_path):
     db.close()
 
 
+def test_a_saved_formula_is_overwritten_in_place_as_a_saved_program_is(tmp_path):
+    db = DatabaseManager(db_path=str(tmp_path / "sf.db"))
+    uid = db.create_user("u")
+    db.add_saved_formula(uid, "Calm", "alpha1")
+    db.add_saved_formula(uid, "Deep", "theta")
+    assert db.update_saved_formula(uid, 0, "Calm", "alpha2") is True
+    assert db.get_saved_formulas(uid) == [{"name": "Calm", "formula": "alpha2"}, {"name": "Deep", "formula": "theta"}]
+    assert db.update_saved_formula(uid, 5, "Nope", "x") is False  # out of range: no write
+    assert len(db.get_saved_formulas(uid)) == 2
+    db.close()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

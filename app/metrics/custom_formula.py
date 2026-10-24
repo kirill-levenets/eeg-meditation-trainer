@@ -328,7 +328,7 @@ class CustomFormulaEvaluator:
 
 
 def compile_formula(formula: str) -> tuple[CustomFormulaEvaluator | None, str]:
-    """A ready evaluator, or None and why the formula can't run (an empty one can't): Save, a slot and a program agree."""
+    """A ready evaluator, or None and why the formula can't run (an empty one can't)."""
     ev = CustomFormulaEvaluator()
     ok, err = ev.set_formula(formula)
     return (ev, "") if ok and ev.is_valid else (None, err or "Empty formula")

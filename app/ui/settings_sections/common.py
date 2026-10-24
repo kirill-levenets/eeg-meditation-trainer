@@ -1,5 +1,5 @@
 """Pieces more than one Settings section builds with: the sound file chooser, the list-select source picker, the saved
-formulas/programs list and the checkbox row."""
+formulas/programs list and its unique-name save, and the checkbox row."""
 import os
 from collections.abc import Callable
 

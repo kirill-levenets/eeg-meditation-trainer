@@ -64,6 +64,7 @@ class FormulaSettings:
         if formula:
             _, error = compile_formula(formula)
             if error:
+                logger.warning(f"Formula slot {idx} refused {formula!r}: {error}")
                 self._section.set_formula_slot_status(idx, f"Error: {error}", is_error=True)
                 return error
         self._formulas.names[idx] = name or default_name(idx)
@@ -94,6 +95,7 @@ class FormulaSettings:
             return
         _, error = compile_formula(formula)
         if error:
+            logger.warning(f"Formula not saved, {formula!r}: {error}")
             self._section.set_formula_slot_status(idx, f"Error: {error}", is_error=True)
             return
         # Fall back to a truncated formula as the display name when none is given.
@@ -106,7 +108,8 @@ class FormulaSettings:
         uid = self._user_id()
         if index is None:
             if not self._db.add_saved_formula(uid, label, formula):
-                self._section.set_formula_slot_status(idx, "Limit reached (50 max)", is_error=True)
+                self._section.set_formula_slot_status(idx, f"Limit reached ({self._db._MAX_SAVED_FORMULAS} max)",
+                                                      is_error=True)
                 return
         elif not self._db.update_saved_formula(uid, index, label, formula):
             logger.warning(f"Overwrite skipped: formula index {index} out of range")
