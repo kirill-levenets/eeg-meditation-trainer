@@ -382,7 +382,8 @@ Three slots (**Formula 1**, **2** and **3**), each with:
 - **name**: the label of its series on the graphs and in a session's detail
 - **formula**: a Python-style expression of band powers, normalized bands, computed metrics and math functions, with `avg(expr, N)` for a moving average
 - **Apply**: evaluates it; a status line shows the current value or the error, and a formula with an error leaves the slot as it was
-- **Save**: stores it in your formula library under the slot's name; a formula with an error isn't saved, and the status line shows the error
+- **Save**: stores it in your formula library under the slot's name; a formula with an error isn't saved, and the status line shows the error;
+  a name already in the library asks before overwriting that formula, as saving a program does
 
 **Saved Formulas** below the slots is your library: tap one to put it into the first empty slot (Formula 1 when all three are in use), or its **X** to delete it (after a confirmation).
 **Export to .txt** writes the library's formulas, one per line, to `Documents/EEGMeditation/formulas_user_<n>.txt` (on a computer, `~/Documents/EEGMeditation/`), and a message says where.

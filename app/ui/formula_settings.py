@@ -14,7 +14,7 @@ from app.metrics.formula_slots import (
 )
 from app.storage.android_share import copy_to_documents
 from app.storage.fileops import discard_file
-from app.ui.settings_sections.common import saved_formula_label
+from app.ui.settings_sections.common import save_under_unique_name, saved_formula_label
 from app.ui.theme import format_count
 
 
@@ -24,7 +24,7 @@ class FormulaSettings:
 
     def __init__(self, db, section, live_graph, formulas: FormulaSlots, *, user_id: Callable[[], int | None],
                  require_user: Callable[[str], int | None], scoring_locked: Callable[[str], bool],
-                 audio_key: Callable[[], str], info: Callable[[str, str], None],
+                 audio_key: Callable[[], str], confirm: Callable[..., None], info: Callable[[str, str], None],
                  confirm_saved_delete: Callable[..., None]) -> None:
         self._db = db
         self._section = section  # Settings' FormulaSection
@@ -34,6 +34,7 @@ class FormulaSettings:
         self._require_user = require_user
         self._scoring_locked = scoring_locked
         self._audio_key = audio_key
+        self._confirm = confirm
         self._info = info
         self._confirm_saved_delete = confirm_saved_delete
 
@@ -97,13 +98,22 @@ class FormulaSettings:
             return
         # Fall back to a truncated formula as the display name when none is given.
         label = name or (formula[:40] + ("..." if len(formula) > 40 else ""))
-        ok = self._db.add_saved_formula(uid, label, formula)
-        if ok:
-            self._section.set_formula_slot_status(idx, "Formula saved")
-            self.refresh_saved()
-            logger.info(f"Formula saved: {label} = {formula}")
-        else:
-            self._section.set_formula_slot_status(idx, "Limit reached (50 max)", is_error=True)
+        save_under_unique_name("formula", self._db.get_saved_formulas(uid), label, "this formula",
+                               lambda index: self._save(idx, index, label, formula), self._confirm)
+
+    def _save(self, idx: int, index: int | None, label: str, formula: str) -> None:
+        """Add (index None) or overwrite a saved formula by its name, and say so under the slot."""
+        uid = self._user_id()
+        if index is None:
+            if not self._db.add_saved_formula(uid, label, formula):
+                self._section.set_formula_slot_status(idx, "Limit reached (50 max)", is_error=True)
+                return
+        elif not self._db.update_saved_formula(uid, index, label, formula):
+            logger.warning(f"Overwrite skipped: formula index {index} out of range")
+            return
+        self._section.set_formula_slot_status(idx, "Formula saved")
+        self.refresh_saved()
+        logger.info(f"Formula saved: {label} = {formula}")
 
     def on_load(self, index: int) -> None:
         """Load a saved formula into the first empty slot and apply it."""

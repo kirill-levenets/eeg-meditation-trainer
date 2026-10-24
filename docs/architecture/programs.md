@@ -15,7 +15,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   the name shows in Settings through `set_program_name` and in the Session screen's duration picker.
 - The `sessions.session_program` column stores the JSON segments of the program each session started with (`ProgramRun.segments_json`; empty when none ran).
   The saved-programs library uses `get/add/update/remove_saved_program` in `DatabaseManager` (a JSON list in the user-settings KV store under `user_{id}_saved_programs`).
-  Program Save upserts by name, so re-saving an already-loaded program overwrites it; load reflects the name back so the next save goes to the same record.
+  Program Save keeps names unique (`save_under_unique_name`, shared with saved formulas): an existing name is overwritten after a confirmation;
+  load reflects the name back so the next save goes to the same record.
 
 ## Live series
 
