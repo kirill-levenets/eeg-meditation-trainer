@@ -45,7 +45,10 @@ def _threshold_app(*, program: bool = False, state: SessionState = SessionState.
     a._metrics_engine.meditation_threshold = 70
     sm = SessionManager()
     sm.start(threshold=70)
-    sm.set_active_goal("shamatha_score", 70 if program else None)
+    if program:
+        sm.start_segment("shamatha_score", 70)
+    else:
+        sm.set_active_goal("shamatha_score")
     sm._state = state
     a._session_manager = sm
     return a
@@ -161,6 +164,15 @@ def test_each_ticks_row_and_mirror_point_record_its_target():
         ("shamatha_score", 80.0, 70), ("shamatha_score", 80.0, 70), ("shamatha_score", 80.0, 85)]
     assert [m["score_target"] for m in a._mirror.metrics] == [70, 70, 85]
     assert [c.kwargs["threshold"] for c in _ui_updates(a)] == [70, 70, 85]
+
+
+def test_each_ticks_screen_update_shows_the_score_as_of_that_tick():
+    """The score is taken with the tick, not when the main thread gets to it (#113)."""
+    a = _tick_app()
+    for _ in range(3):
+        _drive_tick(a, _raw_sample(), _metrics(seed=80.0))
+    _ui_updates(a)
+    assert [c.args[0].time_above for c in a._live_screen.update_stats.call_args_list] == [0.5, 1.0, 1.5]
 
 
 def test_a_tick_the_session_paused_under_is_not_recorded():

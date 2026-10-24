@@ -20,7 +20,7 @@ def _live(values: list[float], targets: list[float], keys: list[str] | None = No
     for i, (v, t) in enumerate(zip(values, targets)):
         key = keys[i] if keys else "shamatha_score"
         if keys:
-            sm.set_active_goal(key, t)  # a program segment
+            sm.start_segment(key, t)  # a program segment
         else:
             sm.set_active_goal(key)
             sm.set_threshold(t)

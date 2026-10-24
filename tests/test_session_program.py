@@ -64,7 +64,7 @@ def test_time_above_threshold_follows_active_goal():
     from app.session.manager import SessionManager, SessionState
     sm = SessionManager()
     sm._state = SessionState.RUNNING
-    sm.set_active_goal("custom_formula", 60)
+    sm.start_segment("custom_formula", 60)
     sm.add_metric({"meditation_score": 10, "shamatha_score": 10, "custom_formula": 80})
     sm.add_metric({"meditation_score": 99, "shamatha_score": 99, "custom_formula": 20})
     # only the first tick is above the *custom_formula* goal of 60

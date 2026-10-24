@@ -539,6 +539,21 @@ def test_no_text_outgrows_a_box_at_the_largest_size_that_it_fits_at_normal(phone
     assert found[LARGEST] - found[1.0] == set()
 
 
+
+def test_the_stats_bars_titles_and_values_keep_to_their_thirds(phone):
+    """On a 360 dp phone at the largest size, with its widest values: a title or value wider than its third runs into
+    the next one, at any size (#113). The first title, a metric's name, is cut with an ellipsis instead."""
+    F.set_scale(LARGEST)
+    screen = LiveSessionScreen()
+    phone.clear_widgets()
+    phone.add_widget(screen)
+    screen.update_stats(WIDE_SCORE)
+    for mode in ("live", "aggregate"):
+        screen.set_stats_mode(mode)
+        _frames()
+        for label in screen._stat_title_labels[1:] + screen._stat_labels:
+            assert _text_size_needed(label)[0] <= label.width + 1.5, (mode, label.text, label.width)
+
 def _layout(root, where: str) -> list[tuple]:
     """Each widget's kind, text, font and size, in tree order."""
     return [(where, type(w).__name__, str(getattr(w, "text", "")), round(float(getattr(w, "font_size", 0)), 2),
@@ -565,7 +580,8 @@ def test_the_largest_size_also_fits_at_a_phones_pixel_density():
     chart's 100). The density is fixed when Kivy starts, so the checks run again in a process of their own."""
     checks = [f"{__file__}::{name}" for name in ("test_no_text_outgrows_a_box_at_the_largest_size_that_it_fits_at_normal",
                                                  "test_narrow_buttons_keep_their_text_on_one_line_at_the_largest_size",
-                                                 "test_the_timer_pill_holds_every_timer_on_one_line")]
+                                                 "test_the_timer_pill_holds_every_timer_on_one_line",
+                                                 "test_the_stats_bars_titles_and_values_keep_to_their_thirds")]
     # On this run's display (no second Xvfb to start); only the density differs.
     run = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-p", "no:xvfb", *checks],
                          env={**os.environ, "KIVY_METRICS_DENSITY": PHONE_DENSITY}, capture_output=True, text=True,

@@ -3,7 +3,7 @@ from dataclasses import replace
 from unittest.mock import MagicMock
 
 import app.ui.app_manager as am
-from app.session.manager import LiveScore
+from app.session.manager import LiveScore, SessionManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.live_mirror import LiveMirror
 from app.ui.live_session import LiveSessionScreen
@@ -174,6 +174,34 @@ def test_deleting_another_profile_leaves_the_shown_session():
     app = _deleting_app(shown=2)
     app._on_user_delete(3)
     app._drop_shown_session.assert_not_called()
+
+
+def test_the_live_title_is_the_scored_series_name_on_the_graph_kept_until_the_readout_clears():
+    screen = _finished_screen()
+    screen.graph.set_series_name("custom_formula", "Alpha calm")
+    screen.set_training_series("custom_formula")
+    assert screen._stat_title_labels[0].text == "Alpha calm"
+    screen.set_training_series(None)  # the session ended: the legend's mark goes, its numbers stay with their name
+    assert screen._stat_title_labels[0].text == "Alpha calm"
+    screen.clear_readout()
+    assert screen._stat_title_labels[0].text == "Score"
+
+
+def test_the_end_of_a_session_shows_its_numbers_before_its_scoring_is_reset():
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._live_screen = LiveSessionScreen()
+    app._session_manager = sm = SessionManager()
+    sm.start(threshold=50)
+    sm.set_active_goal("shamatha_score")
+    for value in (60, 70, 40):
+        sm.add_metric({"shamatha_score": value})
+    app._undo_session_setup = sm.reset  # what the real one does to the scoring
+    app._mirror = LiveMirror()
+    for name in ("_mark_history_dirty", "_settings_screen"):
+        setattr(app, name, MagicMock())
+    app._finalize_stop_ui({}, None)
+    app._live_screen.set_stats_mode("aggregate")
+    assert _texts(app._live_screen) == ["57", "1s", "1s"]
 
 
 def test_a_profiles_stats_view_redraws_the_strip_not_just_the_button():

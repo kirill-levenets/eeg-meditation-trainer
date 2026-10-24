@@ -8,12 +8,11 @@ SCORE = LiveScore(value=72.4, target=60, streak=95, average=63.44, segmented=Fal
 
 
 def test_live_shows_the_scored_metric_its_threshold_and_the_streak_now():
-    assert _format_stats_slots("live", "Shamatha", SCORE) == (["Shamatha", "Threshold", "Streak"],
-                                                              ["72", "60", "1m 35s"])
+    assert _format_stats_slots("live", "Shamatha", SCORE) == (["Shamatha", "Target", "Streak"], ["72", "60", "1m 35s"])
 
 
 def test_avg_shows_the_end_cards_numbers_so_far():
-    assert _format_stats_slots("aggregate", "Shamatha", SCORE) == (["Average", "Above threshold", "Longest streak"],
+    assert _format_stats_slots("aggregate", "Shamatha", SCORE) == (["Average", "On target", "Best streak"],
                                                                    ["63", "7m 00s", "1m 00s"])
 
 

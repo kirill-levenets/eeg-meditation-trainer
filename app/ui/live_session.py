@@ -138,11 +138,11 @@ def _format_stats_slots(mode: str, name: str, score: LiveScore) -> tuple[list[st
     threshold and the streak now; AVG, the end card's numbers so far (a program's average is its running segment's)."""
     if mode == "aggregate":
         average = "-" if score.average is None else average_text(score.average)
-        return (["Segment avg" if score.segmented else "Average", "Above threshold", "Longest streak"],
+        return (["Segment avg" if score.segmented else "Average", "On target", "Best streak"],  # History's words
                 [average, format_duration(int(score.time_above)), format_duration(int(score.longest_streak))])
     value = "-" if score.value is None else str(int(round(score.value)))
     target = "-" if score.target is None else f"{score.target:g}"
-    return [name, "Threshold", "Streak"], [value, target, format_duration(int(score.streak))]
+    return [name, "Target", "Streak"], [value, target, format_duration(int(score.streak))]
 
 
 def _cut_to_width(text: str, label) -> str:
@@ -276,6 +276,7 @@ class LiveSessionScreen(Screen):
         super().__init__(**kwargs)
         self.name = "live_session"
         self._last_score = NO_SCORE  # what the stats bar shows, kept for the LIVE / AVG switch
+        self._score_name_key: str | None = None  # the series it was scored on, named until the readout clears
         self._build_ui()
         # Scroll height tracking is persistent (the widget itself lives for the screen's lifetime)
         self._scroll.bind(height=self._reflow)
@@ -432,11 +433,12 @@ class LiveSessionScreen(Screen):
         self._stats_card = stats_card
         self._stat_title_labels: list[ThemedLabel] = []
         self._stat_labels: list[ThemedLabel] = []
-        for _slot in range(3):
+        for slot in range(3):
             box = BoxLayout(orientation="vertical")
-            title = ThemedLabel(font_size=F.capped(F.TINY, 1.1), color=C.TEXT_MUTED, size_hint_y=0.4, halign="center",
-                                valign="middle", shorten=True, shorten_from="right")
-            title.bind(size=title.setter("text_size"))  # a long formula name is cut, not run into the next slot
+            title = ThemedLabel(font_size=F.capped(F.TINY, 1.1), color=C.TEXT_MUTED, size_hint_y=0.4)
+            if slot == 0:  # the metric's name: a long formula name is cut, not run into the next slot
+                title.shorten, title.shorten_from, title.halign, title.valign = True, "right", "center", "middle"
+                title.bind(size=title.setter("text_size"))
             value = ThemedLabel(font_size=F.capped(F.H2), bold=True, color=C.TEXT, size_hint_y=0.6)  # "59m 59s"
             box.add_widget(title)
             box.add_widget(value)
@@ -718,6 +720,8 @@ class LiveSessionScreen(Screen):
         pass None/a non-plotted key to clear the marker. The line colours come with each point (add_point's `scored`),
         so a new mark recolours nothing already drawn."""
         self._training_key = key
+        if key is not None:
+            self._score_name_key = key
         self._rebuild_metric_legend(self._graph.visible_keys())
         self._render_stats()  # the bar's first title names it
 
@@ -766,7 +770,7 @@ class LiveSessionScreen(Screen):
 
     def clear_readout(self) -> None:
         """Back to the readout a fresh screen shows: no session's numbers, timer, start time, state or alert."""
-        self._last_score = NO_SCORE
+        self._last_score, self._score_name_key = NO_SCORE, None
         self._render_stats()
         self._start_time_str = ""
         self._graph.set_start_wall_time(None)
@@ -1178,8 +1182,9 @@ class LiveSessionScreen(Screen):
         self._render_stats()
 
     def _render_stats(self) -> None:
-        """The bar on the series the legend marks as scored, by its name on the graph."""
-        name = self._graph.series_name(self._training_key) if self._training_key else "Score"
+        """The bar on the series the legend marks as scored (kept after the session ends), by its name on the graph."""
+        key = self._score_name_key
+        name = self._graph.series_name(key) if key else "Score"
         titles, values = _format_stats_slots(self._stats_mode, name, self._last_score)
         for title, value, title_text, value_text in zip(self._stat_title_labels, self._stat_labels, titles, values):
             title.text, value.text = title_text, value_text

@@ -110,7 +110,7 @@ def test_a_program_session_keeps_its_segment_goal():
     sm = SessionManager()
     sm.start(threshold=50)
     sm._state = SessionState.RUNNING
-    sm.set_active_goal("custom_formula", 60)  # what _apply_program_segment does
+    sm.start_segment("custom_formula", 60)  # what ProgramRun._enter_segment does
     for m in ({"custom_formula": 80, "shamatha_score": 0}, {"custom_formula": 90, "shamatha_score": 0}):
         sm.add_metric(m)
     assert sm._time_above_threshold == 1.0
@@ -142,6 +142,15 @@ def test_a_program_segment_starts_its_own_average_and_the_streak_carries_over():
     score = sm.live_score()
     assert (score.average, score.segmented, score.target) == (12, True, 10)
     assert (score.streak, score.time_above) == (1.5, 1.5)  # one run across the boundary, as the scoring counts it
+
+
+def test_the_live_average_rounds_as_the_end_cards_does():
+    sm = SessionManager()
+    sm.start(threshold=50)
+    sm.set_active_goal("shamatha_score")
+    for value in (63.4, 63.592, 63.496):  # mean 63.496: rounded once to 63, once via 63.50 to 64
+        sm.add_metric({"shamatha_score": value})
+    assert sm.live_score().average == sm.compute_statistics()["avg_score"]
 
 
 def test_the_score_stays_after_the_stop_and_a_new_session_starts_with_none():

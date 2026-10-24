@@ -31,7 +31,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Those are `_targets_text`: `score_targets` joined by ` › ` (Roboto has no `→` glyph), more than three as first › … › last, or `threshold_used` for a row from before #83.
   A program gets `Metric` + `<program> (program)` (just `Program` when it was unsaved) and `Threshold` + `Per segment`, with no average (one metric per segment);
   a session that saved no metric gets `Avg Shamatha` + `<avg_shamatha>` and `Threshold Used` + `<threshold_used>`.
-  An average reads the same everywhere, through `_average`.
+  An average reads the same everywhere, through `average_text` (the Session screen's stats bar too).
   `session_notes_line` is the notes' first non-blank line.
   The session detail's Metrics legend marks the recorded series with `»` (`_scored_key`; a program's key matches no series, and a session with no saved metric marks nothing).
 
