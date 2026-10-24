@@ -1,7 +1,14 @@
 import math
 import unittest
 
-from app.metrics.custom_formula import CustomFormulaEvaluator
+from app.metrics.custom_formula import CustomFormulaEvaluator, compile_formula
+
+
+def test_one_check_says_whether_a_formula_can_run_and_why_not():
+    ev, error = compile_formula("alpha1 * 2")
+    assert ev is not None and ev.is_valid and error == ""
+    assert compile_formula("alpha1 +")[0] is None and compile_formula("alpha1 +")[1].startswith("Syntax error")
+    assert compile_formula("   ") == (None, "Empty formula")  # nothing to run either
 
 
 class TestFormulaValidation(unittest.TestCase):

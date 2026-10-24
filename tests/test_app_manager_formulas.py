@@ -260,6 +260,15 @@ class TestAssignSavedToSlot(unittest.TestCase):
         self.assertEqual(app._formulas.first_empty(), 0)  # all full → slot 0
 
 
+def test_a_profile_whose_stored_formula_cant_run_loads_that_slot_empty(caplog):
+    # A failed set keeps the evaluator's formula: the last profile's would run under this one's name.
+    slots = FormulaSlots()
+    slots.load([{"name": "A", "formula": "alpha1"}])
+    slots.load([{"name": "B", "formula": "alpha1 +"}])
+    assert (slots.names[0], slots.evaluators[0].formula, slots.evaluators[0].is_valid) == ("B", "", False)
+    assert "'alpha1 +' can't run" in caplog.text
+
+
 def test_deleting_a_saved_formula_asks_first_like_a_saved_program():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._db = MagicMock()

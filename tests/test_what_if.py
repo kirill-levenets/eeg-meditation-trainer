@@ -299,3 +299,32 @@ def test_a_segment_left_with_no_ticks_is_dropped_and_the_rest_keep_their_numbers
     _stats, rows = _live([80.0] * 220, [60] * 100 + [70] * 120, keys)
     ticks = scored_ticks(_program_session(program), rows, {})
     assert [(s.index, s.start, s.end) for s in ticks.segments] == [(0, 0, 100), (2, 100, 220)]
+
+
+def test_a_session_from_an_older_build_is_read_on_the_formulas_own_line_as_it_recorded():
+    # Older builds scored a formula that doesn't compile on its own line, which read 0, and recorded that key.
+    program = [PROGRAM[0], {"minutes": 1, "target": 95, "formula": {"name": "Broken", "formula": "alpha1 +"}},
+               {"minutes": 1, "target": 60, "formula": "meditation_score"}]
+    keys = ["shamatha_score"] * 115 + ["program_formula"] * 120 + ["meditation_score"] * 120
+    targets = [90] * 115 + [95] * 120 + [60] * 120
+    stats, rows = _live(SEG1[5:] + [0.0] * 120 + [70.0] * 120, targets, keys)
+    ticks = scored_ticks(_program_session(program), rows, {})
+    assert ticks.segments == [Segment("shamatha_score", 90, 0, 115),
+                              Segment("program_formula", 95, 115, 235, "Broken", 1),
+                              Segment("meditation_score", 60, 235, 355, "", 2)]
+    assert _stored(_as_recorded(ticks)[0]) == _recorded(stats)
+
+
+def test_an_older_session_without_a_record_on_a_formula_that_cant_run_is_not_scored():
+    program = [PROGRAM[0], {"minutes": 1, "target": 95, "formula": {"name": "Broken", "formula": "alpha1 +"}}]
+    rows = _old_rows({"shamatha_score": SEG1 + SEG2})
+    assert scored_ticks(_program_session(program), rows, {}, lambda _evaluators: {}) is None  # no series to rebuild
+
+
+def test_a_segment_whose_formula_couldnt_run_is_found_and_named_by_the_shamatha_it_scored():
+    # The session drove that segment on Shamatha and recorded it so: the replay finds it there.
+    program = [PROGRAM[0], {"minutes": 1, "target": 95, "formula": {"name": "Broken", "formula": "alpha1 +"}}]
+    keys = ["shamatha_score"] * 235
+    _stats, rows = _live(SEG1[5:] + SEG2, [90] * 115 + [95] * 120, keys)  # 5 ticks dropped: the switch at 115
+    ticks = scored_ticks(_program_session(program), rows, {})
+    assert ticks.segments == [Segment("shamatha_score", 90, 0, 115), Segment("shamatha_score", 95, 115, 235, "", 1)]

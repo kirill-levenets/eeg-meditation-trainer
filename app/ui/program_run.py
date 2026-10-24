@@ -7,9 +7,9 @@ from app.logger import logger
 from app.metrics.custom_formula import CustomFormulaEvaluator, evaluate_series
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
+    RunnablePlan,
     SessionProgram,
-    program_evaluators,
-    program_plan,
+    runnable_plan,
     segment_target,
 )
 from app.ui.live_session import SERIES_NAMES
@@ -21,14 +21,13 @@ def program_line_name(custom: dict) -> str:
     return f"Program: {name}" if name else "Program"
 
 
-def show_program_series(graph, prog: SessionProgram) -> None:
+def show_program_series(graph, plan: RunnablePlan) -> None:
     """Set the graph to EXACTLY the program's metric set and label each program custom line. Shared by a program
     session's start and the idle preview."""
-    keys, custom_slots, _ = program_plan(prog)
-    for slot, custom in custom_slots:
+    for slot, custom in plan.customs:
         graph.set_series_name(slot, program_line_name(custom))
     for k in graph.series_keys():
-        graph.set_visible(k, k in keys)
+        graph.set_visible(k, k in plan.keys)
 
 
 class ProgramRun:
@@ -39,12 +38,13 @@ class ProgramRun:
     """
 
     def __init__(self, session_manager, audio, live_screen, *, on_main: Callable[[Callable[[], object]], None],
-                 formula_vars: Callable[[dict, dict], dict]) -> None:
+                 formula_vars: Callable[[dict, dict], dict], info: Callable[[str, str], None]) -> None:
         self._session_manager = session_manager
         self._audio = audio
         self._live_screen = live_screen
         self._on_main = on_main
         self._formula_vars = formula_vars
+        self._info = info  # (title, message): a popup that stays until read, as the meditator may not be looking
         self.program: SessionProgram | None = None
         self.name = ""  # the program's name at the start; Settings may load or save another during the session
         self.audio_key = ""  # the active segment's metric; transient, never written to the user's baseline
@@ -64,9 +64,10 @@ class ProgramRun:
 
     def begin(self, prog: SessionProgram | None, feedback_ids: list[str], name: str) -> None:
         """Session start: a simple session (None) runs none. A program snapshots the graph's visibility, shows EXACTLY
-        its metric set for the whole session, and arms one persistent evaluator per distinct custom formula. Each custom
-        line is shown the whole program (not per-segment) and evaluated every tick, so only the legend marker changes
-        as segments cross."""
+        its metric set for the whole session, and arms one persistent evaluator per distinct custom formula that
+        compiles; one that doesn't runs its segments on shamatha, and a popup names it. Each custom line is shown the
+        whole program (not per-segment) and evaluated every tick, so only the legend marker changes as segments
+        cross."""
         self.program = prog
         self.name = name if prog is not None else ""
         self.seg_idx = -1
@@ -79,9 +80,15 @@ class ProgramRun:
         graph = self._live_screen.graph
         # Snapshot every catalog key's visibility so stop restores exactly.
         self._prev_visibility = {k: graph.is_visible(k) for k in graph.series_keys()}
-        show_program_series(graph, prog)
-        _, _, self._segment_keys = program_plan(prog)
-        self.formula_evs = program_evaluators(prog)
+        plan = runnable_plan(prog)
+        show_program_series(graph, plan)
+        self._segment_keys, self.formula_evs = plan.segment_keys, plan.evaluators
+        if plan.unrunnable:
+            logger.warning(f"Program formulas that can't run, their segments use shamatha: {plan.unrunnable}")
+            listed = ", ".join(f'"{n}"' for n in plan.unrunnable)
+            message = f"Can't run {listed}: Shamatha is used instead.\nSettings › Timer / Program edits the program."
+            # Next frame: the start finishes its setup first, whatever the popup does.
+            self._on_main(lambda: self._info("Formula error in this program", message))
 
     def end(self) -> None:
         """Restore the live graph to its pre-program visibility and drop the program custom-formula

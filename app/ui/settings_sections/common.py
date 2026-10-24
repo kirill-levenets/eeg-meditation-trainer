@@ -1,5 +1,5 @@
 """Pieces more than one Settings section builds with: the sound file chooser, the list-select source picker, the saved
-formulas/programs list and the checkbox row."""
+formulas/programs list and its unique-name save, and the checkbox row."""
 import os
 from collections.abc import Callable
 
@@ -105,6 +105,18 @@ def saved_formula_label(index: int, entry: dict) -> str:
 def saved_program_label(index: int, entry: dict) -> str:
     """A saved program as its list row and its delete confirmation name it."""
     return entry.get("name", f"Program {index + 1}")
+
+
+def save_under_unique_name(kind: str, entries: list[dict], name: str, overwrite_with: str,
+                           save: Callable[[int | None], None], confirm: Callable[..., None]) -> None:
+    """A saved formula or program keeps a name no other has: a new name is added (`save(None)`), and an existing one
+    is overwritten (`save(index)`) once the user confirms."""
+    existing = next((i for i, entry in enumerate(entries) if entry.get("name") == name), None)
+    if existing is None:
+        save(None)
+        return
+    confirm(f"Overwrite {kind}", f"A {kind} named '{name}' already exists.\nOverwrite it with {overwrite_with}?",
+            "Overwrite", lambda: save(existing), ok_color=C.WARM)
 
 
 def fill_saved_list(box, entries, label: Callable, on_load: Callable, on_delete: Callable) -> None:

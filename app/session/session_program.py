@@ -1,7 +1,9 @@
 """Headless session-program model: ordered timed segments with per-segment
 target + driving formula. Pure logic (no Kivy), mirrors timer_state.py."""
 
-from app.metrics.custom_formula import CustomFormulaEvaluator
+from typing import NamedTuple
+
+from app.metrics.custom_formula import CustomFormulaEvaluator, compile_formula
 
 
 def _minutes(seg: dict) -> int:
@@ -98,12 +100,32 @@ def program_plan(prog: SessionProgram) -> tuple[set[str], list[tuple[str, dict]]
     return keys, custom_slots, segment_keys
 
 
-def program_evaluators(prog: SessionProgram) -> dict[str, CustomFormulaEvaluator]:
-    """One evaluator per distinct custom formula, by its series slot, to run on every tick from the session's start."""
-    evaluators: dict[str, CustomFormulaEvaluator] = {}
-    for slot, custom in program_plan(prog)[1]:
-        ev = CustomFormulaEvaluator()
-        ok, _ = ev.set_formula(custom.get("formula", "") or "")
-        if ok and ev.is_valid:
-            evaluators[slot] = ev
-    return evaluators
+def _compile(customs: list[tuple[str, dict]]) -> dict[str, CustomFormulaEvaluator]:
+    """One evaluator per custom formula that compiles, by its series slot, to run on every tick from the start."""
+    compiled = {slot: compile_formula(custom.get("formula", "") or "")[0] for slot, custom in customs}
+    return {slot: ev for slot, ev in compiled.items() if ev is not None}
+
+
+class RunnablePlan(NamedTuple):
+    keys: set[str]  # the series the program shows
+    customs: list[tuple[str, dict]]  # (slot, custom) for each custom formula that runs
+    segment_keys: list[str]  # the metric each segment drives and is scored on
+    planned_keys: list[str]  # program_plan's: a formula that doesn't compile on its own slot, as older builds drove it
+    evaluators: dict[str, CustomFormulaEvaluator]  # slot -> evaluator
+    unrunnable: list[str]  # the names of custom formulas that don't compile
+
+
+def runnable_plan(prog: SessionProgram) -> RunnablePlan:
+    """`program_plan` as a session runs it: a custom formula that doesn't compile gets no line, and its segments drive
+    and show shamatha; a series nothing computes reads 0, constant maximum noise."""
+    keys, customs, planned = program_plan(prog)
+    evaluators = _compile(customs)
+    dead = {slot for slot, _ in customs} - set(evaluators)
+    if not dead:
+        return RunnablePlan(keys=keys, customs=customs, segment_keys=planned, planned_keys=planned,
+                            evaluators=evaluators, unrunnable=[])
+    return RunnablePlan(keys=(keys - dead) | {"shamatha_score"},
+                        customs=[(slot, c) for slot, c in customs if slot not in dead],
+                        segment_keys=["shamatha_score" if k in dead else k for k in planned], planned_keys=planned,
+                        evaluators=evaluators,
+                        unrunnable=[c.get("name") or c.get("formula", "") for slot, c in customs if slot in dead])

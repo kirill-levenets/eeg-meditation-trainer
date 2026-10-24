@@ -27,15 +27,17 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `scored_ticks(session, rows, formula_series, replay_formulas)` gives each tick's value and recorded target and the `Segment`s the controls move.
   A simple session has one segment over every tick, its values from the stored per-tick record (#83) when every row has one;
   else from its saved metric (its stored column, or the formula replay's series for a formula slot; meditation for a session from before #51, which is what its recorded numbers were measured on) at `threshold_used`.
-  A program has one segment per program segment, each with the metric `program_plan` gives it, its target as the live session reads it (`segment_target`: a whole number, 50 when missing or unreadable
-  — the graph's steps, the live goal and the start's threshold use it too) and a custom formula's `name`; a segment the session never reached is dropped.
+  A program has one segment per program segment, each with the metric the session ran it on, its target as the live session reads it (`segment_target`: a whole number, 50 when missing or unreadable
+  — the graph's steps, the live goal and the start's threshold use it too) and, when it scored a custom formula's line, that formula's `name`; a segment the session never reached is dropped.
+  The metric is `runnable_plan`'s, Shamatha for a formula that doesn't compile, unless the session is from an older build that scored such a formula on its own line (read as 0):
+  then it is `planned_keys`, read when the record shows that line or there is no record, and a session without one then can't be replayed, as its formula has no series.
   A segment starts where the per-tick record shows the live session switching to its metric and target, searched from the last switch found:
   the live session switches on elapsed time and `TickThread._loop` drops an overrun tick, so the switch drifts off minutes x 2.
   A segment like the one before it can't be told apart, so it starts its minutes after it, capped at the next switch found;
   a segment left with no tick is dropped, and the rest keep their program `index`, which numbers their titles.
   Without a record a segment starts by its minutes, as the graph's steps do (`SessionProgram.threshold_steps(2)`), never by the row timestamp, which is the EEG stream's clock.
   Values come from the per-tick record, else from the stored columns and the program's formulas run over the whole session by the `replay_formulas` callable the load worker passes (`recompute_formula_series` over the rows it read;
-  the engine calls it, with `program_evaluators`, only when there is no record): every released build evaluates a program's formulas on every tick from the start.
+  the engine calls it, with the plan's evaluators, only when there is no record): every released build evaluates a program's formulas on every tick from the start.
   `scored_ticks` returns None when it can't be replayed: a formula the replay couldn't rebuild (formula series aren't stored per tick), a program that can't be read or has no tick.
   `rescore(ticks, overrides)` re-runs the live accrual (`GoalAccrual`) with each segment's ticks against its override, or with None against their own recorded targets;
   so as recorded it gives back the recorded numbers by construction (known-answer tests against the real `SessionManager`).
