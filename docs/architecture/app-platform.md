@@ -1,6 +1,6 @@
 # App lifecycle, platform and build
 
-The user gate and profiles, the Android back button, error reporting, test guardrails, and build/CI specifics.
+The user gate and profiles, the Android back button, error reporting, the Linux clipboard, test guardrails, and build/CI specifics.
 Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); this file holds how the subsystem works and why.
 
 ## User gate and profiles
@@ -57,6 +57,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 - `theme` calls `kivy_providers.clipboard_without_commands()` on import, before any text input asks Kivy for a clipboard:
   on Linux it limits Kivy's providers to SDL2 (`kivy_options["clipboard"] = ("sdl2", "dummy")`, `kivy_options["cutbuffer"] = ()`), and logs an error if Kivy had already picked one.
+  `dummy` is Kivy's in-app clipboard, the last resort if SDL2's can't load: copy and paste would then work only inside the app, and the crash dialog's copy would not reach other apps.
   Kivy otherwise picks xclip or xsel by running them when the first text input is built, waiting with no timeout:
   bare `xsel` reads its stdin when that isn't a terminal and asks the X selection's owner, so an open stdin or an owner that never answers hung the app (#118), and a stdin that isn't a terminal cleared the user's selection.
   `KIVY_CLIPBOARD=sdl2` alone isn't enough: the cut buffer is picked from xclip and xsel whatever it says.
