@@ -114,7 +114,8 @@ With no active user the first-run popup (the user gate) is shown.
 - **App icons** (`app/assets/icons/`): Generated EEG brainwave icon (512/192/128/48 PNG + ICO + ICNS), presplash for Android.
 - **Shared widgets** (`widgets/`): `UserPickerForm` (the first-run popup and Settings → User Profile): the existing profiles, a name input, and for a duplicate name an inline "Use existing 'X'" / "Change name" choice.
   `ChoiceToggle` (`widgets/choice_toggle.py`) is a switch whose every position shows what it picks: one button per choice, the chosen one filled and bold, the others outlined and muted, so they read on a card as on the screen;
-  the Session screen's Metrics / Raw EEG and History's Cal / 14d use it, each with its own button size.
+  every switch between views or modes uses it, each with its own button size: the Session screen's Metrics / Raw EEG and its stats bar's LIVE / AVG, History's Cal / 14d,
+  the session detail's Metrics / Raw EEG / Frequencies, Settings › Timer's Simple / Program and Settings › Theme.
   `LoadingOverlay` (`widgets/loading_overlay.py`) is the app-global modal spinner (status + animated dots on the theme's `ModalPanel` over a dim);
   it is mounted by wrapping the app root in a `FloatLayout` and shown via `EEGMeditationApp.show_loading(text, delay=0.0)`/`hide_loading()`.
   With a `delay` it takes taps at once and paints only once the delay has passed, so a job that ends sooner never flashes it.

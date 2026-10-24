@@ -46,6 +46,7 @@ from app.ui.theme import (
     make_message_popup,
 )
 from app.ui.widgets.band_totals import BAND_COLORS, BAND_SCALES, BandTotalsView
+from app.ui.widgets.choice_toggle import ChoiceToggle
 from app.ui.widgets.legend import LegendBar
 from app.ui.widgets.what_if import WhatIfPanel
 
@@ -173,8 +174,6 @@ class DiaryScreen(Screen):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        self._theme_C = C
-
         root = BoxLayout(orientation="vertical", padding=S.PAGE_PAD, spacing=S.GAP)
         fill_background(root, C.BG)
 
@@ -349,25 +348,10 @@ class DiaryScreen(Screen):
         self._detail_layout.add_widget(self._export_status)
 
         # --- Graph tab buttons ---
-        graph_tabs = BoxLayout(size_hint_y=None, height=dp(30), spacing=S.GAP_SM)
-        self._tab_metrics_btn = StyledButton(
-            text="Metrics", font_size=F.SMALL, height=dp(30),
-            bg_color=C.PRIMARY,
-        )
-        self._tab_raw_btn = StyledButton(
-            text="Raw EEG", font_size=F.SMALL, height=dp(30),
-            bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY,
-        )
-        self._tab_freq_btn = StyledButton(
-            text="Frequencies", font_size=F.SMALL, height=dp(30),
-            bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY,
-        )
-        self._tab_metrics_btn.bind(on_release=lambda x: self._switch_graph_tab("metrics"))
-        self._tab_raw_btn.bind(on_release=lambda x: self._switch_graph_tab("raw"))
-        self._tab_freq_btn.bind(on_release=lambda x: self._switch_graph_tab("freq"))
-        graph_tabs.add_widget(self._tab_metrics_btn)
-        graph_tabs.add_widget(self._tab_raw_btn)
-        graph_tabs.add_widget(self._tab_freq_btn)
+        graph_tabs = ChoiceToggle([("metrics", "Metrics"), ("raw", "Raw EEG"), ("freq", "Frequencies")], "metrics",
+                                  self._switch_graph_tab, button={"font_size": F.SMALL, "height": dp(30)},
+                                  size_hint_y=None, height=dp(30), spacing=S.GAP_SM)
+        self._graph_tabs = graph_tabs
         self._detail_layout.add_widget(graph_tabs)
 
         # --- Graph container (holds one graph at a time) ---
@@ -626,18 +610,7 @@ class DiaryScreen(Screen):
         self._active_graph_tab = tab
         self._graph_container.clear_widgets()
 
-        C = self._theme_C
-        for btn, key in [
-            (self._tab_metrics_btn, "metrics"),
-            (self._tab_raw_btn, "raw"),
-            (self._tab_freq_btn, "freq"),
-        ]:
-            if key == tab:
-                btn.bg_color = C.PRIMARY
-                btn.text_color = None
-            else:
-                btn.bg_color = C.BG_CARD
-                btn.text_color = C.TEXT_SECONDARY
+        self._graph_tabs.show(tab)
 
         shown = None
         if tab not in self._ready:
