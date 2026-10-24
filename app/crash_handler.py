@@ -281,13 +281,13 @@ class CrashDialog:
             height=dp(48),
             spacing=dp(8),
         )
-        btn_copy = make["action"]("Copied \u2713")
+        btn_copy = make["action"]("Copied")
         btn_dismiss = make["danger"]("Dismiss & Exit") if fatal else make["dismiss"]("Close")
 
         def _on_copy(_btn):
             try:
                 Clipboard.copy(report)
-                btn_copy.text = "Copied \u2713"
+                btn_copy.text = "Copied"
             except Exception:  # noqa: BLE001
                 btn_copy.text = "Copy failed"
 
