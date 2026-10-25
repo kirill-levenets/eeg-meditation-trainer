@@ -135,7 +135,7 @@ def _compute_graph_height_adaptive(
 
 def _format_stats_slots(mode: str, name: str, score: LiveScore) -> tuple[list[str], list[str]]:
     """(titles, values) of the stats bar's three slots, on the metric the session is scored on: LIVE, its value, the
-    threshold and the streak now; AVG, the end card's numbers so far (a program's average is its running segment's)."""
+    target and the streak now; AVG, the end card's numbers so far (a program's average is its running segment's)."""
     if mode == "aggregate":
         average = "-" if score.average is None else average_text(score.average)
         return (["Segment avg" if score.segmented else "Average", "On target", "Best streak"],  # History's words
@@ -435,7 +435,7 @@ class LiveSessionScreen(Screen):
         self._stat_labels: list[ThemedLabel] = []
         for slot in range(3):
             box = BoxLayout(orientation="vertical")
-            title = ThemedLabel(font_size=F.capped(F.TINY, 1.1), color=C.TEXT_MUTED, size_hint_y=0.4)
+            title = ThemedLabel(font_size=F.TINY, color=C.TEXT_MUTED, size_hint_y=0.4)
             if slot == 0:  # the metric's name: a long formula name is cut, not run into the next slot
                 title.shorten, title.shorten_from, title.halign, title.valign = True, "right", "center", "middle"
                 title.bind(size=title.setter("text_size"))

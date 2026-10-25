@@ -23,7 +23,7 @@ With no active user the first-run popup (the user gate) is shown.
   A **selected** state is an accent fill with AUTO (`text_color=None`): `C.TEXT` on a bright fill is 1.5–2:1 in the dark themes.
   **Disabled** dims label and icon to a 60/40 blend of `readable_fg(bg)` into the disabled `C.BG_CARD` fill, at least ~4:1 in every theme (the theme's `C.TEXT_MUTED` washes out on light cards).
   The dimmed colour goes to the labels' **`disabled_color`** as well as `color`: Kivy's `Label` draws `disabled_color` (default white@.3, invisible on light cards) whenever the widget is disabled.
-  **Pressed** darkens the background (glyph colour unchanged) **and** raises an edge-visible press ring (issue #33), since a darker fill alone is hidden under the fingertip:
+  **Pressed** darkens the background (glyph colour unchanged; an outlined button keeps its card fill and its border fills in and thickens, as its text is often the border's colour) **and** raises an edge-visible press ring (issue #33), since a darker fill alone is hidden under the fingertip:
   `on_state` snaps `_ring_alpha` to `_RING_MAX` on `down` and `Animation`-fades it to 0 over `_RING_FADE` on release, so the cue lingers after the finger lifts.
   The ring is a `Line` drawn in `_redraw` at `_ring_rgb()` = `C.TEXT`: its contrast derives from the **surrounding surface** (light on dark themes, dark on light), NOT the button fill, the same rule as the graph expand glyph;
   `readable_fg(fill)` would give a dark ring on a bright accent button that vanishes on a dark theme.
@@ -92,7 +92,7 @@ With no active user the first-run popup (the user gate) is shown.
     `padding=` fixes the sides instead;
   - where the box can't grow with its text (a fixed strip of columns, a status line), the text is `F.capped(size)`: it follows the text size up to `F.CAPPED_MAX` (120 %), or a cap of its own.
     Capped: the Session screen's status line and timer length (the bottom bar's width is fixed: grown to 150 %, "105m" would squeeze Start onto two lines on the phone);
-    its stats bar's titles (110 %, "Above threshold" in a third of a 360 dp phone), values and LIVE / AVG switch; a program's segment row and its header.
+    its stats bar's values ("59m 59s" in a third of a 360 dp phone) and LIVE / AVG switch; a program's segment row and its header.
     Everything else grows to 150 %.
     A cap is added only where a test fails without it.
 
@@ -115,7 +115,7 @@ With no active user the first-run popup (the user gate) is shown.
 - **Shared widgets** (`widgets/`): `UserPickerForm` (the first-run popup and Settings → User Profile): the existing profiles, a name input, and for a duplicate name an inline "Use existing 'X'" / "Change name" choice.
   `ChoiceToggle` (`widgets/choice_toggle.py`) is a switch whose every position shows what it picks: one button per choice, the chosen one filled and bold, the others outlined and muted, so they read on a card as on the screen;
   every switch between views or modes uses it, each with its own button size: the Session screen's Metrics / Raw EEG and its stats bar's LIVE / AVG, History's Cal / 14d,
-  the session detail's Metrics / Raw EEG / Frequencies, Settings › Timer's Simple / Program and Settings › Theme.
+  the session detail's Metrics / Raw EEG / Frequencies and its band breakdown's Detailed / Grouped, Settings › Timer's Simple / Program, Settings › Threshold's formula Slot and Settings › Theme.
   `LoadingOverlay` (`widgets/loading_overlay.py`) is the app-global modal spinner (status + animated dots on the theme's `ModalPanel` over a dim);
   it is mounted by wrapping the app root in a `FloatLayout` and shown via `EEGMeditationApp.show_loading(text, delay=0.0)`/`hide_loading()`.
   With a `delay` it takes taps at once and paints only once the delay has passed, so a job that ends sooner never flashes it.

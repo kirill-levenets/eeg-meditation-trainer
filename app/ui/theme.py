@@ -910,8 +910,7 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
         bg = self._get_bg()
         with self.canvas.before:
             if self.outline:
-                # Pressed, the border fills in and thickens; the fill stays the card, so its text (often the border's
-                # colour) stays readable instead of sitting on a darkened copy of itself.
+                # Pressed, the fill stays the card (the text is often the border's colour) and the border thickens.
                 down = self.state == "down"
                 Color(*C.BG_CARD)
                 RoundedRectangle(pos=self.pos, size=self.size, radius=[S.RADIUS])

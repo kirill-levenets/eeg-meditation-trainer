@@ -25,7 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   LIVE shows its value, the target it is scored against and the current streak; AVG the average, the time on target and the best streak.
   It used to show Shamatha and four fixed values, and its averages were Shamatha's even when a session trained a formula; Avg Med and ≥90 (time with Shamatha at 90 or more) are no longer shown, though ≥90 is still saved.
   In a program it follows each segment, its average the running segment's.
-  LIVE and AVG are both shown, the chosen one filled and the other outlined; every other switch between views or modes looks the same (Metrics / Raw EEG, Cal / 14d, the session detail's tabs, Settings › Timer's mode and Theme).
+  LIVE and AVG are both shown, the chosen one filled and the other outlined; every other switch between views or modes looks the same (Metrics / Raw EEG, Cal / 14d, the session detail's tabs and band breakdown, Settings › Timer's mode, the formula Slot and Theme).
   Distraction, Sinking and the NeuroSky values stay available as graph series.
 
 ### Removed

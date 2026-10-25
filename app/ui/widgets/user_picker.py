@@ -36,7 +36,7 @@ class UserPickerForm(BoxLayout):
         self,
         on_create: Callable[[str], None],
         on_pick_existing: Callable[[int], None],
-        on_count: Optional[Callable[[int], int]] = None,
+        on_count: Optional[Callable[[int], int | None]] = None,  # None: shown without a count
         on_delete: Optional[Callable[[int], None]] = None,
         **kwargs,
     ) -> None:

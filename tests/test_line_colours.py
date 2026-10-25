@@ -1,6 +1,6 @@
 """The scored line's colours (#94): its own colour, or a gradient by value from 0 to 200 that stays readable on every
-theme's graph background; the Session screen colours the series being trained, History the one a session was scored
-on; each profile keeps its choice and a change reaches every graph at once."""
+theme's graph background; each point is coloured on the series it was scored on, live, after a reload and in History;
+each profile keeps its choice and a change reaches every graph at once."""
 
 import json
 

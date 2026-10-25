@@ -1,6 +1,6 @@
 """A switch whose every position reads as what it shows: one button per choice, the chosen one filled."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Hashable
 
 from kivy.uix.boxlayout import BoxLayout
 
@@ -12,11 +12,11 @@ class ChoiceToggle(BoxLayout):
     card as on the screen. A tap on another choice shows it and calls on_choose(key); `show` marks a choice made
     elsewhere (a loaded profile) without the call."""
 
-    def __init__(self, choices: list[tuple[str, str]], chosen: str, on_choose: Callable[[str], None], *,
+    def __init__(self, choices: list[tuple[Hashable, str]], chosen: Hashable, on_choose: Callable[[Hashable], None], *,
                  button: dict, **layout) -> None:
         super().__init__(**layout)
         self._on_choose = on_choose
-        self.buttons: dict[str, StyledButton] = {}
+        self.buttons: dict[Hashable, StyledButton] = {}
         for key, text in choices:
             btn = StyledButton(text=text, **button)
             btn.bind(on_release=lambda _btn, k=key: self._choose(k))
@@ -24,7 +24,7 @@ class ChoiceToggle(BoxLayout):
             self.add_widget(btn)
         self.show(chosen)
 
-    def show(self, key: str) -> None:
+    def show(self, key: Hashable) -> None:
         self.chosen = key
         for k, btn in self.buttons.items():
             on = k == key
@@ -33,7 +33,7 @@ class ChoiceToggle(BoxLayout):
             btn.text_color = None if on else C.TEXT_SECONDARY  # None: the glyph colour that reads on the fill
             btn.bold = on
 
-    def _choose(self, key: str) -> None:
+    def _choose(self, key: Hashable) -> None:
         if key == self.chosen:
             return
         self.show(key)

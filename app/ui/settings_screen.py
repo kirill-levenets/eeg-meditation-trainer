@@ -265,7 +265,6 @@ class SettingsScreen(Screen):
         self._audio_metric_radios: dict[str, CheckBox] = {}
         self._audio_metric_selected: str = "shamatha_score"
         self._audio_formula_index_selected: int = 0
-        self._audio_formula_index_buttons: list[StyledButton] = []
         audio_metric_options = {
             "shamatha_score": "Shamatha Score",
             "native_meditation": "NS Meditation",
@@ -288,20 +287,10 @@ class SettingsScreen(Screen):
             size_hint_x=0.25,
             halign="left", valign="middle",
         ))
-        btn_box = BoxLayout(size_hint_x=0.75, spacing=S.GAP)
-        for slot_idx, slot_label in enumerate(("1", "2", "3")):
-            btn = StyledButton(
-                text=slot_label,
-                font_size=F.SMALL,
-                size_hint_y=None,
-                height=dp(28),
-                bg_color=C.ACCENT if slot_idx == 0 else C.BG_CARD,
-            )
-            btn._slot_idx = slot_idx
-            btn.bind(on_release=self._on_audio_formula_index_pressed)
-            btn_box.add_widget(btn)
-            self._audio_formula_index_buttons.append(btn)
-        index_row.add_widget(btn_box)
+        self._slot_toggle = ChoiceToggle([(0, "1"), (1, "2"), (2, "3")], 0, self._on_audio_formula_index_chosen,
+                                         button={"font_size": F.SMALL, "size_hint_y": None, "height": dp(28)},
+                                         size_hint_x=0.75, spacing=S.GAP)
+        index_row.add_widget(self._slot_toggle)
         threshold_section.add_widget(index_row)
 
         # --- Audio section ---
@@ -476,8 +465,7 @@ class SettingsScreen(Screen):
         """Mark the active theme, whoever applied it (this selector or a profile's settings load)."""
         self._theme_toggle.show(C.theme_name)
 
-    def _on_audio_formula_index_pressed(self, btn) -> None:
-        idx = getattr(btn, "_slot_idx", 0)
+    def _on_audio_formula_index_chosen(self, idx: int) -> None:
         self.audio_formula_index = idx
         self.on_audio_formula_index(idx)
 
@@ -550,5 +538,4 @@ class SettingsScreen(Screen):
     @audio_formula_index.setter
     def audio_formula_index(self, idx: int) -> None:
         self._audio_formula_index_selected = idx
-        for i, btn in enumerate(self._audio_formula_index_buttons):
-            btn.bg_color = C.ACCENT if i == idx else C.BG_CARD
+        self._slot_toggle.show(idx)
