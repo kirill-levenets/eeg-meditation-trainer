@@ -2,6 +2,7 @@ import os
 import tempfile
 import types
 import unittest
+from unittest import mock
 from unittest.mock import MagicMock
 
 from app.metrics.formula_slots import FormulaSlots
@@ -139,6 +140,24 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         self.app._graph_series.persist(freq)
         saved_freq = self.app._db.get_user_json_setting(self.uid, "graph_series_diary_freq")
         self.assertNotIn("gamma", saved_freq)
+
+    def test_a_detail_showing_a_programs_lines_lists_them_and_saves_none_of_its_set(self):
+        diary = self.app._diary_screen._metrics_graph
+        shown = frozenset({"shamatha_score", "program_formula"})
+        series = make_graph_series(self.app, detail_program=lambda g: shown if g is diary else frozenset())
+        for key in diary.series_keys():
+            diary.set_visible(key, key in shown)  # what show_program_series does for a program session
+        listed = []
+
+        def capture(_title, rows, footer=None, **_kw):
+            listed.extend(getattr(row, "text", None) or row.children[-1].text for row in rows)
+            return types.SimpleNamespace(bind=lambda **_k: None, open=lambda: None)
+
+        with mock.patch.object(graph_series, "make_scroll_popup", capture):
+            series.present_picker(diary)
+        self.assertIn(diary.series_name("program_formula"), listed)
+        series.persist(diary)
+        self.assertIsNone(self.app._db.get_user_json_setting(self.uid, "graph_series_diary_metrics"))
 
     def test_custom_formula_gated_on_live_graph_only(self):
         # Live metrics: custom_formula stays hidden while the formula is invalid.

@@ -27,11 +27,13 @@ def _show_row(btn, graph, key: str) -> None:
 
 class GraphSeries:
     """The live metrics graph lists a formula slot only while it is valid, and a program line only while its program
-    runs and computes it; a program's own series set is never saved as the profile's selection."""
+    runs and computes it; a session detail lists a program session's lines while it shows them. A program's own
+    series set is never saved as the profile's selection."""
 
     def __init__(self, db, live_graph, formulas: FormulaSlots, program_run, program_settings, formula_settings,
                  *, graphs: Callable[[], tuple], legacy_defaults: dict[str, bool],
-                 user_id: Callable[[], int | None], require_user: Callable[[str], int | None]) -> None:
+                 user_id: Callable[[], int | None], require_user: Callable[[str], int | None],
+                 detail_program: Callable[[object], frozenset[str]] = lambda _graph: frozenset()) -> None:
         self._db = db
         self._live_graph = live_graph
         self._formulas = formulas
@@ -42,6 +44,7 @@ class GraphSeries:
         self._legacy_defaults = legacy_defaults
         self._user_id = user_id
         self._require_user = require_user
+        self._detail_program = detail_program  # the program lines a graph shows for the session detail on screen
 
     def present_picker(self, graph) -> None:
         """Open the shared multi-select series popup for `graph`.
@@ -54,8 +57,9 @@ class GraphSeries:
         is_live = graph is self._live_graph
         rows = []
         for key in graph.series_keys():
-            if key in PROGRAM_FORMULA_KEYS and not (is_live and self._program_run.computes(key)):
-                continue  # program-controlled: listed only while its program runs and computes it
+            if key in PROGRAM_FORMULA_KEYS and not (is_live and self._program_run.computes(key)) \
+                    and key not in self._detail_program(graph):
+                continue  # program-controlled: listed only while its program runs, or a detail shows it
             btn = StyledButton(height=dp(44))
             _show_row(btn, graph, key)
             btn.bind(on_release=lambda b, k=key: self._toggle(graph, k, b))
@@ -132,11 +136,14 @@ class GraphSeries:
         """Persist `graph`'s visible series under its per-graph key (on picker close).
 
         Skips the live metrics graph while a program sets its series — a running one, or the idle preview of the one
-        Settings has loaded: the program-driven set must not overwrite the user's saved manual selection."""
+        Settings has loaded — and a detail showing a program session's: the program-driven set must not overwrite the
+        user's saved manual selection."""
         uid = self._user_id()
         if not (uid and graph.graph_id):
             return
         if graph is self._live_graph and (self._program_run.active or self._program_settings.governs_live_series()):
+            return
+        if self._detail_program(graph):
             return
         self._db.set_user_json_setting(
             uid, f"graph_series_{graph.graph_id}",

@@ -145,3 +145,9 @@ def runnable_plan(prog: SessionProgram) -> RunnablePlan:
                         segment_keys=["shamatha_score" if k in dead else k for k in planned], planned_keys=planned,
                         evaluators=evaluators,
                         unrunnable=[c.get("name") or c.get("formula", "") for slot, c in customs if slot in dead])
+
+
+def recorded_plan(program_json: str) -> RunnablePlan | None:
+    """The plan a session's recorded program ran on, or None for a simple session or a record that can't be read."""
+    program = recorded_program(program_json)
+    return runnable_plan(program) if program is not None else None

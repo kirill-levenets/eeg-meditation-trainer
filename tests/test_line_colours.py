@@ -8,6 +8,7 @@ import pytest
 from kivy.graphics import Line, Mesh
 
 from app.metrics.formula_slots import session_formulas
+from app.session.session_program import recorded_plan
 from app.settings.registry import SettingsStore
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import line_colours_setting
@@ -189,7 +190,7 @@ def test_a_programs_detail_colours_each_segment_as_it_was_scored():
 
 def test_a_program_sessions_detail_draws_its_formula_line_as_the_session_did():
     """A segment that trained a program formula: History draws that line, named as the Session screen named it, in the
-    gradient over its own segment (#113); a simple session opened next shows no program line."""
+    gradient over its own segment (#113)."""
     program = [{"minutes": 1, "target": 50, "formula": "shamatha_score"},
                {"minutes": 1, "target": 60, "formula": {"name": "Calm", "formula": "alpha1"}}]
     session = {"id": 3, "date_time": "2026-10-10T09:30:00", "duration": 2, "score_metric_key": "program",
@@ -203,13 +204,13 @@ def test_a_program_sessions_detail_draws_its_formula_line_as_the_session_did():
     detail.show_session_detail(session)
     detail.set_session_formulas(replayed, names)
     detail.fill_graph("metrics", detail_graph_data(rows, replayed))
+    detail.show_program_lines(recorded_plan(session["session_program"]))
     graph = detail._metrics_graph
     assert graph.is_visible("program_formula") and graph.series_name("program_formula") == "Program: Calm"
     assert list(graph._data["program_formula"]) == [10.0, 20.0, 30.0, 40.0]
     assert graph._gradient_spans("program_formula", 0, 4) == [(2, 4)]
     assert graph._gradient_spans("shamatha_score", 0, 4) == [(0, 2)]
-    detail.set_session_formulas({}, session_formulas({"id": 4})[1])
-    assert not graph.is_visible("program_formula")
+    assert detail.show_program_lines(None)  # a simple session next: the app brings the profile's selection back
 
 
 def test_picking_line_colours_applies_them_at_once():

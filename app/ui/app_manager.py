@@ -42,6 +42,7 @@ from app.session.manager import SessionManager, SessionState, elapsed_clock
 from app.session.recorder import SessionRecorder
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
+    recorded_plan,
     segment_target,
 )
 from app.session.tick_thread import TickThread
@@ -502,7 +503,7 @@ class EEGMeditationApp(App):
         self._fullscreen = GraphFullscreen(float_root)
         self._graph_series = GraphSeries(
             self._db, self._live_screen.graph, self._formulas, self._program_run, self._program_settings,
-            self._formula_settings, graphs=self._all_graphs,
+            self._formula_settings, graphs=self._all_graphs, detail_program=self._diary_screen.program_lines_of,
             legacy_defaults=self._settings_screen._graph_toggles, user_id=lambda: self._current_user_id,
             require_user=self._require_user)
         self._last_back_time = 0.0  # for double-back-to-exit on the root screen
@@ -2107,6 +2108,8 @@ class EEGMeditationApp(App):
             d.show_session_detail(session)
             d.set_metrics_threshold(float(session.get("threshold_used", 50)))
             d.set_program(session.get("session_program", ""))
+            if d.show_program_lines(recorded_plan(session.get("session_program") or "")) and self._current_user_id:
+                self._graph_series.apply_saved(d._metrics_graph, self._current_user_id)  # a program's set showed last
             bv = {}
             if self._current_user_id:
                 bv = self._db.get_user_json_setting(self._current_user_id, "band_breakdown_view", {}) or {}

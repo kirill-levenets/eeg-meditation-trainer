@@ -12,8 +12,7 @@ from app.metrics.custom_formula import (
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
     program_line_name,
-    recorded_program,
-    runnable_plan,
+    recorded_plan,
 )
 
 FORMULA_KEYS: tuple[str, ...] = ("custom_formula", "custom_formula_2", "custom_formula_3")
@@ -76,9 +75,8 @@ def session_formulas(session: dict) -> tuple[dict[str, CustomFormulaEvaluator], 
     """A saved session's formula lines, ({series key: evaluator}, {series key: name}): its Settings slots' and, for a
     program session, its program's, named as the Session screen named them while it ran."""
     evaluators, names = recorded_formulas(session)
-    program = recorded_program(session.get("session_program") or "")
-    if program is not None:
-        plan = runnable_plan(program)
+    plan = recorded_plan(session.get("session_program") or "")
+    if plan is not None:
         evaluators = {**evaluators, **plan.evaluators}
         names = {**names, **{slot: program_line_name(custom) for slot, custom in plan.customs}}
     return evaluators, names

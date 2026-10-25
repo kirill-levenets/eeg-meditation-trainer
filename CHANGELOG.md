@@ -38,8 +38,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
-- **History didn't draw a program's formula lines** (#113): a program session's detail showed only the Settings formula slots, so a segment that trained a program formula had no line there.
-  It now draws them, named as the Session screen named them ("Program: <name>"), and colours each segment's line as the session did.
+- **History didn't draw a program session as the Session screen did** (#113): its detail showed only the Settings formula slots and your own History series, so a segment that trained a program formula, or a series you hide there, had no line.
+  It now shows the program's lines as they were shown live, the formula lines named "Program: <name>", each segment's line coloured as during the session; your History selection is left as it was and comes back for a simple session.
 - **Pressing an outlined button hid its label** (#113): a profile's X, or a switch's unchosen side, filled with its own text colour while held; it now keeps its card fill and its border thickens.
 - **In a program, the scored line's colours jumped at each segment** (#113): the new segment's line took the gradient over the whole graph and the last segment's lost it.
   Each part of the graph now keeps the colouring of the line its segment trained, live, after a screen lock and in the session's detail in History.
