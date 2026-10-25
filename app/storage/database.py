@@ -378,8 +378,8 @@ class DatabaseManager:
 
     def count_sessions(self, user_id: int, exclude_id: int | None = None) -> int:
         """One profile's sessions, leaving out `exclude_id` (a running session's row)."""
-        return self._conn.execute("SELECT COUNT(*) FROM sessions WHERE user_id = ? AND id IS NOT ?",
-                                  (user_id, exclude_id)).fetchone()[0]
+        return (self._conn.execute("SELECT COUNT(*) FROM sessions WHERE user_id = ? AND id IS NOT ?",
+                                   (user_id, exclude_id)).fetchone() or (0,))[0]  # the null connection has no row
 
     def get_session(self, session_id: int) -> Optional[dict]:
         """Return a single session by ID."""

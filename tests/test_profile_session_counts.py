@@ -76,3 +76,17 @@ def test_a_running_sessions_row_is_counted_once_it_ends(tmp_path):
         assert app._count_sessions_for_user(uid) == 2
     finally:
         db.close()
+
+
+def test_the_count_is_each_profiles_own_and_zero_once_the_database_is_closing(tmp_path):
+    db = DatabaseManager(db_path=str(tmp_path / "t.db"))
+    try:
+        first, second = db.create_user("Mock"), db.create_user("Second mock")
+        for uid in (first, first, second):
+            db.save_session({"duration": 60}, user_id=uid)
+        assert (db.count_sessions(first), db.count_sessions(second)) == (2, 1)
+        db.mark_shutting_down()
+        db.close()
+        assert db.count_sessions(first) == 0  # late access is a no-op, never a crash
+    finally:
+        db.close()
