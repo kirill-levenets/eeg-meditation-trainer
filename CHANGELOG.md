@@ -43,6 +43,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Pressing an outlined button hid its label** (#113): a profile's X, or a switch's unchosen side, filled with its own text colour while held; it now keeps its card fill and its border thickens.
 - **In a program, the scored line's colours jumped at each segment** (#113): the new segment's line took the gradient over the whole graph and the last segment's lost it.
   Each part of the graph now keeps the colouring of the line its segment trained, live, after a screen lock and in the session's detail in History.
+- **Another line could hide the scored line** (#113): lines were drawn in a fixed order, and Shamatha, which is computed as the meditation score itself, lay exactly under the Meditation line whenever both showed, as they always do in a program with both.
+  The scored line is now drawn over every other line.
 - **The timer length or "P" beside Start was hard to read** (#113): it was drawn in the theme's text colour on Start's green, light on light in the dark themes.
   It now takes the colour Start's own text takes, dimmed with it while a session runs.
 - **The Session screen's stats row ran its values together at a larger text size** (#113): at Large or Larger on a phone, an average touched the time beside it ("82.41m 00s").

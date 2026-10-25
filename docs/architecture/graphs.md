@@ -65,6 +65,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Each gradient and background has one cached texture (`gradient_texture`); a theme switch redraws every graph, a new choice (`LINE_COLOURS.add_listener`) every graph with a gradient series.
   The graph keeps `(first point, series)` steps (`set_gradient_steps`; `set_gradient_series(key)` is one step at 0), and `_split_at_spans` draws each series in runs, the gradient only over its own steps:
   a program's next segment colours its series from the boundary on and recolours nothing drawn before it (#113).
+  The scored runs are drawn after every other series' line, so no series hides the scored line, Mono included:
+  Shamatha is computed as the meditation score itself (`compute_shamatha`), so when both lines show, the one drawn later covers the other exactly.
   Live, `add_point(values, threshold, scored)` extends the steps with the key each tick was scored on, as it extends the threshold steps, and `LiveMirror` keeps that key so a screen lock's reload redraws the same colours;
   `set_training_series` only moves the legend's » and the stats bar's title, and `clear_data` drops the steps with the points.
   The session detail colours by its stored ticks' `score_key` (`scoring.scored_steps`), else the metric the session was scored on (`recorded_score`); a key that is no series of the graph (a program session's "program" from before per-tick keys, a session from before #51) colours none.

@@ -5,7 +5,7 @@ each profile keeps its choice and a change reaches every graph at once."""
 import json
 
 import pytest
-from kivy.graphics import Line, Mesh
+from kivy.graphics import Color, Line, Mesh
 
 from app.metrics.formula_slots import session_formulas
 from app.session.session_program import recorded_plan
@@ -106,6 +106,27 @@ def test_mono_draws_the_scored_line_in_its_own_colour():
     LINE_COLOURS.set(MONO)
     assert _meshes(g) == []
     assert any(isinstance(c, Line) for c in g._gfx.children)
+
+
+def _last_colour(children, rgba) -> int:
+    return max(i for i, c in enumerate(children) if isinstance(c, Color) and tuple(c.rgba) == pytest.approx(tuple(rgba)))
+
+
+@pytest.mark.parametrize("colours", [DEFAULT, MONO])
+def test_the_scored_line_is_drawn_over_every_other_line(colours):
+    """Shamatha is the meditation score itself, drawn first: shown together, Meditation must not hide the scored line."""
+    g = _graph()
+    g._visible["meditation_score"] = True
+    g._data["meditation_score"].clear()
+    g._data["meditation_score"].extend(RAMP)
+    LINE_COLOURS.set(colours)
+    g._draw()
+    children = g._gfx.children
+    other = _last_colour(children, g.series_color("meditation_score"))
+    if colours == MONO:
+        assert _last_colour(children, g.series_color("shamatha_score")) > other
+    else:
+        assert min(i for i, c in enumerate(children) if isinstance(c, Mesh)) > other
 
 
 def test_a_change_reaches_a_graph_already_drawn():

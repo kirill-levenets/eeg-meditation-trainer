@@ -563,8 +563,10 @@ class ScrollableGraphWidget(Widget):
                         ))
                 t_mark += grid_sec
 
-        # Data lines + endpoint value labels
+        # Data lines + endpoint value labels; the scored parts after every other line, so no series hides them
         label_y_positions: list[float] = []
+        scored_parts: list[tuple[list[float], tuple, float]] = []
+        colour_by_value = not self._bipolar and LINE_COLOURS.name != MONO
         for key, slice_data in slices.items():
             if len(slice_data) < 2:
                 continue
@@ -572,7 +574,6 @@ class ScrollableGraphWidget(Widget):
             color = self.series_color(key)
             scale = self._scales.get(key, 100.0)
             draw_scale = max_scale if not self._bipolar else scale
-            colour_by_value = not self._bipolar and LINE_COLOURS.name != MONO
 
             n = len(slice_data)
             vp = max(self._viewport_points, n)
@@ -592,11 +593,10 @@ class ScrollableGraphWidget(Widget):
                     y = graph_y + min(max(val, 0.0) / draw_scale, 1.0) * graph_h
                 xy.append((x, y))
 
-            spans = self._gradient_spans(key, start_idx, start_idx + n) if colour_by_value else []
-            for in_gradient, part in _split_at_spans(drawn, xy, spans):
+            for scored, part in _split_at_spans(drawn, xy, self._gradient_spans(key, start_idx, start_idx + n)):
                 points = [coord for x, y in part for coord in (x, y)]
-                if in_gradient:
-                    self._add_gradient_line(points, graph_y, graph_h, draw_scale)
+                if scored:
+                    scored_parts.append((points, color, draw_scale))
                 else:
                     self._add_polyline(points, color)
 
@@ -619,6 +619,11 @@ class ScrollableGraphWidget(Widget):
                     pos=(graph_x + graph_w + dp(3), last_y - tex.height / 2),
                     size=tex.size,
                 ))
+        for points, color, draw_scale in scored_parts:
+            if colour_by_value:
+                self._add_gradient_line(points, graph_y, graph_h, draw_scale)
+            else:
+                self._add_polyline(points, color)
 
         # Marker vertical lines
         if self._markers:
