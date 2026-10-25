@@ -18,12 +18,12 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   A successful save moves the snapshot; a failed one stays pending and is retried on leave.
   Per-session formula series are **replayed**: the load worker (`_load_session_detail`) runs `_compute_session_formulas`,
   which rebuilds the evaluators from `formula_slots.session_formulas(session)` and recomputes their series via `recompute_formula_series` over the rows it already read.
-  Those are the session's recorded `custom_formulas` (the Settings slots, `recorded_formulas`) and, for a program session, its program's formulas (`recorded_program` → `runnable_plan`), named `"Program: <name>"` as the Session screen named them while it ran (`program_line_name`).
+  Those are the session's recorded `custom_formulas` (the Settings slots, `recorded_formulas`) and, for a program session, its program's formulas (`recorded_plan`: None for a record that can't be read, never a crash), named `"Program: <name>"` as the Session screen named them while it ran (`program_line_name`).
   Formula series aren't stored per tick:
   `detail_graph_data(rows, series)` takes them from the replay (a slot the session didn't record stays empty), and the metrics graph's fill step calls `set_session_formulas(series, names)` first, which names the series.
   A program session shows exactly its program's lines, as the Session screen did while it ran: the open calls `show_program_lines(recorded_plan(...))`, which runs the live graph's `show_program_series`.
   While it does, the picker lists those lines and `GraphSeries.persist` saves nothing (`detail_program`, as a running program skips the live graph), so the profile's History selection is never overwritten;
-  the next simple session opened gets it back (`apply_saved`), and only then.
+  every simple session opens with that selection (`apply_saved`), which costs nothing when it already shows: `set_visible` changes and redraws only what differs.
   So a program session draws as it did live: each segment's line, a program formula's too, in the gradient over its segment by the stored ticks' `score_key` ([graphs](graphs.md)).
   **Try another threshold** (#50, the what-if):
   `WhatIfPanel` (`app/ui/widgets/what_if.py`) under the stats grid: threshold controls (a slider, ±5) and Reset over the time above threshold and longest streak at them, view only;

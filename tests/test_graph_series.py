@@ -10,6 +10,7 @@ from app.session.session_program import PROGRAM_FORMULA_KEYS
 from app.storage.database import DatabaseManager
 from app.ui import graph_series
 from app.ui.app_manager import EEGMeditationApp
+from app.ui.hooks import wire
 from app.ui.live_session import (
     METRICS_COLORS,
     METRICS_SCALES,
@@ -303,3 +304,14 @@ def test_choosing_a_saved_formula_renames_its_picker_row_at_once(tmp_path, monke
 
     assert graph.series_name("custom_formula") == "Calm"
     assert row.text == "Calm"  # the open picker's row says what the line and the legend say
+
+
+def test_showing_a_series_already_shown_changes_nothing():
+    g = _g(METRICS_COLORS, METRICS_SCALES, "diary_metrics")
+    changes = []
+    wire(g, on_series_change=lambda: changes.append(1))
+    g.set_visible("shamatha_score", g.is_visible("shamatha_score"))
+    assert changes == []
+    g.set_visible("shamatha_score", not g.is_visible("shamatha_score"))
+    assert changes == [1]
+

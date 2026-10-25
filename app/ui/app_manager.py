@@ -2108,8 +2108,10 @@ class EEGMeditationApp(App):
             d.show_session_detail(session)
             d.set_metrics_threshold(float(session.get("threshold_used", 50)))
             d.set_program(session.get("session_program", ""))
-            if d.show_program_lines(recorded_plan(session.get("session_program") or "")) and self._current_user_id:
-                self._graph_series.apply_saved(d._metrics_graph, self._current_user_id)  # a program's set showed last
+            plan = recorded_plan(session.get("session_program") or "")
+            d.show_program_lines(plan)
+            if plan is None and self._current_user_id:  # the profile's own selection, whatever the last session showed
+                self._graph_series.apply_saved(d._metrics_graph, self._current_user_id)
             bv = {}
             if self._current_user_id:
                 bv = self._db.get_user_json_setting(self._current_user_id, "band_breakdown_view", {}) or {}

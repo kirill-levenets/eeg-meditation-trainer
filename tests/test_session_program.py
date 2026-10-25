@@ -1,8 +1,11 @@
+import json
+
 import pytest
 
 from app.session.session_program import (
     SessionProgram,
     program_plan,
+    recorded_plan,
     recorded_program,
     runnable_plan,
     segment_target,
@@ -117,9 +120,20 @@ def test_a_segments_target_is_a_whole_number_50_when_missing():
     assert SessionProgram([{"minutes": 1, "target": 72.5}, {"minutes": 1}]).threshold_steps(2) == [(0, 72), (120, 50)]
 
 
+def test_a_segment_without_a_formula_shows_the_shamatha_line_it_drives():
+    keys, _customs, segment_keys = program_plan(SessionProgram([{"minutes": 1, "target": 60}]))
+    assert segment_keys == ["shamatha_score"] and keys == {"shamatha_score"}
+
+
 @pytest.mark.parametrize("record", ['[{"minutes": "x"}]', '[{"minutes": 1e999}]', "not json", "", "[]"])
 def test_a_record_that_cant_be_read_is_no_program(record):
     assert recorded_program(record) is None
+
+
+@pytest.mark.parametrize("formula", [{"name": "X", "formula": 80}, {"name": ["X"], "formula": "80"}])
+def test_a_formula_of_the_wrong_type_is_no_plan_never_a_crash(formula):
+    record = json.dumps([{"minutes": 1, "target": 50, "formula": formula}])
+    assert recorded_program(record) is not None and recorded_plan(record) is None
 
 
 def test_a_session_detail_opened_on_an_unreadable_program_draws_its_plain_threshold():

@@ -50,10 +50,10 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The picker is wired on every graph with more than one series (all but the two raw EEG graphs), since a single-series graph's picker could only blank the line.
   One presenter, `GraphSeries.present_picker(graph)` (`app/ui/graph_series.py`, the app's `_graph_series`, which also saves and restores each graph's selection), reads the graph's own catalog, labels and colours:
   `series_keys()` / `series_name()` / `series_color()`, no hardcoded metric list.
-  It lists a program's line only on the live graph while its program runs and computes it (`ProgramRun.computes(key)`: the program's valid custom formulas).
+  It lists a program's line on the live graph while its program runs and computes it (`ProgramRun.computes(key)`: the program's valid custom formulas), and on the session detail's metrics graph while it shows a program session's lines (`detail_program`).
   Each graph carries a `graph_id` (`live_metrics`, `live_band`, `diary_metrics`, `diary_freq`, …) and its selection persists per graph as `graph_series_<graph_id>` (JSON, per user);
   the live metrics graph migrates legacy `toggle_<key>` rows when it has no JSON yet, other graphs default to all visible.
-  `set_visible` and `set_series_name` fire the graph's `on_series_change` hook, so the owning screen's legend (visible-filtered) follows any picker toggle, Choose…, restore or program segment;
+  `set_visible` (only when it changes something) and `set_series_name` fire the graph's `on_series_change` hook, so the owning screen's legend (visible-filtered) follows any picker toggle, Choose…, restore or program segment;
   a fullscreen graph's legend follows it too ([Fullscreen](#fullscreen)).
   The formula slots' validity gate (`FormulaSlots.for_key(key).is_valid`) applies only to the live metrics graph: the detail's formula lines are recorded data and toggle freely.
 - **Scored line colours** (#94, `app/ui/line_colours.py`):

@@ -33,7 +33,7 @@ class GraphSeries:
     def __init__(self, db, live_graph, formulas: FormulaSlots, program_run, program_settings, formula_settings,
                  *, graphs: Callable[[], tuple], legacy_defaults: dict[str, bool],
                  user_id: Callable[[], int | None], require_user: Callable[[str], int | None],
-                 detail_program: Callable[[object], frozenset[str]] = lambda _graph: frozenset()) -> None:
+                 detail_program: Callable[[object], frozenset[str]]) -> None:
         self._db = db
         self._live_graph = live_graph
         self._formulas = formulas
@@ -57,8 +57,8 @@ class GraphSeries:
         is_live = graph is self._live_graph
         rows = []
         for key in graph.series_keys():
-            if key in PROGRAM_FORMULA_KEYS and not (is_live and self._program_run.computes(key)) \
-                    and key not in self._detail_program(graph):
+            shown = (is_live and self._program_run.computes(key)) or key in self._detail_program(graph)
+            if key in PROGRAM_FORMULA_KEYS and not shown:
                 continue  # program-controlled: listed only while its program runs, or a detail shows it
             btn = StyledButton(height=dp(44))
             _show_row(btn, graph, key)

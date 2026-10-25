@@ -18,7 +18,7 @@ from app.ui.live_session import SERIES_NAMES
 
 def show_program_series(graph, plan: RunnablePlan) -> None:
     """Set the graph to EXACTLY the program's metric set and label each program custom line. Shared by a program
-    session's start and the idle preview."""
+    session's start, the idle preview and a program session's detail in History."""
     for slot, custom in plan.customs:
         graph.set_series_name(slot, program_line_name(custom))
     for k in graph.series_keys():

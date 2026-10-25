@@ -4,6 +4,7 @@ target + driving formula. Pure logic (no Kivy), mirrors timer_state.py."""
 import json
 from typing import NamedTuple
 
+from app.logger import logger
 from app.metrics.custom_formula import CustomFormulaEvaluator, compile_formula
 
 
@@ -90,7 +91,6 @@ def program_plan(prog: SessionProgram) -> tuple[set[str], list[tuple[str, dict]]
     """Map a program to its series: (program_keys, custom_slots, segment_keys) — the set of series it shows, an ordered
     (slot_key, custom_dict) for each DISTINCT custom formula (capped at PROGRAM_FORMULA_KEYS), and the metric key each
     segment drives (a built-in key or its custom's slot)."""
-    builtins: set[str] = set()
     custom_slots: list[tuple[str, dict]] = []
     ident_to_slot: dict[tuple, str] = {}  # (name, formula) -> slot_key
     segment_keys: list[str] = []
@@ -108,12 +108,10 @@ def program_plan(prog: SessionProgram) -> tuple[set[str], list[tuple[str, dict]]
             else:  # > 3 distinct customs (implausible): reuse the last slot
                 segment_keys.append(custom_slots[-1][0])
         elif isinstance(f, str) and f:
-            builtins.add(f)
             segment_keys.append(f)
         else:
             segment_keys.append("shamatha_score")
-    keys = set(builtins) | {s for s, _ in custom_slots}
-    return keys, custom_slots, segment_keys
+    return set(segment_keys), custom_slots, segment_keys  # every series a segment drives, a formula-less one's too
 
 
 def _compile(customs: list[tuple[str, dict]]) -> dict[str, CustomFormulaEvaluator]:
@@ -150,4 +148,10 @@ def runnable_plan(prog: SessionProgram) -> RunnablePlan:
 def recorded_plan(program_json: str) -> RunnablePlan | None:
     """The plan a session's recorded program ran on, or None for a simple session or a record that can't be read."""
     program = recorded_program(program_json)
-    return runnable_plan(program) if program is not None else None
+    if program is None:
+        return None
+    try:
+        return runnable_plan(program)
+    except (TypeError, AttributeError) as e:  # a formula or its name of the wrong type: no program, never a crash
+        logger.warning(f"Recorded program can't be read: {e!r}")
+        return None

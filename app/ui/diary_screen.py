@@ -163,7 +163,7 @@ class DiaryScreen(Screen):
         self._scored_key: Optional[str] = None  # the series the shown session was scored on, marked in its legend
         self._saved_notes_state: tuple[str, str, int] | None = None  # the fields as loaded or last saved
         self._session_formula_series: dict[str, list[float]] = {}
-        self.program_keys: frozenset[str] = frozenset()  # the program lines a program session shows, none otherwise
+        self._program_keys: frozenset[str] = frozenset()  # the program lines a program session shows, none otherwise
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -552,19 +552,16 @@ class DiaryScreen(Screen):
             if graph.series_name(key) != name:  # each change redraws the graph and its legend
                 graph.set_series_name(key, name)
 
-    def show_program_lines(self, plan: RunnablePlan | None) -> bool:
-        """A program session shows exactly its program's lines, as the Session screen did while it ran (None: a simple
-        session). True when the last session shown was a program's and this one isn't: the profile's own selection
-        has to come back."""
-        was_program = bool(self.program_keys)
-        self.program_keys = frozenset(plan.keys) if plan is not None else frozenset()
+    def show_program_lines(self, plan: RunnablePlan | None) -> None:
+        """A program session shows exactly its program's lines, as the Session screen did while it ran; None, a simple
+        session, shows none of them."""
+        self._program_keys = frozenset(plan.keys) if plan is not None else frozenset()
         if plan is not None:
             show_program_series(self._metrics_graph, plan)
-        return was_program and plan is None
 
     def program_lines_of(self, graph) -> frozenset[str]:
         """The program lines `graph` shows for the session on screen: none but on the metrics graph of a program's."""
-        return self.program_keys if graph is self._metrics_graph else frozenset()
+        return self._program_keys if graph is self._metrics_graph else frozenset()
 
     def load_metrics_preview(self, metrics_rows: list[dict]) -> None:
         """Load session metrics into all three preview graphs at once (the async open fills them one per frame)."""

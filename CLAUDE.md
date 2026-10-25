@@ -196,6 +196,7 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 · save under a unique name `settings_sections.common.save_under_unique_name`
 · whether a formula can run `custom_formula.compile_formula`
 · a saved session's formula lines `formula_slots.session_formulas`
+· a saved session's program `session_program.recorded_plan`
 · a saved formula into a slot `FormulaSettings.assign_saved`
 · message `make_message_popup` / `_info_popup`
 · list picker `make_scroll_popup`

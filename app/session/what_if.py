@@ -9,8 +9,8 @@ from app.metrics.formula_slots import COMPUTED_SERIES
 from app.session.scoring import TICK_SECONDS, GoalAccrual, extend_steps, target_steps
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
+    recorded_plan,
     recorded_program,
-    runnable_plan,
     segment_target,
 )
 
@@ -78,11 +78,10 @@ def scored_ticks(session: dict, rows: list[dict], formula_series: dict[str, list
 
 def _program_ticks(program_json: str, rows: list[dict], formula_series: dict[str, list[float]]) -> ScoredTicks | None:
     """A program's ticks on its segments: where the record shows each switch, else by minutes as the graph's steps."""
-    program = recorded_program(program_json)
-    if program is None:
+    program, plan = recorded_program(program_json), recorded_plan(program_json)
+    if program is None or plan is None:
         return None
     n = len(rows)
-    plan = runnable_plan(program)
     record = _has_record(rows)
     # Older builds scored a formula that can't compile on its own line: a record showing it, or none, is theirs.
     dead = set(plan.planned_keys) - set(plan.segment_keys)

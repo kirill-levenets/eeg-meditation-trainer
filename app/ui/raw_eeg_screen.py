@@ -257,7 +257,7 @@ class ScrollableGraphWidget(Widget):
         self._redraw()
 
     def set_visible(self, metric: str, visible: bool) -> None:
-        if metric in self._visible:
+        if metric in self._visible and self._visible[metric] != visible:  # each change redraws the graph and legend
             self._visible[metric] = visible
             self._redraw()
             self.on_series_change()

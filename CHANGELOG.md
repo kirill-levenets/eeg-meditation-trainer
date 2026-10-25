@@ -25,7 +25,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   LIVE shows its value, the target it is scored against and the current streak; AVG the average, the time on target and the best streak.
   It used to show Shamatha and four fixed values, and its averages were Shamatha's even when a session trained a formula; Avg Med and ≥90 (time with Shamatha at 90 or more) are no longer shown, though ≥90 is still saved.
   In a program it follows each segment, its average the running segment's.
-  LIVE and AVG are both shown, the chosen one filled and the other outlined; every other switch between views or modes looks the same (Metrics / Raw EEG, Cal / 14d, the session detail's tabs and band breakdown, Settings › Timer's mode, the formula Slot and Theme).
+  LIVE and AVG are both shown, the chosen one filled and the other outlined;
+  every other switch between views or modes looks the same (Metrics / Raw EEG, Cal / 14d, the session detail's tabs and band breakdown, Settings › Timer's mode, the formula Slot and Theme).
   Distraction, Sinking and the NeuroSky values stay available as graph series.
 
 ### Removed
@@ -38,12 +39,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
-- **History didn't draw a program session as the Session screen did** (#113): its detail showed only the Settings formula slots and your own History series, so a segment that trained a program formula, or a series you hide there, had no line.
+- **History didn't draw a program session as the Session screen did** (#113):
+  its detail showed only the Settings formula slots and your own History series, so a segment that trained a program formula, or a series you hide there, had no line.
   It now shows the program's lines as they were shown live, the formula lines named "Program: <name>", each segment's line coloured as during the session; your History selection is left as it was and comes back for a simple session.
 - **Pressing an outlined button hid its label** (#113): a profile's X, or a switch's unchosen side, filled with its own text colour while held; it now keeps its card fill and its border thickens.
 - **In a program, the scored line's colours jumped at each segment** (#113): the new segment's line took the gradient over the whole graph and the last segment's lost it.
   Each part of the graph now keeps the colouring of the line its segment trained, live, after a screen lock and in the session's detail in History.
-- **Another line could hide the scored line** (#113): lines were drawn in a fixed order, and Shamatha, which is computed as the meditation score itself, lay exactly under the Meditation line whenever both showed, as they always do in a program with both.
+- **Another line could hide the scored line** (#113):
+  lines were drawn in a fixed order, and Shamatha, which is computed as the meditation score itself, lay exactly under the Meditation line whenever both showed, as they always do in a program with both.
   The scored line is now drawn over every other line.
 - **The timer length or "P" beside Start was hard to read** (#113): it was drawn in the theme's text colour on Start's green, light on light in the dark themes.
   It now takes the colour Start's own text takes, dimmed with it while a session runs.

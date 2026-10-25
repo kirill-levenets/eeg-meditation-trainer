@@ -3,7 +3,6 @@ the session's ticks give at it — one control for a simple session, one per seg
 the graph's line follows it, and nothing is written."""
 
 import json
-from unittest.mock import MagicMock
 
 from kivy.base import EventLoop
 from kivy.core.window import Window
@@ -15,7 +14,12 @@ from app.settings.registry import BOOL, Setting, SettingsStore
 from app.ui.hooks import wire
 from app.ui.theme import Icons
 from app.ui.widgets.what_if import WhatIfPanel
-from tests.test_session_detail_open import app, db  # noqa: F401  (fixtures)
+from tests.test_session_detail_open import (  # noqa: F401  (fixtures)
+    _open,
+    _program_session,
+    app,
+    db,
+)
 
 VALUES = [60, 72, 75, 80, 50, 90, 91, 92, 40, 88, 95, 96, 97, 30, 99]
 NOTE = "Recorded at 70 · nothing is saved"
@@ -222,12 +226,6 @@ def _scored_rows(values, targets, key="shamatha_score") -> list[dict]:
              "score_target": t} for i, (v, t) in enumerate(zip(values, targets))]
 
 
-def _open(a, workers, sid) -> None:
-    a._on_session_select(sid)
-    workers.pop()()
-    _frames(6)
-
-
 def test_the_detail_opens_its_session_as_recorded_and_the_line_follows_the_slider(app):  # noqa: F811
     a, workers = app
     targets = [70] * 7 + [90] * 8
@@ -323,13 +321,6 @@ def test_a_what_if_that_fails_fails_alone(app, monkeypatch):  # noqa: F811
     assert max(len(v) for v in d._metrics_graph._data.values()) == 40  # the graphs still filled
 
 
-def _program_session(a, program, rows) -> int:
-    return a._db.checkpoint_session(None, {"duration": len(rows) // 2, "threshold_used": program[0]["target"],
-                                           "score_metric_key": "program", "score_metric_name": "Program"},
-                                    rows, user_id=a._current_user_id, session_name="p",
-                                    session_program=json.dumps(program))
-
-
 def test_an_older_programs_formula_is_replayed_for_its_segment(app):  # noqa: F811
     a, workers = app
     program = [{"minutes": 1, "target": 90, "formula": "shamatha_score"},
@@ -340,27 +331,6 @@ def test_an_older_programs_formula_is_replayed_for_its_segment(app):  # noqa: F8
     assert [c.title.text for c in panel._seg_controls] == ["1 · Shamatha · recorded 90", "2 · Steady · recorded 60"]
     assert [c.stats.text for c in panel._seg_controls] == ["Above 0s · Streak 0s", "Above 1m 00s · Streak 1m 00s"]
 
-
-
-
-def test_a_program_session_shows_its_programs_lines_and_a_simple_one_after_it_the_saved_choice(app):  # noqa: F811
-    """As the Session screen did while it ran: exactly the program's lines, whatever History's own selection (#113)."""
-    a, workers = app
-    a._graph_series = MagicMock()
-    graph = a._diary_screen._metrics_graph
-    for key in graph.series_keys():
-        graph.set_visible(key, key == "shamatha_score")  # History's saved selection: Shamatha only
-    program = [{"minutes": 1, "target": 90, "formula": "shamatha_score"},
-               {"minutes": 1, "target": 60, "formula": {"name": "Steady", "formula": "80"}},
-               {"minutes": 1, "target": 70, "formula": "meditation_score"}]
-    sid = _program_session(a, program, [{"timestamp": i * 0.5, "shamatha_score": 50.0} for i in range(360)])
-    _open(a, workers, sid)
-    assert set(graph.visible_keys()) == {"shamatha_score", "program_formula", "meditation_score"}
-    assert graph.series_name("program_formula") == "Program: Steady"
-    a._graph_series.apply_saved.assert_not_called()
-    _open(a, workers, a.sessions["A"])  # a simple session next: the profile's own selection comes back
-    a._graph_series.apply_saved.assert_called_once_with(graph, a._current_user_id)
-    assert a._diary_screen.program_lines_of(graph) == frozenset()
 
 def test_an_older_programs_formula_runs_once_for_the_graph_and_the_what_if(app, monkeypatch):  # noqa: F811
     a, workers = app

@@ -129,6 +129,21 @@ def test_the_scored_line_is_drawn_over_every_other_line(colours):
         assert min(i for i, c in enumerate(children) if isinstance(c, Mesh)) > other
 
 
+def test_every_scored_run_of_a_program_is_drawn_after_every_plain_line():
+    g = _graph()
+    lines = ("shamatha_score", "program_formula", "meditation_score")
+    for key in lines[1:]:
+        g._visible[key] = True
+        g._data[key].clear()
+        g._data[key].extend(RAMP)
+    third = len(RAMP) // 3
+    g.set_gradient_steps([(0, lines[0]), (third, lines[1]), (2 * third, lines[2])])
+    g._draw()
+    children = g._gfx.children
+    meshes = [i for i, c in enumerate(children) if isinstance(c, Mesh)]
+    assert len(meshes) == 3 and min(meshes) > max(_last_colour(children, g.series_color(k)) for k in lines)
+
+
 def test_a_change_reaches_a_graph_already_drawn():
     g = _graph()
     g.size = (600, 360)
@@ -231,7 +246,8 @@ def test_a_program_sessions_detail_draws_its_formula_line_as_the_session_did():
     assert list(graph._data["program_formula"]) == [10.0, 20.0, 30.0, 40.0]
     assert graph._gradient_spans("program_formula", 0, 4) == [(2, 4)]
     assert graph._gradient_spans("shamatha_score", 0, 4) == [(0, 2)]
-    assert detail.show_program_lines(None)  # a simple session next: the app brings the profile's selection back
+    detail.show_program_lines(None)  # a simple session next
+    assert detail.program_lines_of(graph) == frozenset()
 
 
 def test_picking_line_colours_applies_them_at_once():

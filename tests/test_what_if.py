@@ -3,6 +3,8 @@
 
 import json
 
+import pytest
+
 from app.session.manager import SessionManager
 from app.session.scoring import target_steps
 from app.session.what_if import Segment, Stats, line_steps, rescore, scored_ticks
@@ -230,8 +232,9 @@ def test_a_program_stopped_early_has_controls_for_the_segments_it_reached():
     assert [(s.start, s.end) for s in ticks.segments] == [(0, SEGMENT_TICKS), (SEGMENT_TICKS, 150)]
 
 
-def test_a_program_that_cant_be_read_is_not_scored():
-    session = {**_program_session(), "session_program": "{not json"}
+@pytest.mark.parametrize("record", ["{not json", json.dumps([{"minutes": 1, "formula": {"name": "x", "formula": 80}}])])
+def test_a_program_that_cant_be_read_is_not_scored(record):
+    session = {**_program_session(), "session_program": record}
     assert scored_ticks(session, _old_rows({"shamatha_score": [80.0] * 10}), {}) is None
 
 
