@@ -5,6 +5,8 @@ from app.session.manager import SessionManager
 from app.session.timer_state import TimerState
 from app.settings.registry import BOOL, INT, STR, Setting, SettingsStore
 from app.ui.app_manager import EEGMeditationApp
+from app.ui.hooks import wire
+from app.ui.settings_screen import SettingsScreen
 from tests._program_run import make_run
 
 
@@ -90,3 +92,13 @@ def test_saving_settings_mid_program_keeps_the_programs_timer():
     assert app._timer_state.enabled is True
     assert app._timer_state.duration_minutes == 45
     app._settings_store.save.assert_called_once_with(7)
+
+
+def test_the_formula_slot_switch_tells_the_app_and_shows_a_slot_set_elsewhere():
+    screen = SettingsScreen()
+    picked = []
+    wire(screen, on_audio_formula_index=picked.append)
+    screen._slot_toggle.buttons[2].dispatch("on_release")
+    assert (picked, screen.audio_formula_index, screen._slot_toggle.chosen) == ([2], 2, 2)
+    screen.audio_formula_index = 0  # a profile's load
+    assert (picked, screen._slot_toggle.chosen) == ([2], 0)

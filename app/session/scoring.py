@@ -1,9 +1,9 @@
 """Session scoring: time at/above the goal and the longest run, and which metric a stored session was scored on (#51)."""
 
-from collections.abc import Hashable, Iterable
+from collections.abc import Iterable
 from typing import TypeVar
 
-T = TypeVar("T", bound=Hashable)  # what a tick is scored against or on: a target, a series key
+T = TypeVar("T")  # what a tick is scored against or on: a target, a series key
 
 TICK_SECONDS = 0.5  # the 2 Hz session tick
 

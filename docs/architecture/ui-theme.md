@@ -23,7 +23,7 @@ With no active user the first-run popup (the user gate) is shown.
   A **selected** state is an accent fill with AUTO (`text_color=None`): `C.TEXT` on a bright fill is 1.5–2:1 in the dark themes.
   **Disabled** dims label and icon to a 60/40 blend of `readable_fg(bg)` into the disabled `C.BG_CARD` fill, at least ~4:1 in every theme (the theme's `C.TEXT_MUTED` washes out on light cards).
   The dimmed colour goes to the labels' **`disabled_color`** as well as `color`: Kivy's `Label` draws `disabled_color` (default white@.3, invisible on light cards) whenever the widget is disabled.
-  **Pressed** darkens the background (glyph colour unchanged; an outlined button keeps its card fill and its border fills in and thickens, as its text is often the border's colour) **and** raises an edge-visible press ring (issue #33), since a darker fill alone is hidden under the fingertip:
+  **Pressed** darkens the background (glyph colour unchanged; an outlined button keeps its card fill and its border turns solid and thickens, as its text is often the border's colour) **and** raises an edge-visible press ring (issue #33), since a darker fill alone is hidden under the fingertip:
   `on_state` snaps `_ring_alpha` to `_RING_MAX` on `down` and `Animation`-fades it to 0 over `_RING_FADE` on release, so the cue lingers after the finger lifts.
   The ring is a `Line` drawn in `_redraw` at `_ring_rgb()` = `C.TEXT`: its contrast derives from the **surrounding surface** (light on dark themes, dark on light), NOT the button fill, the same rule as the graph expand glyph;
   `readable_fg(fill)` would give a dark ring on a bright accent button that vanishes on a dark theme.

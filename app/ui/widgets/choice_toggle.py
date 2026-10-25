@@ -1,6 +1,7 @@
 """A switch whose every position reads as what it shows: one button per choice, the chosen one filled."""
 
 from collections.abc import Callable, Hashable
+from typing import Any
 
 from kivy.uix.boxlayout import BoxLayout
 
@@ -12,7 +13,7 @@ class ChoiceToggle(BoxLayout):
     card as on the screen. A tap on another choice shows it and calls on_choose(key); `show` marks a choice made
     elsewhere (a loaded profile) without the call."""
 
-    def __init__(self, choices: list[tuple[Hashable, str]], chosen: Hashable, on_choose: Callable[[Hashable], None], *,
+    def __init__(self, choices: list[tuple[Hashable, str]], chosen: Hashable, on_choose: Callable[[Any], None], *,
                  button: dict, **layout) -> None:
         super().__init__(**layout)
         self._on_choose = on_choose

@@ -177,7 +177,6 @@ def test_each_ticks_screen_update_shows_the_score_as_of_that_tick():
     assert [c.args[0].time_above for c in a._live_screen.update_stats.call_args_list] == [0.5, 1.0, 1.5]
 
 
-
 def test_a_programs_ticks_carry_each_segments_scored_series_to_the_graph_and_the_mirror():
     """The live line's colouring per point (#113): a tick past the boundary is scored, drawn and mirrored on the next
     segment's series."""
@@ -191,6 +190,7 @@ def test_a_programs_ticks_carry_each_segments_scored_series_to_the_graph_and_the
     keys = ["shamatha_score", "meditation_score"]
     assert [m["score_key"] for m in a._mirror.metrics] == keys
     assert [c.kwargs["scored"] for c in _ui_updates(a)] == keys
+
 
 def test_a_tick_the_session_paused_under_is_not_recorded():
     # The pause lands between the tick's RUNNING check and its scoring: the tick isn't part of the session, so it

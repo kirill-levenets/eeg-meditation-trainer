@@ -165,3 +165,19 @@ def test_band_totals_view_sort_by_power_reorders_and_emits():
     view._toggle_sort("power")
     assert view.current_keys()[0] == "gamma1"      # smallest (1.0) first
     assert seen[-1] == ("detailed", "power", False)
+
+
+def test_band_totals_view_detailed_grouped_switch_emits_and_shows_the_choice():
+    from app.ui.widgets.band_totals import BandTotalsView
+    from app.ui.widgets.choice_toggle import ChoiceToggle
+    seen = []
+    view = BandTotalsView(on_change=lambda m, s, d: seen.append((m, s, d)))
+    view.set_totals(_T)
+
+    def toggle():
+        return next(w for w in view.walk() if isinstance(w, ChoiceToggle))
+
+    assert toggle().chosen == "detailed"
+    toggle().buttons["grouped"].dispatch("on_release")
+    assert seen[-1] == ("grouped", "band", False)
+    assert toggle().chosen == "grouped"  # the view redraws its switch with the rest
