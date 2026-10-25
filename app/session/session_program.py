@@ -71,9 +71,15 @@ def recorded_program(program_json: str) -> SessionProgram | None:
     """The program a session recorded (its session_program), or None for a simple session or a record that can't be read."""
     try:
         program = SessionProgram(json.loads(program_json)) if program_json else None
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):  # a hand-edited or corrupt record: no program, never a crash
         return None
     return program or None
+
+
+def program_line_name(custom: dict) -> str:
+    """A program's custom formula line, as the graphs label it."""
+    name = custom.get("name")
+    return f"Program: {name}" if name else "Program"
 
 
 # Program-driven custom-formula lines: one per distinct custom formula in a program.

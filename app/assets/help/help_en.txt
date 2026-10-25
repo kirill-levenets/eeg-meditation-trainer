@@ -284,7 +284,9 @@ During a program the graph shows each segment's
 metric, and the legend marks the active one with
 a bold "»". The live graph and the session
 detail's graph show a stepped threshold line
-that follows each segment's target.
+that follows each segment's target. The detail
+draws the program's formula lines too, each
+segment's line coloured as during the session.
 
 A segment whose formula has an error uses
 Shamatha, and a message at the session's start

@@ -169,14 +169,8 @@ def test_an_older_program_is_replayed_from_its_columns_and_the_formulas_over_the
     # Every released build evaluates a program's formulas on every tick from the start, so the replay does too.
     stats, _rows = _live_program()
     rows = _old_rows({"shamatha_score": SEG1 + [0.0] * SEGMENT_TICKS})
-    asked = []
-
-    def replay(evaluators):
-        asked.append(sorted(evaluators))
-        return {"program_formula": [0.0] * SEGMENT_TICKS + SEG2}
-
-    ticks = scored_ticks(_program_session(), rows, {}, replay)
-    assert asked == [["program_formula"]]  # its formulas, by their series slot
+    replayed = {"program_formula": [0.0] * SEGMENT_TICKS + SEG2}  # the detail's replay of its formula, by its slot
+    ticks = scored_ticks(_program_session(), rows, replayed)
     assert ticks.values == SEG1 + SEG2
     assert ticks.targets == [90.0] * SEGMENT_TICKS + [95.0] * SEGMENT_TICKS
     assert _stored(_as_recorded(ticks)[0]) == _recorded(stats)
@@ -185,13 +179,11 @@ def test_an_older_program_is_replayed_from_its_columns_and_the_formulas_over_the
 def test_an_older_program_whose_formula_couldnt_be_replayed_is_not_scored():
     rows = _old_rows({"shamatha_score": SEG1 + SEG2})
     assert scored_ticks(_program_session(), rows, {}) is None
-    assert scored_ticks(_program_session(), rows, {}, lambda _evaluators: {}) is None
 
 
-def test_a_program_whose_ticks_stored_their_scoring_replays_nothing():
+def test_a_program_whose_ticks_stored_their_scoring_needs_no_formula_series():
     _stats, rows = _live_program()
-    asked = []
-    assert scored_ticks(_program_session(), rows, {}, asked.append) is not None and asked == []
+    assert scored_ticks(_program_session(), rows, {}) is not None
 
 
 def test_a_program_takes_its_switches_from_the_record_when_ticks_were_dropped():
@@ -318,7 +310,7 @@ def test_a_session_from_an_older_build_is_read_on_the_formulas_own_line_as_it_re
 def test_an_older_session_without_a_record_on_a_formula_that_cant_run_is_not_scored():
     program = [PROGRAM[0], {"minutes": 1, "target": 95, "formula": {"name": "Broken", "formula": "alpha1 +"}}]
     rows = _old_rows({"shamatha_score": SEG1 + SEG2})
-    assert scored_ticks(_program_session(program), rows, {}, lambda _evaluators: {}) is None  # no series to rebuild
+    assert scored_ticks(_program_session(program), rows, {}) is None  # no series to rebuild
 
 
 def test_a_segment_whose_formula_couldnt_run_is_found_and_named_by_the_shamatha_it_scored():

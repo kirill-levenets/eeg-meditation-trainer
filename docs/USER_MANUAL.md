@@ -314,6 +314,7 @@ Loading a program switches to Program mode.
   Time above target counts against each segment's own target.
 - The legend marks the active segment's metric in bold with **»**.
 - A stepped dashed target line follows each segment's target, on the live graph and in the session's detail.
+- In History a program session's detail draws its formula lines too (**Program: \<name\>**), each segment's line coloured as it was during the session.
 
 ### Device
 

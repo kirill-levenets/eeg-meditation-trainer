@@ -1,4 +1,3 @@
-import json
 import math
 import os
 import sys
@@ -14,9 +13,9 @@ from kivy.uix.widget import Widget
 from app.config import APP
 from app.eeg.band_spec import BAND_KEYS, GROUP_NAMES, group_powers
 from app.logger import logger, timed
+from app.metrics.formula_slots import COMPUTED_SERIES
 from app.session.scoring import recorded_score, scored_steps, target_steps
-from app.session.session_program import PROGRAM_FORMULA_KEYS, SessionProgram
-from app.session.what_if import COMPUTED_SERIES
+from app.session.session_program import PROGRAM_FORMULA_KEYS, recorded_program
 from app.ui.hooks import Hook, is_wired, wire
 from app.ui.live_session import (
     METRICS_COLORS,
@@ -51,7 +50,6 @@ from app.ui.widgets.choice_toggle import ChoiceToggle
 from app.ui.widgets.legend import LegendBar
 from app.ui.widgets.what_if import WhatIfPanel
 
-# A session's series: the live ones without a running program's (its formula lines are recomputed apart).
 RAW_EEG_PREVIEW_COLORS = {
     "eeg": (0.3, 0.8, 1.0, 1.0),
 }
@@ -126,15 +124,11 @@ def _synthesize_waveform(rows: list[dict]) -> tuple[list[float], int]:
 def detail_graph_data(rows: list[dict], formula_series: dict[str, list[float]]) -> dict:
     """{"metrics" | "raw" | "freq": (series, marker indices), "threshold_steps": ...} from a session's stored rows: pure
     Python, so the open builds it on its worker and the main thread only loads it."""
-    metrics_series: dict[str, list[float]] = {k: [] for k in METRICS_COLORS}
-    for row in rows:
-        for key in metrics_series:
-            metrics_series[key].append(row.get(key, 0.0))
     # Formula lines (the Settings slots', a program's) aren't stored per tick: they come entirely from the session's
     # formula replay. A slot the session didn't record stays empty (no flat zero-line phantom).
-    for key in metrics_series:
-        if key.startswith(COMPUTED_SERIES):
-            metrics_series[key] = formula_series.get(key, [])
+    stored = [k for k in METRICS_COLORS if k not in COMPUTED_SERIES]
+    metrics_series: dict[str, list[float]] = {k: [row.get(k, 0.0) for row in rows] for k in stored}
+    metrics_series.update({k: formula_series.get(k, []) for k in METRICS_COLORS if k in COMPUTED_SERIES})
 
     with timed("diary.synth_waveform"):
         synth, raw_start = _synthesize_waveform(rows)  # tail only, see _synthesize_waveform
@@ -552,10 +546,13 @@ class DiaryScreen(Screen):
         """Inject recomputed per-session formula series + names before display; a program session's own lines show, as
         they did on the Session screen while it ran, and no other session shows any."""
         self._session_formula_series = series
+        graph = self._metrics_graph
         for key, name in names.items():
-            self._metrics_graph.set_series_name(key, name)
+            if graph.series_name(key) != name:  # each change redraws the graph and its legend
+                graph.set_series_name(key, name)
         for key in PROGRAM_FORMULA_KEYS:
-            self._metrics_graph.set_visible(key, key in names)
+            if graph.is_visible(key) != (key in names):
+                graph.set_visible(key, key in names)
 
     def load_metrics_preview(self, metrics_rows: list[dict]) -> None:
         """Load session metrics into all three preview graphs at once (the async open fills them one per frame)."""
@@ -593,12 +590,8 @@ class DiaryScreen(Screen):
         Empty/invalid JSON clears the steps so a non-program session falls back
         to its single-value threshold.
         """
-        try:
-            segs = json.loads(program_json) if program_json else []
-        except (ValueError, TypeError):
-            segs = []
-        prog = SessionProgram(segs)
-        if prog:
+        prog = recorded_program(program_json)
+        if prog is not None:
             self._metrics_graph.set_threshold_steps(
                 prog.threshold_steps(self._metrics_graph._sample_rate)
             )

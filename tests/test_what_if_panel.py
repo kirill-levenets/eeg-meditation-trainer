@@ -340,6 +340,18 @@ def test_an_older_programs_formula_is_replayed_for_its_segment(app):  # noqa: F8
     assert [c.stats.text for c in panel._seg_controls] == ["Above 0s · Streak 0s", "Above 1m 00s · Streak 1m 00s"]
 
 
+
+def test_an_older_programs_formula_runs_once_for_the_graph_and_the_what_if(app, monkeypatch):  # noqa: F811
+    a, workers = app
+    program = [{"minutes": 1, "target": 90, "formula": "shamatha_score"},
+               {"minutes": 1, "target": 60, "formula": {"name": "Steady", "formula": "80"}}]
+    sid = _program_session(a, program, [{"timestamp": i * 0.5, "shamatha_score": 50.0} for i in range(240)])
+    real, replays = a._db.recompute_formula_series, []
+    monkeypatch.setattr(a._db, "recompute_formula_series", lambda *args: replays.append(sorted(args[1])) or real(*args))
+    _open(a, workers, sid)
+    assert replays == [["program_formula"]]  # the detail's replay, which the what-if scores the segment on
+    assert a._diary_screen._what_if._seg_controls[1].stats.text == "Above 1m 00s · Streak 1m 00s"
+
 def test_a_program_whose_ticks_stored_their_scoring_replays_no_formula(app, monkeypatch):  # noqa: F811
     a, workers = app
     program = [{"minutes": 1, "target": 60, "formula": {"name": "Steady", "formula": "80"}}]

@@ -9,16 +9,11 @@ from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
     RunnablePlan,
     SessionProgram,
+    program_line_name,
     runnable_plan,
     segment_target,
 )
 from app.ui.live_session import SERIES_NAMES
-
-
-def program_line_name(custom: dict) -> str:
-    """The live graph's label of a program's custom formula line."""
-    name = custom.get("name")
-    return f"Program: {name}" if name else "Program"
 
 
 def show_program_series(graph, plan: RunnablePlan) -> None:
