@@ -335,7 +335,7 @@ def test_a_reload_keeps_each_points_colouring():
     """A screen lock's reload redraws the line as it was scored, segment by segment (#113)."""
     mirror = LiveMirror()
     for key in ["shamatha_score"] * 3 + ["custom_formula"] * 2:
-        mirror.record(_metrics(seed=1.0), 50, _raw_sample(seed=1.0), key)
+        mirror.record(_metrics(seed=1.0), {"score_target": 50, "score_key": key}, _raw_sample(seed=1.0))
     screen = LiveSessionScreen()
     mirror.reload_into(screen)
     assert screen.graph.gradient_steps == [(0, "shamatha_score"), (3, "custom_formula")]

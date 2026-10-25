@@ -62,7 +62,7 @@ def test_clear_live_display_empties_the_graphs_their_mirrors_and_the_readout():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._live_screen = _finished_screen()
     app._mirror = LiveMirror()
-    app._mirror.record(METRICS, 70, {"alpha1": 1.0, "raw_eeg_waveform": [1.0]})
+    app._mirror.record(METRICS, {"score_target": 70, "score_key": "shamatha_score"}, {"alpha1": 1.0, "raw_eeg_waveform": [1.0]})
     app._clear_live_display()
     mirror = app._mirror
     assert (list(mirror.metrics), list(mirror.bands), list(mirror.waveform), mirror.last_metrics) == ([], [], [], {})

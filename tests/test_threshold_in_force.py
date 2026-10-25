@@ -162,8 +162,10 @@ def test_each_ticks_row_and_mirror_point_record_its_target():
         _drive_tick(a, _raw_sample(), _metrics(seed=80.0))
     assert [(r["score_key"], r["score_value"], r["score_target"]) for r in a._recorder._buffer] == [
         ("shamatha_score", 80.0, 70), ("shamatha_score", 80.0, 70), ("shamatha_score", 80.0, 85)]
-    assert [m["score_target"] for m in a._mirror.metrics] == [70, 70, 85]
-    assert [c.kwargs["threshold"] for c in _ui_updates(a)] == [70, 70, 85]
+    assert [(m["score_target"], m["score_key"]) for m in a._mirror.metrics] == [
+        (70, "shamatha_score"), (70, "shamatha_score"), (85, "shamatha_score")]
+    assert [(c.kwargs["threshold"], c.kwargs["scored"]) for c in _ui_updates(a)] == [
+        (70, "shamatha_score"), (70, "shamatha_score"), (85, "shamatha_score")]
 
 
 def test_each_ticks_screen_update_shows_the_score_as_of_that_tick():
@@ -174,6 +176,21 @@ def test_each_ticks_screen_update_shows_the_score_as_of_that_tick():
     _ui_updates(a)
     assert [c.args[0].time_above for c in a._live_screen.update_stats.call_args_list] == [0.5, 1.0, 1.5]
 
+
+
+def test_a_programs_ticks_carry_each_segments_scored_series_to_the_graph_and_the_mirror():
+    """The live line's colouring per point (#113): a tick past the boundary is scored, drawn and mirrored on the next
+    segment's series."""
+    a = _tick_app()
+    a._program_run = run = make_run(a)
+    run.begin(SessionProgram([{"minutes": 1, "target": 70, "formula": "shamatha_score"},
+                              {"minutes": 1, "target": 60, "formula": "meditation_score"}]), [], "")
+    _drive_tick(a, _raw_sample(), _metrics(seed=80.0))
+    a._session_manager._start_time -= 61  # the next tick is past the first segment's minute
+    _drive_tick(a, _raw_sample(), _metrics(seed=80.0))
+    keys = ["shamatha_score", "meditation_score"]
+    assert [m["score_key"] for m in a._mirror.metrics] == keys
+    assert [c.kwargs["scored"] for c in _ui_updates(a)] == keys
 
 def test_a_tick_the_session_paused_under_is_not_recorded():
     # The pause lands between the tick's RUNNING check and its scoring: the tick isn't part of the session, so it
@@ -449,7 +466,7 @@ def test_a_program_start_that_fails_in_its_setup_leaves_the_controls_unlocked(mo
 def _idle_app() -> EEGMeditationApp:
     a = _threshold_app(state=SessionState.FINISHED)  # the last session ended; its graphs are still on screen
     a._mirror = LiveMirror()
-    a._mirror.record({}, 70, {})
+    a._mirror.record({}, {"score_target": 70, "score_key": "shamatha_score"}, {})
     a._after_settle = MagicMock()
     return a
 

@@ -20,10 +20,9 @@ class LiveMirror:
         self.last_metrics: dict = {}
         self.last_state: str = "Neutral"
 
-    def record(self, metrics: dict, target: float, raw_sample: dict, scored: str | None = None) -> None:
-        """Tick thread: one tick's metrics with its target and the series it was scored on, its band groups and its raw
-        waveform."""
-        self.metrics.append({**metrics, "score_target": target, "score_key": scored})
+    def record(self, metrics: dict, score: dict, raw_sample: dict) -> None:
+        """Tick thread: one tick's metrics with what it was scored on (score_key, score_target), its bands and waveform."""
+        self.metrics.append({**metrics, "score_target": score["score_target"], "score_key": score["score_key"]})
         bands = group_powers(lambda k: raw_sample.get(k, 0.0))
         self.bands.append(bands)
         waveform = raw_sample.get("raw_eeg_waveform")
