@@ -32,6 +32,7 @@ from app.ui.theme import (
     fit_height_to_text,
     make_scroll_popup,
 )
+from app.ui.widgets.choice_toggle import ChoiceToggle
 
 # Built-in metric keys offered in the per-segment formula picker. These are the
 # REAL metric dict keys — native_attention/native_meditation, NOT ns_*.
@@ -84,21 +85,11 @@ class TimerSection:
             text="Mode:", font_size=F.BODY, color=C.TEXT_SECONDARY,
             size_hint_x=0.25, halign="left", valign="middle",
         ))
-        mode_btn_box = BoxLayout(size_hint_x=0.75, spacing=S.GAP)
-        self._program_mode_buttons: list[StyledButton] = []
-        for mode_key, mode_label in (("simple", "Simple"), ("program", "Program")):
-            btn = StyledButton(
-                text=mode_label,
-                font_size=F.SMALL,
-                size_hint_y=None,
-                height=dp(28),
-                bg_color=C.ACCENT if mode_key == "simple" else C.BG_CARD,
-            )
-            btn._mode_key = mode_key
-            btn.bind(on_release=self._on_program_mode_pressed)
-            mode_btn_box.add_widget(btn)
-            self._program_mode_buttons.append(btn)
-        mode_row.add_widget(mode_btn_box)
+        self._mode_toggle = ChoiceToggle([("simple", "Simple"), ("program", "Program")], "simple",
+                                         self._on_program_mode_chosen,
+                                         button={"font_size": F.SMALL, "size_hint_y": None, "height": dp(28)},
+                                         size_hint_x=0.75, spacing=S.GAP)
+        mode_row.add_widget(self._mode_toggle)
         section.add_widget(mode_row)
 
         # Mode-content host: holds EITHER the simple box OR the program box. The
@@ -320,8 +311,7 @@ class TimerSection:
         """Set toggle + show/hide widgets. Does NOT fire the mode callback."""
         mode = "program" if mode == "program" else "simple"
         self._program_mode = mode
-        for btn in self._program_mode_buttons:
-            btn.bg_color = C.ACCENT if btn._mode_key == mode else C.BG_CARD
+        self._mode_toggle.show(mode)
         # Swap the active box into the content host. The inactive box is fully
         # detached (no geometry, no disabled-overlap that would eat taps).
         self._mode_content_box.clear_widgets()
@@ -329,8 +319,7 @@ class TimerSection:
             self._program_box if mode == "program" else self._simple_box
         )
 
-    def _on_program_mode_pressed(self, btn) -> None:
-        mode = getattr(btn, "_mode_key", "simple")
+    def _on_program_mode_chosen(self, mode: str) -> None:
         logger.info(f"Timer mode -> {mode}")
         self.set_program_mode(mode)
         self.on_program_mode(mode)

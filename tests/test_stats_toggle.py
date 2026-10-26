@@ -1,48 +1,28 @@
+"""The stats bar: three slots on the metric the session is scored on, LIVE now or AVG so far (#113)."""
+from dataclasses import replace
+
+from app.session.manager import NO_SCORE, LiveScore
 from app.ui.live_session import _format_stats_slots
 
-
-def test_live_mode_shows_instant_values():
-    metrics = {
-        "shamatha_score": 72,
-        "distraction": 18,
-        "sinking": 5,
-        "native_attention": 60,
-        "native_meditation": 55,
-    }
-    stats = {}  # unused in live mode
-    titles, values = _format_stats_slots("live", metrics=metrics, stats=stats)
-    assert titles == ["Shamatha", "Distraction", "Sinking", "NS Attn", "NS Med"]
-    assert values == ["72", "18", "5", "60", "55"]
+SCORE = LiveScore(value=72.4, target=60, streak=95, average=63.44, segmented=False, time_above=420, longest_streak=60)
 
 
-def test_aggregate_mode_shows_session_totals():
-    metrics = {}
-    stats = {
-        "avg_shamatha": 63.4,
-        "avg_meditation": 58.1,
-        "time_above_threshold": 420,  # seconds
-        "time_shamatha_90": 90,
-        "longest_streak": 60,
-    }
-    titles, values = _format_stats_slots("aggregate", metrics=metrics, stats=stats)
-    assert titles == ["Avg Sham", "Avg Med", ">Thresh", "\u226590", "Streak"]
-    assert values[0] == "63.4"
-    assert values[1] == "58.1"
-    # format_duration: 420s = "7m 00s", 90s = "1m 30s", 60s = "1m 00s"
-    assert values[2] == "7m 00s"
-    assert values[3] == "1m 30s"
-    assert values[4] == "1m 00s"
+def test_live_shows_the_scored_metric_its_threshold_and_the_streak_now():
+    assert _format_stats_slots("live", "Shamatha", SCORE) == (["Shamatha", "Target", "Streak"], ["72", "60", "1m 35s"])
 
 
-def test_idle_aggregate_shows_zeros():
-    titles, values = _format_stats_slots("aggregate", metrics={}, stats={
-        "avg_shamatha": 0.0,
-        "avg_meditation": 0.0,
-        "time_above_threshold": 0,
-        "time_shamatha_90": 0,
-        "longest_streak": 0,
-    })
-    assert values == ["0.0", "0.0", "0s", "0s", "0s"]
+def test_avg_shows_the_end_cards_numbers_so_far():
+    assert _format_stats_slots("aggregate", "Shamatha", SCORE) == (["Average", "On target", "Best streak"],
+                                                                   ["63", "7m 00s", "1m 00s"])
+
+
+def test_a_programs_average_is_its_running_segments():
+    assert _format_stats_slots("aggregate", "Alpha calm", replace(SCORE, segmented=True))[0][0] == "Segment avg"
+
+
+def test_before_the_first_scored_tick_the_bar_shows_no_numbers():
+    assert _format_stats_slots("live", "Score", NO_SCORE)[1] == ["-", "-", "0s"]
+    assert _format_stats_slots("aggregate", "Score", NO_SCORE)[1] == ["-", "0s", "0s"]
 
 
 def test_stats_view_mode_roundtrips_user_settings(tmp_path):

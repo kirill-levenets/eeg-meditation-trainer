@@ -96,10 +96,12 @@ Start a new session to continue.
 
 ### Bottom stats toggle
 
-The stats row under the graph shows live values: Shamatha, Distraction, Sinking, NS Attn and NS Med.
-Its **LIVE** / **AVG** button switches to the session's averages and times:
-**Avg Sham**, **Avg Med**, **>Thresh** (time above the threshold), **≥90** (time with Shamatha at 90 or more) and **Streak** (the longest one above the threshold).
-Your choice is remembered.
+The stats row under the graph follows the metric the session is scored on, the one the feedback sound follows.
+**LIVE** shows its value now, the **Target** it is scored against (your threshold, or a program segment's target) and the current **Streak** above it.
+**AVG** shows the numbers the end-of-session card will show: the **Average**, the time **On target** (above the threshold) and the **Best streak** (the longest).
+In a program the row follows each segment's metric and target; its average is the running segment's (**Segment avg**), since segments can use different metrics, while the times are the whole session's.
+Tap **LIVE** or **AVG** to switch; your choice is remembered.
+Distraction, Sinking and the NeuroSky values can be shown on the graph from its series list.
 
 ### Locked-screen sessions (Android)
 
@@ -312,6 +314,8 @@ Loading a program switches to Program mode.
   Time above target counts against each segment's own target.
 - The legend marks the active segment's metric in bold with **»**.
 - A stepped dashed target line follows each segment's target, on the live graph and in the session's detail.
+- In History a program session's detail shows the lines the Session screen showed while it ran, the formula lines too (**Program: \<name\>**), each segment's line coloured as it was during the session;
+  a simple session opened next shows your own series again.
 
 ### Device
 
@@ -372,6 +376,7 @@ Loading a program switches to Program mode.
 - **Scored line colours**: how the line of the metric you train on is coloured on the graphs (the Session screen's, and a session's in History).
   **Mono** gives it its own colour; a gradient colours it by its value from 0 to 200: **Blue › Red** (the default), **Viridis**, **Plasma**, **Turbo** or **Red › Green**.
   A gradient keeps every part of the line readable on the current theme.
+  In a program each part of the graph colours the line its segment trained, and a new segment leaves what is already drawn as it was.
   It applies at once.
 - **Line Width**: a slider from 0.5 to 4.0, with presets.
 - **Rotate Screen**: each tap turns the screen 90° (0, 90, 180, 270).

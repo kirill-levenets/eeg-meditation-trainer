@@ -13,8 +13,8 @@
 7. When your shamatha score holds at or above
    your threshold, the status (top right) lights
    up as a green "SHAMATHA" badge
-8. Time above threshold (>Thresh in the live
-   stats) and the streak (Streak) count the
+8. Time above threshold (On target in the stats
+   row's AVG) and the streak (Streak) count the
    metric that drives the sound (Settings >
    Threshold > Audio control metric), marked » in
    the graph legend when that line is shown. It
@@ -284,7 +284,10 @@ During a program the graph shows each segment's
 metric, and the legend marks the active one with
 a bold "»". The live graph and the session
 detail's graph show a stepped threshold line
-that follows each segment's target.
+that follows each segment's target. The detail
+shows the lines the live graph showed, the
+formula lines too, each segment's line coloured
+as during the session.
 
 A segment whose formula has an error uses
 Shamatha, and a message at the session's start

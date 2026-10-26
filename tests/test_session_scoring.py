@@ -9,7 +9,7 @@ import pytest
 
 from app.metrics.custom_formula import CustomFormulaEvaluator
 from app.metrics.formula_slots import FormulaSlots
-from app.session.manager import SessionManager, SessionState
+from app.session.manager import NO_SCORE, SessionManager, SessionState
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from tests._program_run import make_run
@@ -110,11 +110,58 @@ def test_a_program_session_keeps_its_segment_goal():
     sm = SessionManager()
     sm.start(threshold=50)
     sm._state = SessionState.RUNNING
-    sm.set_active_goal("custom_formula", 60)  # what _apply_program_segment does
+    sm.start_segment("custom_formula", 60)  # what ProgramRun._enter_segment does
     for m in ({"custom_formula": 80, "shamatha_score": 0}, {"custom_formula": 90, "shamatha_score": 0}):
         sm.add_metric(m)
     assert sm._time_above_threshold == 1.0
 
+
+
+# --- the live score the stats bar shows (#113) -------------------------------------------------------------------
+
+def test_the_live_score_follows_the_scored_metric_from_running_totals():
+    sm = SessionManager()
+    sm.start(threshold=60)
+    sm.set_active_goal("shamatha_score")
+    for m in SHAMATHA_HIGH:  # shamatha 80, 85, 90, 20, 95
+        sm.add_metric(m)
+    score = sm.live_score()
+    assert (score.value, score.target, score.streak, score.segmented) == (95, 60, 0.5, False)
+    assert (score.time_above, score.longest_streak) == (2.0, 1.5)
+    assert score.average == pytest.approx(74.0) == sm.compute_statistics()["avg_score"]  # the end card's average
+
+
+def test_a_program_segment_starts_its_own_average_and_the_streak_carries_over():
+    sm = SessionManager()
+    sm.start(threshold=50)
+    sm.start_segment("shamatha_score", 60)
+    for m in ({"shamatha_score": 70}, {"shamatha_score": 80}):
+        sm.add_metric(m)
+    sm.start_segment("custom_formula", 10)
+    sm.add_metric({"custom_formula": 12})
+    score = sm.live_score()
+    assert (score.average, score.segmented, score.target) == (12, True, 10)
+    assert (score.streak, score.time_above) == (1.5, 1.5)  # one run across the boundary, as the scoring counts it
+
+
+def test_the_live_average_rounds_as_the_end_cards_does():
+    sm = SessionManager()
+    sm.start(threshold=50)
+    sm.set_active_goal("shamatha_score")
+    for value in (63.4, 63.592, 63.496):  # mean 63.496: rounded once to 63, once via 63.50 to 64
+        sm.add_metric({"shamatha_score": value})
+    assert sm.live_score().average == sm.compute_statistics()["avg_score"]
+
+
+def test_the_score_stays_after_the_stop_and_a_new_session_starts_with_none():
+    sm = SessionManager()
+    sm.start(threshold=50)
+    sm.start_segment("shamatha_score", 60)
+    sm.add_metric({"shamatha_score": 70})
+    sm.stop()
+    assert sm.live_score().time_above == 0.5  # the end of a session shows its numbers
+    sm.start(threshold=50)
+    assert sm.live_score() == NO_SCORE
 
 # --- the record: key, display name and average, on every save path ---------------------------------------------
 

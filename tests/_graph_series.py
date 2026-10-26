@@ -15,7 +15,9 @@ def make_graph_series(app, **deps) -> GraphSeries:
     live_screen = getattr(app, "_live_screen", None)
     defaults = {"graphs": lambda: app._all_graphs(),
                 "legacy_defaults": getattr(getattr(app, "_settings_screen", None), "_graph_toggles", {}),
-                "user_id": lambda: app._current_user_id, "require_user": lambda action: app._require_user(action)}
+                "user_id": lambda: app._current_user_id, "require_user": lambda action: app._require_user(action),
+                "detail_program": getattr(getattr(app, "_diary_screen", None), "program_lines_of",
+                                          lambda _graph: frozenset())}
     return GraphSeries(attr("_db", MagicMock), MagicMock() if live_screen is None else live_screen.graph,
                        app._formulas, attr("_program_run", make_run), attr("_program_settings", make_programs),
                        attr("_formula_settings", MagicMock), **{**defaults, **deps})

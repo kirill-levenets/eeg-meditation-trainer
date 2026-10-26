@@ -129,7 +129,8 @@ The linked file explains the mechanism.
   Every end-card close goes through `_close_summary`. → [live-session-and-settings](docs/architecture/live-session-and-settings.md#session-screen)
 - **A session is scored on the metric that drives the feedback sound** (`_audio_drive_key()`).
   The Settings threshold takes effect only through `_put_threshold_in_force` (the slider and profile load go through `_apply_threshold`). → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
-- `ProgramRun.audio_key` is transient and never written to `_audio_metric_key`; `PROGRAM_FORMULA_KEYS` are never persisted to `graph_series_*` or the baseline audio metric.
+- `ProgramRun.audio_key` is transient and never written to `_audio_metric_key`;
+  `PROGRAM_FORMULA_KEYS` are never persisted to `graph_series_*` or the baseline audio metric, nor a program's series set (live or a session detail's) as the profile's selection.
   A program runs, and is replayed, on `runnable_plan`: a custom formula that doesn't compile gets no line and its segments use Shamatha.
   A leaked program key, or one nothing computes, reads as 0 → constant max noise. → [programs](docs/architecture/programs.md)
 
@@ -195,6 +196,8 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 · confirm `theme.confirm_popup` (via `_confirm_action`)
 · save under a unique name `settings_sections.common.save_under_unique_name`
 · whether a formula can run `custom_formula.compile_formula`
+· a saved session's formula lines `formula_slots.session_formulas`
+· a saved session's program `session_program.recorded_plan`
 · a saved formula into a slot `FormulaSettings.assign_saved`
 · message `make_message_popup` / `_info_popup`
 · list picker `make_scroll_popup`
@@ -205,6 +208,7 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 · modal surface `paint_panel`
 · screen background `fill_background`
 · fold button `theme.FoldChevron`
+· a switch between views `widgets.choice_toggle.ChoiceToggle`
 · label height `fit_height_to_text`
 · label width `fit_width_to_text`
 · row height `fit_row_to_text`

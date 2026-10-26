@@ -7,6 +7,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 - **Session lifecycle** (`app/session/manager.py`): the Start/Pause/Resume/Stop state machine.
   `SessionManager` holds the elapsed time, scores each tick (`add_metric`) and computes the end stats (`compute_statistics`); the app wires it to the stream, engine, audio and recorder.
+  `live_score()` is the score so far from running totals (the last tick's value and target, the streaks, the time above, the average since the program's segment began or the session started), for the stats bar every tick.
   It tracks `time_shamatha_90` (time with the shamatha score >= 90, independent of the user's threshold).
   `SessionManager.stop(reason)` plays a short warble alert only for **failure** terminations (`stale_data`, `bt_lost`, `error`); `user` and `timer` are planned stops and stay silent (`timer` plays its own gong).
 - The session tick runs on a Python daemon thread (`SessionTick`) instead of Kivy `Clock`, so EEG compute, audio volume updates and DB flushes continue while the Android screen is locked.
@@ -30,7 +31,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Those are `_targets_text`: `score_targets` joined by ` › ` (Roboto has no `→` glyph), more than three as first › … › last, or `threshold_used` for a row from before #83.
   A program gets `Metric` + `<program> (program)` (just `Program` when it was unsaved) and `Threshold` + `Per segment`, with no average (one metric per segment);
   a session that saved no metric gets `Avg Shamatha` + `<avg_shamatha>` and `Threshold Used` + `<threshold_used>`.
-  An average reads the same everywhere, through `_average`.
+  An average reads the same everywhere, through `average_text` (the Session screen's stats bar too).
   `session_notes_line` is the notes' first non-blank line.
   The session detail's Metrics legend marks the recorded series with `»` (`_scored_key`; a program's key matches no series, and a session with no saved metric marks nothing).
 
@@ -80,7 +81,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   On success the Session screen drops a deleted session it shows (`_drop_shown_session`: the end card, whose notes would have no session to save to, closes with its gong, and the display clears).
   `HistoryScreen.remove_sessions(ids)` removes those rows and model entries in place (see the session list in [history.md](history.md)): no rebuild, no spinner, wherever the user is.
   History never lists the running session: its row exists from the first checkpoint, with that checkpoint's stats, and a History reload during the session would list it with them, frozen there until the next reload.
-  `_refresh_history` drops `_recorder.session_id` while `_session_pipeline_live()`, and `_finalize_stop_ui` marks History dirty, so the session appears once it ends.
+  `_running_session_id()` (`_recorder.session_id` while `_session_pipeline_live()`) is left out of History's list (`_finished_sessions`) and Settings' profile counts.
+  `_finalize_stop_ui` marks History dirty, so the session appears once it ends.
   `_delete_sessions` also refuses it (`_recorder.session_id` among the ids while live): its next checkpoints would write ticks for no session.
 
 ## Timer

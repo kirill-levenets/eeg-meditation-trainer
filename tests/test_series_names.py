@@ -120,3 +120,10 @@ def test_a_graph_keeps_its_own_copy_of_the_names_it_is_given():
     graph = ScrollableGraphWidget(colors={"a": (1, 1, 1, 1)}, scales={"a": 100.0}, names=names)
     graph.set_series_name("a", "Renamed")
     assert names == {"a": "Alpha"} and graph.series_name("a") == "Renamed"
+
+
+def test_the_session_screens_legend_starts_as_its_graph_shows():
+    """set_visible rebuilds the legend only on a change, so the first one must already match the graph."""
+    screen = LiveSessionScreen()
+    shown = [lbl.text for lbl in reversed(screen._legend.children)]
+    assert shown == [screen.graph.series_name(k) for k in screen.graph.series_keys() if screen.graph.is_visible(k)]

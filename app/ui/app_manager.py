@@ -35,13 +35,14 @@ from app.metrics.engine import MetricsEngine
 from app.metrics.formula_slots import (
     FORMULA_KEYS,
     FormulaSlots,
-    recorded_formulas,
+    session_formulas,
 )
 from app.metrics.noise_detector import PowerLineDetector
 from app.session.manager import SessionManager, SessionState, elapsed_clock
 from app.session.recorder import SessionRecorder
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
+    recorded_plan,
     segment_target,
 )
 from app.session.tick_thread import TickThread
@@ -502,7 +503,7 @@ class EEGMeditationApp(App):
         self._fullscreen = GraphFullscreen(float_root)
         self._graph_series = GraphSeries(
             self._db, self._live_screen.graph, self._formulas, self._program_run, self._program_settings,
-            self._formula_settings, graphs=self._all_graphs,
+            self._formula_settings, graphs=self._all_graphs, detail_program=self._diary_screen.program_lines_of,
             legacy_defaults=self._settings_screen._graph_toggles, user_id=lambda: self._current_user_id,
             require_user=self._require_user)
         self._last_back_time = 0.0  # for double-back-to-exit on the root screen
@@ -1280,13 +1281,15 @@ class EEGMeditationApp(App):
             self._mirror.reload_into(self._live_screen)
         except Exception:
             logger.exception("graph reload on stop failed")
-        self._live_screen.update_stats(self._mirror.last_metrics)  # the whole session's averages: no tick ran while locked
+        self._live_screen.update_stats(self._session_manager.live_score())  # the whole session's: no tick ran while locked
         self._undo_session_setup()
         self._live_screen.update_state("FINISHED")
         # Sync the header timer to the final duration (it froze at lock time).
         if stats:
             self._live_screen.update_timer(elapsed_clock(stats.get("duration", 0)))
         self._mark_history_dirty()
+        if getattr(getattr(self, "_sm", None), "current", None) == "settings":  # a timer can end it there
+            self._settings_screen.refresh_profile_counts()  # else entering Settings redraws them
         if stats and session_id:
             self._summary_saved_notes = ""
             try:
@@ -1557,9 +1560,9 @@ class EEGMeditationApp(App):
         # The drive key is resolved once: the tick scores and sounds the same metric.
         if self._program_run.active:
             self._program_run.tick(metrics, raw_sample)
-            drive_key, scored = self._audio_drive_key(), None
+            drive_key, mark = self._audio_drive_key(), None
         else:
-            drive_key = scored = self._score_on_drive_key()
+            drive_key = mark = self._score_on_drive_key()
 
         # Merge raw + computed for full storage; a pending marker is in the row before a checkpoint can write it.
         full_record = {**raw_sample, **metrics}
@@ -1567,8 +1570,8 @@ class EEGMeditationApp(App):
         if marker_pending:
             self._pending_marker = False
             full_record["marker"] = 1
-        target = self._recorder.record(metrics, full_record)
-        if target is None:  # the session paused or stopped while this tick was read: it isn't part of it
+        score = self._recorder.record(metrics, full_record)
+        if score is None:  # the session paused or stopped while this tick was read: it isn't part of it
             self._pending_marker |= marker_pending  # the marker goes on the next recorded tick
             return
 
@@ -1578,8 +1581,8 @@ class EEGMeditationApp(App):
             self._audio.update_sinking(metrics.get("sinking", 0))
             self._audio.update_subtle_distraction(metrics.get("subtle_distraction", 0))
 
-        self._mirror.record(metrics, target, raw_sample)  # kept even while the screen is locked
-        self._show_tick(metrics, raw_sample, target, marker_pending, scored)
+        self._mirror.record(metrics, score, raw_sample)  # kept even while the screen is locked
+        self._show_tick(metrics, raw_sample, score, marker_pending, mark)
 
         # Timer countdown — tick() is pure counter, no UI
         if self._timer_state.tick(APP.UPDATE_FREQUENCY):
@@ -1666,8 +1669,7 @@ class EEGMeditationApp(App):
                      f"dist={metrics.get('distraction', 0):.0f} "
                      f"native_med={native_med:.0f}{bat_str}")
 
-    def _show_tick(self, metrics: dict, raw_sample: dict, target: float, marker_pending: bool,
-                   scored: str | None) -> None:
+    def _show_tick(self, metrics: dict, raw_sample: dict, score: dict, marker_pending: bool, mark: str | None) -> None:
         """Tick thread: queue the tick's Session screen update for the main thread, unless the screen is locked."""
         elapsed_fmt = self._session_manager.elapsed_formatted
 
@@ -1683,10 +1685,11 @@ class EEGMeditationApp(App):
 
         def _ui_update(
             m=metrics, rs=raw_sample, ef=elapsed_fmt, mp=marker_pending,
-            sa=self._shamatha_active, sc=sham_changed, sk=self._scored_mark(scored), tg=target,
+            sa=self._shamatha_active, sc=sham_changed, sk=self._scored_mark(mark), tg=score["score_target"],
+            on=score["score_key"], live=self._session_manager.live_score(),
         ) -> None:
-            self._live_screen.graph.add_point(m, threshold=tg)
-            self._live_screen.update_stats(m)
+            self._live_screen.graph.add_point(m, threshold=tg, scored=on)  # its line coloured from this point
+            self._live_screen.update_stats(live)
             self._live_screen.update_state(m.get("state", "Neutral"))
             if sc:
                 self._live_screen.set_shamatha(sa)
@@ -2101,10 +2104,14 @@ class EEGMeditationApp(App):
         token = self._detail_load
         d = self._diary_screen
         with timed("diary.open"):
-            d.set_session_formulas({}, recorded_formulas(session)[1])  # the legend's names from the first frame
+            d.set_session_formulas({}, session_formulas(session)[1])  # the legend's names from the first frame
             d.show_session_detail(session)
             d.set_metrics_threshold(float(session.get("threshold_used", 50)))
             d.set_program(session.get("session_program", ""))
+            plan = recorded_plan(session.get("session_program") or "")
+            if plan is None and self._current_user_id:  # the profile's own selection, whatever the last session showed
+                self._graph_series.apply_saved(d._metrics_graph, self._current_user_id)
+            d.show_program_lines(plan)  # the program's mark goes last: lines it still shows are never saved
             bv = {}
             if self._current_user_id:
                 bv = self._db.get_user_json_setting(self._current_user_id, "band_breakdown_view", {}) or {}
@@ -2144,8 +2151,7 @@ class EEGMeditationApp(App):
             d.fill_graph(section, data)
 
         try:
-            ticks = scored_ticks(session, rows, series,
-                                 lambda evaluators: self._db.recompute_formula_series(session_id, evaluators, rows))
+            ticks = scored_ticks(session, rows, series)
             what_if = lambda: d.set_what_if(ticks, session)
         except Exception:  # broad on purpose: a row it can't score must not take the graphs down with it
             logger.exception(f"What-if scoring failed for session {session_id}")
@@ -2176,7 +2182,7 @@ class EEGMeditationApp(App):
                                   rows: list[dict] | None = None) -> tuple[dict, dict]:
         """Recompute the session's recorded formula series + names from its band powers, over `rows` when already
         read. Pure DB + compute, no Kivy — safe to call off the main thread."""
-        evaluators, names = recorded_formulas(session)
+        evaluators, names = session_formulas(session)
         series = self._db.recompute_formula_series(session_id, evaluators, rows) if evaluators else {}
         return series, names
 
@@ -2310,17 +2316,22 @@ class EEGMeditationApp(App):
         if not force and not self._history_dirty:
             return
         with timed("history.get_all_sessions"):
-            sessions = sessions_for_view(self._db, self._current_user_id)
-        if self._session_pipeline_live():
-            # The running session's row exists from its first checkpoint, with stats as of that checkpoint: History
-            # lists finished sessions only, and the ending marks History dirty so it appears then.
-            sessions = [s for s in sessions if s.get("id") != self._recorder.session_id]
+            sessions = self._finished_sessions(self._current_user_id)
         self._history_screen.load_sessions(sessions, keep_filter=self._current_user_id == self._history_view)
         self._history_view = self._current_user_id
         self._history_dirty = False
 
     def _mark_history_dirty(self) -> None:
         self._history_dirty = True
+
+    def _running_session_id(self) -> int | None:
+        """The running session's row, which History lists and Settings counts only once it ends: it exists from the
+        first checkpoint, with stats as of that checkpoint (the ending marks History dirty)."""
+        return self._recorder.session_id if self._session_pipeline_live() else None
+
+    def _finished_sessions(self, uid: int | None) -> list:
+        running = self._running_session_id()
+        return [s for s in sessions_for_view(self._db, uid) if running is None or s.get("id") != running]
 
     def _on_user_switch(self, user_id: int) -> None:
         """Switch the active user profile."""
@@ -2342,8 +2353,13 @@ class EEGMeditationApp(App):
             return  # silent-ok: pref persistence; view already changed, no user to save to
         self._db.set_user_setting(self._current_user_id, "history_view_mode", mode)
 
-    def _count_sessions_for_user(self, user_id: int) -> int:
-        return len(self._db.get_all_sessions(user_id=user_id))
+    def _count_sessions_for_user(self, user_id: int) -> int | None:
+        """The sessions History lists for the profile, or None (a row without its count) when the read fails."""
+        try:
+            return self._db.count_sessions(user_id, self._running_session_id())
+        except sqlite3.Error:
+            logger.exception(f"Profile {user_id}'s sessions couldn't be counted")
+            return None
 
     # --- Data Backup (app/ui/backup_flow.py) ---
 
@@ -2694,7 +2710,7 @@ class EEGMeditationApp(App):
         try:
             self._mirror.reload_into(self._live_screen)
             if self._mirror.last_metrics:
-                self._live_screen.update_stats(self._mirror.last_metrics)
+                self._live_screen.update_stats(self._session_manager.live_score())
                 self._live_screen.update_state(self._mirror.last_state)
                 self._live_screen.set_shamatha(self._shamatha_active)
         except Exception:

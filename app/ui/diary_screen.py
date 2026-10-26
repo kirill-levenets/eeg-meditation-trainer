@@ -1,4 +1,3 @@
-import json
 import math
 import os
 import sys
@@ -14,14 +13,16 @@ from kivy.uix.widget import Widget
 from app.config import APP
 from app.eeg.band_spec import BAND_KEYS, GROUP_NAMES, group_powers
 from app.logger import logger, timed
-from app.session.scoring import recorded_score, target_steps
-from app.session.session_program import PROGRAM_FORMULA_KEYS, SessionProgram
+from app.metrics.formula_slots import COMPUTED_SERIES
+from app.session.scoring import recorded_score, scored_steps, target_steps
+from app.session.session_program import RunnablePlan, recorded_program
 from app.ui.hooks import Hook, is_wired, wire
 from app.ui.live_session import (
     METRICS_COLORS,
     METRICS_SCALES,
     SERIES_NAMES,
 )
+from app.ui.program_run import show_program_series
 from app.ui.raw_eeg_screen import GraphAwareScrollView, ScrollableGraphWidget
 from app.ui.session_labels import session_score_rows, session_title
 from app.ui.theme import (
@@ -46,13 +47,9 @@ from app.ui.theme import (
     make_message_popup,
 )
 from app.ui.widgets.band_totals import BAND_COLORS, BAND_SCALES, BandTotalsView
+from app.ui.widgets.choice_toggle import ChoiceToggle
 from app.ui.widgets.legend import LegendBar
 from app.ui.widgets.what_if import WhatIfPanel
-
-# A session's series: the live ones without a running program's (its formula lines are recomputed apart).
-METRICS_PREVIEW_COLORS = {k: c for k, c in METRICS_COLORS.items() if k not in PROGRAM_FORMULA_KEYS}
-
-METRICS_PREVIEW_SCALES = {k: METRICS_SCALES[k] for k in METRICS_PREVIEW_COLORS}
 
 RAW_EEG_PREVIEW_COLORS = {
     "eeg": (0.3, 0.8, 1.0, 1.0),
@@ -128,15 +125,11 @@ def _synthesize_waveform(rows: list[dict]) -> tuple[list[float], int]:
 def detail_graph_data(rows: list[dict], formula_series: dict[str, list[float]]) -> dict:
     """{"metrics" | "raw" | "freq": (series, marker indices), "threshold_steps": ...} from a session's stored rows: pure
     Python, so the open builds it on its worker and the main thread only loads it."""
-    metrics_series: dict[str, list[float]] = {k: [] for k in METRICS_PREVIEW_COLORS}
-    for row in rows:
-        for key in metrics_series:
-            metrics_series[key].append(row.get(key, 0.0))
-    # Custom-formula columns aren't stored per tick: they come entirely from the session's formula replay. A slot the
-    # session didn't record stays empty (no flat zero-line phantom).
-    for key in metrics_series:
-        if key.startswith("custom_formula"):
-            metrics_series[key] = formula_series.get(key, [])
+    # Formula lines (the Settings slots', a program's) aren't stored per tick: they come entirely from the session's
+    # formula replay. A slot the session didn't record stays empty (no flat zero-line phantom).
+    stored = [k for k in METRICS_COLORS if k not in COMPUTED_SERIES]
+    metrics_series: dict[str, list[float]] = {k: [row.get(k, 0.0) for row in rows] for k in stored}
+    metrics_series.update({k: formula_series.get(k, []) for k in METRICS_COLORS if k in COMPUTED_SERIES})
 
     with timed("diary.synth_waveform"):
         synth, raw_start = _synthesize_waveform(rows)  # tail only, see _synthesize_waveform
@@ -150,7 +143,8 @@ def detail_graph_data(rows: list[dict], formula_series: dict[str, list[float]]) 
     # The raw graph holds only the tail (from raw_start): its markers are offset to it.
     raw_markers = [(i - raw_start) * _SAMPLES_PER_TICK for i in markers if i >= raw_start]
     return {"metrics": (metrics_series, markers), "raw": ({"eeg": synth}, raw_markers), "freq": (freq_series, markers),
-            "threshold_steps": target_steps(row.get("score_target") for row in rows)}  # None: rows without targets
+            "threshold_steps": target_steps(row.get("score_target") for row in rows),  # None: rows without targets
+            "gradient_steps": scored_steps(row.get("score_key") for row in rows)}  # a program's, segment by segment
 
 
 class DiaryScreen(Screen):
@@ -169,11 +163,10 @@ class DiaryScreen(Screen):
         self._scored_key: Optional[str] = None  # the series the shown session was scored on, marked in its legend
         self._saved_notes_state: tuple[str, str, int] | None = None  # the fields as loaded or last saved
         self._session_formula_series: dict[str, list[float]] = {}
+        self._program_keys: frozenset[str] = frozenset()  # the program lines a program session shows, none otherwise
         self._build_ui()
 
     def _build_ui(self) -> None:
-        self._theme_C = C
-
         root = BoxLayout(orientation="vertical", padding=S.PAGE_PAD, spacing=S.GAP)
         fill_background(root, C.BG)
 
@@ -348,25 +341,10 @@ class DiaryScreen(Screen):
         self._detail_layout.add_widget(self._export_status)
 
         # --- Graph tab buttons ---
-        graph_tabs = BoxLayout(size_hint_y=None, height=dp(30), spacing=S.GAP_SM)
-        self._tab_metrics_btn = StyledButton(
-            text="Metrics", font_size=F.SMALL, height=dp(30),
-            bg_color=C.PRIMARY,
-        )
-        self._tab_raw_btn = StyledButton(
-            text="Raw EEG", font_size=F.SMALL, height=dp(30),
-            bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY,
-        )
-        self._tab_freq_btn = StyledButton(
-            text="Frequencies", font_size=F.SMALL, height=dp(30),
-            bg_color=C.BG_CARD, text_color=C.TEXT_SECONDARY,
-        )
-        self._tab_metrics_btn.bind(on_release=lambda x: self._switch_graph_tab("metrics"))
-        self._tab_raw_btn.bind(on_release=lambda x: self._switch_graph_tab("raw"))
-        self._tab_freq_btn.bind(on_release=lambda x: self._switch_graph_tab("freq"))
-        graph_tabs.add_widget(self._tab_metrics_btn)
-        graph_tabs.add_widget(self._tab_raw_btn)
-        graph_tabs.add_widget(self._tab_freq_btn)
+        graph_tabs = ChoiceToggle([("metrics", "Metrics"), ("raw", "Raw EEG"), ("freq", "Frequencies")], "metrics",
+                                  self._switch_graph_tab, button={"font_size": F.SMALL, "height": dp(30)},
+                                  size_hint_y=None, height=dp(30), spacing=S.GAP_SM)
+        self._graph_tabs = graph_tabs
         self._detail_layout.add_widget(graph_tabs)
 
         # --- Graph container (holds one graph at a time) ---
@@ -381,8 +359,8 @@ class DiaryScreen(Screen):
 
         # Create all three graphs
         self._metrics_graph = ScrollableGraphWidget(
-            colors=METRICS_PREVIEW_COLORS,
-            scales=METRICS_PREVIEW_SCALES,
+            colors=METRICS_COLORS,
+            scales=METRICS_SCALES,
             names=SERIES_NAMES,  # the live graph's names: a session's Metric is saved under them
             viewport_seconds=60,
             show_value_labels=True,
@@ -567,10 +545,21 @@ class DiaryScreen(Screen):
         self._switch_graph_tab("metrics")
 
     def set_session_formulas(self, series: dict[str, list[float]], names: dict[str, str]) -> None:
-        """Inject recomputed per-session custom-formula series + names before display."""
+        """Inject recomputed per-session formula series + names before display."""
         self._session_formula_series = series
         for key, name in names.items():
             self._metrics_graph.set_series_name(key, name)
+
+    def show_program_lines(self, plan: RunnablePlan | None) -> None:
+        """A program session shows exactly its program's lines, as the Session screen did while it ran, and marks them
+        as the program's, so they are never saved as the profile's selection; None, a simple session, clears the mark."""
+        self._program_keys = frozenset(plan.keys) if plan is not None else frozenset()
+        if plan is not None:
+            show_program_series(self._metrics_graph, plan)
+
+    def program_lines_of(self, graph) -> frozenset[str]:
+        """The program lines `graph` shows for the session on screen: none but on the metrics graph of a program's."""
+        return self._program_keys if graph is self._metrics_graph else frozenset()
 
     def load_metrics_preview(self, metrics_rows: list[dict]) -> None:
         """Load session metrics into all three preview graphs at once (the async open fills them one per frame)."""
@@ -591,6 +580,8 @@ class DiaryScreen(Screen):
             graph.set_markers(markers)
             if section == "metrics" and data["threshold_steps"]:  # else the line the open drew from the session row
                 graph.set_threshold_steps(data["threshold_steps"])
+            if section == "metrics" and data["gradient_steps"]:  # else the series the open coloured from the row
+                graph.set_gradient_steps(data["gradient_steps"])
             graph.set_scroll_offset(0)  # at the end, so the user sees the latest data and can drag back
         self._ready.add(section)
         if section == self._active_graph_tab:
@@ -606,12 +597,8 @@ class DiaryScreen(Screen):
         Empty/invalid JSON clears the steps so a non-program session falls back
         to its single-value threshold.
         """
-        try:
-            segs = json.loads(program_json) if program_json else []
-        except (ValueError, TypeError):
-            segs = []
-        prog = SessionProgram(segs)
-        if prog:
+        prog = recorded_program(program_json)
+        if prog is not None:
             self._metrics_graph.set_threshold_steps(
                 prog.threshold_steps(self._metrics_graph._sample_rate)
             )
@@ -623,18 +610,7 @@ class DiaryScreen(Screen):
         self._active_graph_tab = tab
         self._graph_container.clear_widgets()
 
-        C = self._theme_C
-        for btn, key in [
-            (self._tab_metrics_btn, "metrics"),
-            (self._tab_raw_btn, "raw"),
-            (self._tab_freq_btn, "freq"),
-        ]:
-            if key == tab:
-                btn.bg_color = C.PRIMARY
-                btn.text_color = None
-            else:
-                btn.bg_color = C.BG_CARD
-                btn.text_color = C.TEXT_SECONDARY
+        self._graph_tabs.show(tab)
 
         shown = None
         if tab not in self._ready:

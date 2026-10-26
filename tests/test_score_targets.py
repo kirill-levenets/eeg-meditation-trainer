@@ -95,7 +95,7 @@ def test_a_session_with_no_scored_tick_records_no_targets():
 
 def test_a_program_segment_target_is_what_its_ticks_record():
     sm = _running(70)
-    sm.set_active_goal("custom_formula", 120)
+    sm.start_segment("custom_formula", 120)
     sm.set_threshold(40)  # the slider: a segment's own target stays in force
     stamp = sm.add_metric({"custom_formula": 130.0})
     assert stamp == {"score_key": "custom_formula", "score_value": 130.0, "score_target": 120}

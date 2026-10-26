@@ -638,6 +638,12 @@ def readable_fg(bg):
     return _FG_DARK if _contrast(_FG_DARK, bg) >= _contrast(_FG_LIGHT, bg) else _FG_LIGHT
 
 
+def dimmed_fg(bg) -> list[float]:
+    """A disabled control's glyph on its greyed bg: 60 % of the readable one, legible (~4:1) without reading as live."""
+    tgt = readable_fg(bg)
+    return [tgt[i] * 0.6 + bg[i] * 0.4 for i in range(3)] + [1]
+
+
 def with_contrast(rgb, bg, floor: float = 3.0) -> tuple[float, float, float]:
     """rgb, or as close to it as reaches floor:1 (WCAG) on bg: the same hue and saturation, lighter on a dark bg and
     darker on a light one."""
@@ -903,15 +909,17 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
         self.canvas.before.clear()
         bg = self._get_bg()
         with self.canvas.before:
-            if self.outline and self.state != "down":
+            if self.outline:
+                # Pressed, the fill stays the card (the text is often the border's colour) and the border thickens.
+                down = self.state == "down"
                 Color(*C.BG_CARD)
                 RoundedRectangle(pos=self.pos, size=self.size, radius=[S.RADIUS])
-                Color(*bg[:3], 0.8)
+                Color(*(self.bg_color if down else bg)[:3], 1.0 if down else 0.8)
                 Line(
                     rounded_rectangle=[
                         self.x, self.y, self.width, self.height, S.RADIUS,
                     ],
-                    width=1.2,
+                    width=2.0 if down else 1.2,
                 )
             else:
                 Color(*bg)
@@ -931,11 +939,7 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
         # leaves the glyph alone (only the background dims). Kivy's Label draws
         # `disabled_color` (default white@.3 -> invisible on light cards) when disabled,
         # so set it too, not just `color`.
-        if self.disabled:
-            tgt = readable_fg(bg)
-            fg = [tgt[i] * 0.6 + bg[i] * 0.4 for i in range(3)] + [1]
-        else:
-            fg = list(self.text_color)
+        fg = dimmed_fg(bg) if self.disabled else list(self.text_color)
         self._label.color = fg
         self._label.disabled_color = fg
         if self._icon_label:

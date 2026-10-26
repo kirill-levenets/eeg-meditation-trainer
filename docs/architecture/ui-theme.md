@@ -27,6 +27,7 @@ With no active user the first-run popup (the user gate) is shown.
   `on_state` snaps `_ring_alpha` to `_RING_MAX` on `down` and `Animation`-fades it to 0 over `_RING_FADE` on release, so the cue lingers after the finger lifts.
   The ring is a `Line` drawn in `_redraw` at `_ring_rgb()` = `C.TEXT`: its contrast derives from the **surrounding surface** (light on dark themes, dark on light), NOT the button fill, the same rule as the graph expand glyph;
   `readable_fg(fill)` would give a dark ring on a bright accent button that vanishes on a dark theme.
+  A pressed outlined button keeps its card fill instead, and its border turns solid and thickens: its text is often the border's colour, which a darker fill would hide.
   `flash_confirm(text="Saved", icon=None, confirm_color=None, duration=1.1)` is the action-confirmation cue (issue #33 E):
   it morphs the label (and optionally the icon / fill) to a success state, then `Clock`-reverts to the **true** original (reentrancy-safe: a repeat tap restarts the timer without capturing the intermediate state).
   Main-thread only.
@@ -92,7 +93,7 @@ With no active user the first-run popup (the user gate) is shown.
     `padding=` fixes the sides instead;
   - where the box can't grow with its text (a fixed strip of columns, a status line), the text is `F.capped(size)`: it follows the text size up to `F.CAPPED_MAX` (120 %), or a cap of its own.
     Capped: the Session screen's status line and timer length (the bottom bar's width is fixed: grown to 150 %, "105m" would squeeze Start onto two lines on the phone);
-    its stat strip's titles (110 %, "Distraction" in a fifth of a 360 dp phone) and LIVE toggle; a program's segment row and its header.
+    its stats bar's values ("59m 59s" in a third of a 360 dp phone) and LIVE / AVG switch; a program's segment row and its header.
     Everything else grows to 150 %.
     A cap is added only where a test fails without it.
 
@@ -113,6 +114,9 @@ With no active user the first-run popup (the user gate) is shown.
 - **Icons** (`app/assets/fonts/materialdesignicons-webfont.ttf`): Material Design Icons font, registered as `'Icons'`; the `ICONS_AVAILABLE` flag allows a graceful fallback if the font is missing.
 - **App icons** (`app/assets/icons/`): Generated EEG brainwave icon (512/192/128/48 PNG + ICO + ICNS), presplash for Android.
 - **Shared widgets** (`widgets/`): `UserPickerForm` (the first-run popup and Settings → User Profile): the existing profiles, a name input, and for a duplicate name an inline "Use existing 'X'" / "Change name" choice.
+  `ChoiceToggle` (`widgets/choice_toggle.py`) is a switch whose every position shows what it picks: one button per choice, the chosen one filled and bold, the others outlined and muted, so they read on a card as on the screen;
+  every switch between views or modes uses it, each with its own button size: the Session screen's Metrics / Raw EEG and its stats bar's LIVE / AVG, History's Cal / 14d,
+  the session detail's Metrics / Raw EEG / Frequencies and its band breakdown's Detailed / Grouped, Settings › Timer's Simple / Program, Settings › Threshold's formula Slot and Settings › Theme.
   `LoadingOverlay` (`widgets/loading_overlay.py`) is the app-global modal spinner (status + animated dots on the theme's `ModalPanel` over a dim);
   it is mounted by wrapping the app root in a `FloatLayout` and shown via `EEGMeditationApp.show_loading(text, delay=0.0)`/`hide_loading()`.
   With a `delay` it takes taps at once and paints only once the delay has passed, so a job that ends sooner never flashes it.

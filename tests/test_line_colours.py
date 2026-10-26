@@ -1,14 +1,18 @@
 """The scored line's colours (#94): its own colour, or a gradient by value from 0 to 200 that stays readable on every
-theme's graph background; the Session screen colours the series being trained, History the one a session was scored
-on; each profile keeps its choice and a change reaches every graph at once."""
+theme's graph background; each point is coloured on the series it was scored on, live, after a reload and in History;
+each profile keeps its choice and a change reaches every graph at once."""
+
+import json
 
 import pytest
-from kivy.graphics import Line, Mesh
+from kivy.graphics import Color, Line, Mesh
 
+from app.metrics.formula_slots import session_formulas
+from app.session.session_program import recorded_plan
 from app.settings.registry import SettingsStore
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import line_colours_setting
-from app.ui.diary_screen import DiaryScreen
+from app.ui.diary_screen import DiaryScreen, detail_graph_data
 from app.ui.hooks import wire
 from app.ui.line_colours import (
     DEFAULT,
@@ -21,7 +25,7 @@ from app.ui.line_colours import (
     gradient_texture,
 )
 from app.ui.live_session import METRICS_COLORS, METRICS_SCALES, LiveSessionScreen
-from app.ui.raw_eeg_screen import ScrollableGraphWidget
+from app.ui.raw_eeg_screen import ScrollableGraphWidget, _split_at_spans
 from app.ui.settings_screen import SettingsScreen
 from app.ui.theme import THEMES, C, _contrast
 
@@ -104,6 +108,42 @@ def test_mono_draws_the_scored_line_in_its_own_colour():
     assert any(isinstance(c, Line) for c in g._gfx.children)
 
 
+def _last_colour(children, rgba) -> int:
+    return max(i for i, c in enumerate(children) if isinstance(c, Color) and tuple(c.rgba) == pytest.approx(tuple(rgba)))
+
+
+@pytest.mark.parametrize("colours", [DEFAULT, MONO])
+def test_the_scored_line_is_drawn_over_every_other_line(colours):
+    """Shamatha is the meditation score itself, drawn first: shown together, Meditation must not hide the scored line."""
+    g = _graph()
+    g._visible["meditation_score"] = True
+    g._data["meditation_score"].clear()
+    g._data["meditation_score"].extend(RAMP)
+    LINE_COLOURS.set(colours)
+    g._draw()
+    children = g._gfx.children
+    other = _last_colour(children, g.series_color("meditation_score"))
+    if colours == MONO:
+        assert _last_colour(children, g.series_color("shamatha_score")) > other
+    else:
+        assert min(i for i, c in enumerate(children) if isinstance(c, Mesh)) > other
+
+
+def test_every_scored_run_of_a_program_is_drawn_after_every_plain_line():
+    g = _graph()
+    lines = ("shamatha_score", "program_formula", "meditation_score")
+    for key in lines[1:]:
+        g._visible[key] = True
+        g._data[key].clear()
+        g._data[key].extend(RAMP)
+    third = len(RAMP) // 3
+    g.set_gradient_steps([(0, lines[0]), (third, lines[1]), (2 * third, lines[2])])
+    g._draw()
+    children = g._gfx.children
+    meshes = [i for i, c in enumerate(children) if isinstance(c, Mesh)]
+    assert len(meshes) == 3 and min(meshes) > max(_last_colour(children, g.series_color(k)) for k in lines)
+
+
 def test_a_change_reaches_a_graph_already_drawn():
     g = _graph()
     g.size = (600, 360)
@@ -120,23 +160,94 @@ def test_a_theme_switch_makes_the_gradient_readable_on_the_new_background():
     assert _meshes(g)[0].texture is gradient_texture(DEFAULT, tuple(C.GRAPH_BG))
 
 
-def test_the_session_screen_colours_the_series_being_trained():
+def _tick(graph, scored: str) -> None:
+    graph.add_point({"shamatha_score": 60, "custom_formula": 40}, threshold=50, scored=scored)
+
+
+def test_each_point_keeps_the_colour_of_the_series_it_was_scored_on():
+    """A program's next segment moves the legend's mark and colours the new series from there; nothing drawn before is
+    recoloured (#113)."""
     screen = LiveSessionScreen()
-    assert screen.graph._gradient_key == "shamatha_score"  # before a session: today's line
+    graph = screen.graph
+    for _ in range(3):
+        _tick(graph, "shamatha_score")
     screen.set_training_series("custom_formula")
-    assert screen.graph._gradient_key == "custom_formula"
-    screen.set_training_series(None)  # the marker clears between sessions; the line keeps its colours
-    assert screen.graph._gradient_key == "custom_formula"
+    assert graph.gradient_steps == [(0, "shamatha_score")]
+    for _ in range(2):
+        _tick(graph, "custom_formula")
+    assert graph.gradient_steps == [(0, "shamatha_score"), (3, "custom_formula")]
+    assert graph._gradient_spans("shamatha_score", 0, 5) == [(0, 3)]
+    assert graph._gradient_spans("custom_formula", 0, 5) == [(3, 5)]
+    graph.clear_data()  # the next session starts uncoloured
+    assert graph.gradient_steps == []
+
+
+def test_a_line_coloured_part_of_the_way_is_drawn_unbroken_in_two_runs():
+    runs = _split_at_spans(range(6), [(i, i) for i in range(6)], [(2, 4)])
+    assert runs == [(False, [(0, 0), (1, 1), (2, 2)]), (True, [(2, 2), (3, 3), (4, 4)]), (False, [(4, 4), (5, 5)])]
+    assert _split_at_spans(range(3), [(0, 0), (1, 1), (2, 2)], []) == [(False, [(0, 0), (1, 1), (2, 2)])]
+
+
+def test_a_segment_boundary_splits_the_two_lines_colouring_where_it_was_crossed():
+    g = _graph()
+    g._visible["custom_formula"] = True
+    g._data["custom_formula"].clear()
+    g._data["custom_formula"].extend(RAMP)
+    g.set_gradient_steps([(0, "shamatha_score"), (150, "custom_formula")])
+    meshes = _meshes(g)
+    assert len(meshes) == 2  # each series in the gradient over its own segment
+    x_mid = g.x + g.width / 2  # the boundary, half way along the 300 points shown
+    spans = sorted((min(m.vertices[0::4]), max(m.vertices[0::4])) for m in meshes)
+    assert spans[0][1] < x_mid + 5 and spans[1][0] > x_mid - 5  # one before the boundary, one after
 
 
 def test_history_colours_the_metric_a_session_was_scored_on():
     detail = DiaryScreen()
     detail.show_session_detail({"id": 1, "date_time": "2026-10-10T07:30:00", "duration": 600,
                                 "score_metric_key": "custom_formula", "score_metric_name": "Calm"})
-    assert detail._metrics_graph._gradient_key == "custom_formula"
+    assert detail._metrics_graph.gradient_steps == [(0, "custom_formula")]
     detail.show_session_detail({"id": 2, "date_time": "2026-10-10T08:30:00", "duration": 600,
                                 "score_metric_key": "program", "score_metric_name": "Deep"})
-    assert detail._metrics_graph._gradient_key is None  # a program is scored per segment: no one line
+    assert detail._metrics_graph.gradient_steps == []  # until its ticks say what each segment was scored on
+
+
+def test_a_programs_detail_colours_each_segment_as_it_was_scored():
+    rows = [{"timestamp": float(i), "score_target": 50, "score_key": key}
+            for i, key in enumerate(["shamatha_score"] * 3 + ["custom_formula"] * 2)]
+    data = detail_graph_data(rows, {})
+    assert data["gradient_steps"] == [(0, "shamatha_score"), (3, "custom_formula")]
+    assert detail_graph_data([{**r, "score_key": None} for r in rows], {})["gradient_steps"] is None  # before #51
+    detail = DiaryScreen()
+    detail.show_session_detail({"id": 2, "date_time": "2026-10-10T08:30:00", "duration": 600,
+                                "score_metric_key": "program", "score_metric_name": "Deep"})
+    detail.fill_graph("metrics", data)
+    assert detail._metrics_graph.gradient_steps == [(0, "shamatha_score"), (3, "custom_formula")]
+
+
+def test_a_program_sessions_detail_draws_its_formula_line_as_the_session_did():
+    """A segment that trained a program formula: History draws that line, named as the Session screen named it, in the
+    gradient over its own segment (#113)."""
+    program = [{"minutes": 1, "target": 50, "formula": "shamatha_score"},
+               {"minutes": 1, "target": 60, "formula": {"name": "Calm", "formula": "alpha1"}}]
+    session = {"id": 3, "date_time": "2026-10-10T09:30:00", "duration": 2, "score_metric_key": "program",
+               "score_metric_name": "Deep", "session_program": json.dumps(program)}
+    evaluators, names = session_formulas(session)
+    assert "program_formula" in evaluators and names["program_formula"] == "Program: Calm"
+    rows = [{"timestamp": float(i), "score_target": 50, "score_key": key}
+            for i, key in enumerate(["shamatha_score"] * 2 + ["program_formula"] * 2)]
+    replayed = {"program_formula": [10.0, 20.0, 30.0, 40.0]}
+    detail = DiaryScreen()
+    detail.show_session_detail(session)
+    detail.set_session_formulas(replayed, names)
+    detail.fill_graph("metrics", detail_graph_data(rows, replayed))
+    detail.show_program_lines(recorded_plan(session["session_program"]))
+    graph = detail._metrics_graph
+    assert graph.is_visible("program_formula") and graph.series_name("program_formula") == "Program: Calm"
+    assert list(graph._data["program_formula"]) == [10.0, 20.0, 30.0, 40.0]
+    assert graph._gradient_spans("program_formula", 0, 4) == [(2, 4)]
+    assert graph._gradient_spans("shamatha_score", 0, 4) == [(0, 2)]
+    detail.show_program_lines(None)  # a simple session next
+    assert detail.program_lines_of(graph) == frozenset()
 
 
 def test_picking_line_colours_applies_them_at_once():

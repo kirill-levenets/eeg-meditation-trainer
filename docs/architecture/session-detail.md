@@ -16,15 +16,22 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `_flush_on_leave` (on_pause / on_stop) flushes the detail only while it is the current screen: leaving already tried, and a retry on every pause would repeat a failed save's error (e.g. for a session deleted since).
   Leaving sends only the changed fields, so it can't rate an unrated session; **Save Notes** sends what the screen shows, mood included (so an unrated session can be saved as 3).
   A successful save moves the snapshot; a failed one stays pending and is retried on leave.
-  Per-session custom-formula series are **replayed**: the load worker (`_load_session_detail`) runs `_compute_session_formulas`,
-  which rebuilds the evaluators from the session's recorded `custom_formulas` JSON (`recorded_formulas`) and recomputes their series via `recompute_formula_series` over the rows it already read.
+  Per-session formula series are **replayed**: the load worker (`_load_session_detail`) runs `_compute_session_formulas`,
+  which rebuilds the evaluators from `formula_slots.session_formulas(session)` and recomputes their series via `recompute_formula_series` over the rows it already read.
+  Those are the session's recorded `custom_formulas` (the Settings slots, `recorded_formulas`) and, for a program session, its program's formulas (`recorded_plan`).
+  A program's formula lines are named `"Program: <name>"`, as the Session screen named them while it ran (`program_line_name`).
+  `recorded_plan` is None for a record that can't be read, and a formula of the wrong type in one runs as a formula that doesn't compile ([programs](programs.md)), so no record stops the open.
   Formula series aren't stored per tick:
   `detail_graph_data(rows, series)` takes them from the replay (a slot the session didn't record stays empty), and the metrics graph's fill step calls `set_session_formulas(series, names)` first, which names the series.
+  A program session shows exactly its program's lines, as the Session screen did while it ran: the open calls `show_program_lines(recorded_plan(...))`, which runs the live graph's `show_program_series`.
+  While it does, the picker lists those lines and `GraphSeries.persist` saves nothing (`detail_program`, as a running program skips the live graph), so the profile's History selection is never overwritten;
+  every simple session opens with that selection (`apply_saved`), which costs nothing when it already shows: `set_visible` changes and redraws only what differs.
+  So a program session draws as it did live: each segment's line, a program formula's too, in the gradient over its segment by the stored ticks' `score_key` ([graphs](graphs.md)).
   **Try another threshold** (#50, the what-if):
   `WhatIfPanel` (`app/ui/widgets/what_if.py`) under the stats grid: threshold controls (a slider, ±5) and Reset over the time above threshold and longest streak at them, view only;
   one control for a simple session, one per segment for a program.
   The engine is `app/session/what_if.py`:
-  `scored_ticks(session, rows, formula_series, replay_formulas)` gives each tick's value and recorded target and the `Segment`s the controls move.
+  `scored_ticks(session, rows, formula_series)` gives each tick's value and recorded target and the `Segment`s the controls move.
   A simple session has one segment over every tick, its values from the stored per-tick record (#83) when every row has one;
   else from its saved metric (its stored column, or the formula replay's series for a formula slot; meditation for a session from before #51, which is what its recorded numbers were measured on) at `threshold_used`.
   A program has one segment per program segment, each with the metric the session ran it on, its target as the live session reads it (`segment_target`: a whole number, 50 when missing or unreadable
@@ -36,8 +43,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   A segment like the one before it can't be told apart, so it starts its minutes after it, capped at the next switch found;
   a segment left with no tick is dropped, and the rest keep their program `index`, which numbers their titles.
   Without a record a segment starts by its minutes, as the graph's steps do (`SessionProgram.threshold_steps(2)`), never by the row timestamp, which is the EEG stream's clock.
-  Values come from the per-tick record, else from the stored columns and the program's formulas run over the whole session by the `replay_formulas` callable the load worker passes (`recompute_formula_series` over the rows it read;
-  the engine calls it, with the plan's evaluators, only when there is no record): every released build evaluates a program's formulas on every tick from the start.
+  Values come from the per-tick record, else from the stored columns and the program's formula lines the graph's replay already computed over the whole session (`formula_series`, so each formula runs once):
+  every released build evaluates a program's formulas on every tick from the start.
   `scored_ticks` returns None when it can't be replayed: a formula the replay couldn't rebuild (formula series aren't stored per tick), a program that can't be read or has no tick.
   `rescore(ticks, overrides)` re-runs the live accrual (`GoalAccrual`) with each segment's ticks against its override, or with None against their own recorded targets;
   so as recorded it gives back the recorded numbers by construction (known-answer tests against the real `SessionManager`).

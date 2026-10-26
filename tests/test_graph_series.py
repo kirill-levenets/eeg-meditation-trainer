@@ -2,16 +2,15 @@ import os
 import tempfile
 import types
 import unittest
+from unittest import mock
 from unittest.mock import MagicMock
 
 from app.metrics.formula_slots import FormulaSlots
+from app.session.session_program import PROGRAM_FORMULA_KEYS
 from app.storage.database import DatabaseManager
 from app.ui import graph_series
 from app.ui.app_manager import EEGMeditationApp
-from app.ui.diary_screen import (
-    METRICS_PREVIEW_COLORS,
-    METRICS_PREVIEW_SCALES,
-)
+from app.ui.hooks import wire
 from app.ui.live_session import (
     METRICS_COLORS,
     METRICS_SCALES,
@@ -38,7 +37,7 @@ class _FakeLive:
 
 class _FakeDiary:
     def __init__(self):
-        self._metrics_graph = _g(METRICS_PREVIEW_COLORS, METRICS_PREVIEW_SCALES, "diary_metrics")
+        self._metrics_graph = _g(METRICS_COLORS, METRICS_SCALES, "diary_metrics")
         self._raw_eeg_graph = _g({"eeg": (1, 1, 1, 1)}, {"eeg": 500.0}, "diary_raw")
         self._freq_graph = _g(BAND_COLORS, BAND_SCALES, "diary_freq")
 
@@ -102,9 +101,10 @@ class TestGraphSeriesPersistence(unittest.TestCase):
 
         self.assertTrue(self.graph.is_visible("native_attention"))
         self.assertFalse(self.graph.is_visible("shamatha_score"))
-        # Diary graphs ignore the legacy live-only keys → default to all-visible.
+        # Diary graphs ignore the legacy live-only keys → default to all-visible, but a program's lines, which follow
+        # the session shown.
         diary_m = self.app._diary_screen._metrics_graph
-        self.assertEqual(set(diary_m.visible_keys()), set(diary_m.series_keys()))
+        self.assertEqual(set(diary_m.visible_keys()), set(diary_m.series_keys()) - set(PROGRAM_FORMULA_KEYS))
 
     def test_first_run_defaults(self):
         self.app._graph_series.restore(self.uid)
@@ -141,6 +141,24 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         self.app._graph_series.persist(freq)
         saved_freq = self.app._db.get_user_json_setting(self.uid, "graph_series_diary_freq")
         self.assertNotIn("gamma", saved_freq)
+
+    def test_a_detail_showing_a_programs_lines_lists_them_and_saves_none_of_its_set(self):
+        diary = self.app._diary_screen._metrics_graph
+        shown = frozenset({"shamatha_score", "program_formula"})
+        series = make_graph_series(self.app, detail_program=lambda g: shown if g is diary else frozenset())
+        for key in diary.series_keys():
+            diary.set_visible(key, key in shown)  # what show_program_series does for a program session
+        listed = []
+
+        def capture(_title, rows, footer=None, **_kw):
+            listed.extend(getattr(row, "text", None) or row.children[-1].text for row in rows)
+            return types.SimpleNamespace(bind=lambda **_k: None, open=lambda: None)
+
+        with mock.patch.object(graph_series, "make_scroll_popup", capture):
+            series.present_picker(diary)
+        self.assertIn(diary.series_name("program_formula"), listed)
+        series.persist(diary)
+        self.assertIsNone(self.app._db.get_user_json_setting(self.uid, "graph_series_diary_metrics"))
 
     def test_custom_formula_gated_on_live_graph_only(self):
         # Live metrics: custom_formula stays hidden while the formula is invalid.
@@ -240,7 +258,7 @@ def test_the_live_screen_and_a_sessions_detail_draw_a_series_in_one_colour():
     from app.ui.diary_screen import DiaryScreen
     from app.ui.live_session import LiveSessionScreen
     live, detail = LiveSessionScreen(), DiaryScreen()
-    for key in METRICS_PREVIEW_COLORS:
+    for key in METRICS_COLORS:
         assert detail._metrics_graph.series_color(key) == live.graph.series_color(key), key
     for key in BAND_COLORS:
         assert detail._freq_graph.series_color(key) == live.band_graph.series_color(key), key
@@ -286,3 +304,16 @@ def test_choosing_a_saved_formula_renames_its_picker_row_at_once(tmp_path, monke
 
     assert graph.series_name("custom_formula") == "Calm"
     assert row.text == "Calm"  # the open picker's row says what the line and the legend say
+
+
+def test_showing_a_series_already_shown_or_naming_it_as_named_changes_nothing():
+    g = _g(METRICS_COLORS, METRICS_SCALES, "diary_metrics")
+    changes, redraws = [], []
+    wire(g, on_series_change=lambda: changes.append(1))
+    g._redraw = lambda: redraws.append(1)
+    g.set_visible("shamatha_score", g.is_visible("shamatha_score"))
+    g.set_series_name("custom_formula", g.series_name("custom_formula"))
+    assert changes == [] and redraws == []
+    g.set_visible("shamatha_score", not g.is_visible("shamatha_score"))
+    g.set_series_name("custom_formula", "Calm")
+    assert changes == [1, 1] and redraws == [1, 1]

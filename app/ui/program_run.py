@@ -9,21 +9,16 @@ from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
     RunnablePlan,
     SessionProgram,
+    program_line_name,
     runnable_plan,
     segment_target,
 )
 from app.ui.live_session import SERIES_NAMES
 
 
-def program_line_name(custom: dict) -> str:
-    """The live graph's label of a program's custom formula line."""
-    name = custom.get("name")
-    return f"Program: {name}" if name else "Program"
-
-
 def show_program_series(graph, plan: RunnablePlan) -> None:
     """Set the graph to EXACTLY the program's metric set and label each program custom line. Shared by a program
-    session's start and the idle preview."""
+    session's start, the idle preview and a program session's detail in History."""
     for slot, custom in plan.customs:
         graph.set_series_name(slot, program_line_name(custom))
     for k in graph.series_keys():
@@ -153,7 +148,7 @@ class ProgramRun:
             line_name = program_line_name(formula)
         target = segment_target(seg)
         self.audio_key = metric_key
-        self._session_manager.set_active_goal(metric_key, target)
+        self._session_manager.start_segment(metric_key, target)
         self._audio.set_threshold(target)
         if 0 <= idx < len(self._feedback_ids):
             self._audio.set_active_feedback(self._feedback_ids[idx])

@@ -1,6 +1,9 @@
 """Session scoring: time at/above the goal and the longest run, and which metric a stored session was scored on (#51)."""
 
 from collections.abc import Iterable
+from typing import TypeVar
+
+T = TypeVar("T")  # what a tick is scored against or on: a target, a series key
 
 TICK_SECONDS = 0.5  # the 2 Hz session tick
 
@@ -30,20 +33,25 @@ def goal_stats(values: Iterable[float], goal: float) -> tuple[float, float]:
     return acc.time_above, acc.longest_streak
 
 
-def extend_steps(steps: list[tuple[int, float]], tick: int, target: float) -> None:
-    """Add tick `tick`'s target to `steps`: a new (tick, target) step only where the target changes."""
+def extend_steps(steps: list[tuple[int, T]], tick: int, target: T) -> None:
+    """Add tick `tick`'s value to `steps`: a new (tick, value) step only where the value changes."""
     if not steps or steps[-1][1] != target:
         steps.append((tick, target))
 
 
-def target_steps(targets: Iterable[float | None]) -> list[tuple[int, float]] | None:
+def target_steps(targets: Iterable[T | None]) -> list[tuple[int, T]] | None:
     """[(first tick, target), ...] of a per-tick target series; None unless every tick has one (nothing is deduced)."""
-    steps: list[tuple[int, float]] = []
+    steps: list[tuple[int, T]] = []
     for tick, target in enumerate(targets):
         if target is None:
             return None
         extend_steps(steps, tick, target)
     return steps or None
+
+
+def scored_steps(keys: Iterable[str | None]) -> list[tuple[int, str]] | None:
+    """[(first tick, series), ...]: the series each tick was scored on, read as target_steps reads its targets."""
+    return target_steps(keys)
 
 
 def recorded_score(session: dict) -> tuple[str, str, float | None] | None:

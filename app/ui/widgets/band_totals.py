@@ -11,7 +11,8 @@ from kivy.uix.widget import Widget
 
 from app.eeg import band_spec
 from app.eeg.band_spec import range_text
-from app.ui.theme import ICONS_AVAILABLE, C, F, Icons, S, StyledButton, ThemedLabel
+from app.ui.theme import ICONS_AVAILABLE, C, F, Icons, S, ThemedLabel
+from app.ui.widgets.choice_toggle import ChoiceToggle
 
 BANDS = list(band_spec.BAND_KEYS)
 GROUPS = list(band_spec.GROUP_KEYS)
@@ -189,17 +190,9 @@ class BandTotalsView(BoxLayout):
                        + self.padding[1] + self.padding[3])
 
     def _build_toggle(self) -> BoxLayout:
-        box = BoxLayout(orientation="horizontal", size_hint_y=None, height=dp(24),
-                        spacing=dp(1))
-        for mode, label in (("detailed", "Detailed"), ("grouped", "Grouped")):
-            active = mode == self._mode
-            kw = {"text": label, "font_size": F.SMALL, "height": dp(24),
-                  "bg_color": C.PRIMARY if active else C.BG_CARD}
-            if not active:
-                kw["text_color"] = C.TEXT_SECONDARY  # active omits -> AUTO contrast
-            btn = StyledButton(**kw)
-            btn.bind(on_release=lambda _b, m=mode: self._set_mode(m))
-            box.add_widget(btn)
+        box = BoxLayout(orientation="horizontal", size_hint_y=None, height=dp(24))
+        box.add_widget(ChoiceToggle([("detailed", "Detailed"), ("grouped", "Grouped")], self._mode, self._set_mode,
+                                    button={"font_size": F.SMALL, "height": dp(24)}, size_hint_x=2, spacing=dp(1)))
         box.add_widget(Widget())  # trailing spacer so the toggle hugs the left
         return box
 

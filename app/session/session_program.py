@@ -1,6 +1,7 @@
 """Headless session-program model: ordered timed segments with per-segment
 target + driving formula. Pure logic (no Kivy), mirrors timer_state.py."""
 
+import json
 from typing import NamedTuple
 
 from app.metrics.custom_formula import CustomFormulaEvaluator, compile_formula
@@ -14,7 +15,7 @@ def segment_target(seg: dict) -> int:
     """The target a segment is scored against: a whole number, 50 when it has none or none that reads."""
     try:
         return int(float(seg.get("target", 50)))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 50
 
 
@@ -66,6 +67,21 @@ class SessionProgram:
         return steps
 
 
+def recorded_program(program_json: str) -> SessionProgram | None:
+    """The program a session recorded (its session_program), or None for a simple session or a record that can't be read."""
+    try:
+        program = SessionProgram(json.loads(program_json)) if program_json else None
+    except (ValueError, TypeError, OverflowError):  # a hand-edited or corrupt record: no program, never a crash
+        return None
+    return program or None
+
+
+def program_line_name(custom: dict) -> str:
+    """A program's custom formula line, as the graphs label it."""
+    name = custom.get("name")
+    return f"Program: {name}" if name else "Program"
+
+
 # Program-driven custom-formula lines: one per distinct custom formula in a program.
 PROGRAM_FORMULA_KEYS: tuple[str, ...] = ("program_formula", "program_formula_2", "program_formula_3")
 
@@ -74,14 +90,13 @@ def program_plan(prog: SessionProgram) -> tuple[set[str], list[tuple[str, dict]]
     """Map a program to its series: (program_keys, custom_slots, segment_keys) — the set of series it shows, an ordered
     (slot_key, custom_dict) for each DISTINCT custom formula (capped at PROGRAM_FORMULA_KEYS), and the metric key each
     segment drives (a built-in key or its custom's slot)."""
-    builtins: set[str] = set()
     custom_slots: list[tuple[str, dict]] = []
     ident_to_slot: dict[tuple, str] = {}  # (name, formula) -> slot_key
     segment_keys: list[str] = []
     for seg in prog.segments:
         f = seg.get("formula")
         if isinstance(f, dict):
-            ident = (f.get("name"), f.get("formula"))
+            ident = (repr(f.get("name")), repr(f.get("formula")))  # any type a record holds, as a dict key
             if ident in ident_to_slot:
                 segment_keys.append(ident_to_slot[ident])
             elif len(custom_slots) < len(PROGRAM_FORMULA_KEYS):
@@ -92,17 +107,16 @@ def program_plan(prog: SessionProgram) -> tuple[set[str], list[tuple[str, dict]]
             else:  # > 3 distinct customs (implausible): reuse the last slot
                 segment_keys.append(custom_slots[-1][0])
         elif isinstance(f, str) and f:
-            builtins.add(f)
             segment_keys.append(f)
         else:
             segment_keys.append("shamatha_score")
-    keys = set(builtins) | {s for s, _ in custom_slots}
-    return keys, custom_slots, segment_keys
+    return set(segment_keys), custom_slots, segment_keys  # every series a segment drives, a formula-less one's too
 
 
 def _compile(customs: list[tuple[str, dict]]) -> dict[str, CustomFormulaEvaluator]:
     """One evaluator per custom formula that compiles, by its series slot, to run on every tick from the start."""
-    compiled = {slot: compile_formula(custom.get("formula", "") or "")[0] for slot, custom in customs}
+    texts = {slot: custom.get("formula") for slot, custom in customs}
+    compiled = {slot: compile_formula(text if isinstance(text, str) else "")[0] for slot, text in texts.items()}
     return {slot: ev for slot, ev in compiled.items() if ev is not None}
 
 
@@ -128,4 +142,10 @@ def runnable_plan(prog: SessionProgram) -> RunnablePlan:
                         customs=[(slot, c) for slot, c in customs if slot not in dead],
                         segment_keys=["shamatha_score" if k in dead else k for k in planned], planned_keys=planned,
                         evaluators=evaluators,
-                        unrunnable=[c.get("name") or c.get("formula", "") for slot, c in customs if slot in dead])
+                        unrunnable=[str(c.get("name") or c.get("formula", "")) for slot, c in customs if slot in dead])
+
+
+def recorded_plan(program_json: str) -> RunnablePlan | None:
+    """The plan a session's recorded program ran on, or None for a simple session or a record that can't be read."""
+    program = recorded_program(program_json)
+    return runnable_plan(program) if program is not None else None

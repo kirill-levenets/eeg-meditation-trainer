@@ -22,6 +22,7 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
 from app.crash_handler import CrashDialog, _themed_makers
+from app.session.manager import LiveScore
 from app.settings.registry import Setting, SettingsStore
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import startup_text_size, text_size_setting
@@ -147,7 +148,8 @@ def test_narrow_buttons_keep_their_text_on_one_line_at_the_largest_size():
     row = settings.timer._segments_box.children[0]
     column = 0.16 * (dp(360) - 2 * S.PAGE_PAD - 5 * S.GAP_SM)
     end_cue = next(w for w in row.children if getattr(w, "text", "") == "Warble")
-    for btn, width in ((history._btn_calendar, dp(40)), (history._btn_bars, dp(40)), (preset, dp(38)),
+    cal, bars = history._toggle_col.buttons["calendar"], history._toggle_col.buttons["bars"]
+    for btn, width in ((cal, dp(40)), (bars, dp(40)), (preset, dp(38)),
                        (end_cue, column), (row._feedback_btn, column)):
         btn.size_hint_x, btn.width = None, width
         assert _fits(btn.text, btn._label.font_size, width, btn.padding[0], btn._label.bold), btn.text
@@ -375,9 +377,17 @@ def _frames(n: int = 6) -> None:
         EventLoop.idle()
 
 
+# The widest values the stats bar shows: a slot that can't hold one runs it into the next (#113).
+WIDE_SCORE = LiveScore(value=188, target=120, streak=3599, average=187.55, segmented=True, time_above=3599,
+                       longest_streak=3599)
+
+
 def _session_states(screen):
     yield "", None
     yield " a 105 min timer", lambda: screen.refresh_duration_preset(True, 105)
+    yield " a filled stats bar", lambda: (screen.graph.set_series_name("custom_formula", "Alpha calm, evening"),
+                                          screen.set_training_series("custom_formula"), screen.update_stats(WIDE_SCORE))
+    yield " its AVG side", lambda: screen.set_stats_mode("aggregate")
     yield " saved card", lambda: screen.show_summary(
         1, {"duration": 1500, "threshold_used": 60, "avg_shamatha": 72, "time_above_threshold": 610,
             "longest_streak": 270}, title="2026-10-10 07:30 - Mock with a name too long for one line")
@@ -529,6 +539,21 @@ def test_no_text_outgrows_a_box_at_the_largest_size_that_it_fits_at_normal(phone
     assert found[LARGEST] - found[1.0] == set()
 
 
+
+def test_the_stats_bars_titles_and_values_keep_to_their_thirds(phone):
+    """On a 360 dp phone at the largest size, with its widest values: a title or value wider than its third runs into
+    the next one, at any size (#113). The first title, a metric's name, is cut with an ellipsis instead."""
+    F.set_scale(LARGEST)
+    screen = LiveSessionScreen()
+    phone.clear_widgets()
+    phone.add_widget(screen)
+    screen.update_stats(WIDE_SCORE)
+    for mode in ("live", "aggregate"):
+        screen.set_stats_mode(mode)
+        _frames()
+        for label in screen._stat_title_labels[1:] + screen._stat_labels:
+            assert _text_size_needed(label)[0] <= label.width + 1.5, (mode, label.text, label.width)
+
 def _layout(root, where: str) -> list[tuple]:
     """Each widget's kind, text, font and size, in tree order."""
     return [(where, type(w).__name__, str(getattr(w, "text", "")), round(float(getattr(w, "font_size", 0)), 2),
@@ -555,7 +580,8 @@ def test_the_largest_size_also_fits_at_a_phones_pixel_density():
     chart's 100). The density is fixed when Kivy starts, so the checks run again in a process of their own."""
     checks = [f"{__file__}::{name}" for name in ("test_no_text_outgrows_a_box_at_the_largest_size_that_it_fits_at_normal",
                                                  "test_narrow_buttons_keep_their_text_on_one_line_at_the_largest_size",
-                                                 "test_the_timer_pill_holds_every_timer_on_one_line")]
+                                                 "test_the_timer_pill_holds_every_timer_on_one_line",
+                                                 "test_the_stats_bars_titles_and_values_keep_to_their_thirds")]
     # On this run's display (no second Xvfb to start); only the density differs.
     run = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-p", "no:xvfb", *checks],
                          env={**os.environ, "KIVY_METRICS_DENSITY": PHONE_DENSITY}, capture_output=True, text=True,

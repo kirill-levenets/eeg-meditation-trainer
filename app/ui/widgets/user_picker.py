@@ -36,7 +36,7 @@ class UserPickerForm(BoxLayout):
         self,
         on_create: Callable[[str], None],
         on_pick_existing: Callable[[int], None],
-        on_count: Optional[Callable[[int], int]] = None,
+        on_count: Optional[Callable[[int], int | None]] = None,  # None: shown without a count
         on_delete: Optional[Callable[[int], None]] = None,
         **kwargs,
     ) -> None:
@@ -168,6 +168,10 @@ class UserPickerForm(BoxLayout):
         """Set the full user list. The visible dropdown is then derived
         from this list and the current input text."""
         self._users = users
+        self._render_filtered_list(self._name_input.text)
+
+    def redraw(self) -> None:
+        """The rows again, for the same users and filter: each row's session count is read anew."""
         self._render_filtered_list(self._name_input.text)
 
     def _render_filtered_list(self, query: str) -> None:

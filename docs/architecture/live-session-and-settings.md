@@ -24,9 +24,16 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   It runs when another profile is picked (`_activate_user`), when that profile is deleted, and when History deletes the shown session (`_recorder.session_id`, kept after the stop).
   Re-picking the shown profile resets nothing (`_on_user_switch` allows that mid-session, and a reset there would wipe the running session's graph).
   An idle threshold change (#83) clears the display but keeps the owner, so a later switch still closes an open card.
-  The readout's AVG view renders the averages cached with the last tick, refreshed once more at the session's end (ticks are skipped while locked), and `set_stats_mode` redraws the strip when a profile's LIVE/AVG choice loads.
-- Stats card toggle: the LIVE/AVG button flips all 5 slots between live instant values and session aggregates (`avg_shamatha`, `avg_meditation`, `time_above_threshold`, `time_shamatha_90`, `longest_streak`).
-  The mode persists per profile as the `stats_view_mode` setting.
+  The stats bar shows the `LiveScore` each tick hands it (`update_stats`), refreshed once more at the session's end and on resume (ticks are skipped while locked), and `set_stats_mode` redraws it when a profile's LIVE/AVG choice loads.
+- Stats bar (#113): three slots on the metric the session is scored on, the end card's numbers as they build up.
+  LIVE: the scored value, the Target it is scored against (the threshold, or a program segment's target) and the current Streak; AVG: the Average, the time On target and the Best streak.
+  The AVG titles are History's period-totals words, which fit a third of a 360 dp phone at the largest size where the end card's "Time Above Threshold" and "Longest Streak" don't.
+  The first LIVE title is the name on the graph of the series the legend marks `»` (`set_training_series`, which redraws the bar); it stays after the session ends (`_score_name_key`) until `clear_readout`, and reads "Score" before any.
+  A program's segments are scored on different metrics, so its AVG average is the running segment's ("Segment avg"); the time above and the streaks are the whole session's, as on the end card.
+  The bar reads `SessionManager.live_score()`, running totals, not `compute_statistics`, which walks every tick and runs only at a checkpoint or the save.
+  LIVE / AVG is a `ChoiceToggle` (both positions shown, the chosen one filled); the choice persists per profile as the `stats_view_mode` setting.
+  Values are `F.capped(F.H2)` so "59m 59s" keeps to its third; only the first title, a metric's name, is cut with an ellipsis.
+  `test_the_stats_bars_titles_and_values_keep_to_their_thirds` checks every other title and every value at the largest size, at 1 and at 2.75 px per dp.
 - **Shamatha-reached status emphasis** (issue #13): while the live `shamatha_score` holds at/above the session threshold the header status label becomes a bold `SHAMATHA` on a green `C.SHAMATHA` rounded pill;
   otherwise it shows the classified state.
   The pill is a `Color`+`RoundedRectangle` in `_state_label.canvas.before` sized to the text (`_position_shamatha_chip`, bound to the label's `texture_size`).

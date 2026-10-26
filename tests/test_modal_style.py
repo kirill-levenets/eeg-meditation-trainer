@@ -368,9 +368,36 @@ def test_the_app_selected_states_are_readable(theme, screens):
     live._set_view("raw")
     live._set_view("metrics")
     hist.set_view_mode("bars")
-    for btn in (live._btn_view_metrics, hist._btn_bars, sett._theme_buttons[theme]):
+    for btn in (live._view_toggle.buttons["metrics"], hist._toggle_col.buttons["bars"], sett._theme_toggle.buttons[theme]):
         assert _contrast(btn.text_color, btn.bg_color) == pytest.approx(_best_glyph_contrast(btn.bg_color)), btn.text
 
+
+
+@pytest.mark.parametrize("theme", list(THEMES))
+def test_starts_timer_part_draws_its_text_as_start_does(theme, screens):
+    """The timer length or "P" beside Start, and its chevron: the glyph Start's own text takes, enabled or not."""
+    C.set_theme(theme)
+    live = screens(LiveSessionScreen)
+    pill, start = live._btn_duration_expand, live.btn_start
+    try:
+        for disabled in (False, True):
+            pill.disabled = start.disabled = disabled
+            _pump()
+            for label in (pill._text_label, pill._chevron_label):
+                assert list(label.color) == pytest.approx(list(start._label.color)), (disabled, label.text)
+    finally:
+        pill.disabled = start.disabled = False
+
+
+@pytest.mark.parametrize("theme", list(THEMES))
+def test_an_outlined_button_keeps_its_card_fill_while_pressed(theme):
+    """Its text is often the border's colour (a switch's unchosen side, a profile's X): a fill of that colour hid it."""
+    C.set_theme(theme)
+    btn = StyledButton(text="AVG", outline=True, bg_color=C.TEXT_SECONDARY, text_color=C.TEXT_SECONDARY)
+    btn.state = "down"
+    fill = next(i for i in btn.canvas.before.children if type(i).__name__ in ("Color", "ThemedColor"))
+    assert list(fill.rgba)[:3] == pytest.approx(list(C.BG_CARD)[:3])
+    assert _contrast(btn._label.color, fill.rgba) >= 3.0
 
 def test_a_popup_without_a_height_is_as_tall_as_its_content_capped():
     from kivy.uix.boxlayout import BoxLayout

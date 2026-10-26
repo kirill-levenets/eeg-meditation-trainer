@@ -2,22 +2,17 @@
 recorded (every tick against its own target) it gives back the recorded time above threshold and longest streak. One
 control for a simple session, one per segment for a program. View only: nothing is written."""
 
-import json
-from collections.abc import Callable
 from dataclasses import dataclass, replace
 from functools import cached_property
 
-from app.metrics.custom_formula import CustomFormulaEvaluator
+from app.metrics.formula_slots import COMPUTED_SERIES
 from app.session.scoring import TICK_SECONDS, GoalAccrual, extend_steps, target_steps
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
-    SessionProgram,
-    runnable_plan,
+    recorded_plan,
+    recorded_program,
     segment_target,
 )
-
-# Runs {series key: evaluator} over the session's rows, every tick from the start: {series key: value per tick}.
-FormulaReplay = Callable[[dict[str, CustomFormulaEvaluator]], dict[str, list[float]]]
 
 
 @dataclass(frozen=True)
@@ -49,9 +44,6 @@ class ScoredTicks:
         return target_steps(self.targets) or []
 
 
-_FORMULA_KEYS = ("custom_formula", "program_formula")  # prefixes of series computed, not stored per tick
-
-
 def _has_record(rows: list[dict]) -> bool:
     """Every tick stored what it was scored on (#83); a partial record is not trusted."""
     return bool(rows) and all(r.get("score_target") is not None for r in rows)
@@ -59,19 +51,18 @@ def _has_record(rows: list[dict]) -> bool:
 
 def _values(key: str, rows: list[dict], formula_series: dict[str, list[float]]) -> list[float] | None:
     """A metric's value per tick: its stored column, or a formula's replayed series (None when it wasn't replayed)."""
-    if key.startswith(_FORMULA_KEYS):
+    if key in COMPUTED_SERIES:
         return list(formula_series[key]) if key in formula_series else None
     return [r.get(key) or 0.0 for r in rows]
 
 
-def scored_ticks(session: dict, rows: list[dict], formula_series: dict[str, list[float]],
-                 replay_formulas: FormulaReplay | None = None) -> ScoredTicks | None:
+def scored_ticks(session: dict, rows: list[dict], formula_series: dict[str, list[float]]) -> ScoredTicks | None:
     """What each tick was scored on and against: its stored record, or for an older session its saved metric
-    (meditation before it was saved, #51) at its threshold, or its program's segments, their formulas run through
-    `replay_formulas`. None when it can't be replayed: a formula the replay couldn't rebuild (formulas aren't stored
-    per tick), a program that can't be read or has no tick."""
+    (meditation before it was saved, #51) at its threshold, or its program's segments, their formulas from
+    `formula_series` (the session's replayed lines, its program's too). None when it can't be replayed: a formula the
+    replay couldn't rebuild (formulas aren't stored per tick), a program that can't be read or has no tick."""
     if session.get("session_program"):
-        return _program_ticks(session["session_program"], rows, formula_series, replay_formulas)
+        return _program_ticks(session["session_program"], rows, formula_series)
     target = float(session.get("threshold_used") or 0)
     if _has_record(rows):
         key = rows[0]["score_key"]
@@ -85,15 +76,12 @@ def scored_ticks(session: dict, rows: list[dict], formula_series: dict[str, list
     return ScoredTicks(values, targets, [Segment(key, target, 0, len(values))])
 
 
-def _program_ticks(program_json: str, rows: list[dict], formula_series: dict[str, list[float]],
-                   replay_formulas: FormulaReplay | None) -> ScoredTicks | None:
+def _program_ticks(program_json: str, rows: list[dict], formula_series: dict[str, list[float]]) -> ScoredTicks | None:
     """A program's ticks on its segments: where the record shows each switch, else by minutes as the graph's steps."""
-    try:
-        program = SessionProgram(json.loads(program_json))
-    except (ValueError, TypeError):
+    program, plan = recorded_program(program_json), recorded_plan(program_json)
+    if program is None or plan is None:
         return None
     n = len(rows)
-    plan = runnable_plan(program)
     record = _has_record(rows)
     # Older builds scored a formula that can't compile on its own line: a record showing it, or none, is theirs.
     dead = set(plan.planned_keys) - set(plan.segment_keys)
@@ -111,8 +99,6 @@ def _program_ticks(program_json: str, rows: list[dict], formula_series: dict[str
     segments[-1] = replace(segments[-1], end=n)
     if record:
         return ScoredTicks([r["score_value"] for r in rows], [r["score_target"] for r in rows], segments)
-    if plan.evaluators and replay_formulas is not None:
-        formula_series = {**formula_series, **replay_formulas(plan.evaluators)}
     values: list[float] = []
     targets: list[float] = []
     for segment in segments:

@@ -13,9 +13,11 @@ from kivy.base import EventLoop
 from kivy.uix.screenmanager import NoTransition, Screen, ScreenManager
 
 import app.ui.app_manager as am
+from app.metrics.formula_slots import FormulaSlots
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.diary_screen import DiaryScreen
+from tests._graph_series import make_graph_series
 
 BANDS = ("delta", "theta", "alpha1", "alpha2", "beta1", "beta2", "gamma1", "gamma2")
 
@@ -58,6 +60,8 @@ def app(db, monkeypatch):
     a._refresh_history = MagicMock()
     a._history_screen = MagicMock()
     a._history_screen.session_by_id = lambda sid: db.get_session(sid)  # the row History's list holds
+    a._formulas = FormulaSlots()
+    a._graph_series = make_graph_series(a, graphs=a._detail_graphs)  # the diary's program lines, as build() wires them
     a.show_loading = MagicMock()
     a.hide_loading = MagicMock()
     workers = []
@@ -71,6 +75,19 @@ def app(db, monkeypatch):
 def _frames(n: int = 1) -> None:
     for _ in range(n):
         EventLoop.idle()
+
+
+def _open(a, workers, sid) -> None:
+    a._on_session_select(sid)
+    workers.pop()()
+    _frames(6)
+
+
+def _program_session(a, program, rows) -> int:
+    return a._db.checkpoint_session(None, {"duration": len(rows) // 2, "threshold_used": program[0]["target"],
+                                           "score_metric_key": "program", "score_metric_name": "Program"},
+                                    rows, user_id=a._current_user_id, session_name="p",
+                                    session_program=json.dumps(program))
 
 
 def _filled(graph) -> int:
@@ -202,3 +219,37 @@ def test_the_legend_names_the_new_sessions_formulas_while_its_graphs_load(app):
     a._on_diary_back()
     a._on_session_select(a.sessions["B"])
     assert a._diary_screen._metrics_graph.series_name("custom_formula") == "Drowsy"
+
+
+@pytest.mark.parametrize("program, lines", [
+    ([{"minutes": 1, "target": 90, "formula": "shamatha_score"},
+      {"minutes": 1, "target": 60, "formula": {"name": "Steady", "formula": "80"}},
+      {"minutes": 1, "target": 70, "formula": "meditation_score"}], {"shamatha_score", "program_formula", "meditation_score"}),
+    ([{"minutes": 1, "target": 60}], {"shamatha_score"}),  # no formula, from outside the editor: the line it drives
+])
+def test_a_program_sessions_detail_shows_its_lines_and_never_saves_them(app, program, lines):
+    """As the Session screen did while it ran: exactly the program's lines, whatever History's own selection; while
+    they show nothing saves over that selection, and a simple session opened next shows it again (#113)."""
+    a, workers = app
+    d, uid = a._diary_screen, a._current_user_id
+    graph = d._metrics_graph
+    a._db.set_user_json_setting(uid, "graph_series_diary_metrics", ["distraction"])
+    a._graph_series.apply_saved(graph, uid)
+    _open(a, workers, _program_session(a, program, [{"timestamp": i * 0.5, "shamatha_score": 50.0} for i in range(360)]))
+    assert set(graph.visible_keys()) == lines
+    assert all(graph.series_name(key) == "Program: Steady" for key in lines & {"program_formula"})
+    a._graph_series.persist_all()  # a settings save, a backup or a pause while it shows
+    assert a._db.get_user_json_setting(uid, "graph_series_diary_metrics") == ["distraction"]
+    assert a._db.get_user_json_setting(uid, "graph_series_diary_freq") is not None  # the other graphs still save
+    _open(a, workers, a.sessions["A"])  # a simple session next
+    assert graph.visible_keys() == ["distraction"]
+
+
+def test_every_simple_session_opens_with_the_profiles_selection(app):
+    a, workers = app
+    graph = a._diary_screen._metrics_graph
+    a._db.set_user_json_setting(a._current_user_id, "graph_series_diary_metrics", ["shamatha_score"])
+    _open(a, workers, a.sessions["A"])
+    graph.set_visible("sinking", True)  # shown, never saved
+    _open(a, workers, a.sessions["B"])
+    assert graph.visible_keys() == ["shamatha_score"]

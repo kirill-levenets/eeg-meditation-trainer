@@ -40,6 +40,7 @@ from app.ui.theme import (
     format_count,
     make_message_popup,
 )
+from app.ui.widgets.choice_toggle import ChoiceToggle
 from app.ui.widgets.user_picker import UserPickerForm
 
 HELP_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "help")
@@ -264,7 +265,6 @@ class SettingsScreen(Screen):
         self._audio_metric_radios: dict[str, CheckBox] = {}
         self._audio_metric_selected: str = "shamatha_score"
         self._audio_formula_index_selected: int = 0
-        self._audio_formula_index_buttons: list[StyledButton] = []
         audio_metric_options = {
             "shamatha_score": "Shamatha Score",
             "native_meditation": "NS Meditation",
@@ -287,20 +287,10 @@ class SettingsScreen(Screen):
             size_hint_x=0.25,
             halign="left", valign="middle",
         ))
-        btn_box = BoxLayout(size_hint_x=0.75, spacing=S.GAP)
-        for slot_idx, slot_label in enumerate(("1", "2", "3")):
-            btn = StyledButton(
-                text=slot_label,
-                font_size=F.SMALL,
-                size_hint_y=None,
-                height=dp(28),
-                bg_color=C.ACCENT if slot_idx == 0 else C.BG_CARD,
-            )
-            btn._slot_idx = slot_idx
-            btn.bind(on_release=self._on_audio_formula_index_pressed)
-            btn_box.add_widget(btn)
-            self._audio_formula_index_buttons.append(btn)
-        index_row.add_widget(btn_box)
+        self._slot_toggle = ChoiceToggle([(0, "1"), (1, "2"), (2, "3")], 0, self._on_audio_formula_index_chosen,
+                                         button={"font_size": F.SMALL, "size_hint_y": None, "height": dp(28)},
+                                         size_hint_x=0.75, spacing=S.GAP)
+        index_row.add_widget(self._slot_toggle)
         threshold_section.add_widget(index_row)
 
         # --- Audio section ---
@@ -319,18 +309,10 @@ class SettingsScreen(Screen):
         # --- Theme section ---
         theme_section = accordion.add_section("Theme", collapsed=True)
 
-        self._theme_buttons = {}
-        theme_row = BoxLayout(
-            size_hint_y=None, height=dp(36), spacing=S.GAP_SM,
-        )
-        for theme_name in THEMES:
-            btn = StyledButton(text=theme_name, font_size=F.TINY, height=dp(34))
-            btn._theme_name = theme_name
-            btn.bind(on_release=self._on_theme_select)
-            theme_row.add_widget(btn)
-            self._theme_buttons[theme_name] = btn
-        theme_section.add_widget(theme_row)
-        self._show_active_theme()
+        self._theme_toggle = ChoiceToggle([(name, name) for name in THEMES], C.theme_name, self._on_theme_select,
+                                          button={"font_size": F.TINY, "height": dp(34)},
+                                          size_hint_y=None, height=dp(36), spacing=S.GAP_SM)
+        theme_section.add_widget(self._theme_toggle)
         C.add_listener(self._show_active_theme)
 
         # --- Developer Tools section ---
@@ -463,6 +445,7 @@ class SettingsScreen(Screen):
     def on_pre_enter(self, *args) -> None:
         # The link may have dropped between sessions, with nothing on screen to report it.
         self.device.mark_bt_devices()
+        self.refresh_profile_counts()  # sessions saved or deleted since the list was drawn
 
     # --- Audio threshold metric picker ---
 
@@ -474,21 +457,15 @@ class SettingsScreen(Screen):
             self._audio_metric_selected = key
             self.on_audio_metric_change(key)
 
-    def _on_theme_select(self, btn) -> None:
-        name = btn._theme_name
+    def _on_theme_select(self, name: str) -> None:
         C.set_theme(name)
         self.on_theme_change(name)
 
     def _show_active_theme(self) -> None:
-        """Highlight the active theme's button, whoever applied it (this selector or a profile's settings load)."""
-        for name, btn in self._theme_buttons.items():
-            active = name == C.theme_name
-            btn.bg_color = C.PRIMARY if active else C.BG_CARD
-            btn.text_color = None if active else C.TEXT_SECONDARY
-            btn.bold = active
+        """Mark the active theme, whoever applied it (this selector or a profile's settings load)."""
+        self._theme_toggle.show(C.theme_name)
 
-    def _on_audio_formula_index_pressed(self, btn) -> None:
-        idx = getattr(btn, "_slot_idx", 0)
+    def _on_audio_formula_index_chosen(self, idx: int) -> None:
         self.audio_formula_index = idx
         self.on_audio_formula_index(idx)
 
@@ -497,7 +474,7 @@ class SettingsScreen(Screen):
     def show_backup_status(self, text: str) -> None:
         self._backup_status.text = text
 
-    def _count_user_sessions(self, user_id: int) -> int:
+    def _count_user_sessions(self, user_id: int) -> int | None:
         return self.session_counter(user_id)
 
     def _on_form_create_pressed(self, name: str) -> None:
@@ -518,8 +495,9 @@ class SettingsScreen(Screen):
     def _confirm_user_delete(self, user_id, user_name):
         """Show confirmation before deleting a user."""
         n = self._count_user_sessions(user_id)
+        sessions = "Its sessions" if n is None else f"Its {format_count(n, 'session')}"  # None: the count failed
         message = (f'Delete profile "{user_name}"?\n\n'
-                   f"Its {format_count(n, 'session')} and all its settings will be permanently deleted.\n"
+                   f"{sessions} and all its settings will be permanently deleted.\n"
                    "This cannot be undone.")
         btn_cancel = cancel_button()
         btn_confirm = StyledButton(text="Delete", icon=Icons.DELETE, bg_color=C.DANGER)
@@ -532,6 +510,10 @@ class SettingsScreen(Screen):
 
         btn_confirm.bind(on_release=_do_delete)
         popup.open()
+
+    def refresh_profile_counts(self) -> None:
+        """Draw the profile rows again: each reads its session count as it is drawn."""
+        self._user_picker_form.redraw()
 
     def populate_users(self, users, current_user_id=None):
         """Fill the user picker form."""
@@ -556,5 +538,4 @@ class SettingsScreen(Screen):
     @audio_formula_index.setter
     def audio_formula_index(self, idx: int) -> None:
         self._audio_formula_index_selected = idx
-        for i, btn in enumerate(self._audio_formula_index_buttons):
-            btn.bg_color = C.ACCENT if i == idx else C.BG_CARD
+        self._slot_toggle.show(idx)

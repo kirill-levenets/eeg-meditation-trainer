@@ -9,8 +9,14 @@ from app.metrics.custom_formula import (
     compile_formula,
     evaluate_series,
 )
+from app.session.session_program import (
+    PROGRAM_FORMULA_KEYS,
+    program_line_name,
+    recorded_plan,
+)
 
 FORMULA_KEYS: tuple[str, ...] = ("custom_formula", "custom_formula_2", "custom_formula_3")
+COMPUTED_SERIES: tuple[str, ...] = (*FORMULA_KEYS, *PROGRAM_FORMULA_KEYS)  # computed from the bands, not stored per tick
 
 
 def default_name(slot: int) -> str:
@@ -63,6 +69,17 @@ class FormulaSlots:
             for i, (key, ev) in enumerate(zip(FORMULA_KEYS, self.evaluators)) if ev.is_valid
         ])
 
+
+
+def session_formulas(session: dict) -> tuple[dict[str, CustomFormulaEvaluator], dict[str, str]]:
+    """A saved session's formula lines, ({series key: evaluator}, {series key: name}): its Settings slots' and, for a
+    program session, its program's, named as the Session screen named them while it ran."""
+    evaluators, names = recorded_formulas(session)
+    plan = recorded_plan(session.get("session_program") or "")
+    if plan is not None:
+        evaluators = {**evaluators, **plan.evaluators}
+        names = {**names, **{slot: program_line_name(custom) for slot, custom in plan.customs}}
+    return evaluators, names
 
 def read_active(db, user_id: int) -> list[dict]:
     """The profile's active_formulas, else slot 1 seeded from the single formula kept before there were three."""

@@ -54,7 +54,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 ## Scoring
 
-- `SessionManager.set_active_goal(metric_key, target=None)` accrues `time_above_threshold`/`longest_streak` (and `avg_score`) against that metric and target (`None` → the threshold in force);
+- `SessionManager.set_active_goal(metric_key)` accrues `time_above_threshold`/`longest_streak` (and `avg_score`) against that metric and the threshold in force; `start_segment(metric_key, target)` against a program segment's target;
   it scores at the formula's own scale, independent of `meditation_threshold`'s 0–100 clamp.
   **A session is scored on the metric that drives the feedback sound (#51).**
   In a simple session (decided by `ProgramRun.active`, fixed at session start, never the editable `ProgramSettings.mode` toggle) `_update_tick` calls `_score_on_drive_key()` → `set_active_goal(self._audio_drive_key())` every tick;
@@ -78,12 +78,12 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   For a program it sets `"program"`, the name the program had when the session started (`ProgramRun.name`, `"Program"` if unsaved; Settings may load or save another during the session) and a NULL `avg_score`.
   `ProgramRun.tick` (called in `_update_tick`, program mode only) detects a boundary crossing with the pure `ProgramRun.transition` helper;
   `_enter_segment` then fires the prior segment's end cue (`AudioEngine.play_transition_cue()` chime, or warble), sets the **transient** `audio_key` to the segment's metric key (precomputed by `begin`);
-  it also calls `set_active_goal` and moves the legend marker.
+  it also calls `start_segment` (`set_active_goal`, and the live average starts over: a program's segments differ in metric) and moves the legend marker.
   `audio_key` must not overwrite the user's persisted `_audio_metric_key`: a program slot would leak into the baseline, and a later simple session would read that absent key as 0 → constant max noise.
   Every program custom line is evaluated every tick (persistent `formula_evs`, see [programs.md](programs.md)).
   Auto-stop reuses the timer-expiry path: the program total seeds the timer at session start.
 - **The threshold in force** (#83):
-  `SessionManager` scores a tick against `set_active_goal`'s target (a program segment), else `_threshold`, which `set_threshold(value)` and `start(threshold)` move.
+  `SessionManager` scores a tick against `start_segment`'s target (a program segment), else `_threshold`, which `set_threshold(value)` and `start(threshold)` move.
   `start()` without one keeps it, which is how a session that waited for the headset starts with a threshold changed during the wait; `threshold_used` stays the Start value (the row's).
   `_put_threshold_in_force(value)` is the one place the Settings threshold takes effect, on the metrics engine, the sound, the SHAMATHA pill (`_shamatha_threshold`), `SessionManager.set_threshold` and the graph's scalar line together;
   it is the only writer of `_shamatha_threshold`.

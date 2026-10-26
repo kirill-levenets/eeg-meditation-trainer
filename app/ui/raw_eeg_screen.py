@@ -144,7 +144,7 @@ class ScrollableGraphWidget(Widget):
         self._visible: dict[str, bool] = dict.fromkeys(colors, True)
         self._appended: dict[str, int] = dict.fromkeys(colors, 0)  # samples ever added: a run's absolute position
         self._run_extremes: dict[str, _RunExtremes] = {}
-        self._gradient_key: str | None = None  # the series drawn in LINE_COLOURS' gradient, not its own colour
+        self._gradient_steps: list[tuple[int, str]] = []  # (first point, series): drawn from there in LINE_COLOURS
         self._scroll_offset: int = 0
         self._total_points: int = 0
         self._show_value_labels: bool = show_value_labels
@@ -219,16 +219,25 @@ class ScrollableGraphWidget(Widget):
         self._redraw()
 
     def _on_line_colours(self) -> None:
-        if self._gradient_key is not None:
+        if self._gradient_steps:
             self._redraw()
 
     def set_gradient_series(self, key: str | None) -> None:
-        """Draw `key` coloured by its value in the profile's line colours (LINE_COLOURS); a key that is no series of this
-        graph (None, a program session's "program") colours none."""
-        key = key if key in self._data else None
-        if key != self._gradient_key:
-            self._gradient_key = key
+        """Draw `key` coloured by its value in the profile's line colours (LINE_COLOURS) over the whole graph; a key that
+        is no series of this graph (None, a program session's "program") colours none."""
+        self.set_gradient_steps([(0, key)] if key in self._data else None)
+
+    def set_gradient_steps(self, steps) -> None:
+        """[(first point, series), ...]: each series in the gradient from its point to the next step's, the series each
+        point was scored on (a program's segment by segment), so a later step recolours none drawn before it."""
+        steps = [(start, key) for start, key in steps] if steps else []
+        if steps != self._gradient_steps:
+            self._gradient_steps = steps
             self._redraw()
+
+    @property
+    def gradient_steps(self) -> list[tuple[int, str]]:
+        return list(self._gradient_steps)
 
 
     @property
@@ -248,7 +257,7 @@ class ScrollableGraphWidget(Widget):
         self._redraw()
 
     def set_visible(self, metric: str, visible: bool) -> None:
-        if metric in self._visible:
+        if metric in self._visible and self._visible[metric] != visible:  # each change redraws the graph and legend
             self._visible[metric] = visible
             self._redraw()
             self.on_series_change()
@@ -273,6 +282,8 @@ class ScrollableGraphWidget(Widget):
 
     def set_series_name(self, key: str, name: str) -> None:
         """Override a series' friendly label at runtime (custom-formula renames)."""
+        if self.series_name(key) == name:  # as set_visible: only a change redraws the graph and its legend
+            return
         self._names[key] = name
         self._redraw()
         self.on_series_change()
@@ -289,8 +300,9 @@ class ScrollableGraphWidget(Widget):
         self._start_wall_time = epoch
         self._redraw()
 
-    def add_point(self, values: dict[str, float], threshold: float | None = None) -> None:
-        """Append one point; `threshold` is the one in force at it, and a change steps the threshold line there."""
+    def add_point(self, values: dict[str, float], threshold: float | None = None, scored: str | None = None) -> None:
+        """Append one point; `threshold` is the one in force at it, and a change steps the threshold line there; `scored`
+        is the series it was scored on, drawn in the gradient from there."""
         for key in self._data:
             val = values.get(key, 0.0)
             self._data[key].append(val)
@@ -301,6 +313,8 @@ class ScrollableGraphWidget(Widget):
             steps = self._threshold_steps or []
             extend_steps(steps, self._total_points - 1, threshold)
             self._threshold_steps = steps
+        if scored is not None:
+            extend_steps(self._gradient_steps, self._total_points - 1, scored)
         self._follow_fit()
         self._redraw_for_data()
 
@@ -551,8 +565,10 @@ class ScrollableGraphWidget(Widget):
                         ))
                 t_mark += grid_sec
 
-        # Data lines + endpoint value labels
+        # Data lines + endpoint value labels; the scored parts after every other line, so no series hides them
         label_y_positions: list[float] = []
+        scored_parts: list[tuple[list[float], tuple, float]] = []
+        colour_by_value = not self._bipolar and LINE_COLOURS.name != MONO
         for key, slice_data in slices.items():
             if len(slice_data) < 2:
                 continue
@@ -560,7 +576,6 @@ class ScrollableGraphWidget(Widget):
             color = self.series_color(key)
             scale = self._scales.get(key, 100.0)
             draw_scale = max_scale if not self._bipolar else scale
-            gradient = key == self._gradient_key and LINE_COLOURS.name != MONO
 
             n = len(slice_data)
             vp = max(self._viewport_points, n)
@@ -580,11 +595,12 @@ class ScrollableGraphWidget(Widget):
                     y = graph_y + min(max(val, 0.0) / draw_scale, 1.0) * graph_h
                 xy.append((x, y))
 
-            points = [coord for x, y in xy for coord in (x, y)]
-            if gradient and not self._bipolar:
-                self._add_gradient_line(points, graph_y, graph_h, draw_scale)
-            else:
-                self._add_polyline(points, color)
+            for scored, part in _split_at_spans(drawn, xy, self._gradient_spans(key, start_idx, start_idx + n)):
+                points = [coord for x, y in part for coord in (x, y)]
+                if scored:
+                    scored_parts.append((points, color, draw_scale))
+                else:
+                    self._add_polyline(points, color)
 
             # Realtime value label at right edge of line
             if self._show_value_labels and slice_data:
@@ -605,6 +621,11 @@ class ScrollableGraphWidget(Widget):
                     pos=(graph_x + graph_w + dp(3), last_y - tex.height / 2),
                     size=tex.size,
                 ))
+        for points, color, draw_scale in scored_parts:
+            if colour_by_value:
+                self._add_gradient_line(points, graph_y, graph_h, draw_scale)
+            else:
+                self._add_polyline(points, color)
 
         # Marker vertical lines
         if self._markers:
@@ -654,6 +675,17 @@ class ScrollableGraphWidget(Widget):
             out.extend(_extremes(values, last * size - v0, n))
         out.append(n - 1)
         return [i for j, i in enumerate(out) if j == 0 or i != out[j - 1]]
+
+    def _gradient_spans(self, key: str, first: int, end: int) -> list[tuple[int, int]]:
+        """The [a, b) runs, counted from `first`, of the points first..end that `key` is drawn in the gradient."""
+        steps = self._gradient_steps
+        spans = []
+        for j, (start, k) in enumerate(steps):
+            stop = steps[j + 1][0] if j + 1 < len(steps) else end
+            a, b = max(start, first), min(stop, end)
+            if k == key and a < b:
+                spans.append((a - first, b - first))
+        return spans
 
     def _add_polyline(self, points: list[float], color) -> None:
         if color is None or len(points) < 4:
@@ -1165,8 +1197,26 @@ class ScrollableGraphWidget(Widget):
         self._total_points = 0
         self._scroll_offset = 0
         self._markers = []
+        self._gradient_steps = []
         self._new_data()
         self._redraw()
+
+
+def _split_at_spans(indices, xy: list[tuple[float, float]], spans: list[tuple[int, int]]) -> list[tuple[bool, list]]:
+    """(in a span, points) runs of the drawn points; each run also takes the next one's first point, so the line is
+    unbroken where its colouring changes."""
+    if not spans:
+        return [(False, xy)]
+    runs: list[tuple[bool, list]] = []
+    for i, point in zip(indices, xy):
+        inside = any(a <= i < b for a, b in spans)
+        if runs and runs[-1][0] == inside:
+            runs[-1][1].append(point)
+            continue
+        if runs:
+            runs[-1][1].append(point)
+        runs.append((inside, [point]))
+    return runs
 
 
 def _window_rect(widget) -> tuple[float, float, float, float]:
