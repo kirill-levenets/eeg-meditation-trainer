@@ -547,14 +547,12 @@ class DiaryScreen(Screen):
     def set_session_formulas(self, series: dict[str, list[float]], names: dict[str, str]) -> None:
         """Inject recomputed per-session formula series + names before display."""
         self._session_formula_series = series
-        graph = self._metrics_graph
         for key, name in names.items():
-            if graph.series_name(key) != name:  # each change redraws the graph and its legend
-                graph.set_series_name(key, name)
+            self._metrics_graph.set_series_name(key, name)
 
     def show_program_lines(self, plan: RunnablePlan | None) -> None:
-        """A program session shows exactly its program's lines, as the Session screen did while it ran; None, a simple
-        session, shows none of them."""
+        """A program session shows exactly its program's lines, as the Session screen did while it ran, and marks them
+        as the program's, so they are never saved as the profile's selection; None, a simple session, clears the mark."""
         self._program_keys = frozenset(plan.keys) if plan is not None else frozenset()
         if plan is not None:
             show_program_series(self._metrics_graph, plan)

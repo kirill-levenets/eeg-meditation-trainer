@@ -116,7 +116,7 @@ def test_a_fourth_formula_shares_the_last_slot_and_its_fate():
 
 def test_a_segments_target_is_a_whole_number_50_when_missing():
     assert [segment_target(s) for s in ({"target": 72.5}, {"target": "80"}, {})] == [72, 80, 50]
-    assert [segment_target({"target": t}) for t in (None, "", "high")] == [50, 50, 50]  # unreadable: as missing
+    assert [segment_target({"target": t}) for t in (None, "", "high", float("inf"))] == [50] * 4  # unreadable: as missing
     assert SessionProgram([{"minutes": 1, "target": 72.5}, {"minutes": 1}]).threshold_steps(2) == [(0, 72), (120, 50)]
 
 
@@ -130,10 +130,13 @@ def test_a_record_that_cant_be_read_is_no_program(record):
     assert recorded_program(record) is None
 
 
-@pytest.mark.parametrize("formula", [{"name": "X", "formula": 80}, {"name": ["X"], "formula": "80"}])
-def test_a_formula_of_the_wrong_type_is_no_plan_never_a_crash(formula):
+@pytest.mark.parametrize("formula", [{"name": "X", "formula": 80}, {"name": ["X"], "formula": None}])
+def test_a_formula_of_the_wrong_type_runs_as_one_that_doesnt_compile(formula):
+    """A hand-edited or foreign record: every reader gets a plan, the recorded one and the live one alike."""
     record = json.dumps([{"minutes": 1, "target": 50, "formula": formula}])
-    assert recorded_program(record) is not None and recorded_plan(record) is None
+    for plan in (recorded_plan(record), runnable_plan(SessionProgram(json.loads(record)))):
+        assert (plan.keys, plan.segment_keys, plan.evaluators) == ({"shamatha_score"}, ["shamatha_score"], {})
+        assert plan.unrunnable == [str(formula["name"])]
 
 
 def test_a_session_detail_opened_on_an_unreadable_program_draws_its_plain_threshold():

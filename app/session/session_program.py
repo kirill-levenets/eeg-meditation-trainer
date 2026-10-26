@@ -4,7 +4,6 @@ target + driving formula. Pure logic (no Kivy), mirrors timer_state.py."""
 import json
 from typing import NamedTuple
 
-from app.logger import logger
 from app.metrics.custom_formula import CustomFormulaEvaluator, compile_formula
 
 
@@ -16,7 +15,7 @@ def segment_target(seg: dict) -> int:
     """The target a segment is scored against: a whole number, 50 when it has none or none that reads."""
     try:
         return int(float(seg.get("target", 50)))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 50
 
 
@@ -97,7 +96,7 @@ def program_plan(prog: SessionProgram) -> tuple[set[str], list[tuple[str, dict]]
     for seg in prog.segments:
         f = seg.get("formula")
         if isinstance(f, dict):
-            ident = (f.get("name"), f.get("formula"))
+            ident = (repr(f.get("name")), repr(f.get("formula")))  # any type a record holds, as a dict key
             if ident in ident_to_slot:
                 segment_keys.append(ident_to_slot[ident])
             elif len(custom_slots) < len(PROGRAM_FORMULA_KEYS):
@@ -116,7 +115,8 @@ def program_plan(prog: SessionProgram) -> tuple[set[str], list[tuple[str, dict]]
 
 def _compile(customs: list[tuple[str, dict]]) -> dict[str, CustomFormulaEvaluator]:
     """One evaluator per custom formula that compiles, by its series slot, to run on every tick from the start."""
-    compiled = {slot: compile_formula(custom.get("formula", "") or "")[0] for slot, custom in customs}
+    texts = {slot: custom.get("formula") for slot, custom in customs}
+    compiled = {slot: compile_formula(text if isinstance(text, str) else "")[0] for slot, text in texts.items()}
     return {slot: ev for slot, ev in compiled.items() if ev is not None}
 
 
@@ -142,16 +142,10 @@ def runnable_plan(prog: SessionProgram) -> RunnablePlan:
                         customs=[(slot, c) for slot, c in customs if slot not in dead],
                         segment_keys=["shamatha_score" if k in dead else k for k in planned], planned_keys=planned,
                         evaluators=evaluators,
-                        unrunnable=[c.get("name") or c.get("formula", "") for slot, c in customs if slot in dead])
+                        unrunnable=[str(c.get("name") or c.get("formula", "")) for slot, c in customs if slot in dead])
 
 
 def recorded_plan(program_json: str) -> RunnablePlan | None:
     """The plan a session's recorded program ran on, or None for a simple session or a record that can't be read."""
     program = recorded_program(program_json)
-    if program is None:
-        return None
-    try:
-        return runnable_plan(program)
-    except (TypeError, AttributeError) as e:  # a formula or its name of the wrong type: no program, never a crash
-        logger.warning(f"Recorded program can't be read: {e!r}")
-        return None
+    return runnable_plan(program) if program is not None else None

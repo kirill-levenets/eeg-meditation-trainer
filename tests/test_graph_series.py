@@ -306,12 +306,14 @@ def test_choosing_a_saved_formula_renames_its_picker_row_at_once(tmp_path, monke
     assert row.text == "Calm"  # the open picker's row says what the line and the legend say
 
 
-def test_showing_a_series_already_shown_changes_nothing():
+def test_showing_a_series_already_shown_or_naming_it_as_named_changes_nothing():
     g = _g(METRICS_COLORS, METRICS_SCALES, "diary_metrics")
-    changes = []
+    changes, redraws = [], []
     wire(g, on_series_change=lambda: changes.append(1))
+    g._redraw = lambda: redraws.append(1)
     g.set_visible("shamatha_score", g.is_visible("shamatha_score"))
-    assert changes == []
+    g.set_series_name("custom_formula", g.series_name("custom_formula"))
+    assert changes == [] and redraws == []
     g.set_visible("shamatha_score", not g.is_visible("shamatha_score"))
-    assert changes == [1]
-
+    g.set_series_name("custom_formula", "Calm")
+    assert changes == [1, 1] and redraws == [1, 1]

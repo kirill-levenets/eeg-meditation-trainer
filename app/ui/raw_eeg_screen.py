@@ -282,6 +282,8 @@ class ScrollableGraphWidget(Widget):
 
     def set_series_name(self, key: str, name: str) -> None:
         """Override a series' friendly label at runtime (custom-formula renames)."""
+        if self.series_name(key) == name:  # as set_visible: only a change redraws the graph and its legend
+            return
         self._names[key] = name
         self._redraw()
         self.on_series_change()

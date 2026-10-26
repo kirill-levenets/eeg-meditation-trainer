@@ -55,10 +55,11 @@ class GraphSeries:
         that assigns a saved formula to that slot without leaving the picker.
         """
         is_live = graph is self._live_graph
+        detail_lines = self._detail_program(graph)
         rows = []
         for key in graph.series_keys():
-            shown = (is_live and self._program_run.computes(key)) or key in self._detail_program(graph)
-            if key in PROGRAM_FORMULA_KEYS and not shown:
+            if key in PROGRAM_FORMULA_KEYS and key not in detail_lines and not (
+                    is_live and self._program_run.computes(key)):
                 continue  # program-controlled: listed only while its program runs, or a detail shows it
             btn = StyledButton(height=dp(44))
             _show_row(btn, graph, key)
@@ -125,7 +126,7 @@ class GraphSeries:
         ev = self._formulas.for_key(key)
         if ev is not None and graph is self._live_graph:
             visible = visible and ev.is_valid
-        graph.set_visible(key, visible)  # fires the legends' refresh, the fullscreen one too
+        graph.set_visible(key, visible)  # a change fires the legends' refresh, the fullscreen one too
         _show_row(btn, graph, key)
 
     def _pickable(self) -> list:
@@ -157,7 +158,7 @@ class GraphSeries:
     def restore(self, user_id: int) -> None:
         """Apply each graph's persisted series selection (graph_series_<id>).
 
-        set_visible drives each graph's own legend refresh. The live metrics graph
+        set_visible drives each graph's own legend refresh on a change. The live metrics graph
         migrates the pre-F2 toggle_<key> rows when it has no JSON yet; other graphs
         default to all-visible (their pre-picker behavior)."""
         for graph in self._pickable():

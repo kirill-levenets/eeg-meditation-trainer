@@ -129,7 +129,8 @@ The linked file explains the mechanism.
   Every end-card close goes through `_close_summary`. → [live-session-and-settings](docs/architecture/live-session-and-settings.md#session-screen)
 - **A session is scored on the metric that drives the feedback sound** (`_audio_drive_key()`).
   The Settings threshold takes effect only through `_put_threshold_in_force` (the slider and profile load go through `_apply_threshold`). → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
-- `ProgramRun.audio_key` is transient and never written to `_audio_metric_key`; `PROGRAM_FORMULA_KEYS` are never persisted to `graph_series_*` or the baseline audio metric.
+- `ProgramRun.audio_key` is transient and never written to `_audio_metric_key`;
+  `PROGRAM_FORMULA_KEYS` are never persisted to `graph_series_*` or the baseline audio metric, nor a program's series set (live or a session detail's) as the profile's selection.
   A program runs, and is replayed, on `runnable_plan`: a custom formula that doesn't compile gets no line and its segments use Shamatha.
   A leaked program key, or one nothing computes, reads as 0 → constant max noise. → [programs](docs/architecture/programs.md)
 

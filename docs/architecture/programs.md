@@ -27,6 +27,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `program_plan(prog)` (`app/session/session_program.py`, with `PROGRAM_FORMULA_KEYS`) returns `(program_keys, custom_slots, segment_keys)`:
   the set of series to show, the `(slot_key, custom_dict)` for each distinct custom (capped at 3), and the metric key each segment drives (a built-in key or its custom's slot).
   The set is exactly the segments' keys, so a segment with no formula (a record from outside the editor) shows the Shamatha line it drives, and a program always shows at least one line.
+  A custom formula or name that isn't text, from such a record, is read as a formula that doesn't compile, so every reader of a program gets a plan.
   `runnable_plan(prog)` is that plan as a session runs it: a custom formula that doesn't compile (`compile_formula` gives it no evaluator) gets no line, and its segments drive, show and are scored on `shamatha_score`.
   A slot nothing computes is absent from `metrics` and would read 0 → constant max noise; Settings → Custom Formula's Save refuses such a formula, but one saved before it can still be in a program.
   The plan keeps `program_plan`'s keys as `planned_keys`: older builds scored such a formula on its own slot, and the what-if replay reads their sessions by them ([session-detail](session-detail.md)).
@@ -40,7 +41,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `end` restores the snapshot, resets all program-slot labels, and force-hides all `PROGRAM_FORMULA_KEYS`.
 - `PROGRAM_FORMULA_KEYS` stay out of persistence, so they never leak into `graph_series_*`:
   `GraphSeries.persist` (which `_save_user_settings` runs through `persist_all`) filters them out, and `GraphSeries.restore`/`apply_saved` force-hide them.
-  `GraphSeries.present_picker` lists one (as `Program: <name>`) on the live graph **only while the running program computes it** (`ProgramRun.computes`), and on the session detail's metrics graph while it shows a program session's lines (`detail_program`, [session-detail](session-detail.md)).
+  `GraphSeries.present_picker` lists one (as `Program: <name>`) on the live graph **only while the running program computes it** (`ProgramRun.computes`).
+  It lists one on the session detail's metrics graph too, while it shows a program session's lines (`detail_program`, [session-detail](session-detail.md)).
   Idle preview (`ProgramSettings.refresh_live_series`, run by `sync_picker`, not while a session runs): in program mode with a loaded program it shows the program's set via `show_program_series` before Start;
   otherwise `GraphSeries.apply_saved` restores the user's saved selection.
   A running program (`ProgramRun.active`) or `governs_live_series()` stops `persist` for the live graph, so a program's visible set never overwrites the saved manual selection:

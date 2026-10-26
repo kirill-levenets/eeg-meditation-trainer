@@ -18,7 +18,9 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   A successful save moves the snapshot; a failed one stays pending and is retried on leave.
   Per-session formula series are **replayed**: the load worker (`_load_session_detail`) runs `_compute_session_formulas`,
   which rebuilds the evaluators from `formula_slots.session_formulas(session)` and recomputes their series via `recompute_formula_series` over the rows it already read.
-  Those are the session's recorded `custom_formulas` (the Settings slots, `recorded_formulas`) and, for a program session, its program's formulas (`recorded_plan`: None for a record that can't be read, never a crash), named `"Program: <name>"` as the Session screen named them while it ran (`program_line_name`).
+  Those are the session's recorded `custom_formulas` (the Settings slots, `recorded_formulas`) and, for a program session, its program's formulas (`recorded_plan`).
+  A program's formula lines are named `"Program: <name>"`, as the Session screen named them while it ran (`program_line_name`).
+  `recorded_plan` is None for a record that can't be read, and a formula of the wrong type in one runs as a formula that doesn't compile ([programs](programs.md)), so no record stops the open.
   Formula series aren't stored per tick:
   `detail_graph_data(rows, series)` takes them from the replay (a slot the session didn't record stays empty), and the metrics graph's fill step calls `set_session_formulas(series, names)` first, which names the series.
   A program session shows exactly its program's lines, as the Session screen did while it ran: the open calls `show_program_lines(recorded_plan(...))`, which runs the live graph's `show_program_series`.

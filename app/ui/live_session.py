@@ -383,8 +383,7 @@ class LiveSessionScreen(Screen):
         # Series the program is currently training (bold + » in the legend); None
         # outside a program segment.
         self._training_key = None
-        # Legend is populated by _rebuild_metric_legend; start with Shamatha only
-        self._rebuild_metric_legend(["shamatha_score"])
+        self._rebuild_metric_legend(self._graph.visible_keys())  # set_visible rebuilds it only on a change
 
         # ── Raw EEG view (hidden initially) ──
         self._raw_container = BoxLayout(orientation="vertical", spacing=S.GAP_SM)

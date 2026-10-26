@@ -221,22 +221,35 @@ def test_the_legend_names_the_new_sessions_formulas_while_its_graphs_load(app):
     assert a._diary_screen._metrics_graph.series_name("custom_formula") == "Drowsy"
 
 
-def test_a_program_sessions_detail_shows_its_lines_and_never_saves_them(app):
+@pytest.mark.parametrize("program, lines", [
+    ([{"minutes": 1, "target": 90, "formula": "shamatha_score"},
+      {"minutes": 1, "target": 60, "formula": {"name": "Steady", "formula": "80"}},
+      {"minutes": 1, "target": 70, "formula": "meditation_score"}], {"shamatha_score", "program_formula", "meditation_score"}),
+    ([{"minutes": 1, "target": 60}], {"shamatha_score"}),  # no formula, from outside the editor: the line it drives
+])
+def test_a_program_sessions_detail_shows_its_lines_and_never_saves_them(app, program, lines):
     """As the Session screen did while it ran: exactly the program's lines, whatever History's own selection; while
     they show nothing saves over that selection, and a simple session opened next shows it again (#113)."""
     a, workers = app
     d, uid = a._diary_screen, a._current_user_id
     graph = d._metrics_graph
-    a._db.set_user_json_setting(uid, "graph_series_diary_metrics", ["shamatha_score"])
+    a._db.set_user_json_setting(uid, "graph_series_diary_metrics", ["distraction"])
     a._graph_series.apply_saved(graph, uid)
-    program = [{"minutes": 1, "target": 90, "formula": "shamatha_score"},
-               {"minutes": 1, "target": 60, "formula": {"name": "Steady", "formula": "80"}},
-               {"minutes": 1, "target": 70, "formula": "meditation_score"}]
     _open(a, workers, _program_session(a, program, [{"timestamp": i * 0.5, "shamatha_score": 50.0} for i in range(360)]))
-    assert set(graph.visible_keys()) == {"shamatha_score", "program_formula", "meditation_score"}
-    assert graph.series_name("program_formula") == "Program: Steady"
+    assert set(graph.visible_keys()) == lines
+    assert all(graph.series_name(key) == "Program: Steady" for key in lines & {"program_formula"})
     a._graph_series.persist_all()  # a settings save, a backup or a pause while it shows
-    assert a._db.get_user_json_setting(uid, "graph_series_diary_metrics") == ["shamatha_score"]
+    assert a._db.get_user_json_setting(uid, "graph_series_diary_metrics") == ["distraction"]
     assert a._db.get_user_json_setting(uid, "graph_series_diary_freq") is not None  # the other graphs still save
     _open(a, workers, a.sessions["A"])  # a simple session next
+    assert graph.visible_keys() == ["distraction"]
+
+
+def test_every_simple_session_opens_with_the_profiles_selection(app):
+    a, workers = app
+    graph = a._diary_screen._metrics_graph
+    a._db.set_user_json_setting(a._current_user_id, "graph_series_diary_metrics", ["shamatha_score"])
+    _open(a, workers, a.sessions["A"])
+    graph.set_visible("sinking", True)  # shown, never saved
+    _open(a, workers, a.sessions["B"])
     assert graph.visible_keys() == ["shamatha_score"]

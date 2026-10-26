@@ -50,7 +50,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The picker is wired on every graph with more than one series (all but the two raw EEG graphs), since a single-series graph's picker could only blank the line.
   One presenter, `GraphSeries.present_picker(graph)` (`app/ui/graph_series.py`, the app's `_graph_series`, which also saves and restores each graph's selection), reads the graph's own catalog, labels and colours:
   `series_keys()` / `series_name()` / `series_color()`, no hardcoded metric list.
-  It lists a program's line on the live graph while its program runs and computes it (`ProgramRun.computes(key)`: the program's valid custom formulas), and on the session detail's metrics graph while it shows a program session's lines (`detail_program`).
+  It lists a program's line on the live graph while its program runs and computes it (`ProgramRun.computes(key)`: the program's valid custom formulas).
+  It lists one on the session detail's metrics graph too, while it shows a program session's lines (`detail_program`).
   Each graph carries a `graph_id` (`live_metrics`, `live_band`, `diary_metrics`, `diary_freq`, …) and its selection persists per graph as `graph_series_<graph_id>` (JSON, per user);
   the live metrics graph migrates legacy `toggle_<key>` rows when it has no JSON yet, other graphs default to all visible.
   `set_visible` (only when it changes something) and `set_series_name` fire the graph's `on_series_change` hook, so the owning screen's legend (visible-filtered) follows any picker toggle, Choose…, restore or program segment;
@@ -69,7 +70,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Shamatha is computed as the meditation score itself (`compute_shamatha`), so when both lines show, the one drawn later covers the other exactly.
   Live, `add_point(values, threshold, scored)` extends the steps with the key each tick was scored on, as it extends the threshold steps, and `LiveMirror` keeps that key so a screen lock's reload redraws the same colours;
   `set_training_series` only moves the legend's » and the stats bar's title, and `clear_data` drops the steps with the points.
-  The session detail colours by its stored ticks' `score_key` (`scoring.scored_steps`), else the metric the session was scored on (`recorded_score`); a key that is no series of the graph (a program session's "program" from before per-tick keys, a session from before #51) colours none.
+  The session detail colours by its stored ticks' `score_key` (`scoring.scored_steps`), else the metric the session was scored on (`recorded_score`);
+  a key that is no series of the graph (a program session's "program" from before per-tick keys, a session from before #51) colours none.
   A program session's detail shows exactly the program's lines, its formula lines too, as the live graph did ([session-detail](session-detail.md)), so every segment's line is drawn and coloured there as it was live.
   Settings → Display shows the six as two `PresetRow`s, each gradient with a `GradientStrip` of itself as the graphs draw it on the current theme; the choice is the per-profile `line_colours` setting.
 - `ScrollableGraphWidget.set_threshold_steps(steps)` draws the dashed threshold line piecewise, along a list of `(start_tick, target)` steps;

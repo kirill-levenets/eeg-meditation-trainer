@@ -74,7 +74,7 @@ class FormulaSettings:
             logger.info(f"Custom formula slot {idx} cleared")
         else:
             ev.set_formula(formula)
-            self._graph.set_visible(key, True)  # fires the graph's visibility callback → legend rebuilds
+            self._graph.set_visible(key, True)  # if it was hidden, the graph's visibility callback rebuilds the legend
             self._section.set_formula_slot_status(idx, "Formula active")
             logger.info(f"Custom formula slot {idx} applied: {formula}")
         uid = self._user_id()
