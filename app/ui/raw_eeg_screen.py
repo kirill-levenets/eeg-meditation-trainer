@@ -21,12 +21,12 @@ from app.config import APP
 from app.session.manager import elapsed_clock
 from app.session.scoring import extend_steps
 from app.ui import render_stats
+from app.ui.graph_gestures import GraphGestures
 from app.ui.graph_runs import RUN_STROKES, RunExtremes, run_indices
 from app.ui.hooks import Hook
 from app.ui.line_colours import GRADIENT_TOP, LINE_COLOURS, MONO, gradient_texture
 from app.ui.theme import C as TC
 from app.ui.theme import F
-from app.ui.touch_utils import ROUTED_BY, point_in_rect
 
 # Labels by (text, font_size, color); the CoreLabel is kept since it re-renders its texture after a GL context loss.
 _LABEL_CACHE: "OrderedDict[tuple, CoreLabel]" = OrderedDict()
@@ -34,7 +34,6 @@ _LABEL_CACHE_MAX = 512
 
 # X grid steps (s); the smallest that keeps time labels _MIN_X_LABEL_GAP_DP apart is used.
 _X_GRID_STEPS_S = (10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200)
-_GLYPH_DRIFT_DP = 20  # a glyph's press survives this much drift; more is a pan (a pan starts at 10)
 _MAX_Y_GRID_LINES = 20  # a fixed grid step far below the scale gives way to a nice one (each line has a label)
 _MIN_X_LABEL_GAP_DP = 70
 # New data waits its last redraw's cost / _REDRAW_BUDGET once a redraw takes _SLOW_REDRAW_S (graphs.md, item 6).
@@ -61,7 +60,7 @@ def _x_grid_step(graph_w: float, visible_seconds: float) -> float:
 _MESH_MAX_QUADS = 65535 // 6
 
 
-class ScrollableGraphWidget(Widget):
+class ScrollableGraphWidget(GraphGestures, Widget):
     """Scrollable real-time graph with a 5-minute data buffer.
 
     Features: Y-axis scale numbers, horizontal grid lines, realtime value
@@ -106,19 +105,11 @@ class ScrollableGraphWidget(Widget):
         self._total_points: int = 0
         self._show_value_labels: bool = show_value_labels
         self._show_timestamps: bool = show_timestamps
-        self._touch_start_offset: int = 0  # scroll offset when the current gesture's pan started
         self._default_viewport: int = self._viewport_points
         self._min_viewport: int = max(4, int(self._sample_rate * 2))  # min 2 seconds
         self._max_viewport: int = effective_max  # max = full buffer
         self._zoom_factor: float = 1.3  # each step zooms by 30%
-        # Pinch zoom state
-        self._pinch_active: bool = False
-        self._pinch_start_dist: float = 0.0
-        self._pinch_start_viewport: int = 0
-        # uid → {"start", "pos"} of each finger in this graph's parent frame (another touch's .pos may be in any frame)
-        self._grabbed_touches: dict[int, dict[str, tuple[float, float]]] = {}
-        self._tap_cancelled: bool = False  # the gesture moved (either axis) or pinched: no tap on release
-        self._gesture_pinched: bool = False
+        self._init_gestures()
         # Sync group: linked graphs zoom together
         self._sync_group: list["ScrollableGraphWidget"] = []
         self._threshold_value: Optional[float] = None
@@ -130,13 +121,11 @@ class ScrollableGraphWidget(Widget):
         self._start_wall_time: Optional[float] = None
         self._expand_callback = None
         self._expand_closes = False  # in fullscreen the corner glyph is the close cross
-        self._pressed_glyph = None  # the rect function of the glyph under a finger, drawn pressed
         self._series_callback = None
         self._fit_callback = None
         self._pads: tuple[float, float, float, float] = (dp(30), dp(30), dp(20), dp(6))  # left, right, bottom, top
         self._pads_floor: tuple[float, float, float, float] | None = None  # the widest since the data was (re)loaded
         self._fit_restore: tuple[int, int] | None = None  # while the whole data is shown: (width, scroll) to go back to
-        self._touch_moved: bool = False
         self._redraw_cost: float = 0.0  # the last redraw's duration and end (perf_counter): the data redraw budget
         self._redraw_end: float = 0.0
         self._deferred_redraw = None  # the one pending Clock event of a data redraw waiting for its budget
@@ -827,145 +816,6 @@ class ScrollableGraphWidget(Widget):
         """Zoom out (show more points = wider view)."""
         self._set_viewport(int(self._zoom_base() * self._zoom_factor))
 
-    def _on_window_mouse_down(self, window, x, y, button, modifiers):
-        """Handle mouse scroll at Window level (bypasses ScrollView)."""
-        if button not in ("scrollup", "scrolldown") or self.get_root_window() is None:
-            return  # a graph off screen (a hidden screen or tab) keeps its last place under the pointer
-        # Convert window coords to widget coords and check collision
-        wx, wy = self.to_widget(x, y, relative=False)
-        if not self.collide_point(wx, wy):
-            return
-        if button == "scrollup":
-            self.zoom_in()
-        elif button == "scrolldown":
-            self.zoom_out()
-
-    def on_touch_down(self, touch):
-        if not self.collide_point(*touch.pos):
-            return super().on_touch_down(touch)
-
-        # Skip scroll events — handled by _on_window_mouse_down
-        if hasattr(touch, "button") and touch.button in ("scrollup", "scrolldown"):
-            return True
-
-        touch.grab(self)
-        if self._grabbed_touches:  # a second finger: a pinch or a two-finger tap, never a tap
-            self._tap_cancelled = True
-        if not self._grabbed_touches:  # a new gesture
-            self._touch_start_offset = self._scroll_offset
-            self._touch_moved = False
-            self._tap_cancelled = False
-            self._gesture_pinched = False
-        # A glyph over the data is a button: grabbed like any touch, it fires on a clean tap's release (on_touch_up).
-        glyph = self._glyph_at(touch)
-        self._grabbed_touches[touch.uid] = {"start": tuple(touch.pos), "pos": tuple(touch.pos), "glyph": glyph}
-        if glyph is not None:
-            self._press_glyph(glyph[1])
-        return True
-
-    def _glyph_at(self, touch):
-        """(callback, rect function) of the glyph under `touch` (hit-tested in WINDOW coordinates), or None."""
-        for callback, rect in ((self._series_callback, self._series_icon_rect),
-                               (self._expand_callback, self._expand_icon_rect),
-                               (self._fit_callback, self._fit_icon_rect)):
-            if callback is not None and self._touch_in_window_rect(touch, rect()):
-                return callback, rect
-        return None
-
-    def _press_glyph(self, rect) -> None:
-        if rect is not self._pressed_glyph:
-            self._pressed_glyph = rect
-            self._redraw()
-
-    def on_touch_move(self, touch):
-        if touch.grab_current is not self:
-            return super().on_touch_move(touch)
-
-        finger = self._grabbed_touches.get(touch.uid)
-        if finger is None:
-            return True
-        finger["pos"] = tuple(touch.pos)
-        glyph = finger.get("glyph")
-        if glyph is not None:
-            sx0, sy0 = finger["start"]
-            drift = max(abs(touch.x - sx0), abs(touch.y - sy0))
-            if drift <= _GLYPH_DRIFT_DP * dp(1) and self._touch_in_window_rect(touch, glyph[1]()):
-                return True  # a fingertip drifting on a glyph: still its press, as on a button
-            finger["glyph"] = None  # dragged off it: an ordinary gesture from here
-            self._tap_cancelled = True
-            self._press_glyph(None)
-        sx, sy = finger["start"]
-        dx, dy = abs(touch.x - sx), abs(touch.y - sy)
-        if dx > dp(10):
-            self._touch_moved = True
-        if dx > dp(10) or dy > dp(10):
-            self._tap_cancelled = True
-
-        # Pinch zoom detection (Android / multi-touch)
-        active = [f["pos"] for f in self._grabbed_touches.values() if self.collide_point(*f["pos"])]
-        if len(active) >= 2:
-            self._gesture_pinched = self._tap_cancelled = True
-            (x1, y1), (x2, y2) = active[0], active[1]
-            dist = ((x1 - x2) ** 2 + (y1 - y2) ** 2) ** 0.5
-            if not self._pinch_active:
-                self._pinch_active = True
-                self._pinch_start_dist = max(dist, 1.0)
-                self._pinch_start_viewport = self._zoom_base()
-            else:
-                scale = self._pinch_start_dist / max(dist, 1.0)
-                new_vp = int(self._pinch_start_viewport * scale)
-                self._set_viewport(new_vp)
-            return True
-
-        if self._hand_off_vertical_swipe(touch, dx, dy):
-            return True
-
-        # Single touch — scroll
-        graph_w = self._plot_rect()[2]
-        if graph_w > 0 and self._total_points > self._viewport_points:
-            dx = touch.x - sx
-            points_per_pixel = self._viewport_points / graph_w
-            delta_points = int(-dx * points_per_pixel)
-            new_offset = self._touch_start_offset + delta_points
-            self.set_scroll_offset(new_offset)
-        return True
-
-    def on_touch_up(self, touch):
-        if touch.grab_current is self:
-            was_tap = not self._tap_cancelled and not self._pinch_active
-            lifted = self._grabbed_touches.pop(touch.uid, None) or {}
-            touch.ungrab(self)
-            self._pinch_active = False
-            if len(self._grabbed_touches) == 1:  # a pinch ended: the remaining finger pans on from where it is
-                remaining = next(iter(self._grabbed_touches.values()))
-                remaining["start"] = remaining["pos"]
-                self._touch_start_offset = self._scroll_offset
-            glyph = lifted.get("glyph")
-            if glyph is not None:
-                self._press_glyph(None)
-            if was_tap and len(self._grabbed_touches) == 0:
-                if glyph is not None:
-                    glyph[0](self)
-                else:
-                    self.on_tap()
-            return True
-        return super().on_touch_up(touch)
-
-    def _hand_off_vertical_swipe(self, touch, dx: float, dy: float) -> bool:
-        """A single finger moving mostly vertically, before any pan or pinch, scrolls the page that routed it here:
-        the graph has no vertical gesture, and in landscape it fills the view the user scrolls to reach the controls."""
-        if self._touch_moved or self._gesture_pinched or len(self._grabbed_touches) != 1:
-            return False
-        if dy < dp(20) or dy < 2 * dx:
-            return False
-        page = touch.ud.get(ROUTED_BY)  # no walk up the tree: Window.parent is the Window itself
-        if page is None or not page.scroll_with(touch, self):
-            return False
-        self._grabbed_touches.pop(touch.uid, None)
-        touch.ungrab(self)
-        self.set_scroll_offset(self._touch_start_offset)
-        return True
-
     def set_expand_callback(self, callback, closes: bool = False) -> None:
         """The top-right glyph's tap: fullscreen-expand, or with `closes` the close cross; None hides it."""
         self._expand_callback = callback
@@ -1045,21 +895,6 @@ class ScrollableGraphWidget(Widget):
         if self._series_callback is None or self._icon_too_small():
             return None
         return self._corner_rect(right=False, top=True)
-
-    def _touch_in_window_rect(self, touch, rect) -> bool:
-        """True if `touch` falls in `rect`, compared in WINDOW coordinates.
-
-        The touch's canonical window position (sx/sy) vs the rect's rendered
-        window rect — the one frame that isn't ambiguous under the
-        GraphAwareScrollView touch-forwarding transform.
-        """
-        if rect is None:
-            return False
-        wx0, wy0 = self.to_window(rect[0], rect[1])
-        wx1, wy1 = self.to_window(rect[0] + rect[2], rect[1] + rect[3])
-        tx, ty = self.to_window(*touch.pos)  # touch.pos is in this graph's parent frame; sx/sy ignore Rotate Screen
-        win_rect = (min(wx0, wx1), min(wy0, wy1), abs(wx1 - wx0), abs(wy1 - wy0))
-        return point_in_rect(tx, ty, win_rect)
 
     def _draw_icon_backing(self, rect) -> None:
         # Transparent background — the glyph sits directly on the graph. Set the

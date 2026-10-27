@@ -122,6 +122,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 ## Touch
 
+A graph's touch handling is the `GraphGestures` mixin (`app/ui/graph_gestures.py`): pan, pinch, the mouse wheel's zoom, taps on the plot and its glyphs, and the vertical-swipe hand-off; it keeps its own gesture state (`_init_gestures`).
+
 - **Glyph hit-testing is done in WINDOW coordinates** (`_touch_in_window_rect`):
   the touch's window position (`self.to_window(*touch.pos)`: `touch.pos` is in the graph's parent frame, and `touch.sx/sy` ignore Settings → Display's Rotate Screen) against the glyph's rect in window coordinates.
   `GraphAwareScrollView` delivers a touch in the graph's parent frame (`_dispatch_to_graph`, #66), since a graph's coordinates are content coordinates, not the view's parent's.
@@ -132,7 +134,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `self.to_window(*touch.pos)` against each graph's rendered window rect (`touch_utils.window_rect`, via `point_in_rect`), and only inside the viewport's own window rect.
   A ScrollView translates its canvas, so a child's `x`/`y` are content coordinates: a graph's `collide_point` against the touch lets a graph scrolled out of view claim taps on whatever sits in its unscrolled rect (#66).
   A touch on a graph goes straight to it (pan, pinch, tap, glyphs, with no ScrollView hold-to-decide delay), in the graph's parent frame, except a **vertical swipe**:
-  `ScrollableGraphWidget._hand_off_vertical_swipe` hands a single-finger touch that moved >20 dp mostly vertically, before any pan or pinch in the gesture, to the view that routed it:
+  `_hand_off_vertical_swipe` hands a single-finger touch that moved >20 dp mostly vertically, before any pan or pinch in the gesture, to the view that routed it:
   `touch.ud[touch_utils.ROUTED_BY]`, set by `_dispatch_to_graph` (the key lives in `touch_utils`, so the graph needn't import the scroll view that imports it).
   `GraphAwareScrollView.scroll_with` takes it only if the page can scroll, isn't already scrolling under another finger and the finger is still inside it, otherwise the graph keeps the touch;
   the graph releases the touch and undoes any pan only on success.
