@@ -6,6 +6,7 @@ from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 
 from app.config import APP
+from app.logger import logger
 from app.ui.device_labels import MAX_DEVICE_ALIAS, device_row_text
 from app.ui.hooks import Hook
 from app.ui.settings_sections.common import checkbox_row
@@ -320,8 +321,8 @@ class DeviceSection:
             if scroll is not None and section is not None:
                 try:
                     scroll.scroll_to(section)
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as e:  # noqa: BLE001 - the section is open and its banner shown, just not scrolled to
+                    logger.warning(f"Couldn't scroll Settings to the Device section: {e}")
 
         # Defer to next frame so the section's expanded height is laid out
         # before we ask the ScrollView to bring it into view.
