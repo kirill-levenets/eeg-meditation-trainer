@@ -62,7 +62,10 @@ and the connected one shows a Bluetooth sign.
 Tap the pencil on a row to name the headset;
 the Session screen and new sessions use the
 name. Switching headsets waits until the
-session stops.
+session stops. Each profile keeps its own
+headset; with several MindWaves paired and
+none picked, Start opens Settings > Device
+to pick one.
 
 ## Supported Devices
 

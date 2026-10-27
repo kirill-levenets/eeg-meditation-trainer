@@ -59,10 +59,22 @@ def test_typing_an_existing_name_at_the_gate_picks_it_without_overwriting_its_mo
     assert not [c for c in app._db.set_user_setting.call_args_list if c.args[1] == "use_mock"]
 
 
-def test_a_new_profile_starts_in_mock_mode():
+def test_a_new_profile_is_saved_on_the_mock_before_its_load_then_scanned_for():
+    """Its load applies the mock, so it doesn't scan as a real-mode profile; the new profile's scan decides (#99)."""
     app = _gate_app(created_uid=5)
+    order = []
+    app._db.set_user_setting.side_effect = lambda uid, key, value: order.append((uid, key, value))
+    app._load_user_settings.side_effect = lambda uid: order.append(("loaded", uid))
+    app._headset.scan_for_new_profile.side_effect = lambda: order.append("scanned")
     app._complete_first_run("NewUser")
-    app._db.set_user_setting.assert_any_call(5, "use_mock", "True")
+    assert order == [(5, "use_mock", "True"), ("loaded", 5), "scanned"]
+
+
+def test_a_profile_picked_at_the_gate_is_scanned_for_only_by_its_load():
+    app = _gate_app(created_uid=0)
+    app._db.get_user.return_value = {"id": 4, "name": "M"}
+    app._on_pick_existing_user(4)
+    app._headset.scan_for_new_profile.assert_not_called()
 
 
 def test_a_database_error_at_first_run_create_is_reported_not_raised(monkeypatch):

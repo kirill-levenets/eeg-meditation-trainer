@@ -51,11 +51,11 @@ Inspired by the [EEG meditation research and Vernihor formula](https://scripture
 - **Full signal storage** — raw bands, computed metrics, native NeuroSky values and markers, per tick, in SQLite with automatic schema migration; a running session is saved every minute.
 - **CSV export** — a session's full data with a marker column: on desktop to a folder you pick, on Android to `Documents/EEGMeditation/`; History's select mode exports several sessions as one ZIP.
 - **Mock EEG simulation** — NeuroSky-compatible band powers from a state machine (relaxed, focused, drowsy, distracted, deep calm) with smooth transitions, a 128 Hz synthesized raw waveform and eSense values.
-- **User profiles** — sessions, settings and formulas per profile; the last profile opens at start, and the app can't be used without one.
+- **User profiles** — sessions, settings, formulas and headset per profile; the last profile opens at start, and the app can't be used without one.
 - **Session guards** — Start needs a profile and, with no headset selected, scans the paired ones first; every ending (Stop, timer, lost signal) saves the session.
 - **Navigation** — 3-tab bottom navigation (Session / History / Settings) with Material Design icons.
 - **First run** — create a profile or pick an existing one, so a restored database doesn't lose history;
-  a single paired MindWave is then selected automatically, several open Settings → Device to pick one, and with none the app runs on simulated EEG (demo mode).
+  a single paired MindWave is then selected automatically, with several Start opens Settings → Device to pick one, and with none the app runs on simulated EEG (demo mode).
 - **Existing-user picker** — the first-run popup and Settings → User Profile share one form: pick an existing profile or type a new name;
   a duplicate name offers "Use existing 'X'" or "Change name" inline (the DB enforces unique names).
 - **Session end summary** — an end card with the stats and a notes field, which can also delete the session after a confirmation.

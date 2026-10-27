@@ -68,6 +68,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
     a list populate, `update_device_status`, and `on_pre_enter`, since the link can drop between sessions with nothing on screen.
     Every row is built with the glyph so its slot exists (`StyledButton` makes an icon label only at construction) and `set_icon("")` blanks it.
   - **Names:** the pencil opens the inline editor History's rename uses (`theme.RenameRow`, stopping at `MAX_DEVICE_ALIAS` while typing) under the row;
+    a list that lands while it is open (scans run off the main thread) keeps it, with its text, under that headset's new row;
     Save or Enter calls `Headset.on_rename(address, bluetooth_name, text)`, which stores the alias and relabels the row (`relabel_bt_device`);
     for the headset in use it also relabels the status line and the Session screen's label (`Headset.show_selected`, which a pick in the list goes through too).
     Aliases are app-wide, not per profile: `bt_device_aliases`, a JSON `{address: alias}` in `app_settings` (`get_json_setting`), because a headset is the same object whichever profile uses it;
@@ -80,5 +81,6 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 - **First run is the user gate's popup** (`_show_first_run_popup`, see [app-platform](app-platform.md#user-gate-and-profiles)): a `UserPickerForm` to create a profile or pick an existing one (e.g. after a restore) without retyping the name.
   It is a Popup, not a Screen, because a TextInput inside a Screen doesn't get keyboard focus on some Android devices.
-  A new profile (`_complete_first_run`) starts on the mock; a picked one (`_on_pick_existing_user`) keeps its own headset and mode;
-  both leave through `_finish_first_run`, and `Headset.auto_scan`, which scans only while the stream has no headset set, selects a single paired MindWave or opens Settings → Device to pick among several.
+  A new profile (`_complete_first_run`) starts on the mock and is scanned for (`Headset.scan_for_new_profile`): a paired MindWave takes it off the mock, the single one selected, and with several Start asks which;
+  a picked one (`_on_pick_existing_user`) keeps its own headset and mode, and its load scans for a real-mode profile without a headset ([eeg-bluetooth](eeg-bluetooth.md#connection)).
+  Both leave through `_finish_first_run` for the Session screen.

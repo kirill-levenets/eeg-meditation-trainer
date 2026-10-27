@@ -65,7 +65,7 @@ from app.ui.diary_screen import DiaryScreen, detail_graph_data
 from app.ui.formula_settings import FormulaSettings
 from app.ui.graph_fullscreen import GraphFullscreen
 from app.ui.graph_series import GraphSeries
-from app.ui.headset import Headset, filter_mindwave
+from app.ui.headset import Headset
 from app.ui.history_screen import HistoryScreen
 from app.ui.hooks import wire
 from app.ui.line_colours import DEFAULT as LINE_DEFAULT
@@ -472,7 +472,7 @@ class EEGMeditationApp(App):
         self._headset = Headset(
             self._db, self._real_stream, self._settings_screen.device, self._live_screen,
             user_id=lambda: self._current_user_id, refused_while_session_runs=self._refused_while_session_runs,
-            waiting_for_bt=lambda: self._waiting_for_bt, switch_to_settings=lambda: self._switch_screen("settings"),
+            session_live=self._session_pipeline_live, waiting_for_bt=lambda: self._waiting_for_bt,
             serial_override=lambda: self.serial_device_override,
             report=lambda label, detail, force=False: report_soft_error(label, detail, app=self, force=force))
         self._headset.load_aliases()
@@ -528,8 +528,6 @@ class EEGMeditationApp(App):
         # Screen doesn't get keyboard focus on some platforms.
         if resolved_user is None:
             self._open_user_gate(0.5)
-        else:
-            self._headset.auto_scan()
 
         return float_root
 
@@ -849,12 +847,10 @@ class EEGMeditationApp(App):
         except sqlite3.Error as e:  # the popup's caller reopens the gate: no profile was made
             report_soft_error("user_create_failed", f"The profile '{user_name}' could not be created: {e}")
             return
+        self._db.set_user_setting(uid, "use_mock", "True")  # before its load, which applies it
         self._activate_user(uid)
-        APP.USE_MOCK_DEVICE = True
-        self._db.set_user_setting(uid, "use_mock", "True")
-        self._settings_screen.device._device_mode_cb.active = True
-        self._live_screen.update_device_status(False, device_name="Mock EEG")
-        logger.info("First run: using mock device")
+        self._headset.scan_for_new_profile()
+        logger.info("First run: using mock device until a MindWave is found")
         self._finish_first_run(f"user '{user_name}' created")
 
     def _finish_first_run(self, what: str) -> None:
@@ -864,7 +860,6 @@ class EEGMeditationApp(App):
         self._refresh_profile()
         self._sm.current = "live_session"
         self._bottom_nav.active_tab = "session"
-        self._headset.auto_scan()
         self._power.offer_once()
         logger.info(f"First run complete: {what}")
 
@@ -907,60 +902,52 @@ class EEGMeditationApp(App):
 
         # Real device — need BT connection
         if self._real_stream._device_address:
-            # Device already selected (from settings or auto-scan)
+            # The profile's headset, or one picked in Settings
             self._eeg_stream = self._real_stream
             self._start_session_common()
             return
 
-        # No device selected — auto-scan and connect
+        # No headset selected: find the profile's among the paired devices, then connect
         self._live_screen.show_overlay("Scanning for MindWave...")
         self._live_screen.set_controls_running()
         logger.info("Auto-scanning for BT device before session start")
+        uid = self._current_user_id
 
+        def _scanned(devices: list[dict]) -> None:
+            if attempt != self._start_attempt:
+                return  # cancelled while scanning
+            if uid != self._current_user_id:
+                self._cancel_session_start("IDLE")  # the Start was the profile picked away while it scanned
+                return
+            mindwaves = self._headset.adopt(devices)
+            if self._real_stream._device_address:
+                self._eeg_stream = self._real_stream
+                self._live_screen.update_overlay(f"Found {self._headset.name()}\nConnecting...")
+                self._start_session_common()
+            elif mindwaves:
+                self._live_screen.set_controls_idle()
+                self._live_screen.hide_overlay()
+                self._switch_screen("settings")
+                self._settings_screen.device.focus_device_section(
+                    f"Found {len(mindwaves)} MindWave devices.\n"
+                    "Pick the one you want to use, then press Start again."
+                )
+            elif devices:
+                self._live_screen.set_controls_idle()
+                self._live_screen.show_overlay_retry(
+                    "No MindWave found among paired devices.\n"
+                    "Pair it in system Bluetooth settings,\n"
+                    "or select manually in Settings tab."
+                )
+            else:
+                self._live_screen.set_controls_idle()
+                self._live_screen.show_overlay_retry(
+                    "No paired Bluetooth devices found.\n"
+                    "Pair your MindWave in system\n"
+                    "Bluetooth settings first."
+                )
 
-        def _scan_and_connect():
-            devices = NeuroSkyStream.scan_paired_devices()
-            matches = filter_mindwave(devices)
-
-            def _on_main_thread(dt):
-                if attempt != self._start_attempt:
-                    return  # cancelled while scanning
-                if len(matches) == 1:
-                    mindwave = matches[0]
-                    self._headset.on_select(mindwave["address"], mindwave["name"])
-                    self._eeg_stream = self._real_stream
-                    self._live_screen.update_overlay(f"Found {self._headset.name()}\nConnecting...")
-                    self._start_session_common()
-                elif len(matches) > 1:
-                    # Multiple NeuroSky devices paired — user must pick.
-                    self._headset.list_devices(matches)
-                    self._live_screen.set_controls_idle()
-                    self._live_screen.hide_overlay()
-                    self._switch_screen("settings")
-                    self._settings_screen.device.focus_device_section(
-                        f"Found {len(matches)} MindWave devices.\n"
-                        "Pick the one you want to use, then press Start again."
-                    )
-                elif devices:
-                    # Found BT devices but no MindWave
-                    self._headset.list_devices(devices)
-                    self._live_screen.set_controls_idle()
-                    self._live_screen.show_overlay_retry(
-                        "No MindWave found among paired devices.\n"
-                        "Pair it in system Bluetooth settings,\n"
-                        "or select manually in Settings tab."
-                    )
-                else:
-                    self._live_screen.set_controls_idle()
-                    self._live_screen.show_overlay_retry(
-                        "No paired Bluetooth devices found.\n"
-                        "Pair your MindWave in system\n"
-                        "Bluetooth settings first."
-                    )
-
-            Clock.schedule_once(_on_main_thread)
-
-        threading.Thread(target=_scan_and_connect, daemon=True).start()
+        self._headset.find_paired(_scanned)
 
     def _on_main(self, fn) -> None:
         """Queue callable on Kivy's main thread.
@@ -1506,27 +1493,15 @@ class EEGMeditationApp(App):
 
     def _bt_connect_failed(self, name: str) -> None:
         """Tick thread: the connection thread ended with an error."""
-        self._abort_bt_wait()
         hint = self._real_stream._last_connect_error or "Check device is on and paired."
-        self._on_main_for_wait(lambda n=name, h=hint: (
-            self._undo_session_setup(),
-            self._live_screen.show_overlay_retry(
-                f"Connection to {n} failed.\n{h}"
-            ),
-        ))
+        self._give_up_bt_wait(name, f"Connection to {name} failed.\n{hint}")
         logger.error("BT connection failed, session aborted")
         self._report_bt_connect_failure(name, hint)
 
     def _bt_connect_timed_out(self, name: str) -> None:
         """Tick thread: no BT socket within _BT_CONNECT_TIMEOUT."""
-        self._abort_bt_wait()
-        self._on_main_for_wait(lambda n=name: (
-            self._undo_session_setup(),
-            self._live_screen.show_overlay_retry(
-                f"Connection to {n} timed out.\n"
-                "Make sure the device is turned on\nand in range."
-            ),
-        ))
+        self._give_up_bt_wait(name, f"Connection to {name} timed out.\n"
+                                    "Make sure the device is turned on\nand in range.")
         logger.error("BT connection timed out")
 
     def _update_tick(self, dt: float) -> None:
@@ -2588,21 +2563,7 @@ class EEGMeditationApp(App):
 
         self._graph_series.restore(user_id)
 
-        # Skip BT/mock restore if --serial override is active
-        if not self.serial_device_override:
-            bt_addr = g(user_id, "bt_device_address")
-            bt_name = g(user_id, "bt_device_name")
-            if bt_addr:
-                self._real_stream.set_device(bt_addr, bt_name or bt_addr)
-                self._settings_screen.device.update_device_status(False, meta=f"Saved device: {self._headset.name()}")
-            # use_mock is applied by the settings registry (store.load) above.
-
-        # Update live screen device label to match current mode
-        if APP.USE_MOCK_DEVICE:
-            self._live_screen.update_device_status(False, device_name="Mock EEG")
-        elif self._real_stream._device_address:
-            name = self._headset.name()
-            self._live_screen.update_device_status(False, device_name=name)
+        self._headset.load(user_id)  # after store.load, which applies use_mock
 
         history_mode = g(user_id, "history_view_mode") or "calendar"
         self._history_screen.set_view_mode(history_mode)

@@ -342,7 +342,7 @@ def test_the_editor_starts_from_the_alias_and_saves_through_the_callback():
 def test_an_editor_closed_before_its_focus_lands_raises_no_keyboard():
     screen = _settings()
     screen.device._bt_pencils[BLUE].dispatch("on_release")
-    screen.device.populate_bt_devices(PAIRED)  # a rescan in the same frame closes it
+    screen.device._bt_pencils[BLUE].dispatch("on_release")  # closed again in the same frame
     Clock.tick()
     assert screen.device._bt_rename_input.focus is False
 
@@ -364,13 +364,17 @@ def test_a_relabelled_row_shows_its_new_name_or_the_bluetooth_name():
     assert screen.device._bt_rows[BLUE].text == device_row_text("MindWave Mobile", BLUE)
 
 
-def test_a_rescan_keeps_no_stale_editor():
+def test_a_rescan_moves_an_open_editor_to_its_headsets_new_row():
+    """A scan's list can land while a name is typed (scans run off the main thread): the editor stays, on the new list."""
     screen = _settings()
-    screen.device._bt_pencils[BLUE].dispatch("on_release")
-    screen.device.populate_bt_devices(PAIRED)
-    assert screen.device._bt_rename_row.parent is None
-    screen.device._bt_pencils[BLUE].dispatch("on_release")  # one tap opens it again, on the new list
-    assert screen.device._bt_rename_row.parent is screen.device._bt_device_list
+    device = screen.device
+    device._bt_pencils[BLUE].dispatch("on_release")
+    device.populate_bt_devices(PAIRED)
+    rows = device._bt_device_list.children
+    assert device._bt_rename_row.parent is device._bt_device_list
+    assert rows[rows.index(device._bt_rename_row) + 1] is device._bt_rows[BLUE].parent  # right under BLUE's new row
+    device._bt_pencils[BLUE].dispatch("on_release")  # one tap closes it
+    assert device._bt_rename_row.parent is None
 
 
 def test_tapping_a_row_selects_its_headset():

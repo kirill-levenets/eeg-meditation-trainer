@@ -21,6 +21,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **With several MindWaves paired, Start asks which one** (#99): the app no longer opens Settings › Device at launch or after creating a profile; Settings › Device lists them, and **Start** opens it to pick one, as it did.
+  Its "pick one" message now goes once a headset is picked or another profile is chosen, not only once one connects.
+  A new profile still starts on Mock Data and leaves it when a MindWave is paired: one is picked for it, and with several **Start** asks which.
+  Settings › Device's **Scan** and **Copy Diagnostics** list the paired devices off the main thread, as the other searches do, so a slow Bluetooth listing doesn't hold up the screen;
+  a list that lands while you type a headset's name keeps the name field open with what you typed.
+
 - **The Session screen's stats row follows the metric the session is scored on** (#113), as the end-of-session card does.
   LIVE shows its value, the target it is scored against and the current streak; AVG the average, the time on target and the best streak.
   It used to show Shamatha and four fixed values, and its averages were Shamatha's even when a session trained a formula; Avg Med and ≥90 (time with Shamatha at 90 or more) are no longer shown, though ≥90 is still saved.
@@ -39,6 +45,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **A profile with no saved headset used the last profile's** (#99): after a profile switch, Settings › Device showed the other profile's headset as selected and Start connected to it, though nothing saved it to the profile;
+  after a restart the same profile had none.
+  A profile now gets its own headset or none, and a link to another profile's closes.
+  In real mode the app then looks among the paired devices, so with one MindWave paired every profile gets it saved and a restart agrees.
+  A profile on Mock Data no longer has a paired MindWave picked for it at launch, which switched it to the real headset.
+- **A Start right after launch could be refused** (#99): the launch's search for the headset could end while the session started, then say "Session in progress", or, with several MindWaves paired, open Settings in the middle of the session.
+  A search that ends after a session started, a profile switch, a headset pick or a mode change now does nothing.
+  A Start whose own search ends after another profile was picked now ends, instead of starting a session for that profile.
+- **A failed scroll to Settings › Device was silently swallowed** (#99): when Start opens the section to pick a headset and can't scroll to it, that is now logged.
+- **Two connection failures didn't name the headset** (#99): after "Connection to … failed" or "timed out", the Session screen's headset label read "Disconnected"; it now names the headset, as the other failures do.
 - **History didn't draw a program session as the Session screen did** (#113):
   its detail showed only the Settings formula slots and your own History series, so a segment that trained a program formula, or a series you hide there, had no line.
   It now shows the program's lines as they were shown live, the formula lines named "Program: <name>", each segment's line coloured as during the session; your History selection is left as it was and comes back for a simple session.

@@ -23,13 +23,28 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The link is kept open between sessions (a session stop doesn't close it) to avoid RFCOMM EBUSY and ThinkGear reinit failures.
   On app exit the socket is not closed explicitly (`on_stop`): the kernel closes it while BlueZ may keep the ACL link, for a faster reconnect at the next launch.
   A session whose headset sends no packets for `_STALE_DATA_THRESHOLD` (10 s) is stopped and saved (`_check_stale_data`).
-- Auto-connect selects the single paired device matching the `mindwave`/`neurosky` name filter (`headset.filter_mindwave`).
-  When more than one matches, the startup auto-scan and Start route the user to Settings → Device:
-  `DeviceSection.focus_device_section(message)` expands the section, scrolls it into view and shows a "pick one" banner over a list of only the matching devices.
-  `update_device_status(connected=True)` clears the banner.
+- **The selected headset is the active profile's own, or none.**
+  Every profile load (`_load_user_settings` → `Headset.load`, so startup, a switch and a first-run pick) selects the profile's saved `bt_device_address`, or none (`set_device(None)`), which closes a link to the last profile's headset:
+  a profile with none used to keep the last one's for the rest of the run, unsaved, and get a different answer after a restart.
+  The `--serial` override keeps its device, and a load while a session runs (its own profile re-picked, the one pick allowed then) leaves the headset and its link as they are.
+- **One scan finds a profile's headset** (`Headset.scan` → `find_paired`, which lists the paired devices off the main thread, then `adopt` on it).
+  `adopt` makes the single paired device matching the `mindwave`/`neurosky` name filter (`headset.filter_mindwave`) the profile's headset, unless it has one, through `on_select`, which saves it to the profile;
+  Settings → Device then lists the matches, or every paired device when none matches.
+  A profile load scans for a real-mode profile without a headset, so with one MindWave paired every profile ends up with it saved and a restart agrees; a profile on Mock Data doesn't scan.
+  A new profile (`_complete_first_run`) is saved on the mock, loaded, then scanned for (`scan_for_new_profile`): a MindWave found takes it off the mock, the single one selected; none leaves it on the mock (demo mode).
+  A scan's result does nothing when it ends after another profile loaded, a headset was picked, the mode changed, another profile scan began (each moves `Headset._scan_seq`) or a session started (`session_live`):
+  a launch's scan used to pick a headset under a just-started session (a "Session in progress" refusal) or open Settings in its middle.
+  Settings → Device's Scan (`on_scan`) and Copy Diagnostics list the paired devices through `find_paired` too:
+  Scan lists every paired device and lets a profile scan still running make its pick (a pick, not a Scan, keeps a late profile scan from replacing the list it came from).
+- **Only Start sends the user to Settings → Device.**
+  Start with no headset selected runs `find_paired` and `adopt` itself: a headset then selected (the single MindWave, or one picked in Settings while it scanned) connects;
+  several MindWaves route the user to Settings → Device, where `DeviceSection.focus_device_section(message)` expands the section, scrolls it into view and shows a "pick one" banner over a list of only the matching devices;
+  none gets a retry screen.
+  Its result does nothing for a Start already ended (`_start_attempt`), and ends the Start (`_cancel_session_start`) when another profile was picked while it scanned.
+  A pick, Mock Data or another profile's load answers it (`clear_picker_banner`), as a connection does (`update_device_status(connected=True)`).
 - **The link is always to the selected headset.**
-  It stays open between sessions, so `NeuroSkyStream.set_device` to another address stops the reader first; otherwise the next Start would reuse the old headset's socket and record its session under the new headset's name.
-  Every target change goes through it: a pick in Settings, a profile's saved headset on load or first-run pick, and the start-time auto-select.
+  It stays open between sessions, so `NeuroSkyStream.set_device` to another address, or to none, stops the reader first; otherwise the next Start would reuse the old headset's socket and record its session under the new headset's name.
+  Every target change goes through it: a pick in Settings, a profile load, and a scan's auto-select.
   A pick of another headset is refused while a session runs or connects (`Headset.on_select` → `_refused_while_session_runs`), as a profile switch is.
   Settings' row marks rely on this: the connected headset is the selected one while `is_connected` (`Headset.state()`).
 
@@ -83,7 +98,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   It also records `_bt_dropped_at` (monotonic): only packets after the drop count as streaming, since a streaming headset's wait has no no-data timeout and an older packet would keep a silent socket's wait open.
   The session starts only on band data with a packet on this connection (`total > 0 and has_packets`), since the reader keeps the last band values across a reconnect.
   Restarting the windows unbounds a headset that keeps connecting and closing, so a wait ends at its third drop (`_BT_MAX_DROPS` = 2, `_bt_drops` reset per wait) with "keeps closing the connection";
-  that exit and the no-data one share `_give_up_bt_wait(name, message)`.
+  every wait exit that gives up (keeps closing, no data, a failed connect, the connect timeout) goes through `_give_up_bt_wait(name, message)`, which leaves the headset's name on the Session screen under its retry screen.
   `tests/test_bt_wait_reconnect.py` replays drops and reconnects on a fake clock.
   Android reads drain what is available in one `InputStream.read(buf, 0, n)` per chunk, the buffer sized to the read (pyjnius copies the whole array both ways, so an oversized buffer is slower);
   byte-at-a-time reads would be ~4000 JNI calls/s at the 512 Hz raw rate.

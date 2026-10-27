@@ -15,10 +15,12 @@ Your profile keeps your sessions and settings.
 The app then looks for your headset among the phone's paired Bluetooth devices:
 
 - **One MindWave paired**: it is selected for you.
-- **Several**: Settings → Device opens so you can pick the one to use.
+- **Several**: tapping **Start** opens Settings → Device so you can pick the one to use.
 - **None**: the app runs on simulated EEG data (demo mode); pair your MindWave, then pick it in Settings → Device.
 
 A profile that already has a headset saved uses it straight away.
+Each profile keeps its own headset: switching to a profile that has none saved never uses another profile's.
+On a real headset, the app looks for one among the paired devices: one MindWave is selected for that profile, and with several **Start** asks which; a profile on Mock Data stays on it, and only a new profile falls back to demo mode.
 You land on the Session screen, ready to meditate.
 On later launches the app restores your last profile and headset.
 

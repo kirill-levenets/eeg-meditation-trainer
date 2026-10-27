@@ -6,6 +6,7 @@ from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 
 from app.config import APP
+from app.logger import logger
 from app.ui.device_labels import MAX_DEVICE_ALIAS, device_row_text
 from app.ui.hooks import Hook
 from app.ui.settings_sections.common import checkbox_row
@@ -91,7 +92,7 @@ class DeviceSection:
         self._device_mode_cb.bind(active=self._on_device_mode_change)
         section.add_widget(device_mode_row)
 
-        # Scan + device list (visible when mock is off)
+        # Scan + device list
         self._bt_section = BoxLayout(
             orientation="vertical", size_hint_y=None, spacing=S.GAP_SM,
         )
@@ -185,7 +186,9 @@ class DeviceSection:
         self.on_copy_diagnostics()
 
     def populate_bt_devices(self, devices: list) -> None:
-        """Populate the BT device list with scan results, each with the `alias` its user gave it."""
+        """Populate the BT device list with scan results, each with the `alias` its user gave it; a name being typed
+        stays open, with its text, under its headset's new row."""
+        renaming, typed = self._bt_renaming, self._bt_rename_input.text
         self._close_device_rename()
         self._bt_device_list.clear_widgets()
         self._bt_devices = {dev["address"]: dict(dev) for dev in devices}
@@ -224,6 +227,9 @@ class DeviceSection:
             self._bt_pencils[address] = pencil
             self._bt_device_list.add_widget(row)
         self.mark_bt_devices()
+        if renaming in self._bt_rows:
+            self._toggle_device_rename(renaming)
+            self._bt_rename_input.text = typed
 
     def mark_bt_devices(self) -> None:
         """Fill the selected headset's row and show the link on the connected one's."""
@@ -276,8 +282,7 @@ class DeviceSection:
         if connected:
             self._device_status_label.text = f"Connected: {name}" if name else "Connected"
             self._device_status_label.color = C.CONNECTED
-            # User has resolved the picker prompt — clear the banner.
-            self._set_device_picker_banner("")
+            self.clear_picker_banner()
         else:
             self._device_status_label.text = "Not connected"
             self._device_status_label.color = C.DISCONNECTED
@@ -288,6 +293,10 @@ class DeviceSection:
             self._device_meta_label.text = "Mode: Mock Data"
         else:
             self._device_meta_label.text = "Mode: Real Device"
+
+    def clear_picker_banner(self) -> None:
+        """Start's pick-one prompt is answered: a headset picked or connected, Mock Data, or another profile."""
+        self._set_device_picker_banner("")
 
     def _set_device_picker_banner(self, message: str) -> None:
         """Show or hide the picker banner above the device list."""
@@ -320,8 +329,8 @@ class DeviceSection:
             if scroll is not None and section is not None:
                 try:
                     scroll.scroll_to(section)
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as e:  # noqa: BLE001 - the section is open and its banner shown, just not scrolled to
+                    logger.warning(f"Couldn't scroll Settings to the Device section: {e}")
 
         # Defer to next frame so the section's expanded height is laid out
         # before we ask the ScrollView to bring it into view.

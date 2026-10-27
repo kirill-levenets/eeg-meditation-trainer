@@ -1,5 +1,5 @@
 """The headset the app talks to: which paired MindWave (or the mock), what its user calls it, Settings → Device's
-choices, the startup auto-scan and the diagnostics report."""
+choices, the scan for a profile's headset and the diagnostics report."""
 import threading
 from collections.abc import Callable, Mapping
 from types import MappingProxyType
@@ -23,13 +23,13 @@ def filter_mindwave(devices: list) -> list:
 
 
 class Headset:
-    """The Bluetooth link is always to the selected headset (NeuroSkyStream.set_device closes another), and a switch is
-    refused while a session runs. A headset's alias is the same for every profile: it is the same headset whoever uses
-    it."""
+    """The Bluetooth link is always to the selected headset (NeuroSkyStream.set_device closes another), a switch is
+    refused while a session runs, and the selected headset is the active profile's own or none. A headset's alias is
+    the same for every profile: it is the same headset whoever uses it."""
 
     def __init__(self, db, stream, device_section, live_screen, *, user_id: Callable[[], int | None],
-                 refused_while_session_runs: Callable[[str], bool], waiting_for_bt: Callable[[], bool],
-                 switch_to_settings: Callable[[], None], serial_override: Callable[[], str | None],
+                 refused_while_session_runs: Callable[[str], bool], session_live: Callable[[], bool],
+                 waiting_for_bt: Callable[[], bool], serial_override: Callable[[], str | None],
                  report: Callable[..., None]) -> None:
         self._db = db
         self._stream = stream
@@ -37,12 +37,14 @@ class Headset:
         self._live_screen = live_screen
         self._user_id = user_id
         self._refused = refused_while_session_runs
+        self._session_live = session_live
         self._waiting_for_bt = waiting_for_bt
-        self._switch_to_settings = switch_to_settings
         self._serial_override = serial_override
         self._report = report  # report_soft_error(label, detail, force=...) shown by the app
         # address -> the name its user gave the headset; replaced, never changed in place (the tick thread reads it)
         self.aliases: Mapping[str, str] = MappingProxyType({})
+        # Moved by a profile load, a pick, a mode change and each profile scan: a profile scan applies while current.
+        self._scan_seq = 0
 
     def load_aliases(self) -> None:
         aliases = self._db.get_json_setting("bt_device_aliases", {})
@@ -67,6 +69,9 @@ class Headset:
             return None, None
         return stream._device_address, stream._device_address if stream.is_connected else None
 
+    def _session_label(self) -> str:
+        return "Mock EEG" if APP.USE_MOCK_DEVICE else self.name()
+
     def show_selected(self) -> None:
         """The selected headset's name and link, on the Session screen and in Settings."""
         connected = self._stream.is_connected
@@ -78,34 +83,46 @@ class Headset:
         else:
             self._device_section.update_device_status(False, meta=f"Selected: {label}")
 
+    def load(self, uid: int) -> None:
+        """Select the profile's own headset, or none (closing a link to another profile's) and, in real mode, scan for
+        one. The --serial override keeps its device, and a running session (its own profile re-picked) its headset."""
+        self._scan_seq += 1
+        if self._session_live():
+            return
+        if not self._serial_override():
+            address = self._db.get_user_setting(uid, "bt_device_address") or None
+            self._stream.set_device(address, self._db.get_user_setting(uid, "bt_device_name") or "")
+            self._device_section.update_device_status(False, meta=f"Saved device: {self.name()}" if address else "")
+        self._device_section.clear_picker_banner()  # it asked the last profile
+        self._live_screen.update_device_status(False, device_name=self._session_label())
+        if not self._stream._device_address and not APP.USE_MOCK_DEVICE:
+            self.scan()
+
     def on_mode_toggle(self, use_mock: bool) -> None:
+        self._scan_seq += 1
         APP.USE_MOCK_DEVICE = use_mock
-        if use_mock:
-            self._device_section.update_device_status(False, meta="Mode: Mock Data")
-            self._live_screen.update_device_status(False, device_name="Mock EEG")
-        else:
-            addr = self._stream._device_address or "none"
-            self._device_section.update_device_status(False, meta=f"Mode: Real Device ({addr})")
-            self._live_screen.update_device_status(False, device_name=self.name())
+        self._device_section.clear_picker_banner()  # Start's question was for the real headset
+        addr = self._stream._device_address or "none"
+        self._device_section.update_device_status(False, meta="Mode: Mock Data" if use_mock
+                                                  else f"Mode: Real Device ({addr})")
+        self._live_screen.update_device_status(False, device_name=self._session_label())
         uid = self._user_id()
         if uid:
             self._db.set_user_setting(uid, "use_mock", str(use_mock))
         logger.info(f"Device mode: {'Mock' if use_mock else 'Real'}")
 
     def on_scan(self) -> None:
-        """Scan for paired Bluetooth devices and send to settings screen."""
-        devices = NeuroSkyStream.scan_paired_devices()
-        self.list_devices(devices)
-        logger.info(f"BT scan found {len(devices)} paired devices")
+        """Settings → Device's Scan: every paired device, listed; a profile scan still running makes its pick."""
+        self.find_paired(self.list_devices)
 
     def on_select(self, address: str, name: str) -> None:
-        """User selected a BT device from the list."""
+        """A headset picked in the list, or the one a scan found: the profile's, in real mode."""
         if address != self._stream._device_address and self._refused("switching headsets"):
             return
+        self._scan_seq += 1
         self._stream.set_device(address, name)
-        # Auto-switch to real device mode
-        APP.USE_MOCK_DEVICE = False
-        self._device_section._device_mode_cb.active = False
+        self._use_real_device()
+        self._device_section.clear_picker_banner()
         self.show_selected()
         logger.info(f"BT device selected: {name} ({address}), switched to real mode")
         uid = self._user_id()
@@ -127,62 +144,63 @@ class Headset:
         if address == self.state()[0]:
             self.show_selected()
 
-    def auto_scan(self) -> None:
-        """Background-scan paired BT devices at startup and auto-select MindWave."""
-        if self._serial_override():
-            return
-        if self._stream._device_address:
-            # Already have a saved device from user settings
-            return
+    def _use_real_device(self) -> None:
+        APP.USE_MOCK_DEVICE = False
+        self._device_section._device_mode_cb.active = False  # its handler, on_mode_toggle, saves the mode
 
-        def _scan_thread():
-            return NeuroSkyStream.scan_paired_devices()
-
-        def _on_scan_done(devices):
-            if not devices:
-                return
-            matches = filter_mindwave(devices)
-            if len(matches) == 1:
-                self.on_select(matches[0]["address"], matches[0]["name"])
-                logger.info(f"Auto-selected BT device: {matches[0]['name']}")
-                return
-            if len(matches) > 1:
-                # Multiple NeuroSky devices paired — user must choose explicitly.
-                logger.info(
-                    f"Found {len(matches)} MindWave devices — routing to settings picker"
-                )
-                self.list_devices(matches)
-                self._switch_to_settings()
-                self._device_section.focus_device_section(
-                    f"Found {len(matches)} MindWave devices.\n"
-                    "Pick the one you want to use."
-                )
-                return
-            # No MindWave found — populate settings list for manual pick
-            self.list_devices(devices)
-
-        def _run():
+    def find_paired(self, then: Callable[[list[dict]], None]) -> None:
+        """The paired devices, listed off the main thread, to `then` on the main thread ([] when listing fails)."""
+        def run():
             try:
-                devices = _scan_thread()
-                Clock.schedule_once(lambda dt: _on_scan_done(devices))
-            except Exception as e:  # noqa: BLE001 - a failed scan leaves the headset to be picked by hand; logged
-                logger.warning(f"Auto-scan failed: {e}")
+                devices = NeuroSkyStream.scan_paired_devices()
+            except Exception as e:  # noqa: BLE001 - a failed scan finds nothing: the headset is picked by hand; logged
+                logger.warning(f"BT scan failed: {e}")
+                devices = []
+            logger.info(f"BT scan found {len(devices)} paired devices")
+            Clock.schedule_once(lambda _dt: then(devices))
 
-        threading.Thread(target=_run, daemon=True).start()
+        threading.Thread(target=run, daemon=True).start()
+
+    def adopt(self, devices: list[dict]) -> list[dict]:
+        """A scan's paired devices: a single MindWave becomes the profile's headset unless it has one, and Settings →
+        Device lists the MindWaves, or every paired device when none is one. Returns the MindWaves."""
+        mindwaves = filter_mindwave(devices)
+        if len(mindwaves) == 1 and not self._stream._device_address:
+            self.on_select(mindwaves[0]["address"], mindwaves[0]["name"])
+            logger.info(f"Auto-selected BT device: {mindwaves[0]['name']}")
+        self.list_devices(mindwaves or devices)
+        return mindwaves
+
+    def scan(self, then: Callable[[list[dict]], None] | None = None) -> None:
+        """Find the profile's headset (`adopt`), then `then(mindwaves)`; nothing comes of a result when another profile
+        loaded, a headset was picked, the mode changed, another scan began or a session started meanwhile."""
+        self._scan_seq += 1
+        seq = self._scan_seq
+
+        def done(devices: list[dict]) -> None:
+            if seq != self._scan_seq or self._session_live():
+                logger.info("BT scan result dropped: the headset choice or a session changed while it ran")
+                return
+            mindwaves = self.adopt(devices)
+            if then is not None:
+                then(mindwaves)
+
+        self.find_paired(done)
+
+    def scan_for_new_profile(self) -> None:
+        """A new profile starts on the mock and leaves it when a MindWave is paired: Start asks which one if several."""
+        def found(mindwaves: list[dict]) -> None:
+            if mindwaves:
+                self._use_real_device()
+
+        self.scan(then=found)
 
     def on_copy_diagnostics(self) -> None:
-        """Build a diagnostic report and show it via the soft-error dialog.
+        """Build a diagnostic report, with the paired devices listed off the main thread, and show it via the
+        soft-error dialog; user-initiated, so it bypasses the per-label cooldown."""
+        self.find_paired(self._report_diagnostics)
 
-        User-initiated, so we bypass the per-label cooldown — the user
-        explicitly asked for the report.
-        """
-
-        try:
-            paired = NeuroSkyStream.scan_paired_devices()
-        except Exception as e:  # noqa: BLE001 - the report goes out with what is known; logged
-            paired = []
-            logger.warning(f"Diagnostics: BT scan failed: {e}")
-
+    def _report_diagnostics(self, paired: list[dict]) -> None:
         try:
             paired_summary = "\n".join(
                 f"  - {d.get('name') or 'Unknown'}  ({d.get('address')})"

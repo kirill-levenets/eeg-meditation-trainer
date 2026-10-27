@@ -1,8 +1,10 @@
 import unittest
 from unittest import mock
 
+from kivy.clock import Clock
 from kivy.metrics import dp
 
+import app.ui.settings_sections.device as device_section
 from app.ui.headset import filter_mindwave
 from app.ui.hooks import wire
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
@@ -571,9 +573,17 @@ class TestSettingsDevicePicker(unittest.TestCase):
         self.assertEqual(self.device._device_picker_banner.text, "")
         self.assertEqual(self.device._device_picker_banner.height, 0)
 
+    def test_a_failed_scroll_to_the_section_is_logged_not_swallowed(self):
+        with mock.patch.object(device_section.logger, "warning") as warning, \
+                mock.patch.object(self.device._scroll, "scroll_to", side_effect=ValueError("not in its scroll view")):
+            self.device.focus_device_section("Pick one")
+            Clock.tick()
+        warning.assert_called_once()
+        self.assertEqual(self.device._device_picker_banner.text, "Pick one")
+
 
 class TestFilterMindwave(unittest.TestCase):
-    """Static helper used by both auto-scan and start-session paths."""
+    """Which paired devices a scan takes for MindWaves."""
 
     def test_filter_mindwave_picks_only_matching_names(self):
         devices = [
