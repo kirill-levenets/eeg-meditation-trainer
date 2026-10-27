@@ -11,14 +11,11 @@ All jnius imports are function-local so this module imports cleanly off-Android.
 import hashlib
 import os
 import queue
-import sys
 import threading
 
-from app.android_jni import java_string
+from app import android_jni
 from app.logger import logger
 from app.storage.fileops import discard_file
-
-_IS_ANDROID = hasattr(sys, "getandroidapilevel")
 
 # Request codes for startActivityForResult (must fit in 16 bits).
 _REQ_CREATE = 9011
@@ -30,10 +27,6 @@ _bound = False
 _imports: queue.SimpleQueue = queue.SimpleQueue()
 _importer: threading.Thread | None = None
 _importer_lock = threading.Lock()
-
-
-def is_available() -> bool:
-    return _IS_ANDROID
 
 
 def create_document(display_name: str, on_result) -> None:
@@ -54,9 +47,8 @@ def write_file_to_uri(uri_str: str, src_path: str) -> bool:
     """Stream `src_path` into the content:// URI via ContentResolver."""
     from jnius import autoclass
 
-    PythonActivity = autoclass("org.kivy.android.PythonActivity")
     Uri = autoclass("android.net.Uri")
-    resolver = PythonActivity.mActivity.getContentResolver()
+    resolver = android_jni.content_resolver()
     out = resolver.openOutputStream(Uri.parse(uri_str))
     if out is None:
         logger.error("SAF openOutputStream returned None")
@@ -78,10 +70,9 @@ def read_uri_to_file(uri_str: str, dst_path: str) -> bool:
     """Stream the content:// URI into `dst_path` via ContentResolver."""
     from jnius import autoclass
 
-    PythonActivity = autoclass("org.kivy.android.PythonActivity")
     Uri = autoclass("android.net.Uri")
     FileOutputStream = autoclass("java.io.FileOutputStream")
-    resolver = PythonActivity.mActivity.getContentResolver()
+    resolver = android_jni.content_resolver()
     inp = resolver.openInputStream(Uri.parse(uri_str))
     if inp is None:
         logger.error("SAF openInputStream returned None")
@@ -111,10 +102,9 @@ def query_display_name(uri_str: str) -> str | None:
     """The document's file name as its provider shows it."""
     from jnius import autoclass
 
-    PythonActivity = autoclass("org.kivy.android.PythonActivity")
     Uri = autoclass("android.net.Uri")
     OpenableColumns = autoclass("android.provider.OpenableColumns")
-    cursor = PythonActivity.mActivity.getContentResolver().query(Uri.parse(uri_str), None, None, None, None)
+    cursor = android_jni.content_resolver().query(Uri.parse(uri_str), None, None, None, None)
     if cursor is None:
         return None
     try:
@@ -128,10 +118,9 @@ def query_extension(uri_str: str) -> str | None:
     """The usual file extension for the document's type, as its provider reports it."""
     from jnius import autoclass
 
-    PythonActivity = autoclass("org.kivy.android.PythonActivity")
     Uri = autoclass("android.net.Uri")
     MimeTypeMap = autoclass("android.webkit.MimeTypeMap")
-    mime = PythonActivity.mActivity.getContentResolver().getType(Uri.parse(uri_str))
+    mime = android_jni.content_resolver().getType(Uri.parse(uri_str))
     return MimeTypeMap.getSingleton().getExtensionFromMimeType(mime) if mime else None
 
 
@@ -225,7 +214,6 @@ def _launch(request_code: int, mime_types: tuple[str, ...], title: str | None) -
     @run_on_ui_thread
     def _run():
         from jnius import autoclass
-        PythonActivity = autoclass("org.kivy.android.PythonActivity")
         Intent = autoclass("android.content.Intent")
         action = (Intent.ACTION_CREATE_DOCUMENT if request_code == _REQ_CREATE
                   else Intent.ACTION_OPEN_DOCUMENT)
@@ -237,7 +225,7 @@ def _launch(request_code: int, mime_types: tuple[str, ...], title: str | None) -
             extras.putStringArray(Intent.EXTRA_MIME_TYPES, list(mime_types))  # not overloaded, unlike putExtra
             intent.putExtras(extras)
         if title:
-            intent.putExtra(Intent.EXTRA_TITLE, java_string(title))
-        PythonActivity.mActivity.startActivityForResult(intent, request_code)
+            intent.putExtra(Intent.EXTRA_TITLE, android_jni.java_string(title))
+        android_jni.activity().startActivityForResult(intent, request_code)
 
     _run()

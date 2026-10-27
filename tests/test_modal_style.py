@@ -3,7 +3,6 @@ the diagnostic dialog and toasts are drawn on the same panel, in the active them
 
 import ast
 import pathlib
-import sys
 from unittest.mock import MagicMock
 
 import pytest
@@ -14,6 +13,7 @@ from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.textinput import TextInput
 
+from app import android_jni
 from app.ui.diary_screen import DiaryScreen
 from app.ui.history_screen import HistoryScreen
 from app.ui.live_session import LiveSessionScreen
@@ -310,7 +310,7 @@ def _toast_app():
 
 @pytest.mark.parametrize("theme", ["Light Cream", "Dark Blue"])
 def test_a_toast_is_the_themed_panel_above_any_popup(theme, monkeypatch):
-    monkeypatch.setattr(sys, "getandroidapilevel", lambda: 30, raising=False)  # also on Android, while in the app
+    monkeypatch.setattr(android_jni, "on_android", lambda: True)  # also on Android, while in the app
     C.set_theme(theme)
     popup = _popups()[0]
     popup.open()
@@ -330,7 +330,7 @@ def test_a_toast_is_the_themed_panel_above_any_popup(theme, monkeypatch):
 
 
 def test_a_toast_raised_while_the_app_is_leaving_is_the_native_one(monkeypatch):
-    monkeypatch.setattr(sys, "getandroidapilevel", lambda: 30, raising=False)
+    monkeypatch.setattr(android_jni, "on_android", lambda: True)
     app = _toast_app()
     before = list(Window.children)
     app._leaving = True

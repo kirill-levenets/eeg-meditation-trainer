@@ -5,6 +5,7 @@ import types
 
 import pytest
 
+from app import android_jni
 from app.storage import android_saf, android_share
 
 
@@ -85,7 +86,7 @@ def android(monkeypatch):
         jnius = types.ModuleType("jnius")
         jnius.autoclass = classes.__getitem__
         monkeypatch.setitem(sys.modules, "jnius", jnius)
-        monkeypatch.setattr(android_share, "_IS_ANDROID", True)
+        monkeypatch.setattr(android_jni, "on_android", lambda: True)
     return install
 
 

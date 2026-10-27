@@ -21,10 +21,10 @@ import time
 from collections.abc import Callable
 from typing import Any, Optional
 
+from app import android_jni
 from app.eeg.band_spec import BAND_KEYS
 from app.logger import logger
 
-_IS_ANDROID: bool = hasattr(sys, "getandroidapilevel")
 _IS_WINDOWS: bool = sys.platform == "win32"
 
 THINKGEAR_SYNC = 0xAA
@@ -397,7 +397,7 @@ class NeuroSkyStream:
     @staticmethod
     def _boost_thread_priority() -> None:
         """Run the reader at Android priority -8, like the NeuroSky SDK's, so Kivy's renderer can't starve it."""
-        if not _IS_ANDROID:
+        if not android_jni.on_android():
             return
         try:
             from jnius import autoclass
@@ -449,8 +449,7 @@ class NeuroSkyStream:
             return
 
         try:
-            PythonActivity = autoclass("org.kivy.android.PythonActivity")
-            activity = PythonActivity.mActivity
+            activity = android_jni.activity()
             PackageManager = autoclass("android.content.pm.PackageManager")
             Build_VERSION = autoclass("android.os.Build$VERSION")
 
@@ -490,7 +489,7 @@ class NeuroSkyStream:
         """Open RFCOMM socket to the MindWave (or serial device from splitter)."""
         if self._is_serial_device:
             self._connect_serial()
-        elif _IS_ANDROID:
+        elif android_jni.on_android():
             self._connect_android()
         elif _IS_WINDOWS:
             self._connect_windows()
@@ -734,7 +733,7 @@ class NeuroSkyStream:
         """Read bytes from the BT socket or serial device (platform-aware)."""
         if self._serial_fd is not None:
             return self._read_bytes_serial(max_bytes)
-        if _IS_ANDROID:
+        if android_jni.on_android():
             return self._read_bytes_android(max_bytes)
         if _IS_WINDOWS and self._windows_serial is not None:
             return self._read_bytes_windows(max_bytes)
@@ -871,7 +870,7 @@ class NeuroSkyStream:
         Returns [{'name': ..., 'address': ...}].
         Works on Android (pyjnius) and desktop Linux (bluetoothctl).
         """
-        if _IS_ANDROID:
+        if android_jni.on_android():
             return NeuroSkyStream._scan_paired_android()
         if _IS_WINDOWS:
             return NeuroSkyStream._scan_paired_windows()

@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import app.audio_feedback.noise as noise_mod
+from app import android_jni
 from app.audio_feedback.noise import AudioEngine, _AndroidMediaNoisePlayer, _AudioFocus
 from tests._audio_sequence import record_sequences, sequence_sleep
 
@@ -39,8 +40,8 @@ def players(monkeypatch):
 def _manager_answering(jnius, monkeypatch, answer: str) -> MagicMock:
     manager = MagicMock()
     manager.requestAudioFocus.return_value = getattr(jnius.setdefault("android.media.AudioManager", MagicMock()), answer)
-    monkeypatch.setattr(noise_mod, "on_android", lambda: True)
-    monkeypatch.setattr(noise_mod, "activity", lambda: MagicMock(getSystemService=lambda _name: manager))
+    monkeypatch.setattr(android_jni, "on_android", lambda: True)
+    monkeypatch.setattr(android_jni, "activity", lambda: MagicMock(getSystemService=lambda _name: manager))
     return manager
 
 

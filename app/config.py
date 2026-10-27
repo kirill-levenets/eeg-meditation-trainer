@@ -1,6 +1,7 @@
 import os
 import sys
 
+from app import android_jni
 from app.storage.fileops import copy_file_atomic
 
 APP_VERSION = "1.5.0"
@@ -141,9 +142,8 @@ class AppConfig:
     SIGNAL_BUFFER_SECONDS: int = 120
 
     DB_NAME: str = "meditation.db"
-    _ANDROID: bool = hasattr(sys, "getandroidapilevel")
     _BASE_DIR: str = (
-        _resolve_android_base_dir() if _ANDROID
+        _resolve_android_base_dir() if android_jni.on_android()
         else _resolve_desktop_base_dir_with_migration()
     )
     DB_PATH: str = os.path.join(_BASE_DIR, DB_NAME)

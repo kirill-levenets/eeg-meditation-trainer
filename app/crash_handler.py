@@ -16,6 +16,7 @@ import time as _time
 import traceback as _traceback
 from typing import Any
 
+from app import android_jni
 from app.config import APP_VERSION
 from app.logger import logger
 
@@ -33,12 +34,8 @@ def _kivy_version() -> str:
 
 
 def _platform_string() -> str:
-    try:
-        from kivy.utils import platform as kplat  # noqa: PLC0415
-        if kplat == "android":
-            return f"Android ({_platform.release()})"
-    except Exception:  # noqa: BLE001
-        pass
+    if android_jni.on_android():
+        return f"Android ({_platform.release()})"
     try:
         return _platform.platform()
     except Exception:  # noqa: BLE001

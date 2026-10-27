@@ -40,7 +40,17 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   else, on the Session screen, **a second press within 2 s exits** (`_exit_on_second_back`, `_last_back_time`), the first showing the in-app `_toast`.
   While the app is leaving (`_leaving`), `_toast` shows the native `_android_toast` (`run_on_ui_thread` + pyjnius `Toast`) instead.
   Esc on desktop follows the same chain.
-  **A Python `str` must cross pyjnius as `android_jni.java_string(text)`** whenever the Java method is overloaded:
+
+## Android access
+
+- **The app reaches Android only through `app/android_jni.py`**: `on_android()` is the one Android check and `activity()` the one lookup of the app's Activity (`content_resolver()` is its resolver).
+  Every caller reads them through the module at call time (`android_jni.on_android()`, never a copied name or a module constant):
+  a test fakes the Android check by patching `android_jni.on_android`, and the Activity by patching `android_jni.activity` or the `jnius` it reads.
+  `tests/test_android_jni.py` walks the app's code and fails, anywhere else, on the Activity's class name, a `getandroidapilevel` probe, a comparison with `"android"`
+  or an import of Kivy's `platform` (which only `kivy_providers` asks, for Linux).
+  `config.py` and `crash_handler.py` import it before the app exists, which works because it imports only `app.logger`.
+  `tests/test_android_paths.py` runs the Android-only branches with a fake `jnius`: the wake lock, the native toast, the Bluetooth permissions, thread priority and backend, and the crash report's platform.
+- **A Python `str` must cross pyjnius as `android_jni.java_string(text)`** whenever the Java method is overloaded:
   pyjnius scores a `str` 10 for both `String` and `char[]` and breaks the tie by sorting signatures (`[C` > `L`), so `Intent.putExtra(EXTRA_TITLE, str)` stores a `char[]` and the SAF save dialog's name comes up blank;
   a `CharSequence` parameter never matches a `str` at all, so `Toast.makeText` raises.
 
