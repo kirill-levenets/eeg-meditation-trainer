@@ -18,11 +18,9 @@ from kivy.uix.widget import Widget
 from app.eeg.band_spec import BAND_KEYS, GROUP_NAMES, group_powers
 from app.logger import logger
 from app.session.manager import NO_SCORE, LiveScore
+from app.ui.graph_scroll import GraphAwareScrollView
 from app.ui.hooks import Hook, wire
-from app.ui.raw_eeg_screen import (
-    GraphAwareScrollView,
-    ScrollableGraphWidget,
-)
+from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.session_labels import average_text, session_score_rows
 from app.ui.theme import (
     ICONS_AVAILABLE,

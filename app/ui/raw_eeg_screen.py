@@ -15,7 +15,6 @@ from kivy.graphics import (
     RoundedRectangle,
 )
 from kivy.metrics import dp
-from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
 from app.config import APP
@@ -27,7 +26,7 @@ from app.ui.hooks import Hook
 from app.ui.line_colours import GRADIENT_TOP, LINE_COLOURS, MONO, gradient_texture
 from app.ui.theme import C as TC
 from app.ui.theme import F
-from app.ui.touch_utils import point_in_rect
+from app.ui.touch_utils import ROUTED_BY, point_in_rect
 
 # Labels by (text, font_size, color); the CoreLabel is kept since it re-renders its texture after a GL context loss.
 _LABEL_CACHE: "OrderedDict[tuple, CoreLabel]" = OrderedDict()
@@ -959,7 +958,7 @@ class ScrollableGraphWidget(Widget):
             return False
         if dy < dp(20) or dy < 2 * dx:
             return False
-        page = touch.ud.get(GraphAwareScrollView.ROUTED_BY)  # no walk up the tree: Window.parent is the Window itself
+        page = touch.ud.get(ROUTED_BY)  # no walk up the tree: Window.parent is the Window itself
         if page is None or not page.scroll_with(touch, self):
             return False
         self._grabbed_touches.pop(touch.uid, None)
@@ -1163,92 +1162,3 @@ def _split_at_spans(indices, xy: list[tuple[float, float]], spans: list[tuple[in
             runs[-1][1].append(point)
         runs.append((inside, [point]))
     return runs
-
-
-def _window_rect(widget) -> tuple[float, float, float, float]:
-    """The widget's rendered rectangle in window coordinates (x, y, w, h)."""
-    x0, y0 = widget.to_window(widget.x, widget.y)
-    x1, y1 = widget.to_window(widget.right, widget.top)
-    return min(x0, x1), min(y0, y1), abs(x1 - x0), abs(y1 - y0)
-
-
-class GraphAwareScrollView(ScrollView):
-    """ScrollView that hands touches on a graph straight to the graph (pan, pinch, tap, glyphs) instead of holding them
-    to decide on a scroll — except a vertical swipe, which the graph hands back as a page scroll (`scroll_with`)."""
-
-    def _graph_under_touch(self, touch):
-        """The graph drawn under the touch (in this view's parent frame), compared in window coordinates.
-
-        A child's x/y are content coordinates (the ScrollView translates the canvas), so testing them against the touch
-        let a graph scrolled out of view claim taps on whatever now sits there (#66).
-        """
-        tx, ty = self.to_window(*touch.pos)
-        if not point_in_rect(tx, ty, _window_rect(self)):
-            return None
-        for child in self._walk_children():
-            if isinstance(child, ScrollableGraphWidget) and point_in_rect(tx, ty, _window_rect(child)):
-                return child
-        return None
-
-    def _walk_children(self):
-        stack = list(self.children)
-        while stack:
-            child = stack.pop()
-            yield child
-            if hasattr(child, "children"):
-                stack.extend(child.children)
-
-    ROUTED_BY = "graph_aware_scroll_view"  # touch.ud key: the view that handed this touch to a graph
-
-    def _dispatch_to_graph(self, graph, touch) -> bool:
-        """Deliver the touch in the graph's parent frame — the one its collide_point and drag maths use."""
-        touch.ud[self.ROUTED_BY] = self
-        touch.push()
-        try:
-            touch.apply_transform_2d(self.to_window)
-            touch.apply_transform_2d(graph.parent.to_widget)
-            return bool(graph.dispatch("on_touch_down", touch))
-        finally:
-            touch.pop()
-
-    def scroll_with(self, touch, graph) -> bool:
-        """Take over a graph's vertical swipe as a scroll of this page; False (the graph keeps it) when this page can't
-        scroll, already scrolls under another finger, or the finger has left the viewport."""
-        vp = self._viewport
-        if self._touch or not self.do_scroll_y or vp is None or vp.height <= self.height:
-            return False
-        touch.push()
-        try:
-            touch.apply_transform_2d(graph.to_window)  # from the graph's parent frame
-            touch.apply_transform_2d(self.parent.to_widget)
-            if not self.collide_point(*touch.pos):
-                return False
-            taken = ScrollView.on_touch_down(self, touch)
-        finally:
-            touch.pop()
-        ud = touch.ud.get(self._get_uid())
-        if not taken or ud is None:
-            return False
-        ud["mode"] = "scroll"  # it already moved past the threshold; also stops scroll_timeout handing it back
-        return True
-
-    def on_scroll_start(self, touch, check_children=True):
-        if (
-            self.collide_point(*touch.pos)
-            and hasattr(touch, "button")
-            and touch.button in ("scrollup", "scrolldown")
-            and self._graph_under_touch(touch) is not None
-        ):
-            return False
-        return super().on_scroll_start(touch, check_children)
-
-    def on_touch_down(self, touch):
-        # Only intercept touches actually inside the viewport. A graph's logical
-        # bounds can extend above/below the visible scroll area (overflowing
-        # body), and without this guard those bounds would steal touches from
-        # widgets sitting outside the ScrollView (e.g. the Metrics/Raw toggle).
-        if self.collide_point(*touch.pos):
-            graph = self._graph_under_touch(touch)
-            if graph is not None and self._dispatch_to_graph(graph, touch):
-                return True
-        return super().on_touch_down(touch)

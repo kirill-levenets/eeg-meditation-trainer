@@ -127,7 +127,7 @@ class TestGraphAwareScrollViewGuard(unittest.TestCase):
     aimed at widgets sitting outside the ScrollView (e.g. the Metrics/Raw toggle)."""
 
     def _make(self, viewport_h):
-        from app.ui.raw_eeg_screen import GraphAwareScrollView
+        from app.ui.graph_scroll import GraphAwareScrollView
         sv = GraphAwareScrollView()
         sv.pos = (0, 0)
         sv.size = (400, viewport_h)

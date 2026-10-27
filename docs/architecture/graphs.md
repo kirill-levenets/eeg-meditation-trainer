@@ -128,12 +128,12 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The draw (`_draw_expand_icon` and the other glyphs') and the hit-test use the same rect (`_expand_icon_rect`, …), so the visible box is exactly the tap target.
   `app/ui/touch_utils.point_in_rect` is the shared rect test.
   The History and user-picker manual routers work with raw `collide_point` because their handlers are bound where the touch is already in the right frame: they're not under `GraphAwareScrollView`.
-- **`GraphAwareScrollView._graph_under_touch` hit-tests in WINDOW coordinates**:
-  `self.to_window(*touch.pos)` against each graph's rendered window rect (`_window_rect`, via `point_in_rect`), and only inside the viewport's own window rect.
+- **`GraphAwareScrollView._graph_under_touch` hit-tests in WINDOW coordinates** (`app/ui/graph_scroll.py`, the scroll view a page of graphs scrolls in):
+  `self.to_window(*touch.pos)` against each graph's rendered window rect (`touch_utils.window_rect`, via `point_in_rect`), and only inside the viewport's own window rect.
   A ScrollView translates its canvas, so a child's `x`/`y` are content coordinates: a graph's `collide_point` against the touch lets a graph scrolled out of view claim taps on whatever sits in its unscrolled rect (#66).
   A touch on a graph goes straight to it (pan, pinch, tap, glyphs, with no ScrollView hold-to-decide delay), in the graph's parent frame, except a **vertical swipe**:
   `ScrollableGraphWidget._hand_off_vertical_swipe` hands a single-finger touch that moved >20 dp mostly vertically, before any pan or pinch in the gesture, to the view that routed it:
-  `touch.ud[GraphAwareScrollView.ROUTED_BY]`, set by `_dispatch_to_graph`.
+  `touch.ud[touch_utils.ROUTED_BY]`, set by `_dispatch_to_graph` (the key lives in `touch_utils`, so the graph needn't import the scroll view that imports it).
   `GraphAwareScrollView.scroll_with` takes it only if the page can scroll, isn't already scrolling under another finger and the finger is still inside it, otherwise the graph keeps the touch;
   the graph releases the touch and undoes any pan only on success.
   The view is never found by a walk up the tree: Kivy's `Window.parent` is the Window itself, so the walk never ends for a graph with no such ancestor (fullscreen).
