@@ -39,6 +39,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **Two connection failures didn't name the headset** (#99): after "Connection to … failed" or "timed out", the Session screen's headset label read "Disconnected"; it now names the headset, as the other failures do.
 - **History didn't draw a program session as the Session screen did** (#113):
   its detail showed only the Settings formula slots and your own History series, so a segment that trained a program formula, or a series you hide there, had no line.
   It now shows the program's lines as they were shown live, the formula lines named "Program: <name>", each segment's line coloured as during the session; your History selection is left as it was and comes back for a simple session.

@@ -1506,27 +1506,15 @@ class EEGMeditationApp(App):
 
     def _bt_connect_failed(self, name: str) -> None:
         """Tick thread: the connection thread ended with an error."""
-        self._abort_bt_wait()
         hint = self._real_stream._last_connect_error or "Check device is on and paired."
-        self._on_main_for_wait(lambda n=name, h=hint: (
-            self._undo_session_setup(),
-            self._live_screen.show_overlay_retry(
-                f"Connection to {n} failed.\n{h}"
-            ),
-        ))
+        self._give_up_bt_wait(name, f"Connection to {name} failed.\n{hint}")
         logger.error("BT connection failed, session aborted")
         self._report_bt_connect_failure(name, hint)
 
     def _bt_connect_timed_out(self, name: str) -> None:
         """Tick thread: no BT socket within _BT_CONNECT_TIMEOUT."""
-        self._abort_bt_wait()
-        self._on_main_for_wait(lambda n=name: (
-            self._undo_session_setup(),
-            self._live_screen.show_overlay_retry(
-                f"Connection to {n} timed out.\n"
-                "Make sure the device is turned on\nand in range."
-            ),
-        ))
+        self._give_up_bt_wait(name, f"Connection to {name} timed out.\n"
+                                    "Make sure the device is turned on\nand in range.")
         logger.error("BT connection timed out")
 
     def _update_tick(self, dt: float) -> None:

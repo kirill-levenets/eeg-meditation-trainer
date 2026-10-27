@@ -51,6 +51,7 @@ def wait(monkeypatch):
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     stream = _Stream(clock)
     app._real_stream = app._eeg_stream = stream
+    app._bt_signal_start = None  # as __init__ sets it
     app._ticker = MagicMock(running=False)
     app._release_wake_lock = MagicMock()
     app._stop_session_keep_alive_service = MagicMock()
@@ -219,3 +220,34 @@ def test_band_values_from_before_a_drop_dont_start_the_session_on_the_new_socket
     assert app._session_manager.state != SessionState.RUNNING
     tick(12.5, connected=True, bands=5.0, packet=True)  # the new socket's first data
     assert app._session_manager.state == SessionState.RUNNING
+
+
+def _connect_failed(stream, tick) -> None:
+    stream._running = False  # the reader ended with an error
+    tick(5.0, connected=False)
+
+
+def _connect_timed_out(stream, tick) -> None:
+    tick(30.5, connected=False)
+
+
+def _no_data(stream, tick) -> None:
+    tick(6.0, connected=True)
+    tick(14.5, connected=True)
+
+
+def _keeps_closing(stream, tick) -> None:
+    for connect, drop in ((6.0, 11.5), (18.0, 23.5), (30.0, 35.5)):
+        tick(connect, connected=True)
+        tick(drop, connected=False)
+
+
+@pytest.mark.parametrize("ending", [_connect_failed, _connect_timed_out, _no_data, _keeps_closing])
+def test_every_wait_ending_names_the_headset_on_the_session_screen(wait, ending):
+    """One ending for the wait (#99): each leaves the headset's name, as its user calls it, under the retry screen."""
+    app, stream, tick = wait
+    app._headset.aliases = {stream._device_address: "Blue"}
+    ending(stream, tick)
+    assert _gave_up(stream)
+    _retry_message(app)
+    app._live_screen.update_device_status.assert_called_with(False, device_name="Blue")
