@@ -86,6 +86,9 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 ## Drawing cost
 
 - **Graph drawing cost**: `ScrollableGraphWidget._draw` rebuilds the graph from scratch on every `add_point` (2 Hz per live graph, within the budget of (6)), and GL re-renders it every frame.
+  It draws in this order, one method each: the background, the y axis (`_draw_y_axis`), the border, the threshold and reference line (`_draw_threshold`),
+  then, with data in view, the time axis (`_draw_x_axis`), the series (`_draw_lines`, the scored parts last) and the markers (`_draw_markers`), and the glyphs last;
+  `_visible_slices` and `_y_scale` give them the window and the scale.
   (1) Axis and value labels come from `_LABEL_CACHE`, an LRU of 512 `CoreLabel`s keyed by text, size and colour;
   the `CoreLabel` is kept, not just its texture, because it is the texture's reload observer after an Android GL context loss.
   (2) The X grid step is `_x_grid_step(graph_w, visible_seconds)`, the smallest of 10 s … 2 h that keeps time labels ≥70 dp apart.

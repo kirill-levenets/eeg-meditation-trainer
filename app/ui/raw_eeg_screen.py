@@ -347,14 +347,39 @@ class ScrollableGraphWidget(GraphGestures, Widget):
         self._gfx.clear()
         if self.width < 10 or self.height < 10:
             return
+        start_idx, end_idx, slices = self._visible_slices()
+        max_scale = self._y_scale(slices)
+        pads = self._label_pads(max_scale, slices)
+        if self._pads_floor is not None:  # margins only grow: a label gaining a digit must not shift the plot back
+            pads = tuple(max(a, b) for a, b in zip(pads, self._pads_floor))
+        self._pads = self._pads_floor = pads
+        rect = self._plot_rect()
+        if rect[2] < 10 or rect[3] < 10:
+            return
+        # Background
+        self._gfx.add(Color(*TC.GRAPH_BG))
+        self._gfx.add(Rectangle(pos=(self.x, self.y), size=(self.width, self.height)))
+        self._draw_y_axis(rect, max_scale)
+        # Border
+        self._gfx.add(Color(*TC.GRAPH_BORDER))
+        self._gfx.add(Line(rectangle=rect, width=1))
+        self._draw_threshold(rect, max_scale, start_idx, end_idx)
+        if end_idx > start_idx:
+            self._draw_x_axis(rect, start_idx, end_idx)
+            self._draw_lines(rect, max_scale, start_idx, slices)
+            self._draw_markers(rect, start_idx, end_idx)
+        self._draw_glyphs()
 
-        # Compute visible slice
+    def _visible_slices(self) -> tuple[int, int, dict[str, list[float]]]:
+        """The visible window's start and end sample and each shown series' samples in it."""
         end_idx = self._total_points - self._scroll_offset
         start_idx = max(0, end_idx - self._viewport_points)
         slices = {key: list(data)[start_idx:end_idx] for key, data in self._data.items()
                   if self._visible.get(key, True)}
+        return start_idx, end_idx, slices
 
-        # Y-axis scale
+    def _y_scale(self, slices: dict[str, list[float]]) -> float:
+        """The value at the top of the plot: the visible data's peak with headroom, or the series' fixed scales."""
         if self._auto_scale:
             max_scale = 0.0
             for slice_vals in slices.values():
@@ -368,20 +393,11 @@ class ScrollableGraphWidget(GraphGestures, Widget):
             max_scale = 100.0
             for key in self._data:
                 max_scale = max(max_scale, self._scales.get(key, 100.0))
+        return max_scale
 
-        pads = self._label_pads(max_scale, slices)
-        if self._pads_floor is not None:  # margins only grow: a label gaining a digit must not shift the plot back
-            pads = tuple(max(a, b) for a, b in zip(pads, self._pads_floor))
-        self._pads = self._pads_floor = pads
-        graph_x, graph_y, graph_w, graph_h = self._plot_rect()
-        if graph_w < 10 or graph_h < 10:
-            return
-
-        # Background
-        self._gfx.add(Color(*TC.GRAPH_BG))
-        self._gfx.add(Rectangle(pos=(self.x, self.y), size=(self.width, self.height)))
-
-        # Grid lines + Y-axis labels
+    def _draw_y_axis(self, rect: tuple[float, float, float, float], max_scale: float) -> None:
+        """The horizontal grid lines and their value labels."""
+        graph_x, graph_y, graph_w, graph_h = rect
         if self._bipolar:
             num_grid_lines = 4
             for i in range(num_grid_lines + 1):
@@ -419,10 +435,10 @@ class ScrollableGraphWidget(GraphGestures, Widget):
                     ))
                 val += step
 
-        # Border
-        self._gfx.add(Color(*TC.GRAPH_BORDER))
-        self._gfx.add(Line(rectangle=(graph_x, graph_y, graph_w, graph_h), width=1))
-
+    def _draw_threshold(self, rect: tuple[float, float, float, float], max_scale: float, start_idx: int,
+                        end_idx: int) -> None:
+        """The threshold (its steps, or one dashed value and its label) and the reference line over it."""
+        graph_x, graph_y, graph_w, graph_h = rect
         # Threshold line (piecewise steps take precedence over a single value)
         if self._threshold_steps and not self._bipolar:
             self._draw_threshold_steps(graph_x, graph_y, graph_w, graph_h,
@@ -460,11 +476,9 @@ class ScrollableGraphWidget(GraphGestures, Widget):
                 points=[graph_x, y_ref, graph_x + graph_w, y_ref], width=1,
             ))
 
-        if end_idx <= start_idx:
-            self._draw_glyphs()
-            return
-
-        # X-axis timestamps + vertical grid lines at 10-second intervals
+    def _draw_x_axis(self, rect: tuple[float, float, float, float], start_idx: int, end_idx: int) -> None:
+        """The vertical grid lines with their elapsed and wall-clock time labels."""
+        graph_x, graph_y, graph_w, graph_h = rect
         if self._show_timestamps:
             n_visible = end_idx - start_idx
             vp = max(self._viewport_points, n_visible)
@@ -511,7 +525,10 @@ class ScrollableGraphWidget(GraphGestures, Widget):
                         ))
                 t_mark += grid_sec
 
-        # Data lines + endpoint value labels; the scored parts after every other line, so no series hides them
+    def _draw_lines(self, rect: tuple[float, float, float, float], max_scale: float, start_idx: int,
+                   slices: dict[str, list[float]]) -> None:
+        """Each series' line and its end value label; the scored parts last, so no series hides them."""
+        graph_x, graph_y, graph_w, graph_h = rect
         label_y_positions: list[float] = []
         scored_parts: list[tuple[list[float], tuple, float]] = []
         colour_by_value = not self._bipolar and LINE_COLOURS.name != MONO
@@ -573,7 +590,9 @@ class ScrollableGraphWidget(GraphGestures, Widget):
             else:
                 self._add_polyline(points, color)
 
-        # Marker vertical lines
+    def _draw_markers(self, rect: tuple[float, float, float, float], start_idx: int, end_idx: int) -> None:
+        """The session markers' vertical lines."""
+        graph_x, graph_y, graph_w, graph_h = rect
         if self._markers:
             n_visible = end_idx - start_idx
             vp = max(self._viewport_points, n_visible)
@@ -586,8 +605,6 @@ class ScrollableGraphWidget(GraphGestures, Widget):
                         x_pos = graph_x + frac_m * graph_w
                         self._gfx.add(Color(*TC.THRESHOLD_LINE))
                         self._gfx.add(Line(points=[x_pos, graph_y, x_pos, graph_y + graph_h], width=1.5))
-
-        self._draw_glyphs()
 
     def _draw_glyphs(self) -> None:
         pressed = self._pressed_glyph() if self._pressed_glyph is not None else None
