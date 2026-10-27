@@ -8,9 +8,11 @@ import time
 import pytest
 from kivy.graphics import Line, Mesh
 
+import app.ui.graph_runs as runs
 import app.ui.raw_eeg_screen as rg
+from app.ui.graph_runs import RunExtremes, extremes
 from app.ui.live_session import METRICS_COLORS, METRICS_SCALES
-from app.ui.raw_eeg_screen import ScrollableGraphWidget, _extremes, _RunExtremes
+from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.theme import C
 from tests.test_graph_gradient import _graph, _shot
 
@@ -61,7 +63,7 @@ def _stroke(g: ScrollableGraphWidget) -> float:
 
 def _run_px(g: ScrollableGraphWidget) -> float:
     """The widest a run gets on screen: _RUN_STROKES of the stroke."""
-    return _stroke(g) * rg._RUN_STROKES
+    return _stroke(g) * runs.RUN_STROKES
 
 
 def _points_cap(g: ScrollableGraphWidget) -> float:
@@ -84,17 +86,17 @@ def _noisy(n: int, seed: int) -> list[float]:
 
 def test_a_run_is_drawn_as_its_min_and_max_in_sample_order():
     values = [5, 9, 1, 7, 3, 3, 8, 2, 6, 4, 6, 5]
-    assert _extremes(values, 0, 4) == (1, 2)  # the max 9 comes before the min 1
-    assert _RunExtremes(4).runs(values, 0, 0, 3) == [1, 2, 6, 7, 8, 9]
+    assert extremes(values, 0, 4) == (1, 2)  # the max 9 comes before the min 1
+    assert RunExtremes(4).runs(values, 0, 0, 3) == [1, 2, 6, 7, 8, 9]
 
 
 def test_kept_runs_are_not_scanned_again(monkeypatch):
     values = _noisy(1000, 2)
-    kept = _RunExtremes(8)
+    kept = RunExtremes(8)
     before = kept.runs(values, 0, 0, 100)
     scanned = []
-    real = rg._extremes
-    monkeypatch.setattr(rg, "_extremes", lambda v, a, b: scanned.append(a) or real(v, a, b))
+    real = runs.extremes
+    monkeypatch.setattr(runs, "extremes", lambda v, a, b: scanned.append(a) or real(v, a, b))
     assert kept.runs(values, 0, 0, 125)[:200] == before
     assert len(scanned) == 25
 
@@ -102,11 +104,11 @@ def test_kept_runs_are_not_scanned_again(monkeypatch):
 
 def test_panning_back_scans_only_the_runs_before_what_is_kept(monkeypatch):
     values = _noisy(1000, 5)
-    kept = _RunExtremes(8)
+    kept = RunExtremes(8)
     shown = kept.runs(values, 0, 50, 100)
     scanned = []
-    real = rg._extremes
-    monkeypatch.setattr(rg, "_extremes", lambda v, a, b: scanned.append(a) or real(v, a, b))
+    real = runs.extremes
+    monkeypatch.setattr(runs, "extremes", lambda v, a, b: scanned.append(a) or real(v, a, b))
     assert kept.runs(values, 0, 40, 90)[20:] == shown[:80]
     assert len(scanned) == 10
 
@@ -150,7 +152,7 @@ def test_drawn_points_are_each_runs_min_and_max_through_appends_eviction_scrolli
             values = buf[start:start + n]
             got = g._drawn_indices("a", values, start, per_px)
             longest = per_px * _run_px(g)
-            if longest < rg._MIN_RUN:
+            if longest < runs.MIN_RUN:
                 assert got == range(n)
                 continue
             size = 1 << int(math.log2(longest))
@@ -283,7 +285,7 @@ def test_a_folded_graph_looks_like_the_unfolded_one(tmp_path, monkeypatch):
     graph = _metrics_graph(21600, keys=["shamatha_score", "distraction"], spiky=True, width=800)
     tol = math.ceil(_stroke(graph))
     folded = columns(_shot(graph, tmp_path, "folded"))
-    monkeypatch.setattr(rg, "_MIN_RUN", math.inf)
+    monkeypatch.setattr(runs, "MIN_RUN", math.inf)
     plain = columns(_shot(_metrics_graph(21600, keys=["shamatha_score", "distraction"], spiky=True,
                                          width=800), tmp_path, "plain"))
 

@@ -100,14 +100,15 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   (4) `set_drawing_enabled(False)` pauses a graph its owner detached (`LiveSessionScreen._set_view`: the hidden Metrics/Raw view), which keeps its size and would redraw every tick unseen;
   data keeps accruing and the graph redraws once re-enabled.
   (5) A zoomed-out series draws each run of samples' min and max (MinMax; #70, #104):
-  `_drawn_indices(key, values, start_idx, per_px)` folds once a run of `_MIN_RUN` (4) samples spans at most `_RUN_STROKES` (2/3) of the stroke (`2 × dp(line_width)`).
+  The fold is `app/ui/graph_runs.py`, Kivy-free arithmetic the widget's `_drawn_indices(key, values, start_idx, per_px)` calls (`run_indices`):
+  it folds once a run of `MIN_RUN` (4) samples spans at most `RUN_STROKES` (2/3) of the stroke (`2 × dp(line_width)`).
   A run is the longest power of two samples that fits, at a fixed absolute sample position (`_appended[key]` counts every sample added, so a buffer that drops its oldest samples doesn't shift the runs).
   Each run draws its min and max in sample order, and the series its first and last sample.
   Why this rule: a MinMax line looks like the full series from about 3 points per stroke width (Van Der Donckt et al., IEEE VIS 2023: the image metrics' curve has its elbow at canvas width × 3 / line width points).
   So a phone's thick stroke needs far fewer points than a desktop's thin one; of the selections they compared, MinMax is the most stable while data streams in.
   Runs at sample positions, not pixel columns, don't move as a fitted graph grows, so the line doesn't shimmer from tick to tick; the price is one change of the line's fine texture each time the zoom doubles and the run size steps.
   The folded line reaches every height the full line reaches, less than the stroke's width to the side, but is not pixel-exact (`tests/test_graph_decimation.py` checks it on the line's centre and on rendered pixels).
-  `_RunExtremes` keeps each series' run extremes for its current run size as data arrives, as Audacity keeps its waveform summaries:
+  `RunExtremes` keeps each series' run extremes for its current run size as data arrives (the widget's `_kept_runs`), as Audacity keeps its waveform summaries:
   a redraw scans only the runs completed since the last one, the runs a pan back brings into view and the part runs at the window's two ends.
   A new run size replaces the old one's; `load_static_data` and `clear_data` reset them.
   One step stays proportional to the buffered samples: each visible series' `list(deque)` copy, sliced to the window.

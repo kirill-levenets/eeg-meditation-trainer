@@ -22,6 +22,7 @@ from app.config import APP
 from app.session.manager import elapsed_clock
 from app.session.scoring import extend_steps
 from app.ui import render_stats
+from app.ui.graph_runs import RUN_STROKES, RunExtremes, run_indices
 from app.ui.hooks import Hook
 from app.ui.line_colours import GRADIENT_TOP, LINE_COLOURS, MONO, gradient_texture
 from app.ui.theme import C as TC
@@ -59,49 +60,6 @@ def _x_grid_step(graph_w: float, visible_seconds: float) -> float:
 
 # Kivy caps a Mesh at 65535 indices (GLES2, enforced on Android): 6 per quad, so 10922 quads (43688 vertices).
 _MESH_MAX_QUADS = 65535 // 6
-
-
-# A run's min and max are 2 of MinMax's 3 points per stroke width at its elbow, so a run spans 2/3 of the stroke.
-_RUN_STROKES = 2 / 3
-_MIN_RUN = 4  # samples: a shorter run saves too little to be worth folding
-
-
-def _extremes(values: list[float], start: int, stop: int) -> tuple[int, int]:
-    """Indices of values[start:stop]'s min and max, in sample order."""
-    run = values[start:stop]
-    lo, hi = start + run.index(min(run)), start + run.index(max(run))
-    return (lo, hi) if lo <= hi else (hi, lo)
-
-
-class _RunExtremes:
-    """One series' min and max per run of `size` samples at fixed positions, kept as data arrives (as Audacity's)."""
-
-    __slots__ = ("size", "base", "idx")
-
-    def __init__(self, size: int) -> None:
-        self.size = size
-        self.base = 0  # the absolute run number of idx[0:2]
-        self.idx: list[int] = []  # two absolute sample indices per run: its min and max in sample order
-
-    def runs(self, values: list[float], v0: int, first: int, last: int) -> list[int]:
-        """Absolute indices for runs first..last-1, which lie inside values (values[0] is absolute sample v0)."""
-        have = self.base + len(self.idx) // 2
-        if last < self.base or first > have:  # nothing kept touches the window: start over at it
-            self.base, self.idx, have = first, [], first
-        if first < self.base:  # panned back: only the runs before what is kept
-            self.idx[:0] = self._scan(values, v0, first, self.base)
-            self.base = first
-        if have < last:
-            self.idx.extend(self._scan(values, v0, have, last))
-        out = self.idx[2 * (first - self.base):2 * (last - self.base)]
-        if first - self.base > 2 * (last - first):  # far behind the window, as runs the buffer has dropped are
-            del self.idx[:2 * (first - self.base)]
-            self.base = first
-        return out
-
-    def _scan(self, values: list[float], v0: int, first: int, last: int) -> list[int]:
-        size = self.size
-        return [v0 + i for r in range(first, last) for i in _extremes(values, r * size - v0, (r + 1) * size - v0)]
 
 
 class ScrollableGraphWidget(Widget):
@@ -143,7 +101,7 @@ class ScrollableGraphWidget(Widget):
         }
         self._visible: dict[str, bool] = dict.fromkeys(colors, True)
         self._appended: dict[str, int] = dict.fromkeys(colors, 0)  # samples ever added: a run's absolute position
-        self._run_extremes: dict[str, _RunExtremes] = {}
+        self._run_extremes: dict[str, RunExtremes] = {}
         self._gradient_steps: list[tuple[int, str]] = []  # (first point, series): drawn from there in LINE_COLOURS
         self._scroll_offset: int = 0
         self._total_points: int = 0
@@ -654,27 +612,15 @@ class ScrollableGraphWidget(Widget):
 
     def _drawn_indices(self, key: str, values: list[float], start_idx: int, per_px: float) -> range | list[int]:
         """Indices into values to draw: every one, or each run's min and max and the series' two ends."""
-        n = len(values)
         stroke = 2 * dp(self._line_width)  # Kivy Line width is the half-thickness
-        longest = per_px * stroke * _RUN_STROKES  # samples in a run spanning _RUN_STROKES of the stroke
-        if n < 3 or longest < _MIN_RUN:
-            return range(n)
-        size = 1 << int(math.log2(longest))  # a power of two: the runs stay put until the zoom doubles
         v0 = self._appended[key] - len(self._data[key]) + start_idx  # the absolute index of values[0]
-        first, last = -(-v0 // size), (v0 + n) // size
-        if last <= first:
-            return range(n)
+        return run_indices(values, v0, per_px * stroke * RUN_STROKES, lambda size: self._kept_runs(key, size))
+
+    def _kept_runs(self, key: str, size: int) -> RunExtremes:
         kept = self._run_extremes.get(key)
         if kept is None or kept.size != size:  # one run size per series: a new zoom drops the last one's
-            kept = self._run_extremes[key] = _RunExtremes(size)
-        out = [0]
-        if first * size > v0:
-            out.extend(_extremes(values, 0, first * size - v0))
-        out.extend(i - v0 for i in kept.runs(values, v0, first, last))
-        if last * size - v0 < n:
-            out.extend(_extremes(values, last * size - v0, n))
-        out.append(n - 1)
-        return [i for j, i in enumerate(out) if j == 0 or i != out[j - 1]]
+            kept = self._run_extremes[key] = RunExtremes(size)
+        return kept
 
     def _gradient_spans(self, key: str, first: int, end: int) -> list[tuple[int, int]]:
         """The [a, b) runs, counted from `first`, of the points first..end that `key` is drawn in the gradient."""
