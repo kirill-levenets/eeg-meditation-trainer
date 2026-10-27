@@ -24,7 +24,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   more drift or leaving the glyph turns the touch into an ordinary gesture, so a pan, pinch or vertical swipe that starts on a glyph still works.
   A second finger makes the gesture a pinch or a two-finger tap: no glyph fires and no marker is placed.
   The press is the lifted finger's own (`on_touch_up` reads the finger that lifted, not the one left down).
-  The hit-test is in window coordinates (`_touch_in_window_rect`, see [Touch](#touch)), so the ScrollView can't starve a glyph the way it would an overlaid Kivy widget.
+  The hit-test is in window coordinates (`touch_utils.touch_in_window_rect`, see [Touch](#touch)), so the ScrollView can't starve a glyph the way it would an overlaid Kivy widget.
 - **Fit the whole session** (#43):
   `set_fitted(True)` shows all of the data, never in a window narrower than the graph's default (a session just started would be a second stretched across the plot);
   `_fit_restore` keeps the width and scroll position to go back to.
@@ -86,8 +86,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 ## Drawing cost
 
 - **Graph drawing cost**: `ScrollableGraphWidget._draw` rebuilds the graph from scratch on every `add_point` (2 Hz per live graph, within the budget of (6)), and GL re-renders it every frame.
-  It draws in this order, one method each: the background, the y axis (`_draw_y_axis`), the border, the threshold and reference line (`_draw_threshold`),
-  then, with data in view, the time axis (`_draw_x_axis`), the series (`_draw_lines`, the scored parts last) and the markers (`_draw_markers`), and the glyphs last;
+  It draws in this order: the background, the y axis (`_draw_y_axis`), the border, the threshold and reference line (`_draw_threshold`, its dashes `_add_dashed_hline`),
+  then, with data in view, the time axis (`_draw_x_axis`), the series (`_draw_lines`, the scored parts last, each end label `_draw_end_label`) and the markers (`_draw_markers`), and the glyphs last;
   `_visible_slices` and `_y_scale` give them the window and the scale.
   (1) Axis and value labels come from `_LABEL_CACHE`, an LRU of 512 `CoreLabel`s keyed by text, size and colour;
   the `CoreLabel` is kept, not just its texture, because it is the texture's reload observer after an Android GL context loss.
@@ -127,7 +127,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 A graph's touch handling is the `GraphGestures` mixin (`app/ui/graph_gestures.py`): pan, pinch, the mouse wheel's zoom, taps on the plot and its glyphs, and the vertical-swipe hand-off; it keeps its own gesture state (`_init_gestures`).
 
-- **Glyph hit-testing is done in WINDOW coordinates** (`_touch_in_window_rect`):
+- **Glyph hit-testing is done in WINDOW coordinates** (`touch_utils.touch_in_window_rect`):
   the touch's window position (`self.to_window(*touch.pos)`: `touch.pos` is in the graph's parent frame, and `touch.sx/sy` ignore Settings → Display's Rotate Screen) against the glyph's rect in window coordinates.
   `GraphAwareScrollView` delivers a touch in the graph's parent frame (`_dispatch_to_graph`, #66), since a graph's coordinates are content coordinates, not the view's parent's.
   The draw (`_draw_expand_icon` and the other glyphs') and the hit-test use the same rect (`_expand_icon_rect`, …), so the visible box is exactly the tap target.

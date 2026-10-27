@@ -12,7 +12,7 @@ How each subsystem works and why.
 | [audio.md](audio.md) | Audio engine: below/reward channels, cues, timer gong, MediaPlayer threading | `app/audio_feedback/noise.py` |
 | [storage.md](storage.md) | SQLite, write lock, DB paths and migrations, per-user settings registry, backup/restore and SAF, exports to shared storage | `app/storage/`, `app/settings/registry.py` |
 | [ui-theme.md](ui-theme.md) | Navigation, theme system and colour roles, shared widgets, modals | `app/ui/theme.py`, `app/ui/widgets/` |
-| [graphs.md](graphs.md) | `ScrollableGraphWidget`: fit, threshold steps, drawing cost, touch routing, fullscreen | `app/ui/raw_eeg_screen.py`, `app/ui/touch_utils.py` |
+| [graphs.md](graphs.md) | `ScrollableGraphWidget`: fit, threshold steps, drawing cost, the run fold, touch routing, glyphs, fullscreen | `app/ui/raw_eeg_screen.py`, `app/ui/graph_runs.py`, `app/ui/graph_gestures.py`, `app/ui/graph_glyphs.py`, `app/ui/graph_scroll.py`, `app/ui/touch_utils.py` |
 | [live-session-and-settings.md](live-session-and-settings.md) | Session screen, Settings screen, first run | `app/ui/live_session.py`, `app/ui/settings_screen.py` |
 | [history.md](history.md) | History screen: charts, totals, RecycleView list, select mode | `app/ui/history_screen.py`, `app/ui/period_totals.py` |
 | [session-detail.md](session-detail.md) | Session detail: stats, notes, graphs, what-if threshold (#50), band breakdown, loading | `app/ui/diary_screen.py`, `app/session/what_if.py`, `app/ui/widgets/what_if.py`, `app/ui/widgets/band_totals.py`, `app/ui/app_manager.py` (`_on_session_select`, `_load_session_detail`) |

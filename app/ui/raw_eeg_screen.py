@@ -22,7 +22,7 @@ from app.session.scoring import extend_steps
 from app.ui import render_stats
 from app.ui.graph_gestures import GraphGestures
 from app.ui.graph_glyphs import GraphGlyphs
-from app.ui.graph_runs import RUN_STROKES, RunExtremes, run_indices
+from app.ui.graph_runs import RunExtremes, run_indices
 from app.ui.hooks import Hook
 from app.ui.line_colours import GRADIENT_TOP, LINE_COLOURS, MONO, gradient_texture
 from app.ui.theme import C as TC
@@ -438,19 +438,12 @@ class ScrollableGraphWidget(GraphGestures, GraphGlyphs, Widget):
         graph_x, graph_y, graph_w, graph_h = rect
         # Threshold line (piecewise steps take precedence over a single value)
         if self._threshold_steps and not self._bipolar:
-            self._draw_threshold_steps(graph_x, graph_y, graph_w, graph_h,
-                                       max_scale, start_idx, end_idx)
+            self._draw_threshold_steps(rect, max_scale, start_idx, end_idx)
         elif self._threshold_value is not None and not self._bipolar:
             frac_t = min(max(self._threshold_value, 0.0) / max_scale, 1.0) if max_scale > 0 else 0.0
             y_thresh = graph_y + frac_t * graph_h
             self._gfx.add(Color(*TC.THRESHOLD_LINE))
-            dash_w = dp(6)
-            gap_w = dp(4)
-            x_cur = graph_x
-            while x_cur < graph_x + graph_w:
-                x_end = min(x_cur + dash_w, graph_x + graph_w)
-                self._gfx.add(Line(points=[x_cur, y_thresh, x_end, y_thresh], width=1))
-                x_cur = x_end + gap_w
+            self._add_dashed_hline(graph_x, graph_x + graph_w, y_thresh)
             if self._show_value_labels:
                 tex = self._make_text_texture(
                     f"{self._threshold_value:.0f}", size=8,
@@ -523,7 +516,7 @@ class ScrollableGraphWidget(GraphGestures, GraphGlyphs, Widget):
                 t_mark += grid_sec
 
     def _draw_lines(self, rect: tuple[float, float, float, float], max_scale: float, start_idx: int,
-                   slices: dict[str, list[float]]) -> None:
+                    slices: dict[str, list[float]]) -> None:
         """Each series' line and its end value label; the scored parts last, so no series hides them."""
         graph_x, graph_y, graph_w, graph_h = rect
         label_y_positions: list[float] = []
@@ -545,7 +538,7 @@ class ScrollableGraphWidget(GraphGestures, GraphGlyphs, Widget):
             # (x, y) once per drawn point: a run's min and max once runs span part of the stroke, whatever the zoom.
             drawn = self._drawn_indices(key, slice_data, start_idx, span / graph_w)
             xy: list[tuple[float, float]] = []
-            for i in drawn:
+            for i in drawn:  # _y_of inline: a call per drawn point costs a slow phone's redraw budget
                 val = slice_data[i]
                 x = graph_x + ((x_offset + i) / span) * graph_w
                 if self._bipolar:
@@ -562,30 +555,30 @@ class ScrollableGraphWidget(GraphGestures, GraphGlyphs, Widget):
                 else:
                     self._add_polyline(points, color)
 
-            # Realtime value label at right edge of line
             if self._show_value_labels and slice_data:
-                last_val = slice_data[-1]
-                if self._bipolar:
-                    norm = (last_val / draw_scale + 1.0) * 0.5
-                    last_y = graph_y + max(0.0, min(norm, 1.0)) * graph_h
-                else:
-                    last_y = graph_y + min(max(last_val, 0.0) / draw_scale, 1.0) * graph_h
-                last_y = _free_label_y(last_y, label_y_positions, graph_y, self.top - dp(6))
-                label_y_positions.append(last_y)
-                tex = self._make_text_texture(
-                    f"{last_val:.0f}", size=9, color=color,
-                )
-                self._gfx.add(Color(*TC.TEXT))
-                self._gfx.add(Rectangle(
-                    texture=tex,
-                    pos=(graph_x + graph_w + dp(3), last_y - tex.height / 2),
-                    size=tex.size,
-                ))
+                self._draw_end_label(rect, slice_data[-1], draw_scale, color, label_y_positions)
         for points, color, draw_scale in scored_parts:
             if colour_by_value:
                 self._add_gradient_line(points, graph_y, graph_h, draw_scale)
             else:
                 self._add_polyline(points, color)
+
+    def _y_of(self, val: float, draw_scale: float, graph_y: float, graph_h: float) -> float:
+        """Where a value sits on the plot: around the middle for a bipolar graph, from the floor otherwise; clamped."""
+        if self._bipolar:
+            norm = (val / draw_scale + 1.0) * 0.5
+            return graph_y + max(0.0, min(norm, 1.0)) * graph_h
+        return graph_y + min(max(val, 0.0) / draw_scale, 1.0) * graph_h
+
+    def _draw_end_label(self, rect: tuple[float, float, float, float], last_val: float, draw_scale: float,
+                        color: tuple, taken: list[float]) -> None:
+        """A line's latest value at the plot's right edge, in the nearest slot no other end label has taken."""
+        graph_x, graph_y, graph_w, graph_h = rect
+        last_y = _free_label_y(self._y_of(last_val, draw_scale, graph_y, graph_h), taken, graph_y, self.top - dp(6))
+        taken.append(last_y)
+        tex = self._make_text_texture(f"{last_val:.0f}", size=9, color=color)
+        self._gfx.add(Color(*TC.TEXT))
+        self._gfx.add(Rectangle(texture=tex, pos=(graph_x + graph_w + dp(3), last_y - tex.height / 2), size=tex.size))
 
     def _draw_markers(self, rect: tuple[float, float, float, float], start_idx: int, end_idx: int) -> None:
         """The session markers' vertical lines."""
@@ -606,8 +599,9 @@ class ScrollableGraphWidget(GraphGestures, GraphGlyphs, Widget):
     def _drawn_indices(self, key: str, values: list[float], start_idx: int, per_px: float) -> range | list[int]:
         """Indices into values to draw: every one, or each run's min and max and the series' two ends."""
         stroke = 2 * dp(self._line_width)  # Kivy Line width is the half-thickness
-        v0 = self._appended[key] - len(self._data[key]) + start_idx  # the absolute index of values[0]
-        return run_indices(values, v0, per_px * stroke * RUN_STROKES, lambda size: self._kept_runs(key, size))
+        return run_indices(values, per_px, stroke,
+                           lambda: self._appended[key] - len(self._data[key]) + start_idx,  # values[0]'s index
+                           lambda size: self._kept_runs(key, size))
 
     def _kept_runs(self, key: str, size: int) -> RunExtremes:
         kept = self._run_extremes.get(key)
@@ -685,9 +679,10 @@ class ScrollableGraphWidget(GraphGestures, GraphGlyphs, Widget):
             nice = 10
         return nice * magnitude
 
-    def _draw_threshold_steps(self, graph_x, graph_y, graph_w, graph_h,
-                              max_scale, start_idx, end_idx) -> None:
+    def _draw_threshold_steps(self, rect: tuple[float, float, float, float], max_scale: float, start_idx: int,
+                              end_idx: int) -> None:
         """Draw one dashed horizontal run per step over its visible tick range."""
+        graph_x, graph_y, graph_w, graph_h = rect
         steps = self._threshold_steps
         if not steps or max_scale <= 0:
             return
@@ -700,8 +695,6 @@ class ScrollableGraphWidget(GraphGestures, GraphGlyphs, Widget):
             x = graph_x + ((x_offset + i) / max(vp - 1, 1)) * graph_w
             return min(max(x, graph_x), graph_x + graph_w)
 
-        dash_w = dp(6)
-        gap_w = dp(4)
         for k, (step_tick, value) in enumerate(steps):
             next_tick = steps[k + 1][0] if k + 1 < len(steps) else float("inf")
             seg_start = max(step_tick, start_idx)
@@ -715,11 +708,7 @@ class ScrollableGraphWidget(GraphGestures, GraphGlyphs, Widget):
             frac = min(max(value, 0.0) / max_scale, 1.0)  # on the graph's floor and ceiling, as its values are
             y = graph_y + frac * graph_h
             self._gfx.add(Color(*TC.THRESHOLD_LINE))
-            x_cur = x_left
-            while x_cur < x_right:
-                x_end = min(x_cur + dash_w, x_right)
-                self._gfx.add(Line(points=[x_cur, y, x_end, y], width=1))
-                x_cur = x_end + gap_w
+            self._add_dashed_hline(x_left, x_right, y)
             if self._show_value_labels:
                 tex = self._make_text_texture(
                     f"{value:.0f}", size=8, color=(1.0, 0.4, 0.2, 1),
@@ -730,6 +719,15 @@ class ScrollableGraphWidget(GraphGestures, GraphGlyphs, Widget):
                     pos=(x_right - tex.width, y + dp(2) if y + dp(2) + tex.height <= self.top else y - dp(2) - tex.height),
                     size=tex.size,
                 ))
+
+    def _add_dashed_hline(self, x0: float, x1: float, y: float) -> None:
+        """A dashed horizontal line from x0 to x1 at y, in the colour already set."""
+        dash_w, gap_w = dp(6), dp(4)
+        x_cur = x0
+        while x_cur < x1:
+            x_end = min(x_cur + dash_w, x1)
+            self._gfx.add(Line(points=[x_cur, y, x_end, y], width=1))
+            x_cur = x_end + gap_w
 
     @staticmethod
     def link_zoom(*graphs: "ScrollableGraphWidget") -> None:

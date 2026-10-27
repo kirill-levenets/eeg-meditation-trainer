@@ -46,14 +46,17 @@ class RunExtremes:
         return [v0 + i for r in range(first, last) for i in extremes(values, r * size - v0, (r + 1) * size - v0)]
 
 
-def run_indices(values: list[float], v0: int, longest: float,
+def run_indices(values: list[float], per_px: float, stroke: float, v0_of: Callable[[], int],
                 kept_for: Callable[[int], RunExtremes]) -> range | list[int]:
-    """Indices into values to draw: every one, or each run's min and max and the series' two ends. values[0] is
-    absolute sample v0, a run spans at most `longest` samples, and kept_for(size) gives the series' kept runs."""
+    """Indices into values to draw: every one, or each run's min and max and the series' two ends. A pixel holds
+    per_px samples and the line is `stroke` pixels thick; values[0] is absolute sample v0_of(), asked only when the
+    series folds, and kept_for(size) gives the series' kept runs."""
     n = len(values)
+    longest = per_px * stroke * RUN_STROKES  # samples in a run spanning RUN_STROKES of the stroke
     if n < 3 or longest < MIN_RUN:
         return range(n)
     size = 1 << int(math.log2(longest))  # a power of two: the runs stay put until the zoom doubles
+    v0 = v0_of()
     first, last = -(-v0 // size), (v0 + n) // size
     if last <= first:
         return range(n)

@@ -10,7 +10,7 @@ from kivy.graphics import Line, Mesh
 
 import app.ui.graph_runs as runs
 import app.ui.raw_eeg_screen as rg
-from app.ui.graph_runs import RunExtremes, extremes
+from app.ui.graph_runs import RunExtremes, extremes, run_indices
 from app.ui.live_session import METRICS_COLORS, METRICS_SCALES
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.theme import C
@@ -62,7 +62,7 @@ def _stroke(g: ScrollableGraphWidget) -> float:
 
 
 def _run_px(g: ScrollableGraphWidget) -> float:
-    """The widest a run gets on screen: _RUN_STROKES of the stroke."""
+    """The widest a run gets on screen: RUN_STROKES of the stroke."""
     return _stroke(g) * runs.RUN_STROKES
 
 
@@ -111,6 +111,28 @@ def test_panning_back_scans_only_the_runs_before_what_is_kept(monkeypatch):
     monkeypatch.setattr(runs, "extremes", lambda v, a, b: scanned.append(a) or real(v, a, b))
     assert kept.runs(values, 0, 40, 90)[20:] == shown[:80]
     assert len(scanned) == 10
+
+
+def _never(*_args):
+    raise AssertionError("asked although the series doesn't fold")
+
+
+def test_run_indices_draws_every_sample_until_a_run_is_worth_folding():
+    assert run_indices([3.0, 1.0], 100.0, 2.0, _never, _never) == range(2)  # too short to fold
+    assert run_indices([float(i) for i in range(50)], 1.0, 2.0, _never, _never) == range(50)  # runs under MIN_RUN
+
+
+def test_run_indices_without_a_whole_run_in_the_window_draws_every_sample():
+    values = [float(i) for i in range(10)]  # runs of 8 start at 8 and 16: samples 3..12 hold none whole
+    assert run_indices(values, 6.0, 2.0, lambda: 3, _never) == range(10)
+
+
+def test_run_indices_folds_each_whole_run_to_its_min_and_max_and_keeps_both_ends():
+    values = [5.0, 1.0, 9.0, 4.0, 2.0, 8.0, 3.0, 7.0, 6.0, 0.0]
+    asked = []
+    out = run_indices(values, 4.0, 2.0, lambda: 0, lambda size: asked.append(size) or RunExtremes(size))
+    assert asked == [4]  # runs of 4 samples: 0-3 and 4-7, then the part run 8-9
+    assert out == [0, 1, 2, 4, 5, 8, 9]
 
 
 def test_a_series_keeps_the_runs_of_one_size():

@@ -4,17 +4,34 @@ from kivy.graphics import Color, Line, RoundedRectangle
 from kivy.metrics import dp
 
 from app.ui.theme import C as TC
+from app.ui.touch_utils import touch_in_window_rect
 
 
 class GraphGlyphs:
-    """Mixed into ScrollableGraphWidget, which provides _gfx, the plot rect and pads, and _pressed_glyph (the gesture
-    state of the glyph under a finger); a glyph shows only once its callback is set."""
+    """Mixed into ScrollableGraphWidget, which provides _gfx, the plot rect and pads, and _redraw. GraphGestures asks
+    _glyph_at which glyph a touch lands on and _press_glyph to draw it pressed; a glyph shows once it has a callback."""
 
     def _init_glyphs(self) -> None:
+        """The glyphs' callbacks and pressed state; the host's __init__ calls it."""
         self._expand_callback = None
         self._expand_closes = False  # in fullscreen the corner glyph is the close cross
         self._series_callback = None
         self._fit_callback = None
+        self._pressed_glyph = None  # the rect function of the glyph under a finger, drawn pressed
+
+    def _glyph_at(self, touch):
+        """(callback, rect function) of the glyph under `touch` (hit-tested in WINDOW coordinates), or None."""
+        for callback, rect in ((self._series_callback, self._series_icon_rect),
+                               (self._expand_callback, self._expand_icon_rect),
+                               (self._fit_callback, self._fit_icon_rect)):
+            if callback is not None and touch_in_window_rect(self, touch, rect()):
+                return callback, rect
+        return None
+
+    def _press_glyph(self, rect) -> None:
+        if rect is not self._pressed_glyph:
+            self._pressed_glyph = rect
+            self._redraw()
 
     def _draw_glyphs(self) -> None:
         pressed = self._pressed_glyph() if self._pressed_glyph is not None else None

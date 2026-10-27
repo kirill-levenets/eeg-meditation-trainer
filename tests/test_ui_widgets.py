@@ -5,6 +5,7 @@ from kivy.clock import Clock
 from kivy.metrics import dp
 
 import app.ui.settings_sections.device as device_section
+from app.ui.graph_scroll import GraphAwareScrollView
 from app.ui.headset import filter_mindwave
 from app.ui.hooks import wire
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
@@ -127,7 +128,6 @@ class TestGraphAwareScrollViewGuard(unittest.TestCase):
     aimed at widgets sitting outside the ScrollView (e.g. the Metrics/Raw toggle)."""
 
     def _make(self, viewport_h):
-        from app.ui.graph_scroll import GraphAwareScrollView
         sv = GraphAwareScrollView()
         sv.pos = (0, 0)
         sv.size = (400, viewport_h)

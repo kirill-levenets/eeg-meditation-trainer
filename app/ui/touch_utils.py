@@ -9,8 +9,8 @@ x/y are content coordinates. Compare in WINDOW coordinates — the touch's windo
 position (`widget.to_window(*touch.pos)` with `touch.pos` in that widget's parent
 frame; `touch.sx/sy` ignore the app's screen rotation) against the target's
 rendered window rect (`widget.to_window(...)`). See
-`ScrollableGraphWidget._touch_in_window_rect` and `GraphAwareScrollView._graph_under_touch`.
-`point_in_rect` is the shared rect test used on both sides, `window_rect` a widget's rendered rect.
+`touch_in_window_rect` (a graph's glyphs) and `GraphAwareScrollView._graph_under_touch`.
+`point_in_rect` is the shared rect test used on both sides, `window_rect` a rect as rendered.
 """
 
 
@@ -26,8 +26,17 @@ def point_in_rect(px: float, py: float, rect) -> bool:
 ROUTED_BY = "graph_aware_scroll_view"
 
 
-def window_rect(widget) -> tuple[float, float, float, float]:
-    """The widget's rendered rectangle in window coordinates (x, y, w, h)."""
-    x0, y0 = widget.to_window(widget.x, widget.y)
-    x1, y1 = widget.to_window(widget.right, widget.top)
+def window_rect(widget, rect=None) -> tuple[float, float, float, float]:
+    """`rect` (x, y, w, h) in the widget's frame, the widget's own by default, as rendered in window coordinates."""
+    x, y, w, h = rect if rect is not None else (widget.x, widget.y, widget.width, widget.height)
+    x0, y0 = widget.to_window(x, y)
+    x1, y1 = widget.to_window(x + w, y + h)
     return min(x0, x1), min(y0, y1), abs(x1 - x0), abs(y1 - y0)
+
+
+def touch_in_window_rect(widget, touch, rect) -> bool:
+    """True if `touch` (in the widget's parent frame) falls in the widget's `rect`, compared in window coordinates,
+    the one frame not ambiguous under GraphAwareScrollView's forwarding; touch.sx/sy ignore Rotate Screen."""
+    if rect is None:
+        return False
+    return point_in_rect(*widget.to_window(*touch.pos), window_rect(widget, rect))

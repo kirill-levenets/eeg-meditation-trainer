@@ -2,16 +2,18 @@
 vertical swipe a graph hands back to the page it is on."""
 from kivy.metrics import dp
 
-from app.ui.touch_utils import ROUTED_BY, point_in_rect
+from app.ui.touch_utils import ROUTED_BY, touch_in_window_rect
 
 _GLYPH_DRIFT_DP = 20  # a glyph's press survives this much drift; more is a pan (a pan starts at 10)
 
 
 class GraphGestures:
-    """Mixed into ScrollableGraphWidget, which provides the viewport (_scroll_offset, set_scroll_offset, _zoom_base,
-    _set_viewport, zoom_in/zoom_out, _plot_rect), the glyphs (their callbacks and rects) and _redraw."""
+    """Mixed into ScrollableGraphWidget, which provides the viewport (_scroll_offset, _total_points, _viewport_points,
+    set_scroll_offset, _zoom_base, _set_viewport, zoom_in/zoom_out, _plot_rect), on_tap, and GraphGlyphs' _glyph_at
+    and _press_glyph."""
 
     def _init_gestures(self) -> None:
+        """The gesture state; the host's __init__ calls it."""
         self._touch_start_offset: int = 0  # scroll offset when the current gesture's pan started
         self._pinch_active: bool = False
         self._pinch_start_dist: float = 0.0
@@ -21,7 +23,6 @@ class GraphGestures:
         self._tap_cancelled: bool = False  # the gesture moved (either axis) or pinched: no tap on release
         self._gesture_pinched: bool = False
         self._touch_moved: bool = False
-        self._pressed_glyph = None  # the rect function of the glyph under a finger, drawn pressed
 
     def _on_window_mouse_down(self, window, x, y, button, modifiers):
         """Handle mouse scroll at Window level (bypasses ScrollView)."""
@@ -59,20 +60,6 @@ class GraphGestures:
             self._press_glyph(glyph[1])
         return True
 
-    def _glyph_at(self, touch):
-        """(callback, rect function) of the glyph under `touch` (hit-tested in WINDOW coordinates), or None."""
-        for callback, rect in ((self._series_callback, self._series_icon_rect),
-                               (self._expand_callback, self._expand_icon_rect),
-                               (self._fit_callback, self._fit_icon_rect)):
-            if callback is not None and self._touch_in_window_rect(touch, rect()):
-                return callback, rect
-        return None
-
-    def _press_glyph(self, rect) -> None:
-        if rect is not self._pressed_glyph:
-            self._pressed_glyph = rect
-            self._redraw()
-
     def on_touch_move(self, touch):
         if touch.grab_current is not self:
             return super().on_touch_move(touch)
@@ -85,7 +72,7 @@ class GraphGestures:
         if glyph is not None:
             sx0, sy0 = finger["start"]
             drift = max(abs(touch.x - sx0), abs(touch.y - sy0))
-            if drift <= _GLYPH_DRIFT_DP * dp(1) and self._touch_in_window_rect(touch, glyph[1]()):
+            if drift <= _GLYPH_DRIFT_DP * dp(1) and touch_in_window_rect(self, touch, glyph[1]()):
                 return True  # a fingertip drifting on a glyph: still its press, as on a button
             finger["glyph"] = None  # dragged off it: an ordinary gesture from here
             self._tap_cancelled = True
@@ -161,18 +148,3 @@ class GraphGestures:
         touch.ungrab(self)
         self.set_scroll_offset(self._touch_start_offset)
         return True
-
-    def _touch_in_window_rect(self, touch, rect) -> bool:
-        """True if `touch` falls in `rect`, compared in WINDOW coordinates.
-
-        The touch's canonical window position (sx/sy) vs the rect's rendered
-        window rect — the one frame that isn't ambiguous under the
-        GraphAwareScrollView touch-forwarding transform.
-        """
-        if rect is None:
-            return False
-        wx0, wy0 = self.to_window(rect[0], rect[1])
-        wx1, wy1 = self.to_window(rect[0] + rect[2], rect[1] + rect[3])
-        tx, ty = self.to_window(*touch.pos)  # touch.pos is in this graph's parent frame; sx/sy ignore Rotate Screen
-        win_rect = (min(wx0, wx1), min(wy0, wy1), abs(wx1 - wx0), abs(wy1 - wy0))
-        return point_in_rect(tx, ty, win_rect)
