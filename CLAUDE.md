@@ -225,6 +225,7 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 · graph glyphs `_wire_graph_affordances`
 · headset names `Headset.name()` / `device_labels.py`
 · a profile's headset `Headset.load` / `Headset.scan`, the paired devices `Headset.find_paired`
+· the Android check / the app's Activity `android_jni.on_android()` / `android_jni.activity()`
 · legends `LegendBar`
 · file copy `copy_file_atomic`
 · temp removal `discard_file`.

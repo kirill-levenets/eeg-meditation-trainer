@@ -13,6 +13,7 @@ from kivy.clock import Clock
 
 import app.storage.android_saf as saf
 import app.ui.settings_sections.common as common
+from app import android_jni
 from app.config import APP
 from app.ui.hooks import wire
 from app.ui.settings_screen import SettingsScreen
@@ -24,7 +25,7 @@ RAIN = "content://com.android.providers.downloads.documents/document/77"
 @pytest.fixture
 def phone(monkeypatch, tmp_path):
     """Android, with a document picker that returns what `picks` holds and a provider serving `files`."""
-    monkeypatch.setattr(saf, "_IS_ANDROID", True)
+    monkeypatch.setattr(android_jni, "on_android", lambda: True)
     monkeypatch.setattr(APP, "DB_PATH", str(tmp_path / "EEGMeditation" / "meditation.db"))
     monkeypatch.setattr(common, "ThemedFileChooser", lambda *a, **k: pytest.fail("Kivy's file browser opened on Android"))
     state = {"picks": [], "launched": [], "files": {BOWL: ("Singing bowl.mp3", b"ID3 bowl"),
@@ -139,7 +140,7 @@ def test_a_name_from_the_provider_never_leaves_the_sounds_folder(phone):
 
 
 def test_the_desktop_keeps_kivys_file_browser(monkeypatch):
-    monkeypatch.setattr(saf, "_IS_ANDROID", False)
+    monkeypatch.setattr(android_jni, "on_android", lambda: False)
     monkeypatch.setattr(saf, "open_document", lambda *a, **k: pytest.fail("the document picker opened on the desktop"))
     opened = []
     monkeypatch.setattr(common.ThemedPopup, "open", lambda popup, *a, **k: opened.append(popup))

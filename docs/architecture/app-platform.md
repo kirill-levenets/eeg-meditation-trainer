@@ -40,6 +40,10 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   else, on the Session screen, **a second press within 2 s exits** (`_exit_on_second_back`, `_last_back_time`), the first showing the in-app `_toast`.
   While the app is leaving (`_leaving`), `_toast` shows the native `_android_toast` (`run_on_ui_thread` + pyjnius `Toast`) instead.
   Esc on desktop follows the same chain.
+  **The app reaches Android only through `app/android_jni.py`**: `on_android()` is the one Android check and `activity()` the one lookup of the app's Activity.
+  Every caller reads them through the module at call time (`android_jni.on_android()`, never a copied name or a module constant), so a test fakes Android by patching `android_jni` alone;
+  `tests/test_android_jni.py` fails on an inline `PythonActivity` lookup, `getandroidapilevel` check or Kivy `platform == "android"` anywhere else.
+  `config.py` and `crash_handler.py` import it before the app exists, which works because it imports only `app.logger`.
   **A Python `str` must cross pyjnius as `android_jni.java_string(text)`** whenever the Java method is overloaded:
   pyjnius scores a `str` 10 for both `String` and `char[]` and breaks the tie by sorting signatures (`[C` > `L`), so `Intent.putExtra(EXTRA_TITLE, str)` stores a `char[]` and the SAF save dialog's name comes up blank;
   a `CharSequence` parameter never matches a `str` at all, so `Toast.makeText` raises.

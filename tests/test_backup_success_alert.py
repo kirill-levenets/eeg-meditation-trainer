@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock
 
 import app.ui.backup_flow as bf
+from app import android_jni
 from app.ui.backup_flow import BACKUP_SOUND_NOTE
 from tests._backup_flow import make_flow
 
@@ -46,7 +47,7 @@ def test_the_backup_is_named_for_the_active_profile_after_its_settings_are_saved
     order = []
     flow = make_flow(user_name=lambda: order.append("name") or "carl",
                      save_settings=MagicMock(side_effect=lambda: order.append("save")))
-    monkeypatch.setattr(bf, "_on_android", lambda: False)
+    monkeypatch.setattr(android_jni, "on_android", lambda: False)
     flow._open_backup_save_picker = MagicMock()
     flow.on_backup_pressed()
     assert order == ["save", "name"]

@@ -8,13 +8,11 @@ On non-Android platforms, falls back to simple file copy.
 """
 
 import os
-import sys
 
+from app import android_jni
 from app.logger import logger
 from app.storage import android_saf
 from app.storage.fileops import copy_file_atomic
-
-_IS_ANDROID = hasattr(sys, "getandroidapilevel")
 
 
 def copy_to_documents(private_path: str, subfolder: str = "EEGMeditation",
@@ -37,7 +35,7 @@ def copy_to_documents(private_path: str, subfolder: str = "EEGMeditation",
     if not display_name:
         display_name = os.path.basename(private_path)
 
-    if not _IS_ANDROID:
+    if not android_jni.on_android():
         return _copy_desktop(private_path, subfolder, display_name)
 
     return _copy_android_mediastore(private_path, subfolder, display_name)
@@ -63,8 +61,7 @@ def _copy_android_mediastore(private_path: str, subfolder: str,
     try:
         from jnius import autoclass
 
-        PythonActivity = autoclass("org.kivy.android.PythonActivity")
-        activity = PythonActivity.mActivity
+        activity = android_jni.activity()
         ContentValues = autoclass("android.content.ContentValues")
         MediaStoreFiles = autoclass("android.provider.MediaStore$Files")
         Environment = autoclass("android.os.Environment")

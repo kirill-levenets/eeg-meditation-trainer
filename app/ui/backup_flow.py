@@ -2,7 +2,6 @@
 relaunch."""
 import os
 import sqlite3
-import sys
 import threading
 from collections.abc import Callable
 from datetime import datetime as _dt
@@ -11,6 +10,7 @@ from kivy.clock import Clock
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 
+from app import android_jni
 from app.config import APP
 from app.crash_handler import report_soft_error
 from app.logger import logger
@@ -29,10 +29,6 @@ from app.ui.theme import (
 )
 
 BACKUP_SOUND_NOTE = "Custom sound files are not included in a backup."
-
-
-def _on_android() -> bool:
-    return hasattr(sys, "getandroidapilevel")
 
 
 class BackupFlow:
@@ -60,7 +56,7 @@ class BackupFlow:
         self._save_settings()
         filename = _backup.backup_filename(self._user_name(), _dt.now())
 
-        if _on_android():
+        if android_jni.on_android():
             self._run_backup_saf(filename)
         else:
             self._open_backup_save_picker(filename)
@@ -132,7 +128,7 @@ class BackupFlow:
         # A restore closes the DB and force-relaunches: a running (or connecting) session would be silently dropped.
         if self._refused("restoring a backup"):
             return
-        if _on_android():
+        if android_jni.on_android():
             self._run_restore_saf()
         else:
             self._open_restore_picker_desktop()

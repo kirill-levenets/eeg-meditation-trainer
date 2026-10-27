@@ -1,5 +1,7 @@
 """A str crosses pyjnius as java.lang.String: a bare str made putExtra store a char[], so the save dialog's name came up blank."""
 
+import pathlib
+import re
 import sys
 import types
 
@@ -86,3 +88,24 @@ def test_an_open_dialog_for_several_types_lists_them_all(monkeypatch):
     android_saf._launch(android_saf._REQ_OPEN, ("audio/*", "application/ogg"), None)
     assert _Intent.last.type == "*/*"
     assert _Intent.last.extras[_Intent.EXTRA_MIME_TYPES] == ["audio/*", "application/ogg"]
+
+
+_APP = pathlib.Path(__file__).resolve().parent.parent
+_INLINE_ANDROID = [
+    (re.compile(r"PythonActivity"), "the app's Activity: android_jni.activity()"),
+    (re.compile(r"getandroidapilevel"), "the Android check: android_jni.on_android()"),
+    (re.compile(r"""platform\s*[!=]=\s*["']android["']|["']android["']\s*[!=]=\s*\w*platform"""),
+     "the Android check: android_jni.on_android()"),
+]
+
+
+def test_android_is_reached_only_through_android_jni():
+    """One Android check and one Activity lookup, read at call time, so a test fakes Android in one place (#108)."""
+    found = []
+    for path in [*(_APP / "app").rglob("*.py"), _APP / "main.py"]:
+        if path.name == "android_jni.py":
+            continue
+        for number, line in enumerate(path.read_text().splitlines(), 1):
+            found += [f"{path.relative_to(_APP)}:{number}: use {use}" for pattern, use in _INLINE_ANDROID
+                      if pattern.search(line)]
+    assert not found, "\n".join(found)
