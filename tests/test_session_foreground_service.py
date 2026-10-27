@@ -6,6 +6,7 @@ import types
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from app import android_jni
 from app.session.manager import SessionState
 from app.ui.app_manager import EEGMeditationApp
 
@@ -33,7 +34,7 @@ def test_on_android_a_session_starts_and_stops_the_service_through_its_static_me
     jnius = types.SimpleNamespace(autoclass=lambda name: {
         SERVICE: service, "org.kivy.android.PythonActivity": types.SimpleNamespace(mActivity=activity)}[name])
     monkeypatch.setitem(sys.modules, "jnius", jnius)
-    monkeypatch.setattr(sys, "getandroidapilevel", lambda: 29, raising=False)
+    monkeypatch.setattr(android_jni, "on_android", lambda: True)
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._start_session_keep_alive_service()
     app._stop_session_keep_alive_service()

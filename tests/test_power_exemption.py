@@ -28,7 +28,7 @@ class _Db:
 def android(monkeypatch):
     """An Android phone whose battery state and maker the test sets."""
     phone = types.SimpleNamespace(exempt=False, maker="huawei")
-    monkeypatch.setattr(sys, "getandroidapilevel", lambda: 29, raising=False)
+    monkeypatch.setattr(android_jni, "on_android", lambda: True)
     monkeypatch.setattr(android_jni, "ignores_battery_optimisation", lambda: phone.exempt)
     monkeypatch.setattr(android_jni, "manufacturer", lambda: phone.maker)
     return phone
@@ -64,7 +64,7 @@ def test_the_advice_follows_what_the_phone_needs(exempt, maker, want):
 
 
 def test_off_android_nothing_is_offered(monkeypatch, popups):
-    monkeypatch.delattr(sys, "getandroidapilevel", raising=False)  # on_android() reads it
+    monkeypatch.setattr(android_jni, "on_android", lambda: False)
     db = _Db()
     _power(db).offer_once()
     assert popups == [] and db.settings == {}

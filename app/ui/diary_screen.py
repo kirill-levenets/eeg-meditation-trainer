@@ -16,6 +16,7 @@ from app.logger import logger, timed
 from app.metrics.formula_slots import COMPUTED_SERIES
 from app.session.scoring import recorded_score, scored_steps, target_steps
 from app.session.session_program import RunnablePlan, recorded_program
+from app.storage.android_share import copy_to_documents
 from app.ui.hooks import Hook, is_wired, wire
 from app.ui.live_session import (
     METRICS_COLORS,
@@ -784,10 +785,7 @@ class DiaryScreen(Screen):
                     return
 
                 # On Android: copy from private storage to shared Documents.
-                # `copy_to_documents` is imported lazily because the module
-                # uses pyjnius and is only safe on Android.
                 if android_jni.on_android():
-                    from app.storage.android_share import copy_to_documents
                     shared = copy_to_documents(result, display_name=filename)
                     if shared:
                         self._show_export_result(

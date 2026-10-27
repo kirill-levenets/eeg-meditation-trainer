@@ -54,6 +54,7 @@ from app.settings.registry import (
     SettingsStore,
     stored_value,
 )
+from app.storage.android_share import copy_to_documents
 from app.storage.csv_export import build_sessions_zip
 from app.storage.database import DatabaseManager, UserExistsError
 from app.ui import render_stats
@@ -380,8 +381,8 @@ class EEGMeditationApp(App):
             if self._wake_lock is not None:
                 try:
                     self._wake_lock.release()
-                except Exception:
-                    pass
+                except Exception as e:  # already released by Android; the flag still clears below
+                    logger.warning(f"Wake lock release failed: {e}")
                 self._wake_lock = None
             from android.runnable import run_on_ui_thread
 
@@ -2254,7 +2255,6 @@ class EEGMeditationApp(App):
                     return
                 dest = tmp_zip
                 try:
-                    from app.storage.android_share import copy_to_documents
                     shared = copy_to_documents(tmp_zip, display_name=fname)
                     if shared:
                         dest = shared

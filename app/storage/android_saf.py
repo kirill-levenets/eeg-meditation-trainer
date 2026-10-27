@@ -29,10 +29,6 @@ _importer: threading.Thread | None = None
 _importer_lock = threading.Lock()
 
 
-def is_available() -> bool:
-    return android_jni.on_android()
-
-
 def create_document(display_name: str, on_result) -> None:
     """Launch the system 'Save as' dialog. `on_result(uri_str | None)` later."""
     _ensure_bound()
@@ -52,7 +48,7 @@ def write_file_to_uri(uri_str: str, src_path: str) -> bool:
     from jnius import autoclass
 
     Uri = autoclass("android.net.Uri")
-    resolver = android_jni.activity().getContentResolver()
+    resolver = android_jni.content_resolver()
     out = resolver.openOutputStream(Uri.parse(uri_str))
     if out is None:
         logger.error("SAF openOutputStream returned None")
@@ -76,7 +72,7 @@ def read_uri_to_file(uri_str: str, dst_path: str) -> bool:
 
     Uri = autoclass("android.net.Uri")
     FileOutputStream = autoclass("java.io.FileOutputStream")
-    resolver = android_jni.activity().getContentResolver()
+    resolver = android_jni.content_resolver()
     inp = resolver.openInputStream(Uri.parse(uri_str))
     if inp is None:
         logger.error("SAF openInputStream returned None")
@@ -108,7 +104,7 @@ def query_display_name(uri_str: str) -> str | None:
 
     Uri = autoclass("android.net.Uri")
     OpenableColumns = autoclass("android.provider.OpenableColumns")
-    cursor = android_jni.activity().getContentResolver().query(Uri.parse(uri_str), None, None, None, None)
+    cursor = android_jni.content_resolver().query(Uri.parse(uri_str), None, None, None, None)
     if cursor is None:
         return None
     try:
@@ -124,7 +120,7 @@ def query_extension(uri_str: str) -> str | None:
 
     Uri = autoclass("android.net.Uri")
     MimeTypeMap = autoclass("android.webkit.MimeTypeMap")
-    mime = android_jni.activity().getContentResolver().getType(Uri.parse(uri_str))
+    mime = android_jni.content_resolver().getType(Uri.parse(uri_str))
     return MimeTypeMap.getSingleton().getExtensionFromMimeType(mime) if mime else None
 
 
