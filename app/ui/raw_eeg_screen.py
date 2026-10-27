@@ -12,7 +12,6 @@ from kivy.graphics import (
     Line,
     Mesh,
     Rectangle,
-    RoundedRectangle,
 )
 from kivy.metrics import dp
 from kivy.uix.widget import Widget
@@ -22,6 +21,7 @@ from app.session.manager import elapsed_clock
 from app.session.scoring import extend_steps
 from app.ui import render_stats
 from app.ui.graph_gestures import GraphGestures
+from app.ui.graph_glyphs import GraphGlyphs
 from app.ui.graph_runs import RUN_STROKES, RunExtremes, run_indices
 from app.ui.hooks import Hook
 from app.ui.line_colours import GRADIENT_TOP, LINE_COLOURS, MONO, gradient_texture
@@ -60,7 +60,7 @@ def _x_grid_step(graph_w: float, visible_seconds: float) -> float:
 _MESH_MAX_QUADS = 65535 // 6
 
 
-class ScrollableGraphWidget(GraphGestures, Widget):
+class ScrollableGraphWidget(GraphGestures, GraphGlyphs, Widget):
     """Scrollable real-time graph with a 5-minute data buffer.
 
     Features: Y-axis scale numbers, horizontal grid lines, realtime value
@@ -119,10 +119,7 @@ class ScrollableGraphWidget(GraphGestures, Widget):
         # graph to mark level 100 — the per-metric maximum.
         self._reference_value: Optional[float] = None
         self._start_wall_time: Optional[float] = None
-        self._expand_callback = None
-        self._expand_closes = False  # in fullscreen the corner glyph is the close cross
-        self._series_callback = None
-        self._fit_callback = None
+        self._init_glyphs()
         self._pads: tuple[float, float, float, float] = (dp(30), dp(30), dp(20), dp(6))  # left, right, bottom, top
         self._pads_floor: tuple[float, float, float, float] | None = None  # the widest since the data was (re)loaded
         self._fit_restore: tuple[int, int] | None = None  # while the whole data is shown: (width, scroll) to go back to
@@ -606,15 +603,6 @@ class ScrollableGraphWidget(GraphGestures, Widget):
                         self._gfx.add(Color(*TC.THRESHOLD_LINE))
                         self._gfx.add(Line(points=[x_pos, graph_y, x_pos, graph_y + graph_h], width=1.5))
 
-    def _draw_glyphs(self) -> None:
-        pressed = self._pressed_glyph() if self._pressed_glyph is not None else None
-        if pressed is not None:  # a light disc under the glyph a finger is on
-            self._gfx.add(Color(*TC.TEXT[:3], 0.18))
-            self._gfx.add(RoundedRectangle(pos=pressed[:2], size=pressed[2:], radius=[dp(10)]))
-        self._draw_series_icon()
-        self._draw_fit_icon()
-        self._draw_expand_icon()
-
     def _drawn_indices(self, key: str, values: list[float], start_idx: int, per_px: float) -> range | list[int]:
         """Indices into values to draw: every one, or each run's min and max and the series' two ends."""
         stroke = 2 * dp(self._line_width)  # Kivy Line width is the half-thickness
@@ -833,28 +821,6 @@ class ScrollableGraphWidget(GraphGestures, Widget):
         """Zoom out (show more points = wider view)."""
         self._set_viewport(int(self._zoom_base() * self._zoom_factor))
 
-    def set_expand_callback(self, callback, closes: bool = False) -> None:
-        """The top-right glyph's tap: fullscreen-expand, or with `closes` the close cross; None hides it."""
-        self._expand_callback = callback
-        self._expand_closes = closes
-        self._redraw()
-
-    def set_series_picker_callback(self, callback) -> None:
-        """Set callback invoked with `self` when the series-picker glyph is tapped.
-
-        Setting a callback reveals the glyph (top-left); pass None to hide it.
-        """
-        self._series_callback = callback
-        self._redraw()
-
-    def set_fit_callback(self, callback) -> None:
-        """Set callback invoked with `self` when the fit-whole-session glyph is tapped; None hides the glyph."""
-        self._fit_callback = callback
-        self._redraw()
-
-    def _icon_too_small(self) -> bool:
-        return self.width < dp(60) or self.height < dp(60)
-
     def _plot_rect(self) -> tuple[float, float, float, float]:
         """The plot area (x, y, w, h): the widget less the margins its labels took at the last draw."""
         left, right, bottom, top = self._pads
@@ -884,96 +850,6 @@ class ScrollableGraphWidget(GraphGestures, Widget):
             if self._start_wall_time is not None:
                 bottom += self._make_text_texture("00:00:00", size=7, color=(0.4, 0.6, 0.4, 1)).height + dp(1)
         return left, right, bottom, top
-
-    def _corner_rect(self, right: bool, top: bool):
-        """A glyph's rect (x, y, w, h) in a corner of the plot area."""
-        size, margin = dp(44), dp(2)
-        px, py, pw, ph = self._plot_rect()
-        return (px + pw - size - margin if right else px + margin, py + ph - size - margin if top else py + margin,
-                size, size)
-
-    def _expand_icon_rect(self):
-        """Rect (x, y, w, h) for the expand glyph (the plot's top-right corner), or None when hidden."""
-        if self._expand_callback is None or self._icon_too_small():
-            return None
-        return self._corner_rect(right=True, top=True)
-
-    def _fit_icon_rect(self):
-        """Rect (x, y, w, h) for the fit glyph (the plot's bottom-right), or None: hidden where it would meet expand."""
-        if self._fit_callback is None or self._icon_too_small():
-            return None
-        rect, expand = self._corner_rect(right=True, top=False), self._expand_icon_rect()
-        if expand is not None and rect[1] + rect[3] > expand[1]:
-            return None
-        return rect
-
-    def _series_icon_rect(self):
-        """Rect (x, y, w, h) for the series-picker glyph (the plot's top-left corner), or None."""
-        if self._series_callback is None or self._icon_too_small():
-            return None
-        return self._corner_rect(right=False, top=True)
-
-    def _draw_icon_backing(self, rect) -> None:
-        # Transparent background — the glyph sits directly on the graph. Set the
-        # glyph color (TEXT) here for the Line instructions that follow; TEXT
-        # contrasts with GRAPH_BG on every palette.
-        self._gfx.add(Color(*TC.TEXT))
-
-    def _draw_expand_icon(self) -> None:
-        """Top-right fullscreen-expand glyph (four outward corner brackets), or in fullscreen a close cross."""
-        rect = self._expand_icon_rect()
-        if rect is None:
-            return
-        self._draw_icon_backing(rect)
-        ix, iy, iw, ih = rect
-        pad, arm, lw = dp(11), dp(9), 1.6
-        left, right = ix + pad, ix + iw - pad
-        bottom, top = iy + pad, iy + ih - pad
-        if self._expand_closes:
-            self._gfx.add(Line(points=[left + dp(2), bottom + dp(2), right - dp(2), top - dp(2)], width=lw))
-            self._gfx.add(Line(points=[left + dp(2), top - dp(2), right - dp(2), bottom + dp(2)], width=lw))
-            return
-        self._gfx.add(Line(points=[left, bottom + arm, left, bottom, left + arm, bottom], width=lw))
-        self._gfx.add(Line(points=[right - arm, bottom, right, bottom, right, bottom + arm], width=lw))
-        self._gfx.add(Line(points=[left, top - arm, left, top, left + arm, top], width=lw))
-        self._gfx.add(Line(points=[right - arm, top, right, top, right, top - arm], width=lw))
-
-    def _draw_fit_icon(self) -> None:
-        """|<->| shows the whole session, ->|<- goes back to the window."""
-        rect = self._fit_icon_rect()
-        if rect is None:
-            return
-        self._draw_icon_backing(rect)
-        ix, iy, iw, ih = rect
-        pad, head, lw = dp(11), dp(4), 1.6
-        left, right, mid = ix + pad, ix + iw - pad, iy + ih / 2
-        bar = dp(7)
-        if self.fitted:  # two arrows pointing in at a centre bar
-            cx, reach = ix + iw / 2, dp(15)
-            self._gfx.add(Line(points=[cx, mid - bar, cx, mid + bar], width=lw))
-            for tip, tail in ((cx - dp(4), cx - reach), (cx + dp(4), cx + reach)):
-                back = dp(3) if tip > tail else -dp(3)
-                self._gfx.add(Line(points=[tail, mid, tip, mid], width=lw))
-                self._gfx.add(Line(points=[tip - back, mid + dp(3), tip, mid, tip - back, mid - dp(3)], width=lw))
-        else:  # a double arrow between two bars
-            self._gfx.add(Line(points=[left, mid - bar, left, mid + bar], width=lw))
-            self._gfx.add(Line(points=[right, mid - bar, right, mid + bar], width=lw))
-            self._gfx.add(Line(points=[left + dp(2), mid, right - dp(2), mid], width=lw))
-            for tip, back in ((left + dp(2), head), (right - dp(2), -head)):
-                self._gfx.add(Line(points=[tip + back, mid + head, tip, mid, tip + back, mid - head], width=lw))
-
-    def _draw_series_icon(self) -> None:
-        """Top-left series-picker glyph: three stacked lines (a list) + a chevron."""
-        rect = self._series_icon_rect()
-        if rect is None:
-            return
-        self._draw_icon_backing(rect)
-        ix, iy, iw, ih = rect
-        pad, lw = dp(12), 1.6
-        left, right = ix + pad, ix + iw - pad
-        for i in range(3):  # three horizontal "list" lines, top to bottom
-            ly = iy + ih - pad - i * dp(6)
-            self._gfx.add(Line(points=[left, ly, right, ly], width=lw))
 
     def add_marker(self, index: Optional[int] = None) -> None:
         """Add a marker at the given data point index (default: current end)."""

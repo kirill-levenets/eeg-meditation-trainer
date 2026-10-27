@@ -14,7 +14,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   A line's end label takes the nearest free slot between the plot's bottom and the widget's top (`_free_label_y`, upward first), since the top margin leaves no room above and the bottom one holds the time rows;
   a threshold step's label at the top of the scale goes under its line.
   The Y grid is bounded: a fixed `grid_step` that would draw more than `_MAX_Y_GRID_LINES` lines gives way to `_compute_nice_step`, since each line carries a label (a 200000 scale at the default 20-unit step would draw 10000).
-- **Glyphs** sit inside the plot's corners (`_corner_rect`):
+- **Glyphs** (the `GraphGlyphs` mixin, `app/ui/graph_glyphs.py`: their callbacks, rects and drawing) sit inside the plot's corners (`_corner_rect`):
   the series picker top-left, expand top-right (in fullscreen the close cross, `set_expand_callback(cb, closes=True)`), fit bottom-right, hidden on a plot too short for it under expand.
   `AppManager._wire_graph_affordances` wires them on every graph (`_all_graphs()`), the one place for cross-graph affordances.
   They are strokes in `TC.TEXT` straight on the graph with no backing (`_draw_icon_backing` only sets the colour), so they contrast on every palette; a fixed backing reads as a grey box on light themes.
