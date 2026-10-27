@@ -11,7 +11,7 @@ from typing import Optional
 
 from kivy.clock import Clock
 
-from app.android_jni import activity, on_android
+from app import android_jni
 from app.config import APP
 from app.logger import logger
 from app.storage.fileops import discard_file
@@ -181,7 +181,7 @@ class _AudioFocus:
         """`holder` plays: ask for focus unless held; the first holder's `gain` stands. Refused, the next hold asks."""
         with self._lock:
             self._holders.add(holder)
-            if self._request is None and on_android():
+            if self._request is None and android_jni.on_android():
                 self._ask(gain)
 
     def release(self, holder: str) -> None:
@@ -203,7 +203,7 @@ class _AudioFocus:
             request = (autoclass("android.media.AudioFocusRequest$Builder")(getattr(AudioManager, gain))
                        .setAudioAttributes(_media_attributes())
                        .build())
-            mgr = activity().getSystemService(autoclass("android.content.Context").AUDIO_SERVICE)
+            mgr = android_jni.activity().getSystemService(autoclass("android.content.Context").AUDIO_SERVICE)
             if mgr.requestAudioFocus(request) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED:
                 logger.info("Audio focus refused (a call?); the next start, resume or gong asks again")
                 return
@@ -224,8 +224,7 @@ def _make_noise_player(path: str, loop: bool = True):
     to SoundLoader if MediaPlayer init fails; a one-shot raises. Desktop always
     uses SoundLoader.
     """
-    from kivy.utils import platform as kplat
-    if kplat == "android":
+    if android_jni.on_android():
         try:
             return _AndroidMediaNoisePlayer(path, loop)
         except Exception as e:

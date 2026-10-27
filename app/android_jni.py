@@ -13,12 +13,19 @@ def java_string(text: str):
 
 
 def on_android() -> bool:
+    """The one Android check: it needs no Kivy, so config.py can ask before Kivy loads; read at call time, so a test
+    fakes it here."""
     return hasattr(sys, "getandroidapilevel")
 
 
 def activity():
+    """The app's Activity, the one lookup of it."""
     from jnius import autoclass
     return autoclass("org.kivy.android.PythonActivity").mActivity
+
+
+def content_resolver():
+    return activity().getContentResolver()
 
 
 def language() -> str:

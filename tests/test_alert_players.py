@@ -2,11 +2,11 @@
 import threading
 from unittest.mock import MagicMock
 
-import kivy.utils
 import pytest
 from kivy.core.audio import SoundLoader
 
 import app.audio_feedback.noise as noise_mod
+from app import android_jni
 from app.audio_feedback.noise import AudioEngine
 
 
@@ -65,7 +65,7 @@ def test_every_alert_replays_its_one_player_and_releases_nothing_on_the_tick(mad
 
 
 def test_on_android_an_alert_player_is_a_media_player_that_plays_once(monkeypatch):
-    monkeypatch.setattr(kivy.utils, "platform", "android")
+    monkeypatch.setattr(android_jni, "on_android", lambda: True)
     monkeypatch.setattr(noise_mod, "_AndroidMediaNoisePlayer", lambda path, loop: ("MediaPlayer", path, loop))
     assert noise_mod._make_noise_player("chime.wav", loop=False) == ("MediaPlayer", "chime.wav", False)
 
@@ -75,7 +75,7 @@ def broken_media_player(monkeypatch):
     def fail(path, loop=True):
         raise RuntimeError("MediaPlayer prepare failed")
 
-    monkeypatch.setattr(kivy.utils, "platform", "android")
+    monkeypatch.setattr(android_jni, "on_android", lambda: True)
     monkeypatch.setattr(noise_mod, "_AndroidMediaNoisePlayer", fail)
 
 

@@ -8,6 +8,7 @@ from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.checkbox import CheckBox
 
+from app import android_jni
 from app.config import APP
 from app.crash_handler import report_soft_error
 from app.storage import android_saf as _saf
@@ -35,7 +36,7 @@ _AUDIO_TYPES = ("audio/*", "application/ogg", "application/x-flac")
 
 def open_audio_file_chooser(on_select: Callable[[str], None], title: str = "Choose audio file") -> None:
     """The one sound picker; on Android the system's, since an app can't browse storage by path."""
-    if _saf.is_available():
+    if android_jni.on_android():
         def _on_uri(uri: str | None) -> None:
             if uri:
                 _saf.import_document(uri, os.path.join(os.path.dirname(APP.DB_PATH), "sounds"), "sound",

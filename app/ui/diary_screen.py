@@ -1,6 +1,5 @@
 import math
 import os
-import sys
 from typing import Optional
 
 from kivy.metrics import dp
@@ -10,12 +9,14 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.slider import Slider
 from kivy.uix.widget import Widget
 
+from app import android_jni
 from app.config import APP
 from app.eeg.band_spec import BAND_KEYS, GROUP_NAMES, group_powers
 from app.logger import logger, timed
 from app.metrics.formula_slots import COMPUTED_SERIES
 from app.session.scoring import recorded_score, scored_steps, target_steps
 from app.session.session_program import RunnablePlan, recorded_program
+from app.storage.android_share import copy_to_documents
 from app.ui.graph_scroll import GraphAwareScrollView
 from app.ui.hooks import Hook, is_wired, wire
 from app.ui.live_session import (
@@ -687,7 +688,7 @@ class DiaryScreen(Screen):
         if not self._selected_session_id or not is_wired(self, "on_export_csv"):
             return
 
-        is_android = hasattr(sys, "getandroidapilevel")
+        is_android = android_jni.on_android()
 
         content = BoxLayout(orientation="vertical", spacing=S.GAP, padding=S.GAP)
 
@@ -785,10 +786,7 @@ class DiaryScreen(Screen):
                     return
 
                 # On Android: copy from private storage to shared Documents.
-                # `copy_to_documents` is imported lazily because the module
-                # uses pyjnius and is only safe on Android.
-                if hasattr(sys, "getandroidapilevel"):
-                    from app.storage.android_share import copy_to_documents
+                if android_jni.on_android():
                     shared = copy_to_documents(result, display_name=filename)
                     if shared:
                         self._show_export_result(

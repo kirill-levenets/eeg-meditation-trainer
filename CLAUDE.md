@@ -177,7 +177,7 @@ The linked file explains the mechanism.
 - SQLite never opens a file on `/sdcard` or a `content://` URI: back up into an internal temp file (`online_backup_to_tempfile`) and stream it through the Storage Access Framework. → [storage](docs/architecture/storage.md#backup-and-restore)
 - On Android a file the user picks comes through the Storage Access Framework (`android_saf.open_document`), never Kivy's file browser: an app can't list `/data` (its `~`) or shared storage by path.
   A file the app keeps is copied in by `android_saf.import_document`. → [storage](docs/architecture/storage.md#backup-and-restore)
-- A Python `str` passed to an overloaded Java method crosses pyjnius as `android_jni.java_string(text)`. → [app-platform](docs/architecture/app-platform.md#android-back-button)
+- A Python `str` passed to an overloaded Java method crosses pyjnius as `android_jni.java_string(text)`. → [app-platform](docs/architecture/app-platform.md#android-access)
 - `on_pause()` always returns `True` (returning `False` stops the app).
 - Kivy's Linux clipboard is SDL2 (its in-app dummy the last resort) with no cut buffer, set by `kivy_providers.clipboard_without_commands()` before any text input:
   its xclip/xsel probe waits with no timeout and hung the app at startup; `tests/test_linux_clipboard.py`. → [app-platform](docs/architecture/app-platform.md#linux-clipboard)
@@ -226,6 +226,7 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 · graph glyphs `_wire_graph_affordances`
 · headset names `Headset.name()` / `device_labels.py`
 · a profile's headset `Headset.load` / `Headset.scan`, the paired devices `Headset.find_paired`
+· the Android check `android_jni.on_android()`, the app's Activity `android_jni.activity()`
 · legends `LegendBar`
 · file copy `copy_file_atomic`
 · temp removal `discard_file`.

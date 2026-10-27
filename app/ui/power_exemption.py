@@ -1,14 +1,7 @@
 """What may close a locked session: Android's battery optimisation and the maker's power manager, which has no API."""
 from collections.abc import Callable
 
-from app.android_jni import (
-    component_intent,
-    ignores_battery_optimisation,
-    manufacturer,
-    on_android,
-    open_first,
-    settings_intent,
-)
+from app import android_jni
 from app.logger import logger
 from app.ui.theme import C, StyledButton, cancel_button, make_message_popup
 
@@ -57,10 +50,10 @@ class PowerExemption:
 
     def _state(self) -> tuple[bool, str] | None:
         """(exempt, maker) on Android; None off it or when Android can't be asked."""
-        if not on_android():
+        if not android_jni.on_android():
             return None
         try:
-            return ignores_battery_optimisation(), manufacturer()
+            return android_jni.ignores_battery_optimisation(), android_jni.manufacturer()
         except Exception:
             logger.exception("Couldn't read the battery optimisation state")
             return None
@@ -125,24 +118,26 @@ class PowerExemption:
     def on_maker_settings(self) -> None:
         """Huawei's App launch where the phone lets another app open it, else its Battery screen; App info elsewhere."""
         logger.info("Locked-session settings: the maker's power screen")
-        if not on_android():
+        if not android_jni.on_android():
             return
         try:
             intents = []
-            if maker_screen(manufacturer()) == "App launch":
-                intents = [component_intent(package, cls) for package, cls in _APP_LAUNCH_SCREENS]
-                intents.append(settings_intent("android.intent.action.POWER_USAGE_SUMMARY", package=False))
-            intents.append(settings_intent("android.settings.APPLICATION_DETAILS_SETTINGS"))
-            open_first(intents, self._opened)
+            if maker_screen(android_jni.manufacturer()) == "App launch":
+                intents = [android_jni.component_intent(package, cls) for package, cls in _APP_LAUNCH_SCREENS]
+                intents.append(android_jni.settings_intent("android.intent.action.POWER_USAGE_SUMMARY",
+                                                           package=False))
+            intents.append(android_jni.settings_intent("android.settings.APPLICATION_DETAILS_SETTINGS"))
+            android_jni.open_first(intents, self._opened)
         except Exception:
             logger.exception("Locked-session settings: couldn't build the maker's screens")
             self._opened(False)
 
     def _open(self, actions: list[tuple[str, bool]]) -> None:
-        if not on_android():
+        if not android_jni.on_android():
             return
         try:
-            open_first([settings_intent(action, package) for action, package in actions], self._opened)
+            intents = [android_jni.settings_intent(action, package) for action, package in actions]
+            android_jni.open_first(intents, self._opened)
         except Exception:
             logger.exception("Locked-session settings: couldn't build the battery screens")
             self._opened(False)

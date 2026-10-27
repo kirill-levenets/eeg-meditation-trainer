@@ -1,6 +1,5 @@
 import os
 import sqlite3
-import sys
 import threading
 import time
 from collections.abc import Callable
@@ -16,10 +15,8 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.modalview import ModalView
 from kivy.uix.screenmanager import ScreenManager, SlideTransition
-from kivy.utils import platform as kivy_platform
 
-from app.android_jni import activity as android_activity
-from app.android_jni import java_string, on_android
+from app import android_jni
 from app.audio_feedback.noise import AudioEngine
 from app.config import APP
 from app.crash_handler import (
@@ -57,6 +54,7 @@ from app.settings.registry import (
     SettingsStore,
     stored_value,
 )
+from app.storage.android_share import copy_to_documents
 from app.storage.csv_export import build_sessions_zip
 from app.storage.database import DatabaseManager, UserExistsError
 from app.ui import render_stats
@@ -349,7 +347,7 @@ class EEGMeditationApp(App):
 
     def _acquire_wake_lock(self) -> None:
         """Keep CPU running + screen on during session (Android only)."""
-        if not hasattr(sys, "getandroidapilevel"):
+        if not android_jni.on_android():
             return
         try:
             from android.runnable import run_on_ui_thread
@@ -357,18 +355,16 @@ class EEGMeditationApp(App):
             @run_on_ui_thread
             def _set_flag():
                 from jnius import autoclass
-                PythonActivity = autoclass("org.kivy.android.PythonActivity")
-                activity = PythonActivity.mActivity
+                activity = android_jni.activity()
                 WindowManager = autoclass("android.view.WindowManager$LayoutParams")
                 activity.getWindow().addFlags(WindowManager.FLAG_KEEP_SCREEN_ON)
             _set_flag()
 
             # Partial wake lock keeps CPU alive when screen is off.
             from jnius import autoclass
-            PythonActivity = autoclass("org.kivy.android.PythonActivity")
             Context = autoclass("android.content.Context")
             PowerManager = autoclass("android.os.PowerManager")
-            pm = PythonActivity.mActivity.getSystemService(Context.POWER_SERVICE)
+            pm = android_jni.activity().getSystemService(Context.POWER_SERVICE)
             self._wake_lock = pm.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK, "eegmeditation:session"
             )
@@ -379,22 +375,21 @@ class EEGMeditationApp(App):
 
     def _release_wake_lock(self) -> None:
         """Release wake locks (Android only)."""
-        if not hasattr(sys, "getandroidapilevel"):
+        if not android_jni.on_android():
             return
         try:
             if self._wake_lock is not None:
                 try:
                     self._wake_lock.release()
-                except Exception:
-                    pass
+                except Exception as e:  # already released by Android; the flag still clears below
+                    logger.warning(f"Wake lock release failed: {e}")
                 self._wake_lock = None
             from android.runnable import run_on_ui_thread
 
             @run_on_ui_thread
             def _clear_flag():
                 from jnius import autoclass
-                PythonActivity = autoclass("org.kivy.android.PythonActivity")
-                activity = PythonActivity.mActivity
+                activity = android_jni.activity()
                 WindowManager = autoclass("android.view.WindowManager$LayoutParams")
                 activity.getWindow().clearFlags(WindowManager.FLAG_KEEP_SCREEN_ON)
             _clear_flag()
@@ -404,22 +399,22 @@ class EEGMeditationApp(App):
 
     def _start_session_keep_alive_service(self) -> None:
         """Start the session's foreground service: it runs in this process, so the OS keeps this process up."""
-        if not on_android():
+        if not android_jni.on_android():
             return
         try:
             from jnius import autoclass
             service_cls = autoclass("org.eeg.eegmeditation.SessionForegroundService")
-            service_cls.start(android_activity(), "EEG Meditation", "Meditation session in progress")
+            service_cls.start(android_jni.activity(), "EEG Meditation", "Meditation session in progress")
             logger.info("Session foreground service started.")
         except Exception as e:
             logger.warning(f"Failed to start the session foreground service: {e}")
 
     def _stop_session_keep_alive_service(self) -> None:
-        if not on_android():
+        if not android_jni.on_android():
             return
         try:
             from jnius import autoclass
-            autoclass("org.eeg.eegmeditation.SessionForegroundService").stop(android_activity())
+            autoclass("org.eeg.eegmeditation.SessionForegroundService").stop(android_jni.activity())
             logger.info("Session foreground service stopped.")
         except Exception as e:
             logger.warning(f"Failed to stop the session foreground service: {e}")
@@ -592,7 +587,7 @@ class EEGMeditationApp(App):
         self._live_screen.summary_delete_btn.bind(on_release=self._on_summary_delete)
 
         # Tap on graph to set marker (Android — no keyboard available)
-        if kivy_platform == "android":
+        if android_jni.on_android():
             wire(self._live_screen.graph, on_tap=self._on_marker)
 
         # Shared fullscreen-expand + series-picker glyphs on every graph
@@ -1761,7 +1756,7 @@ class EEGMeditationApp(App):
     def _toast(self, message: str) -> None:
         """Short non-blocking confirmation on the theme's modal panel, above any popup. While the app is leaving it is
         the native Android toast instead, the one thing still seen then."""
-        if self._leaving and hasattr(sys, "getandroidapilevel"):
+        if self._leaving and android_jni.on_android():
             self._android_toast(message)
             return
         lbl = ThemedLabel(text=message, font_size=F.BODY, color=C.TEXT, size_hint=(None, None),
@@ -1777,7 +1772,7 @@ class EEGMeditationApp(App):
 
     def _android_toast(self, message: str) -> None:
         """Short Android toast; no-op (logged) off Android."""
-        if not hasattr(sys, "getandroidapilevel"):
+        if not android_jni.on_android():
             logger.debug(f"toast: {message}")
             return
         try:
@@ -1786,10 +1781,9 @@ class EEGMeditationApp(App):
             @run_on_ui_thread
             def _show():
                 from jnius import autoclass
-                PythonActivity = autoclass("org.kivy.android.PythonActivity")
                 Toast = autoclass("android.widget.Toast")
                 Toast.makeText(
-                    PythonActivity.mActivity, java_string(message), Toast.LENGTH_SHORT
+                    android_jni.activity(), android_jni.java_string(message), Toast.LENGTH_SHORT
                 ).show()
             _show()
         except Exception as e:
@@ -2261,7 +2255,6 @@ class EEGMeditationApp(App):
                     return
                 dest = tmp_zip
                 try:
-                    from app.storage.android_share import copy_to_documents
                     shared = copy_to_documents(tmp_zip, display_name=fname)
                     if shared:
                         dest = shared

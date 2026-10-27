@@ -28,9 +28,9 @@ class _Db:
 def android(monkeypatch):
     """An Android phone whose battery state and maker the test sets."""
     phone = types.SimpleNamespace(exempt=False, maker="huawei")
-    monkeypatch.setattr(sys, "getandroidapilevel", lambda: 29, raising=False)
-    monkeypatch.setattr(pe, "ignores_battery_optimisation", lambda: phone.exempt)
-    monkeypatch.setattr(pe, "manufacturer", lambda: phone.maker)
+    monkeypatch.setattr(android_jni, "on_android", lambda: True)
+    monkeypatch.setattr(android_jni, "ignores_battery_optimisation", lambda: phone.exempt)
+    monkeypatch.setattr(android_jni, "manufacturer", lambda: phone.maker)
     return phone
 
 
@@ -64,7 +64,7 @@ def test_the_advice_follows_what_the_phone_needs(exempt, maker, want):
 
 
 def test_off_android_nothing_is_offered(monkeypatch, popups):
-    monkeypatch.delattr(sys, "getandroidapilevel", raising=False)  # on_android() reads it
+    monkeypatch.setattr(android_jni, "on_android", lambda: False)
     db = _Db()
     _power(db).offer_once()
     assert popups == [] and db.settings == {}
@@ -107,8 +107,8 @@ def test_the_alerts_buttons_open_the_screens(android, popups, monkeypatch):
 
 def test_battery_asks_androids_dialog_then_falls_back_to_the_list(android, monkeypatch):
     tried = []
-    monkeypatch.setattr(pe, "settings_intent", lambda action, package=True: (action, package))
-    monkeypatch.setattr(pe, "open_first", lambda intents, done: (tried.extend(intents), done(False)))
+    monkeypatch.setattr(android_jni, "settings_intent", lambda action, package=True: (action, package))
+    monkeypatch.setattr(android_jni, "open_first", lambda intents, done: (tried.extend(intents), done(False)))
     power = _power()
     power.on_battery_settings()
     assert tried == [("android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS", True),
@@ -123,10 +123,10 @@ def test_battery_asks_androids_dialog_then_falls_back_to_the_list(android, monke
 def test_the_makers_screen_is_app_launch_on_huawei_and_app_info_after_it_or_elsewhere(android, monkeypatch, maker,
                                                                                     screens):
     android.maker = maker
-    monkeypatch.setattr(pe, "component_intent", lambda package, cls: (package, cls))
-    monkeypatch.setattr(pe, "settings_intent", lambda action, package=True: action)
+    monkeypatch.setattr(android_jni, "component_intent", lambda package, cls: (package, cls))
+    monkeypatch.setattr(android_jni, "settings_intent", lambda action, package=True: action)
     tried = []
-    monkeypatch.setattr(pe, "open_first", lambda intents, done: tried.extend(intents))
+    monkeypatch.setattr(android_jni, "open_first", lambda intents, done: tried.extend(intents))
     _power().on_maker_settings()
     assert tried == [*screens, "android.settings.APPLICATION_DETAILS_SETTINGS"]
 
@@ -227,8 +227,8 @@ def test_a_jni_failure_behind_a_button_says_so_instead_of_crashing(android, monk
     def broken(*_args, **_kwargs):
         raise RuntimeError("JavaException: no such class")
 
-    monkeypatch.setattr(pe, "settings_intent", broken)
-    monkeypatch.setattr(pe, "component_intent", broken)
+    monkeypatch.setattr(android_jni, "settings_intent", broken)
+    monkeypatch.setattr(android_jni, "component_intent", broken)
     power = _power()
     power.on_battery_settings()
     power.on_maker_settings()
