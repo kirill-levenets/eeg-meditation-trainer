@@ -155,6 +155,19 @@ class TestReaderLifecycle:
         assert s._thread is None
         assert s._device_address == "00:11:22:33:44:02"
 
+    def test_no_target_closes_the_link(self):
+        """A profile without a headset gets none: a link to the last profile's must not carry its sessions (#99)."""
+        s = SlowConnectStream(delay=0.0)
+        s.set_device("00:11:22:33:44:01", "MindWave Mobile")
+        s.start()
+        assert _wait_until(lambda: s.is_connected)
+
+        s.set_device(None)
+        assert s.sockets[0].closed
+        assert s.is_connected is False
+        assert s._device_address is None and s._device_name is None
+        assert s.start() is False  # nothing to connect to
+
     def test_the_same_target_keeps_the_link(self):
         s = SlowConnectStream(delay=0.0)
         s.set_device("00:11:22:33:44:01", "MindWave Mobile")

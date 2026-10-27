@@ -80,5 +80,6 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 - **First run is the user gate's popup** (`_show_first_run_popup`, see [app-platform](app-platform.md#user-gate-and-profiles)): a `UserPickerForm` to create a profile or pick an existing one (e.g. after a restore) without retyping the name.
   It is a Popup, not a Screen, because a TextInput inside a Screen doesn't get keyboard focus on some Android devices.
-  A new profile (`_complete_first_run`) starts on the mock; a picked one (`_on_pick_existing_user`) keeps its own headset and mode;
-  both leave through `_finish_first_run`, and `Headset.auto_scan`, which scans only while the stream has no headset set, selects a single paired MindWave or opens Settings → Device to pick among several.
+  A new profile (`_complete_first_run`) starts on the mock and is scanned for (`Headset.scan_for_new_profile`): a paired MindWave takes it off the mock, the single one selected, and with several Start asks which;
+  a picked one (`_on_pick_existing_user`) keeps its own headset and mode, and its load scans for a real-mode profile without a headset ([eeg-bluetooth](eeg-bluetooth.md#connection)).
+  Both leave through `_finish_first_run` for the Session screen.

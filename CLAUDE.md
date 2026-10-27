@@ -103,7 +103,8 @@ The linked file explains the mechanism.
   The MindWave serves one RFCOMM channel and a connected socket nobody drains stalls it until the headset is power-cycled.
   `NeuroSkyStream.start()` returns a bool and refuses while a previous reader is alive; `stop()` closes the socket before joining. → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md)
 - **The Bluetooth link is always to the selected headset**:
-  `NeuroSkyStream.set_device` to another address closes it (the link outlives sessions), and `Headset.on_select` refuses a switch while a session runs. → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md#connection)
+  `NeuroSkyStream.set_device` to another address closes it (the link outlives sessions), and `Headset.on_select` refuses a switch while a session runs.
+  The selected headset is the active profile's own or none (`Headset.load`); a profile's headset is found by `Headset.scan`, whose result does nothing once the profile, its headset or mode changed or a session started, and only Start opens Settings → Device to pick. → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md#connection)
 - **A session start is one attempt** (`_start_attempt`): a callback queued for an earlier attempt does nothing.
   Every BT-wait exit goes through `_abort_bt_wait()` (tick watcher stopped before the stream); every ending undoes the start's setup through `_undo_session_setup()`. → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md)
 - **At most one tick thread.**

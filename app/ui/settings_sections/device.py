@@ -290,6 +290,10 @@ class DeviceSection:
         else:
             self._device_meta_label.text = "Mode: Real Device"
 
+    def clear_picker_banner(self) -> None:
+        """Start's pick-one prompt is answered: a headset was picked, or another profile loaded."""
+        self._set_device_picker_banner("")
+
     def _set_device_picker_banner(self, message: str) -> None:
         """Show or hide the picker banner above the device list."""
         if message:

@@ -18,6 +18,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   **Every path that picks a profile goes through `_activate_user(uid)`** (sets the id, stores `last_user_id`, loads the settings):
   startup restore, the first-run popup's create (`_complete_first_run`) or pick (`_on_pick_existing_user`), and `_on_user_switch`.
   An activation that skipped the load would leave the previous profile's (or the default) values in memory under the new one, for the next flush (e.g. the pre-backup save) to write over its stored settings.
+  The headset is loaded the same way: the profile's own or none, never the last profile's (`Headset.load`, [eeg-bluetooth](eeg-bluetooth.md#connection)).
   `_on_user_switch` to another profile is refused through `_refused_while_session_runs` while `_session_pipeline_live()` ("Session in progress", the picker snapped back via `_refresh_profile`):
   the running session owns its loaded timer/threshold/sound settings and saves under the profile it started with.
 - `DatabaseManager.create_user` raises `UserExistsError(user_id, name)` on a duplicate.
