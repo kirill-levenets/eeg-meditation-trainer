@@ -902,7 +902,7 @@ class EEGMeditationApp(App):
 
         # Real device — need BT connection
         if self._real_stream._device_address:
-            # Device already selected (from settings or auto-scan)
+            # The profile's headset, or one picked in Settings
             self._eeg_stream = self._real_stream
             self._start_session_common()
             return

@@ -32,15 +32,16 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Settings → Device then lists the matches, or every paired device when none matches.
   A profile load scans for a real-mode profile without a headset, so with one MindWave paired every profile ends up with it saved and a restart agrees; a profile on Mock Data doesn't scan.
   A new profile (`_complete_first_run`) is saved on the mock, loaded, then scanned for (`scan_for_new_profile`): a MindWave found takes it off the mock, the single one selected; none leaves it on the mock (demo mode).
-  A scan's result does nothing when it ends after another profile loaded, a headset was picked, the mode changed, another scan began (each moves `Headset._scan_seq`) or a session started (`session_live`):
+  A scan's result does nothing when it ends after another profile loaded, a headset was picked, the mode changed, another profile scan began (each moves `Headset._scan_seq`) or a session started (`session_live`):
   a launch's scan used to pick a headset under a just-started session (a "Session in progress" refusal) or open Settings in its middle.
-  Settings → Device's Scan (`on_scan`) lists every paired device through `find_paired` and moves `_scan_seq`, so a profile scan doesn't replace the list a pick came from.
+  Settings → Device's Scan (`on_scan`) and Copy Diagnostics list the paired devices through `find_paired` too:
+  Scan lists every paired device and lets a profile scan still running make its pick (a pick, not a Scan, keeps a late profile scan from replacing the list it came from).
 - **Only Start sends the user to Settings → Device.**
   Start with no headset selected runs `find_paired` and `adopt` itself: a headset then selected (the single MindWave, or one picked in Settings while it scanned) connects;
   several MindWaves route the user to Settings → Device, where `DeviceSection.focus_device_section(message)` expands the section, scrolls it into view and shows a "pick one" banner over a list of only the matching devices;
   none gets a retry screen.
   Its result does nothing for a Start already ended (`_start_attempt`), and ends the Start (`_cancel_session_start`) when another profile was picked while it scanned.
-  A pick or another profile's load answers it (`clear_picker_banner`), as a connection does (`update_device_status(connected=True)`).
+  A pick, Mock Data or another profile's load answers it (`clear_picker_banner`), as a connection does (`update_device_status(connected=True)`).
 - **The link is always to the selected headset.**
   It stays open between sessions, so `NeuroSkyStream.set_device` to another address, or to none, stops the reader first; otherwise the next Start would reuse the old headset's socket and record its session under the new headset's name.
   Every target change goes through it: a pick in Settings, a profile load, and a scan's auto-select.

@@ -78,7 +78,7 @@ Read it before changing that subsystem.
   `app/ui/hooks.py` — `Hook`/`wire()`: the handlers the app plugs into a widget. → [ui-theme](docs/architecture/ui-theme.md)
 - `app/ui/raw_eeg_screen.py` — `ScrollableGraphWidget`, the one time-series graph class;
   `graph_series.py` `GraphSeries` (the series picker, each graph's saved selection), `line_colours.py` (the scored line's gradient), `touch_utils.py`, `render_stats.py`. → [graphs](docs/architecture/graphs.md)
-- `app/ui/headset.py` `Headset` (which headset, its name, Settings → Device)
+- `app/ui/headset.py` `Headset` (which headset: a profile's own, found by its one scan path; its name; Settings → Device)
   · `app/ui/power_exemption.py` `PowerExemption` (what may close a locked session: battery optimisation, the maker's power manager;
   the first-start alert and Settings → Device's row → [app-platform](docs/architecture/app-platform.md#background-running-android))
   · `app/ui/live_session.py`, `live_mirror.py` (the live graphs' session, kept through a screen lock), `settings_screen.py` (its larger sections in `settings_sections/`), `device_labels.py` → [live-session-and-settings](docs/architecture/live-session-and-settings.md);
@@ -104,7 +104,9 @@ The linked file explains the mechanism.
   `NeuroSkyStream.start()` returns a bool and refuses while a previous reader is alive; `stop()` closes the socket before joining. → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md)
 - **The Bluetooth link is always to the selected headset**:
   `NeuroSkyStream.set_device` to another address closes it (the link outlives sessions), and `Headset.on_select` refuses a switch while a session runs.
-  The selected headset is the active profile's own or none (`Headset.load`); a profile's headset is found by `Headset.scan`, whose result does nothing once the profile, its headset or mode changed or a session started, and only Start opens Settings → Device to pick. → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md#connection)
+  The selected headset is the active profile's own or none (`Headset.load`);
+  a profile's headset is found by `Headset.scan`, whose result does nothing once the profile, its headset or mode changed or a session started;
+  only Start opens Settings → Device to pick. → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md#connection)
 - **A session start is one attempt** (`_start_attempt`): a callback queued for an earlier attempt does nothing.
   Every BT-wait exit goes through `_abort_bt_wait()` (tick watcher stopped before the stream); every ending undoes the start's setup through `_undo_session_setup()`. → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md)
 - **At most one tick thread.**
@@ -222,6 +224,7 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 · scoring `scoring.GoalAccrual`
 · graph glyphs `_wire_graph_affordances`
 · headset names `Headset.name()` / `device_labels.py`
+· a profile's headset `Headset.load` / `Headset.scan`, the paired devices `Headset.find_paired`
 · legends `LegendBar`
 · file copy `copy_file_atomic`
 · temp removal `discard_file`.

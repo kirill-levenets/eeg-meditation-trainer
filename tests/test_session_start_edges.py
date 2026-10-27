@@ -11,13 +11,12 @@ from unittest.mock import MagicMock
 import pytest
 
 import app.ui.app_manager as am
-import app.ui.headset as headset
 from app.config import APP
 from app.session.manager import SessionManager, SessionState
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.live_mirror import LiveMirror
-from tests._headset import make_headset
+from tests._headset import fake_paired, make_headset
 from tests._program_run import make_run
 from tests._recorder import make_recorder
 
@@ -176,37 +175,29 @@ def test_stop_after_the_timer_ended_the_session_leaves_its_teardown_alone():
 
 def test_cancel_during_the_device_scan_does_not_start_the_session(monkeypatch):
     monkeypatch.setattr(APP, "USE_MOCK_DEVICE", False)
-    monkeypatch.setattr(am.NeuroSkyStream, "scan_paired_devices",
-                        staticmethod(lambda: [{"name": "MindWave Mobile", "address": "00:11"}]))
-    monkeypatch.setattr(headset.threading, "Thread", lambda target, **k: MagicMock(start=target))
-    scheduled = []
-    monkeypatch.setattr(headset.Clock, "schedule_once", lambda cb, *a, **k: scheduled.append(cb))
+    paired = fake_paired(monkeypatch)
+    paired.devices.append({"name": "MindWave Mobile", "address": "00:11"})
     app = _app()
     app._real_stream._device_address = ""
     app._headset.on_select = MagicMock()
     app._start_session_common = MagicMock()
     app._on_start()  # "Scanning for MindWave..."; the scan result is queued
     app._on_connect_cancel()
-    for cb in scheduled:
-        cb(0)
+    paired.arrive()
     app._start_session_common.assert_not_called()
 
 
 def test_a_scan_result_still_starts_the_session_without_a_cancel(monkeypatch):
     monkeypatch.setattr(APP, "USE_MOCK_DEVICE", False)
-    monkeypatch.setattr(am.NeuroSkyStream, "scan_paired_devices",
-                        staticmethod(lambda: [{"name": "MindWave Mobile", "address": "00:11"}]))
-    monkeypatch.setattr(headset.threading, "Thread", lambda target, **k: MagicMock(start=target))
-    scheduled = []
-    monkeypatch.setattr(headset.Clock, "schedule_once", lambda cb, *a, **k: scheduled.append(cb))
+    paired = fake_paired(monkeypatch)
+    paired.devices.append({"name": "MindWave Mobile", "address": "00:11"})
     app = _app()
     app._real_stream._device_address = ""
     app._real_stream.set_device.side_effect = lambda address, name="": setattr(app._real_stream, "_device_address",
                                                                               address)
     app._start_session_common = MagicMock()
     app._on_start()
-    for cb in scheduled:
-        cb(0)
+    paired.arrive()
     app._start_session_common.assert_called_once()
     assert app._real_stream._device_address == "00:11"
 
@@ -215,19 +206,15 @@ def test_a_scan_result_for_a_profile_picked_away_ends_the_start(monkeypatch):
     """The Start was the profile's that pressed it: another one picked while it scanned gets neither its headset nor
     its session (#99)."""
     monkeypatch.setattr(APP, "USE_MOCK_DEVICE", False)
-    monkeypatch.setattr(am.NeuroSkyStream, "scan_paired_devices",
-                        staticmethod(lambda: [{"name": "MindWave Mobile", "address": "00:11"}]))
-    monkeypatch.setattr(headset.threading, "Thread", lambda target, **k: MagicMock(start=target))
-    scheduled = []
-    monkeypatch.setattr(headset.Clock, "schedule_once", lambda cb, *a, **k: scheduled.append(cb))
+    paired = fake_paired(monkeypatch)
+    paired.devices.append({"name": "MindWave Mobile", "address": "00:11"})
     app = _app()
     app._real_stream._device_address = None
     app._headset.on_select = MagicMock()
     app._start_session_common = MagicMock()
     app._on_start()
     app._current_user_id = 2  # picked in Settings while the scan ran
-    for cb in scheduled:
-        cb(0)
+    paired.arrive()
     app._start_session_common.assert_not_called()
     app._headset.on_select.assert_not_called()
     app._live_screen.hide_overlay.assert_called()

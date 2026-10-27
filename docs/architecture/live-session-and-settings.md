@@ -68,6 +68,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
     a list populate, `update_device_status`, and `on_pre_enter`, since the link can drop between sessions with nothing on screen.
     Every row is built with the glyph so its slot exists (`StyledButton` makes an icon label only at construction) and `set_icon("")` blanks it.
   - **Names:** the pencil opens the inline editor History's rename uses (`theme.RenameRow`, stopping at `MAX_DEVICE_ALIAS` while typing) under the row;
+    a list that lands while it is open (scans run off the main thread) keeps it, with its text, under that headset's new row;
     Save or Enter calls `Headset.on_rename(address, bluetooth_name, text)`, which stores the alias and relabels the row (`relabel_bt_device`);
     for the headset in use it also relabels the status line and the Session screen's label (`Headset.show_selected`, which a pick in the list goes through too).
     Aliases are app-wide, not per profile: `bt_device_aliases`, a JSON `{address: alias}` in `app_settings` (`get_json_setting`), because a headset is the same object whichever profile uses it;

@@ -43,7 +43,7 @@ class Headset:
         self._report = report  # report_soft_error(label, detail, force=...) shown by the app
         # address -> the name its user gave the headset; replaced, never changed in place (the tick thread reads it)
         self.aliases: Mapping[str, str] = MappingProxyType({})
-        # Moved by a profile load, a pick, a mode change and every scan: a profile scan applies only while current.
+        # Moved by a profile load, a pick, a mode change and each profile scan: a profile scan applies while current.
         self._scan_seq = 0
 
     def load_aliases(self) -> None:
@@ -69,6 +69,9 @@ class Headset:
             return None, None
         return stream._device_address, stream._device_address if stream.is_connected else None
 
+    def _session_label(self) -> str:
+        return "Mock EEG" if APP.USE_MOCK_DEVICE else self.name()
+
     def show_selected(self) -> None:
         """The selected headset's name and link, on the Session screen and in Settings."""
         connected = self._stream.is_connected
@@ -91,28 +94,25 @@ class Headset:
             self._stream.set_device(address, self._db.get_user_setting(uid, "bt_device_name") or "")
             self._device_section.update_device_status(False, meta=f"Saved device: {self.name()}" if address else "")
         self._device_section.clear_picker_banner()  # it asked the last profile
-        self._live_screen.update_device_status(False, device_name="Mock EEG" if APP.USE_MOCK_DEVICE else self.name())
+        self._live_screen.update_device_status(False, device_name=self._session_label())
         if not self._stream._device_address and not APP.USE_MOCK_DEVICE:
             self.scan()
 
     def on_mode_toggle(self, use_mock: bool) -> None:
         self._scan_seq += 1
         APP.USE_MOCK_DEVICE = use_mock
-        if use_mock:
-            self._device_section.update_device_status(False, meta="Mode: Mock Data")
-            self._live_screen.update_device_status(False, device_name="Mock EEG")
-        else:
-            addr = self._stream._device_address or "none"
-            self._device_section.update_device_status(False, meta=f"Mode: Real Device ({addr})")
-            self._live_screen.update_device_status(False, device_name=self.name())
+        self._device_section.clear_picker_banner()  # Start's question was for the real headset
+        addr = self._stream._device_address or "none"
+        self._device_section.update_device_status(False, meta="Mode: Mock Data" if use_mock
+                                                  else f"Mode: Real Device ({addr})")
+        self._live_screen.update_device_status(False, device_name=self._session_label())
         uid = self._user_id()
         if uid:
             self._db.set_user_setting(uid, "use_mock", str(use_mock))
         logger.info(f"Device mode: {'Mock' if use_mock else 'Real'}")
 
     def on_scan(self) -> None:
-        """Settings → Device's Scan: every paired device, listed."""
-        self._scan_seq += 1
+        """Settings → Device's Scan: every paired device, listed; a profile scan still running makes its pick."""
         self.find_paired(self.list_devices)
 
     def on_select(self, address: str, name: str) -> None:
@@ -196,18 +196,11 @@ class Headset:
         self.scan(then=found)
 
     def on_copy_diagnostics(self) -> None:
-        """Build a diagnostic report and show it via the soft-error dialog.
+        """Build a diagnostic report, with the paired devices listed off the main thread, and show it via the
+        soft-error dialog; user-initiated, so it bypasses the per-label cooldown."""
+        self.find_paired(self._report_diagnostics)
 
-        User-initiated, so we bypass the per-label cooldown — the user
-        explicitly asked for the report.
-        """
-
-        try:
-            paired = NeuroSkyStream.scan_paired_devices()
-        except Exception as e:  # noqa: BLE001 - the report goes out with what is known; logged
-            paired = []
-            logger.warning(f"Diagnostics: BT scan failed: {e}")
-
+    def _report_diagnostics(self, paired: list[dict]) -> None:
         try:
             paired_summary = "\n".join(
                 f"  - {d.get('name') or 'Unknown'}  ({d.get('address')})"

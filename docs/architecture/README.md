@@ -5,7 +5,7 @@ How each subsystem works and why.
 
 | File | Covers | Main code |
 |---|---|---|
-| [eeg-bluetooth.md](eeg-bluetooth.md) | EEG sources, the NeuroSky link, the single-reader lifecycle, the BT wait at session start, BT throughput and render stats, diagnostic tools | `app/eeg/`, `app/ui/app_manager.py` (`_begin_bt_wait`, `_handle_bt_wait`, `_abort_bt_wait`), `app/ui/render_stats.py`, `tools/` |
+| [eeg-bluetooth.md](eeg-bluetooth.md) | EEG sources, the NeuroSky link, each profile's headset and the scan that finds it, the single-reader lifecycle, the BT wait at session start, BT throughput and render stats, diagnostic tools | `app/eeg/`, `app/ui/headset.py`, `app/ui/app_manager.py` (`_begin_bt_wait`, `_handle_bt_wait`, `_abort_bt_wait`), `app/ui/render_stats.py`, `tools/` |
 | [metrics-scoring.md](metrics-scoring.md) | Metrics engine and its formulas, custom formulas, the scored metric (#51), the threshold in force (#83) | `app/metrics/`, `app/session/scoring.py`, `app/session/manager.py` |
 | [session.md](session.md) | Session state machine, tick thread, session names and labels, checkpoints (#30), the session ending path, timer, screen lock | `app/session/manager.py`, `app/session/timer_state.py`, `app/ui/app_manager.py`, `app/ui/session_labels.py`, `android_src/` |
 | [programs.md](programs.md) | Session programs: model, live series, Settings and picker controls, per-segment feedback | `app/session/session_program.py`, `app/ui/app_manager.py`, `app/ui/settings_screen.py` |
