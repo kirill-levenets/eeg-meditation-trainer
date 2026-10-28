@@ -15,12 +15,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import app.ui.profiles as profiles
 from app import android_jni
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp, resolve_startup_user
 from app.ui.history_flow import sessions_for_view
 from app.ui.settings_screen import SettingsScreen
 from tests._backup_flow import make_flow
+from tests._profiles import make_gate, make_profiles
 from tests._recorder import make_recorder
 
 _TMP_DIRS: list[str] = []
@@ -138,14 +140,14 @@ def test_deleting_active_profile_mid_session_discards_it_and_regates():
     app._discard_running_session = MagicMock()
     app._db = MagicMock()
     app._db.get_all_users.return_value = []       # last profile removed
-    app._refresh_profile = MagicMock()
+    app._settings_screen = MagicMock()
     app._program_settings = MagicMock()
-    app._open_user_gate = MagicMock()
+    app._gate = MagicMock()
     app._history = MagicMock()
-    EEGMeditationApp._on_user_delete(app, 5)
+    make_profiles(app).on_delete(5)
     app._discard_running_session.assert_called_once()  # discarded, not saved-then-orphaned
     assert app._current_user_id is None
-    app._open_user_gate.assert_called_once()            # re-gate
+    app._gate.open.assert_called_once()                 # re-gate
 
 
 def test_deleting_the_last_profile_while_none_is_active_regates():
@@ -155,12 +157,12 @@ def test_deleting_the_last_profile_while_none_is_active_regates():
     app._session_manager = MagicMock()
     app._db = MagicMock()
     app._db.get_all_users.return_value = []
-    app._refresh_profile = MagicMock()
+    app._settings_screen = MagicMock()
     app._program_settings = MagicMock()
-    app._open_user_gate = MagicMock()
+    app._gate = MagicMock()
     app._history = MagicMock()
-    EEGMeditationApp._on_user_delete(app, 9)
-    app._open_user_gate.assert_called_once()
+    make_profiles(app).on_delete(9)
+    app._gate.open.assert_called_once()
 
 
 @pytest.mark.parametrize("current, shown", [(2, "Current: B"), (None, "Current: none"), (9, "Current: none")])
@@ -175,19 +177,22 @@ def test_reopen_gate_when_selection_left_no_user():
     # #5: a failed pick/create at the gate must not strand the app (nav disabled, no popup).
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._current_user_id = None
-    app._refresh_profile = MagicMock()
-    app._program_settings = MagicMock()
-    app._open_user_gate = MagicMock()
-    EEGMeditationApp._reopen_gate_if_unresolved(app)
-    app._open_user_gate.assert_called_once()
+    app._db = MagicMock()
+    app._profiles = MagicMock()
+    gate = make_gate(app)
+    gate.open = MagicMock()
+    gate._reopen_if_unresolved()
+    gate.open.assert_called_once()
 
 
 def test_reopen_gate_noop_when_user_resolved():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._current_user_id = 3
-    app._open_user_gate = MagicMock()
-    EEGMeditationApp._reopen_gate_if_unresolved(app)
-    app._open_user_gate.assert_not_called()
+    app._db = MagicMock()
+    gate = make_gate(app)
+    gate.open = MagicMock()
+    gate._reopen_if_unresolved()
+    gate.open.assert_not_called()
 
 
 def test_discard_running_session_deletes_partial_row_and_resets_ui():
@@ -254,11 +259,11 @@ def test_delete_active_profile_discards_during_bt_connect():
     app._discard_running_session = MagicMock()
     app._db = MagicMock()
     app._db.get_all_users.return_value = []
-    app._refresh_profile = MagicMock()
+    app._settings_screen = MagicMock()
     app._program_settings = MagicMock()
-    app._open_user_gate = MagicMock()
+    app._gate = MagicMock()
     app._history = MagicMock()
-    EEGMeditationApp._on_user_delete(app, 5)
+    make_profiles(app).on_delete(5)
     app._discard_running_session.assert_called_once()   # connecting session halted
 
 
@@ -269,10 +274,10 @@ def test_on_resume_during_restore_reshows_relaunch_popup():
     app._is_paused = True
     app._restoring = True
     app._show_relaunch_popup = MagicMock()
-    app._open_user_gate = MagicMock()
+    app._gate = MagicMock()
     EEGMeditationApp.on_resume(app)
     app._show_relaunch_popup.assert_called_once()
-    app._open_user_gate.assert_not_called()
+    app._gate.open.assert_not_called()
 
 
 def test_gate_active_during_schedule_window_before_popup_exists():
@@ -281,7 +286,8 @@ def test_gate_active_during_schedule_window_before_popup_exists():
     app._bottom_nav = MagicMock()
     app._bottom_nav.disabled = True
     app._current_user_id = None
-    assert EEGMeditationApp._gate_active(app) is True
+    app._db = MagicMock()
+    assert make_gate(app).active() is True
 
 
 def test_gate_not_active_when_user_resolved():
@@ -289,7 +295,8 @@ def test_gate_not_active_when_user_resolved():
     app._bottom_nav = MagicMock()
     app._bottom_nav.disabled = False
     app._current_user_id = 3
-    assert EEGMeditationApp._gate_active(app) is False
+    app._db = MagicMock()
+    assert make_gate(app).active() is False
 
 
 def test_gate_back_first_press_warns_second_exits(monkeypatch):
@@ -309,28 +316,31 @@ def test_gate_back_first_press_warns_second_exits(monkeypatch):
 
 def test_open_user_gate_dedupes_but_always_disables_nav(monkeypatch):
     # #7/#8: never stack two gate popups; nav must be disabled even when deduped.
-    import app.ui.app_manager as am
     fake_clock = MagicMock()
-    monkeypatch.setattr(am, "Clock", fake_clock)
+    monkeypatch.setattr(profiles, "Clock", fake_clock)
     app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._db = MagicMock()
     app._bottom_nav = MagicMock()
     app._bottom_nav.disabled = False
-    app._gate_popup = MagicMock()   # a gate popup is already open
-    app._gate_event = None
-    EEGMeditationApp._open_user_gate(app, 0)
+    gate = make_gate(app)
+    gate._gate_popup = MagicMock()   # a gate popup is already open
+    gate._gate_event = None
+    gate.open(0)
     assert app._bottom_nav.disabled is True          # enforced despite dedupe
     fake_clock.schedule_once.assert_not_called()      # no second popup
-    app._gate_popup = None
-    app._gate_event = MagicMock()   # one already scheduled (pre-popup window)
-    EEGMeditationApp._open_user_gate(app, 0)
+    gate._gate_popup = None
+    gate._gate_event = MagicMock()   # one already scheduled (pre-popup window)
+    gate.open(0)
     fake_clock.schedule_once.assert_not_called()      # still no stacking
 
 
 def test_open_user_gate_disables_bottom_nav_and_opens_modal():
     app = EEGMeditationApp.__new__(EEGMeditationApp)  # bypass heavy __init__/build
+    app._db = MagicMock()
     app._bottom_nav = MagicMock()
-    app._show_first_run_popup = MagicMock()
-    EEGMeditationApp._open_user_gate(app, 0)
+    gate = make_gate(app)
+    gate._show = MagicMock()
+    gate.open(0)
     assert app._bottom_nav.disabled is True  # app not usable until a user is chosen
 
 

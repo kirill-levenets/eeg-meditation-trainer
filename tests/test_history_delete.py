@@ -10,6 +10,7 @@ from app.ui.app_manager import EEGMeditationApp
 from app.ui.history_screen import HistoryScreen
 from app.ui.hooks import wire
 from tests._history_flow import make_history_flow
+from tests._profiles import make_profiles
 from tests._recorder import make_recorder
 
 
@@ -295,8 +296,8 @@ def test_deleting_another_profile_marks_history_for_a_rebuild():
     app._db = MagicMock()
     app._db.get_all_users.return_value = [{"id": 1}]
     app._current_user_id = 1
-    app._refresh_profile = MagicMock()
+    app._settings_screen = MagicMock()
     app._history = MagicMock()
-    app._on_user_delete(2)
+    make_profiles(app).on_delete(2)
     app._db.delete_user.assert_called_once_with(2)
     app._history.mark_dirty.assert_called_once()

@@ -73,7 +73,8 @@ Read it before changing that subsystem.
 - `app/storage/` — `database.py` (SQLite, migrations, write lock), `backup.py`, `fileops.py`, `android_saf.py`, `android_share.py`, `csv_export.py`.
   `app/settings/registry.py` — per-user scalar settings.
   `app/ui/backup_flow.py` `BackupFlow` — Settings → Data Backup. → [storage](docs/architecture/storage.md)
-- `app/ui/app_manager.py` — `EEGMeditationApp`: wiring, session start/stop, BT wait, user gate, settings load/save.
+- `app/ui/app_manager.py` — `EEGMeditationApp`: wiring, session start/stop, BT wait, the active profile (`_activate_user`), settings load/save.
+  `app/ui/profiles.py` — `ProfileGate` (the blocking profile picker), `Profiles` (Settings → Profile). → [app-platform](docs/architecture/app-platform.md#user-gate-and-profiles)
 - `app/ui/theme.py`, `app/ui/widgets/` — palette `C`/`F`/`S`, themed widgets, modals, legends, overlays.
   `app/ui/hooks.py` — `Hook`/`wire()`: the handlers the app plugs into a widget. → [ui-theme](docs/architecture/ui-theme.md)
 - `app/ui/raw_eeg_screen.py` — `ScrollableGraphWidget`, the one time-series graph class;

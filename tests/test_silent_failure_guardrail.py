@@ -20,6 +20,7 @@ FEEDBACK_FNS = {
     "report_soft_error", "_toast", "_android_toast", "_info_popup", "_require_user",
     "set_formula_slot_status", "_confirm_program_action", "focus_device_section",
     "update_state", "show_alert", "notify_user", "show_backup_status",
+    "gate.open",  # the blocking profile picker
 }
 MARKER = re.compile(r"#\s*silent-ok:\s*\S")
 
@@ -128,6 +129,12 @@ def test_passes_gate_return_with_feedback():
 def test_respects_silent_ok_marker():
     src = ("class A:\n    def h(self):\n        if not self._current_user_id:\n"
            "            return  # silent-ok: batch save, nothing to persist\n")
+    assert not find_silent_gate_returns(src)
+
+
+def test_passes_gate_return_that_opens_the_profile_gate():
+    src = ("class A:\n    def h(self):\n        if self._current_user_id is None:\n"
+           "            self._gate.open(0)\n            return\n")
     assert not find_silent_gate_returns(src)
 
 

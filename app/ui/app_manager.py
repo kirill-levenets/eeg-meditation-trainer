@@ -50,7 +50,7 @@ from app.settings.registry import (
     SettingsStore,
     stored_value,
 )
-from app.storage.database import DatabaseManager, UserExistsError
+from app.storage.database import DatabaseManager
 from app.ui import render_stats
 from app.ui.backup_flow import BackupFlow
 from app.ui.diary_screen import DiaryScreen
@@ -67,6 +67,7 @@ from app.ui.line_colours import OPTIONS as LINE_OPTIONS
 from app.ui.live_mirror import LiveMirror
 from app.ui.live_session import LiveSessionScreen
 from app.ui.power_exemption import PowerExemption
+from app.ui.profiles import ProfileGate, Profiles
 from app.ui.program_run import ProgramRun
 from app.ui.program_settings import ProgramSettings
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
@@ -84,7 +85,6 @@ from app.ui.theme import (
     F,
     StyledButton,
     ThemedLabel,
-    ThemedPopup,
     confirm_popup,
     fill_background,
     format_count,
@@ -92,7 +92,6 @@ from app.ui.theme import (
     paint_panel,
 )
 from app.ui.widgets.loading_overlay import LoadingOverlay
-from app.ui.widgets.user_picker import UserPickerForm
 
 
 def resolve_startup_user(db) -> Optional[int]:
@@ -500,6 +499,16 @@ class EEGMeditationApp(App):
         self._detail = SessionDetailFlow(
             self._db, self._diary_screen, self._history_screen, self._sm, self._graph_series,
             user_id=lambda: self._current_user_id, on_main=self._on_main, switch_screen=self._switch_screen)
+        self._gate = ProfileGate(
+            self._db, self._bottom_nav, self._sm, user_id=lambda: self._current_user_id, activate=self._activate_user,
+            refresh_profiles=lambda: self._profiles.refresh(), scan_for_new_profile=self._headset.scan_for_new_profile,
+            offer_power_exemption=self._power.offer_once)
+        self._profiles = Profiles(
+            self._db, self._settings_screen, self._gate, user_id=lambda: self._current_user_id,
+            activate=self._activate_user, deactivate=self._deactivate_user, on_deleted=self._on_profile_deleted,
+            session_live=self._session_pipeline_live, discard_running_session=self._discard_running_session,
+            refused_while_session_runs=self._refused_while_session_runs, save_settings=self._save_user_settings,
+            running_session_id=self._running_session_id)
         self._last_back_time = 0.0  # for double-back-to-exit on the root screen
         float_root.add_widget(root)
         self._loading_overlay = LoadingOverlay()
@@ -510,7 +519,7 @@ class EEGMeditationApp(App):
         # After _bind_callbacks (it sets the fields get() snapshots as defaults), before any user load.
         self._build_settings_store()
         resolved_user = self._restore_last_user()
-        self._refresh_profile()
+        self._profiles.refresh()
 
         # Hard user gate: the app is never usable without a resolved concrete
         # user. Gate on "did we resolve a user", NOT on whether the users table
@@ -521,7 +530,7 @@ class EEGMeditationApp(App):
         # is a Popup, not a Screen, because a TextInput inside a
         # Screen doesn't get keyboard focus on some platforms.
         if resolved_user is None:
-            self._open_user_gate(0.5)
+            self._gate.open(0.5)
 
         return float_root
 
@@ -598,10 +607,10 @@ class EEGMeditationApp(App):
             on_audio_metric_change=self._on_audio_metric_change,
             on_audio_formula_index=self._on_audio_formula_index,
             on_theme_change=self._on_theme_change,
-            on_profile_switch=self._on_user_switch,
-            on_profile_create=self._on_user_create,
-            on_profile_delete=self._on_user_delete,
-            session_counter=self._count_sessions_for_user,
+            on_profile_switch=self._profiles.on_switch,
+            on_profile_create=self._profiles.on_create,
+            on_profile_delete=self._profiles.on_delete,
+            session_counter=self._profiles.count_sessions,
         )
         wire(
             self._settings_screen.audio,
@@ -695,7 +704,7 @@ class EEGMeditationApp(App):
 
         # Data Backup section
         self._backup_flow = BackupFlow(
-            self._db, self._settings_screen, user_name=self._current_user_name,
+            self._db, self._settings_screen, user_name=self._profiles.current_name,
             save_settings=self._save_user_settings, checkpoint=self._checkpoint_or_report,
             refused_while_session_runs=self._refused_while_session_runs, confirm=self._confirm_action,
             info=self._info_popup, on_db_replaced=self._on_db_replaced,
@@ -715,6 +724,16 @@ class EEGMeditationApp(App):
         self._load_user_settings(uid)
         self._history.mark_dirty()  # History still lists the previous profile's sessions
 
+    def _deactivate_user(self) -> None:
+        """No active profile (its own was deleted, the gate opens next): its programs leave the UI now."""
+        self._current_user_id = None
+        self._program_settings.refresh_saved()
+
+    def _on_profile_deleted(self, uid: int) -> None:
+        if uid == self._live_display_uid:  # its session went with it: the card has nothing left to save
+            self._drop_shown_session(keep_notes=False)
+        self._history.mark_dirty()
+
     def _restore_last_user(self) -> Optional[int]:
         """Restore the last selected user; return the resolved uid, or None when
         the app must prompt (no/stale/corrupt last_user_id). build() opens the
@@ -725,19 +744,6 @@ class EEGMeditationApp(App):
         self._activate_user(uid)
         logger.info(f"Restored last user id={uid}")
         return uid
-
-    def _open_user_gate(self, delay: float = 0.0) -> None:
-        """Enter the hard user gate: disable the bottom nav and open the blocking
-        selection modal. Single source for build() / on_resume / self-delete so
-        the 'app unusable without a user' enforcement can't drift between them."""
-        # Disable nav BEFORE any dedupe return — the gate state must be enforced
-        # even when a popup is already open/scheduled.
-        self._bottom_nav.disabled = True
-        if getattr(self, "_gate_popup", None) is not None:
-            return  # a gate popup is already open — don't stack another
-        if getattr(self, "_gate_event", None) is not None:
-            return  # one is already scheduled (pre-popup window) — don't stack
-        self._gate_event = Clock.schedule_once(self._show_first_run_popup, delay)
 
     def _handle_gate_back(self) -> bool:
         """Back/Esc while gated: never fall through into the app, but the user must
@@ -754,108 +760,6 @@ class EEGMeditationApp(App):
         self._last_back_time = now
         self._toast("Press back again to exit")
         return True
-
-    def _gate_active(self) -> bool:
-        """True while the app is gated on user selection — nav disabled, no concrete
-        user. Covers both the popup-open state and the schedule window before the
-        popup exists, so the gate is un-escapable throughout."""
-        nav = getattr(self, "_bottom_nav", None)
-        return bool(nav is not None and nav.disabled and not getattr(self, "_current_user_id", None))
-
-    def _reopen_gate_if_unresolved(self) -> None:
-        """After a gate create/pick attempt, re-open the gate if no concrete user
-        ended up set (invalid name, or a stale/deleted profile row) — otherwise the
-        popup is gone, nav stays disabled, and the app is stranded with no user."""
-        if not self._current_user_id:
-            self._refresh_profile()  # drop any stale row from the picker list
-            self._open_user_gate(0)
-
-    def _show_first_run_popup(self, dt) -> None:
-        """Show a name-entry popup on first run (no users in DB).
-
-        After uninstall→reinstall on Android, the DB may persist with
-        existing profiles — UserPickerForm surfaces them so the user can
-        adopt instead of creating a duplicate name.
-        """
-        self._gate_event = None  # the scheduled open is now firing
-        if getattr(self, "_gate_popup", None) is not None:
-            return  # a gate popup is already open — never stack a second modal
-
-        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
-
-        welcome = ThemedLabel(
-            text="Welcome! Create a profile or pick an existing one:",
-            font_size=F.BODY, color=C.TEXT,
-            size_hint_y=None, height=dp(48),
-            halign="center",
-        )
-        welcome.bind(size=welcome.setter("text_size"))
-        content.add_widget(welcome)
-
-        popup = ThemedPopup(
-            title="Select Profile",
-            content=content,
-            size_hint=(0.9, None),
-            auto_dismiss=False,
-        )
-        # Tracked so _on_keyboard can make the gate un-escapable (back/Esc must
-        # not dismiss it or exit the app out from under an unresolved user).
-        self._gate_popup = popup
-        # A dismissal from ANY path clears the handle, so a stale non-None
-        # _gate_popup can never block re-gating forever.
-        popup.bind(on_dismiss=lambda *_a: setattr(self, "_gate_popup", None))
-
-        def _on_create(name: str) -> None:
-            self._gate_popup = None
-            popup.dismiss()
-            self._complete_first_run(name)
-            self._reopen_gate_if_unresolved()
-
-        def _on_pick(user_id: int) -> None:
-            self._gate_popup = None
-            popup.dismiss()
-            self._on_pick_existing_user(user_id)
-            self._reopen_gate_if_unresolved()
-
-        form = UserPickerForm(
-            on_create=_on_create,
-            on_pick_existing=_on_pick,
-        )
-        existing_users = self._db.get_all_users()
-        form.populate_users(existing_users)
-        content.add_widget(form)
-        popup.open()
-
-    def _complete_first_run(self, user_name: str) -> None:
-        """First-run popup: a typed name creates that profile, in mock mode until a headset is picked; a name that
-        exists picks that profile instead."""
-        if not user_name or len(user_name.strip()) < 2:
-            logger.warning(f"First run with invalid name: '{user_name}', ignoring")
-            return
-        try:
-            uid = self._db.create_user(user_name)
-        except UserExistsError as e:
-            logger.info(f"First run: '{e.name}' exists, picking it (id={e.user_id})")
-            self._on_pick_existing_user(e.user_id)
-            return
-        except sqlite3.Error as e:  # the popup's caller reopens the gate: no profile was made
-            report_soft_error("user_create_failed", f"The profile '{user_name}' could not be created: {e}")
-            return
-        self._db.set_user_setting(uid, "use_mock", "True")  # before its load, which applies it
-        self._activate_user(uid)
-        self._headset.scan_for_new_profile()
-        logger.info("First run: using mock device until a MindWave is found")
-        self._finish_first_run(f"user '{user_name}' created")
-
-    def _finish_first_run(self, what: str) -> None:
-        """Leave the first-run popup for the Session screen, the nav usable again."""
-        self._bottom_nav.opacity = 1
-        self._bottom_nav.disabled = False
-        self._refresh_profile()
-        self._sm.current = "live_session"
-        self._bottom_nav.active_tab = "session"
-        self._power.offer_once()
-        logger.info(f"First run complete: {what}")
 
     def _on_nav_tab(self, tab_key: str) -> None:
         """Handle bottom nav tab press."""
@@ -1720,7 +1624,7 @@ class EEGMeditationApp(App):
         # The mandatory user-selection gate: back/Esc never falls through INTO the
         # app (covers the pre-popup schedule window too), but double-press exits —
         # a fresh-install user who declines to create a profile must be able to leave.
-        if self._gate_active():
+        if self._gate.active():
             return self._handle_gate_back()
         # An open Popup/ModalView dismisses itself on escape — let it.
         if any(isinstance(c, ModalView) for c in Window.children):
@@ -2056,33 +1960,7 @@ class EEGMeditationApp(App):
         first checkpoint, with stats as of that checkpoint (the ending marks History dirty)."""
         return self._recorder.session_id if self._session_pipeline_live() else None
 
-    def _on_user_switch(self, user_id: int) -> None:
-        """Switch the active user profile."""
-        # The running session owns the loaded settings and saves under its own profile.
-        if user_id != self._current_user_id and self._refused_while_session_runs("switching profiles"):
-            self._refresh_profile()  # snap the picker back to the active profile
-            return
-        # Save current user's settings before switching
-        self._save_user_settings()
-        user = self._db.get_user(user_id)
-        name = user["name"] if user else "Unknown"
-        self._activate_user(user_id)
-        logger.info(f"Switched to user: {name} (id={user_id})")
-        self._refresh_profile()
-
-    def _count_sessions_for_user(self, user_id: int) -> int | None:
-        """The sessions History lists for the profile, or None (a row without its count) when the read fails."""
-        try:
-            return self._db.count_sessions(user_id, self._running_session_id())
-        except sqlite3.Error:
-            logger.exception(f"Profile {user_id}'s sessions couldn't be counted")
-            return None
-
     # --- Data Backup (app/ui/backup_flow.py) ---
-
-    def _current_user_name(self) -> str | None:
-        user = self._db.get_user(self._current_user_id) if self._current_user_id else None
-        return user["name"] if user else None
 
     def _on_db_replaced(self) -> None:
         """A restore replaced the database file: on_stop/on_pause must not flush settings over it; relaunch."""
@@ -2107,63 +1985,6 @@ class EEGMeditationApp(App):
 
         ok.bind(on_release=_quit)
         popup.open()
-
-    def _on_pick_existing_user(self, user_id: int) -> None:
-        """First-run popup: an existing profile picked, activated as it is (its own headset and mode)."""
-        if not self._db.get_user(user_id):
-            logger.warning(f"_on_pick_existing_user: user {user_id} not found")
-            return
-        self._activate_user(user_id)
-        self._finish_first_run(f"user {user_id} picked")
-
-    def _on_user_create(self, name: str) -> None:
-        """Create a new user and refresh the profile list.
-
-        Routes UserExistsError to the active picker form (Settings) for
-        inline duplicate handling.
-        """
-
-        try:
-            self._db.create_user(name)
-        except UserExistsError as e:
-            form = getattr(self._settings_screen, "_user_picker_form", None)
-            if form is not None:
-                form.show_duplicate_error(user_id=e.user_id, name=e.name)
-            return
-        except Exception as e:
-            report_soft_error(
-                "user_create_failed", f"Could not create user '{name}': {e}",
-            )
-            return
-        self._refresh_profile()
-
-    def _on_user_delete(self, user_id: int) -> None:
-        """Delete a user profile. Deleting the ACTIVE profile drops the app into
-        the no-user state, so re-enter the hard gate instead of leaving the app
-        usable with nothing selected."""
-        deleted_active = self._current_user_id == user_id
-        if deleted_active and self._session_pipeline_live():
-            # Discard the running (or connecting) session — otherwise the tick
-            # thread keeps running and writes an orphaned session, and saving it
-            # under a profile that's about to be deleted just orphans it anyway.
-            self._discard_running_session()
-        self._db.delete_user(user_id)
-        if user_id == self._live_display_uid:  # its session went with it: the card has nothing left to save
-            self._drop_shown_session(keep_notes=False)
-        self._history.mark_dirty()
-        remaining = self._db.get_all_users()
-        # Re-enter the gate when no usable active user is left: the active profile was deleted, or no profile is left
-        # at all (the app is never usable with zero users).
-        if deleted_active or not remaining:
-            self._current_user_id = None
-            self._refresh_profile()
-            self._program_settings.refresh_saved()  # drop the deleted user's programs from the UI now
-            self._open_user_gate(0)
-        else:
-            self._refresh_profile()
-
-    def _refresh_profile(self) -> None:
-        self._settings_screen.populate_users(self._db.get_all_users(), self._current_user_id)
 
     def _build_settings_store(self) -> None:
         """Build the settings registry; call once in build() before any user load, as get() snapshots defaults."""
@@ -2329,7 +2150,7 @@ class EEGMeditationApp(App):
             logger.exception("flush_pre_app_errors failed")
         render_stats.start()
         self._power.refresh()
-        if not self._gate_active():  # a first run offers it once the profile is picked (_finish_first_run)
+        if not self._gate.active():  # a first run offers it once the profile is picked (ProfileGate._finish_first_run)
             Clock.schedule_once(lambda _dt: self._power.offer_once(), 1.0)
 
     def on_pause(self) -> bool:
@@ -2377,10 +2198,9 @@ class EEGMeditationApp(App):
         # in an unset state and no gate is already up, re-enter it rather than
         # resume usable with no user.
         # getattr guards keep this safe if on_resume fires before build() runs.
-        if (getattr(self, "_bottom_nav", None) is not None
-                and getattr(self, "_current_user_id", None) is None
-                and getattr(self, "_gate_popup", None) is None):
-            self._open_user_gate(0)
+        gate = getattr(self, "_gate", None)
+        if gate is not None and self._current_user_id is None and not gate.shown():
+            gate.open(0)
             return
         try:
             Clock.schedule_once(lambda dt: self._refresh_ui_after_resume(), 0)

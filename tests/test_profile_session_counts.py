@@ -8,6 +8,7 @@ from app.ui.app_manager import EEGMeditationApp
 from app.ui.hooks import wire
 from app.ui.settings_screen import SettingsScreen
 from tests._history_flow import make_history_flow
+from tests._profiles import make_profiles
 
 
 def _rows(screen) -> set[str]:
@@ -54,7 +55,7 @@ def test_a_failed_count_shows_the_profile_without_one_and_the_end_card_still_ope
     app._recorder, app._waiting_for_bt, app._ticker = MagicMock(session_id=9), False, MagicMock(running=False)
     app._session_manager.state = SessionState.FINISHED
     screen = SettingsScreen()
-    wire(screen, session_counter=app._count_sessions_for_user)
+    wire(screen, session_counter=make_profiles(app).count_sessions)
     app._settings_screen = screen
     screen.populate_users([{"id": 1, "name": "Mock"}], 1)
     app._finalize_stop_ui({"duration": 96}, 9)
@@ -72,9 +73,10 @@ def test_a_running_sessions_row_is_counted_once_it_ends(tmp_path):
         app._db, app._waiting_for_bt, app._ticker = db, False, MagicMock(running=False)
         app._session_manager, app._recorder = MagicMock(), MagicMock(session_id=running)
         app._session_manager.state = SessionState.RUNNING
-        assert app._count_sessions_for_user(uid) == 1 == len(make_history_flow(app).finished_sessions(uid))
+        profiles = make_profiles(app)
+        assert profiles.count_sessions(uid) == 1 == len(make_history_flow(app).finished_sessions(uid))
         app._session_manager.state = SessionState.IDLE
-        assert app._count_sessions_for_user(uid) == 2
+        assert profiles.count_sessions(uid) == 2
     finally:
         db.close()
 

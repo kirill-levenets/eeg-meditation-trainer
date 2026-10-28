@@ -8,31 +8,32 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 - **Hard user gate:** the app is never usable with no active user.
   `build()` gates on `resolve_startup_user(db)` (the resolved uid, or `None`; through `_restore_last_user`), not on whether users exist:
   after a reinstall, a restored DB, a deleted active profile or a corrupt `last_user_id`, users exist but none is current.
-  `_open_user_gate(delay)` is its one entry (build, `on_resume`, a profile delete, a failed gate pick):
-  it disables the bottom nav synchronously (no cold-start tap window) and opens the blocking `_show_first_run_popup` (`self._gate_popup`, made un-escapable in `_on_keyboard`).
+  The gate is `ProfileGate` (`app/ui/profiles.py`, the app's `_gate`); `ProfileGate.open(delay)` is its one entry (build, `on_resume`, a profile delete, a failed gate pick):
+  it disables the bottom nav synchronously (no cold-start tap window) and opens the blocking picker (`_show`, its `_gate_popup` made un-escapable in `_on_keyboard`).
   `on_resume` re-enters the gate if the process resumed unset; deleting the active profile, or the last one, re-enters it too.
   Per-user handlers use `_require_user(action)` (surfaces a message, returns the uid or `None`) instead of a bare silent `return`:
   `ProgramSettings.on_save`/`on_load`/`on_delete`, `FormulaSettings.on_load`/`on_delete`, the series picker's saved-formula Choose;
   in `ProgramSettings` an empty name and a full library (`_save`) surface a message too.
   History/Diary go through `history_flow.sessions_for_view(db, uid)`: the active profile's sessions, and `[]` for an **unset** user, so `_current_user_id=None` never leaks every profile's sessions (`get_all_sessions(None)` lists them all).
   **Every path that picks a profile goes through `_activate_user(uid)`** (sets the id, stores `last_user_id`, loads the settings):
-  startup restore, the first-run popup's create (`_complete_first_run`) or pick (`_on_pick_existing_user`), and `_on_user_switch`.
+  startup restore, the gate's create (`ProfileGate.complete_first_run`) or pick (`ProfileGate.pick_existing`), and Settings' switch (`Profiles.on_switch`).
   An activation that skipped the load would leave the previous profile's (or the default) values in memory under the new one, for the next flush (e.g. the pre-backup save) to write over its stored settings.
   The headset is loaded the same way: the profile's own or none, never the last profile's (`Headset.load`, [eeg-bluetooth](eeg-bluetooth.md#connection)).
-  `_on_user_switch` to another profile is refused through `_refused_while_session_runs` while `_session_pipeline_live()` ("Session in progress", the picker snapped back via `_refresh_profile`):
+  `Profiles.on_switch` to another profile is refused through `_refused_while_session_runs` while `_session_pipeline_live()` ("Session in progress", the picker snapped back via `Profiles.refresh`):
   the running session owns its loaded timer/threshold/sound settings and saves under the profile it started with.
 - `DatabaseManager.create_user` raises `UserExistsError(user_id, name)` on a duplicate.
   The first-run popup and Settings → User Profile use the shared `UserPickerForm` widget (`app/ui/widgets/user_picker.py`);
-  its "Use existing 'X'" button goes through `_on_pick_existing_user(user_id)` at the gate, and in Settings switches profile through `_on_user_switch`.
+  its "Use existing 'X'" button goes through `ProfileGate.pick_existing(user_id)` at the gate, and in Settings switches profile through `Profiles.on_switch`.
+  A profile's delete (`Profiles.on_delete`) leaves its session to the app (`_on_profile_deleted`) and, with no active profile left, clears it (`_deactivate_user`) and opens the gate.
   The picked profile is activated by id as it is (`_activate_user`: its own headset and mock/real mode); typing an existing name at the gate picks it the same way, so first run never overwrites a profile's settings.
-  Each row reads its profile's session count as it is drawn (`session_counter`: `count_sessions`, one `COUNT(*)` leaving out `_running_session_id()`, so the sessions History lists);
+  Each row reads its profile's session count as it is drawn (`session_counter`: `Profiles.count_sessions` → `count_sessions`, one `COUNT(*)` leaving out `_running_session_id()`, so the sessions History lists);
   a failed read logs and shows the row without its count.
   Settings draws the rows again each time it is entered, and at a session's end when it is the screen shown (a timer can end a session there).
 
 ## Android back button
 
 - Android hardware back button (`AppManager._on_keyboard`, bound to `Window.on_keyboard`): it consumes key 27 (returns `True`) so Kivy's default exit-on-escape never fires, then routes by precedence.
-  While the user gate is active (`_gate_active`, incl. the pre-popup schedule window), `_handle_gate_back` applies double-press-to-exit: never into the app, but a fresh-install user who declines to create a profile can still leave.
+  While the user gate is active (`ProfileGate.active`, incl. the pre-popup schedule window), `_handle_gate_back` applies double-press-to-exit: never into the app, but a fresh-install user who declines to create a profile can still leave.
   Else an open `Popup`/`ModalView` is left to dismiss itself (the handler returns `False`);
   else an open fullscreen graph overlay closes (`GraphFullscreen.close()`, which runs its stored `_restore` closure);
   else the Diary detail goes back (`SessionDetailFlow.on_diary_back`);
@@ -133,7 +134,7 @@ CI builds start clean and are unaffected.
   The user-side lever is Battery › App launch › Manage manually.
 - **`PowerExemption`** (`app/ui/power_exemption.py`, the app's `_power`) does what the app can: it reads Android's battery optimisation (`PowerManager.isIgnoringBatteryOptimizations`) and the maker (`Build.MANUFACTURER`).
   A maker's own setting has no API, so for `AGGRESSIVE_MAKERS` (dontkillmyapp's 3-of-5 or worse) it can only explain and open a screen.
-  `offer_once` shows the alert at the first start with something to allow, after the profile gate (from `on_start`, or from `_finish_first_run` on a first run), and records `power_alert_shown` app-wide: it is the phone's setting.
+  `offer_once` shows the alert at the first start with something to allow, after the profile gate (from `on_start`, or from `ProfileGate._finish_first_run` on a first run), and records `power_alert_shown` app-wide: it is the phone's setting.
   A phone with nothing to allow isn't marked, so a lost exemption still gets the alert.
   `refresh` keeps Settings → Device's row (`DeviceSection.show_power_state`, attached only when Android answers) current at every start and resume, since the user may change it in the phone's settings.
 - **Screens it opens**: the first that opens (`android_jni.open_first`), on Android's UI thread; none (or a JNI failure building them) → a toast.

@@ -10,6 +10,7 @@ from app.metrics.formula_slots import FORMULA_KEYS, FormulaSlots
 from app.ui.app_manager import EEGMeditationApp
 from tests._backup_flow import make_flow
 from tests._formula_settings import make_formula_settings
+from tests._profiles import make_profiles
 from tests._program_run import make_run
 
 
@@ -129,13 +130,13 @@ def test_loading_a_saved_formula_into_the_driving_slot_is_refused(app, monkeypat
 
 
 @pytest.mark.parametrize("call, doing", [
-    (lambda a: a._on_user_switch(7), "switching profiles"),
+    (lambda a: make_profiles(a).on_switch(7), "switching profiles"),
     (lambda a: make_flow(refused_while_session_runs=a._refused_while_session_runs).on_restore_pressed(),
      "restoring a backup"),
 ])
 def test_the_other_session_locks_say_the_same(app, call, doing):
     app._current_user_id = 3
-    app._refresh_profile = MagicMock()
+    app._db = MagicMock()  # the profile list a refused switch snaps back to
     call(app)
     assert app._info_popup.call_args.args == ("Session in progress", f"Stop the current session before {doing}.")
 

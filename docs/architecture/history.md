@@ -100,7 +100,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Any other ScrollView whose content changes while the user may be scrolling needs the same override.
   The day filter has one owner, `_set_filter(date | None)` (the filtered day, both charts' highlight, the Show-all button).
   A reload of the same profile keeps it (`load_sessions(..., keep_filter=)`, decided by `HistoryFlow._history_view`); another profile clears it.
-  `_activate_user` and `_on_user_delete` mark History dirty (`HistoryFlow.mark_dirty`).
+  `_activate_user` and a profile's delete (`_on_profile_deleted`) mark History dirty (`HistoryFlow.mark_dirty`).
   `_sync_date_row` lays out the list heading's row: Show All attached only while a day is picked, Select only outside select mode, each detached otherwise;
   a button hidden in place would keep its room beside the heading, which then wraps, and its taps.
   `_show_sessions` sets `_shown` even for an empty list (then `_empty_label` shows): a stale `_shown` would let Select show and export the previous profile's sessions.

@@ -31,7 +31,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `adopt` makes the single paired device matching the `mindwave`/`neurosky` name filter (`headset.filter_mindwave`) the profile's headset, unless it has one, through `on_select`, which saves it to the profile;
   Settings → Device then lists the matches, or every paired device when none matches.
   A profile load scans for a real-mode profile without a headset, so with one MindWave paired every profile ends up with it saved and a restart agrees; a profile on Mock Data doesn't scan.
-  A new profile (`_complete_first_run`) is saved on the mock, loaded, then scanned for (`scan_for_new_profile`): a MindWave found takes it off the mock, the single one selected; none leaves it on the mock (demo mode).
+  A new profile (`ProfileGate.complete_first_run`) is saved on the mock, loaded, then scanned for (`scan_for_new_profile`): a MindWave found takes it off the mock, the single one selected; none leaves it on the mock (demo mode).
   A scan's result does nothing when it ends after another profile loaded, a headset was picked, the mode changed, another profile scan began (each moves `Headset._scan_seq`) or a session started (`session_live`):
   a launch's scan used to pick a headset under a just-started session (a "Session in progress" refusal) or open Settings in its middle.
   Settings → Device's Scan (`on_scan`) and Copy Diagnostics list the paired devices through `find_paired` too:

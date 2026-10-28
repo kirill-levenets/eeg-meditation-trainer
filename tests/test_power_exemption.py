@@ -11,6 +11,7 @@ import app.ui.power_exemption as pe
 from app.ui.power_exemption import PowerExemption, advice, maker_screen
 from app.ui.settings_screen import SettingsScreen
 from app.ui.theme import StyledButton
+from tests._profiles import make_gate
 
 
 class _Db:
@@ -169,12 +170,13 @@ def test_the_app_offers_it_at_start_or_once_the_first_run_picks_a_profile(monkey
     scheduled = []
     monkeypatch.setattr(am.Clock, "schedule_once", lambda fn, _timeout=0: scheduled.append(fn))
     gated = [True]
-    monkeypatch.setattr(app, "_gate_active", lambda: gated[0])
+    app._gate = MagicMock()
+    app._gate.active.side_effect = lambda: gated[0]
     app.on_start()
     assert scheduled == []  # the profile popup is up: not over it
-    for attr in ("_bottom_nav", "_refresh_profile", "_sm", "_headset"):
+    for attr in ("_db", "_bottom_nav", "_profiles", "_sm", "_headset"):
         setattr(app, attr, MagicMock())
-    app._finish_first_run("test")
+    make_gate(app)._finish_first_run("test")
     app._power.offer_once.assert_called_once()
     gated[0] = False
     app.on_start()

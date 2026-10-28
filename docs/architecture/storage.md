@@ -92,7 +92,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   the SAF workers catch broadly (pyjnius boundary); both `report_soft_error`.
   Desktop uses `ThemedFileChooser` (a Kivy `FileChooserListView`) save/open popups.
   Restore **refuses to run while a session is active**
-  — running, paused, OR still in the BT-connect wait (`_session_pipeline_live()`: state RUNNING/PAUSED, `_waiting_for_bt`, or a live tick thread; the same window `_on_user_delete` discards on active-profile delete).
+  — running, paused, OR still in the BT-connect wait (`_session_pipeline_live()`: state RUNNING/PAUSED, `_waiting_for_bt`, or a live tick thread; the same window `Profiles.on_delete` discards on active-profile delete).
   Checked at `BackupFlow.on_restore_pressed` and again in `_do_restore_and_restart` (the DB shutdown would silently drop the session).
   `_confirm_restore` validates the file before its confirm;
   `_do_restore_and_restart` `mark_shutting_down()`s + closes the live DB, and `restore_backup` copies the file over `APP.DB_PATH`;

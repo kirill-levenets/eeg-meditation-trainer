@@ -9,6 +9,7 @@ from app.ui.app_manager import EEGMeditationApp
 from app.ui.live_mirror import LiveMirror
 from app.ui.live_session import LiveSessionScreen
 from tests._history_flow import make_history_flow
+from tests._profiles import make_profiles
 from tests._recorder import make_recorder
 
 METRICS = {"shamatha_score": 71, "distraction": 22, "sinking": 9, "native_attention": 55, "native_meditation": 63}
@@ -160,21 +161,21 @@ def _deleting_app(shown) -> EEGMeditationApp:
     app._db.get_all_users.return_value = [{"id": 2}]
     app._current_user_id = 2
     app._live_display_uid = shown
-    for name in ("_session_pipeline_live", "_history", "_refresh_profile", "_program_settings",
-                 "_open_user_gate", "_drop_shown_session"):
+    for name in ("_session_pipeline_live", "_history", "_settings_screen", "_program_settings", "_gate",
+                 "_drop_shown_session"):
         setattr(app, name, MagicMock(return_value=False))
     return app
 
 
 def test_deleting_the_shown_profile_drops_its_session_without_saving_notes():
     app = _deleting_app(shown=3)
-    app._on_user_delete(3)
+    make_profiles(app).on_delete(3)
     app._drop_shown_session.assert_called_once_with(keep_notes=False)
 
 
 def test_deleting_another_profile_leaves_the_shown_session():
     app = _deleting_app(shown=2)
-    app._on_user_delete(3)
+    make_profiles(app).on_delete(3)
     app._drop_shown_session.assert_not_called()
 
 
