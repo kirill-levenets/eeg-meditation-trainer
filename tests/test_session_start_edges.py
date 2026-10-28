@@ -147,7 +147,7 @@ def test_deleting_the_profile_in_the_frame_the_session_starts_leaves_no_audio_pl
     app._recorder = make_recorder(app)
     app._recorder._buffer = []
     app._mirror = MagicMock()
-    app._mark_history_dirty = MagicMock()
+    app._history = MagicMock()
     app._discard_running_session()
     _run_queued(app)
     app._audio.start.assert_not_called()

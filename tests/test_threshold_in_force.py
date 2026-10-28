@@ -262,7 +262,7 @@ def test_the_detail_draws_a_sessions_threshold_steps(app):  # noqa: F811
                                           "score_metric_name": "Shamatha", "avg_score": 60.0,
                                           "score_targets": "[70, 85]"},
                                    _rows([70, 70, 85, 85]), user_id=a._current_user_id, session_name="s")
-    a._on_session_select(sid)
+    a._detail.on_session_select(sid)
     workers.pop()()
     _frames(3)
     graph = a._diary_screen._metrics_graph
@@ -272,7 +272,7 @@ def test_the_detail_draws_a_sessions_threshold_steps(app):  # noqa: F811
 
 def test_a_session_saved_before_the_targets_keeps_its_line(app):  # noqa: F811
     a, workers = app
-    a._on_session_select(a.sessions["A"])  # rows without targets, threshold_used 70
+    a._detail.on_session_select(a.sessions["A"])  # rows without targets, threshold_used 70
     workers.pop()()
     _frames(3)
     graph = a._diary_screen._metrics_graph
@@ -334,11 +334,11 @@ def test_an_old_session_opened_after_a_new_one_does_not_keep_its_steps(app):  # 
     a, workers = app
     sid = a._db.checkpoint_session(None, {"duration": 2, "threshold_used": 70, "score_targets": "[70, 85]"},
                                    _rows([70, 85]), user_id=a._current_user_id, session_name="s")
-    a._on_session_select(sid)
+    a._detail.on_session_select(sid)
     workers.pop()()
     _frames(3)
-    a._on_diary_back()
-    a._on_session_select(a.sessions["A"])
+    a._detail.on_diary_back()
+    a._detail.on_session_select(a.sessions["A"])
     workers.pop()()
     _frames(3)
     assert a._diary_screen._metrics_graph._threshold_steps is None

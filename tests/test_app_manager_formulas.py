@@ -8,6 +8,7 @@ from app.metrics.formula_slots import FORMULA_KEYS, FormulaSlots, read_active
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from tests._formula_settings import make_formula_settings
+from tests._history_flow import make_detail_flow
 from tests._program_run import make_run
 
 
@@ -147,6 +148,7 @@ class TestSessionFormulaSaveAndReplay(unittest.TestCase):
         self.app._audio_metric_key = "shamatha_score"
         self.app._live_screen = types.SimpleNamespace(graph=_FakeGraph())
         self.app._diary_screen = _StubDiary()
+        self.detail = make_detail_flow(self.app)
 
     def tearDown(self):
         self.app._db.close()
@@ -182,7 +184,7 @@ class TestSessionFormulaSaveAndReplay(unittest.TestCase):
         # Mutate today's slot — replay must ignore it and use the stored def.
         self.app._formulas.evaluators[0].set_formula("delta")
         session = self.app._db.get_session(sid)
-        self.app._inject_session_formulas(sid, session)
+        self.detail.inject_session_formulas(sid, session)
         injected = self.app._diary_screen.series[FORMULA_KEYS[0]]
         from app.metrics.custom_formula import CustomFormulaEvaluator
         ev = CustomFormulaEvaluator()
@@ -199,7 +201,7 @@ class TestSessionFormulaSaveAndReplay(unittest.TestCase):
         self.app._formulas.evaluators[2].set_formula("alpha1")
         sid = self._seed_session()
         session = self.app._db.get_session(sid)
-        self.app._inject_session_formulas(sid, session)
+        self.detail.inject_session_formulas(sid, session)
         series = self.app._diary_screen.series
         self.assertIn(FORMULA_KEYS[0], series)
         self.assertIn(FORMULA_KEYS[2], series)
@@ -210,14 +212,14 @@ class TestSessionFormulaSaveAndReplay(unittest.TestCase):
     def test_replay_resets_stale_names_for_empty_slots(self):
         sid = self._seed_session()  # no valid slots
         session = self.app._db.get_session(sid)
-        self.app._inject_session_formulas(sid, session)
+        self.detail.inject_session_formulas(sid, session)
         # All custom keys reset to defaults so a prior session's name can't leak.
         self.assertEqual(self.app._diary_screen.names[FORMULA_KEYS[1]], "Custom 2")
 
     def test_replay_no_formulas_is_empty(self):
         sid = self._seed_session()  # no valid slots
         session = self.app._db.get_session(sid)
-        self.app._inject_session_formulas(sid, session)
+        self.detail.inject_session_formulas(sid, session)
         self.assertEqual(self.app._diary_screen.series, {})
 
     def test_replay_tolerates_malformed_json(self):
@@ -225,7 +227,7 @@ class TestSessionFormulaSaveAndReplay(unittest.TestCase):
             {"duration": 1}, user_id=self.app._current_user_id, custom_formulas="{not json"
         )
         session = self.app._db.get_session(sid)
-        self.app._inject_session_formulas(sid, session)  # must not raise
+        self.detail.inject_session_formulas(sid, session)  # must not raise
         self.assertEqual(self.app._diary_screen.series, {})
 
 

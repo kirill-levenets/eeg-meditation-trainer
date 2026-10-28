@@ -14,7 +14,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Per-user handlers use `_require_user(action)` (surfaces a message, returns the uid or `None`) instead of a bare silent `return`:
   `ProgramSettings.on_save`/`on_load`/`on_delete`, `FormulaSettings.on_load`/`on_delete`, the series picker's saved-formula Choose;
   in `ProgramSettings` an empty name and a full library (`_save`) surface a message too.
-  History/Diary go through `sessions_for_view(db, uid)`: the active profile's sessions, and `[]` for an **unset** user, so `_current_user_id=None` never leaks every profile's sessions (`get_all_sessions(None)` lists them all).
+  History/Diary go through `history_flow.sessions_for_view(db, uid)`: the active profile's sessions, and `[]` for an **unset** user, so `_current_user_id=None` never leaks every profile's sessions (`get_all_sessions(None)` lists them all).
   **Every path that picks a profile goes through `_activate_user(uid)`** (sets the id, stores `last_user_id`, loads the settings):
   startup restore, the first-run popup's create (`_complete_first_run`) or pick (`_on_pick_existing_user`), and `_on_user_switch`.
   An activation that skipped the load would leave the previous profile's (or the default) values in memory under the new one, for the next flush (e.g. the pre-backup save) to write over its stored settings.
@@ -35,7 +35,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   While the user gate is active (`_gate_active`, incl. the pre-popup schedule window), `_handle_gate_back` applies double-press-to-exit: never into the app, but a fresh-install user who declines to create a profile can still leave.
   Else an open `Popup`/`ModalView` is left to dismiss itself (the handler returns `False`);
   else an open fullscreen graph overlay closes (`GraphFullscreen.close()`, which runs its stored `_restore` closure);
-  else the Diary detail goes back (`_on_diary_back`);
+  else the Diary detail goes back (`SessionDetailFlow.on_diary_back`);
   else any screen but the Session screen switches to it (`_switch_screen("live_session")`, which syncs the bottom-nav highlight);
   else, on the Session screen, **a second press within 2 s exits** (`_exit_on_second_back`, `_last_back_time`), the first showing the in-app `_toast`.
   While the app is leaving (`_leaving`), `_toast` shows the native `_android_toast` (`run_on_ui_thread` + pyjnius `Toast`) instead.

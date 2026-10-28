@@ -1,6 +1,5 @@
 import os
 import sqlite3
-import threading
 import time
 from collections.abc import Callable
 from datetime import datetime as _dt
@@ -27,24 +26,21 @@ from app.crash_handler import (
 from app.eeg.band_spec import BAND_KEYS
 from app.eeg.mock_stream_v2 import MockEEGStream
 from app.eeg.neurosky_stream import NeuroSkyStream
-from app.logger import logger, timed
+from app.logger import logger
 from app.metrics.engine import MetricsEngine
 from app.metrics.formula_slots import (
     FORMULA_KEYS,
     FormulaSlots,
-    session_formulas,
 )
 from app.metrics.noise_detector import PowerLineDetector
 from app.session.manager import SessionManager, SessionState, elapsed_clock
 from app.session.recorder import SessionRecorder
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
-    recorded_plan,
     segment_target,
 )
 from app.session.tick_thread import TickThread
 from app.session.timer_state import TimerState
-from app.session.what_if import scored_ticks
 from app.settings.registry import (
     BOOL,
     FLOAT,
@@ -54,16 +50,15 @@ from app.settings.registry import (
     SettingsStore,
     stored_value,
 )
-from app.storage.android_share import copy_to_documents
-from app.storage.csv_export import build_sessions_zip
 from app.storage.database import DatabaseManager, UserExistsError
 from app.ui import render_stats
 from app.ui.backup_flow import BackupFlow
-from app.ui.diary_screen import DiaryScreen, detail_graph_data
+from app.ui.diary_screen import DiaryScreen
 from app.ui.formula_settings import FormulaSettings
 from app.ui.graph_fullscreen import GraphFullscreen
 from app.ui.graph_series import GraphSeries
 from app.ui.headset import Headset
+from app.ui.history_flow import HistoryFlow
 from app.ui.history_screen import HistoryScreen
 from app.ui.hooks import wire
 from app.ui.line_colours import DEFAULT as LINE_DEFAULT
@@ -75,6 +70,7 @@ from app.ui.power_exemption import PowerExemption
 from app.ui.program_run import ProgramRun
 from app.ui.program_settings import ProgramSettings
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
+from app.ui.session_detail_flow import SessionDetailFlow
 from app.ui.session_labels import session_title, start_stamp
 from app.ui.settings_screen import (
     SettingsScreen,
@@ -173,11 +169,6 @@ def startup_text_size(db) -> float:
 def startup_theme(db) -> str:
     """The startup profile's theme, else the seed."""
     return startup_value(db, theme_setting(theme_seed(db)))
-
-
-def sessions_for_view(db, current_uid: int | None) -> list:
-    """The active profile's sessions; none while no profile is active."""
-    return db.get_all_sessions(user_id=current_uid) if current_uid else []
 
 
 class EEGMeditationApp(App):
@@ -501,6 +492,14 @@ class EEGMeditationApp(App):
             self._formula_settings, graphs=self._all_graphs, detail_program=self._diary_screen.program_lines_of,
             legacy_defaults=self._settings_screen._graph_toggles, user_id=lambda: self._current_user_id,
             require_user=self._require_user)
+        self._history = HistoryFlow(
+            self._db, self._history_screen, self._formulas, user_id=lambda: self._current_user_id,
+            on_main=self._on_main, show_loading=self.show_loading, hide_loading=self.hide_loading, info=self._info_popup,
+            toast=self._toast, running_session_id=self._running_session_id,
+            on_sessions_deleted=self._on_sessions_deleted)
+        self._detail = SessionDetailFlow(
+            self._db, self._diary_screen, self._history_screen, self._sm, self._graph_series,
+            user_id=lambda: self._current_user_id, on_main=self._on_main, switch_screen=self._switch_screen)
         self._last_back_time = 0.0  # for double-back-to-exit on the root screen
         float_root.add_widget(root)
         self._loading_overlay = LoadingOverlay()
@@ -676,20 +675,20 @@ class EEGMeditationApp(App):
 
         wire(
             self._diary_screen,
-            on_save_notes=self._on_save_notes,
-            on_export_csv=self._on_export_csv,
-            on_back=self._on_diary_back,
-            on_band_view_change=self._persist_band_view,
+            on_save_notes=self._history.save_notes,
+            on_export_csv=self._history.on_export_csv,
+            on_back=self._detail.on_diary_back,
+            on_band_view_change=self._detail.persist_band_view,
             on_band_collapse=lambda _collapsed: self._persist_user_setting("band_power_collapsed"),
         )
 
         wire(
             self._history_screen,
-            on_session_select=self._on_session_select,
-            on_delete_sessions=self._delete_sessions,
-            on_rename_session=self._on_rename_session,
-            on_view_mode_change=self._on_history_view_mode_change,
-            on_export_sessions=self._on_export_sessions_csv,
+            on_session_select=self._detail.on_session_select,
+            on_delete_sessions=self._history.delete_sessions,
+            on_rename_session=self._history.on_rename_session,
+            on_view_mode_change=self._history.on_view_mode_change,
+            on_export_sessions=self._history.on_export_sessions_csv,
             on_chart_collapse=lambda _collapsed: self._persist_user_setting("history_chart_collapsed"),
         )
         wire(self._diary_screen.what_if, on_collapse=lambda _collapsed: self._persist_user_setting("what_if_collapsed"))
@@ -714,7 +713,7 @@ class EEGMeditationApp(App):
         self._current_user_id = uid
         self._db.set_setting("last_user_id", str(uid))
         self._load_user_settings(uid)
-        self._mark_history_dirty()  # History still lists the previous profile's sessions
+        self._history.mark_dirty()  # History still lists the previous profile's sessions
 
     def _restore_last_user(self) -> Optional[int]:
         """Restore the last selected user; return the resolved uid, or None when
@@ -872,7 +871,7 @@ class EEGMeditationApp(App):
         logger.debug(f"Screen switch: {name}")
         self._sm.current = name
         if name == "history":
-            self._refresh_history()
+            self._history.refresh()
         elif name == "live_session":
             # Reflect any Settings timer/mode change on the Start duration button.
             self._program_settings.sync_picker()
@@ -1117,7 +1116,7 @@ class EEGMeditationApp(App):
         """Write the card's notes only if they changed since the last save, so an untouched card writes nothing."""
         sid = self._live_screen.summary_session_id
         notes = self._live_screen.summary_notes
-        if sid and notes != self._summary_saved_notes and self._save_session_notes(sid, notes=notes):
+        if sid and notes != self._summary_saved_notes and self._history.save_notes(sid, notes=notes):
             self._summary_saved_notes = notes
 
     def _flush_on_leave(self) -> None:
@@ -1153,6 +1152,11 @@ class EEGMeditationApp(App):
         self._audio.stop_timer_bell()
         self._live_screen.hide_summary()
 
+    def _on_sessions_deleted(self, ids: list[int]) -> None:
+        """History deleted these sessions: the Session screen lets go of one it shows (the end card, its display)."""
+        if self._recorder.session_id in ids or self._live_screen.summary_session_id in ids:
+            self._drop_shown_session(keep_notes=False)
+
     def _drop_shown_session(self, keep_notes: bool) -> None:
         """Take the shown session off the Session screen: its end card, if open, and its display."""
         if self._live_screen.summary_session_id is not None:
@@ -1167,24 +1171,7 @@ class EEGMeditationApp(App):
 
         # The delete closes the card and stops the gong once the session is gone; a failed one leaves both.
         self._confirm_action("Delete session", "Delete this session permanently? This can't be undone.",
-                             "Delete", lambda: self._delete_sessions([sid]), ok_color=C.DANGER)
-
-    def _save_session_notes(self, session_id: int, notes: Optional[str] = None,
-                            tags: Optional[str] = None, mood: Optional[int] = None) -> bool:
-        """The one notes-save path (session-end card, diary): writes only the given fields; failures are reported."""
-        try:
-            saved = self._db.update_session_notes(session_id, notes=notes, tags=tags, mood_rating=mood)
-        except sqlite3.Error as exc:
-            report_soft_error("notes_save_failed", f"Notes for session {session_id} were not saved: {exc}")
-            return False
-        if not saved:
-            report_soft_error("notes_save_failed", f"Notes for session {session_id} were not saved: no such session")
-            return False
-        # In place: a reload would start the History list from the top.
-        self._history_screen.update_session(session_id, notes=notes, tags=tags, mood_rating=mood)
-        self._toast("Notes saved")
-        logger.info(f"Notes saved for session {session_id}")
-        return True
+                             "Delete", lambda: self._history.delete_sessions([sid]), ok_color=C.DANGER)
 
     def _on_pause(self, *args) -> None:
         if self._session_manager.state == SessionState.RUNNING:
@@ -1269,7 +1256,7 @@ class EEGMeditationApp(App):
         # Sync the header timer to the final duration (it froze at lock time).
         if stats:
             self._live_screen.update_timer(elapsed_clock(stats.get("duration", 0)))
-        self._mark_history_dirty()
+        self._history.mark_dirty()
         if getattr(getattr(self, "_sm", None), "current", None) == "settings":  # a timer can end it there
             self._settings_screen.refresh_profile_counts()  # else entering Settings redraws them
         if stats and session_id:
@@ -1743,7 +1730,7 @@ class EEGMeditationApp(App):
             return True
         current = self._sm.current
         if current == "diary":
-            self._on_diary_back()
+            self._detail.on_diary_back()
             return True
         if current != "live_session":
             self._switch_screen("live_session")
@@ -2060,246 +2047,14 @@ class EEGMeditationApp(App):
         )
         report_soft_error("bt_connect_failed", detail, app=self)
 
-    _detail_load: int = 0  # the session-detail open in progress; a result for an earlier one is dropped
-
-    def _on_session_select(self, session_id: int) -> None:
-        """Open the session detail at once (#59): title, stats and notes from the row History holds, so they can be read
-        and edited at once; the band totals and graphs load on a worker and fill in, one section per frame."""
-        session = self._history_screen.session_by_id(session_id)
-        if session is None:  # not in History's list: nothing was tapped
-            logger.warning(f"Session detail: session {session_id} isn't listed")
-            return
-        self._detail_load += 1
-        token = self._detail_load
-        d = self._diary_screen
-        with timed("diary.open"):
-            d.set_session_formulas({}, session_formulas(session)[1])  # the legend's names from the first frame
-            d.show_session_detail(session)
-            d.set_metrics_threshold(float(session.get("threshold_used", 50)))
-            d.set_program(session.get("session_program", ""))
-            plan = recorded_plan(session.get("session_program") or "")
-            if plan is None and self._current_user_id:  # the profile's own selection, whatever the last session showed
-                self._graph_series.apply_saved(d._metrics_graph, self._current_user_id)
-            d.show_program_lines(plan)  # the program's mark goes last: lines it still shows are never saved
-            bv = {}
-            if self._current_user_id:
-                bv = self._db.get_user_json_setting(self._current_user_id, "band_breakdown_view", {}) or {}
-            d.set_band_view_state(bv.get("mode", "detailed"), bv.get("sort", "band"), bool(bv.get("desc", False)))
-            self._session_detail_back = self._sm.current
-            self._sm.current = "diary"
-        threading.Thread(target=self._load_session_detail, args=(token, session_id, session), daemon=True,
-                         name="DiaryLoad").start()
-
-    def _load_session_detail(self, token: int, session_id: int, session: dict) -> None:
-        """Worker: the band totals (one query) first, then the metric rows, read once for the graphs and the formula
-        replay, built into each graph's data off the main thread; each result goes to _fill_detail as it is ready."""
-        d = self._diary_screen
-        try:
-            with timed("diary.band_totals"):
-                totals = self._db.get_session_band_totals(session_id)
-            self._on_main(lambda: self._fill_detail(token, [lambda: d.set_band_totals(totals)]))
-            with timed("diary.get_metrics"):
-                rows = self._db.get_session_metrics(session_id)
-            with timed("diary.compute_formulas"):
-                series, names = self._compute_session_formulas(session_id, session, rows)
-            with timed("diary.graph_data"):
-                data = detail_graph_data(rows, series)
-        except Exception as e:  # any failure: the sections say so, never "Loading…" for good
-            logger.exception(f"Session detail load failed for session {session_id}")
-
-            def failed(err=e) -> None:
-                d.show_load_failed()
-                report_soft_error("session_detail_load_failed", f"Session {session_id}'s graphs: {err}")
-
-            self._on_main(lambda: self._fill_detail(token, [failed]))
-            return
-
-        def fill(section: str) -> None:
-            if section == "metrics":
-                d.set_session_formulas(series, names)  # the formula lines' names, before their graph
-            d.fill_graph(section, data)
-
-        try:
-            ticks = scored_ticks(session, rows, series)
-            what_if = lambda: d.set_what_if(ticks, session)
-        except Exception:  # broad on purpose: a row it can't score must not take the graphs down with it
-            logger.exception(f"What-if scoring failed for session {session_id}")
-            what_if = d.show_what_if_failed
-
-        self._on_main(lambda: self._fill_detail(token, [*(lambda s=s: fill(s) for s in d.graph_fill_order()),
-                                                        what_if]))
-
-    def _fill_detail(self, token: int, steps: list) -> None:
-        """Run one step per frame, so no frame holds them all, while this open is the detail on screen: after Back,
-        another tab or another session's open, the rest is dropped."""
-        if token != self._detail_load or self._sm.current != "diary" or not steps:
-            return
-        steps[0]()
-        if len(steps) > 1:
-            Clock.schedule_once(lambda dt: self._fill_detail(token, steps[1:]), 0)  # 0 from a callback: next frame
-
-    def _persist_band_view(self, mode: str, sort_by: str, descending: bool) -> None:
-        """Persist the diary band-table view (mode/sort) per user."""
-        if not self._current_user_id:
-            return  # silent-ok: view-pref persistence; no concrete user = nothing to save
-        self._db.set_user_json_setting(
-            self._current_user_id, "band_breakdown_view",
-            {"mode": mode, "sort": sort_by, "desc": descending},
-        )
-
-    def _compute_session_formulas(self, session_id: int, session: dict,
-                                  rows: list[dict] | None = None) -> tuple[dict, dict]:
-        """Recompute the session's recorded formula series + names from its band powers, over `rows` when already
-        read. Pure DB + compute, no Kivy — safe to call off the main thread."""
-        evaluators, names = session_formulas(session)
-        series = self._db.recompute_formula_series(session_id, evaluators, rows) if evaluators else {}
-        return series, names
-
-    def _inject_session_formulas(self, session_id: int, session: dict) -> None:
-        """Recompute + apply the session's recorded formulas (synchronous)."""
-        series, names = self._compute_session_formulas(session_id, session)
-        self._diary_screen.set_session_formulas(series, names)
-
-    def _on_diary_back(self) -> None:
-        """Return from diary detail to previous screen (usually history)."""
-        back = getattr(self, "_session_detail_back", "history")
-        self._switch_screen(back)
-
-    def _on_save_notes(self, session_id: int, notes: str | None = None, tags: str | None = None,
-                       mood: int | None = None) -> bool:
-        return self._save_session_notes(session_id, notes=notes, tags=tags, mood=mood)
-
-    def _delete_sessions(self, session_ids: list[int], on_done: Optional[Callable[[bool], None]] = None) -> None:
-        """The one session-delete path (a History row, the selection, the session-end card): one transaction on a worker
-        thread, then History drops the rows in place and the end card closes if it shows one of them. on_done(True)
-        once deleted; on_done(False) when refused or failed, with nothing deleted."""
-        ids = list(session_ids)
-        done = on_done or (lambda _ok: None)
-        if self._session_pipeline_live() and self._recorder.session_id in ids:
-            # Its row is in History after the first checkpoint; its next checkpoints would write data for no session.
-            self._info_popup("Session in progress",
-                             "Stop the session first: a running session can't be deleted. Nothing was deleted.")
-            done(False)
-            return
-        # Modal at once, so a tap can't reach the rows or the end card being deleted; painted only if it takes a while.
-        self.show_loading(f"Deleting {format_count(len(ids), 'session')}\u2026", delay=0.15)
-        t0 = time.monotonic()
-
-        def _finish(error) -> None:
-            self.hide_loading()
-            if error is not None:
-                report_soft_error("session_delete_failed",
-                                  f"{format_count(len(ids), 'session')} could not be deleted: {error}")
-                done(False)
-                return
-            logger.info(f"Deleted {format_count(len(ids), 'session')} {ids} in {(time.monotonic() - t0) * 1000:.0f} ms")
-            if self._recorder.session_id in ids or self._live_screen.summary_session_id in ids:
-                self._drop_shown_session(keep_notes=False)  # the Session screen shows a session that's gone
-            self._history_screen.remove_sessions(ids)
-            done(True)
-
-        def _worker() -> None:
-            try:
-                self._db.delete_sessions(ids)
-            except sqlite3.Error as e:
-                logger.exception(f"Deleting sessions {ids} failed")
-                self._on_main(lambda err=e: _finish(err))
-                return
-            self._on_main(lambda: _finish(None))
-
-        threading.Thread(target=_worker, daemon=True, name="SessionDelete").start()
-
-    def _on_rename_session(self, session_id: int, new_name: str) -> None:
-        """Rename a session; its History row already shows the new name."""
-        self._db.rename_session(session_id, new_name)
-        logger.info(f"Session {session_id} renamed to '{new_name}'")
-
-    def _on_export_csv(self, session_id: int, path: Optional[str] = None) -> Optional[str]:
-        """Export session data as CSV file. Returns file path or None."""
-        csv_data = self._db.export_session_csv(
-            session_id, custom_formula=self._formulas.evaluators[0]
-        )
-        if not csv_data:
-            return None
-        if not path:
-            export_dir = os.path.dirname(self._db._db_path)
-            path = os.path.join(export_dir, f"session_{session_id}.csv")
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        with open(path, "w") as f:
-            f.write(csv_data)
-        logger.info(f"Session {session_id} exported to {path}")
-        return path
-
-    def _on_export_sessions_csv(self, session_ids: list) -> None:
-        """Bulk-export selected sessions as one ZIP of per-session CSVs (issue #7).
-        Runs off the main thread behind the loading spinner; delivers via the shared
-        copy_to_documents path (Documents on Android, a Documents folder on desktop)."""
-        if not session_ids:
-            return
-        self.show_loading(f"Exporting {format_count(len(session_ids), 'session')}…")
-
-        def _worker():
-            try:
-                mapping = {}
-                for sid in session_ids:
-                    csv = self._db.export_session_csv(sid, custom_formula=self._formulas.evaluators[0])
-                    if csv:
-                        mapping[sid] = csv
-                ts = _dt.now().strftime("%Y%m%d_%H%M%S")
-                fname = f"sessions_{ts}.zip"
-                tmp_zip = os.path.join(os.path.dirname(self._db._db_path), fname)
-                n = build_sessions_zip(tmp_zip, mapping)
-                if n == 0:
-                    self._on_main(lambda: (self.hide_loading(), report_soft_error(
-                        "export_empty", "No data to export in the selected sessions.", app=self)))
-                    return
-                dest = tmp_zip
-                try:
-                    shared = copy_to_documents(tmp_zip, display_name=fname)
-                    if shared:
-                        dest = shared
-                except Exception:
-                    logger.exception("copy_to_documents failed for bulk export")
-                self._on_main(lambda: self._finish_bulk_export(n, dest))
-            except Exception:
-                logger.exception("Bulk CSV export failed")
-                self._on_main(lambda: (self.hide_loading(), report_soft_error(
-                    "export_failed", "Bulk CSV export failed — see logs.", app=self)))
-
-        threading.Thread(target=_worker, daemon=True, name="BulkCSVExport").start()
-
-    def _finish_bulk_export(self, count: int, dest: str) -> None:
-        self.hide_loading()
-        self._history_screen.set_select_mode(False)
-        self._info_popup("Export complete", f"Exported {format_count(count, 'session')} to:\n{dest}")
-
     # Each Start and each ending (_undo_session_setup) moves it on: a callback queued for an earlier attempt (the device
     # scan's result, the BT wait's UI and audio) sees it has changed and does nothing.
     _start_attempt: int = 0
     _wait_attempt: int = 0  # the attempt the BT wait belongs to, taken on the main thread when it begins
-    _history_dirty: bool = True
-    _history_view: int | None = None  # the profile History last loaded; a day filter survives only that
-
-    def _refresh_history(self, force: bool = False) -> None:
-        if not force and not self._history_dirty:
-            return
-        with timed("history.get_all_sessions"):
-            sessions = self._finished_sessions(self._current_user_id)
-        self._history_screen.load_sessions(sessions, keep_filter=self._current_user_id == self._history_view)
-        self._history_view = self._current_user_id
-        self._history_dirty = False
-
-    def _mark_history_dirty(self) -> None:
-        self._history_dirty = True
-
     def _running_session_id(self) -> int | None:
         """The running session's row, which History lists and Settings counts only once it ends: it exists from the
         first checkpoint, with stats as of that checkpoint (the ending marks History dirty)."""
         return self._recorder.session_id if self._session_pipeline_live() else None
-
-    def _finished_sessions(self, uid: int | None) -> list:
-        running = self._running_session_id()
-        return [s for s in sessions_for_view(self._db, uid) if running is None or s.get("id") != running]
 
     def _on_user_switch(self, user_id: int) -> None:
         """Switch the active user profile."""
@@ -2314,12 +2069,6 @@ class EEGMeditationApp(App):
         self._activate_user(user_id)
         logger.info(f"Switched to user: {name} (id={user_id})")
         self._refresh_profile()
-
-    def _on_history_view_mode_change(self, mode: str) -> None:
-        """Persist the user's preferred History view layout."""
-        if not self._current_user_id:
-            return  # silent-ok: pref persistence; view already changed, no user to save to
-        self._db.set_user_setting(self._current_user_id, "history_view_mode", mode)
 
     def _count_sessions_for_user(self, user_id: int) -> int | None:
         """The sessions History lists for the profile, or None (a row without its count) when the read fails."""
@@ -2401,7 +2150,7 @@ class EEGMeditationApp(App):
         self._db.delete_user(user_id)
         if user_id == self._live_display_uid:  # its session went with it: the card has nothing left to save
             self._drop_shown_session(keep_notes=False)
-        self._mark_history_dirty()
+        self._history.mark_dirty()
         remaining = self._db.get_all_users()
         # Re-enter the gate when no usable active user is left: the active profile was deleted, or no profile is left
         # at all (the app is never usable with zero users).

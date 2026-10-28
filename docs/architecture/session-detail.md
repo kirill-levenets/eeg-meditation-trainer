@@ -16,7 +16,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `_flush_on_leave` (on_pause / on_stop) flushes the detail only while it is the current screen: leaving already tried, and a retry on every pause would repeat a failed save's error (e.g. for a session deleted since).
   Leaving sends only the changed fields, so it can't rate an unrated session; **Save Notes** sends what the screen shows, mood included (so an unrated session can be saved as 3).
   A successful save moves the snapshot; a failed one stays pending and is retried on leave.
-  Per-session formula series are **replayed**: the load worker (`_load_session_detail`) runs `_compute_session_formulas`,
+  Per-session formula series are **replayed**: the load worker (`_load_session_detail`) runs `compute_session_formulas`,
   which rebuilds the evaluators from `formula_slots.session_formulas(session)` and recomputes their series via `recompute_formula_series` over the rows it already read.
   Those are the session's recorded `custom_formulas` (the Settings slots, `recorded_formulas`) and, for a program session, its program's formulas (`recorded_plan`).
   A program's formula lines are named `"Program: <name>"`, as the Session screen named them while it ran (`program_line_name`).
@@ -73,17 +73,17 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 ## Loading
 
 - **The session detail opens at once** (#59):
-  `_on_session_select` shows it in the tap's frame from the row History holds (`HistoryScreen.session_by_id`; `get_all_sessions` is `SELECT *`, and notes and renames update it in place):
+  `SessionDetailFlow.on_session_select` (`app/ui/session_detail_flow.py`, the app's `_detail`) shows it in the tap's frame from the row History holds (`HistoryScreen.session_by_id`; `get_all_sessions` is `SELECT *`, and notes and renames update it in place):
   title, stats and notes, editable at once, with no full-screen spinner.
   Its band totals and graphs show a non-modal "Loading…" (`_band_placeholder`, `_graph_placeholder`; `DiaryScreen._ready` holds the sections whose data is in)
   while the worker `_load_session_detail` reads the band totals (one `SUM` query, sent first), then the metric rows **once**
-  — the formula replay runs over the same rows (`_compute_session_formulas(sid, session, rows)` → `recompute_formula_series(..., rows)`)
+  — the formula replay runs over the same rows (`compute_session_formulas(sid, session, rows)` → `recompute_formula_series(..., rows)`)
   — and builds each graph's series, the raw-EEG tail and the markers off the main thread (`diary_screen.detail_graph_data`, pure).
   `_fill_detail(token, steps)` then puts one section in per frame (`Clock.schedule_once(…, 0)` from a callback runs next frame), the shown tab's graph first (`graph_fill_order`), through `DiaryScreen.fill_graph`.
   Every open takes a load token (`_detail_load`):
   a result for an earlier open, or for a detail no longer on screen (Back, another tab), is dropped, so opening B right after A shows only B.
   A failed load reports `session_detail_load_failed` and the sections say "Couldn't load this session's data."; the stats and notes keep working.
-  `load_metrics_preview(rows)` is the same builder and fills, synchronously, as `_inject_session_formulas` is the formula replay's: both for tests.
+  `load_metrics_preview(rows)` is the same builder and fills, synchronously, as `inject_session_formulas` is the formula replay's: both for tests.
   The metric-row read (`SELECT *` into dicts) is nearly all of the graphs' wait.
   DB reads off-thread are safe (`check_same_thread=False` + WAL).
 - Diary raw-EEG `_synthesize_waveform` synthesizes only the **tail** the graph retains (`_RAW_MAX_SAMPLES = sample_rate*60`), starting the global sample index at the first kept tick so the tail is phase-identical to a full synthesis;
@@ -102,6 +102,6 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Grouping and sorting are pure view transforms: `grouped_totals(totals)` (alpha1+alpha2→alpha, etc.) and `band_rows(totals, mode, sort_by, descending)` build the ordered rows; `band_shares`/`format_power` are unit-tested too.
   Tapping a column header (`_HeaderCell`, a `ButtonBehavior` label) sorts (`band` = frequency order, `power`/`percent` = magnitude, largest first); tapping the active column reverses.
   The active column's sort arrow uses the **MDI `Icons` font via Kivy markup**: geometric ↑↓ render as tofu in this Roboto build, the same constraint as the `»` legend marker.
-  View state (`mode`/`sort`/`desc`) persists per user as the JSON setting `band_breakdown_view`: the widget's `on_change` → `DiaryScreen.on_band_view_change` (a hook) → `AppManager._persist_band_view`;
-  restored when the detail opens (`_on_session_select` → `set_band_view_state`), before the totals arrive from the detail's worker, its first step (`_load_session_detail` → `set_band_totals`).
+  View state (`mode`/`sort`/`desc`) persists per user as the JSON setting `band_breakdown_view`: the widget's `on_change` → `DiaryScreen.on_band_view_change` (a hook) → `SessionDetailFlow.persist_band_view`;
+  restored when the detail opens (`on_session_select` → `set_band_view_state`), before the totals arrive from the detail's worker, its first step (`_load_session_detail` → `set_band_totals`).
   The live end-summary deliberately does **not** show it (fixed, full layout).

@@ -83,8 +83,8 @@ Read it before changing that subsystem.
   · `app/ui/power_exemption.py` `PowerExemption` (what may close a locked session: battery optimisation, the maker's power manager;
   the first-start alert and Settings → Device's row → [app-platform](docs/architecture/app-platform.md#background-running-android))
   · `app/ui/live_session.py`, `live_mirror.py` (the live graphs' session, kept through a screen lock), `settings_screen.py` (its larger sections in `settings_sections/`), `device_labels.py` → [live-session-and-settings](docs/architecture/live-session-and-settings.md);
-  `history_screen.py`, `period_totals.py` → [history](docs/architecture/history.md);
-  `diary_screen.py` (session detail) → [session-detail](docs/architecture/session-detail.md);
+  `history_screen.py`, `period_totals.py`, `history_flow.py` `HistoryFlow` (what the app does with History's rows) → [history](docs/architecture/history.md);
+  `diary_screen.py` (session detail), `session_detail_flow.py` `SessionDetailFlow` (opens and loads it) → [session-detail](docs/architecture/session-detail.md);
   `session_labels.py` → [session](docs/architecture/session.md)
 - `app/crash_handler.py`, `app/logger.py`, `app/android_jni.py`, `app/ui/kivy_providers.py` (the Kivy providers the app picks itself) → [app-platform](docs/architecture/app-platform.md)
 - `android_src/` — `SessionForegroundService` (Java), the session's foreground service, in the app's own process; its start/stop state is `ServiceStartState`, tested with `javac` (`tests/test_service_start_state.py`).
@@ -195,8 +195,8 @@ The linked file explains the mechanism.
 
 A widget's handler from the app:
 a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
-· Session delete `_delete_sessions(ids)`
-· notes `_save_session_notes`
+· Session delete `HistoryFlow.delete_sessions(ids)`
+· notes `HistoryFlow.save_notes`
 · confirm `theme.confirm_popup` (via `_confirm_action`)
 · save under a unique name `settings_sections.common.save_under_unique_name`
 · whether a formula can run `custom_formula.compile_formula`

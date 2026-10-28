@@ -16,11 +16,12 @@ from kivy.tests.common import UnitTestTouch
 from kivy.uix.recycleview.views import _cached_views
 from kivy.weakproxy import WeakProxy as KivyWeakProxy
 
-import app.ui.app_manager as app_manager
+import app.ui.history_flow as history_flow
 from app.session.manager import SessionManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.history_screen import HistoryScreen, _checkbox_glyph, _SessionRow
 from app.ui.hooks import wire
+from tests._history_flow import make_history_flow
 
 
 def _sessions(n: int) -> list[dict]:
@@ -407,7 +408,7 @@ def test_history_loads_without_the_full_screen_spinner(monkeypatch):
     app._current_user_id = 1
     app._session_manager = SessionManager()  # no session running
     app.show_loading = MagicMock()
-    monkeypatch.setattr(app_manager, "sessions_for_view", lambda db, uid: _sessions(3))
-    app._refresh_history(force=True)
+    monkeypatch.setattr(history_flow, "sessions_for_view", lambda db, uid: _sessions(3))
+    make_history_flow(app).refresh(force=True)
     app.show_loading.assert_not_called()
     app._history_screen.load_sessions.assert_called_once()

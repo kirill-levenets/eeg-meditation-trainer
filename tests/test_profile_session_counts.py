@@ -7,6 +7,7 @@ from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.hooks import wire
 from app.ui.settings_screen import SettingsScreen
+from tests._history_flow import make_history_flow
 
 
 def _rows(screen) -> set[str]:
@@ -27,7 +28,7 @@ def test_entering_settings_reads_the_counts_again():
 def _ending_app(shown: str) -> EEGMeditationApp:
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     for name in ("_live_screen", "_mirror", "_session_manager", "_settings_screen", "_undo_session_setup",
-                 "_mark_history_dirty"):
+                 "_history"):
         setattr(app, name, MagicMock())
     app._sm = MagicMock(current=shown)
     return app
@@ -71,7 +72,7 @@ def test_a_running_sessions_row_is_counted_once_it_ends(tmp_path):
         app._db, app._waiting_for_bt, app._ticker = db, False, MagicMock(running=False)
         app._session_manager, app._recorder = MagicMock(), MagicMock(session_id=running)
         app._session_manager.state = SessionState.RUNNING
-        assert app._count_sessions_for_user(uid) == 1 == len(app._finished_sessions(uid))
+        assert app._count_sessions_for_user(uid) == 1 == len(make_history_flow(app).finished_sessions(uid))
         app._session_manager.state = SessionState.IDLE
         assert app._count_sessions_for_user(uid) == 2
     finally:

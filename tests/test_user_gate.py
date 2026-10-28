@@ -17,7 +17,8 @@ import pytest
 
 from app import android_jni
 from app.storage.database import DatabaseManager
-from app.ui.app_manager import EEGMeditationApp, resolve_startup_user, sessions_for_view
+from app.ui.app_manager import EEGMeditationApp, resolve_startup_user
+from app.ui.history_flow import sessions_for_view
 from app.ui.settings_screen import SettingsScreen
 from tests._backup_flow import make_flow
 from tests._recorder import make_recorder
@@ -140,6 +141,7 @@ def test_deleting_active_profile_mid_session_discards_it_and_regates():
     app._refresh_profile = MagicMock()
     app._program_settings = MagicMock()
     app._open_user_gate = MagicMock()
+    app._history = MagicMock()
     EEGMeditationApp._on_user_delete(app, 5)
     app._discard_running_session.assert_called_once()  # discarded, not saved-then-orphaned
     assert app._current_user_id is None
@@ -156,6 +158,7 @@ def test_deleting_the_last_profile_while_none_is_active_regates():
     app._refresh_profile = MagicMock()
     app._program_settings = MagicMock()
     app._open_user_gate = MagicMock()
+    app._history = MagicMock()
     EEGMeditationApp._on_user_delete(app, 9)
     app._open_user_gate.assert_called_once()
 
@@ -254,6 +257,7 @@ def test_delete_active_profile_discards_during_bt_connect():
     app._refresh_profile = MagicMock()
     app._program_settings = MagicMock()
     app._open_user_gate = MagicMock()
+    app._history = MagicMock()
     EEGMeditationApp._on_user_delete(app, 5)
     app._discard_running_session.assert_called_once()   # connecting session halted
 

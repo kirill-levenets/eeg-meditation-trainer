@@ -3,10 +3,12 @@ from dataclasses import replace
 from unittest.mock import MagicMock
 
 import app.ui.app_manager as am
+import app.ui.history_flow as history_flow
 from app.session.manager import LiveScore, SessionManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.live_mirror import LiveMirror
 from app.ui.live_session import LiveSessionScreen
+from tests._history_flow import make_history_flow
 from tests._recorder import make_recorder
 
 METRICS = {"shamatha_score": 71, "distraction": 22, "sinking": 9, "native_attention": 55, "native_meditation": 63}
@@ -75,7 +77,7 @@ def _owner_app(active, shown) -> EEGMeditationApp:
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._db = MagicMock()
     app._load_user_settings = MagicMock()
-    app._mark_history_dirty = MagicMock()
+    app._history = MagicMock()
     app._current_user_id = active
     app._live_display_uid = shown
     app._drop_shown_session = MagicMock()
@@ -158,7 +160,7 @@ def _deleting_app(shown) -> EEGMeditationApp:
     app._db.get_all_users.return_value = [{"id": 2}]
     app._current_user_id = 2
     app._live_display_uid = shown
-    for name in ("_session_pipeline_live", "_mark_history_dirty", "_refresh_profile", "_program_settings",
+    for name in ("_session_pipeline_live", "_history", "_refresh_profile", "_program_settings",
                  "_open_user_gate", "_drop_shown_session"):
         setattr(app, name, MagicMock(return_value=False))
     return app
@@ -197,7 +199,7 @@ def test_the_end_of_a_session_shows_its_numbers_before_its_scoring_is_reset():
         sm.add_metric({"shamatha_score": value})
     app._undo_session_setup = sm.reset  # what the real one does to the scoring
     app._mirror = LiveMirror()
-    for name in ("_mark_history_dirty", "_settings_screen"):
+    for name in ("_history", "_settings_screen"):
         setattr(app, name, MagicMock())
     app._finalize_stop_ui({}, None)
     app._live_screen.set_stats_mode("aggregate")
@@ -217,7 +219,7 @@ def test_the_end_of_a_session_locked_since_its_first_minute_shows_its_whole_numb
     app._session_manager.live_score.return_value = replace(SCORE, average=81.5)  # the timer ran out while locked
     app._mirror = LiveMirror()
     app._mirror.last_metrics = METRICS
-    for name in ("_undo_session_setup", "_mark_history_dirty", "_settings_screen"):
+    for name in ("_undo_session_setup", "_history", "_settings_screen"):
         setattr(app, name, MagicMock())
     app._finalize_stop_ui({"duration": 1800}, None)
     app._live_screen.set_stats_mode("aggregate")
@@ -235,7 +237,7 @@ def test_a_start_that_never_connected_leaves_no_owner():
 
 
 def test_deleting_the_shown_session_in_history_drops_it_from_the_session_screen(monkeypatch):
-    monkeypatch.setattr(am.threading, "Thread", lambda target, **k: MagicMock(start=target))
+    monkeypatch.setattr(history_flow.threading, "Thread", lambda target, **k: MagicMock(start=target))
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._db = MagicMock()
     app._history_screen = MagicMock()
@@ -245,9 +247,10 @@ def test_deleting_the_shown_session_in_history_drops_it_from_the_session_screen(
     app._recorder.session_id = 9
     app._on_main = lambda fn: fn()
     app._drop_shown_session = MagicMock()
-    for name in ("_refresh_history", "show_loading", "hide_loading", "_session_pipeline_live"):
+    for name in ("show_loading", "hide_loading", "_session_pipeline_live"):
         setattr(app, name, MagicMock(return_value=False))
-    app._delete_sessions([7, 9])
+    app._history = make_history_flow(app)
+    app._history.delete_sessions([7, 9])
     app._drop_shown_session.assert_called_once_with(keep_notes=False)
 
 

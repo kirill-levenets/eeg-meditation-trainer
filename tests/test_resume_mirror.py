@@ -305,7 +305,7 @@ def test_finalize_stop_ui_reloads_full_graph_and_sets_duration():
     app._timer_state = MagicMock()
     app._release_wake_lock = MagicMock()
     app._stop_session_keep_alive_service = MagicMock()
-    app._mark_history_dirty = MagicMock()
+    app._history = MagicMock()
     app._db = MagicMock()
     app._db.get_session.return_value = None
 

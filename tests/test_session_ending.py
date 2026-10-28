@@ -9,11 +9,12 @@ import pytest
 from kivy.base import EventLoop
 from kivy.uix.popup import Popup
 
-import app.ui.app_manager as am
+import app.ui.history_flow as history_flow
 from app.session.manager import SessionManager, SessionState
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.live_mirror import LiveMirror
+from tests._history_flow import make_history_flow
 from tests._program_run import make_run
 from tests._recorder import make_recorder
 
@@ -36,9 +37,10 @@ def _app() -> EEGMeditationApp:
     app._mirror = LiveMirror()
     app._toast = MagicMock()
     app._history_screen = MagicMock()
-    app._refresh_history = MagicMock()
     app._session_manager = SessionManager()  # idle: the card's session has ended
     app._on_main = lambda fn: fn()
+    app._history = make_history_flow(app)
+    app._history.refresh = MagicMock()
     return app
 
 
@@ -116,8 +118,7 @@ def _recorded_session(db) -> EEGMeditationApp:
     app._ticker = MagicMock(running=False)
     app._eeg_stream = MagicMock()
     for name in ("_audio", "_live_screen", "_settings_screen", "_timer_state", "_confirm_action",
-                 "_release_wake_lock", "_stop_session_keep_alive_service",
-                 "_mark_history_dirty"):
+                 "_release_wake_lock", "_stop_session_keep_alive_service", "_history"):
         setattr(app, name, MagicMock())
     for _ in range(240):
         metrics = {"shamatha_score": 70, "meditation_score": 60}
@@ -161,7 +162,7 @@ def test_card_delete_without_confirmation_deletes_nothing():
 
 
 def test_card_delete_confirmed_removes_the_session_and_stops_the_gong(monkeypatch):
-    monkeypatch.setattr(am.threading, "Thread", lambda target, **k: MagicMock(start=target))  # the worker, inline
+    monkeypatch.setattr(history_flow.threading, "Thread", lambda target, **k: MagicMock(start=target))  # the worker, inline
     app = _app()
     app._confirm_action = MagicMock()
     app._on_summary_delete()
@@ -170,16 +171,16 @@ def test_card_delete_confirmed_removes_the_session_and_stops_the_gong(monkeypatc
     app._audio.stop_timer_bell.assert_called_once()
     app._live_screen.hide_summary.assert_called_once()
     app._history_screen.remove_sessions.assert_called_once_with([SID])
-    app._refresh_history.assert_not_called()  # the row goes in place; no full-screen rebuild spinner
+    app._history.refresh.assert_not_called()  # the row goes in place; no full-screen rebuild spinner
 
 
 def test_history_row_delete_removes_its_row_in_place(monkeypatch):
-    monkeypatch.setattr(am.threading, "Thread", lambda target, **k: MagicMock(start=target))  # the worker, inline
+    monkeypatch.setattr(history_flow.threading, "Thread", lambda target, **k: MagicMock(start=target))  # the worker, inline
     app = _app()
-    app._delete_sessions([SID])
+    app._history.delete_sessions([SID])
     app._db.delete_sessions.assert_called_once_with([SID])
     app._history_screen.remove_sessions.assert_called_once_with([SID])
-    app._refresh_history.assert_not_called()
+    app._history.refresh.assert_not_called()
 
 
 # --- Notes: typed notes are kept; empty or untouched notes write nothing ---------------------------------------
@@ -258,11 +259,10 @@ def test_leaving_during_a_restore_writes_no_notes(hook):
 
 
 def test_a_failed_notes_save_is_reported_not_toasted(monkeypatch):
-    import app.ui.app_manager as am
     app = _app()
     app._db.update_session_notes.return_value = False
     reported = []
-    monkeypatch.setattr(am, "report_soft_error", lambda label, detail, **k: reported.append(label))
+    monkeypatch.setattr(history_flow, "report_soft_error", lambda label, detail, **k: reported.append(label))
     app._live_screen.summary_notes = "lost?"
     app._on_summary_ok()
     assert reported == ["notes_save_failed"]

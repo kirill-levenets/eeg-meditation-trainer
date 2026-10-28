@@ -19,7 +19,7 @@ def _make_app(state: SessionState) -> EEGMeditationApp:
     app._refresh_profile = MagicMock()
     app._save_user_settings = MagicMock()
     app._load_user_settings = MagicMock()
-    app._mark_history_dirty = MagicMock()
+    app._history = MagicMock()
     return app
 
 

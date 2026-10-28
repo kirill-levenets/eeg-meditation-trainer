@@ -63,27 +63,27 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The session-end card ("Session saved") offers **Save notes** (`_on_summary_save_notes`; the card stays open), **OK** and a low-emphasis **Delete session** behind a confirm.
   OK is `_close_summary`: it saves the notes only if they changed since the last save (`_flush_summary_notes`, against `_summary_saved_notes`, the last written text), so an untouched card writes nothing and clearing saved notes clears them;
   then it stops the gong and closes.
-  Delete is `_on_summary_delete` → `_delete_sessions`, which closes the card once the session is gone; a failed delete leaves the card and its typed notes.
+  Delete is `_on_summary_delete` → `HistoryFlow.delete_sessions`, which closes the card once the session is gone; a failed delete leaves the card and its typed notes.
   `on_pause` and `on_stop` both flush the card's notes with the settings through `_flush_on_leave`, skipped while `_restoring`.
-  Notes go through the one `_save_session_notes(sid, notes=, tags=, mood=)` (also the diary's Save and its leave-flush):
+  Notes go through the one `HistoryFlow.save_notes(sid, notes=, tags=, mood=)` (also the diary's Save and its leave-flush):
   `DatabaseManager.update_session_notes` writes only the fields given and returns whether a row changed; a failure goes to `report_soft_error`.
   Success shows `_toast("Notes saved")` and calls `HistoryScreen.update_session(sid, ...)`, which updates the History model's session in place (a reload would start the list from the top);
   `_update_item` re-derives that row's item, so its notes line appears, changes or goes (and the row's height with it) at once.
   `_toast` is the one toast (also the double-back "Press back again to exit"): `C.TEXT` on `paint_panel`, added to the `Window` so it shows above any open popup, on every platform;
   only while the app is leaving (`_leaving`, set by `_flush_on_leave`, when nothing the app draws is seen) is it the native Android toast.
-  `_delete_sessions(ids)` is the one delete (a History row, the History selection, the end card):
+  `HistoryFlow.delete_sessions(ids)` is the one delete (a History row, the History selection, the end card):
   one `DatabaseManager.delete_sessions(ids)` transaction over metrics and rows, so an error deletes none of them (`delete_session(sid)` is a selection of one).
   A `wal_checkpoint(TRUNCATE)` follows: one big transaction parks every deleted page in the WAL (40–100 MB for a few hundred long sessions), which keeps that size until a clean close;
   a failed checkpoint (e.g. "database table is locked" while another thread's read is open on the shared connection) is only logged, since the delete has committed.
   The delete runs on a worker thread (a large selection takes 0.3–0.8 s on desktop) behind the loading overlay, and reports `on_done(ok)`;
   the overlay is modal at once and painted only past 0.15 s (`show_loading(text, delay=0.15)`), so a tap can't reach the rows or the end card being deleted.
   A `sqlite3.Error` is reported as `session_delete_failed`.
-  On success the Session screen drops a deleted session it shows (`_drop_shown_session`: the end card, whose notes would have no session to save to, closes with its gong, and the display clears).
+  On success the Session screen drops a deleted session it shows (the app's `_on_sessions_deleted` → `_drop_shown_session`: the end card, whose notes would have no session to save to, closes with its gong, and the display clears).
   `HistoryScreen.remove_sessions(ids)` removes those rows and model entries in place (see the session list in [history.md](history.md)): no rebuild, no spinner, wherever the user is.
   History never lists the running session: its row exists from the first checkpoint, with that checkpoint's stats, and a History reload during the session would list it with them, frozen there until the next reload.
-  `_running_session_id()` (`_recorder.session_id` while `_session_pipeline_live()`) is left out of History's list (`_finished_sessions`) and Settings' profile counts.
+  `_running_session_id()` (`_recorder.session_id` while `_session_pipeline_live()`) is left out of History's list (`HistoryFlow.finished_sessions`) and Settings' profile counts.
   `_finalize_stop_ui` marks History dirty, so the session appears once it ends.
-  `_delete_sessions` also refuses it (`_recorder.session_id` among the ids while live): its next checkpoints would write ticks for no session.
+  `delete_sessions` also refuses it (`_running_session_id()` among the ids): its next checkpoints would write ticks for no session.
 
 ## Timer
 
