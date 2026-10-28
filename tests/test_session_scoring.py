@@ -15,6 +15,7 @@ from app.ui.app_manager import EEGMeditationApp
 from tests._program_run import make_run
 from tests._program_settings import make_programs
 from tests._recorder import make_recorder
+from tests._session_run import run_in
 from tests.test_resume_mirror import _drive_tick, _make_tick_app, _metrics, _raw_sample
 
 
@@ -41,7 +42,7 @@ def _app(metric_key: str = "shamatha_score", formulas=()):
                                                                 "meditation_score": "Meditation",
                                                                 "custom_formula": "Calm ratio"}.get(k, k)
     app._is_paused = False
-    app._scored_key = None
+    run_in(app)  # a session's run, nothing marked yet
     sm = SessionManager()
     sm.start(threshold=50)
     sm._state = SessionState.RUNNING
@@ -90,20 +91,20 @@ def test_changing_the_feedback_metric_mid_session_moves_the_scoring():
 
 def test_the_legend_marks_the_scored_series_once_per_change():
     app = _app("shamatha_score")
-    marks = [app._scored_mark(app._score_on_drive_key()) for _ in range(3)]
+    marks = [app._scored_mark(app._run, app._score_on_drive_key()) for _ in range(3)]
     app._audio_metric_key = "meditation_score"
-    marks.append(app._scored_mark(app._score_on_drive_key()))
+    marks.append(app._scored_mark(app._run, app._score_on_drive_key()))
     assert marks == ["shamatha_score", None, None, "meditation_score"]
 
 
 def test_a_change_during_a_screen_lock_is_marked_by_the_first_tick_after_it():
     app = _app("shamatha_score")
-    app._scored_mark(app._score_on_drive_key())
+    app._scored_mark(app._run, app._score_on_drive_key())
     app._audio_metric_key = "meditation_score"
     app._is_paused = True
-    assert app._scored_mark(app._score_on_drive_key()) is None  # no UI dispatch while locked
+    assert app._scored_mark(app._run, app._score_on_drive_key()) is None  # no UI dispatch while locked
     app._is_paused = False
-    assert app._scored_mark(app._score_on_drive_key()) == "meditation_score"
+    assert app._scored_mark(app._run, app._score_on_drive_key()) == "meditation_score"
 
 
 def test_a_program_session_keeps_its_segment_goal():

@@ -17,6 +17,7 @@ import pytest
 
 import app.ui.profiles as profiles
 from app import android_jni
+from app.session.session_run import Phase
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp, resolve_startup_user
 from app.ui.history_flow import sessions_for_view
@@ -24,6 +25,7 @@ from app.ui.settings_screen import SettingsScreen
 from tests._backup_flow import make_flow
 from tests._profiles import make_gate, make_profiles
 from tests._recorder import make_recorder
+from tests._session_run import run_in
 
 _TMP_DIRS: list[str] = []
 
@@ -237,7 +239,7 @@ def test_restore_refused_during_bt_connect_window(monkeypatch):
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._session_manager = MagicMock()
     app._session_manager.state = SessionState.IDLE
-    app._waiting_for_bt = True          # connecting
+    run_in(app, Phase.CONNECTING)
     app._ticker = MagicMock(running=True)
     app._info_popup = MagicMock()
     on_android = MagicMock()
@@ -254,7 +256,7 @@ def test_delete_active_profile_discards_during_bt_connect():
     app._current_user_id = 5
     app._session_manager = MagicMock()
     app._session_manager.state = SessionState.IDLE
-    app._waiting_for_bt = True
+    run_in(app, Phase.CONNECTING)
     app._ticker = MagicMock(running=True)
     app._discard_running_session = MagicMock()
     app._db = MagicMock()

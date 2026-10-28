@@ -5,16 +5,17 @@ from unittest.mock import MagicMock
 
 import app.ui.app_manager as am
 from app.session.manager import SessionManager
+from app.session.session_run import Phase
 from app.ui.app_manager import EEGMeditationApp
 from tests._headset import make_headset
 from tests._program_run import make_run
+from tests._session_run import run_in
 
 
 def _make_waiting_app() -> tuple[EEGMeditationApp, list]:
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     events: list = []
-    app._waiting_for_bt = True
-    app._bt_signal_start = 123.0
+    run_in(app, Phase.CONNECTING).signal_start = 123.0
     app._ticker = MagicMock(running=True)
 
     def stop_tick():
@@ -24,7 +25,7 @@ def _make_waiting_app() -> tuple[EEGMeditationApp, list]:
     app._ticker.stop.side_effect = stop_tick
     app._real_stream = MagicMock()
     app._real_stream.stop.side_effect = lambda: events.append(
-        ("stream_stopped", app._waiting_for_bt, app._ticker.running)
+        ("stream_stopped", app._connecting(), app._ticker.running)
     )
     app._eeg_stream = app._real_stream
     app._keep_awake = MagicMock()
@@ -39,7 +40,7 @@ def _make_waiting_app() -> tuple[EEGMeditationApp, list]:
 
 def _assert_unwatched_stream_stop(app: EEGMeditationApp, events: list) -> None:
     assert events == ["tick_stopped", ("stream_stopped", False, False)]
-    assert app._bt_signal_start is None
+    assert not app._connecting()
     # Released by the abort itself (on the tick thread for a wait exit), and again by a cancel's shared teardown.
     app._keep_awake.release.assert_called()
 
@@ -48,12 +49,14 @@ def test_connect_cancel_stops_watcher_before_stream():
     app, events = _make_waiting_app()
     app._on_connect_cancel()
     _assert_unwatched_stream_stop(app, events)
+    assert app._run is None  # the start's run ended with it
 
 
 def test_stop_during_bt_wait_stops_watcher_before_stream():
     app, events = _make_waiting_app()
     app._on_stop()
     _assert_unwatched_stream_stop(app, events)
+    assert app._run is None
     app._live_screen.hide_overlay.assert_called_once()
 
 
@@ -62,8 +65,7 @@ def test_app_init_defines_bt_wait_state(monkeypatch):
     monkeypatch.setattr(am, "DatabaseManager", MagicMock())
     monkeypatch.setattr(am, "AudioEngine", MagicMock())
     app = am.EEGMeditationApp()
-    assert app._waiting_for_bt is False
-    assert app._bt_signal_start is None
+    assert app._run is None and not app._connecting()
 
     app._live_screen = MagicMock()  # built by build(), which runs before any UI action
     app._settings_screen = MagicMock()
@@ -74,7 +76,7 @@ def test_app_init_defines_bt_wait_state(monkeypatch):
 
 def test_failed_connect_exit_releases_wake_lock_and_service():
     app, events = _make_waiting_app()
-    app._bt_connect_start = time.time()
+    app._run.connect_start = time.time()
     app._real_stream.is_connected = False
     app._real_stream._running = False
     app._real_stream._device_name = "MindWave"
@@ -82,15 +84,16 @@ def test_failed_connect_exit_releases_wake_lock_and_service():
     app._on_main = MagicMock()
     app._report_bt_connect_failure = MagicMock()
 
-    app._handle_bt_wait()
+    app._handle_bt_wait(app._run)
 
     _assert_unwatched_stream_stop(app, events)
+    assert app._run.phase is Phase.ENDED  # its teardown is queued for the main thread
     app._report_bt_connect_failure.assert_called_once()
 
 
 def test_refused_start_undoes_setup_without_entering_the_wait():
     app, _ = _make_waiting_app()
-    app._waiting_for_bt = False
+    app._run.phase = Phase.STARTING  # Start pressed, the wait not begun
     app._real_stream.start.return_value = False
     app._real_stream._device_name = "MindWave"
     app._real_stream._last_connect_error = "Previous connection is still closing."
@@ -98,7 +101,7 @@ def test_refused_start_undoes_setup_without_entering_the_wait():
 
     assert app._begin_bt_wait() is False
 
-    assert app._waiting_for_bt is False
+    assert not app._connecting()
     app._keep_awake.release.assert_called_once()
     shown = app._live_screen.show_overlay_retry.call_args.args[0]
     assert "still closing" in shown
@@ -107,12 +110,12 @@ def test_refused_start_undoes_setup_without_entering_the_wait():
 
 def test_started_stream_enters_the_wait():
     app, _ = _make_waiting_app()
-    app._waiting_for_bt = False
+    app._run.phase = Phase.STARTING  # Start pressed, the wait not begun
     app._real_stream.start.return_value = True
     app._real_stream._device_name = "MindWave"
 
     assert app._begin_bt_wait() is True
 
-    assert app._waiting_for_bt is True
+    assert app._connecting()
     app._live_screen.show_overlay.assert_called_once()
     app._keep_awake.release.assert_not_called()

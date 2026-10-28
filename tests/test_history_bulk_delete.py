@@ -135,7 +135,6 @@ def _app(db, monkeypatch) -> tuple[EEGMeditationApp, _Deferred, list]:
     app._live_screen.summary_session_id = None
     app._audio = MagicMock()
     app._session_manager = SessionManager()
-    app._waiting_for_bt = False
     app._ticker = MagicMock(running=False)
     app._recorder = make_recorder(app)
     app._info_popup = MagicMock()

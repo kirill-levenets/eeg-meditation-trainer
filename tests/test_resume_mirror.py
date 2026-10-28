@@ -23,6 +23,7 @@ from app.config import APP
 from app.metrics.engine import MetricsEngine
 from app.metrics.formula_slots import FormulaSlots
 from app.session.manager import SessionState
+from app.session.session_run import Phase
 from app.session.tick_thread import TickThread
 from app.session.timer_state import TimerState
 from app.ui.app_manager import EEGMeditationApp
@@ -32,6 +33,7 @@ from tests._headset import make_headset
 from tests._program_run import make_run
 from tests._program_settings import make_programs
 from tests._recorder import make_recorder
+from tests._session_run import run_in
 
 BAND_KEYS = ("alpha", "beta", "gamma", "theta", "delta")
 
@@ -78,12 +80,11 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     # Skip the real-BT notify/disconnect branches regardless of USE_MOCK_DEVICE.
     app._real_stream = MagicMock()
     app._real_stream.is_connected = True
-    app._bt_connected_notified = True
+    run_in(app).bt_connected_notified = True  # a running session's run
 
     app._check_stale_data = MagicMock()
     app._eeg_stream = MagicMock()
     app._metrics_engine = MagicMock()
-    app._noise_detector = None  # skip power-line feed branch
     app._formulas = FormulaSlots()
     # All slots invalid by default (no formula set)
 
@@ -94,7 +95,6 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     app._timer_state.tick.return_value = False  # never expire
 
     app._recorder = make_recorder(app)  # its 60s flush never triggers within these short tests
-    app._pending_marker = False
     app._on_main = MagicMock()
     app._is_paused = is_paused
     app._live_screen = MagicMock()
@@ -109,8 +109,6 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     app._program_run = make_run(app)
     app._program_settings = make_programs(app._db, app._current_user_id)
 
-    app._shamatha_active = False
-    app._shamatha_streak = 0
     app._shamatha_threshold = 50
 
     app._mirror = LiveMirror()
@@ -393,9 +391,7 @@ def _make_btwait_app() -> EEGMeditationApp:
     app._real_stream.is_connected = True
     app._real_stream._device_name = "MindWave"
     app._real_stream.seconds_since_last_packet = 1.0
-    app._bt_signal_start = None
-    app._bt_connect_start = time.time()
-    app._waiting_for_bt = True
+    run_in(app, Phase.CONNECTING).connect_start = time.time()
 
     app._eeg_stream = MagicMock()
     app._eeg_stream.read_sample.return_value = {
@@ -422,9 +418,9 @@ def test_btwait_arms_countdown_synchronously_on_connect():
     # deferred to _on_main (here a no-op MagicMock), remaining stays 0 and the
     # next tick fires the timer immediately → a 0s "timer-ended" session.
     app = _make_btwait_app()
-    EEGMeditationApp._handle_bt_wait(app)
+    EEGMeditationApp._handle_bt_wait(app, app._run)
 
-    assert app._waiting_for_bt is False
+    assert app._run.phase is Phase.STARTED
     assert app._timer_state.remaining_seconds == 15 * 60
     app._session_manager.start.assert_called_once_with()  # against the threshold in force
     app._on_main.assert_called_once()  # UI/audio still deferred to main thread
@@ -435,7 +431,7 @@ def test_btwait_does_not_start_audio_on_tick_thread():
     # deferred to the main-thread callback (atomic with hide_overlay), never run
     # synchronously on the tick thread.
     app = _make_btwait_app()
-    EEGMeditationApp._handle_bt_wait(app)
+    EEGMeditationApp._handle_bt_wait(app, app._run)
 
     app._audio.start.assert_not_called()
     app._audio.play_connect_sound.assert_not_called()
@@ -480,7 +476,6 @@ def test_timer_expiry_leaves_no_live_pipeline_behind():
     app._timer_state.custom_sound_path = ""
     app._session_manager.stop.return_value = {"duration": 100}
     app._recorder._buffer = []
-    app._waiting_for_bt = False
     app._ticker._thread = MagicMock()  # the running SessionTick thread
 
     def stop(reason):

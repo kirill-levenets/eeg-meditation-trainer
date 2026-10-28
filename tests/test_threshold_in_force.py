@@ -16,6 +16,7 @@ from app.config import APP
 from app.session.manager import SessionManager, SessionState
 from app.session.scoring import target_steps
 from app.session.session_program import SessionProgram
+from app.session.session_run import Phase
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.diary_screen import detail_graph_data
 from app.ui.live_mirror import LiveMirror
@@ -24,6 +25,7 @@ from app.ui.settings_screen import SettingsScreen
 from tests._program_run import make_run
 from tests._program_settings import make_programs
 from tests._recorder import make_recorder
+from tests._session_run import run_in
 from tests.test_bt_wait_reconnect import wait  # noqa: F401  (fixture)
 from tests.test_resume_mirror import _drive_tick, _make_tick_app, _metrics, _raw_sample
 from tests.test_session_detail_open import _frames, app, db  # noqa: F401  (fixtures)
@@ -203,11 +205,11 @@ def test_a_tick_the_session_paused_under_is_not_recorded():
         return real_add(metric)
 
     a._session_manager.add_metric = pause_first
-    a._pending_marker = True
+    a._run.pending_marker = True
     _drive_tick(a, _raw_sample(), _metrics())
     assert a._recorder._buffer == [] and len(a._mirror.metrics) == 0
     a._on_main.assert_not_called()
-    assert a._pending_marker  # it goes on the next tick that is recorded
+    assert a._run.pending_marker  # it goes on the next tick that is recorded
 
 
 def test_the_live_graph_reloaded_from_the_mirror_steps_its_line():
@@ -304,6 +306,7 @@ def _start(program: bool, monkeypatch, prepare=None, **before) -> EEGMeditationA
         setattr(a, name, value)
     if prepare is not None:
         prepare(a)
+    run_in(a, Phase.STARTING)  # as Start makes it
     a._start_session_common()
     return a
 
@@ -385,7 +388,6 @@ def test_a_program_session_locks_the_threshold_controls_and_its_end_unlocks_them
     a._settings_screen.lock_threshold.assert_called_with(a._refuse_program_threshold if program else None)
     a._settings_screen.lock_threshold.reset_mock()
     a._keep_awake = MagicMock()
-    a._start_attempt = 1
     a._undo_session_setup()  # every ending
     a._settings_screen.lock_threshold.assert_called_with(None)
 

@@ -53,7 +53,6 @@ def app(db, paired):
     a = EEGMeditationApp.__new__(EEGMeditationApp)
     a._db = db
     a._current_user_id = None
-    a._waiting_for_bt = False
     a._ticker = MagicMock(running=False)
     a._session_manager = SessionManager()
     a._real_stream = NeuroSkyStream()

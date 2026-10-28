@@ -52,7 +52,7 @@ def test_a_failed_count_shows_the_profile_without_one_and_the_end_card_still_ope
     app._db = MagicMock()
     app._db.count_sessions.side_effect = sqlite3.OperationalError("disk I/O error")
     app._db.get_session.return_value = {"id": 9, "date_time": "2026-10-03T20:05:46", "session_name": "Mock"}
-    app._recorder, app._waiting_for_bt, app._ticker = MagicMock(session_id=9), False, MagicMock(running=False)
+    app._recorder, app._ticker = MagicMock(session_id=9), MagicMock(running=False)
     app._session_manager.state = SessionState.FINISHED
     screen = SettingsScreen()
     wire(screen, session_counter=make_profiles(app).count_sessions)
@@ -70,7 +70,7 @@ def test_a_running_sessions_row_is_counted_once_it_ends(tmp_path):
         db.save_session({"duration": 600}, user_id=uid)
         running = db.save_session({"duration": 60}, user_id=uid)  # its first checkpoint
         app = EEGMeditationApp.__new__(EEGMeditationApp)
-        app._db, app._waiting_for_bt, app._ticker = db, False, MagicMock(running=False)
+        app._db, app._ticker = db, MagicMock(running=False)
         app._session_manager, app._recorder = MagicMock(), MagicMock(session_id=running)
         app._session_manager.state = SessionState.RUNNING
         profiles = make_profiles(app)

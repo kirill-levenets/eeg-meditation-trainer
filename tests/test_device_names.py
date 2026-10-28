@@ -11,6 +11,7 @@ from kivy.clock import Clock
 
 from app.config import APP
 from app.session.manager import SessionManager
+from app.session.session_run import Phase
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.device_labels import MAX_DEVICE_ALIAS, device_label, device_row_text
@@ -19,6 +20,7 @@ from app.ui.settings_screen import SettingsScreen
 from app.ui.settings_sections.device import DeviceSection
 from app.ui.theme import C, Icons
 from tests._headset import make_headset
+from tests._session_run import run_in
 from tests._settings_section import settings_section
 
 BLUE = "00:11:22:33:44:01"
@@ -40,7 +42,6 @@ def _app(db: DatabaseManager | None = None) -> EEGMeditationApp:
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._db = db or MagicMock()
     app._current_user_id = 1
-    app._waiting_for_bt = False
     app._ticker = MagicMock(running=False)
     app._real_stream = MagicMock()
     app._real_stream._device_address = BLUE
@@ -167,7 +168,7 @@ def test_the_connecting_overlay_names_the_headset_by_its_alias(db_path):
     try:
         app = _app(db)
         app._headset.on_rename(BLUE, "MindWave Mobile", "Blue")
-        app._start_attempt = 1
+        run_in(app, Phase.STARTING)
         app._real_stream.start.return_value = True
         assert app._begin_bt_wait()
         app._live_screen.show_overlay.assert_called_with("Connecting to Blue...")
@@ -210,7 +211,7 @@ def test_switching_headsets_while_a_session_runs_is_refused():
 
 def test_switching_headsets_while_connecting_is_refused():
     app = _app()
-    app._waiting_for_bt = True
+    run_in(app, Phase.CONNECTING)
     app._headset.on_select(GREY, "MindWave Mobile")
     app._real_stream.set_device.assert_not_called()
 

@@ -53,7 +53,6 @@ def _notes_writes(app):
 def test_user_stop_confirms_then_takes_the_shared_save_path():
     app = _app()
     app._session_manager = MagicMock(state=SessionState.RUNNING)
-    app._waiting_for_bt = False
     app._ticker = MagicMock(running=False)
     app._stop_and_save = MagicMock()
     app._confirm_action = MagicMock()
@@ -113,7 +112,6 @@ def _recorded_session(db) -> EEGMeditationApp:
     app._session_custom_formulas_json = lambda: ""
     app._program_run = make_run()
     app._make_session_name = lambda: "2026-10-05 07:00 - MindWave Mobile"
-    app._waiting_for_bt = False
     app._ticker = MagicMock(running=False)
     app._eeg_stream = MagicMock()
     for name in ("_audio", "_live_screen", "_settings_screen", "_timer_state", "_confirm_action",

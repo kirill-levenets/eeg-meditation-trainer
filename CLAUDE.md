@@ -65,7 +65,7 @@ Read it before changing that subsystem.
   `ENGINE_VERSION` stamped on sessions), `custom_formula.py` (AST-parsed user formulas, `avg(expr, N)`), `formula_slots.py` (the three Settings formulas:
   evaluators, names, their session record), `noise_detector.py`. → [metrics-scoring](docs/architecture/metrics-scoring.md)
 - `app/session/` — `manager.py` `SessionManager` (Start/Pause/Resume/Stop, accrual), `scoring.py` `GoalAccrual`, `session_program.py` (timed segments), `timer_state.py`, `what_if.py` (threshold recompute).
-  `tick_thread.py` `TickThread` (the 2 Hz tick), `recorder.py` `SessionRecorder` (the running session's checkpoints).
+  `session_run.py` `SessionRun` (one Start: its phase and per-run state), `tick_thread.py` `TickThread` (the 2 Hz tick), `recorder.py` `SessionRecorder` (the running session's checkpoints).
   `app/ui/program_run.py` `ProgramRun` — the running program: segment stepping on the tick thread, its live-graph lines.
   `app/ui/program_settings.py` `ProgramSettings` — Settings → Timer: mode, the edited program, saved programs.
   `app/ui/formula_settings.py` `FormulaSettings` — Settings → Custom Formula. → [session](docs/architecture/session.md), [programs](docs/architecture/programs.md), [metrics-scoring](docs/architecture/metrics-scoring.md)
@@ -110,7 +110,8 @@ The linked file explains the mechanism.
   The selected headset is the active profile's own or none (`Headset.load`);
   a profile's headset is found by `Headset.scan`, whose result does nothing once the profile, its headset or mode changed or a session started;
   only Start opens Settings → Device to pick. → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md#connection)
-- **A session start is one attempt** (`_start_attempt`): a callback queued for an earlier attempt does nothing.
+- **A session start is one run** (`SessionRun`, `app/session/session_run.py`, the app's `_run`): its phase and per-run state, from the Start to its ending;
+  a callback queued for an earlier run does nothing (`_on_main_for(run, fn)`), and the tick works on the run it read at its start.
   Every BT-wait exit goes through `_abort_bt_wait()` (tick watcher stopped before the stream); every ending undoes the start's setup through `_undo_session_setup()`. → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md)
 - **At most one tick thread.**
   `TickThread.start` (`app/session/tick_thread.py`, the app's `_ticker`) is a no-op while one is alive; each thread gets its own stop event. → [session](docs/architecture/session.md)
