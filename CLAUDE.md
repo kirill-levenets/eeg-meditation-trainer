@@ -131,7 +131,8 @@ The linked file explains the mechanism.
 - **A session reaches the DB only through `SessionRecorder.checkpoint`** (`app/session/recorder.py`, the app's `_recorder`):
   the row and the buffered ticks in one transaction, at the 60 s flush, on leaving the app, at backup and at the final save. → [session](docs/architecture/session.md#persistence)
 - **Every ending saves through one path**: `_stop_and_save` → `_persist_session_data` (tick-thread-safe, no Kivy) + `_finalize_stop_ui` (main thread).
-  There is no discard path; a confirm that arrives after the session ended writes nothing. → [session](docs/architecture/session.md#persistence)
+  There is no discard path; a confirm that arrives after the session ended writes nothing.
+  A check that ends it on the tick thread (stale data, the recording limit) freezes it there (`_end_from_tick`: pause, mute, stop the tick) and saves once on main; every queued finish runs only for its own run. → [session](docs/architecture/session.md#persistence)
 - While a session runs or connects (`_session_pipeline_live()`), anything that would break it is refused through `_refused_while_session_runs(doing)`:
   profile switch, Restore, the scored metric (`_scoring_locked`), a running program's threshold, Settings › Audio's Test. → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
 - The Session screen shows one profile's session (`ShownSession`, `app/ui/shown_session.py`, the app's `_shown`; its `owner` set at Start): picking another profile drops it through `ShownSession.drop`; re-picking the shown one (allowed mid-session) resets nothing.

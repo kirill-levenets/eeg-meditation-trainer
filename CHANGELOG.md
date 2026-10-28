@@ -45,6 +45,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **A session could end twice while the phone was locked**: with the headset's data gone stale, the stop waited for the unlock while the timer could still end the session, so it was saved and torn down twice;
+  at the 3-hour recording limit the stop and its alert repeated on every tick until the unlock.
+  Such a check now freezes the session at once (its duration ends there, its sound goes quiet) and saves it once on unlock.
 - **A profile with no saved headset used the last profile's** (#99): after a profile switch, Settings › Device showed the other profile's headset as selected and Start connected to it, though nothing saved it to the profile;
   after a restart the same profile had none.
   A profile now gets its own headset or none, and a link to another profile's closes.

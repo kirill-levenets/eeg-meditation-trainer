@@ -397,7 +397,7 @@ class EEGMeditationApp(App):
             abort=self._abort_bt_wait, undo_setup=self._undo_session_setup)
         self._watch = SessionWatch(
             self._real_stream, self._session_manager, self._audio, self._live_screen, self._settings_screen.device,
-            headset_name=self._headset.name, on_main=self._on_main, stop_and_save=self._stop_and_save)
+            headset_name=self._headset.name, on_main=self._on_main, end_session=self._end_from_tick)
 
         self._sm.add_widget(self._live_screen)
         self._sm.add_widget(self._history_screen)
@@ -1118,7 +1118,7 @@ class EEGMeditationApp(App):
         if self._session_manager.state != SessionState.RUNNING:
             return
 
-        if self._watch.at_limit():
+        if self._watch.at_limit(run):
             return
         self._watch.follow_link(run)
         self._watch.check_stale(run)
@@ -1161,7 +1161,7 @@ class EEGMeditationApp(App):
 
         # Timer countdown — tick() is pure counter, no UI
         if self._timer_state.tick(APP.UPDATE_FREQUENCY):
-            self._end_by_timer()
+            self._end_by_timer(run)
             return
 
         self._recorder.flush_tick()  # DB opened with check_same_thread=False
@@ -1223,7 +1223,15 @@ class EEGMeditationApp(App):
         if not self._is_paused:
             self._on_main(_ui_update)
 
-    def _end_by_timer(self) -> None:
+    def _end_from_tick(self, run: SessionRun, reason: str, alert: str) -> None:
+        """Tick thread: a check ended the session. It is frozen here (its duration ends now, its sound goes quiet, no
+        later tick can end it again) and saved on the main thread, once, while its run is current."""
+        self._session_manager.pause()
+        self._audio.mute()
+        self._ticker.stop()
+        self._on_main_for(run, lambda: (self._live_screen.show_alert(alert), self._stop_and_save(reason=reason)))
+
+    def _end_by_timer(self, run: SessionRun) -> None:
         """Tick thread: the timer expired; save the session, silence it, end the tick, ring the gong."""
         logger.info("Timer expired, auto-stopping session")
         # Persist FIRST, before any audio teardown: the session must be saved even with the screen locked, and
@@ -1241,7 +1249,7 @@ class EEGMeditationApp(App):
         def _finish_on_main(_dt=None):
             self._audio.stop()  # full noise teardown on the main thread
             self._finalize_stop_ui(stats, session_id)
-        self._on_main(_finish_on_main)
+        self._on_main_for(run, _finish_on_main)  # an ending that ran first (a profile's delete) has done it
         # Ring the gong LAST, on this thread, so it sounds at the timer end
         # even with the screen locked: it routes through a MediaPlayer
         # (USAGE_MEDIA), which plays through lock — SoundLoader is silenced

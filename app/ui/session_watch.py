@@ -8,13 +8,13 @@ from app.session.session_run import SessionRun
 
 
 class SessionWatch:
-    """Tick thread: each check warns once per condition and stops the session where it must; alerts, the device status
-    and a stop reach the main thread through on_main."""
+    """Tick thread: each check warns once per condition and ends the session where it must (end_session freezes it on
+    this thread and saves it once on the main one); alerts and the device status reach the main thread through on_main."""
 
     STALE_DATA_THRESHOLD = 10.0  # seconds with no new packets before warning
 
     def __init__(self, stream, session_manager, audio, live_screen, device_section, *, headset_name: Callable[[], str],
-                 on_main: Callable[[Callable], None], stop_and_save: Callable[..., None]) -> None:
+                 on_main: Callable[[Callable], None], end_session: Callable[[SessionRun, str, str], None]) -> None:
         self._stream = stream
         self._session_manager = session_manager
         self._audio = audio
@@ -22,10 +22,10 @@ class SessionWatch:
         self._device_section = device_section
         self._headset_name = headset_name
         self._on_main = on_main
-        self._stop_and_save = stop_and_save
+        self._end_session = end_session
 
-    def at_limit(self) -> bool:
-        """Stop and save a session that reached the recording limit; True if it did."""
+    def at_limit(self, run: SessionRun) -> bool:
+        """End a session that reached the recording limit; True if it did."""
         if self._session_manager.elapsed_seconds < APP.SESSION_MAX_SECONDS:
             return False
         logger.info(f"Session reached max duration ({APP.SESSION_MAX_SECONDS}s), auto-stopping")
@@ -34,8 +34,7 @@ class SessionWatch:
             f"Session recording limit reached ({APP.SESSION_MAX_SECONDS // 3600}h). "
             "Session saved. Start a new one to continue."
         )
-        self._on_main(lambda m=limit_msg: self._live_screen.show_alert(m))
-        self._on_main(lambda: self._stop_and_save())
+        self._end_session(run, "user", limit_msg)
         return True
 
     def follow_link(self, run: SessionRun) -> None:
@@ -72,13 +71,7 @@ class SessionWatch:
             if not run.stale_data_warned:
                 run.stale_data_warned = True
                 logger.warning(f"Stale EEG data: no packets for {stale_secs:.0f}s, auto-stopping")
-                self._on_main(lambda: (
-                    self._live_screen.show_alert(
-                        "No EEG data. Session stopped.\n"
-                        "Check headset and battery."
-                    ),
-                    self._stop_and_save(reason="stale_data"),
-                ))
+                self._end_session(run, "stale_data", "No EEG data. Session stopped.\nCheck headset and battery.")
         else:
             run.stale_data_warned = False
 
