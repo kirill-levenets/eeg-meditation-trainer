@@ -26,6 +26,7 @@ from app.crash_handler import (
 from app.eeg.band_spec import BAND_KEYS
 from app.eeg.mock_stream_v2 import MockEEGStream
 from app.eeg.neurosky_stream import NeuroSkyStream
+from app.keep_awake import KeepAwake
 from app.logger import logger
 from app.metrics.engine import MetricsEngine
 from app.metrics.formula_slots import (
@@ -210,7 +211,7 @@ class EEGMeditationApp(App):
         self._formulas: FormulaSlots = FormulaSlots()
         self._audio_formula_index: int = 0  # the slot that drives the sound when the custom formula does
         self.serial_device_override: Optional[str] = None
-        self._wake_lock = None
+        self._keep_awake: KeepAwake = KeepAwake()  # held from a session's setup to its ending
 
     def _persist_user_setting(self, key: str) -> None:
         """Persist one setting now via the registry (it reads the live value); no-op mid-load or unbuilt."""
@@ -334,80 +335,6 @@ class EEGMeditationApp(App):
         sqrt_bands = self._metrics_engine.compute_sqrt_relative_bands(raw_sample)
         fvars.update({f"s_{k}": v for k, v in sqrt_bands.items()})
         return fvars
-
-    def _acquire_wake_lock(self) -> None:
-        """Keep CPU running + screen on during session (Android only)."""
-        if not android_jni.on_android():
-            return
-        try:
-            from android.runnable import run_on_ui_thread
-
-            @run_on_ui_thread
-            def _set_flag():
-                from jnius import autoclass
-                activity = android_jni.activity()
-                WindowManager = autoclass("android.view.WindowManager$LayoutParams")
-                activity.getWindow().addFlags(WindowManager.FLAG_KEEP_SCREEN_ON)
-            _set_flag()
-
-            # Partial wake lock keeps CPU alive when screen is off.
-            from jnius import autoclass
-            Context = autoclass("android.content.Context")
-            PowerManager = autoclass("android.os.PowerManager")
-            pm = android_jni.activity().getSystemService(Context.POWER_SERVICE)
-            self._wake_lock = pm.newWakeLock(
-                PowerManager.PARTIAL_WAKE_LOCK, "eegmeditation:session"
-            )
-            self._wake_lock.acquire()
-            logger.info("Wake lock acquired (partial + screen-on).")
-        except Exception as e:
-            logger.warning(f"Failed to acquire wake lock: {e}")
-
-    def _release_wake_lock(self) -> None:
-        """Release wake locks (Android only)."""
-        if not android_jni.on_android():
-            return
-        try:
-            if self._wake_lock is not None:
-                try:
-                    self._wake_lock.release()
-                except Exception as e:  # already released by Android; the flag still clears below
-                    logger.warning(f"Wake lock release failed: {e}")
-                self._wake_lock = None
-            from android.runnable import run_on_ui_thread
-
-            @run_on_ui_thread
-            def _clear_flag():
-                from jnius import autoclass
-                activity = android_jni.activity()
-                WindowManager = autoclass("android.view.WindowManager$LayoutParams")
-                activity.getWindow().clearFlags(WindowManager.FLAG_KEEP_SCREEN_ON)
-            _clear_flag()
-            logger.info("Wake lock released.")
-        except Exception as e:
-            logger.warning(f"Failed to release wake lock: {e}")
-
-    def _start_session_keep_alive_service(self) -> None:
-        """Start the session's foreground service: it runs in this process, so the OS keeps this process up."""
-        if not android_jni.on_android():
-            return
-        try:
-            from jnius import autoclass
-            service_cls = autoclass("org.eeg.eegmeditation.SessionForegroundService")
-            service_cls.start(android_jni.activity(), "EEG Meditation", "Meditation session in progress")
-            logger.info("Session foreground service started.")
-        except Exception as e:
-            logger.warning(f"Failed to start the session foreground service: {e}")
-
-    def _stop_session_keep_alive_service(self) -> None:
-        if not android_jni.on_android():
-            return
-        try:
-            from jnius import autoclass
-            autoclass("org.eeg.eegmeditation.SessionForegroundService").stop(android_jni.activity())
-            logger.info("Session foreground service stopped.")
-        except Exception as e:
-            logger.warning(f"Failed to stop the session foreground service: {e}")
 
     # Map bottom-nav tab keys to screen groups
     _TAB_SCREENS = {
@@ -910,8 +837,7 @@ class EEGMeditationApp(App):
         self._live_screen.set_controls_running()
         self._settings_screen.lock_threshold(self._refuse_program_threshold if self._program_run.active else None)
 
-        self._acquire_wake_lock()
-        self._start_session_keep_alive_service()
+        self._keep_awake.hold()
 
         if APP.USE_MOCK_DEVICE:
             self._eeg_stream.start()
@@ -965,8 +891,7 @@ class EEGMeditationApp(App):
         self._waiting_for_bt = False
         self._bt_signal_start = None
         self._real_stream.stop()
-        self._release_wake_lock()
-        self._stop_session_keep_alive_service()
+        self._keep_awake.release()
         self._live_display_uid = None  # no session came of the start, which emptied the display
 
     def _on_connect_cancel(self, *args) -> None:
@@ -996,8 +921,7 @@ class EEGMeditationApp(App):
         self._timer_state.reset()
         self._session_manager.reset()
         self._settings_screen.lock_threshold(None)
-        self._release_wake_lock()
-        self._stop_session_keep_alive_service()
+        self._keep_awake.release()
 
     def _on_connect_retry(self, *args) -> None:
         """Retry button on connection overlay."""
@@ -2268,7 +2192,7 @@ class EEGMeditationApp(App):
                 # entry points refuse to run while a session is active, so this is
                 # defense-in-depth, not a data-loss path.)
                 self._stop_and_save()
-        self._stop_session_keep_alive_service()  # a start still connecting has no session to stop it
+        self._keep_awake.stop_service()  # a start still connecting has no session to stop it
         self._audio.cleanup()
         self._db.mark_shutting_down()
         self._db.close()

@@ -39,8 +39,7 @@ def _app() -> EEGMeditationApp:
     app._live_screen = MagicMock()
     app._settings_screen = MagicMock()
     app._audio = MagicMock()
-    app._release_wake_lock = MagicMock()
-    app._stop_session_keep_alive_service = MagicMock()
+    app._keep_awake = MagicMock()
     app._confirm_action = MagicMock()
     app._program_run = make_run(app)
     queued = []

@@ -72,7 +72,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   In `app_manager`, `_begin_bt_wait()` checks `start()`'s result **before** entering the wait:
   a refusal undoes the start's setup (`_undo_session_setup`) and shows a retry overlay with `_last_connect_error`, with no `bt_connect_failed` soft error (its 60 s cooldown would hide the next real failure).
   **Every BT-wait exit** (Cancel, Stop, no data, keeps closing, failed connect, timeout) goes through `_abort_bt_wait()`:
-  it stops the tick watcher (clearing `_waiting_for_bt`/`_bt_signal_start`) **before** `_real_stream.stop()`, then releases the wake lock and keep-alive service.
+  it stops the tick watcher (clearing `_waiting_for_bt`/`_bt_signal_start`) **before** `_real_stream.stop()`, then releases the wake lock and keep-alive service (`KeepAwake.release`).
   The watcher reads `not stream._running` as a failed connect, so stopping the stream first shows a false "Connection failed".
   **A session start is one attempt** (#52):
   `_start_attempt` advances on every Start (`_on_start`) and on every ending (`_undo_session_setup()`, which every ending goes through), and a callback queued for an attempt does nothing once it has moved on.

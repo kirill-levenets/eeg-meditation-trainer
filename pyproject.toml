@@ -82,6 +82,8 @@ ignore = [
 "app/storage/android_saf.py" = ["PLC0415", "BLE001"]
 # pyjnius helpers: lazy pyjnius import, broad except while trying screens in turn (logged)
 "app/android_jni.py" = ["PLC0415", "BLE001"]
+# The session's keep-awake: lazy pyjnius/android imports, broad except around each Android call (logged)
+"app/keep_awake.py" = ["PLC0415", "BLE001"]
 # The maker's power screens: broad except around building them through pyjnius (logged, then a toast)
 "app/ui/power_exemption.py" = ["BLE001"]
 # AST validator/evaluator: deeply branched by design

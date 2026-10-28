@@ -27,8 +27,7 @@ def _make_waiting_app() -> tuple[EEGMeditationApp, list]:
         ("stream_stopped", app._waiting_for_bt, app._ticker.running)
     )
     app._eeg_stream = app._real_stream
-    app._release_wake_lock = MagicMock()
-    app._stop_session_keep_alive_service = MagicMock()
+    app._keep_awake = MagicMock()
     app._live_screen = MagicMock()
     app._settings_screen = MagicMock()
     app._timer_state = MagicMock()
@@ -42,8 +41,7 @@ def _assert_unwatched_stream_stop(app: EEGMeditationApp, events: list) -> None:
     assert events == ["tick_stopped", ("stream_stopped", False, False)]
     assert app._bt_signal_start is None
     # Released by the abort itself (on the tick thread for a wait exit), and again by a cancel's shared teardown.
-    app._release_wake_lock.assert_called()
-    app._stop_session_keep_alive_service.assert_called()
+    app._keep_awake.release.assert_called()
 
 
 def test_connect_cancel_stops_watcher_before_stream():
@@ -101,8 +99,7 @@ def test_refused_start_undoes_setup_without_entering_the_wait():
     assert app._begin_bt_wait() is False
 
     assert app._waiting_for_bt is False
-    app._release_wake_lock.assert_called_once()
-    app._stop_session_keep_alive_service.assert_called_once()
+    app._keep_awake.release.assert_called_once()
     shown = app._live_screen.show_overlay_retry.call_args.args[0]
     assert "still closing" in shown
     app._report_bt_connect_failure.assert_not_called()
@@ -118,4 +115,4 @@ def test_started_stream_enters_the_wait():
 
     assert app._waiting_for_bt is True
     app._live_screen.show_overlay.assert_called_once()
-    app._release_wake_lock.assert_not_called()
+    app._keep_awake.release.assert_not_called()

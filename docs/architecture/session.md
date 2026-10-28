@@ -119,7 +119,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `tests/test_service_start_state.py` compiles it with `javac` and runs its transition table (`tests/java/`); without a JDK the test is skipped.
   `START_NOT_STICKY` keeps the system from restarting it alone.
   A maker's power manager can still close the app at this priority ([app-platform](app-platform.md#background-running-android)).
-  `_start_session_keep_alive_service`/`_stop_session_keep_alive_service` call its static `start`/`stop`.
+  `KeepAwake` (`app/keep_awake.py`, the app's `_keep_awake`) calls its static `start`/`stop`, together with the wake lock and the keep-screen-on flag:
+  `hold()` at a session's setup, `release()` at its ending or an abandoned start; `on_stop` stops only the service.
 - While the app is paused (screen locked) the tick skips its per-tick UI update: N minutes locked would queue ~120·N full graph redraws, which froze the screen on resume.
   The tick thread records every tick into the session-lifetime mirror instead (`LiveMirror` in `app/ui/live_mirror.py`, the app's `_mirror`, no Kivy).
   `LiveMirror.reload_into` reloads the live graphs from it in one batch on resume (while the session runs) and at the session's end (`_finalize_stop_ui`):

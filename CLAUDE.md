@@ -87,7 +87,8 @@ Read it before changing that subsystem.
   `history_screen.py`, `period_totals.py`, `history_flow.py` `HistoryFlow` (what the app does with History's rows) → [history](docs/architecture/history.md);
   `diary_screen.py` (session detail), `session_detail_flow.py` `SessionDetailFlow` (opens and loads it) → [session-detail](docs/architecture/session-detail.md);
   `session_labels.py` → [session](docs/architecture/session.md)
-- `app/crash_handler.py`, `app/logger.py`, `app/android_jni.py`, `app/ui/kivy_providers.py` (the Kivy providers the app picks itself) → [app-platform](docs/architecture/app-platform.md)
+- `app/crash_handler.py`, `app/logger.py`, `app/android_jni.py`, `app/ui/kivy_providers.py` (the Kivy providers the app picks itself),
+  `app/keep_awake.py` `KeepAwake` (a session's wake lock, screen-on flag and foreground service) → [app-platform](docs/architecture/app-platform.md)
 - `android_src/` — `SessionForegroundService` (Java), the session's foreground service, in the app's own process; its start/stop state is `ServiceStartState`, tested with `javac` (`tests/test_service_start_state.py`).
   `tools/` — BT diagnostics (`bt_test.py`, `ble_battery_scan.py`).
 

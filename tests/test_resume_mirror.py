@@ -303,8 +303,7 @@ def test_finalize_stop_ui_reloads_full_graph_and_sets_duration():
     app = _make_resume_app(running=False)  # session already FINISHED
     _populate(app, n=10)
     app._timer_state = MagicMock()
-    app._release_wake_lock = MagicMock()
-    app._stop_session_keep_alive_service = MagicMock()
+    app._keep_awake = MagicMock()
     app._history = MagicMock()
     app._db = MagicMock()
     app._db.get_session.return_value = None

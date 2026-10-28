@@ -72,8 +72,7 @@ def test_user_stop_restores_program_series_and_clears_the_training_marker():
     app._ticker = MagicMock(running=False)
     app._persist_session_data = MagicMock(return_value={"duration": 30})
     app._recorder.session_id = SID
-    for name in ("_program_run", "_release_wake_lock",
-                 "_stop_session_keep_alive_service"):
+    for name in ("_program_run", "_keep_awake"):
         setattr(app, name, MagicMock())
     app._timer_state = MagicMock()
     app._session_manager = MagicMock()
@@ -118,7 +117,7 @@ def _recorded_session(db) -> EEGMeditationApp:
     app._ticker = MagicMock(running=False)
     app._eeg_stream = MagicMock()
     for name in ("_audio", "_live_screen", "_settings_screen", "_timer_state", "_confirm_action",
-                 "_release_wake_lock", "_stop_session_keep_alive_service", "_history"):
+                 "_keep_awake", "_history"):
         setattr(app, name, MagicMock())
     for _ in range(240):
         metrics = {"shamatha_score": 70, "meditation_score": 60}
@@ -232,6 +231,7 @@ def _leaving_app(notes: str, restoring: bool = False):
     app._session_manager = MagicMock()
     app._session_manager.state = SessionState.IDLE
     app._live_screen.summary_notes = notes
+    app._keep_awake = MagicMock()  # on_stop stops the session's service
     return app
 
 

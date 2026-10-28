@@ -9,6 +9,7 @@ import pytest
 
 from app import android_jni, crash_handler
 from app.eeg.neurosky_stream import NeuroSkyStream
+from app.keep_awake import KeepAwake
 from app.ui.app_manager import EEGMeditationApp
 
 
@@ -28,9 +29,7 @@ def _fake_run_on_ui_thread(monkeypatch):
 
 
 def _app():
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._wake_lock = None
-    return app
+    return EEGMeditationApp.__new__(EEGMeditationApp)
 
 
 def _off_android(monkeypatch):
@@ -51,23 +50,23 @@ def test_the_wake_lock_is_taken_and_given_back_through_the_activity(monkeypatch)
         "android.content.Context": types.SimpleNamespace(POWER_SERVICE="power"),
         "android.os.PowerManager": types.SimpleNamespace(PARTIAL_WAKE_LOCK=1),
     })
-    app = _app()
-    app._acquire_wake_lock()
+    keep_awake = KeepAwake()
+    keep_awake._acquire_wake_lock()
     window.addFlags.assert_called_once_with(128)
     power.newWakeLock.assert_called_once_with(1, "eegmeditation:session")
     lock.acquire.assert_called_once_with()
-    app._release_wake_lock()
+    keep_awake._release_wake_lock()
     lock.release.assert_called_once_with()
     window.clearFlags.assert_called_once_with(128)
-    assert app._wake_lock is None
+    assert keep_awake._wake_lock is None
 
 
 def test_off_android_the_wake_lock_does_nothing(monkeypatch):
     _off_android(monkeypatch)
-    app = _app()
-    app._acquire_wake_lock()
-    app._release_wake_lock()
-    assert app._wake_lock is None
+    keep_awake = KeepAwake()
+    keep_awake.hold()
+    keep_awake.release()
+    assert keep_awake._wake_lock is None
 
 
 def test_the_native_toast_gets_the_activity_and_a_java_string(monkeypatch):

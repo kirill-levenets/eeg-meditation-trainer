@@ -229,7 +229,7 @@ def test_the_end_of_a_session_locked_since_its_first_minute_shows_its_whole_numb
 
 def test_a_start_that_never_connected_leaves_no_owner():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
-    for name in ("_ticker", "_release_wake_lock", "_stop_session_keep_alive_service"):
+    for name in ("_ticker", "_keep_awake"):
         setattr(app, name, MagicMock())
     app._real_stream = MagicMock()
     app._live_display_uid = 1

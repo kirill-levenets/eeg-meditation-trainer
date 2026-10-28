@@ -291,8 +291,7 @@ def _start(program: bool, monkeypatch, prepare=None, **before) -> EEGMeditationA
     a._program_settings.segments = prog.segments
     a._program_settings.mode = "program" if program else "simple"
     a._timer_state = MagicMock()
-    for name in ("_warn_missing_sound_files", "_acquire_wake_lock",
-                 "_start_session_keep_alive_service"):
+    for name in ("_warn_missing_sound_files", "_keep_awake"):
         setattr(a, name, MagicMock())
     a._global_feedback_id = lambda: "noise"
     a._source_spec = lambda sid: ("noise", "")
@@ -385,8 +384,7 @@ def test_a_program_session_locks_the_threshold_controls_and_its_end_unlocks_them
     a = _start(program, monkeypatch)
     a._settings_screen.lock_threshold.assert_called_with(a._refuse_program_threshold if program else None)
     a._settings_screen.lock_threshold.reset_mock()
-    for name in ("_release_wake_lock", "_stop_session_keep_alive_service"):
-        setattr(a, name, MagicMock())
+    a._keep_awake = MagicMock()
     a._start_attempt = 1
     a._undo_session_setup()  # every ending
     a._settings_screen.lock_threshold.assert_called_with(None)

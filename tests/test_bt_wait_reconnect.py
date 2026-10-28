@@ -53,8 +53,7 @@ def wait(monkeypatch):
     app._real_stream = app._eeg_stream = stream
     app._bt_signal_start = None  # as __init__ sets it
     app._ticker = MagicMock(running=False)
-    app._release_wake_lock = MagicMock()
-    app._stop_session_keep_alive_service = MagicMock()
+    app._keep_awake = MagicMock()
     app._session_manager = SessionManager()
     app._timer_state = MagicMock()
     app._live_screen = MagicMock()
