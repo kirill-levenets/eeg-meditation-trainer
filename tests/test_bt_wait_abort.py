@@ -7,6 +7,7 @@ import app.ui.app_manager as am
 from app.session.manager import SessionManager
 from app.session.session_run import Phase
 from app.ui.app_manager import EEGMeditationApp
+from tests._bt_wait import make_bt_wait
 from tests._headset import make_headset
 from tests._program_run import make_run
 from tests._session_run import run_in
@@ -35,6 +36,7 @@ def _make_waiting_app() -> tuple[EEGMeditationApp, list]:
     app._session_manager = SessionManager()  # idle: the session starts only when data arrives
     app._program_run = make_run(app)
     app._headset = make_headset(app)
+    app._bt_wait = make_bt_wait(app)
     return app, events
 
 
@@ -82,13 +84,13 @@ def test_failed_connect_exit_releases_wake_lock_and_service():
     app._real_stream._device_name = "MindWave"
     app._real_stream._last_connect_error = "Headset is asleep or off."
     app._on_main = MagicMock()
-    app._report_bt_connect_failure = MagicMock()
+    app._bt_wait._report_connect_failure = MagicMock()
 
-    app._handle_bt_wait(app._run)
+    app._bt_wait.tick(app._run)
 
     _assert_unwatched_stream_stop(app, events)
     assert app._run.phase is Phase.ENDED  # its teardown is queued for the main thread
-    app._report_bt_connect_failure.assert_called_once()
+    app._bt_wait._report_connect_failure.assert_called_once()
 
 
 def test_refused_start_undoes_setup_without_entering_the_wait():
@@ -97,15 +99,15 @@ def test_refused_start_undoes_setup_without_entering_the_wait():
     app._real_stream.start.return_value = False
     app._real_stream._device_name = "MindWave"
     app._real_stream._last_connect_error = "Previous connection is still closing."
-    app._report_bt_connect_failure = MagicMock()
+    app._bt_wait._report_connect_failure = MagicMock()
 
-    assert app._begin_bt_wait() is False
+    assert app._bt_wait.begin(app._run) is False
 
     assert not app._connecting()
     app._keep_awake.release.assert_called_once()
     shown = app._live_screen.show_overlay_retry.call_args.args[0]
     assert "still closing" in shown
-    app._report_bt_connect_failure.assert_not_called()
+    app._bt_wait._report_connect_failure.assert_not_called()
 
 
 def test_started_stream_enters_the_wait():
@@ -114,7 +116,7 @@ def test_started_stream_enters_the_wait():
     app._real_stream.start.return_value = True
     app._real_stream._device_name = "MindWave"
 
-    assert app._begin_bt_wait() is True
+    assert app._bt_wait.begin(app._run) is True
 
     assert app._connecting()
     app._live_screen.show_overlay.assert_called_once()

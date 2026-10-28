@@ -55,6 +55,7 @@ from app.settings.registry import (
 from app.storage.database import DatabaseManager
 from app.ui import render_stats
 from app.ui.backup_flow import BackupFlow
+from app.ui.bt_wait import BtWait
 from app.ui.diary_screen import DiaryScreen
 from app.ui.formula_settings import FormulaSettings
 from app.ui.graph_fullscreen import GraphFullscreen
@@ -388,6 +389,10 @@ class EEGMeditationApp(App):
             report=lambda label, detail, force=False: report_soft_error(label, detail, app=self, force=force))
         self._headset.load_aliases()
         self._power = PowerExemption(self._db, self._settings_screen.device, toast=self._toast, main=self._on_main)
+        self._bt_wait = BtWait(
+            self._real_stream, self._live_screen, headset_name=self._headset.name, on_main_for=self._on_main_for,
+            start_session=self._start_on_first_data, on_connected=self._on_session_connected,
+            abort=self._abort_bt_wait, undo_setup=self._undo_session_setup)
 
         self._sm.add_widget(self._live_screen)
         self._sm.add_widget(self._history_screen)
@@ -849,29 +854,11 @@ class EEGMeditationApp(App):
             self._timer_state.start_countdown()
             self._on_session_connected(name)
             logger.info(f"Reusing existing BT connection to {name}")
-        elif not self._begin_bt_wait():
+        elif not self._bt_wait.begin(run):
             return
 
         self._ticker.start()
         logger.info("Session started via UI")
-
-    def _begin_bt_wait(self) -> bool:
-        """Start the reader and show the connect overlay; False, with the session setup undone, if refused."""
-        name = self._headset.name()
-        if not self._real_stream.start():
-            # Nothing is connecting: entering the wait would misreport a refusal as a failed connect.
-            self._undo_session_setup()
-            self._live_screen.update_device_status(False, device_name=name)
-            self._live_screen.show_overlay_retry(
-                f"Can't connect to {name} yet.\n{self._real_stream._last_connect_error}"
-            )
-            logger.info(f"BT start refused: {self._real_stream._last_connect_error!r}")
-            return False
-        self._run.phase = Phase.CONNECTING
-        self._live_screen.update_device_status(False, device_name=name, connecting=True)
-        self._live_screen.show_overlay(f"Connecting to {name}...")
-        logger.info(f"Waiting for BT connection to {name}")
-        return True
 
     def _abort_bt_wait(self) -> None:
         """Tear down a BT-connect wait; the tick watcher stops first or it reads our stop as a failed connect."""
@@ -1126,6 +1113,13 @@ class EEGMeditationApp(App):
             f"Session stopped and saved (took {time.monotonic() - t_start:.3f}s)"
         )
 
+    def _start_on_first_data(self) -> None:
+        """Tick thread: the BT wait's first data starts the session, against the threshold in force (it may have moved).
+        The countdown is armed on this thread before the next tick reads it: deferred to the main thread, a stalled main
+        thread left remaining_seconds at 0 and the next tick ended a 0 s "timer-ended" session."""
+        self._session_manager.start()
+        self._timer_state.start_countdown()
+
     def _on_session_connected(self, name: str) -> None:
         """Main thread: a headset session has started (the BT wait's first data, or a kept-alive connection)."""
         self._live_screen.update_device_status(True, device_name=name)
@@ -1148,9 +1142,6 @@ class EEGMeditationApp(App):
         profile delete handled before it) or another Start has replaced it."""
         self._on_main(lambda: fn() if self._run is run else None)
 
-    _BT_CONNECT_TIMEOUT = 30.0  # seconds before BT socket gives up
-    _BT_SIGNAL_TIMEOUT = 8.0   # seconds to wait for EEG packets after connected
-    _BT_MAX_DROPS = 2  # the third drop of the link in one wait ends it: the headset keeps closing it
     _STALE_DATA_THRESHOLD = 10.0  # seconds with no new packets before warning
 
     def _check_stale_data(self, run: SessionRun) -> None:
@@ -1178,124 +1169,6 @@ class EEGMeditationApp(App):
         else:
             run.stale_data_warned = False
 
-    def _give_up_bt_wait(self, run: SessionRun, name: str, message: str) -> None:
-        """End the wait from the tick thread with a retry screen (queued for this run only)."""
-        self._abort_bt_wait()
-        self._on_main_for(run, lambda: (
-            self._undo_session_setup(),
-            self._live_screen.update_device_status(False, device_name=name),
-            self._live_screen.show_overlay_retry(message),
-        ))
-
-    def _handle_bt_wait(self, run: SessionRun) -> None:
-        """Handle the BT connection wait phase (called from _update_tick).
-
-        Runs on the background tick thread — all Kivy UI calls are dispatched
-        via _on_main so they execute safely on the main thread.
-        """
-        name = self._headset.name()
-        link_dropped = not self._real_stream.is_connected and run.signal_start is not None
-        if link_dropped and self._bt_link_dropped(run, name):
-            return
-        elapsed = time.time() - run.connect_start
-
-        if self._real_stream.is_connected:
-            self._wait_for_data(run, name)
-        elif not self._real_stream._running:
-            self._bt_connect_failed(run, name)
-        elif elapsed > self._BT_CONNECT_TIMEOUT:
-            self._bt_connect_timed_out(run, name)
-        else:
-            # Still waiting for BT socket — show countdown
-            remaining = int(self._BT_CONNECT_TIMEOUT - elapsed)
-            msg = f"Connecting to {name}...\nTimeout in {remaining}s"
-            self._on_main_for(run, lambda m=msg: self._live_screen.update_overlay(m))
-
-    def _bt_link_dropped(self, run: SessionRun, name: str) -> bool:
-        """Tick thread: the link dropped and the reader reconnects; True if the headset keeps closing it (the wait ends)."""
-        # The next connection gets its own connect and no-data windows, and only its own packets count.
-        run.signal_start = None
-        run.dropped_at = time.monotonic()
-        run.connect_start = time.time()
-        run.drops += 1
-        if run.drops > self._BT_MAX_DROPS:
-            self._give_up_bt_wait(run, name, f"{name} keeps closing the connection.\n"
-                                             "Switch the headset off and on, then retry.")
-            logger.error(f"BT wait: {name} closed the connection {run.drops} times, giving up")
-            return True
-        return False
-
-    def _wait_for_data(self, run: SessionRun, name: str) -> None:
-        """Tick thread: BT socket connected — waiting for actual EEG data; the first data starts the session."""
-        if not run.signal_start:
-            run.signal_start = time.time()
-        signal_elapsed = time.time() - run.signal_start
-        signal_remaining = int(self._BT_SIGNAL_TIMEOUT - signal_elapsed)
-
-        raw_sample = self._eeg_stream.read_sample()
-        sq = raw_sample.get("signal_quality", 200)
-        total = sum(raw_sample.get(k, 0.0) for k in BAND_KEYS)
-
-        # Is the headset streaming packets on this connection?
-        since_packet = self._real_stream.seconds_since_last_packet
-        has_packets = 0 < since_packet < time.monotonic() - run.dropped_at
-
-        if total > 0 and has_packets:  # data on this connection: band values outlive a drop
-            self._session_manager.start()  # against the threshold in force, which may have moved
-            run.phase = Phase.STARTED
-            # Arm the countdown on THIS thread before the next tick()
-            # reads it. Deferring it via _on_main let a stalled main
-            # thread leave remaining_seconds=0, so the very next tick
-            # fired the timer instantly — a 0s "timer-ended" session.
-            self._timer_state.start_countdown()
-            self._on_main_for(run, lambda n=name: self._on_session_connected(n))
-            logger.info(f"BT device {name} connected, session started")
-        elif signal_elapsed > self._BT_SIGNAL_TIMEOUT and not has_packets:
-            # No packets — ThinkGear didn't start streaming.
-            # Don't try RFCOMM reconnect: closing the socket triggers
-            # EBUSY that blocks reconnection for 60+ seconds.
-            # The only reliable fix is a headset power cycle.
-            self._give_up_bt_wait(run, name, "No EEG data received.\nCheck battery or restart headset.")
-            logger.error("No ThinkGear packets — likely low battery or needs power cycle")
-        else:
-            # Show signal quality feedback (keep waiting if packets arrive)
-            if has_packets:
-                # Headset streaming — no timeout, wait for contact
-                wait_msg = "Place sensor on forehead..."
-            else:
-                wait_msg = f"Waiting for EEG data... {signal_remaining}s"
-            logger.debug(
-                f"BT signal wait: sq={sq} total={total:.0f} "
-                f"packets={'yes' if has_packets else 'no'} "
-                f"elapsed={signal_elapsed:.0f}s"
-            )
-            msg = f"Connected to {name}\n{wait_msg}\n{self._sensor_contact(sq)}"
-            self._on_main_for(run, lambda m=msg: self._live_screen.update_overlay(m))
-
-    @staticmethod
-    def _sensor_contact(signal_quality: int) -> str:
-        """The connect overlay's line on the sensor's contact, from ThinkGear's signal quality (200 = none, 0 = good)."""
-        if signal_quality == 200:
-            return "Sensor: no contact"
-        if signal_quality > 50:
-            return f"Sensor: poor (quality {signal_quality})"
-        if signal_quality > 0:
-            return f"Sensor: fair (quality {signal_quality})"
-        return "Sensor: good"
-
-    def _bt_connect_failed(self, run: SessionRun, name: str) -> None:
-        """Tick thread: the connection thread ended with an error."""
-        hint = self._real_stream._last_connect_error or "Check device is on and paired."
-        self._give_up_bt_wait(run, name, f"Connection to {name} failed.\n{hint}")
-        logger.error("BT connection failed, session aborted")
-        self._report_bt_connect_failure(name, hint)
-
-    def _bt_connect_timed_out(self, run: SessionRun, name: str) -> None:
-        """Tick thread: no BT socket within _BT_CONNECT_TIMEOUT."""
-        self._give_up_bt_wait(run, name, f"Connection to {name} timed out.\n"
-                                    "Make sure the device is turned on\nand in range.")
-        logger.error("BT connection timed out")
-
     def _update_tick(self, dt: float) -> None:
         """Main 2 Hz processing loop.
 
@@ -1307,7 +1180,7 @@ class EEGMeditationApp(App):
         if run is None:
             return
         if run.phase is Phase.CONNECTING:
-            self._handle_bt_wait(run)
+            self._bt_wait.tick(run)
             return
 
         if self._session_manager.state != SessionState.RUNNING:
@@ -1841,23 +1714,6 @@ class EEGMeditationApp(App):
     def _on_stop_test_timer_sound(self) -> None:
         logger.debug("Stop timer test sound")
         self._audio.stop_timer_bell()
-
-    def _report_bt_connect_failure(self, device_name: str, hint: str) -> None:
-        """Fire a soft-error dialog for a failed BT connect (cooldown-gated).
-
-        The retry overlay already tells the user *something* went wrong; this
-        adds a copy-pasteable technical report so they can forward it when
-        the friendly hint isn't enough.
-        """
-
-        addr = self._real_stream._device_address or "(unset)"
-        last_err = self._real_stream._last_connect_error or "(none)"
-        detail = (
-            f"Device: {device_name} ({addr})\n"
-            f"Hint shown to user: {hint}\n"
-            f"Stream last_connect_error: {last_err}\n"
-        )
-        report_soft_error("bt_connect_failed", detail, app=self)
 
     # The current Start, from the press to its ending (_undo_session_setup): a callback queued for an earlier one (the
     # device scan's result, the BT wait's UI and audio) finds it replaced and does nothing.

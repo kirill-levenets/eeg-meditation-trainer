@@ -16,7 +16,9 @@ from app.session.manager import SessionManager, SessionState
 from app.session.session_run import Phase
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
+from app.ui.bt_wait import BtWait
 from app.ui.live_mirror import LiveMirror
+from tests._bt_wait import make_bt_wait
 from tests._headset import fake_paired, make_headset
 from tests._program_run import make_run
 from tests._recorder import make_recorder
@@ -46,6 +48,7 @@ def _app() -> EEGMeditationApp:
     app._on_main = queued.append
     app._queued = queued
     app._headset = make_headset(app)
+    app._bt_wait = make_bt_wait(app)
     return app
 
 
@@ -58,7 +61,7 @@ def _waiting(app) -> EEGMeditationApp:
     """In the BT wait, connected, the first band data arriving on this tick."""
     run_in(app, Phase.STARTING)  # as _on_start makes it
     app._real_stream.start.return_value = True
-    assert app._begin_bt_wait()
+    assert app._bt_wait.begin(app._run)
     app._ticker.running = True
     app._run.connect_start = time.time()
     app._real_stream.is_connected = True
@@ -90,7 +93,7 @@ def test_stop_during_a_running_session_still_asks():
 
 def test_a_cancel_in_the_frame_the_session_starts_leaves_no_session_running():
     app = _waiting(_app())
-    app._handle_bt_wait(app._run)  # data arrived: the session starts and its "Running" UI + audio are queued
+    app._bt_wait.tick(app._run)  # data arrived: the session starts and its "Running" UI + audio are queued
     assert app._session_manager.state == SessionState.RUNNING
     app._on_connect_cancel()  # the Cancel tap, handled before the queued callback
     _run_queued(app)
@@ -101,7 +104,7 @@ def test_a_cancel_in_the_frame_the_session_starts_leaves_no_session_running():
 
 def test_without_a_cancel_the_session_starts_its_audio():
     app = _waiting(_app())
-    app._handle_bt_wait(app._run)
+    app._bt_wait.tick(app._run)
     _run_queued(app)
     app._audio.start.assert_called_once()
 
@@ -111,7 +114,7 @@ def test_a_cancel_while_the_tick_reads_the_first_data_leaves_no_session_running(
     app = _waiting(_app())
     in_read, release = threading.Event(), threading.Event()
     app._real_stream.read_sample.side_effect = lambda: (in_read.set(), release.wait(2), dict(BANDS))[2]
-    tick = threading.Thread(target=app._handle_bt_wait, args=(app._run,))
+    tick = threading.Thread(target=app._bt_wait.tick, args=(app._run,))
     tick.start()
     assert in_read.wait(2)
     app._ticker.stop = MagicMock(side_effect=lambda: (release.set(), tick.join(2)))  # the real stop joins the tick
@@ -128,7 +131,7 @@ def test_a_tick_that_outlives_the_cancel_shows_nothing():
     app = _waiting(_app())
     in_read, release = threading.Event(), threading.Event()
     app._real_stream.read_sample.side_effect = lambda: (in_read.set(), release.wait(2), dict(BANDS))[2]
-    tick = threading.Thread(target=app._handle_bt_wait, args=(app._run,))
+    tick = threading.Thread(target=app._bt_wait.tick, args=(app._run,))
     tick.start()
     assert in_read.wait(2)
     app._on_connect_cancel()  # the fixture's ticker stop returns without the tick, like a timed-out join
@@ -141,7 +144,7 @@ def test_a_tick_that_outlives_the_cancel_shows_nothing():
 
 def test_deleting_the_profile_in_the_frame_the_session_starts_leaves_no_audio_playing():
     app = _waiting(_app())
-    app._handle_bt_wait(app._run)  # data arrived: the "Running" UI + audio are queued
+    app._bt_wait.tick(app._run)  # data arrived: the "Running" UI + audio are queued
     app._db = MagicMock()
     app._recorder = make_recorder(app)
     app._recorder._buffer = []
@@ -154,7 +157,7 @@ def test_deleting_the_profile_in_the_frame_the_session_starts_leaves_no_audio_pl
 
 def test_the_header_start_time_is_when_the_data_arrived(monkeypatch):
     app = _waiting(_app())
-    app._handle_bt_wait(app._run)
+    app._bt_wait.tick(app._run)
     started = app._session_manager.started_at
     monkeypatch.setattr(am.time, "time", lambda: started + 600)  # the queued UI runs after a 10-min screen lock
     _run_queued(app)
@@ -238,28 +241,28 @@ def test_a_cancelled_program_session_restores_the_series_and_leaves_no_program_s
 
 
 def _end_the_wait(app, exit_case: str) -> None:
-    """Make the next _handle_bt_wait tick end the wait the given way."""
+    """Make the next BT-wait tick end the wait the given way."""
     if exit_case == "failed":
         app._real_stream.is_connected = False
         app._real_stream._running = False
         app._real_stream._last_connect_error = "Host is down"
-        app._report_bt_connect_failure = MagicMock()
+        app._bt_wait._report_connect_failure = MagicMock()
     elif exit_case == "no data":
         app._real_stream.read_sample.return_value = dict(BANDS, delta=0.0, theta=0.0, alpha1=0.0, alpha2=0.0,
                                                          beta1=0.0, beta2=0.0, gamma1=0.0, gamma2=0.0)
         app._real_stream.seconds_since_last_packet = 0
-        app._run.signal_start = time.time() - app._BT_SIGNAL_TIMEOUT - 1
+        app._run.signal_start = time.time() - BtWait.SIGNAL_TIMEOUT - 1
     else:
         app._real_stream.is_connected = False
         app._real_stream._running = True
-        app._run.connect_start = time.time() - app._BT_CONNECT_TIMEOUT - 1
+        app._run.connect_start = time.time() - BtWait.CONNECT_TIMEOUT - 1
 
 
 @pytest.mark.parametrize("exit_case", ["failed", "no data", "timeout"])
 def test_a_wait_that_ends_on_its_own_undoes_the_program_setup(exit_case):
     app = _with_program(_waiting(_app()))
     _end_the_wait(app, exit_case)
-    app._handle_bt_wait(app._run)
+    app._bt_wait.tick(app._run)
     _run_queued(app)
     assert not app._program_run.active and app._program_run._prev_visibility == {}
     app._live_screen.show_overlay_retry.assert_called_once()
@@ -269,7 +272,7 @@ def test_a_wait_that_ends_on_its_own_undoes_the_program_setup(exit_case):
 def test_a_wait_exit_queued_before_a_cancel_leaves_the_next_start_alone(exit_case, monkeypatch):
     app = _waiting(_app())
     _end_the_wait(app, exit_case)
-    app._handle_bt_wait(app._run)  # the wait ended on the tick thread; its retry screen is queued
+    app._bt_wait.tick(app._run)  # the wait ended on the tick thread; its retry screen is queued
     app._on_connect_cancel()
     monkeypatch.setattr(APP, "USE_MOCK_DEVICE", True)
     app._mock_stream = MagicMock()

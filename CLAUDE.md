@@ -80,7 +80,8 @@ Read it before changing that subsystem.
 - `app/ui/raw_eeg_screen.py` — `ScrollableGraphWidget`, the one time-series graph class;
   `graph_series.py` `GraphSeries` (the series picker, each graph's saved selection), `line_colours.py` (the scored line's gradient), `graph_runs.py` (the run fold, Kivy-free);
   `graph_gestures.py` (its touch), `graph_glyphs.py` (its corner buttons), `graph_scroll.py` `GraphAwareScrollView` (a page of graphs), `touch_utils.py`, `render_stats.py`. → [graphs](docs/architecture/graphs.md)
-- `app/ui/headset.py` `Headset` (which headset: a profile's own, found by its one scan path; its name; Settings → Device)
+- `app/ui/bt_wait.py` `BtWait` (the BT wait at a session's start: connect, first data, give up)
+  · `app/ui/headset.py` `Headset` (which headset: a profile's own, found by its one scan path; its name; Settings → Device)
   · `app/ui/power_exemption.py` `PowerExemption` (what may close a locked session: battery optimisation, the maker's power manager;
   the first-start alert and Settings → Device's row → [app-platform](docs/architecture/app-platform.md#background-running-android))
   · `app/ui/live_session.py`, `live_mirror.py` (the live graphs' session, kept through a screen lock), `settings_screen.py` (its larger sections in `settings_sections/`), `device_labels.py` → [live-session-and-settings](docs/architecture/live-session-and-settings.md);

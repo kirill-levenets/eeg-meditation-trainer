@@ -9,6 +9,7 @@ import app.ui.app_manager as am
 from app.session.manager import SessionManager, SessionState
 from app.session.session_run import Phase
 from app.ui.app_manager import EEGMeditationApp
+from tests._bt_wait import make_bt_wait
 from tests._headset import make_headset
 from tests._session_run import run_in
 
@@ -61,12 +62,13 @@ def wait(monkeypatch):
     app._settings_screen = MagicMock()
     app._headset = make_headset(app)
     app._on_main_for = MagicMock()
-    app._report_bt_connect_failure = MagicMock()
+    app._bt_wait = make_bt_wait(app)
+    app._bt_wait._report_connect_failure = MagicMock()
     app._undo_session_setup = MagicMock()
     run = run_in(app, Phase.STARTING)  # as Start makes it
     stream.start = MagicMock(return_value=True)
     run.connect_start = clock.now  # set by the session start that precedes the wait
-    assert app._begin_bt_wait()  # the wait as Start enters it, at T0
+    assert app._bt_wait.begin(run)  # the wait as Start enters it, at T0
 
     def tick(at: float, *, connected: bool, bands: float = 0.0, packet: bool = False) -> None:
         clock.now = T0 + at
@@ -74,7 +76,7 @@ def wait(monkeypatch):
         stream.bands = bands
         if packet:
             stream.last_packet = clock.now - 0.1  # just before the tick reads it (0.0 means none yet)
-        app._handle_bt_wait(app._run)  # the tick reads the current run
+        app._bt_wait.tick(app._run)  # the tick reads the current run
 
     return app, stream, tick
 
@@ -205,7 +207,7 @@ def test_the_next_wait_starts_with_no_drops(wait):
         tick(drop, connected=False)
     stream.start = MagicMock(return_value=True)
     run_in(app, Phase.STARTING).connect_start = am.time.time()  # a Retry is a new Start: a run with its own drops
-    assert app._begin_bt_wait()
+    assert app._bt_wait.begin(app._run)
     tick(30.0, connected=True)
     tick(35.5, connected=False)  # this wait's first drop, not the third
     assert not _gave_up(stream)

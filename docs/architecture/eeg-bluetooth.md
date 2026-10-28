@@ -69,8 +69,9 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   A late reader (epoch superseded after its connect returned) closes its socket instead of adopting it, and `_last_connect_error` is cleared only after that check.
   The reader clears `_connected` on exit, so a `stop()` landing just after `_connected = True` can't leave `is_connected` stuck True with no reader (the next Start would "reuse" a dead connection).
   Every failed Android connect attempt (secure → insecure → `createRfcommSocket(1)`) closes its socket; the ch=1 fallback is called directly on the device, since through `Class.getMethod` pyjnius can't resolve its varargs overload.
-  In `app_manager`, `_begin_bt_wait()` checks `start()`'s result **before** entering the wait:
-  a refusal undoes the start's setup (`_undo_session_setup`) and shows a retry overlay with `_last_connect_error`, with no `bt_connect_failed` soft error (its 60 s cooldown would hide the next real failure).
+  The wait is `BtWait` (`app/ui/bt_wait.py`, the app's `_bt_wait`): `begin(run)` checks `start()`'s result **before** entering the wait, and the tick drives `tick(run)` while the run is CONNECTING;
+  it reaches the app only through what it is given: the first data starts the session on the tick thread (`_start_on_first_data`), the "connected" UI runs on main (`_on_session_connected`), a give-up aborts (`_abort_bt_wait`) and queues the undo.
+  A refused `start()` undoes the start's setup (`_undo_session_setup`) and shows a retry overlay with `_last_connect_error`, with no `bt_connect_failed` soft error (its 60 s cooldown would hide the next real failure).
   **Every BT-wait exit** (Cancel, Stop, no data, keeps closing, failed connect, timeout) goes through `_abort_bt_wait()`:
   it stops the tick watcher (and marks the run ENDED, so it is no longer connecting) **before** `_real_stream.stop()`, then releases the wake lock and keep-alive service (`KeepAwake.release`).
   The watcher reads `not stream._running` as a failed connect, so stopping the stream first shows a false "Connection failed".
@@ -96,11 +97,11 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The header's start time and the graph's wall-clock axis come from `SessionManager.started_at`, not from when the queued UI ran (after a screen lock, the unlock time).
   `_run` is None until the first Start, so a Cancel before any Start finds no run to end.
   **Each connection gets its own windows**:
-  when `_handle_bt_wait` sees the link drop while the reader reconnects, `_bt_link_dropped` restarts the no-data window (the run's `signal_start`, `_BT_SIGNAL_TIMEOUT` 8 s) and the connect window (its `connect_start`, `_BT_CONNECT_TIMEOUT` 30 s).
+  when `BtWait.tick` sees the link drop while the reader reconnects, `_link_dropped` restarts the no-data window (the run's `signal_start`, `SIGNAL_TIMEOUT` 8 s) and the connect window (its `connect_start`, `CONNECT_TIMEOUT` 30 s).
   It also records the run's `dropped_at` (monotonic): only packets after the drop count as streaming, since a streaming headset's wait has no no-data timeout and an older packet would keep a silent socket's wait open.
   The session starts only on band data with a packet on this connection (`total > 0 and has_packets`), since the reader keeps the last band values across a reconnect.
-  Restarting the windows unbounds a headset that keeps connecting and closing, so a wait ends at its third drop (`_BT_MAX_DROPS` = 2, counted by the run's `drops`: a Retry is a new Start, with none) with "keeps closing the connection";
-  every wait exit that gives up (keeps closing, no data, a failed connect, the connect timeout) goes through `_give_up_bt_wait(run, name, message)`, which leaves the headset's name on the Session screen under its retry screen.
+  Restarting the windows unbounds a headset that keeps connecting and closing, so a wait ends at its third drop (`MAX_DROPS` = 2, counted by the run's `drops`: a Retry is a new Start, with none) with "keeps closing the connection";
+  every wait exit that gives up (keeps closing, no data, a failed connect, the connect timeout) goes through `BtWait._give_up(run, name, message)`, which leaves the headset's name on the Session screen under its retry screen.
   `tests/test_bt_wait_reconnect.py` replays drops and reconnects on a fake clock.
   Android reads drain what is available in one `InputStream.read(buf, 0, n)` per chunk, the buffer sized to the read (pyjnius copies the whole array both ways, so an oversized buffer is slower);
   byte-at-a-time reads would be ~4000 JNI calls/s at the 512 Hz raw rate.

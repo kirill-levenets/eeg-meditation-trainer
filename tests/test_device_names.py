@@ -19,6 +19,7 @@ from app.ui.hooks import wire
 from app.ui.settings_screen import SettingsScreen
 from app.ui.settings_sections.device import DeviceSection
 from app.ui.theme import C, Icons
+from tests._bt_wait import make_bt_wait
 from tests._headset import make_headset
 from tests._session_run import run_in
 from tests._settings_section import settings_section
@@ -170,7 +171,7 @@ def test_the_connecting_overlay_names_the_headset_by_its_alias(db_path):
         app._headset.on_rename(BLUE, "MindWave Mobile", "Blue")
         run_in(app, Phase.STARTING)
         app._real_stream.start.return_value = True
-        assert app._begin_bt_wait()
+        assert make_bt_wait(app).begin(app._run)
         app._live_screen.show_overlay.assert_called_with("Connecting to Blue...")
     finally:
         db.close()

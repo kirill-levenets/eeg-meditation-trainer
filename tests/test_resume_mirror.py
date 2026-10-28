@@ -29,6 +29,7 @@ from app.session.timer_state import TimerState
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.live_mirror import LiveMirror
 from app.ui.live_session import METRICS_COLORS, LiveSessionScreen
+from tests._bt_wait import make_bt_wait
 from tests._headset import make_headset
 from tests._program_run import make_run
 from tests._program_settings import make_programs
@@ -385,7 +386,7 @@ def test_tick_then_resume_roundtrip_preserves_data():
 
 
 def _make_btwait_app() -> EEGMeditationApp:
-    """An app stubbed to run the real ``_handle_bt_wait`` success branch."""
+    """An app stubbed to run the real BT wait's success branch."""
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._real_stream = MagicMock()
     app._real_stream.is_connected = True
@@ -393,8 +394,7 @@ def _make_btwait_app() -> EEGMeditationApp:
     app._real_stream.seconds_since_last_packet = 1.0
     run_in(app, Phase.CONNECTING).connect_start = time.time()
 
-    app._eeg_stream = MagicMock()
-    app._eeg_stream.read_sample.return_value = {
+    app._real_stream.read_sample.return_value = {
         "delta": 10.0, "theta": 10.0, "alpha1": 10.0, "alpha2": 10.0,
         "beta1": 10.0, "beta2": 10.0, "gamma1": 10.0, "gamma2": 10.0,
     }
@@ -409,6 +409,7 @@ def _make_btwait_app() -> EEGMeditationApp:
     ts.set_duration(15)
     app._timer_state = ts
     app._headset = make_headset(app)
+    app._bt_wait = make_bt_wait(app)
     return app
 
 
@@ -418,7 +419,7 @@ def test_btwait_arms_countdown_synchronously_on_connect():
     # deferred to _on_main (here a no-op MagicMock), remaining stays 0 and the
     # next tick fires the timer immediately → a 0s "timer-ended" session.
     app = _make_btwait_app()
-    EEGMeditationApp._handle_bt_wait(app, app._run)
+    app._bt_wait.tick(app._run)
 
     assert app._run.phase is Phase.STARTED
     assert app._timer_state.remaining_seconds == 15 * 60
@@ -431,7 +432,7 @@ def test_btwait_does_not_start_audio_on_tick_thread():
     # deferred to the main-thread callback (atomic with hide_overlay), never run
     # synchronously on the tick thread.
     app = _make_btwait_app()
-    EEGMeditationApp._handle_bt_wait(app, app._run)
+    app._bt_wait.tick(app._run)
 
     app._audio.start.assert_not_called()
     app._audio.play_connect_sound.assert_not_called()
