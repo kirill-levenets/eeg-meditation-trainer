@@ -211,7 +211,6 @@ class EEGMeditationApp(App):
         self._settle_triggers: dict = {}  # input name -> its settle trigger (_after_settle)
         self._settle_fns: dict = {}  # input name -> the function its trigger runs (the latest one given)
         self._formulas: FormulaSlots = FormulaSlots()
-        self._audio_formula_index: int = 0  # the slot that drives the sound when the custom formula does
         self.serial_device_override: Optional[str] = None
         self._keep_awake: KeepAwake = KeepAwake()  # held from a session's setup to its ending
 
@@ -264,7 +263,8 @@ class EEGMeditationApp(App):
             ev.cancel()
 
     def _session_custom_formulas_json(self) -> str:
-        return self._formulas.session_record(self._live_screen.graph.is_visible, self._audio_metric_key)
+        return self._formulas.session_record(self._live_screen.graph.is_visible,
+                                             self._settings_store.value("audio_metric"))
 
     @staticmethod
     def _source_spec(source_id: str) -> tuple[str, str]:
@@ -390,7 +390,7 @@ class EEGMeditationApp(App):
         self._formula_settings = FormulaSettings(
             self._db, self._settings_screen.formulas, self._live_screen.graph, self._formulas,
             user_id=lambda: self._current_user_id, require_user=self._require_user,
-            scoring_locked=self._scoring_locked, audio_key=lambda: self._audio_metric_key,
+            scoring_locked=self._scoring_locked, audio_key=lambda: self._settings_store.value("audio_metric"),
             confirm=self._confirm_action, info=self._info_popup, confirm_saved_delete=self._confirm_saved_delete)
         self._headset = Headset(
             self._db, self._real_stream, self._settings_screen.device, self._live_screen,
@@ -626,7 +626,6 @@ class EEGMeditationApp(App):
         # _load_user_settings will override for existing users)
         for key, active in self._settings_screen._graph_toggles.items():
             self._live_screen.graph.set_visible(key, active)
-        self._audio_metric_key: str = "shamatha_score"
 
         wire(
             self._diary_screen,
@@ -1452,7 +1451,7 @@ class EEGMeditationApp(App):
         if self._program_run.active and self._program_run.audio_key:
             key = self._program_run.audio_key
         else:
-            key = self._baseline_audio_metric(self._audio_metric_key)
+            key = self._baseline_audio_metric(self._settings_store.value("audio_metric"))
         ev = self._formulas.for_key(key)
         if ev is not None and not ev.is_valid:
             return "shamatha_score"
@@ -1461,16 +1460,17 @@ class EEGMeditationApp(App):
     def _on_audio_metric_change(self, key: str) -> None:
         """Switch which metric drives the audio threshold feedback: a running session keeps the one it is scored on
         (#51 scores it on the drive key every tick, so a switch mixed both metrics into one average and streak)."""
-        new_key = FORMULA_KEYS[self._audio_formula_index] if key == "custom_formula" else key
-        if new_key != self._audio_metric_key and self._scoring_locked("changing the metric it is scored on"):
+        store = self._settings_store
+        new_key = FORMULA_KEYS[store.value("audio_formula_index")] if key == "custom_formula" else key
+        if new_key != store.value("audio_metric") and self._scoring_locked("changing the metric it is scored on"):
             self._show_audio_metric()
             return
-        self._audio_metric_key = new_key
-        self._persist_user_setting("audio_metric")
-        logger.info(f"Audio threshold metric changed to: {self._audio_metric_key}")
+        self._change_setting("audio_metric", new_key)
+        logger.info(f"Audio threshold metric changed to: {new_key}")
 
     def _on_feedback_source_change(self, source: str, path: str) -> None:
-        """The global (below-threshold) feedback source chosen in Settings; its path first, so the source shows with it."""
+        """The global (below-threshold) feedback source chosen in Settings; its path first, so the source shows with
+        it."""
         self._change_setting("feedback_sound_path", (path or "").strip())
         self._change_setting("feedback_source", source)
         logger.info(f"Feedback source -> {source} {self._settings_store.value('feedback_sound_path')!r}")
@@ -1486,16 +1486,15 @@ class EEGMeditationApp(App):
         custom-formula slot is the selected driver — tapping it while another metric
         is selected just remembers the choice for when custom-formula is picked."""
         idx = max(0, min(idx, len(FORMULA_KEYS) - 1))
-        if (self._audio_metric_key in FORMULA_KEYS and FORMULA_KEYS[idx] != self._audio_metric_key
+        metric = self._settings_store.value("audio_metric")
+        if (metric in FORMULA_KEYS and FORMULA_KEYS[idx] != metric
                 and self._scoring_locked("changing the metric it is scored on")):
             self._show_audio_metric()
             return
-        self._audio_formula_index = idx
-        if self._audio_metric_key in FORMULA_KEYS:
+        self._change_setting("audio_formula_index", idx)
+        if metric in FORMULA_KEYS:
             # Load derives the index from audio_metric, so persist both or a reload reverts the switch.
-            self._audio_metric_key = FORMULA_KEYS[self._audio_formula_index]
-            self._persist_user_setting("audio_metric")
-        self._persist_user_setting("audio_formula_index")
+            self._change_setting("audio_metric", FORMULA_KEYS[idx])
 
     def _scoring_locked(self, doing: str) -> bool:
         """True (after telling the user) while a simple session runs: it is scored on the audio control metric (#51)
@@ -1505,9 +1504,9 @@ class EEGMeditationApp(App):
 
     def _show_audio_metric(self) -> None:
         """Settings' audio-metric choice and formula-slot buttons show the metric in force."""
-        key = self._audio_metric_key
+        key = self._settings_store.value("audio_metric")
         self._settings_screen.audio_metric = "custom_formula" if key in FORMULA_KEYS else key
-        self._settings_screen.audio_formula_index = self._audio_formula_index
+        self._settings_screen.audio_formula_index = self._settings_store.value("audio_formula_index")
 
     def _on_text_size_change(self, size: float) -> None:
         self._persist_user_setting("text_size")
@@ -1655,15 +1654,6 @@ class EEGMeditationApp(App):
             ss.display._rotate_btn.text = f"Rotate Screen ({v}°)"
             Window.rotation = v
 
-        def set_audio_index(v):
-            self._audio_formula_index = max(0, min(int(v), len(FORMULA_KEYS) - 1))
-
-        def set_audio_metric(v):
-            v = self._baseline_audio_metric(v)  # heal a leaked program slot
-            self._audio_metric_key = v
-            if v in FORMULA_KEYS:
-                self._audio_formula_index = FORMULA_KEYS.index(v)
-            self._show_audio_metric()
 
         def apply_feedback_source(v):
             ss.audio.set_feedback_source(v, self._settings_store.value("feedback_sound_path"))
@@ -1701,9 +1691,7 @@ class EEGMeditationApp(App):
         hold("rotation", INT, ss.display._current_rotation, apply_rotation)
         add("graph_zoom_seconds", FLOAT, self._saved_zoom_seconds, self._apply_saved_zoom)
         # audio_formula_index BEFORE audio_metric: metric reconciles the index when it's a slot.
-        add("audio_formula_index", INT, lambda: self._audio_formula_index, set_audio_index)
-        add("audio_metric", STR,
-            lambda: self._baseline_audio_metric(self._audio_metric_key), set_audio_metric)
+        settings += self._audio_metric_settings()
         hold("feedback_source", STR, "noise", apply_feedback_source)
         hold("feedback_sound_path", STR, "", apply_feedback_path)
         hold("reward_source", STR, "none", apply_reward_source)  # the above-threshold channel: off by default
@@ -1718,6 +1706,22 @@ class EEGMeditationApp(App):
         settings.append(line_colours_setting())
 
         self._settings_store = SettingsStore(self._db, settings)
+
+    def _audio_metric_settings(self) -> list[Setting]:
+        """The metric that drives the sound and its formula slot; the slot first: the metric reconciles it."""
+
+        def apply_audio_metric(v):
+            if v in FORMULA_KEYS:
+                self._settings_store.change("audio_formula_index", FORMULA_KEYS.index(v))
+            self._show_audio_metric()
+
+        def parse_slot(raw: str) -> int:
+            return max(0, min(int(raw), len(FORMULA_KEYS) - 1))
+
+        # A stored program slot heals to the baseline: outside a program it reads 0, constant max noise.
+        return [Setting("audio_formula_index", 0, parse_slot, INT[1], None, lambda _v: None),  # shown with the metric
+                Setting("audio_metric", "shamatha_score", self._baseline_audio_metric, STR[1], None,
+                        apply_audio_metric)]
 
     def _apply_stats_mode(self, mode: str) -> None:
         self._live_screen.set_stats_mode(mode)

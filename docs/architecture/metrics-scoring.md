@@ -37,7 +37,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Slot names reach the graph via `graph.set_series_name(key, name)`.
   Active names and expressions persist as `active_formulas` (JSON list of `{name, formula}`, per user), the audio-driving slot index as `audio_formula_index` (flat KV string, per user).
   At load `formula_slots.read_active` seeds slot 1 from the legacy `custom_formula` scalar if no JSON exists yet.
-  When "Custom Formula" is the audio metric, `_audio_metric_key = FORMULA_KEYS[_audio_formula_index]`.
+  When "Custom Formula" is the audio metric, the held `audio_metric` is `FORMULA_KEYS[audio_formula_index]` (both in the settings store, `_audio_metric_settings`; the metric's apply reconciles the slot).
   `_audio_drive_key()` resolves the live drive key: the program's transient `ProgramRun.audio_key` while a program runs, else the user's baseline.
   It falls back to `shamatha_score` for an invalid (empty or unparsable) formula slot **or** a `PROGRAM_FORMULA_KEYS` value outside a program: both are absent from `metrics`, so they would read 0 → constant max noise.
   `_baseline_audio_metric(key)` keeps program slots out of the persisted/baseline `audio_metric`, sanitizing on both save and load (load also heals a leaked value).
@@ -79,7 +79,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `ProgramRun.tick` (called in `_update_tick`, program mode only) detects a boundary crossing with the pure `ProgramRun.transition` helper;
   `_enter_segment` then fires the prior segment's end cue (`AudioEngine.play_transition_cue()` chime, or warble), sets the **transient** `audio_key` to the segment's metric key (precomputed by `begin`);
   it also calls `start_segment` (`set_active_goal`, and the live average starts over: a program's segments differ in metric) and moves the legend marker.
-  `audio_key` must not overwrite the user's persisted `_audio_metric_key`: a program slot would leak into the baseline, and a later simple session would read that absent key as 0 → constant max noise.
+  `audio_key` must not overwrite the user's stored `audio_metric`: a program slot would leak into the baseline, and a later simple session would read that absent key as 0 → constant max noise.
   Every program custom line is evaluated every tick (persistent `formula_evs`, see [programs.md](programs.md)).
   Auto-stop reuses the timer-expiry path: the program total seeds the timer at session start.
 - **The threshold in force** (#83):

@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 from app.session.manager import SessionManager
 from app.session.timer_state import TimerState
-from app.settings.registry import BOOL, INT, STR, Setting, SettingsStore
+from app.settings.registry import BOOL, Setting, SettingsStore
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.hooks import wire
 from app.ui.settings_screen import SettingsScreen
@@ -40,8 +40,7 @@ def _app(uid=7):
 def test_disconnect_alert_toggle_persists_via_store():
     app = _app()
     app._audio = type("A", (), {})()
-    s = Setting("disconnect_alert", False, BOOL[0], BOOL[1],
-                lambda: app._audio.disconnect_alert_enabled,
+    s = Setting("disconnect_alert", False, BOOL[0], BOOL[1], None,  # the store holds it
                 lambda v: setattr(app._audio, "disconnect_alert_enabled", v))
     app._settings_store = SettingsStore(app._db, [s])
     app._on_disconnect_alert_toggle(True)
@@ -53,13 +52,9 @@ def test_audio_formula_index_switch_copersists_metric():
     # Switching the driving slot must persist BOTH audio_metric and audio_formula_index,
     # or a reload (which reconciles the index from audio_metric) reverts it.
     app = _app()
-    app._audio_metric_key = "custom_formula"     # a FORMULA_KEY -> this slot drives audio
-    app._audio_formula_index = 0
-    idx_s = Setting("audio_formula_index", 0, INT[0], INT[1],
-                    lambda: app._audio_formula_index, lambda v: None)
-    met_s = Setting("audio_metric", "shamatha_score", STR[0], STR[1],
-                    lambda: app._baseline_audio_metric(app._audio_metric_key), lambda v: None)
-    app._settings_store = SettingsStore(app._db, [idx_s, met_s])
+    app._settings_screen = MagicMock()
+    store = app._settings_store = SettingsStore(app._db, app._audio_metric_settings())
+    store.change("audio_metric", "custom_formula")  # a FORMULA_KEY -> this slot drives audio
     app._on_audio_formula_index(1)
     stored = {k: v for _, k, v in app._db.writes}
     assert stored == {"audio_formula_index": "1", "audio_metric": "custom_formula_2"}

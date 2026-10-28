@@ -36,6 +36,7 @@ from tests._program_settings import make_programs
 from tests._recorder import make_recorder
 from tests._session_run import run_in
 from tests._session_watch import make_watch
+from tests._settings import audio_store
 from tests._shown_session import make_shown
 
 BAND_KEYS = ("alpha", "beta", "gamma", "theta", "delta")
@@ -91,7 +92,7 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     # All slots invalid by default (no formula set)
 
     app._audio = MagicMock()
-    app._audio_metric_key = "shamatha_score"
+    audio_store(app)
 
     app._timer_state = MagicMock()
     app._timer_state.tick.return_value = False  # never expire

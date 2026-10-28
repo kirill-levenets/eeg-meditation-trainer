@@ -16,6 +16,7 @@ from tests._program_run import make_run
 from tests._program_settings import make_programs
 from tests._recorder import make_recorder
 from tests._session_run import run_in
+from tests._settings import audio_store
 from tests.test_resume_mirror import _drive_tick, _make_tick_app, _metrics, _raw_sample
 
 
@@ -31,7 +32,7 @@ SHAMATHA_HIGH = _ticks(shamatha_score=[80, 85, 90, 20, 95], meditation_score=[10
 
 def _app(metric_key: str = "shamatha_score", formulas=()):
     app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._audio_metric_key = metric_key
+    audio_store(app, metric_key)
     app._program_run = make_run()
     app._program_settings = make_programs()
     app._formulas = FormulaSlots()
@@ -83,7 +84,7 @@ def test_a_valid_custom_formula_scores_the_session_and_an_invalid_one_falls_back
 def test_changing_the_feedback_metric_mid_session_moves_the_scoring():
     app = _app("shamatha_score")
     _run(app, SHAMATHA_HIGH[:3])  # 3 ticks above on shamatha
-    app._audio_metric_key = "meditation_score"
+    app._settings_store.change("audio_metric", "meditation_score")
     stats = _run(app, SHAMATHA_HIGH[3:])  # meditation: tick 4 above (90), tick 5 not
     assert stats["score_metric_key"] == "meditation_score"
     assert app._session_manager._time_above_threshold == 2.0  # 3 + 1 ticks
@@ -92,7 +93,7 @@ def test_changing_the_feedback_metric_mid_session_moves_the_scoring():
 def test_the_legend_marks_the_scored_series_once_per_change():
     app = _app("shamatha_score")
     marks = [app._scored_mark(app._run, app._score_on_drive_key()) for _ in range(3)]
-    app._audio_metric_key = "meditation_score"
+    app._settings_store.change("audio_metric", "meditation_score")
     marks.append(app._scored_mark(app._run, app._score_on_drive_key()))
     assert marks == ["shamatha_score", None, None, "meditation_score"]
 
@@ -100,7 +101,7 @@ def test_the_legend_marks_the_scored_series_once_per_change():
 def test_a_change_during_a_screen_lock_is_marked_by_the_first_tick_after_it():
     app = _app("shamatha_score")
     app._scored_mark(app._run, app._score_on_drive_key())
-    app._audio_metric_key = "meditation_score"
+    app._settings_store.change("audio_metric", "meditation_score")
     app._is_paused = True
     assert app._scored_mark(app._run, app._score_on_drive_key()) is None  # no UI dispatch while locked
     app._is_paused = False
@@ -265,7 +266,7 @@ def test_recomputing_from_the_stored_ticks_reproduces_the_stored_stats():
 def test_a_simple_session_tick_scores_on_the_feedback_metric_and_marks_it():
     app = _make_tick_app()
     app._program_settings.mode = "simple"
-    app._audio_metric_key = "meditation_score"
+    app._settings_store.change("audio_metric", "meditation_score")
     _drive_tick(app, _raw_sample(), _metrics())
     app._session_manager.set_active_goal.assert_called_with("meditation_score")
     ui_update = app._on_main.call_args_list[-1].args[0]
@@ -286,7 +287,7 @@ def test_program_mode_with_no_usable_program_is_scored_like_a_simple_session():
     app = _make_tick_app()
     app._program_settings.mode = "program"  # the Settings toggle; the session started without a program
     app._program_run = make_run(app)
-    app._audio_metric_key = "shamatha_score"
+    app._settings_store.change("audio_metric", "shamatha_score")
     _drive_tick(app, _raw_sample(), _metrics())
     app._session_manager.set_active_goal.assert_called_with("shamatha_score")
 

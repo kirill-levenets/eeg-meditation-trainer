@@ -2,7 +2,7 @@ from app.metrics.formula_slots import FormulaSlots
 from app.session.session_program import SessionProgram
 from app.ui.app_manager import EEGMeditationApp
 from tests._program_run import make_run
-from tests._settings import held_store
+from tests._settings import audio_store, held_store
 
 
 def test_source_spec_builtins_and_custom():
@@ -80,7 +80,7 @@ def test_baseline_audio_metric_rejects_program_keys():
 
 def _drive_app(metric_key, program_active=False, program_key=""):
     app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._audio_metric_key = metric_key
+    audio_store(app, metric_key)
     app._program_run = make_run(program=SessionProgram([{"minutes": 1}]) if program_active else None,
                                 audio_key=program_key)
     app._formulas = FormulaSlots()
