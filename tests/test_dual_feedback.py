@@ -92,14 +92,14 @@ def test_source_spec_heartbeat_is_builtin_not_custom():
 
 def test_reward_id_resolves_heartbeat_builtin():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._reward_source = "heartbeat"
+    app._settings_store = held_store(reward_source="heartbeat", reward_sound_path="")
     assert app._reward_id() == "heartbeat"
 
 
 def test_test_audio_sources_include_below_and_reward():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._settings_store = held_store(feedback_source="tone", feedback_sound_path="")
-    app._reward_source, app._reward_sound_path = "heartbeat", ""
+    app._settings_store = held_store(feedback_source="tone", feedback_sound_path="", reward_source="heartbeat",
+                                     reward_sound_path="")
     sources, gid, reward_id = app._test_audio_sources()
     assert gid == "tone"
     assert reward_id == "heartbeat"
@@ -108,8 +108,8 @@ def test_test_audio_sources_include_below_and_reward():
 
 def test_test_audio_sources_omit_reward_when_off():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._settings_store = held_store(feedback_source="noise", feedback_sound_path="")
-    app._reward_source, app._reward_sound_path = "none", ""
+    app._settings_store = held_store(feedback_source="noise", feedback_sound_path="", reward_source="none",
+                                     reward_sound_path="")
     sources, gid, reward_id = app._test_audio_sources()
     assert reward_id == ""
     assert sources == {"noise": ("noise", "")}
@@ -127,11 +127,11 @@ def test_heartbeat_resolves_to_a_generated_playable_file():
 
 def test_reward_id_resolves_none_builtin_and_missing_custom():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._reward_source, app._reward_sound_path = "none", ""
+    store = app._settings_store = held_store(reward_source="none", reward_sound_path="")
     assert app._reward_id() == ""
-    app._reward_source = "tone"
+    store.change("reward_source", "tone")
     assert app._reward_id() == "tone"
-    app._reward_source, app._reward_sound_path = "custom", ""
+    store.change("reward_source", "custom")
     assert app._reward_id() == ""          # missing custom -> silent, no rain surprise
-    app._reward_source, app._reward_sound_path = "custom", "/x.wav"
+    store.change("reward_sound_path", "/x.wav")
     assert app._reward_id() == "/x.wav"

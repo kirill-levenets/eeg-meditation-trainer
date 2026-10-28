@@ -61,7 +61,8 @@ def test_on_test_audio_prepares_selected_source(monkeypatch):
     from unittest.mock import MagicMock
     monkeypatch.setattr(EEGMeditationApp, "_session_pipeline_live", lambda self: False)  # no session: not refused
     app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._settings_store = held_store(feedback_source="tone", feedback_sound_path="")
+    app._settings_store = held_store(feedback_source="tone", feedback_sound_path="", reward_source="none",
+                                     reward_sound_path="")
     app._audio = MagicMock()
     app._on_test_audio()
     app._audio.prepare_feedback.assert_called_once_with({"tone": ("tone", "")}, "tone")

@@ -70,7 +70,7 @@ def test_persist_noop_without_store():
     app = _app()
     app._audio = type("A", (), {})()
     # no _settings_store attribute set
-    app._on_disconnect_alert_toggle(True)   # must not raise
+    app._persist_user_setting("disconnect_alert")   # must not raise
 
 
 # --- a settings save leaves the live timer alone --------------------------------

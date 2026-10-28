@@ -46,8 +46,11 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   **The store holds a setting's value** when its descriptor has no `get` (`get=None`): the store's copy is the only one while the profile is active, `set` applies it (its consumers and its widget, idempotent), and `SettingsStore.change(key, value)` is its one change path.
   The app's `_change_setting(key, value)` is what a widget's hook calls: the store holds and applies the value, then it is persisted at once or, for a continuous input (`settle=True`: a slider, typing), once it settles.
   Readers ask the store (`value(key)`), the tick thread included; save and persist write the held value, never a widget's.
-  Held so far: the sinking alert, the line width (persisted once a drag settles) and the feedback source and its path;
-  the rest still name their holder with a `get` until #107 moves them.
+  The store holds every setting that had two copies kept in step by hand (a consumer and its widget, or an app field and its widget):
+  the three alert toggles, the line width (persisted once a drag settles), the rotation, the feedback and reward sources and their paths, the timer sound (once typing settles).
+  A setting with one holder elsewhere keeps its `get`, since there is no second copy to keep in step:
+  the theme, text size and line colours (their globals, with listeners), the fold states (their widgets), the graph zoom (the live graph), the stats view and the marker hotkey (their widgets), the timer's enable and minutes (the Timer section).
+  The threshold, the audio metric and its formula slot and the device mode have controllers, since a change can be refused while a session runs.
   `_persist_user_setting(key)` (key only — the store reads the live value) catches `sqlite3.Error` → soft error;
   the threshold slider, the timer sound and the held settings with `settle=True` go through `_persist_user_setting_later(key)`:
   a per-key Kivy `Clock` trigger (`_after_settle`) restarted on every change (`_PERSIST_SETTLE_S` = 0.5 s), so a drag is one write, not one fsync per step on the UI thread.
