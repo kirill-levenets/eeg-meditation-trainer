@@ -60,10 +60,10 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `_confirm_action`'s `on_cancel` fires on any close that isn't OK (Cancel, tap outside, Android back), so the tick that Stop paused is always resumed, and it decides **once**:
   Kivy keeps delivering taps to a `ModalView` during its 0.1 s fade-out, so a second OK (or OK right after Cancel) would run the action again.
   That logic is `theme.confirm_popup`, the one confirm (OK left, Cancel right); `_confirm_action` and History's delete confirm both call it.
-  The session-end card ("Session saved") offers **Save notes** (`_on_summary_save_notes`; the card stays open), **OK** and a low-emphasis **Delete session** behind a confirm.
-  OK is `_close_summary`: it saves the notes only if they changed since the last save (`_flush_summary_notes`, against `_summary_saved_notes`, the last written text), so an untouched card writes nothing and clearing saved notes clears them;
+  The session-end card ("Session saved") offers **Save notes** (`ShownSession.on_save_notes`; the card stays open), **OK** and a low-emphasis **Delete session** behind a confirm.
+  OK is `ShownSession.close`: it saves the notes only if they changed since the last save (`flush_notes`, against the last written text), so an untouched card writes nothing and clearing saved notes clears them;
   then it stops the gong and closes.
-  Delete is `_on_summary_delete` → `HistoryFlow.delete_sessions`, which closes the card once the session is gone; a failed delete leaves the card and its typed notes.
+  Delete is `ShownSession.on_delete` → `HistoryFlow.delete_sessions`, which closes the card once the session is gone; a failed delete leaves the card and its typed notes.
   `on_pause` and `on_stop` both flush the card's notes with the settings through `_flush_on_leave`, skipped while `_restoring`.
   Notes go through the one `HistoryFlow.save_notes(sid, notes=, tags=, mood=)` (also the diary's Save and its leave-flush):
   `DatabaseManager.update_session_notes` writes only the fields given and returns whether a row changed; a failure goes to `report_soft_error`.
@@ -78,7 +78,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The delete runs on a worker thread (a large selection takes 0.3–0.8 s on desktop) behind the loading overlay, and reports `on_done(ok)`;
   the overlay is modal at once and painted only past 0.15 s (`show_loading(text, delay=0.15)`), so a tap can't reach the rows or the end card being deleted.
   A `sqlite3.Error` is reported as `session_delete_failed`.
-  On success the Session screen drops a deleted session it shows (the app's `_on_sessions_deleted` → `_drop_shown_session`: the end card, whose notes would have no session to save to, closes with its gong, and the display clears).
+  On success the Session screen drops a deleted session it shows (`ShownSession.on_sessions_deleted` → `drop`: the end card, whose notes would have no session to save to, closes with its gong, and the display clears).
   `HistoryScreen.remove_sessions(ids)` removes those rows and model entries in place (see the session list in [history.md](history.md)): no rebuild, no spinner, wherever the user is.
   History never lists the running session: its row exists from the first checkpoint, with that checkpoint's stats, and a History reload during the session would list it with them, frozen there until the next reload.
   `_running_session_id()` (`_recorder.session_id` while `_session_pipeline_live()`) is left out of History's list (`HistoryFlow.finished_sessions`) and Settings' profile counts.
@@ -96,7 +96,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `_on_main(_finish_on_main)` to defer `_audio.stop()` + `_finalize_stop_ui` to the main thread;
   then `play_timer_sound()` **last** (a one-shot `MediaPlayer` gong, which rings through the lock).
   Persisting first and ringing last means a hung audio call can never cost the session or the summary.
-  The gong plays until the file ends or the end card closes (every close goes through `_close_summary`), which calls `AudioEngine.stop_timer_bell()` (releases the gong `MediaPlayer` on the main thread);
+  The gong plays until the file ends or the end card closes (every close goes through `ShownSession.close`), which calls `AudioEngine.stop_timer_bell()` (releases the gong `MediaPlayer` on the main thread);
   `_start_session_common` also calls it, to stop a long custom gong still ringing from the previous session.
 
 ## Screen lock and Android

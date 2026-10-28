@@ -12,6 +12,7 @@ from app.ui.app_manager import EEGMeditationApp
 from tests._bt_wait import make_bt_wait
 from tests._headset import make_headset
 from tests._session_run import run_in
+from tests._shown_session import make_shown
 
 T0 = 1000.0
 
@@ -78,6 +79,7 @@ def wait(monkeypatch):
             stream.last_packet = clock.now - 0.1  # just before the tick reads it (0.0 means none yet)
         app._bt_wait.tick(app._run)  # the tick reads the current run
 
+    app._shown = make_shown(app)
     return app, stream, tick
 
 

@@ -9,6 +9,7 @@ from app.ui.hooks import wire
 from app.ui.settings_screen import SettingsScreen
 from tests._history_flow import make_history_flow
 from tests._profiles import make_profiles
+from tests._shown_session import make_shown
 
 
 def _rows(screen) -> set[str]:
@@ -32,6 +33,7 @@ def _ending_app(shown: str) -> EEGMeditationApp:
                  "_history"):
         setattr(app, name, MagicMock())
     app._sm = MagicMock(current=shown)
+    app._shown = make_shown(app)
     return app
 
 

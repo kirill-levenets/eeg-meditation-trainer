@@ -23,6 +23,7 @@ from tests._headset import fake_paired, make_headset
 from tests._program_run import make_run
 from tests._recorder import make_recorder
 from tests._session_run import run_in
+from tests._shown_session import make_shown
 
 BANDS = {"delta": 10.0, "theta": 10.0, "alpha1": 10.0, "alpha2": 10.0, "beta1": 10.0, "beta2": 10.0,
          "gamma1": 10.0, "gamma2": 10.0, "signal_quality": 0}
@@ -49,6 +50,7 @@ def _app() -> EEGMeditationApp:
     app._queued = queued
     app._headset = make_headset(app)
     app._bt_wait = make_bt_wait(app)
+    app._shown = make_shown(app)
     return app
 
 

@@ -17,6 +17,7 @@ from app.ui.live_mirror import LiveMirror
 from tests._history_flow import make_history_flow
 from tests._program_run import make_run
 from tests._recorder import make_recorder
+from tests._shown_session import make_shown
 
 SID = 42
 
@@ -32,7 +33,6 @@ def _app() -> EEGMeditationApp:
     app._settings_screen = MagicMock()
     app._live_screen.summary_session_id = SID
     app._live_screen.summary_notes = ""
-    app._summary_saved_notes = ""
     app._recorder = make_recorder(app)
     app._mirror = LiveMirror()
     app._toast = MagicMock()
@@ -41,6 +41,7 @@ def _app() -> EEGMeditationApp:
     app._on_main = lambda fn: fn()
     app._history = make_history_flow(app)
     app._history.refresh = MagicMock()
+    app._shown = make_shown(app)
     return app
 
 
@@ -122,6 +123,7 @@ def _recorded_session(db) -> EEGMeditationApp:
         app._recorder.record(metrics, {"timestamp": 0.0, **metrics})
     app._session_manager._start_time = time.time() - 120
     app._recorder.checkpoint()
+    app._shown = make_shown(app)
     return app
 
 
@@ -153,7 +155,7 @@ def test_a_stop_confirmed_after_the_session_ended_another_way_keeps_it(db, ended
 def test_card_delete_without_confirmation_deletes_nothing():
     app = _app()
     app._confirm_action = MagicMock()
-    app._on_summary_delete()
+    app._shown.on_delete()
     app._db.delete_session.assert_not_called()
     app._live_screen.hide_summary.assert_not_called()
 
@@ -162,7 +164,7 @@ def test_card_delete_confirmed_removes_the_session_and_stops_the_gong(monkeypatc
     monkeypatch.setattr(history_flow.threading, "Thread", lambda target, **k: MagicMock(start=target))  # the worker, inline
     app = _app()
     app._confirm_action = MagicMock()
-    app._on_summary_delete()
+    app._shown.on_delete()
     app._confirm_action.call_args.args[3]()  # the user confirms
     app._db.delete_sessions.assert_called_once_with([SID])
     app._audio.stop_timer_bell.assert_called_once()
@@ -185,7 +187,7 @@ def test_history_row_delete_removes_its_row_in_place(monkeypatch):
 def test_typed_notes_are_saved_on_ok():
     app = _app()
     app._live_screen.summary_notes = "calm, then sleepy"
-    app._on_summary_ok()
+    app._shown.on_ok()
     assert _notes_writes(app) == ["calm, then sleepy"]
     app._toast.assert_called_once_with("Notes saved")
     app._audio.stop_timer_bell.assert_called_once()
@@ -195,10 +197,10 @@ def test_typed_notes_are_saved_on_ok():
 def test_saved_then_edited_notes_persist_the_edit_on_ok():
     app = _app()
     app._live_screen.summary_notes = "first"
-    app._on_summary_save_notes()
+    app._shown.on_save_notes()
     app._live_screen.hide_summary.assert_not_called()  # Save notes keeps the card open
     app._live_screen.summary_notes = "first, then more"
-    app._on_summary_ok()
+    app._shown.on_ok()
     assert _notes_writes(app) == ["first", "first, then more"]
 
 
@@ -206,8 +208,8 @@ def test_saved_then_edited_notes_persist_the_edit_on_ok():
 def test_empty_or_unchanged_notes_write_nothing_on_ok(typed, saved):
     app = _app()
     app._live_screen.summary_notes = typed
-    app._summary_saved_notes = saved
-    app._on_summary_ok()
+    app._shown._saved_notes = saved
+    app._shown.on_ok()
     app._db.update_session_notes.assert_not_called()
     app._toast.assert_not_called()
 
@@ -215,9 +217,9 @@ def test_empty_or_unchanged_notes_write_nothing_on_ok(typed, saved):
 def test_saved_notes_cleared_before_ok_are_cleared_in_the_db():
     app = _app()
     app._live_screen.summary_notes = "abc"
-    app._on_summary_save_notes()
+    app._shown.on_save_notes()
     app._live_screen.summary_notes = ""
-    app._on_summary_ok()
+    app._shown.on_ok()
     assert _notes_writes(app) == ["abc", ""]
 
 
@@ -262,10 +264,10 @@ def test_a_failed_notes_save_is_reported_not_toasted(monkeypatch):
     reported = []
     monkeypatch.setattr(history_flow, "report_soft_error", lambda label, detail, **k: reported.append(label))
     app._live_screen.summary_notes = "lost?"
-    app._on_summary_ok()
+    app._shown.on_ok()
     assert reported == ["notes_save_failed"]
     app._toast.assert_not_called()
-    assert app._summary_saved_notes == ""
+    assert app._shown._saved_notes == ""
 
 
 # --- The confirm dialog: Cancel, tap-outside and back all count as cancel --------------------------------------
@@ -364,7 +366,7 @@ def test_notes_update_keeps_the_fields_it_is_not_given():
 def test_save_notes_on_already_saved_text_confirms_without_writing():
     app = _app()
     app._live_screen.summary_notes = "kept"
-    app._summary_saved_notes = "kept"
-    app._on_summary_save_notes()
+    app._shown._saved_notes = "kept"
+    app._shown.on_save_notes()
     app._db.update_session_notes.assert_not_called()
     app._toast.assert_called_once_with("Notes saved")

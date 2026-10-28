@@ -103,7 +103,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Start cancels a pending one (`_cancel_settle("apply_threshold")`), since the start reads the slider itself.
   A profile load that moves the slider schedules one too, which applies the same value again (harmless).
   With no session pipeline live, a slider change (`_on_threshold_change`, which Kivy calls only when the value changes, a profile switch to another stored threshold included) clears a finished session off the Session screen;
-  `_clear_live_display` does it (graphs, mirrors, threshold steps and readout; also run at Start and on a change of profile), since the finished session's stepped line would otherwise outrank the new scalar line.
+  `ShownSession.clear` does it (graphs, mirrors, threshold steps and readout; also run at Start and on a change of profile), since the finished session's stepped line would otherwise outrank the new scalar line.
   Re-applying an unchanged Settings value clears nothing: after a program the threshold in force is a segment's target, so comparing against it would wipe the graphs on a mere profile reload.
   `add_metric` returns what the tick was scored on (`{score_key, score_value, score_target}`, `{}` when not RUNNING);
   it keeps the `(first tick, target)` steps with `scoring.extend_steps`, whose values are the stats' `score_targets` (JSON; `''` with no scored tick).

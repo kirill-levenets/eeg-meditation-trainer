@@ -9,7 +9,7 @@ def make_history_flow(app, **deps) -> HistoryFlow:
                 "show_loading": lambda *a, **k: app.show_loading(*a, **k), "hide_loading": lambda: app.hide_loading(),
                 "info": lambda *a: app._info_popup(*a), "toast": lambda message: app._toast(message),
                 "running_session_id": lambda: app._running_session_id(),
-                "on_sessions_deleted": lambda ids: app._on_sessions_deleted(ids)}
+                "on_sessions_deleted": lambda ids: app._shown.on_sessions_deleted(ids)}
     return HistoryFlow(app._db, getattr(app, "_history_screen", None), getattr(app, "_formulas", None),
                        **{**defaults, **deps})
 

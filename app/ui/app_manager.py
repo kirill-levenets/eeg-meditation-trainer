@@ -79,6 +79,7 @@ from app.ui.session_labels import session_title, start_stamp
 from app.ui.settings_screen import (
     SettingsScreen,
 )
+from app.ui.shown_session import ShownSession
 from app.ui.theme import (
     DEFAULT_THEME,
     TEXT_SIZES,
@@ -422,11 +423,16 @@ class EEGMeditationApp(App):
             self._formula_settings, graphs=self._all_graphs, detail_program=self._diary_screen.program_lines_of,
             legacy_defaults=self._settings_screen._graph_toggles, user_id=lambda: self._current_user_id,
             require_user=self._require_user)
+        self._shown = ShownSession(
+            self._live_screen, self._mirror, self._audio,
+            save_notes=lambda sid, notes: self._history.save_notes(sid, notes=notes),
+            delete_sessions=lambda ids: self._history.delete_sessions(ids), confirm=self._confirm_action,
+            toast=self._toast, last_session_id=lambda: self._recorder.session_id)
         self._history = HistoryFlow(
             self._db, self._history_screen, self._formulas, user_id=lambda: self._current_user_id,
             on_main=self._on_main, show_loading=self.show_loading, hide_loading=self.hide_loading, info=self._info_popup,
             toast=self._toast, running_session_id=self._running_session_id,
-            on_sessions_deleted=self._on_sessions_deleted)
+            on_sessions_deleted=self._shown.on_sessions_deleted)
         self._detail = SessionDetailFlow(
             self._db, self._diary_screen, self._history_screen, self._sm, self._graph_series,
             user_id=lambda: self._current_user_id, on_main=self._on_main, switch_screen=self._switch_screen)
@@ -521,9 +527,9 @@ class EEGMeditationApp(App):
         )
         self._live_screen.overlay_cancel_btn.bind(on_release=self._on_connect_cancel)
         self._live_screen.overlay_retry_btn.bind(on_release=self._on_connect_retry)
-        self._live_screen.summary_ok_btn.bind(on_release=self._on_summary_ok)
-        self._live_screen.summary_save_notes_btn.bind(on_release=self._on_summary_save_notes)
-        self._live_screen.summary_delete_btn.bind(on_release=self._on_summary_delete)
+        self._live_screen.summary_ok_btn.bind(on_release=self._shown.on_ok)
+        self._live_screen.summary_save_notes_btn.bind(on_release=self._shown.on_save_notes)
+        self._live_screen.summary_delete_btn.bind(on_release=self._shown.on_delete)
 
         # Tap on graph to set marker (Android — no keyboard available)
         if android_jni.on_android():
@@ -648,8 +654,8 @@ class EEGMeditationApp(App):
 
     def _activate_user(self, uid: int) -> None:
         """Make `uid` the active profile and load its settings; every path that picks a user goes here."""
-        if self._live_display_uid not in (None, uid):  # the Session screen shows another profile's session
-            self._drop_shown_session(keep_notes=True)
+        if self._shown.owner not in (None, uid):  # the Session screen shows another profile's session
+            self._shown.drop(keep_notes=True)
         self._current_user_id = uid
         self._db.set_setting("last_user_id", str(uid))
         self._load_user_settings(uid)
@@ -661,8 +667,8 @@ class EEGMeditationApp(App):
         self._program_settings.refresh_saved()
 
     def _on_profile_deleted(self, uid: int) -> None:
-        if uid == self._live_display_uid:  # its session went with it: the card has nothing left to save
-            self._drop_shown_session(keep_notes=False)
+        if uid == self._shown.owner:  # its session went with it: the card has nothing left to save
+            self._shown.drop(keep_notes=False)
         self._history.mark_dirty()
 
     def _restore_last_user(self) -> Optional[int]:
@@ -813,8 +819,7 @@ class EEGMeditationApp(App):
         self._recorder.begin()
         run.connect_start = time.time()
 
-        self._clear_live_display()
-        self._live_display_uid = self._current_user_id
+        self._shown.take(self._current_user_id)
         gid = self._global_feedback_id()
         if program:
             fb_sources, fb_ids, fb_initial = self._feedback_plan(program, gid)
@@ -867,7 +872,7 @@ class EEGMeditationApp(App):
             self._run.phase = Phase.ENDED
         self._real_stream.stop()
         self._keep_awake.release()
-        self._live_display_uid = None  # no session came of the start, which emptied the display
+        self._shown.owner = None  # no session came of the start, which emptied the display
 
     def _on_connect_cancel(self, *args) -> None:
         """Cancel button on connection overlay."""
@@ -902,30 +907,12 @@ class EEGMeditationApp(App):
         self._live_screen.set_controls_idle()
         self._on_start()
 
-    # The session-end card: the session is already saved on every ending; the card only adds notes or deletes it.
-    _summary_saved_notes: str = ""  # notes last written from the card for the session it shows
-    _live_display_uid: int | None = None  # the profile whose session the Session screen shows: set at Start
-
-    def _on_summary_save_notes(self, *args) -> None:
-        if self._live_screen.summary_notes == self._summary_saved_notes:
-            if self._summary_saved_notes:
-                self._toast("Notes saved")  # already saved; say so rather than ignore the tap
-            return
-        self._flush_summary_notes()
-
-    def _flush_summary_notes(self) -> None:
-        """Write the card's notes only if they changed since the last save, so an untouched card writes nothing."""
-        sid = self._live_screen.summary_session_id
-        notes = self._live_screen.summary_notes
-        if sid and notes != self._summary_saved_notes and self._history.save_notes(sid, notes=notes):
-            self._summary_saved_notes = notes
-
     def _flush_on_leave(self) -> None:
         """Persist what the user changed but hasn't saved, before the app pauses or exits."""
         self._leaving = True
         try:
-            if getattr(self, "_live_screen", None) is not None:
-                self._flush_summary_notes()
+            if getattr(self, "_shown", None) is not None:
+                self._shown.flush_notes()
             self._checkpoint_or_report()  # Android may kill a backgrounded app before the next 60 s checkpoint
             # Only on screen: leaving it already saved (or reported a failed save), and a retry on every pause
             # repeated the error, e.g. for a session deleted since.
@@ -942,37 +929,6 @@ class EEGMeditationApp(App):
         except Exception as exc:
             logger.exception("Session checkpoint failed")
             report_soft_error("session_checkpoint_failed", f"The running session could not be saved: {exc}")
-
-    def _on_summary_ok(self, *args) -> None:
-        self._close_summary(keep_notes=True)
-
-    def _close_summary(self, keep_notes: bool) -> None:
-        """Close the end card and stop its bell; its notes are saved only while its session still exists."""
-        if keep_notes:
-            self._flush_summary_notes()
-        self._audio.stop_timer_bell()
-        self._live_screen.hide_summary()
-
-    def _on_sessions_deleted(self, ids: list[int]) -> None:
-        """History deleted these sessions: the Session screen lets go of one it shows (the end card, its display)."""
-        if self._recorder.session_id in ids or self._live_screen.summary_session_id in ids:
-            self._drop_shown_session(keep_notes=False)
-
-    def _drop_shown_session(self, keep_notes: bool) -> None:
-        """Take the shown session off the Session screen: its end card, if open, and its display."""
-        if self._live_screen.summary_session_id is not None:
-            self._close_summary(keep_notes)
-        self._clear_live_display()
-        self._live_display_uid = None
-
-    def _on_summary_delete(self, *args) -> None:
-        sid = self._live_screen.summary_session_id
-        if not sid:
-            return  # silent-ok: the card is not showing a session
-
-        # The delete closes the card and stops the gong once the session is gone; a failed one leaves both.
-        self._confirm_action("Delete session", "Delete this session permanently? This can't be undone.",
-                             "Delete", lambda: self._history.delete_sessions([sid]), ok_color=C.DANGER)
 
     def _on_pause(self, *args) -> None:
         if self._session_manager.state == SessionState.RUNNING:
@@ -1061,13 +1017,12 @@ class EEGMeditationApp(App):
         if getattr(getattr(self, "_sm", None), "current", None) == "settings":  # a timer can end it there
             self._settings_screen.refresh_profile_counts()  # else entering Settings redraws them
         if stats and session_id:
-            self._summary_saved_notes = ""
             try:
                 saved = self._db.get_session(session_id)  # titled like its History row, from what was stored
             except sqlite3.Error:
                 logger.exception(f"Session {session_id} saved, but its title couldn't be read for the end card")
                 saved = None
-            self._live_screen.show_summary(session_id, stats, title=session_title(saved) if saved else "")
+            self._shown.show_end_card(session_id, stats, session_title(saved) if saved else "")
 
     def _refused_while_session_runs(self, doing: str, why: str = "") -> bool:
         """True, after telling the user, while a session runs or connects: until it stops it owns its profile, the
@@ -1471,7 +1426,7 @@ class EEGMeditationApp(App):
 
     def _on_threshold_change(self, value: int) -> None:
         if self._mirror.metrics and not self._session_pipeline_live():
-            self._clear_live_display()  # the last session's line is not the threshold the next one runs against
+            self._shown.clear()  # the last session's line is not the threshold the next one runs against
         # A drag is one change of the threshold in force, at the value it settles on, not one per slider step.
         self._after_settle("apply_threshold", lambda: self._apply_threshold(self._settings_screen.threshold))
         self._persist_user_setting_later("threshold")
@@ -1489,15 +1444,6 @@ class EEGMeditationApp(App):
         """Put the Settings threshold in force, unless a running program owns it (a profile reload, a late settle)."""
         if not self._program_owns_threshold():
             self._put_threshold_in_force(value)
-
-    def _clear_live_display(self) -> None:
-        """Empty the Session screen of its session: graphs, their mirrors, threshold steps and the readout."""
-        self._mirror.clear()
-        self._live_screen.graph.clear_data()
-        self._live_screen.raw_graph.clear_data()
-        self._live_screen.band_graph.clear_data()
-        self._live_screen.graph.set_threshold_steps(None)  # each tick's target steps it, a program's too
-        self._live_screen.clear_readout()
 
     def _put_threshold_in_force(self, value: int) -> None:
         """The sound, the scoring, the SHAMATHA pill and the engine together; a session start calls it directly."""

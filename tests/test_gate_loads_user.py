@@ -12,6 +12,7 @@ import app.ui.profiles as profiles
 from app.storage.database import UserExistsError
 from app.ui.app_manager import EEGMeditationApp
 from tests._profiles import make_gate
+from tests._shown_session import make_shown
 
 
 def _gate_app(created_uid):
@@ -23,6 +24,7 @@ def _gate_app(created_uid):
                  "_sm", "_headset", "_power", "_profiles", "_load_user_settings", "_history"):
         setattr(app, attr, MagicMock())
     app._gate = make_gate(app)
+    app._shown = make_shown(app)
     return app
 
 

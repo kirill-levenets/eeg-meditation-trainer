@@ -97,7 +97,6 @@ def _app() -> EEGMeditationApp:
     app._history_screen = MagicMock()
     app._live_screen = MagicMock()
     app._live_screen.summary_session_id = None
-    app._summary_saved_notes = ""
     app._save_user_settings = MagicMock()
     app._restoring = False
     app._is_paused = False

@@ -26,6 +26,7 @@ from tests._program_run import make_run
 from tests._program_settings import make_programs
 from tests._recorder import make_recorder
 from tests._session_run import run_in
+from tests._shown_session import make_shown
 from tests.test_bt_wait_reconnect import wait  # noqa: F401  (fixture)
 from tests.test_resume_mirror import _drive_tick, _make_tick_app, _metrics, _raw_sample
 from tests.test_session_detail_open import _frames, app, db  # noqa: F401  (fixtures)
@@ -53,6 +54,7 @@ def _threshold_app(*, program: bool = False, state: SessionState = SessionState.
         sm.set_active_goal("shamatha_score")
     sm._state = state
     a._session_manager = sm
+    a._shown = make_shown(a)
     return a
 
 
@@ -146,6 +148,7 @@ def _tick_app() -> EEGMeditationApp:
     a._program_run = make_run(a)
     a._metrics_engine = MagicMock()
     a._persist_user_setting_later = MagicMock()
+    a._shown = make_shown(a)
     return a
 
 
@@ -468,6 +471,7 @@ def _idle_app() -> EEGMeditationApp:
     a._mirror = LiveMirror()
     a._mirror.record({}, {"score_target": 70, "score_key": "shamatha_score"}, {})
     a._after_settle = MagicMock()
+    a._shown = make_shown(a)
     return a
 
 

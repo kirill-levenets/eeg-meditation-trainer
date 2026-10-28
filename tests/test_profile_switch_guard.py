@@ -20,6 +20,7 @@ def _make_app(state: SessionState) -> EEGMeditationApp:
     app._save_user_settings = MagicMock()
     app._load_user_settings = MagicMock()
     app._history = MagicMock()
+    app._shown = MagicMock(owner=None)  # no session shown
     return app
 
 

@@ -12,6 +12,7 @@ from app.ui.hooks import wire
 from tests._history_flow import make_history_flow
 from tests._profiles import make_profiles
 from tests._recorder import make_recorder
+from tests._shown_session import make_shown
 
 
 def _sessions(n: int) -> list[dict]:
@@ -214,6 +215,7 @@ def _app() -> EEGMeditationApp:
         setattr(app, name, MagicMock())
     app._history = make_history_flow(app)
     app._history.refresh = MagicMock()
+    app._shown = make_shown(app)
     return app
 
 
@@ -287,6 +289,7 @@ def test_picking_a_profile_marks_history_for_a_rebuild():
     app._db = MagicMock()
     app._load_user_settings = MagicMock()
     app._history = MagicMock()
+    app._shown = MagicMock(owner=None)  # no session shown
     app._activate_user(2)
     app._history.mark_dirty.assert_called_once()
 
@@ -298,6 +301,7 @@ def test_deleting_another_profile_marks_history_for_a_rebuild():
     app._current_user_id = 1
     app._settings_screen = MagicMock()
     app._history = MagicMock()
+    app._shown = MagicMock(owner=None)
     make_profiles(app).on_delete(2)
     app._db.delete_user.assert_called_once_with(2)
     app._history.mark_dirty.assert_called_once()

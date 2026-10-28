@@ -17,10 +17,10 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Adaptive landscape layout: `_compute_graph_height_adaptive` uses a fixed graph height when the viewport is tall, or switches to scroll mode when the graph would fall below `dp(400)`.
   The bottom bar lives inside the body ScrollView.
 - **The Session screen shows one profile's session.**
-  `_live_display_uid` is the profile whose session the screen shows (graphs, readout, end card): set at Start, cleared by `_abort_bt_wait` when the start never became a session (the Start already emptied the display).
-  `_drop_shown_session` takes it off the screen:
-  the end card, if open, closes through `_close_summary` (notes saved unless the session is gone, bell stopped; the one way every card closes, OK included);
-  then `_clear_live_display` empties the graphs, their mirrors and the readout (`LiveSessionScreen.clear_readout`: what a fresh screen shows).
+  `ShownSession` (`app/ui/shown_session.py`, the app's `_shown`) is that session: its `owner` is the profile whose session the screen shows (graphs, readout, end card), set at Start (`take`), cleared by `_abort_bt_wait` when the start never became a session (the Start already emptied the display).
+  `drop` takes it off the screen:
+  the end card, if open, closes through `close` (notes saved unless the session is gone, bell stopped; the one way every card closes, OK included);
+  then `clear` empties the graphs, their mirrors and the readout (`LiveSessionScreen.clear_readout`: what a fresh screen shows).
   It runs when another profile is picked (`_activate_user`), when that profile is deleted, and when History deletes the shown session (`_recorder.session_id`, kept after the stop).
   Re-picking the shown profile resets nothing (`Profiles.on_switch` allows that mid-session, and a reset there would wipe the running session's graph).
   An idle threshold change (#83) clears the display but keeps the owner, so a later switch still closes an open card.

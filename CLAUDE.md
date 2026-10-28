@@ -84,7 +84,7 @@ Read it before changing that subsystem.
   · `app/ui/headset.py` `Headset` (which headset: a profile's own, found by its one scan path; its name; Settings → Device)
   · `app/ui/power_exemption.py` `PowerExemption` (what may close a locked session: battery optimisation, the maker's power manager;
   the first-start alert and Settings → Device's row → [app-platform](docs/architecture/app-platform.md#background-running-android))
-  · `app/ui/live_session.py`, `live_mirror.py` (the live graphs' session, kept through a screen lock), `settings_screen.py` (its larger sections in `settings_sections/`), `device_labels.py` → [live-session-and-settings](docs/architecture/live-session-and-settings.md);
+  · `app/ui/live_session.py`, `live_mirror.py` (the live graphs' session, kept through a screen lock), `shown_session.py` `ShownSession` (the session the screen shows, its end card), `settings_screen.py` (its larger sections in `settings_sections/`), `device_labels.py` → [live-session-and-settings](docs/architecture/live-session-and-settings.md);
   `history_screen.py`, `period_totals.py`, `history_flow.py` `HistoryFlow` (what the app does with History's rows) → [history](docs/architecture/history.md);
   `diary_screen.py` (session detail), `session_detail_flow.py` `SessionDetailFlow` (opens and loads it) → [session-detail](docs/architecture/session-detail.md);
   `session_labels.py` → [session](docs/architecture/session.md)
@@ -133,8 +133,8 @@ The linked file explains the mechanism.
   There is no discard path; a confirm that arrives after the session ended writes nothing. → [session](docs/architecture/session.md#persistence)
 - While a session runs or connects (`_session_pipeline_live()`), anything that would break it is refused through `_refused_while_session_runs(doing)`:
   profile switch, Restore, the scored metric (`_scoring_locked`), a running program's threshold, Settings › Audio's Test. → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
-- The Session screen shows one profile's session (`_live_display_uid`, set at Start): picking another profile drops it through `_drop_shown_session`; re-picking the shown one (allowed mid-session) resets nothing.
-  Every end-card close goes through `_close_summary`. → [live-session-and-settings](docs/architecture/live-session-and-settings.md#session-screen)
+- The Session screen shows one profile's session (`ShownSession`, `app/ui/shown_session.py`, the app's `_shown`; its `owner` set at Start): picking another profile drops it through `ShownSession.drop`; re-picking the shown one (allowed mid-session) resets nothing.
+  Every end-card close goes through `ShownSession.close`. → [live-session-and-settings](docs/architecture/live-session-and-settings.md#session-screen)
 - **A session is scored on the metric that drives the feedback sound** (`_audio_drive_key()`).
   The Settings threshold takes effect only through `_put_threshold_in_force` (the slider and profile load go through `_apply_threshold`). → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
 - `ProgramRun.audio_key` is transient and never written to `_audio_metric_key`;

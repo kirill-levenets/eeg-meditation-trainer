@@ -11,6 +11,7 @@ from tests._bt_wait import make_bt_wait
 from tests._headset import make_headset
 from tests._program_run import make_run
 from tests._session_run import run_in
+from tests._shown_session import make_shown
 
 
 def _make_waiting_app() -> tuple[EEGMeditationApp, list]:
@@ -37,6 +38,7 @@ def _make_waiting_app() -> tuple[EEGMeditationApp, list]:
     app._program_run = make_run(app)
     app._headset = make_headset(app)
     app._bt_wait = make_bt_wait(app)
+    app._shown = make_shown(app)
     return app, events
 
 

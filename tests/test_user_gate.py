@@ -146,6 +146,7 @@ def test_deleting_active_profile_mid_session_discards_it_and_regates():
     app._program_settings = MagicMock()
     app._gate = MagicMock()
     app._history = MagicMock()
+    app._shown = MagicMock(owner=None)  # no session shown
     make_profiles(app).on_delete(5)
     app._discard_running_session.assert_called_once()  # discarded, not saved-then-orphaned
     assert app._current_user_id is None
@@ -163,6 +164,7 @@ def test_deleting_the_last_profile_while_none_is_active_regates():
     app._program_settings = MagicMock()
     app._gate = MagicMock()
     app._history = MagicMock()
+    app._shown = MagicMock(owner=None)  # no session shown
     make_profiles(app).on_delete(9)
     app._gate.open.assert_called_once()
 
@@ -265,6 +267,7 @@ def test_delete_active_profile_discards_during_bt_connect():
     app._program_settings = MagicMock()
     app._gate = MagicMock()
     app._history = MagicMock()
+    app._shown = MagicMock(owner=None)  # no session shown
     make_profiles(app).on_delete(5)
     app._discard_running_session.assert_called_once()   # connecting session halted
 

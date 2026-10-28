@@ -23,6 +23,7 @@ from app.ui.theme import StyledButton
 from app.ui.widgets.loading_overlay import LoadingOverlay
 from tests._history_flow import make_history_flow
 from tests._recorder import make_recorder
+from tests._shown_session import make_shown
 
 
 @pytest.fixture
@@ -144,6 +145,7 @@ def _app(db, monkeypatch) -> tuple[EEGMeditationApp, _Deferred, list]:
     app._on_main = deferred.main.append
     app._history = make_history_flow(app)
     done = []
+    app._shown = make_shown(app)
     return app, deferred, done
 
 

@@ -35,6 +35,7 @@ from tests._program_run import make_run
 from tests._program_settings import make_programs
 from tests._recorder import make_recorder
 from tests._session_run import run_in
+from tests._shown_session import make_shown
 
 BAND_KEYS = ("alpha", "beta", "gamma", "theta", "delta")
 
@@ -113,6 +114,7 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     app._shamatha_threshold = 50
 
     app._mirror = LiveMirror()
+    app._shown = make_shown(app)
     return app
 
 
@@ -239,6 +241,7 @@ def _make_resume_app(running: bool = True) -> EEGMeditationApp:
     app._program_run = make_run(app)
     app._settings_screen = MagicMock()
     app._mirror = LiveMirror()
+    app._shown = make_shown(app)
     return app
 
 
@@ -410,6 +413,7 @@ def _make_btwait_app() -> EEGMeditationApp:
     app._timer_state = ts
     app._headset = make_headset(app)
     app._bt_wait = make_bt_wait(app)
+    app._shown = make_shown(app)
     return app
 
 
