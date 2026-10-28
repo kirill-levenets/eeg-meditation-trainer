@@ -76,6 +76,7 @@ from app.ui.program_settings import ProgramSettings
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.session_detail_flow import SessionDetailFlow
 from app.ui.session_labels import session_title, start_stamp
+from app.ui.session_watch import SessionWatch
 from app.ui.settings_screen import (
     SettingsScreen,
 )
@@ -394,6 +395,9 @@ class EEGMeditationApp(App):
             self._real_stream, self._live_screen, headset_name=self._headset.name, on_main_for=self._on_main_for,
             start_session=self._start_on_first_data, on_connected=self._on_session_connected,
             abort=self._abort_bt_wait, undo_setup=self._undo_session_setup)
+        self._watch = SessionWatch(
+            self._real_stream, self._session_manager, self._audio, self._live_screen, self._settings_screen.device,
+            headset_name=self._headset.name, on_main=self._on_main, stop_and_save=self._stop_and_save)
 
         self._sm.add_widget(self._live_screen)
         self._sm.add_widget(self._history_screen)
@@ -1097,33 +1101,6 @@ class EEGMeditationApp(App):
         profile delete handled before it) or another Start has replaced it."""
         self._on_main(lambda: fn() if self._run is run else None)
 
-    _STALE_DATA_THRESHOLD = 10.0  # seconds with no new packets before warning
-
-    def _check_stale_data(self, run: SessionRun) -> None:
-        """Auto-stop session when the real device stops sending EEG data.
-
-        Called from the tick thread; UI calls dispatched via _on_main.
-        """
-        if APP.USE_MOCK_DEVICE:
-            return
-        stale_secs = self._real_stream.seconds_since_last_packet
-        if stale_secs <= 0:
-            run.stale_data_warned = False
-            return
-        if stale_secs > self._STALE_DATA_THRESHOLD:
-            if not run.stale_data_warned:
-                run.stale_data_warned = True
-                logger.warning(f"Stale EEG data: no packets for {stale_secs:.0f}s, auto-stopping")
-                self._on_main(lambda: (
-                    self._live_screen.show_alert(
-                        "No EEG data. Session stopped.\n"
-                        "Check headset and battery."
-                    ),
-                    self._stop_and_save(reason="stale_data"),
-                ))
-        else:
-            run.stale_data_warned = False
-
     def _update_tick(self, dt: float) -> None:
         """Main 2 Hz processing loop.
 
@@ -1141,14 +1118,14 @@ class EEGMeditationApp(App):
         if self._session_manager.state != SessionState.RUNNING:
             return
 
-        if self._end_at_max_duration():
+        if self._watch.at_limit():
             return
-        self._follow_headset_link(run)
-        self._check_stale_data(run)
+        self._watch.follow_link(run)
+        self._watch.check_stale(run)
 
         raw_sample = self._eeg_stream.read_sample()
         metrics = self._metrics_engine.process_sample(raw_sample)
-        self._warn_from_sample(run, raw_sample)
+        self._watch.check_sample(run, raw_sample)
         run.tick_count += 1
         self._log_tick(run, raw_sample, metrics)
 
@@ -1188,69 +1165,6 @@ class EEGMeditationApp(App):
             return
 
         self._recorder.flush_tick()  # DB opened with check_same_thread=False
-
-    def _end_at_max_duration(self) -> bool:
-        """Tick thread: stop and save a session that reached the recording limit; True if it did."""
-        if self._session_manager.elapsed_seconds < APP.SESSION_MAX_SECONDS:
-            return False
-        logger.info(f"Session reached max duration ({APP.SESSION_MAX_SECONDS}s), auto-stopping")
-        self._audio.play_disconnect_alert()
-        limit_msg = (
-            f"Session recording limit reached ({APP.SESSION_MAX_SECONDS // 3600}h). "
-            "Session saved. Start a new one to continue."
-        )
-        self._on_main(lambda m=limit_msg: self._live_screen.show_alert(m))
-        self._on_main(lambda: self._stop_and_save())
-        return True
-
-    def _follow_headset_link(self, run: SessionRun) -> None:
-        """Tick thread: the headset's link coming up (Settings shows it) and dropping during a session (the Session
-        screen shows it reconnecting, with the disconnect alert)."""
-        if (not run.bt_connected_notified
-                and not APP.USE_MOCK_DEVICE
-                and self._real_stream.is_connected):
-            run.bt_connected_notified = True
-            name = self._headset.name()
-            self._on_main(lambda n=name: self._settings_screen.device.update_device_status(True, name=n))
-            logger.info(f"Settings updated: {name} connected")
-
-        if (not APP.USE_MOCK_DEVICE
-                and run.bt_connected_notified
-                and not self._real_stream.is_connected):
-            run.bt_connected_notified = False
-            name = self._headset.name()
-            self._on_main(lambda n=name: self._live_screen.update_device_status(
-                False, device_name=n, connecting=True
-            ))
-            self._audio.play_disconnect_alert()
-            logger.warning(f"BT device {name} disconnected during session")
-
-    def _warn_from_sample(self, run: SessionRun, raw_sample: dict) -> None:
-        """Tick thread: a low headset battery and power-line noise, each warned about once."""
-        # Low battery warning (ThinkGear reports 0-127, warn below ~20%)
-        battery = raw_sample.get("battery", -1)
-        if battery != -1 and battery < 25 and not run.low_battery_warned:
-            run.low_battery_warned = True
-            pct = int(battery / 127 * 100)
-            bat_msg = f"Low headset battery ({pct}%)."
-            self._on_main(lambda m=bat_msg: self._live_screen.show_alert(m))
-            logger.warning(f"Low headset battery: {battery}/127 ({pct}%)")
-
-        # Feed raw waveform to power line noise detector
-        detector = run.noise_detector
-        if detector and not detector.ready():
-            waveform = raw_sample.get("raw_eeg_waveform", [])
-            if waveform:
-                detector.feed(waveform)
-            if detector.ready():
-                detected, freq = detector.result()
-                if detected:
-                    noise_msg = (
-                        f"Warning: {freq} Hz power line noise detected. "
-                        f"Check notch filter setting or move away from electrical equipment."
-                    )
-                    self._on_main(lambda m=noise_msg: self._live_screen.show_alert(m))
-                    logger.warning(f"Power line noise detected: {freq} Hz")
 
     def _log_tick(self, run: SessionRun, raw_sample: dict, metrics: dict) -> None:
         """Log the raw sample and the metrics every 10 ticks (~5s at 2Hz)."""

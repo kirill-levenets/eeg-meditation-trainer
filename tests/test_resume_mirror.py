@@ -35,6 +35,7 @@ from tests._program_run import make_run
 from tests._program_settings import make_programs
 from tests._recorder import make_recorder
 from tests._session_run import run_in
+from tests._session_watch import make_watch
 from tests._shown_session import make_shown
 
 BAND_KEYS = ("alpha", "beta", "gamma", "theta", "delta")
@@ -84,7 +85,6 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     app._real_stream.is_connected = True
     run_in(app).bt_connected_notified = True  # a running session's run
 
-    app._check_stale_data = MagicMock()
     app._eeg_stream = MagicMock()
     app._metrics_engine = MagicMock()
     app._formulas = FormulaSlots()
@@ -115,6 +115,8 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
 
     app._mirror = LiveMirror()
     app._shown = make_shown(app)
+    app._watch = make_watch(app)
+    app._watch.check_stale = lambda run: None  # no real headset behind the stream
     return app
 
 
