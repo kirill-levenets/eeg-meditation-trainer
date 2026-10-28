@@ -79,6 +79,26 @@ def test_typing_a_gong_path_writes_once_after_it_settles(monkeypatch):
     app._settings_store.persist.assert_called_once_with(7, "timer_sound")
 
 
+def test_a_line_width_drag_writes_once_after_it_settles(monkeypatch):
+    # It was written only by the batch save (leaving the app, a profile switch), so a crash before one lost it.
+    app, triggers, _ = _make_app(monkeypatch)
+    app._settings_store.settles.side_effect = lambda key: key == "line_width"
+    for width in (1.3, 1.6, 2.0):
+        app._on_line_width_change(width)
+    assert [c.args for c in app._settings_store.change.call_args_list] == [("line_width", w) for w in (1.3, 1.6, 2.0)]
+    app._settings_store.persist.assert_not_called()
+    triggers[0].fire()
+    app._settings_store.persist.assert_called_once_with(7, "line_width")
+
+
+def test_a_toggle_writes_at_once(monkeypatch):
+    app, _triggers, _ = _make_app(monkeypatch)
+    app._settings_store.settles.return_value = False
+    app._on_sinking_alert_toggle(True)
+    app._settings_store.change.assert_called_once_with("sinking_alert", True)
+    app._settings_store.persist.assert_called_once_with(7, "sinking_alert")
+
+
 def test_no_write_is_scheduled_while_settings_load(monkeypatch):
     app, triggers, _ = _make_app(monkeypatch)
     app._loading_settings = True

@@ -228,6 +228,15 @@ class EEGMeditationApp(App):
             # The value stays applied in memory; the next batch save retries it.
             report_soft_error("settings_save_failed", f"Couldn't save setting {key!r}: {e}", app=self)
 
+    def _change_setting(self, key: str, value) -> None:
+        """The one change path of a setting the store holds: it holds and applies the value, persisted now, or once a
+        continuous input settles."""
+        self._settings_store.change(key, value)
+        if self._settings_store.settles(key):
+            self._persist_user_setting_later(key)
+        else:
+            self._persist_user_setting(key)
+
     def _persist_user_setting_later(self, key: str) -> None:
         """Persist a continuous input (slider drag, typing) once it settles, not on every step."""
         if self._loading_settings:
@@ -295,11 +304,11 @@ class EEGMeditationApp(App):
 
     def _global_feedback_id(self) -> str:
         """The active global feedback source id; a custom selection with no file falls back to noise."""
-        src = getattr(self, "_feedback_source", "noise")
+        src = self._settings_store.value("feedback_source")
         if src in ("", "none"):
             return "none"
         if src == "custom":
-            return getattr(self, "_feedback_sound_path", "") or "noise"
+            return self._settings_store.value("feedback_sound_path") or "noise"
         return src
 
     def _warn_missing_sound_files(self, feedback_sources: dict, timer_path: str = "", *, force: bool = False) -> None:
@@ -618,8 +627,6 @@ class EEGMeditationApp(App):
         for key, active in self._settings_screen._graph_toggles.items():
             self._live_screen.graph.set_visible(key, active)
         self._audio_metric_key: str = "shamatha_score"
-        self._feedback_source: str = "noise"
-        self._feedback_sound_path: str = ""
         self._reward_source: str = "none"   # above-threshold reward channel (off by default)
         self._reward_sound_path: str = ""
 
@@ -1395,6 +1402,9 @@ class EEGMeditationApp(App):
         self._audio.test_audio(reward_id)
 
     def _on_line_width_change(self, width: float) -> None:
+        self._change_setting("line_width", width)
+
+    def _apply_line_width(self, width: float) -> None:
         self._live_screen.graph.set_line_width(width)
         self._live_screen.raw_graph.set_line_width(width)
         self._live_screen.band_graph.set_line_width(width)
@@ -1463,12 +1473,10 @@ class EEGMeditationApp(App):
         logger.info(f"Audio threshold metric changed to: {self._audio_metric_key}")
 
     def _on_feedback_source_change(self, source: str, path: str) -> None:
-        """Apply the global (below-threshold) feedback source chosen in Settings."""
-        self._feedback_source = source
-        self._feedback_sound_path = (path or "").strip()
-        self._persist_user_setting("feedback_source")
-        self._persist_user_setting("feedback_sound_path")
-        logger.info(f"Feedback source -> {self._feedback_source} {self._feedback_sound_path!r}")
+        """The global (below-threshold) feedback source chosen in Settings; its path first, so the source shows with it."""
+        self._change_setting("feedback_sound_path", (path or "").strip())
+        self._change_setting("feedback_source", source)
+        logger.info(f"Feedback source -> {source} {self._settings_store.value('feedback_sound_path')!r}")
 
     def _on_reward_source_change(self, source: str, path: str) -> None:
         """Apply the above-threshold reward source chosen in Settings."""
@@ -1547,8 +1555,7 @@ class EEGMeditationApp(App):
         confirm_popup(title, message, ok_text, on_ok, ok_color=ok_color, on_cancel=on_cancel)
 
     def _on_sinking_alert_toggle(self, active: bool) -> None:
-        self._audio.sinking_alert_enabled = active
-        self._persist_user_setting("sinking_alert")
+        self._change_setting("sinking_alert", active)
         logger.info(f"Sinking alert {'enabled' if active else 'disabled'}")
 
     def _on_subtle_alert_toggle(self, active: bool) -> None:
@@ -1632,7 +1639,7 @@ class EEGMeditationApp(App):
         def set_timer_sound(v):
             self._timer_state.set_custom_sound_path(v); ss.timer.timer_sound_path = v
 
-        def set_sinking(v):
+        def apply_sinking(v):
             self._audio.sinking_alert_enabled = v; ss.audio._sinking_alert_cb.active = v
 
         def set_subtle(v):
@@ -1648,8 +1655,8 @@ class EEGMeditationApp(App):
         def set_use_mock(v):
             APP.USE_MOCK_DEVICE = v; ss.device._device_mode_cb.active = v
 
-        def set_line_width(v):
-            ss.display._line_width_slider.value = v; self._on_line_width_change(v)
+        def apply_line_width(v):
+            ss.display._line_width_slider.value = v; self._apply_line_width(v)
 
         def set_rotation(v):
             ss.display._current_rotation = v
@@ -1666,11 +1673,11 @@ class EEGMeditationApp(App):
                 self._audio_formula_index = FORMULA_KEYS.index(v)
             self._show_audio_metric()
 
-        def set_feedback_source(v):
-            self._feedback_source = v; ss.audio.set_feedback_source(v, self._feedback_sound_path)
+        def apply_feedback_source(v):
+            ss.audio.set_feedback_source(v, self._settings_store.value("feedback_sound_path"))
 
-        def set_feedback_path(v):
-            self._feedback_sound_path = v; ss.audio.set_feedback_source(self._feedback_source, v)
+        def apply_feedback_path(v):
+            ss.audio.set_feedback_source(self._settings_store.value("feedback_source"), v)
 
         def set_reward_source(v):
             self._reward_source = v; ss.audio.set_reward_source(v, self._reward_sound_path)
@@ -1681,10 +1688,13 @@ class EEGMeditationApp(App):
         def add(key, codec, get, set_):
             settings.append(Setting(key, get(), codec[0], codec[1], get, set_))
 
+        def hold(key, codec, default, apply_, settle=False):
+            settings.append(Setting(key, default, codec[0], codec[1], None, apply_, settle))
+
         add("timer_enabled", BOOL, lambda: ss.timer.timer_enabled, set_timer_enabled)
         add("timer_minutes", INT, lambda: ss.timer.timer_minutes, set_timer_minutes)
         add("timer_sound", STR, lambda: ss.timer.timer_sound_path, set_timer_sound)
-        add("sinking_alert", BOOL, lambda: self._audio.sinking_alert_enabled, set_sinking)
+        hold("sinking_alert", BOOL, ss.audio._sinking_alert_cb.active, apply_sinking)
         hs = self._history_screen
         add("history_chart_collapsed", BOOL, lambda: hs.chart_collapsed, hs.set_chart_collapsed)
         what_if = self._diary_screen.what_if
@@ -1695,15 +1705,15 @@ class EEGMeditationApp(App):
         add("disconnect_alert", BOOL, lambda: self._audio.disconnect_alert_enabled, set_disconnect)
         add("threshold", INT, lambda: int(ss.threshold), set_threshold)
         add("use_mock", BOOL, lambda: APP.USE_MOCK_DEVICE, set_use_mock)
-        add("line_width", FLOAT, lambda: ss.display._line_width_slider.value, set_line_width)
+        hold("line_width", FLOAT, ss.display._line_width_slider.value, apply_line_width, settle=True)
         add("rotation", INT, lambda: ss.display._current_rotation, set_rotation)
         add("graph_zoom_seconds", FLOAT, self._saved_zoom_seconds, self._apply_saved_zoom)
         # audio_formula_index BEFORE audio_metric: metric reconciles the index when it's a slot.
         add("audio_formula_index", INT, lambda: self._audio_formula_index, set_audio_index)
         add("audio_metric", STR,
             lambda: self._baseline_audio_metric(self._audio_metric_key), set_audio_metric)
-        add("feedback_source", STR, lambda: self._feedback_source, set_feedback_source)
-        add("feedback_sound_path", STR, lambda: self._feedback_sound_path, set_feedback_path)
+        hold("feedback_source", STR, "noise", apply_feedback_source)
+        hold("feedback_sound_path", STR, "", apply_feedback_path)
         add("reward_source", STR, lambda: self._reward_source, set_reward_source)
         add("reward_sound_path", STR, lambda: self._reward_sound_path, set_reward_path)
         add("marker_hotkey", STR, lambda: ss.display.marker_hotkey,

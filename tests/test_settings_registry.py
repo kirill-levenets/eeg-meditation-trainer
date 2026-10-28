@@ -115,3 +115,47 @@ def test_persist_noop_without_user():
     db = _FakeDB()
     _store(db, [s]).persist(None, "threshold")
     assert db.writes == []
+
+
+# ---- a setting the store holds: one copy, one change path ----
+
+
+def _held(key, default, codec=INT, settle=False):
+    applied = []
+    return Setting(key, default, codec[0], codec[1], None, applied.append, settle), applied
+
+
+def test_a_held_setting_starts_at_its_default_and_loads_into_the_store():
+    s, applied = _held("threshold", 80)
+    st = _store(_FakeDB({(1, "threshold"): "95"}), [s])
+    assert st.value("threshold") == 80
+    st.load(1)
+    assert st.value("threshold") == 95 and applied == [95]
+
+
+def test_a_change_is_held_and_applied_and_saved_from_the_store():
+    s, applied = _held("threshold", 80)
+    db = _FakeDB()
+    st = _store(db, [s])
+    st.change("threshold", 70)
+    assert st.value("threshold") == 70 and applied == [70]
+    st.save(4)
+    st.persist(4, "threshold")
+    assert db.store[(4, "threshold")] == "70"
+
+
+def test_another_profiles_load_replaces_a_held_value():
+    s, _applied = _held("threshold", 80)
+    st = _store(_FakeDB({(1, "threshold"): "95"}), [s])
+    st.change("threshold", 60)
+    st.load(1)
+    assert st.value("threshold") == 95
+    st.load(2)  # nothing stored for profile 2: its default, not profile 1's value
+    assert st.value("threshold") == 80
+
+
+def test_a_setting_says_whether_it_settles():
+    slider, _ = _held("line_width", 1.2, FLOAT, settle=True)
+    toggle, _ = _held("sinking_alert", False, BOOL)
+    st = _store(_FakeDB(), [slider, toggle])
+    assert st.settles("line_width") and not st.settles("sinking_alert")

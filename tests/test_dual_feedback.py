@@ -3,6 +3,7 @@ import os
 from app.audio_feedback.noise import AudioEngine
 from app.config import APP
 from app.ui.app_manager import EEGMeditationApp
+from tests._settings import held_store
 
 
 def _engine(threshold):
@@ -97,7 +98,7 @@ def test_reward_id_resolves_heartbeat_builtin():
 
 def test_test_audio_sources_include_below_and_reward():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._feedback_source, app._feedback_sound_path = "tone", ""
+    app._settings_store = held_store(feedback_source="tone", feedback_sound_path="")
     app._reward_source, app._reward_sound_path = "heartbeat", ""
     sources, gid, reward_id = app._test_audio_sources()
     assert gid == "tone"
@@ -107,7 +108,7 @@ def test_test_audio_sources_include_below_and_reward():
 
 def test_test_audio_sources_omit_reward_when_off():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._feedback_source, app._feedback_sound_path = "noise", ""
+    app._settings_store = held_store(feedback_source="noise", feedback_sound_path="")
     app._reward_source, app._reward_sound_path = "none", ""
     sources, gid, reward_id = app._test_audio_sources()
     assert reward_id == ""

@@ -2,6 +2,7 @@ from app.metrics.formula_slots import FormulaSlots
 from app.session.session_program import SessionProgram
 from app.ui.app_manager import EEGMeditationApp
 from tests._program_run import make_run
+from tests._settings import held_store
 
 
 def test_source_spec_builtins_and_custom():
@@ -45,13 +46,14 @@ def test_feedback_plan_global_tone_default_segments():
 
 def test_global_feedback_id_resolves_source():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._feedback_source, app._feedback_sound_path = "noise", ""
+    store = app._settings_store = held_store(feedback_source="noise", feedback_sound_path="")
     assert app._global_feedback_id() == "noise"
-    app._feedback_source = "tone"
+    store.change("feedback_source", "tone")
     assert app._global_feedback_id() == "tone"
-    app._feedback_source, app._feedback_sound_path = "custom", "/my.wav"
+    store.change("feedback_source", "custom")
+    store.change("feedback_sound_path", "/my.wav")
     assert app._global_feedback_id() == "/my.wav"
-    app._feedback_sound_path = ""                       # custom selected but no file
+    store.change("feedback_sound_path", "")              # custom selected but no file
     assert app._global_feedback_id() == "noise"         # falls back to rain
 
 
@@ -59,7 +61,7 @@ def test_on_test_audio_prepares_selected_source(monkeypatch):
     from unittest.mock import MagicMock
     monkeypatch.setattr(EEGMeditationApp, "_session_pipeline_live", lambda self: False)  # no session: not refused
     app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._feedback_source, app._feedback_sound_path = "tone", ""
+    app._settings_store = held_store(feedback_source="tone", feedback_sound_path="")
     app._audio = MagicMock()
     app._on_test_audio()
     app._audio.prepare_feedback.assert_called_once_with({"tone": ("tone", "")}, "tone")

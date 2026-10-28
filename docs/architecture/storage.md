@@ -43,8 +43,13 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `SettingsStore.load(uid)` applies each setting as its parsed stored value **or its default when absent/invalid**
   — it ALWAYS applies a value, so a fresh/partial user can never inherit the previously-active user's in-memory value.
   `save(uid)` serializes all in **one transaction** (`DatabaseManager.set_user_settings`, one `executemany` + commit, not one commit per key); `persist(uid, key)` writes one key immediately (change-callback path), suppressed while loading.
+  **The store holds a setting's value** when its descriptor has no `get` (`get=None`): the store's copy is the only one while the profile is active, `set` applies it (its consumers and its widget, idempotent), and `SettingsStore.change(key, value)` is its one change path.
+  The app's `_change_setting(key, value)` is what a widget's hook calls: the store holds and applies the value, then it is persisted at once or, for a continuous input (`settle=True`: a slider, typing), once it settles.
+  Readers ask the store (`value(key)`), the tick thread included; save and persist write the held value, never a widget's.
+  Held so far: the sinking alert, the line width (persisted once a drag settles) and the feedback source and its path;
+  the rest still name their holder with a `get` until #107 moves them.
   `_persist_user_setting(key)` (key only — the store reads the live value) catches `sqlite3.Error` → soft error;
-  the threshold slider and the timer sound go through `_persist_user_setting_later(key)`:
+  the threshold slider, the timer sound and the held settings with `settle=True` go through `_persist_user_setting_later(key)`:
   a per-key Kivy `Clock` trigger (`_after_settle`) restarted on every change (`_PERSIST_SETTLE_S` = 0.5 s), so a drag is one write, not one fsync per step on the UI thread.
   `timer_sound`'s getter reads its widget (like `timer_enabled`/`timer_minutes`).
   `_load_user_settings`/`_save_user_settings`/`_persist_user_setting` are thin calls into the store;
