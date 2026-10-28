@@ -12,21 +12,21 @@ from kivy.graphics import (
     Line,
     Mesh,
     Rectangle,
-    RoundedRectangle,
 )
 from kivy.metrics import dp
-from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
 from app.config import APP
 from app.session.manager import elapsed_clock
 from app.session.scoring import extend_steps
 from app.ui import render_stats
+from app.ui.graph_gestures import GraphGestures
+from app.ui.graph_glyphs import GraphGlyphs
+from app.ui.graph_runs import RunExtremes, run_indices
 from app.ui.hooks import Hook
 from app.ui.line_colours import GRADIENT_TOP, LINE_COLOURS, MONO, gradient_texture
 from app.ui.theme import C as TC
 from app.ui.theme import F
-from app.ui.touch_utils import point_in_rect
 
 # Labels by (text, font_size, color); the CoreLabel is kept since it re-renders its texture after a GL context loss.
 _LABEL_CACHE: "OrderedDict[tuple, CoreLabel]" = OrderedDict()
@@ -34,7 +34,6 @@ _LABEL_CACHE_MAX = 512
 
 # X grid steps (s); the smallest that keeps time labels _MIN_X_LABEL_GAP_DP apart is used.
 _X_GRID_STEPS_S = (10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200)
-_GLYPH_DRIFT_DP = 20  # a glyph's press survives this much drift; more is a pan (a pan starts at 10)
 _MAX_Y_GRID_LINES = 20  # a fixed grid step far below the scale gives way to a nice one (each line has a label)
 _MIN_X_LABEL_GAP_DP = 70
 # New data waits its last redraw's cost / _REDRAW_BUDGET once a redraw takes _SLOW_REDRAW_S (graphs.md, item 6).
@@ -61,50 +60,7 @@ def _x_grid_step(graph_w: float, visible_seconds: float) -> float:
 _MESH_MAX_QUADS = 65535 // 6
 
 
-# A run's min and max are 2 of MinMax's 3 points per stroke width at its elbow, so a run spans 2/3 of the stroke.
-_RUN_STROKES = 2 / 3
-_MIN_RUN = 4  # samples: a shorter run saves too little to be worth folding
-
-
-def _extremes(values: list[float], start: int, stop: int) -> tuple[int, int]:
-    """Indices of values[start:stop]'s min and max, in sample order."""
-    run = values[start:stop]
-    lo, hi = start + run.index(min(run)), start + run.index(max(run))
-    return (lo, hi) if lo <= hi else (hi, lo)
-
-
-class _RunExtremes:
-    """One series' min and max per run of `size` samples at fixed positions, kept as data arrives (as Audacity's)."""
-
-    __slots__ = ("size", "base", "idx")
-
-    def __init__(self, size: int) -> None:
-        self.size = size
-        self.base = 0  # the absolute run number of idx[0:2]
-        self.idx: list[int] = []  # two absolute sample indices per run: its min and max in sample order
-
-    def runs(self, values: list[float], v0: int, first: int, last: int) -> list[int]:
-        """Absolute indices for runs first..last-1, which lie inside values (values[0] is absolute sample v0)."""
-        have = self.base + len(self.idx) // 2
-        if last < self.base or first > have:  # nothing kept touches the window: start over at it
-            self.base, self.idx, have = first, [], first
-        if first < self.base:  # panned back: only the runs before what is kept
-            self.idx[:0] = self._scan(values, v0, first, self.base)
-            self.base = first
-        if have < last:
-            self.idx.extend(self._scan(values, v0, have, last))
-        out = self.idx[2 * (first - self.base):2 * (last - self.base)]
-        if first - self.base > 2 * (last - first):  # far behind the window, as runs the buffer has dropped are
-            del self.idx[:2 * (first - self.base)]
-            self.base = first
-        return out
-
-    def _scan(self, values: list[float], v0: int, first: int, last: int) -> list[int]:
-        size = self.size
-        return [v0 + i for r in range(first, last) for i in _extremes(values, r * size - v0, (r + 1) * size - v0)]
-
-
-class ScrollableGraphWidget(Widget):
+class ScrollableGraphWidget(GraphGestures, GraphGlyphs, Widget):
     """Scrollable real-time graph with a 5-minute data buffer.
 
     Features: Y-axis scale numbers, horizontal grid lines, realtime value
@@ -143,25 +99,17 @@ class ScrollableGraphWidget(Widget):
         }
         self._visible: dict[str, bool] = dict.fromkeys(colors, True)
         self._appended: dict[str, int] = dict.fromkeys(colors, 0)  # samples ever added: a run's absolute position
-        self._run_extremes: dict[str, _RunExtremes] = {}
+        self._run_extremes: dict[str, RunExtremes] = {}
         self._gradient_steps: list[tuple[int, str]] = []  # (first point, series): drawn from there in LINE_COLOURS
         self._scroll_offset: int = 0
         self._total_points: int = 0
         self._show_value_labels: bool = show_value_labels
         self._show_timestamps: bool = show_timestamps
-        self._touch_start_offset: int = 0  # scroll offset when the current gesture's pan started
         self._default_viewport: int = self._viewport_points
         self._min_viewport: int = max(4, int(self._sample_rate * 2))  # min 2 seconds
         self._max_viewport: int = effective_max  # max = full buffer
         self._zoom_factor: float = 1.3  # each step zooms by 30%
-        # Pinch zoom state
-        self._pinch_active: bool = False
-        self._pinch_start_dist: float = 0.0
-        self._pinch_start_viewport: int = 0
-        # uid → {"start", "pos"} of each finger in this graph's parent frame (another touch's .pos may be in any frame)
-        self._grabbed_touches: dict[int, dict[str, tuple[float, float]]] = {}
-        self._tap_cancelled: bool = False  # the gesture moved (either axis) or pinched: no tap on release
-        self._gesture_pinched: bool = False
+        self._init_gestures()
         # Sync group: linked graphs zoom together
         self._sync_group: list["ScrollableGraphWidget"] = []
         self._threshold_value: Optional[float] = None
@@ -171,15 +119,10 @@ class ScrollableGraphWidget(Widget):
         # graph to mark level 100 — the per-metric maximum.
         self._reference_value: Optional[float] = None
         self._start_wall_time: Optional[float] = None
-        self._expand_callback = None
-        self._expand_closes = False  # in fullscreen the corner glyph is the close cross
-        self._pressed_glyph = None  # the rect function of the glyph under a finger, drawn pressed
-        self._series_callback = None
-        self._fit_callback = None
+        self._init_glyphs()
         self._pads: tuple[float, float, float, float] = (dp(30), dp(30), dp(20), dp(6))  # left, right, bottom, top
         self._pads_floor: tuple[float, float, float, float] | None = None  # the widest since the data was (re)loaded
         self._fit_restore: tuple[int, int] | None = None  # while the whole data is shown: (width, scroll) to go back to
-        self._touch_moved: bool = False
         self._redraw_cost: float = 0.0  # the last redraw's duration and end (perf_counter): the data redraw budget
         self._redraw_end: float = 0.0
         self._deferred_redraw = None  # the one pending Clock event of a data redraw waiting for its budget
@@ -401,14 +344,39 @@ class ScrollableGraphWidget(Widget):
         self._gfx.clear()
         if self.width < 10 or self.height < 10:
             return
+        start_idx, end_idx, slices = self._visible_slices()
+        max_scale = self._y_scale(slices)
+        pads = self._label_pads(max_scale, slices)
+        if self._pads_floor is not None:  # margins only grow: a label gaining a digit must not shift the plot back
+            pads = tuple(max(a, b) for a, b in zip(pads, self._pads_floor))
+        self._pads = self._pads_floor = pads
+        rect = self._plot_rect()
+        if rect[2] < 10 or rect[3] < 10:
+            return
+        # Background
+        self._gfx.add(Color(*TC.GRAPH_BG))
+        self._gfx.add(Rectangle(pos=(self.x, self.y), size=(self.width, self.height)))
+        self._draw_y_axis(rect, max_scale)
+        # Border
+        self._gfx.add(Color(*TC.GRAPH_BORDER))
+        self._gfx.add(Line(rectangle=rect, width=1))
+        self._draw_threshold(rect, max_scale, start_idx, end_idx)
+        if end_idx > start_idx:
+            self._draw_x_axis(rect, start_idx, end_idx)
+            self._draw_lines(rect, max_scale, start_idx, slices)
+            self._draw_markers(rect, start_idx, end_idx)
+        self._draw_glyphs()
 
-        # Compute visible slice
+    def _visible_slices(self) -> tuple[int, int, dict[str, list[float]]]:
+        """The visible window's start and end sample and each shown series' samples in it."""
         end_idx = self._total_points - self._scroll_offset
         start_idx = max(0, end_idx - self._viewport_points)
         slices = {key: list(data)[start_idx:end_idx] for key, data in self._data.items()
                   if self._visible.get(key, True)}
+        return start_idx, end_idx, slices
 
-        # Y-axis scale
+    def _y_scale(self, slices: dict[str, list[float]]) -> float:
+        """The value at the top of the plot: the visible data's peak with headroom, or the series' fixed scales."""
         if self._auto_scale:
             max_scale = 0.0
             for slice_vals in slices.values():
@@ -422,20 +390,11 @@ class ScrollableGraphWidget(Widget):
             max_scale = 100.0
             for key in self._data:
                 max_scale = max(max_scale, self._scales.get(key, 100.0))
+        return max_scale
 
-        pads = self._label_pads(max_scale, slices)
-        if self._pads_floor is not None:  # margins only grow: a label gaining a digit must not shift the plot back
-            pads = tuple(max(a, b) for a, b in zip(pads, self._pads_floor))
-        self._pads = self._pads_floor = pads
-        graph_x, graph_y, graph_w, graph_h = self._plot_rect()
-        if graph_w < 10 or graph_h < 10:
-            return
-
-        # Background
-        self._gfx.add(Color(*TC.GRAPH_BG))
-        self._gfx.add(Rectangle(pos=(self.x, self.y), size=(self.width, self.height)))
-
-        # Grid lines + Y-axis labels
+    def _draw_y_axis(self, rect: tuple[float, float, float, float], max_scale: float) -> None:
+        """The horizontal grid lines and their value labels."""
+        graph_x, graph_y, graph_w, graph_h = rect
         if self._bipolar:
             num_grid_lines = 4
             for i in range(num_grid_lines + 1):
@@ -473,25 +432,18 @@ class ScrollableGraphWidget(Widget):
                     ))
                 val += step
 
-        # Border
-        self._gfx.add(Color(*TC.GRAPH_BORDER))
-        self._gfx.add(Line(rectangle=(graph_x, graph_y, graph_w, graph_h), width=1))
-
+    def _draw_threshold(self, rect: tuple[float, float, float, float], max_scale: float, start_idx: int,
+                        end_idx: int) -> None:
+        """The threshold (its steps, or one dashed value and its label) and the reference line over it."""
+        graph_x, graph_y, graph_w, graph_h = rect
         # Threshold line (piecewise steps take precedence over a single value)
         if self._threshold_steps and not self._bipolar:
-            self._draw_threshold_steps(graph_x, graph_y, graph_w, graph_h,
-                                       max_scale, start_idx, end_idx)
+            self._draw_threshold_steps(rect, max_scale, start_idx, end_idx)
         elif self._threshold_value is not None and not self._bipolar:
             frac_t = min(max(self._threshold_value, 0.0) / max_scale, 1.0) if max_scale > 0 else 0.0
             y_thresh = graph_y + frac_t * graph_h
             self._gfx.add(Color(*TC.THRESHOLD_LINE))
-            dash_w = dp(6)
-            gap_w = dp(4)
-            x_cur = graph_x
-            while x_cur < graph_x + graph_w:
-                x_end = min(x_cur + dash_w, graph_x + graph_w)
-                self._gfx.add(Line(points=[x_cur, y_thresh, x_end, y_thresh], width=1))
-                x_cur = x_end + gap_w
+            self._add_dashed_hline(graph_x, graph_x + graph_w, y_thresh)
             if self._show_value_labels:
                 tex = self._make_text_texture(
                     f"{self._threshold_value:.0f}", size=8,
@@ -514,11 +466,9 @@ class ScrollableGraphWidget(Widget):
                 points=[graph_x, y_ref, graph_x + graph_w, y_ref], width=1,
             ))
 
-        if end_idx <= start_idx:
-            self._draw_glyphs()
-            return
-
-        # X-axis timestamps + vertical grid lines at 10-second intervals
+    def _draw_x_axis(self, rect: tuple[float, float, float, float], start_idx: int, end_idx: int) -> None:
+        """The vertical grid lines with their elapsed and wall-clock time labels."""
+        graph_x, graph_y, graph_w, graph_h = rect
         if self._show_timestamps:
             n_visible = end_idx - start_idx
             vp = max(self._viewport_points, n_visible)
@@ -565,7 +515,10 @@ class ScrollableGraphWidget(Widget):
                         ))
                 t_mark += grid_sec
 
-        # Data lines + endpoint value labels; the scored parts after every other line, so no series hides them
+    def _draw_lines(self, rect: tuple[float, float, float, float], max_scale: float, start_idx: int,
+                    slices: dict[str, list[float]]) -> None:
+        """Each series' line and its end value label; the scored parts last, so no series hides them."""
+        graph_x, graph_y, graph_w, graph_h = rect
         label_y_positions: list[float] = []
         scored_parts: list[tuple[list[float], tuple, float]] = []
         colour_by_value = not self._bipolar and LINE_COLOURS.name != MONO
@@ -585,7 +538,7 @@ class ScrollableGraphWidget(Widget):
             # (x, y) once per drawn point: a run's min and max once runs span part of the stroke, whatever the zoom.
             drawn = self._drawn_indices(key, slice_data, start_idx, span / graph_w)
             xy: list[tuple[float, float]] = []
-            for i in drawn:
+            for i in drawn:  # _y_of inline: a call per drawn point costs a slow phone's redraw budget
                 val = slice_data[i]
                 x = graph_x + ((x_offset + i) / span) * graph_w
                 if self._bipolar:
@@ -602,32 +555,34 @@ class ScrollableGraphWidget(Widget):
                 else:
                     self._add_polyline(points, color)
 
-            # Realtime value label at right edge of line
             if self._show_value_labels and slice_data:
-                last_val = slice_data[-1]
-                if self._bipolar:
-                    norm = (last_val / draw_scale + 1.0) * 0.5
-                    last_y = graph_y + max(0.0, min(norm, 1.0)) * graph_h
-                else:
-                    last_y = graph_y + min(max(last_val, 0.0) / draw_scale, 1.0) * graph_h
-                last_y = _free_label_y(last_y, label_y_positions, graph_y, self.top - dp(6))
-                label_y_positions.append(last_y)
-                tex = self._make_text_texture(
-                    f"{last_val:.0f}", size=9, color=color,
-                )
-                self._gfx.add(Color(*TC.TEXT))
-                self._gfx.add(Rectangle(
-                    texture=tex,
-                    pos=(graph_x + graph_w + dp(3), last_y - tex.height / 2),
-                    size=tex.size,
-                ))
+                self._draw_end_label(rect, slice_data[-1], draw_scale, color, label_y_positions)
         for points, color, draw_scale in scored_parts:
             if colour_by_value:
                 self._add_gradient_line(points, graph_y, graph_h, draw_scale)
             else:
                 self._add_polyline(points, color)
 
-        # Marker vertical lines
+    def _y_of(self, val: float, draw_scale: float, graph_y: float, graph_h: float) -> float:
+        """Where a value sits on the plot: around the middle for a bipolar graph, from the floor otherwise; clamped."""
+        if self._bipolar:
+            norm = (val / draw_scale + 1.0) * 0.5
+            return graph_y + max(0.0, min(norm, 1.0)) * graph_h
+        return graph_y + min(max(val, 0.0) / draw_scale, 1.0) * graph_h
+
+    def _draw_end_label(self, rect: tuple[float, float, float, float], last_val: float, draw_scale: float,
+                        color: tuple, taken: list[float]) -> None:
+        """A line's latest value at the plot's right edge, in the nearest slot no other end label has taken."""
+        graph_x, graph_y, graph_w, graph_h = rect
+        last_y = _free_label_y(self._y_of(last_val, draw_scale, graph_y, graph_h), taken, graph_y, self.top - dp(6))
+        taken.append(last_y)
+        tex = self._make_text_texture(f"{last_val:.0f}", size=9, color=color)
+        self._gfx.add(Color(*TC.TEXT))
+        self._gfx.add(Rectangle(texture=tex, pos=(graph_x + graph_w + dp(3), last_y - tex.height / 2), size=tex.size))
+
+    def _draw_markers(self, rect: tuple[float, float, float, float], start_idx: int, end_idx: int) -> None:
+        """The session markers' vertical lines."""
+        graph_x, graph_y, graph_w, graph_h = rect
         if self._markers:
             n_visible = end_idx - start_idx
             vp = max(self._viewport_points, n_visible)
@@ -641,40 +596,18 @@ class ScrollableGraphWidget(Widget):
                         self._gfx.add(Color(*TC.THRESHOLD_LINE))
                         self._gfx.add(Line(points=[x_pos, graph_y, x_pos, graph_y + graph_h], width=1.5))
 
-        self._draw_glyphs()
-
-    def _draw_glyphs(self) -> None:
-        pressed = self._pressed_glyph() if self._pressed_glyph is not None else None
-        if pressed is not None:  # a light disc under the glyph a finger is on
-            self._gfx.add(Color(*TC.TEXT[:3], 0.18))
-            self._gfx.add(RoundedRectangle(pos=pressed[:2], size=pressed[2:], radius=[dp(10)]))
-        self._draw_series_icon()
-        self._draw_fit_icon()
-        self._draw_expand_icon()
-
     def _drawn_indices(self, key: str, values: list[float], start_idx: int, per_px: float) -> range | list[int]:
         """Indices into values to draw: every one, or each run's min and max and the series' two ends."""
-        n = len(values)
         stroke = 2 * dp(self._line_width)  # Kivy Line width is the half-thickness
-        longest = per_px * stroke * _RUN_STROKES  # samples in a run spanning _RUN_STROKES of the stroke
-        if n < 3 or longest < _MIN_RUN:
-            return range(n)
-        size = 1 << int(math.log2(longest))  # a power of two: the runs stay put until the zoom doubles
-        v0 = self._appended[key] - len(self._data[key]) + start_idx  # the absolute index of values[0]
-        first, last = -(-v0 // size), (v0 + n) // size
-        if last <= first:
-            return range(n)
+        return run_indices(values, per_px, stroke,
+                           lambda: self._appended[key] - len(self._data[key]) + start_idx,  # values[0]'s index
+                           lambda size: self._kept_runs(key, size))
+
+    def _kept_runs(self, key: str, size: int) -> RunExtremes:
         kept = self._run_extremes.get(key)
         if kept is None or kept.size != size:  # one run size per series: a new zoom drops the last one's
-            kept = self._run_extremes[key] = _RunExtremes(size)
-        out = [0]
-        if first * size > v0:
-            out.extend(_extremes(values, 0, first * size - v0))
-        out.extend(i - v0 for i in kept.runs(values, v0, first, last))
-        if last * size - v0 < n:
-            out.extend(_extremes(values, last * size - v0, n))
-        out.append(n - 1)
-        return [i for j, i in enumerate(out) if j == 0 or i != out[j - 1]]
+            kept = self._run_extremes[key] = RunExtremes(size)
+        return kept
 
     def _gradient_spans(self, key: str, first: int, end: int) -> list[tuple[int, int]]:
         """The [a, b) runs, counted from `first`, of the points first..end that `key` is drawn in the gradient."""
@@ -746,9 +679,10 @@ class ScrollableGraphWidget(Widget):
             nice = 10
         return nice * magnitude
 
-    def _draw_threshold_steps(self, graph_x, graph_y, graph_w, graph_h,
-                              max_scale, start_idx, end_idx) -> None:
+    def _draw_threshold_steps(self, rect: tuple[float, float, float, float], max_scale: float, start_idx: int,
+                              end_idx: int) -> None:
         """Draw one dashed horizontal run per step over its visible tick range."""
+        graph_x, graph_y, graph_w, graph_h = rect
         steps = self._threshold_steps
         if not steps or max_scale <= 0:
             return
@@ -761,8 +695,6 @@ class ScrollableGraphWidget(Widget):
             x = graph_x + ((x_offset + i) / max(vp - 1, 1)) * graph_w
             return min(max(x, graph_x), graph_x + graph_w)
 
-        dash_w = dp(6)
-        gap_w = dp(4)
         for k, (step_tick, value) in enumerate(steps):
             next_tick = steps[k + 1][0] if k + 1 < len(steps) else float("inf")
             seg_start = max(step_tick, start_idx)
@@ -776,11 +708,7 @@ class ScrollableGraphWidget(Widget):
             frac = min(max(value, 0.0) / max_scale, 1.0)  # on the graph's floor and ceiling, as its values are
             y = graph_y + frac * graph_h
             self._gfx.add(Color(*TC.THRESHOLD_LINE))
-            x_cur = x_left
-            while x_cur < x_right:
-                x_end = min(x_cur + dash_w, x_right)
-                self._gfx.add(Line(points=[x_cur, y, x_end, y], width=1))
-                x_cur = x_end + gap_w
+            self._add_dashed_hline(x_left, x_right, y)
             if self._show_value_labels:
                 tex = self._make_text_texture(
                     f"{value:.0f}", size=8, color=(1.0, 0.4, 0.2, 1),
@@ -791,6 +719,15 @@ class ScrollableGraphWidget(Widget):
                     pos=(x_right - tex.width, y + dp(2) if y + dp(2) + tex.height <= self.top else y - dp(2) - tex.height),
                     size=tex.size,
                 ))
+
+    def _add_dashed_hline(self, x0: float, x1: float, y: float) -> None:
+        """A dashed horizontal line from x0 to x1 at y, in the colour already set."""
+        dash_w, gap_w = dp(6), dp(4)
+        x_cur = x0
+        while x_cur < x1:
+            x_end = min(x_cur + dash_w, x1)
+            self._gfx.add(Line(points=[x_cur, y, x_end, y], width=1))
+            x_cur = x_end + gap_w
 
     @staticmethod
     def link_zoom(*graphs: "ScrollableGraphWidget") -> None:
@@ -882,167 +819,6 @@ class ScrollableGraphWidget(Widget):
         """Zoom out (show more points = wider view)."""
         self._set_viewport(int(self._zoom_base() * self._zoom_factor))
 
-    def _on_window_mouse_down(self, window, x, y, button, modifiers):
-        """Handle mouse scroll at Window level (bypasses ScrollView)."""
-        if button not in ("scrollup", "scrolldown") or self.get_root_window() is None:
-            return  # a graph off screen (a hidden screen or tab) keeps its last place under the pointer
-        # Convert window coords to widget coords and check collision
-        wx, wy = self.to_widget(x, y, relative=False)
-        if not self.collide_point(wx, wy):
-            return
-        if button == "scrollup":
-            self.zoom_in()
-        elif button == "scrolldown":
-            self.zoom_out()
-
-    def on_touch_down(self, touch):
-        if not self.collide_point(*touch.pos):
-            return super().on_touch_down(touch)
-
-        # Skip scroll events — handled by _on_window_mouse_down
-        if hasattr(touch, "button") and touch.button in ("scrollup", "scrolldown"):
-            return True
-
-        touch.grab(self)
-        if self._grabbed_touches:  # a second finger: a pinch or a two-finger tap, never a tap
-            self._tap_cancelled = True
-        if not self._grabbed_touches:  # a new gesture
-            self._touch_start_offset = self._scroll_offset
-            self._touch_moved = False
-            self._tap_cancelled = False
-            self._gesture_pinched = False
-        # A glyph over the data is a button: grabbed like any touch, it fires on a clean tap's release (on_touch_up).
-        glyph = self._glyph_at(touch)
-        self._grabbed_touches[touch.uid] = {"start": tuple(touch.pos), "pos": tuple(touch.pos), "glyph": glyph}
-        if glyph is not None:
-            self._press_glyph(glyph[1])
-        return True
-
-    def _glyph_at(self, touch):
-        """(callback, rect function) of the glyph under `touch` (hit-tested in WINDOW coordinates), or None."""
-        for callback, rect in ((self._series_callback, self._series_icon_rect),
-                               (self._expand_callback, self._expand_icon_rect),
-                               (self._fit_callback, self._fit_icon_rect)):
-            if callback is not None and self._touch_in_window_rect(touch, rect()):
-                return callback, rect
-        return None
-
-    def _press_glyph(self, rect) -> None:
-        if rect is not self._pressed_glyph:
-            self._pressed_glyph = rect
-            self._redraw()
-
-    def on_touch_move(self, touch):
-        if touch.grab_current is not self:
-            return super().on_touch_move(touch)
-
-        finger = self._grabbed_touches.get(touch.uid)
-        if finger is None:
-            return True
-        finger["pos"] = tuple(touch.pos)
-        glyph = finger.get("glyph")
-        if glyph is not None:
-            sx0, sy0 = finger["start"]
-            drift = max(abs(touch.x - sx0), abs(touch.y - sy0))
-            if drift <= _GLYPH_DRIFT_DP * dp(1) and self._touch_in_window_rect(touch, glyph[1]()):
-                return True  # a fingertip drifting on a glyph: still its press, as on a button
-            finger["glyph"] = None  # dragged off it: an ordinary gesture from here
-            self._tap_cancelled = True
-            self._press_glyph(None)
-        sx, sy = finger["start"]
-        dx, dy = abs(touch.x - sx), abs(touch.y - sy)
-        if dx > dp(10):
-            self._touch_moved = True
-        if dx > dp(10) or dy > dp(10):
-            self._tap_cancelled = True
-
-        # Pinch zoom detection (Android / multi-touch)
-        active = [f["pos"] for f in self._grabbed_touches.values() if self.collide_point(*f["pos"])]
-        if len(active) >= 2:
-            self._gesture_pinched = self._tap_cancelled = True
-            (x1, y1), (x2, y2) = active[0], active[1]
-            dist = ((x1 - x2) ** 2 + (y1 - y2) ** 2) ** 0.5
-            if not self._pinch_active:
-                self._pinch_active = True
-                self._pinch_start_dist = max(dist, 1.0)
-                self._pinch_start_viewport = self._zoom_base()
-            else:
-                scale = self._pinch_start_dist / max(dist, 1.0)
-                new_vp = int(self._pinch_start_viewport * scale)
-                self._set_viewport(new_vp)
-            return True
-
-        if self._hand_off_vertical_swipe(touch, dx, dy):
-            return True
-
-        # Single touch — scroll
-        graph_w = self._plot_rect()[2]
-        if graph_w > 0 and self._total_points > self._viewport_points:
-            dx = touch.x - sx
-            points_per_pixel = self._viewport_points / graph_w
-            delta_points = int(-dx * points_per_pixel)
-            new_offset = self._touch_start_offset + delta_points
-            self.set_scroll_offset(new_offset)
-        return True
-
-    def on_touch_up(self, touch):
-        if touch.grab_current is self:
-            was_tap = not self._tap_cancelled and not self._pinch_active
-            lifted = self._grabbed_touches.pop(touch.uid, None) or {}
-            touch.ungrab(self)
-            self._pinch_active = False
-            if len(self._grabbed_touches) == 1:  # a pinch ended: the remaining finger pans on from where it is
-                remaining = next(iter(self._grabbed_touches.values()))
-                remaining["start"] = remaining["pos"]
-                self._touch_start_offset = self._scroll_offset
-            glyph = lifted.get("glyph")
-            if glyph is not None:
-                self._press_glyph(None)
-            if was_tap and len(self._grabbed_touches) == 0:
-                if glyph is not None:
-                    glyph[0](self)
-                else:
-                    self.on_tap()
-            return True
-        return super().on_touch_up(touch)
-
-    def _hand_off_vertical_swipe(self, touch, dx: float, dy: float) -> bool:
-        """A single finger moving mostly vertically, before any pan or pinch, scrolls the page that routed it here:
-        the graph has no vertical gesture, and in landscape it fills the view the user scrolls to reach the controls."""
-        if self._touch_moved or self._gesture_pinched or len(self._grabbed_touches) != 1:
-            return False
-        if dy < dp(20) or dy < 2 * dx:
-            return False
-        page = touch.ud.get(GraphAwareScrollView.ROUTED_BY)  # no walk up the tree: Window.parent is the Window itself
-        if page is None or not page.scroll_with(touch, self):
-            return False
-        self._grabbed_touches.pop(touch.uid, None)
-        touch.ungrab(self)
-        self.set_scroll_offset(self._touch_start_offset)
-        return True
-
-    def set_expand_callback(self, callback, closes: bool = False) -> None:
-        """The top-right glyph's tap: fullscreen-expand, or with `closes` the close cross; None hides it."""
-        self._expand_callback = callback
-        self._expand_closes = closes
-        self._redraw()
-
-    def set_series_picker_callback(self, callback) -> None:
-        """Set callback invoked with `self` when the series-picker glyph is tapped.
-
-        Setting a callback reveals the glyph (top-left); pass None to hide it.
-        """
-        self._series_callback = callback
-        self._redraw()
-
-    def set_fit_callback(self, callback) -> None:
-        """Set callback invoked with `self` when the fit-whole-session glyph is tapped; None hides the glyph."""
-        self._fit_callback = callback
-        self._redraw()
-
-    def _icon_too_small(self) -> bool:
-        return self.width < dp(60) or self.height < dp(60)
-
     def _plot_rect(self) -> tuple[float, float, float, float]:
         """The plot area (x, y, w, h): the widget less the margins its labels took at the last draw."""
         left, right, bottom, top = self._pads
@@ -1072,111 +848,6 @@ class ScrollableGraphWidget(Widget):
             if self._start_wall_time is not None:
                 bottom += self._make_text_texture("00:00:00", size=7, color=(0.4, 0.6, 0.4, 1)).height + dp(1)
         return left, right, bottom, top
-
-    def _corner_rect(self, right: bool, top: bool):
-        """A glyph's rect (x, y, w, h) in a corner of the plot area."""
-        size, margin = dp(44), dp(2)
-        px, py, pw, ph = self._plot_rect()
-        return (px + pw - size - margin if right else px + margin, py + ph - size - margin if top else py + margin,
-                size, size)
-
-    def _expand_icon_rect(self):
-        """Rect (x, y, w, h) for the expand glyph (the plot's top-right corner), or None when hidden."""
-        if self._expand_callback is None or self._icon_too_small():
-            return None
-        return self._corner_rect(right=True, top=True)
-
-    def _fit_icon_rect(self):
-        """Rect (x, y, w, h) for the fit glyph (the plot's bottom-right), or None: hidden where it would meet expand."""
-        if self._fit_callback is None or self._icon_too_small():
-            return None
-        rect, expand = self._corner_rect(right=True, top=False), self._expand_icon_rect()
-        if expand is not None and rect[1] + rect[3] > expand[1]:
-            return None
-        return rect
-
-    def _series_icon_rect(self):
-        """Rect (x, y, w, h) for the series-picker glyph (the plot's top-left corner), or None."""
-        if self._series_callback is None or self._icon_too_small():
-            return None
-        return self._corner_rect(right=False, top=True)
-
-    def _touch_in_window_rect(self, touch, rect) -> bool:
-        """True if `touch` falls in `rect`, compared in WINDOW coordinates.
-
-        The touch's canonical window position (sx/sy) vs the rect's rendered
-        window rect — the one frame that isn't ambiguous under the
-        GraphAwareScrollView touch-forwarding transform.
-        """
-        if rect is None:
-            return False
-        wx0, wy0 = self.to_window(rect[0], rect[1])
-        wx1, wy1 = self.to_window(rect[0] + rect[2], rect[1] + rect[3])
-        tx, ty = self.to_window(*touch.pos)  # touch.pos is in this graph's parent frame; sx/sy ignore Rotate Screen
-        win_rect = (min(wx0, wx1), min(wy0, wy1), abs(wx1 - wx0), abs(wy1 - wy0))
-        return point_in_rect(tx, ty, win_rect)
-
-    def _draw_icon_backing(self, rect) -> None:
-        # Transparent background — the glyph sits directly on the graph. Set the
-        # glyph color (TEXT) here for the Line instructions that follow; TEXT
-        # contrasts with GRAPH_BG on every palette.
-        self._gfx.add(Color(*TC.TEXT))
-
-    def _draw_expand_icon(self) -> None:
-        """Top-right fullscreen-expand glyph (four outward corner brackets), or in fullscreen a close cross."""
-        rect = self._expand_icon_rect()
-        if rect is None:
-            return
-        self._draw_icon_backing(rect)
-        ix, iy, iw, ih = rect
-        pad, arm, lw = dp(11), dp(9), 1.6
-        left, right = ix + pad, ix + iw - pad
-        bottom, top = iy + pad, iy + ih - pad
-        if self._expand_closes:
-            self._gfx.add(Line(points=[left + dp(2), bottom + dp(2), right - dp(2), top - dp(2)], width=lw))
-            self._gfx.add(Line(points=[left + dp(2), top - dp(2), right - dp(2), bottom + dp(2)], width=lw))
-            return
-        self._gfx.add(Line(points=[left, bottom + arm, left, bottom, left + arm, bottom], width=lw))
-        self._gfx.add(Line(points=[right - arm, bottom, right, bottom, right, bottom + arm], width=lw))
-        self._gfx.add(Line(points=[left, top - arm, left, top, left + arm, top], width=lw))
-        self._gfx.add(Line(points=[right - arm, top, right, top, right, top - arm], width=lw))
-
-    def _draw_fit_icon(self) -> None:
-        """|<->| shows the whole session, ->|<- goes back to the window."""
-        rect = self._fit_icon_rect()
-        if rect is None:
-            return
-        self._draw_icon_backing(rect)
-        ix, iy, iw, ih = rect
-        pad, head, lw = dp(11), dp(4), 1.6
-        left, right, mid = ix + pad, ix + iw - pad, iy + ih / 2
-        bar = dp(7)
-        if self.fitted:  # two arrows pointing in at a centre bar
-            cx, reach = ix + iw / 2, dp(15)
-            self._gfx.add(Line(points=[cx, mid - bar, cx, mid + bar], width=lw))
-            for tip, tail in ((cx - dp(4), cx - reach), (cx + dp(4), cx + reach)):
-                back = dp(3) if tip > tail else -dp(3)
-                self._gfx.add(Line(points=[tail, mid, tip, mid], width=lw))
-                self._gfx.add(Line(points=[tip - back, mid + dp(3), tip, mid, tip - back, mid - dp(3)], width=lw))
-        else:  # a double arrow between two bars
-            self._gfx.add(Line(points=[left, mid - bar, left, mid + bar], width=lw))
-            self._gfx.add(Line(points=[right, mid - bar, right, mid + bar], width=lw))
-            self._gfx.add(Line(points=[left + dp(2), mid, right - dp(2), mid], width=lw))
-            for tip, back in ((left + dp(2), head), (right - dp(2), -head)):
-                self._gfx.add(Line(points=[tip + back, mid + head, tip, mid, tip + back, mid - head], width=lw))
-
-    def _draw_series_icon(self) -> None:
-        """Top-left series-picker glyph: three stacked lines (a list) + a chevron."""
-        rect = self._series_icon_rect()
-        if rect is None:
-            return
-        self._draw_icon_backing(rect)
-        ix, iy, iw, ih = rect
-        pad, lw = dp(12), 1.6
-        left, right = ix + pad, ix + iw - pad
-        for i in range(3):  # three horizontal "list" lines, top to bottom
-            ly = iy + ih - pad - i * dp(6)
-            self._gfx.add(Line(points=[left, ly, right, ly], width=lw))
 
     def add_marker(self, index: Optional[int] = None) -> None:
         """Add a marker at the given data point index (default: current end)."""
@@ -1217,92 +888,3 @@ def _split_at_spans(indices, xy: list[tuple[float, float]], spans: list[tuple[in
             runs[-1][1].append(point)
         runs.append((inside, [point]))
     return runs
-
-
-def _window_rect(widget) -> tuple[float, float, float, float]:
-    """The widget's rendered rectangle in window coordinates (x, y, w, h)."""
-    x0, y0 = widget.to_window(widget.x, widget.y)
-    x1, y1 = widget.to_window(widget.right, widget.top)
-    return min(x0, x1), min(y0, y1), abs(x1 - x0), abs(y1 - y0)
-
-
-class GraphAwareScrollView(ScrollView):
-    """ScrollView that hands touches on a graph straight to the graph (pan, pinch, tap, glyphs) instead of holding them
-    to decide on a scroll — except a vertical swipe, which the graph hands back as a page scroll (`scroll_with`)."""
-
-    def _graph_under_touch(self, touch):
-        """The graph drawn under the touch (in this view's parent frame), compared in window coordinates.
-
-        A child's x/y are content coordinates (the ScrollView translates the canvas), so testing them against the touch
-        let a graph scrolled out of view claim taps on whatever now sits there (#66).
-        """
-        tx, ty = self.to_window(*touch.pos)
-        if not point_in_rect(tx, ty, _window_rect(self)):
-            return None
-        for child in self._walk_children():
-            if isinstance(child, ScrollableGraphWidget) and point_in_rect(tx, ty, _window_rect(child)):
-                return child
-        return None
-
-    def _walk_children(self):
-        stack = list(self.children)
-        while stack:
-            child = stack.pop()
-            yield child
-            if hasattr(child, "children"):
-                stack.extend(child.children)
-
-    ROUTED_BY = "graph_aware_scroll_view"  # touch.ud key: the view that handed this touch to a graph
-
-    def _dispatch_to_graph(self, graph, touch) -> bool:
-        """Deliver the touch in the graph's parent frame — the one its collide_point and drag maths use."""
-        touch.ud[self.ROUTED_BY] = self
-        touch.push()
-        try:
-            touch.apply_transform_2d(self.to_window)
-            touch.apply_transform_2d(graph.parent.to_widget)
-            return bool(graph.dispatch("on_touch_down", touch))
-        finally:
-            touch.pop()
-
-    def scroll_with(self, touch, graph) -> bool:
-        """Take over a graph's vertical swipe as a scroll of this page; False (the graph keeps it) when this page can't
-        scroll, already scrolls under another finger, or the finger has left the viewport."""
-        vp = self._viewport
-        if self._touch or not self.do_scroll_y or vp is None or vp.height <= self.height:
-            return False
-        touch.push()
-        try:
-            touch.apply_transform_2d(graph.to_window)  # from the graph's parent frame
-            touch.apply_transform_2d(self.parent.to_widget)
-            if not self.collide_point(*touch.pos):
-                return False
-            taken = ScrollView.on_touch_down(self, touch)
-        finally:
-            touch.pop()
-        ud = touch.ud.get(self._get_uid())
-        if not taken or ud is None:
-            return False
-        ud["mode"] = "scroll"  # it already moved past the threshold; also stops scroll_timeout handing it back
-        return True
-
-    def on_scroll_start(self, touch, check_children=True):
-        if (
-            self.collide_point(*touch.pos)
-            and hasattr(touch, "button")
-            and touch.button in ("scrollup", "scrolldown")
-            and self._graph_under_touch(touch) is not None
-        ):
-            return False
-        return super().on_scroll_start(touch, check_children)
-
-    def on_touch_down(self, touch):
-        # Only intercept touches actually inside the viewport. A graph's logical
-        # bounds can extend above/below the visible scroll area (overflowing
-        # body), and without this guard those bounds would steal touches from
-        # widgets sitting outside the ScrollView (e.g. the Metrics/Raw toggle).
-        if self.collide_point(*touch.pos):
-            graph = self._graph_under_touch(touch)
-            if graph is not None and self._dispatch_to_graph(graph, touch):
-                return True
-        return super().on_touch_down(touch)

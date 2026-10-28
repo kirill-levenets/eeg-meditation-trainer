@@ -10,8 +10,9 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
+from app.ui.graph_scroll import GraphAwareScrollView
 from app.ui.hooks import wire
-from app.ui.raw_eeg_screen import GraphAwareScrollView, ScrollableGraphWidget
+from app.ui.raw_eeg_screen import ScrollableGraphWidget
 
 
 def _frames(n: int = 6) -> None:

@@ -14,7 +14,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   A line's end label takes the nearest free slot between the plot's bottom and the widget's top (`_free_label_y`, upward first), since the top margin leaves no room above and the bottom one holds the time rows;
   a threshold step's label at the top of the scale goes under its line.
   The Y grid is bounded: a fixed `grid_step` that would draw more than `_MAX_Y_GRID_LINES` lines gives way to `_compute_nice_step`, since each line carries a label (a 200000 scale at the default 20-unit step would draw 10000).
-- **Glyphs** sit inside the plot's corners (`_corner_rect`):
+- **Glyphs** (the `GraphGlyphs` mixin, `app/ui/graph_glyphs.py`: their callbacks, rects and drawing) sit inside the plot's corners (`_corner_rect`):
   the series picker top-left, expand top-right (in fullscreen the close cross, `set_expand_callback(cb, closes=True)`), fit bottom-right, hidden on a plot too short for it under expand.
   `AppManager._wire_graph_affordances` wires them on every graph (`_all_graphs()`), the one place for cross-graph affordances.
   They are strokes in `TC.TEXT` straight on the graph with no backing (`_draw_icon_backing` only sets the colour), so they contrast on every palette; a fixed backing reads as a grey box on light themes.
@@ -24,7 +24,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   more drift or leaving the glyph turns the touch into an ordinary gesture, so a pan, pinch or vertical swipe that starts on a glyph still works.
   A second finger makes the gesture a pinch or a two-finger tap: no glyph fires and no marker is placed.
   The press is the lifted finger's own (`on_touch_up` reads the finger that lifted, not the one left down).
-  The hit-test is in window coordinates (`_touch_in_window_rect`, see [Touch](#touch)), so the ScrollView can't starve a glyph the way it would an overlaid Kivy widget.
+  The hit-test is in window coordinates (`touch_utils.touch_in_window_rect`, see [Touch](#touch)), so the ScrollView can't starve a glyph the way it would an overlaid Kivy widget.
 - **Fit the whole session** (#43):
   `set_fitted(True)` shows all of the data, never in a window narrower than the graph's default (a session just started would be a second stretched across the plot);
   `_fit_restore` keeps the width and scroll position to go back to.
@@ -86,6 +86,9 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 ## Drawing cost
 
 - **Graph drawing cost**: `ScrollableGraphWidget._draw` rebuilds the graph from scratch on every `add_point` (2 Hz per live graph, within the budget of (6)), and GL re-renders it every frame.
+  It draws in this order: the background, the y axis (`_draw_y_axis`), the border, the threshold and reference line (`_draw_threshold`, its dashes `_add_dashed_hline`),
+  then, with data in view, the time axis (`_draw_x_axis`), the series (`_draw_lines`, the scored parts last, each end label `_draw_end_label`) and the markers (`_draw_markers`), and the glyphs last;
+  `_visible_slices` and `_y_scale` give them the window and the scale.
   (1) Axis and value labels come from `_LABEL_CACHE`, an LRU of 512 `CoreLabel`s keyed by text, size and colour;
   the `CoreLabel` is kept, not just its texture, because it is the texture's reload observer after an Android GL context loss.
   (2) The X grid step is `_x_grid_step(graph_w, visible_seconds)`, the smallest of 10 s … 2 h that keeps time labels ≥70 dp apart.
@@ -100,14 +103,15 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   (4) `set_drawing_enabled(False)` pauses a graph its owner detached (`LiveSessionScreen._set_view`: the hidden Metrics/Raw view), which keeps its size and would redraw every tick unseen;
   data keeps accruing and the graph redraws once re-enabled.
   (5) A zoomed-out series draws each run of samples' min and max (MinMax; #70, #104):
-  `_drawn_indices(key, values, start_idx, per_px)` folds once a run of `_MIN_RUN` (4) samples spans at most `_RUN_STROKES` (2/3) of the stroke (`2 × dp(line_width)`).
+  The fold is `app/ui/graph_runs.py`, Kivy-free arithmetic the widget's `_drawn_indices(key, values, start_idx, per_px)` calls (`run_indices`):
+  it folds once a run of `MIN_RUN` (4) samples spans at most `RUN_STROKES` (2/3) of the stroke (`2 × dp(line_width)`).
   A run is the longest power of two samples that fits, at a fixed absolute sample position (`_appended[key]` counts every sample added, so a buffer that drops its oldest samples doesn't shift the runs).
   Each run draws its min and max in sample order, and the series its first and last sample.
   Why this rule: a MinMax line looks like the full series from about 3 points per stroke width (Van Der Donckt et al., IEEE VIS 2023: the image metrics' curve has its elbow at canvas width × 3 / line width points).
   So a phone's thick stroke needs far fewer points than a desktop's thin one; of the selections they compared, MinMax is the most stable while data streams in.
   Runs at sample positions, not pixel columns, don't move as a fitted graph grows, so the line doesn't shimmer from tick to tick; the price is one change of the line's fine texture each time the zoom doubles and the run size steps.
   The folded line reaches every height the full line reaches, less than the stroke's width to the side, but is not pixel-exact (`tests/test_graph_decimation.py` checks it on the line's centre and on rendered pixels).
-  `_RunExtremes` keeps each series' run extremes for its current run size as data arrives, as Audacity keeps its waveform summaries:
+  `RunExtremes` keeps each series' run extremes for its current run size as data arrives (the widget's `_kept_runs`), as Audacity keeps its waveform summaries:
   a redraw scans only the runs completed since the last one, the runs a pan back brings into view and the part runs at the window's two ends.
   A new run size replaces the old one's; `load_static_data` and `clear_data` reset them.
   One step stays proportional to the buffered samples: each visible series' `list(deque)` copy, sliced to the window.
@@ -121,18 +125,20 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 ## Touch
 
-- **Glyph hit-testing is done in WINDOW coordinates** (`_touch_in_window_rect`):
+A graph's touch handling is the `GraphGestures` mixin (`app/ui/graph_gestures.py`): pan, pinch, the mouse wheel's zoom, taps on the plot and its glyphs, and the vertical-swipe hand-off; it keeps its own gesture state (`_init_gestures`).
+
+- **Glyph hit-testing is done in WINDOW coordinates** (`touch_utils.touch_in_window_rect`):
   the touch's window position (`self.to_window(*touch.pos)`: `touch.pos` is in the graph's parent frame, and `touch.sx/sy` ignore Settings → Display's Rotate Screen) against the glyph's rect in window coordinates.
   `GraphAwareScrollView` delivers a touch in the graph's parent frame (`_dispatch_to_graph`, #66), since a graph's coordinates are content coordinates, not the view's parent's.
   The draw (`_draw_expand_icon` and the other glyphs') and the hit-test use the same rect (`_expand_icon_rect`, …), so the visible box is exactly the tap target.
   `app/ui/touch_utils.point_in_rect` is the shared rect test.
   The History and user-picker manual routers work with raw `collide_point` because their handlers are bound where the touch is already in the right frame: they're not under `GraphAwareScrollView`.
-- **`GraphAwareScrollView._graph_under_touch` hit-tests in WINDOW coordinates**:
-  `self.to_window(*touch.pos)` against each graph's rendered window rect (`_window_rect`, via `point_in_rect`), and only inside the viewport's own window rect.
+- **`GraphAwareScrollView._graph_under_touch` hit-tests in WINDOW coordinates** (`app/ui/graph_scroll.py`, the scroll view a page of graphs scrolls in):
+  `self.to_window(*touch.pos)` against each graph's rendered window rect (`touch_utils.window_rect`, via `point_in_rect`), and only inside the viewport's own window rect.
   A ScrollView translates its canvas, so a child's `x`/`y` are content coordinates: a graph's `collide_point` against the touch lets a graph scrolled out of view claim taps on whatever sits in its unscrolled rect (#66).
   A touch on a graph goes straight to it (pan, pinch, tap, glyphs, with no ScrollView hold-to-decide delay), in the graph's parent frame, except a **vertical swipe**:
-  `ScrollableGraphWidget._hand_off_vertical_swipe` hands a single-finger touch that moved >20 dp mostly vertically, before any pan or pinch in the gesture, to the view that routed it:
-  `touch.ud[GraphAwareScrollView.ROUTED_BY]`, set by `_dispatch_to_graph`.
+  `_hand_off_vertical_swipe` hands a single-finger touch that moved >20 dp mostly vertically, before any pan or pinch in the gesture, to the view that routed it:
+  `touch.ud[touch_utils.ROUTED_BY]`, set by `_dispatch_to_graph` (the key lives in `touch_utils`, so the graph needn't import the scroll view that imports it).
   `GraphAwareScrollView.scroll_with` takes it only if the page can scroll, isn't already scrolling under another finger and the finger is still inside it, otherwise the graph keeps the touch;
   the graph releases the touch and undoes any pan only on success.
   The view is never found by a walk up the tree: Kivy's `Window.parent` is the Window itself, so the walk never ends for a graph with no such ancestor (fullscreen).

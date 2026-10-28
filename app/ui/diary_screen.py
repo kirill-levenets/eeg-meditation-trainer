@@ -17,6 +17,7 @@ from app.metrics.formula_slots import COMPUTED_SERIES
 from app.session.scoring import recorded_score, scored_steps, target_steps
 from app.session.session_program import RunnablePlan, recorded_program
 from app.storage.android_share import copy_to_documents
+from app.ui.graph_scroll import GraphAwareScrollView
 from app.ui.hooks import Hook, is_wired, wire
 from app.ui.live_session import (
     METRICS_COLORS,
@@ -24,7 +25,7 @@ from app.ui.live_session import (
     SERIES_NAMES,
 )
 from app.ui.program_run import show_program_series
-from app.ui.raw_eeg_screen import GraphAwareScrollView, ScrollableGraphWidget
+from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.session_labels import session_score_rows, session_title
 from app.ui.theme import (
     C,

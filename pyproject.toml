@@ -97,8 +97,6 @@ ignore = [
 "app/ui/settings_screen.py" = ["PLR0915"]
 # diary: Android-only `copy_to_documents` lazy import inside Android branch
 "app/ui/diary_screen.py" = ["PLC0415", "BLE001", "PLR0915"]
-# Graph _redraw: inherently complex rendering loop
-"app/ui/raw_eeg_screen.py" = ["C901", "PLR0912", "PLR0915"]
 # Theme: broad except in listeners
 "app/ui/theme.py" = ["BLE001"]
 
