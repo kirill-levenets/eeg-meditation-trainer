@@ -10,7 +10,7 @@ import pytest
 from app import android_jni, crash_handler
 from app.eeg.neurosky_stream import NeuroSkyStream
 from app.keep_awake import KeepAwake
-from app.ui.app_manager import EEGMeditationApp
+from app.ui.toast import android_toast
 
 
 def _fake_jnius(monkeypatch, classes):
@@ -26,10 +26,6 @@ def _fake_run_on_ui_thread(monkeypatch):
     android.runnable = runnable
     monkeypatch.setitem(sys.modules, "android", android)
     monkeypatch.setitem(sys.modules, "android.runnable", runnable)
-
-
-def _app():
-    return EEGMeditationApp.__new__(EEGMeditationApp)
 
 
 def _off_android(monkeypatch):
@@ -88,13 +84,13 @@ def test_the_native_toast_gets_the_activity_and_a_java_string(monkeypatch):
         "android.widget.Toast": _Toast,
         "java.lang.String": lambda text: ("JString", text),
     })
-    _app()._android_toast("Saved")
+    android_toast("Saved")
     assert shown == [(activity, ("JString", "Saved"), 0), "show"]
 
 
 def test_off_android_the_native_toast_is_a_logged_no_op(monkeypatch):
     _off_android(monkeypatch)
-    _app()._android_toast("Saved")
+    android_toast("Saved")
 
 
 def test_bluetooth_permissions_are_asked_through_the_activity(monkeypatch):

@@ -64,7 +64,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   the **aggregates** (custom formulas, saved programs/formulas, the edited program, per-graph series) keep their own handling (`FormulaSettings`, `ProgramSettings`, `GraphSeries`).
   **Theme is per-user** (its descriptor, `get=C.theme_name`/`set=C.set_theme`);
   the global `theme` key (`theme_seed(db)`), left from before themes were per-user and no longer written, is only the default for a profile with no theme of its own;
-  `build()` builds the UI in `startup_theme(db)` — the startup profile's theme, else that seed — so the profile load applies the theme already showing (a no-op);
+  `build()` builds the UI in `startup_theme(db)` (`app/ui/startup.py`) — the startup profile's theme, else that seed — so the profile load applies the theme already showing (a no-op);
   the text size starts the same way (`startup_text_size`).
   Both are `startup_value(db, setting)`: the startup profile's value read as `SettingsStore.load` reads it (`stored_value`: the stored value if present and valid, else the default).
   The theme setting (`theme_setting(seed)`) rejects an unknown stored name, so it loads the seed: `set_theme` ignores an unknown name, which would keep the previous profile's palette.

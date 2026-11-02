@@ -5,11 +5,9 @@ from collections.abc import Callable
 from datetime import datetime as _dt
 from typing import Optional
 
-from kivy.animation import Animation
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
-from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.modalview import ModalView
@@ -52,7 +50,6 @@ from app.settings.registry import (
     SettingsStore,
     held,
     kept,
-    stored_value,
 )
 from app.storage.database import DatabaseManager
 from app.ui import render_stats
@@ -67,9 +64,6 @@ from app.ui.headset import Headset
 from app.ui.history_flow import HistoryFlow
 from app.ui.history_screen import HistoryScreen
 from app.ui.hooks import wire
-from app.ui.line_colours import DEFAULT as LINE_DEFAULT
-from app.ui.line_colours import LINE_COLOURS
-from app.ui.line_colours import OPTIONS as LINE_OPTIONS
 from app.ui.live_session import LiveSessionScreen
 from app.ui.power_exemption import PowerExemption
 from app.ui.profiles import ProfileGate, Profiles
@@ -84,98 +78,27 @@ from app.ui.settings_screen import (
 )
 from app.ui.shown_session import ShownSession
 from app.ui.sound_sources import SoundSources
+from app.ui.startup import (
+    line_colours_setting,
+    resolve_startup_user,
+    startup_text_size,
+    startup_theme,
+    text_size_setting,
+    theme_seed,
+    theme_setting,
+)
 from app.ui.theme import (
-    DEFAULT_THEME,
-    TEXT_SIZES,
-    THEMES,
     BottomNav,
     C,
     F,
     StyledButton,
-    ThemedLabel,
     confirm_popup,
     fill_background,
     format_count,
     make_message_popup,
-    paint_panel,
 )
+from app.ui.toast import android_toast, show_toast
 from app.ui.widgets.loading_overlay import LoadingOverlay
-
-
-def resolve_startup_user(db) -> Optional[int]:
-    """The uid to restore at startup, or None if the user must be prompted.
-
-    None covers no `last_user_id`, a corrupt value, and a stale id whose user was
-    deleted — every case must open the blocking user-select gate rather than let
-    the app run usable with no active user (issue #29 root cause)."""
-    saved = db.get_setting("last_user_id")
-    if not saved:
-        return None
-    try:
-        uid = int(saved)
-    except (ValueError, TypeError):
-        logger.warning(f"Corrupt last_user_id setting {saved!r} — prompting for user")
-        return None
-    if uid <= 0:  # not a valid AUTOINCREMENT id — don't rely on get_user(0) missing
-        return None
-    return uid if db.get_user(uid) else None
-
-
-def theme_seed(db) -> str:
-    """The theme of a profile without its own: the global setting from before themes were per-user, else the
-    default."""
-    seed = db.get_setting("theme")
-    return seed if seed in THEMES else DEFAULT_THEME
-
-
-def _parse_theme(raw: str) -> str:
-    if raw not in THEMES:
-        raise ValueError(f"unknown theme {raw!r}")
-    return raw
-
-
-def theme_setting(seed: str) -> Setting:
-    """The per-user theme. An unknown stored name loads the seed: set_theme ignores it, which kept the previous
-    profile's palette."""
-    return Setting("theme", seed, _parse_theme, STR[1], lambda: C.theme_name, C.set_theme)
-
-
-def _parse_text_size(raw: str) -> float:
-    size = float(raw)
-    if size not in {scale for scale, _name in TEXT_SIZES}:
-        raise ValueError(f"text size {raw!r} isn't on offer")
-    return size
-
-
-def text_size_setting() -> Setting:
-    """The per-user text size: loading a profile applies its size to every screen at once."""
-    return Setting("text_size", 1.0, _parse_text_size, FLOAT[1], lambda: F.SCALE, F.set_scale)
-
-
-def _parse_line_colours(raw: str) -> str:
-    if raw not in {name for name, _label in LINE_OPTIONS}:
-        raise ValueError(f"line colours {raw!r} aren't on offer")
-    return raw
-
-
-def line_colours_setting() -> Setting:
-    """The per-user scored line colours: loading a profile redraws every graph in its choice."""
-    return Setting("line_colours", LINE_DEFAULT, _parse_line_colours, STR[1], lambda: LINE_COLOURS.name,
-                   LINE_COLOURS.set)
-
-
-def startup_value(db, setting: Setting):
-    """The startup profile's value, to build the UI in: its settings load then re-applies it as a no-op."""
-    return stored_value(db, resolve_startup_user(db), setting)
-
-
-def startup_text_size(db) -> float:
-    return startup_value(db, text_size_setting())
-
-
-def startup_theme(db) -> str:
-    """The startup profile's theme, else the seed."""
-    return startup_value(db, theme_setting(theme_seed(db)))
 
 
 class EEGMeditationApp(App):
@@ -1202,40 +1125,12 @@ class EEGMeditationApp(App):
     _leaving = False  # set while _flush_on_leave runs: nothing the app draws is seen any more
 
     def _toast(self, message: str) -> None:
-        """Short non-blocking confirmation on the theme's modal panel, above any popup. While the app is leaving it is
-        the native Android toast instead, the one thing still seen then."""
+        """A short confirmation above any popup; while the app is leaving, Android's own toast, the one thing still
+        seen then."""
         if self._leaving and android_jni.on_android():
-            self._android_toast(message)
-            return
-        lbl = ThemedLabel(text=message, font_size=F.BODY, color=C.TEXT, size_hint=(None, None),
-                          padding=(dp(16), dp(10)))
-        lbl.texture_update()
-        lbl.size = lbl.texture_size
-        lbl.pos = ((Window.width - lbl.width) / 2, Window.height * 0.12)
-        paint_panel(lbl)
-        Window.add_widget(lbl)
-        fade = Animation(opacity=0, duration=0.4)
-        fade.bind(on_complete=lambda *_a: Window.remove_widget(lbl))
-        Clock.schedule_once(lambda _dt: fade.start(lbl), 1.6)
-
-    def _android_toast(self, message: str) -> None:
-        """Short Android toast; no-op (logged) off Android."""
-        if not android_jni.on_android():
-            logger.debug(f"toast: {message}")
-            return
-        try:
-            from android.runnable import run_on_ui_thread
-
-            @run_on_ui_thread
-            def _show():
-                from jnius import autoclass
-                Toast = autoclass("android.widget.Toast")
-                Toast.makeText(
-                    android_jni.activity(), android_jni.java_string(message), Toast.LENGTH_SHORT
-                ).show()
-            _show()
-        except Exception as e:
-            logger.warning(f"Toast failed: {e}")
+            android_toast(message)
+        else:
+            show_toast(message)
 
     def _on_marker(self, *args) -> None:
         """Place a marker at the current position in the session."""

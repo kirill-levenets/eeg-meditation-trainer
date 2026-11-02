@@ -19,9 +19,10 @@ import app.ui.profiles as profiles
 from app import android_jni
 from app.session.session_run import Phase
 from app.storage.database import DatabaseManager
-from app.ui.app_manager import EEGMeditationApp, resolve_startup_user
+from app.ui.app_manager import EEGMeditationApp
 from app.ui.history_flow import sessions_for_view
 from app.ui.settings_screen import SettingsScreen
+from app.ui.startup import resolve_startup_user
 from tests._backup_flow import make_flow
 from tests._profiles import make_gate, make_profiles
 from tests._recorder import make_recorder

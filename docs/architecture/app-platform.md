@@ -17,7 +17,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 ## User gate and profiles
 
 - **Hard user gate:** the app is never usable with no active user.
-  `build()` gates on `resolve_startup_user(db)` (the resolved uid, or `None`; through `_restore_last_user`), not on whether users exist:
+  `build()` gates on `resolve_startup_user(db)` (`app/ui/startup.py`: the resolved uid, or `None`; through `_restore_last_user`), not on whether users exist:
   after a reinstall, a restored DB, a deleted active profile or a corrupt `last_user_id`, users exist but none is current.
   The gate is `ProfileGate` (`app/ui/profiles.py`, the app's `_gate`); `ProfileGate.open(delay)` is its one entry (build, `on_resume`, a profile delete, a failed gate pick):
   it disables the bottom nav synchronously (no cold-start tap window) and opens the blocking picker (`_show`, its `_gate_popup` made un-escapable in `_on_keyboard`).
@@ -50,7 +50,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   else the Diary detail goes back (`SessionDetailFlow.on_diary_back`);
   else any screen but the Session screen switches to it (`_switch_screen("live_session")`, which syncs the bottom-nav highlight);
   else, on the Session screen, **a second press within 2 s exits** (`_exit_on_second_back`, `_last_back_time`), the first showing the in-app `_toast`.
-  While the app is leaving (`_leaving`), `_toast` shows the native `_android_toast` (`run_on_ui_thread` + pyjnius `Toast`) instead.
+  While the app is leaving (`_leaving`), `_toast` shows the native `android_toast` (`app/ui/toast.py`: `run_on_ui_thread` + pyjnius `Toast`) instead.
   Esc on desktop follows the same chain.
 
 ## Android access

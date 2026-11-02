@@ -84,6 +84,8 @@ ignore = [
 "app/android_jni.py" = ["PLC0415", "BLE001"]
 # The session's keep-awake: lazy pyjnius/android imports, broad except around each Android call (logged)
 "app/keep_awake.py" = ["PLC0415", "BLE001"]
+# The native toast: lazy android/pyjnius imports, broad except around the Android call (logged)
+"app/ui/toast.py" = ["PLC0415", "BLE001"]
 # The maker's power screens: broad except around building them through pyjnius (logged, then a toast)
 "app/ui/power_exemption.py" = ["BLE001"]
 # AST validator/evaluator: deeply branched by design

@@ -11,7 +11,6 @@ from app.metrics.formula_slots import session_formulas
 from app.session.session_program import recorded_plan
 from app.settings.registry import SettingsStore
 from app.storage.database import DatabaseManager
-from app.ui.app_manager import line_colours_setting
 from app.ui.diary_screen import DiaryScreen, detail_graph_data
 from app.ui.hooks import wire
 from app.ui.line_colours import (
@@ -27,6 +26,7 @@ from app.ui.line_colours import (
 from app.ui.live_session import METRICS_COLORS, METRICS_SCALES, LiveSessionScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget, _split_at_spans
 from app.ui.settings_screen import SettingsScreen
+from app.ui.startup import line_colours_setting
 from app.ui.theme import THEMES, C, _contrast
 
 GRADIENTS = [name for name, _label in OPTIONS if name != MONO]

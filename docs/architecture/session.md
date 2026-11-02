@@ -76,7 +76,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `DatabaseManager.update_session_notes` writes only the fields given and returns whether a row changed; a failure goes to `report_soft_error`.
   Success shows `_toast("Notes saved")` and calls `HistoryScreen.update_session(sid, ...)`, which updates the History model's session in place (a reload would start the list from the top);
   `_update_item` re-derives that row's item, so its notes line appears, changes or goes (and the row's height with it) at once.
-  `_toast` is the one toast (also the double-back "Press back again to exit"): `C.TEXT` on `paint_panel`, added to the `Window` so it shows above any open popup, on every platform;
+  `_toast` is the one toast (also the double-back "Press back again to exit"; `show_toast` in `app/ui/toast.py`): `C.TEXT` on `paint_panel`, added to the `Window` so it shows above any open popup, on every platform;
   only while the app is leaving (`_leaving`, set by `_flush_on_leave`, when nothing the app draws is seen) is it the native Android toast.
   `HistoryFlow.delete_sessions(ids)` is the one delete (a History row, the History selection, the end card):
   one `DatabaseManager.delete_sessions(ids)` transaction over metrics and rows, so an error deletes none of them (`delete_session(sid)` is a selection of one).

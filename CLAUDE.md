@@ -77,6 +77,7 @@ Read it before changing that subsystem.
 - `app/ui/app_manager.py` — `EEGMeditationApp`: wiring, session start/stop, BT wait, the active profile (`_activate_user`), settings load/save.
   `app/ui/app_context.py` — `AppContext`: what every flow reaches the app through (`_make_context`). → [app-platform](docs/architecture/app-platform.md#flows-and-the-app-context)
   `app/ui/profiles.py` — `ProfileGate` (the blocking profile picker), `Profiles` (Settings → Profile). → [app-platform](docs/architecture/app-platform.md#user-gate-and-profiles)
+  `app/ui/startup.py` — the startup profile (`resolve_startup_user`), the theme, text size and line colours the UI is built in; `app/ui/toast.py` — the toast.
 - `app/ui/theme.py`, `app/ui/widgets/` — palette `C`/`F`/`S`, themed widgets, modals, legends, overlays.
   `app/ui/hooks.py` — `Hook`/`wire()`: the handlers the app plugs into a widget. → [ui-theme](docs/architecture/ui-theme.md)
 - `app/ui/raw_eeg_screen.py` — `ScrollableGraphWidget`, the one time-series graph class;
