@@ -370,19 +370,48 @@ class EEGMeditationApp(App):
             APP.USE_MOCK_DEVICE = False
             logger.info(f"Serial device override: {path}")
 
+        float_root = self._build_screens()
+        self._build_flows()
+        self._bind_callbacks()
+        self._link_graph_zoom()
+        # After _bind_callbacks (it sets the fields get() snapshots as defaults), before any user load.
+        self._build_settings_store()
+        resolved_user = self._restore_last_user()
+        self._profiles.refresh()
+        # The gate is on a resolved user, not on users existing: a reinstall, a restored DB, a deleted active profile or
+        # a corrupt last_user_id leave users but none current. The nav is disabled at once: no cold-start tap window.
+        if resolved_user is None:
+            self._gate.open(0.5)
+        return float_root
+
+    def _build_screens(self) -> FloatLayout:
+        """The four screens under the bottom nav, with the app-wide overlays (loading, a fullscreen graph) above them."""
         root = BoxLayout(orientation="vertical")
         fill_background(root, C.BG_DARK)
-
-        # --- Screen manager (routed via nav) ---
         self._sm = ScreenManager(transition=SlideTransition())
-
         self._live_screen = LiveSessionScreen()
-        self._program_run = ProgramRun(self._ctx, self._session_manager, self._audio, self._live_screen,
-                                       formula_vars=self._eval_formula_vars)
         self._settings_screen = SettingsScreen()
         self._history_screen = HistoryScreen()
         self._diary_screen = DiaryScreen()
+        for screen in (self._live_screen, self._history_screen, self._settings_screen, self._diary_screen):
+            self._sm.add_widget(screen)
+        root.add_widget(self._sm)
+        self._bottom_nav = BottomNav(tabs=[("Session", "session"), ("History", "history"), ("Settings", "settings")],
+                                     callback=self._on_nav_tab)
+        root.add_widget(self._bottom_nav)
+        float_root = FloatLayout()
+        self._float_root = float_root
+        self._fullscreen = GraphFullscreen(float_root)
+        self._loading_overlay = LoadingOverlay()
+        float_root.add_widget(root)
+        float_root.add_widget(self._loading_overlay)
+        return float_root
+
+    def _build_flows(self) -> None:
+        """The objects that own each concern, each given the app context and the screens it works on."""
         self._timer_state = TimerState()
+        self._program_run = ProgramRun(self._ctx, self._session_manager, self._audio, self._live_screen,
+                                       formula_vars=self._eval_formula_vars)
         self._program_settings = ProgramSettings(
             self._ctx, self._settings_screen.timer, self._live_screen, self._session_manager,
             show_saved_series=lambda uid: self._graph_series.apply_saved(self._live_screen.graph, uid))
@@ -396,35 +425,10 @@ class EEGMeditationApp(App):
                                on_main_for=self._on_main_for)
         self._watch = SessionWatch(self._real_stream, self._audio, self._live_screen, self._headset,
                                    on_main=self._on_main)
-
-        self._sm.add_widget(self._live_screen)
-        self._sm.add_widget(self._history_screen)
-        self._sm.add_widget(self._settings_screen)
-        self._sm.add_widget(self._diary_screen)
-
-        root.add_widget(self._sm)
-
-        # --- Bottom navigation ---
-        self._bottom_nav = BottomNav(
-            tabs=[
-                ("Session", "session"),
-                ("History", "history"),
-                ("Settings", "settings"),
-            ],
-            callback=self._on_nav_tab,
-        )
-        root.add_widget(self._bottom_nav)
-
-        # Wrap in a FloatLayout so app-global overlays (loading spinner,
-        # fullscreen graph) can sit on top of every screen.
-        float_root = FloatLayout()
-        self._float_root = float_root
-        self._fullscreen = GraphFullscreen(float_root)
         self._graph_series = GraphSeries(
             self._ctx, self._live_screen.graph, self._formulas, self._program_run, self._program_settings,
             self._formula_settings, graphs=self._all_graphs, detail_program=self._diary_screen.program_lines_of,
             legacy_defaults=self._settings_screen._graph_toggles)
-        self._loading_overlay = LoadingOverlay()
         self._history = HistoryFlow(self._ctx, self._history_screen, self._formulas, self._loading_overlay,
                                     on_sessions_deleted=lambda ids: self._shown.on_sessions_deleted(ids))
         self._shown = ShownSession(self._ctx, self._live_screen, self._audio, self._history, self._recorder)
@@ -435,29 +439,8 @@ class EEGMeditationApp(App):
             scan_for_new_profile=self._headset.scan_for_new_profile, offer_power_exemption=self._power.offer_once)
         self._profiles = Profiles(self._ctx, self._settings_screen, self._gate, deactivate=self._deactivate_user,
                                   on_deleted=self._on_profile_deleted)
-        self._last_back_time = 0.0  # for double-back-to-exit on the root screen
-        float_root.add_widget(root)
-        float_root.add_widget(self._loading_overlay)
-
-        self._bind_callbacks()
-        self._link_graph_zoom()
-        # After _bind_callbacks (it sets the fields get() snapshots as defaults), before any user load.
-        self._build_settings_store()
-        resolved_user = self._restore_last_user()
-        self._profiles.refresh()
-
-        # Hard user gate: the app is never usable without a resolved concrete
-        # user. Gate on "did we resolve a user", NOT on whether the users table
-        # is non-empty — reinstall / restored DB / deleted-active-profile /
-        # corrupt last_user_id all leave users present but none current. Disable
-        # nav synchronously so there is no cold-start window where the app is
-        # tappable with no user; the selection modal re-enables it. The modal
-        # is a Popup, not a Screen, because a TextInput inside a
-        # Screen doesn't get keyboard focus on some platforms.
-        if resolved_user is None:
-            self._gate.open(0.5)
-
-        return float_root
+        self._backup_flow = BackupFlow(self._ctx, self._settings_screen, user_name=self._profiles.current_name,
+                                       checkpoint=self._checkpoint_or_report, on_db_replaced=self._on_db_replaced)
 
     def _make_context(self) -> AppContext:
         """What every flow reaches the app through; the callables read the app when called, so they see the profile and
@@ -505,6 +488,17 @@ class EEGMeditationApp(App):
         ScrollableGraphWidget.link_zoom(*self._detail_graphs())
 
     def _bind_callbacks(self) -> None:
+        """Every screen's handlers, and the keys: the marker hotkey and Android's back button."""
+        self._wire_session_screen()
+        self._wire_settings_screen()
+        self._wire_history_screens()
+        Window.bind(on_key_down=self._on_key_down)
+        # Android's back (key 27) is consumed, so Kivy's exit-on-escape doesn't fire: it navigates, or exits on a double tap.
+        self._last_back_time = 0.0
+        Window.bind(on_keyboard=self._on_keyboard)
+
+    def _wire_session_screen(self) -> None:
+        """The Session screen's controls, its end card, its graphs' glyphs and the series its graph starts with."""
         self._live_screen.btn_start.bind(on_release=self._on_start)
         self._live_screen.btn_pause.bind(on_release=self._on_pause)
         self._live_screen.btn_stop.bind(on_release=self._on_stop)
@@ -526,7 +520,14 @@ class EEGMeditationApp(App):
 
         # Shared fullscreen-expand + series-picker glyphs on every graph
         self._wire_graph_affordances()
+        # The formula series stay hidden until a formula is shown through the picker, the program ones while no program
+        # with formula segments runs; a new profile starts on Shamatha alone (a profile load applies its own).
+        for key in (*FORMULA_KEYS, *PROGRAM_FORMULA_KEYS):
+            self._live_screen.graph.set_visible(key, False)
+        for key, active in self._settings_screen._graph_toggles.items():
+            self._live_screen.graph.set_visible(key, active)
 
+    def _wire_settings_screen(self) -> None:
         wire(
             self._settings_screen,
             on_threshold_change=self._on_threshold_change,
@@ -584,25 +585,11 @@ class EEGMeditationApp(App):
             on_stop_timer_sound=self._on_stop_test_timer_sound,
             on_timer_sound_change=self._on_timer_sound_change,
         )
+        wire(self._settings_screen, on_backup_pressed=self._backup_flow.on_backup_pressed,
+             on_restore_pressed=self._backup_flow.on_restore_pressed)
 
-        # Keyboard hotkey for marker
-        Window.bind(on_key_down=self._on_key_down)
-        # Android hardware back button (key 27) — consume it so Kivy's default
-        # exit-on-escape doesn't fire; navigate / double-tap-to-exit instead.
-        Window.bind(on_keyboard=self._on_keyboard)
-
-        # Hide all custom-formula series until a formula is set + shown via picker
-        for _fk in FORMULA_KEYS:
-            self._live_screen.graph.set_visible(_fk, False)
-        # The program-formula lines are shown only while a program with
-        # custom-formula segments runs.
-        for _pk in PROGRAM_FORMULA_KEYS:
-            self._live_screen.graph.set_visible(_pk, False)
-        # Apply default metric visibility (Shamatha only for new users;
-        # _load_user_settings will override for existing users)
-        for key, active in self._settings_screen._graph_toggles.items():
-            self._live_screen.graph.set_visible(key, active)
-
+    def _wire_history_screens(self) -> None:
+        """History's list and chart, and a session's detail."""
         wire(
             self._diary_screen,
             on_save_notes=self._history.save_notes,
@@ -622,15 +609,6 @@ class EEGMeditationApp(App):
             on_chart_collapse=lambda _collapsed: self._persist_user_setting("history_chart_collapsed"),
         )
         wire(self._diary_screen.what_if, on_collapse=lambda _collapsed: self._persist_user_setting("what_if_collapsed"))
-
-        # Data Backup section
-        self._backup_flow = BackupFlow(self._ctx, self._settings_screen, user_name=self._profiles.current_name,
-                                       checkpoint=self._checkpoint_or_report, on_db_replaced=self._on_db_replaced)
-        wire(
-            self._settings_screen,
-            on_backup_pressed=self._backup_flow.on_backup_pressed,
-            on_restore_pressed=self._backup_flow.on_restore_pressed,
-        )
 
     def _activate_user(self, uid: int) -> None:
         """Make `uid` the active profile and load its settings; every path that picks a user goes here."""
