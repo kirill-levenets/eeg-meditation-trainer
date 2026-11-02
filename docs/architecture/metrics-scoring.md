@@ -57,7 +57,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 - `SessionManager.set_active_goal(metric_key)` accrues `time_above_threshold`/`longest_streak` (and `avg_score`) against that metric and the threshold in force; `start_segment(metric_key, target)` against a program segment's target;
   it scores at the formula's own scale, independent of `meditation_threshold`'s 0–100 clamp.
   **A session is scored on the metric that drives the feedback sound (#51).**
-  In a simple session (decided by `ProgramRun.active`, fixed at session start, never the editable `ProgramSettings.mode` toggle) `_update_tick` calls `_score_on_drive_key()` → `set_active_goal(self._audio_drive_key())` every tick;
+  In a simple session (decided by `ProgramRun.active`, fixed at session start, never the editable `ProgramSettings.mode` toggle) `_session_tick` calls `_score_on_drive_key()` → `set_active_goal(self._audio_drive_key())` every tick;
   it feeds the audio from that same resolved key, so scoring and sound can't diverge (an invalid formula's shamatha fallback moves both).
   The legend's `»` marks the scored series through the tick's single `_ui_update` dispatch:
   `_scored_mark(run, key)` leaves the run's `scored_key` untouched while the screen is locked, so the first tick after it marks the change; a program session's segments set the mark instead.
@@ -76,7 +76,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   the others are the profile switch, a headset switch, both Restore checks, Settings › Audio's Test and a running program's threshold.
   Every checkpoint passes its stats through `_with_score`, which fills the key (the current drive key when none was scored) and adds `score_metric_name` (the live graph's `series_name(key)`, e.g. a formula's name).
   For a program it sets `"program"`, the name the program had when the session started (`ProgramRun.name`, `"Program"` if unsaved; Settings may load or save another during the session) and a NULL `avg_score`.
-  `ProgramRun.tick` (called in `_update_tick`, program mode only) detects a boundary crossing with the pure `ProgramRun.transition` helper;
+  `ProgramRun.tick` (called in `_session_tick`, program mode only) detects a boundary crossing with the pure `ProgramRun.transition` helper;
   `_enter_segment` then fires the prior segment's end cue (`AudioEngine.play_transition_cue()` chime, or warble), sets the **transient** `audio_key` to the segment's metric key (precomputed by `begin`);
   it also calls `start_segment` (`set_active_goal`, and the live average starts over: a program's segments differ in metric) and moves the legend marker.
   `audio_key` must not overwrite the user's stored `audio_metric`: a program slot would leak into the baseline, and a later simple session would read that absent key as 0 → constant max noise.
