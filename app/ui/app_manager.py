@@ -396,9 +396,8 @@ class EEGMeditationApp(App):
             self._real_stream, self._live_screen, headset_name=self._headset.name, on_main_for=self._on_main_for,
             start_session=self._start_on_first_data, on_connected=self._on_session_connected,
             abort=self._abort_bt_wait, undo_setup=self._undo_session_setup)
-        self._watch = SessionWatch(
-            self._real_stream, self._session_manager, self._audio, self._live_screen, self._settings_screen.device,
-            headset_name=self._headset.name, on_main=self._on_main, end_session=self._end_from_tick)
+        self._watch = SessionWatch(self._real_stream, self._session_manager, self._audio, self._live_screen,
+                                   self._headset, on_main=self._on_main, end_session=self._end_from_tick)
 
         self._sm.add_widget(self._live_screen)
         self._sm.add_widget(self._history_screen)

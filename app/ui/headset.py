@@ -68,11 +68,12 @@ class Headset:
         return "Mock EEG" if APP.USE_MOCK_DEVICE else self.name()
 
     def show_selected(self) -> None:
-        """The selected headset's name and link, on the Session screen and in Settings."""
+        """The selected headset's name and link, on the Session screen and in Settings; a session's lost link shows as
+        connecting, since the reader reconnects."""
         connected = self._stream.is_connected
         label = self.name()
         self._live_screen.update_device_status(connected, device_name=label,
-                                               connecting=self._ctx.session.connecting() and not connected)
+                                               connecting=self._ctx.session.live() and not connected)
         if connected:
             self._device_section.update_device_status(True, name=label)
         else:

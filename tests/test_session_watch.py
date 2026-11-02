@@ -6,7 +6,9 @@ import pytest
 
 from app.config import APP
 from app.session.session_run import Phase, SessionRun
+from app.ui.headset import Headset
 from app.ui.session_watch import SessionWatch
+from tests._context import stub_context
 
 
 class _Detector:
@@ -30,9 +32,10 @@ def watch(monkeypatch):
     monkeypatch.setattr(APP, "USE_MOCK_DEVICE", False)
     queued = []
     stream, live_screen, device, audio = MagicMock(), MagicMock(), MagicMock(), MagicMock()
-    stream.is_connected = False
-    w = SessionWatch(stream, MagicMock(elapsed_seconds=0), audio, live_screen, device,
-                     headset_name=lambda: "MWM2", on_main=queued.append, end_session=MagicMock())
+    stream.is_connected, stream._device_address, stream._device_name = False, "AA:BB", "MWM2"
+    headset = Headset(stub_context(live=lambda: True), stream, device, live_screen, serial_override=lambda: None)
+    w = SessionWatch(stream, MagicMock(elapsed_seconds=0), audio, live_screen, headset, on_main=queued.append,
+                     end_session=MagicMock())
     run = SessionRun(1)
     run.phase = Phase.STARTED
     return w, run, queued, stream, live_screen, device, audio
@@ -59,7 +62,7 @@ def test_the_link_lost_mid_session_shows_reconnecting_with_the_alert(watch):
     stream.is_connected = False
     w.follow_link(run)
     _run_queued(queued)
-    live.update_device_status.assert_called_once_with(False, device_name="MWM2", connecting=True)
+    assert live.update_device_status.call_args == ((False,), {"device_name": "MWM2", "connecting": True})
     audio.play_disconnect_alert.assert_called_once()
 
 
@@ -115,3 +118,22 @@ def test_data_flowing_again_rearms_the_stale_stop(watch):
     stream.seconds_since_last_packet = 0.3
     w.check_stale(run)
     assert not run.stale_data_warned
+
+
+def test_a_reconnect_mid_session_shows_the_headset_connected_again(watch):
+    w, run, queued, stream, live, device, _audio = watch
+    for connected in (True, False, True):
+        stream.is_connected = connected
+        w.follow_link(run)
+    _run_queued(queued)
+    assert live.update_device_status.call_args.args[0] is True  # not left "reconnecting" to the session's end
+    assert device.update_device_status.call_args.args[0] is True
+
+
+def test_a_drop_mid_session_is_shown_in_settings_too(watch):
+    w, run, queued, stream, _live, device, _audio = watch
+    for connected in (True, False):
+        stream.is_connected = connected
+        w.follow_link(run)
+    _run_queued(queued)
+    assert device.update_device_status.call_args.args[0] is False  # not still "connected"

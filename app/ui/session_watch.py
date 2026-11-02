@@ -13,14 +13,13 @@ class SessionWatch:
 
     STALE_DATA_THRESHOLD = 10.0  # seconds with no new packets before warning
 
-    def __init__(self, stream, session_manager, audio, live_screen, device_section, *, headset_name: Callable[[], str],
-                 on_main: Callable[[Callable], None], end_session: Callable[[SessionRun, str, str], None]) -> None:
+    def __init__(self, stream, session_manager, audio, live_screen, headset, *, on_main: Callable[[Callable], None],
+                 end_session: Callable[[SessionRun, str, str], None]) -> None:
         self._stream = stream
         self._session_manager = session_manager
         self._audio = audio
         self._live_screen = live_screen
-        self._device_section = device_section
-        self._headset_name = headset_name
+        self._headset = headset
         self._on_main = on_main
         self._end_session = end_session
 
@@ -38,26 +37,18 @@ class SessionWatch:
         return True
 
     def follow_link(self, run: SessionRun) -> None:
-        """The headset's link coming up (Settings shows it) and dropping during a session (the Session screen shows it
+        """The headset's link coming up and dropping during a session, shown where the headset is shown (a drop as
         reconnecting, with the disconnect alert)."""
-        if (not run.bt_connected_notified
-                and not APP.USE_MOCK_DEVICE
-                and self._stream.is_connected):
-            run.bt_connected_notified = True
-            name = self._headset_name()
-            self._on_main(lambda n=name: self._device_section.update_device_status(True, name=n))
-            logger.info(f"Settings updated: {name} connected")
-
-        if (not APP.USE_MOCK_DEVICE
-                and run.bt_connected_notified
-                and not self._stream.is_connected):
-            run.bt_connected_notified = False
-            name = self._headset_name()
-            self._on_main(lambda n=name: self._live_screen.update_device_status(
-                False, device_name=n, connecting=True
-            ))
+        connected = self._stream.is_connected  # read once: the reader thread moves it
+        if APP.USE_MOCK_DEVICE or connected == run.bt_connected_notified:
+            return
+        run.bt_connected_notified = connected
+        self._on_main(self._headset.show_selected)
+        if connected:
+            logger.info(f"BT device {self._headset.name()} connected")
+        else:
             self._audio.play_disconnect_alert()
-            logger.warning(f"BT device {name} disconnected during session")
+            logger.warning(f"BT device {self._headset.name()} disconnected during session")
 
     def check_stale(self, run: SessionRun) -> None:
         """Auto-stop session when the real device stops sending EEG data."""
