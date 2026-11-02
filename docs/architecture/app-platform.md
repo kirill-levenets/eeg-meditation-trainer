@@ -3,6 +3,13 @@
 The user gate and profiles, the Android back button, error reporting, the Linux clipboard, test guardrails, and build/CI specifics.
 Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); this file holds how the subsystem works and why.
 
+## Flows and the app context
+
+- The app builds the screens and the classes that own each concern (`HistoryFlow`, `SessionDetailFlow`, `ProfileGate`, `Profiles`, …), wires the screens' hooks to them, and gives each the same `AppContext` (`app/ui/app_context.py`, built once by `_make_context`).
+  It holds what a flow reaches the app through: the database, the active profile (`user_id`, `activate_user`, `require_user`), the main thread (`on_main`), navigation (`switch_screen`), the user's dialogs (`info`, `toast`, `confirm`), the settings save, and `SessionAccess` (whether a session runs or waits for the headset, its row, the refusal while it runs, its discard).
+  A flow takes the context and then only what is its own (its screens, the objects it works with); the context's callables read the app when called, so they see the profile and the session as they are then.
+  Tests build it from an app with `tests/_context.make_context(app)`, any field replaceable.
+
 ## User gate and profiles
 
 - **Hard user gate:** the app is never usable with no active user.

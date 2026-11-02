@@ -10,6 +10,7 @@ from kivy.uix.boxlayout import BoxLayout
 from app.crash_handler import report_soft_error
 from app.logger import logger
 from app.storage.database import UserExistsError
+from app.ui.app_context import AppContext
 from app.ui.theme import C, F, ThemedLabel, ThemedPopup
 from app.ui.widgets.user_picker import UserPickerForm
 
@@ -18,14 +19,10 @@ class ProfileGate:
     """The blocking profile picker, open while there is no active profile: at first run, after the active profile's
     delete, or when the process resumes with none."""
 
-    def __init__(self, db, bottom_nav, sm, *, user_id: Callable[[], int | None], activate: Callable[[int], None],
-                 refresh_profiles: Callable[[], None], scan_for_new_profile: Callable[[], None],
-                 offer_power_exemption: Callable[[], None]) -> None:
-        self._db = db
+    def __init__(self, ctx: AppContext, bottom_nav, *, refresh_profiles: Callable[[], None],
+                 scan_for_new_profile: Callable[[], None], offer_power_exemption: Callable[[], None]) -> None:
+        self._ctx = ctx
         self._bottom_nav = bottom_nav
-        self._sm = sm
-        self._user_id = user_id
-        self._activate = activate
         self._refresh_profiles = refresh_profiles
         self._scan_for_new_profile = scan_for_new_profile
         self._offer_power_exemption = offer_power_exemption
@@ -49,7 +46,7 @@ class ProfileGate:
         """True while the app is gated on user selection — nav disabled, no concrete
         user. Covers both the popup-open state and the schedule window before the
         popup exists, so the gate is un-escapable throughout."""
-        return bool(self._bottom_nav.disabled and not self._user_id())
+        return bool(self._bottom_nav.disabled and not self._ctx.user_id())
 
     def shown(self) -> bool:
         return self._gate_popup is not None
@@ -58,7 +55,7 @@ class ProfileGate:
         """After a gate create/pick attempt, re-open the gate if no concrete user
         ended up set (invalid name, or a stale/deleted profile row) — otherwise the
         popup is gone, nav stays disabled, and the app is stranded with no user."""
-        if not self._user_id():
+        if not self._ctx.user_id():
             self._refresh_profiles()  # drop any stale row from the picker list
             self.open(0)
 
@@ -113,7 +110,7 @@ class ProfileGate:
             on_create=_on_create,
             on_pick_existing=_on_pick,
         )
-        existing_users = self._db.get_all_users()
+        existing_users = self._ctx.db.get_all_users()
         form.populate_users(existing_users)
         content.add_widget(form)
         popup.open()
@@ -125,7 +122,7 @@ class ProfileGate:
             logger.warning(f"First run with invalid name: '{user_name}', ignoring")
             return
         try:
-            uid = self._db.create_user(user_name)
+            uid = self._ctx.db.create_user(user_name)
         except UserExistsError as e:
             logger.info(f"First run: '{e.name}' exists, picking it (id={e.user_id})")
             self.pick_existing(e.user_id)
@@ -133,18 +130,18 @@ class ProfileGate:
         except sqlite3.Error as e:  # the popup's caller reopens the gate: no profile was made
             report_soft_error("user_create_failed", f"The profile '{user_name}' could not be created: {e}")
             return
-        self._db.set_user_setting(uid, "use_mock", "True")  # before its load, which applies it
-        self._activate(uid)
+        self._ctx.db.set_user_setting(uid, "use_mock", "True")  # before its load, which applies it
+        self._ctx.activate_user(uid)
         self._scan_for_new_profile()
         logger.info("First run: using mock device until a MindWave is found")
         self._finish_first_run(f"user '{user_name}' created")
 
     def pick_existing(self, user_id: int) -> None:
         """First-run popup: an existing profile picked, activated as it is (its own headset and mode)."""
-        if not self._db.get_user(user_id):
+        if not self._ctx.db.get_user(user_id):
             logger.warning(f"pick_existing: user {user_id} not found")
             return
-        self._activate(user_id)
+        self._ctx.activate_user(user_id)
         self._finish_first_run(f"user {user_id} picked")
 
     def _finish_first_run(self, what: str) -> None:
@@ -152,8 +149,7 @@ class ProfileGate:
         self._bottom_nav.opacity = 1
         self._bottom_nav.disabled = False
         self._refresh_profiles()
-        self._sm.current = "live_session"
-        self._bottom_nav.active_tab = "session"
+        self._ctx.switch_screen("live_session")  # its tab marked too
         self._offer_power_exemption()
         logger.info(f"First run complete: {what}")
 
@@ -161,38 +157,28 @@ class Profiles:
     """Settings → Profile: the profile list, a switch, a create, a delete. A session's part in a switch or a delete is
     the app's, through the callables given; a delete that leaves no active profile opens the gate."""
 
-    def __init__(self, db, settings_screen, gate: ProfileGate, *, user_id: Callable[[], int | None],
-                 activate: Callable[[int], None], deactivate: Callable[[], None], on_deleted: Callable[[int], None],
-                 session_live: Callable[[], bool], discard_running_session: Callable[[], None],
-                 refused_while_session_runs: Callable[[str], bool], save_settings: Callable[[], None],
-                 running_session_id: Callable[[], int | None]) -> None:
-        self._db = db
+    def __init__(self, ctx: AppContext, settings_screen, gate: ProfileGate, *, deactivate: Callable[[], None],
+                 on_deleted: Callable[[int], None]) -> None:
+        self._ctx = ctx
         self._settings_screen = settings_screen
         self._gate = gate
-        self._user_id = user_id
-        self._activate = activate
         self._deactivate = deactivate
         self._on_deleted = on_deleted
-        self._session_live = session_live
-        self._discard_running_session = discard_running_session
-        self._refused_while_session_runs = refused_while_session_runs
-        self._save_settings = save_settings
-        self._running_session_id = running_session_id
 
     def refresh(self) -> None:
-        self._settings_screen.populate_users(self._db.get_all_users(), self._user_id())
+        self._settings_screen.populate_users(self._ctx.db.get_all_users(), self._ctx.user_id())
 
     def on_switch(self, user_id: int) -> None:
         """Switch the active user profile."""
         # The running session owns the loaded settings and saves under its own profile.
-        if user_id != self._user_id() and self._refused_while_session_runs("switching profiles"):
+        if user_id != self._ctx.user_id() and self._ctx.session.refused("switching profiles"):
             self.refresh()  # snap the picker back to the active profile
             return
         # Save current user's settings before switching
-        self._save_settings()
-        user = self._db.get_user(user_id)
+        self._ctx.save_settings()
+        user = self._ctx.db.get_user(user_id)
         name = user["name"] if user else "Unknown"
-        self._activate(user_id)
+        self._ctx.activate_user(user_id)
         logger.info(f"Switched to user: {name} (id={user_id})")
         self.refresh()
 
@@ -204,7 +190,7 @@ class Profiles:
         """
 
         try:
-            self._db.create_user(name)
+            self._ctx.db.create_user(name)
         except UserExistsError as e:
             form = getattr(self._settings_screen, "_user_picker_form", None)
             if form is not None:
@@ -221,15 +207,15 @@ class Profiles:
         """Delete a user profile. Deleting the ACTIVE profile drops the app into
         the no-user state, so re-enter the hard gate instead of leaving the app
         usable with nothing selected."""
-        deleted_active = self._user_id() == user_id
-        if deleted_active and self._session_live():
+        deleted_active = self._ctx.user_id() == user_id
+        if deleted_active and self._ctx.session.live():
             # Discard the running (or connecting) session — otherwise the tick
             # thread keeps running and writes an orphaned session, and saving it
             # under a profile that's about to be deleted just orphans it anyway.
-            self._discard_running_session()
-        self._db.delete_user(user_id)
+            self._ctx.session.discard()
+        self._ctx.db.delete_user(user_id)
         self._on_deleted(user_id)
-        remaining = self._db.get_all_users()
+        remaining = self._ctx.db.get_all_users()
         # Re-enter the gate when no usable active user is left: the active profile was deleted, or no profile is left
         # at all (the app is never usable with zero users).
         if deleted_active or not remaining:
@@ -242,12 +228,12 @@ class Profiles:
     def count_sessions(self, user_id: int) -> int | None:
         """The sessions History lists for the profile, or None (a row without its count) when the read fails."""
         try:
-            return self._db.count_sessions(user_id, self._running_session_id())
+            return self._ctx.db.count_sessions(user_id, self._ctx.session.running_id())
         except sqlite3.Error:
             logger.exception(f"Profile {user_id}'s sessions couldn't be counted")
             return None
 
     def current_name(self) -> str | None:
-        uid = self._user_id()
-        user = self._db.get_user(uid) if uid else None
+        uid = self._ctx.user_id()
+        user = self._ctx.db.get_user(uid) if uid else None
         return user["name"] if user else None

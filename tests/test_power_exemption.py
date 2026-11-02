@@ -174,7 +174,7 @@ def test_the_app_offers_it_at_start_or_once_the_first_run_picks_a_profile(monkey
     app._gate.active.side_effect = lambda: gated[0]
     app.on_start()
     assert scheduled == []  # the profile popup is up: not over it
-    for attr in ("_db", "_bottom_nav", "_profiles", "_sm", "_headset"):
+    for attr in ("_db", "_bottom_nav", "_profiles", "_sm", "_headset", "_program_settings"):
         setattr(app, attr, MagicMock())
     make_gate(app)._finish_first_run("test")
     app._power.offer_once.assert_called_once()

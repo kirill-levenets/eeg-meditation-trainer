@@ -49,8 +49,8 @@ def _marked(lines: list[str], node: ast.AST) -> bool:
     return any(MARKER.search(lines[i]) for i in range(node.lineno - 1, min(end, len(lines))))
 
 
-# The active profile as the app holds it, and as a class given the app's `user_id` callable reads it.
-USER_EXPRS = ("self._current_user_id", "self._user_id()")
+# The active profile as the app holds it, and as a class reads it through the app's context or a `user_id` callable.
+USER_EXPRS = ("self._current_user_id", "self._user_id()", "self._ctx.user_id()")
 
 
 def _aliases_of_current_user(fn: ast.AST) -> set[str]:

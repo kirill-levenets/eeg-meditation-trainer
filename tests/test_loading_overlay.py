@@ -3,7 +3,6 @@ import unittest
 
 from kivy.clock import Clock
 
-from app.ui.app_manager import EEGMeditationApp
 from app.ui.widgets.loading_overlay import LoadingOverlay
 
 
@@ -87,17 +86,3 @@ class _Touch:
     y = 10
 
 
-class TestAppLoadingDelegation(unittest.TestCase):
-    def test_show_hide_delegate_to_overlay(self):
-        app = EEGMeditationApp.__new__(EEGMeditationApp)
-        app._loading_overlay = LoadingOverlay()
-        app.show_loading("Crunching")
-        self.assertTrue(app._loading_overlay.is_visible)
-        self.assertEqual(app._loading_overlay._status.text, "Crunching")
-        app.hide_loading()
-        self.assertFalse(app._loading_overlay.is_visible)
-
-    def test_show_hide_safe_without_overlay(self):
-        app = EEGMeditationApp.__new__(EEGMeditationApp)
-        app.show_loading("x")  # no _loading_overlay attribute — must not raise
-        app.hide_loading()

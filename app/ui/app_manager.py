@@ -54,6 +54,7 @@ from app.settings.registry import (
 )
 from app.storage.database import DatabaseManager
 from app.ui import render_stats
+from app.ui.app_context import AppContext, SessionAccess
 from app.ui.backup_flow import BackupFlow
 from app.ui.bt_wait import BtWait
 from app.ui.diary_screen import DiaryScreen
@@ -356,6 +357,7 @@ class EEGMeditationApp(App):
 
     def build(self) -> FloatLayout:
         install_crash_handler(self)
+        self._ctx = self._make_context()
 
         self._theme_seed = theme_seed(self._db)
         C.set_theme(startup_theme(self._db))
@@ -441,27 +443,18 @@ class EEGMeditationApp(App):
             save_notes=lambda sid, notes: self._history.save_notes(sid, notes=notes),
             delete_sessions=lambda ids: self._history.delete_sessions(ids), confirm=self._confirm_action,
             toast=self._toast, last_session_id=lambda: self._recorder.session_id)
-        self._history = HistoryFlow(
-            self._db, self._history_screen, self._formulas, user_id=lambda: self._current_user_id,
-            on_main=self._on_main, show_loading=self.show_loading, hide_loading=self.hide_loading, info=self._info_popup,
-            toast=self._toast, running_session_id=self._running_session_id,
-            on_sessions_deleted=self._shown.on_sessions_deleted)
-        self._detail = SessionDetailFlow(
-            self._db, self._diary_screen, self._history_screen, self._sm, self._graph_series,
-            user_id=lambda: self._current_user_id, on_main=self._on_main, switch_screen=self._switch_screen)
+        self._loading_overlay = LoadingOverlay()
+        self._history = HistoryFlow(self._ctx, self._history_screen, self._formulas, self._loading_overlay,
+                                    on_sessions_deleted=self._shown.on_sessions_deleted)
+        self._detail = SessionDetailFlow(self._ctx, self._diary_screen, self._history_screen, self._sm,
+                                         self._graph_series)
         self._gate = ProfileGate(
-            self._db, self._bottom_nav, self._sm, user_id=lambda: self._current_user_id, activate=self._activate_user,
-            refresh_profiles=lambda: self._profiles.refresh(), scan_for_new_profile=self._headset.scan_for_new_profile,
-            offer_power_exemption=self._power.offer_once)
-        self._profiles = Profiles(
-            self._db, self._settings_screen, self._gate, user_id=lambda: self._current_user_id,
-            activate=self._activate_user, deactivate=self._deactivate_user, on_deleted=self._on_profile_deleted,
-            session_live=self._session_pipeline_live, discard_running_session=self._discard_running_session,
-            refused_while_session_runs=self._refused_while_session_runs, save_settings=self._save_user_settings,
-            running_session_id=self._running_session_id)
+            self._ctx, self._bottom_nav, refresh_profiles=lambda: self._profiles.refresh(),
+            scan_for_new_profile=self._headset.scan_for_new_profile, offer_power_exemption=self._power.offer_once)
+        self._profiles = Profiles(self._ctx, self._settings_screen, self._gate, deactivate=self._deactivate_user,
+                                  on_deleted=self._on_profile_deleted)
         self._last_back_time = 0.0  # for double-back-to-exit on the root screen
         float_root.add_widget(root)
-        self._loading_overlay = LoadingOverlay()
         float_root.add_widget(self._loading_overlay)
 
         self._bind_callbacks()
@@ -484,15 +477,16 @@ class EEGMeditationApp(App):
 
         return float_root
 
-    def show_loading(self, text: str = "Loading…", delay: float = 0.0) -> None:
-        """Show the app-global loading overlay (no-op before build); `delay` as in LoadingOverlay.show."""
-        if getattr(self, "_loading_overlay", None) is not None:
-            self._loading_overlay.show(text, delay)
-
-    def hide_loading(self) -> None:
-        """Hide the app-global loading overlay (no-op before build)."""
-        if getattr(self, "_loading_overlay", None) is not None:
-            self._loading_overlay.hide()
+    def _make_context(self) -> AppContext:
+        """What every flow reaches the app through; the callables read the app when called, so they see the profile and
+        the session as they are then."""
+        session = SessionAccess(live=self._session_pipeline_live, connecting=self._connecting,
+                                running_id=self._running_session_id, refused=self._refused_while_session_runs,
+                                discard=self._discard_running_session)
+        return AppContext(db=self._db, user_id=lambda: self._current_user_id, activate_user=self._activate_user,
+                          require_user=self._require_user, on_main=self._on_main, switch_screen=self._switch_screen,
+                          info=self._info_popup, toast=self._toast, confirm=self._confirm_action,
+                          save_settings=self._save_user_settings, session=session)
 
     def _all_graphs(self) -> tuple:
         """Every mounted graph, for the cross-graph affordances (expand, picker, fit, restore); zoom links per group."""

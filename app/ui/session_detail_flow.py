@@ -1,7 +1,6 @@
 """The session detail opened from History: it shows at once from the row History holds, then its band totals and graphs
 load on a worker and fill in one section per frame (#59)."""
 import threading
-from collections.abc import Callable
 
 from kivy.clock import Clock
 
@@ -10,6 +9,7 @@ from app.logger import logger, timed
 from app.metrics.formula_slots import session_formulas
 from app.session.session_program import recorded_plan
 from app.session.what_if import scored_ticks
+from app.ui.app_context import AppContext
 from app.ui.diary_screen import detail_graph_data
 
 
@@ -17,16 +17,12 @@ class SessionDetailFlow:
     """Opens a session's detail and fills it; a result for an earlier open, or for a detail no longer on screen, is
     dropped (`_detail_load`)."""
 
-    def __init__(self, db, diary_screen, history_screen, sm, graph_series, *, user_id: Callable[[], int | None],
-                 on_main: Callable[[Callable], None], switch_screen: Callable[[str], None]) -> None:
-        self._db = db
+    def __init__(self, ctx: AppContext, diary_screen, history_screen, sm, graph_series) -> None:
+        self._ctx = ctx
         self._diary_screen = diary_screen
         self._history_screen = history_screen
         self._sm = sm
         self._graph_series = graph_series
-        self._user_id = user_id
-        self._on_main = on_main
-        self._switch_screen = switch_screen
         self._detail_load = 0  # the session-detail open in progress; a result for an earlier one is dropped
         self._session_detail_back = "history"
 
@@ -40,7 +36,7 @@ class SessionDetailFlow:
         self._detail_load += 1
         token = self._detail_load
         d = self._diary_screen
-        uid = self._user_id()
+        uid = self._ctx.user_id()
         with timed("diary.open"):
             d.set_session_formulas({}, session_formulas(session)[1])  # the legend's names from the first frame
             d.show_session_detail(session)
@@ -52,7 +48,7 @@ class SessionDetailFlow:
             d.show_program_lines(plan)  # the program's mark goes last: lines it still shows are never saved
             bv = {}
             if uid:
-                bv = self._db.get_user_json_setting(uid, "band_breakdown_view", {}) or {}
+                bv = self._ctx.db.get_user_json_setting(uid, "band_breakdown_view", {}) or {}
             d.set_band_view_state(bv.get("mode", "detailed"), bv.get("sort", "band"), bool(bv.get("desc", False)))
             self._session_detail_back = self._sm.current
             self._sm.current = "diary"
@@ -65,10 +61,10 @@ class SessionDetailFlow:
         d = self._diary_screen
         try:
             with timed("diary.band_totals"):
-                totals = self._db.get_session_band_totals(session_id)
-            self._on_main(lambda: self._fill_detail(token, [lambda: d.set_band_totals(totals)]))
+                totals = self._ctx.db.get_session_band_totals(session_id)
+            self._ctx.on_main(lambda: self._fill_detail(token, [lambda: d.set_band_totals(totals)]))
             with timed("diary.get_metrics"):
-                rows = self._db.get_session_metrics(session_id)
+                rows = self._ctx.db.get_session_metrics(session_id)
             with timed("diary.compute_formulas"):
                 series, names = self.compute_session_formulas(session_id, session, rows)
             with timed("diary.graph_data"):
@@ -80,7 +76,7 @@ class SessionDetailFlow:
                 d.show_load_failed()
                 report_soft_error("session_detail_load_failed", f"Session {session_id}'s graphs: {err}")
 
-            self._on_main(lambda: self._fill_detail(token, [failed]))
+            self._ctx.on_main(lambda: self._fill_detail(token, [failed]))
             return
 
         def fill(section: str) -> None:
@@ -95,7 +91,7 @@ class SessionDetailFlow:
             logger.exception(f"What-if scoring failed for session {session_id}")
             what_if = d.show_what_if_failed
 
-        self._on_main(lambda: self._fill_detail(token, [*(lambda s=s: fill(s) for s in d.graph_fill_order()),
+        self._ctx.on_main(lambda: self._fill_detail(token, [*(lambda s=s: fill(s) for s in d.graph_fill_order()),
                                                         what_if]))
 
     def _fill_detail(self, token: int, steps: list) -> None:
@@ -109,17 +105,17 @@ class SessionDetailFlow:
 
     def persist_band_view(self, mode: str, sort_by: str, descending: bool) -> None:
         """Persist the diary band-table view (mode/sort) per user."""
-        uid = self._user_id()
+        uid = self._ctx.user_id()
         if not uid:
             return  # silent-ok: view-pref persistence; no concrete user = nothing to save
-        self._db.set_user_json_setting(uid, "band_breakdown_view", {"mode": mode, "sort": sort_by, "desc": descending})
+        self._ctx.db.set_user_json_setting(uid, "band_breakdown_view", {"mode": mode, "sort": sort_by, "desc": descending})
 
     def compute_session_formulas(self, session_id: int, session: dict,
                                  rows: list[dict] | None = None) -> tuple[dict, dict]:
         """Recompute the session's recorded formula series + names from its band powers, over `rows` when already
         read. Pure DB + compute, no Kivy — safe to call off the main thread."""
         evaluators, names = session_formulas(session)
-        series = self._db.recompute_formula_series(session_id, evaluators, rows) if evaluators else {}
+        series = self._ctx.db.recompute_formula_series(session_id, evaluators, rows) if evaluators else {}
         return series, names
 
     def inject_session_formulas(self, session_id: int, session: dict) -> None:
@@ -129,4 +125,4 @@ class SessionDetailFlow:
 
     def on_diary_back(self) -> None:
         """Return from diary detail to previous screen (usually history)."""
-        self._switch_screen(self._session_detail_back)
+        self._ctx.switch_screen(self._session_detail_back)

@@ -174,8 +174,6 @@ def test_history_keeps_the_day_filter_only_for_the_same_profile():
     app._ticker = MagicMock(running=False)  # no session's tick running
     app._db = MagicMock()
     app._history_screen = MagicMock()
-    app.show_loading = MagicMock()
-    app.hide_loading = MagicMock()
     app._session_manager = SessionManager()  # no session running
     flow = make_history_flow(app)
     keeps = []
@@ -211,8 +209,7 @@ def _app() -> EEGMeditationApp:
     app._recorder = make_recorder(app)
     app._audio = MagicMock()
     app._on_main = lambda fn: fn()
-    for name in ("show_loading", "hide_loading"):
-        setattr(app, name, MagicMock())
+    app._loading_overlay = MagicMock()
     app._history = make_history_flow(app)
     app._history.refresh = MagicMock()
     app._shown = make_shown(app)
@@ -227,8 +224,8 @@ def test_deleting_sessions_removes_their_rows_and_rebuilds_nothing(monkeypatch):
     app._history_screen.remove_sessions.assert_called_once_with([7, 9])
     app._history.refresh.assert_not_called()
     # No spinner: only the delayed overlay, which paints if the delete runs long, and is gone once it ends.
-    assert [c.kwargs.get("delay", 0) > 0 for c in app.show_loading.call_args_list] == [True]
-    app.hide_loading.assert_called_once()
+    assert [c.kwargs.get("delay", 0) > 0 for c in app._loading_overlay.show.call_args_list] == [True]
+    app._loading_overlay.hide.assert_called_once()
 
 
 def test_renaming_a_session_rebuilds_nothing():

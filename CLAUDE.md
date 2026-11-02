@@ -74,6 +74,7 @@ Read it before changing that subsystem.
   `app/settings/registry.py` — per-user scalar settings.
   `app/ui/backup_flow.py` `BackupFlow` — Settings → Data Backup. → [storage](docs/architecture/storage.md)
 - `app/ui/app_manager.py` — `EEGMeditationApp`: wiring, session start/stop, BT wait, the active profile (`_activate_user`), settings load/save.
+  `app/ui/app_context.py` — `AppContext`: what every flow reaches the app through (`_make_context`). → [app-platform](docs/architecture/app-platform.md#flows-and-the-app-context)
   `app/ui/profiles.py` — `ProfileGate` (the blocking profile picker), `Profiles` (Settings → Profile). → [app-platform](docs/architecture/app-platform.md#user-gate-and-profiles)
 - `app/ui/theme.py`, `app/ui/widgets/` — palette `C`/`F`/`S`, themed widgets, modals, legends, overlays.
   `app/ui/hooks.py` — `Hook`/`wire()`: the handlers the app plugs into a widget. → [ui-theme](docs/architecture/ui-theme.md)
@@ -202,6 +203,7 @@ The linked file explains the mechanism.
 
 A widget's handler from the app:
 a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
+· a flow's access to the app `AppContext` (never one callable per service)
 · Session delete `HistoryFlow.delete_sessions(ids)`
 · notes `HistoryFlow.save_notes`
 · confirm `theme.confirm_popup` (via `_confirm_action`)

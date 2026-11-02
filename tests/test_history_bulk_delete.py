@@ -139,8 +139,7 @@ def _app(db, monkeypatch) -> tuple[EEGMeditationApp, _Deferred, list]:
     app._ticker = MagicMock(running=False)
     app._recorder = make_recorder(app)
     app._info_popup = MagicMock()
-    app.show_loading = MagicMock()
-    app.hide_loading = MagicMock()
+    app._loading_overlay = MagicMock()
     deferred = _Deferred(monkeypatch)
     app._on_main = deferred.main.append
     app._history = make_history_flow(app)
@@ -170,8 +169,8 @@ class _Touch:
 
 
 def _with_overlay(app) -> LoadingOverlay:
-    del app.show_loading, app.hide_loading  # the app's own, on a real overlay
-    app._loading_overlay = LoadingOverlay()
+    app._loading_overlay = LoadingOverlay()  # the app's own
+    app._history = make_history_flow(app)
     return app._loading_overlay
 
 
@@ -217,7 +216,7 @@ def test_a_failed_delete_is_reported_and_history_keeps_the_rows(db, monkeypatch)
     deferred.run()
     assert reported == ["session_delete_failed"] and done == [False]
     app._history_screen.remove_sessions.assert_not_called()
-    app.hide_loading.assert_called_once()
+    app._loading_overlay.hide.assert_called_once()
 
 
 def test_the_running_session_is_not_deleted(db, monkeypatch):
