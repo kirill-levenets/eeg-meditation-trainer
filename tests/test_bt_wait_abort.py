@@ -88,7 +88,7 @@ def test_failed_connect_exit_releases_wake_lock_and_service():
     app._on_main = MagicMock()
     app._bt_wait._report_connect_failure = MagicMock()
 
-    app._bt_wait.tick(app._run)
+    app._follow_bt_wait(app._run)
 
     _assert_unwatched_stream_stop(app, events)
     assert app._run.phase is Phase.ENDED  # its teardown is queued for the main thread
@@ -103,7 +103,7 @@ def test_refused_start_undoes_setup_without_entering_the_wait():
     app._real_stream._last_connect_error = "Previous connection is still closing."
     app._bt_wait._report_connect_failure = MagicMock()
 
-    assert app._bt_wait.begin(app._run) is False
+    assert app._begin_bt_wait(app._run) is False
 
     assert not app._connecting()
     app._keep_awake.release.assert_called_once()
@@ -118,7 +118,7 @@ def test_started_stream_enters_the_wait():
     app._real_stream.start.return_value = True
     app._real_stream._device_name = "MindWave"
 
-    assert app._bt_wait.begin(app._run) is True
+    assert app._begin_bt_wait(app._run) is True
 
     assert app._connecting()
     app._live_screen.show_overlay.assert_called_once()

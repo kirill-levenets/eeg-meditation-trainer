@@ -73,8 +73,10 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The reader clears `_connected` on exit, so a `stop()` landing just after `_connected = True` can't leave `is_connected` stuck True with no reader (the next Start would "reuse" a dead connection).
   Every failed Android connect attempt (secure → insecure → `createRfcommSocket(1)`) closes its socket; the ch=1 fallback is called directly on the device, since through `Class.getMethod` pyjnius can't resolve its varargs overload.
   The wait is `BtWait` (`app/ui/bt_wait.py`, the app's `_bt_wait`): `begin(run)` checks `start()`'s result **before** entering the wait, and the tick drives `tick(run)` while the run is CONNECTING;
-  it reaches the app only through what it is given: the first data starts the session on the tick thread (`_start_on_first_data`), the "connected" UI runs on main (`_on_session_connected`), a give-up aborts (`_abort_bt_wait`) and queues the undo.
-  A refused `start()` undoes the start's setup (`_undo_session_setup`) and shows a retry overlay with `_last_connect_error`, with no `bt_connect_failed` soft error (its 60 s cooldown would hide the next real failure).
+  it runs the wait and its overlay and returns how the wait ended (`WaitEnd`: started, or the retry screen's message), and the app acts on it (`_begin_bt_wait`, `_follow_bt_wait`):
+  the first data starts the session on the tick thread, its countdown armed there before the next tick reads it, and the "connected" UI runs on main (`_on_session_connected`);
+  a give-up aborts on the tick thread (`_abort_bt_wait`) and queues the undo and the retry screen (`_undo_failed_start`).
+  A refused `start()` undoes the start's setup the same way, with the retry overlay showing `_last_connect_error` and no `bt_connect_failed` soft error (its 60 s cooldown would hide the next real failure).
   **Every BT-wait exit** (Cancel, Stop, no data, keeps closing, failed connect, timeout) goes through `_abort_bt_wait()`:
   it stops the tick watcher (and marks the run ENDED, so it is no longer connecting) **before** `_real_stream.stop()`, then releases the wake lock and keep-alive service (`KeepAwake.release`).
   The watcher reads `not stream._running` as a failed connect, so stopping the stream first shows a false "Connection failed".

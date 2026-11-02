@@ -171,7 +171,7 @@ def test_the_connecting_overlay_names_the_headset_by_its_alias(db_path):
         app._headset.on_rename(BLUE, "MindWave Mobile", "Blue")
         run_in(app, Phase.STARTING)
         app._real_stream.start.return_value = True
-        assert make_bt_wait(app).begin(app._run)
+        assert make_bt_wait(app).begin(app._run) is None  # the wait began
         app._live_screen.show_overlay.assert_called_with("Connecting to Blue...")
     finally:
         db.close()

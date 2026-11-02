@@ -69,7 +69,7 @@ def wait(monkeypatch):
     run = run_in(app, Phase.STARTING)  # as Start makes it
     stream.start = MagicMock(return_value=True)
     run.connect_start = clock.now  # set by the session start that precedes the wait
-    assert app._bt_wait.begin(run)  # the wait as Start enters it, at T0
+    assert app._begin_bt_wait(run)  # the wait as Start enters it, at T0
 
     def tick(at: float, *, connected: bool, bands: float = 0.0, packet: bool = False) -> None:
         clock.now = T0 + at
@@ -77,7 +77,7 @@ def wait(monkeypatch):
         stream.bands = bands
         if packet:
             stream.last_packet = clock.now - 0.1  # just before the tick reads it (0.0 means none yet)
-        app._bt_wait.tick(app._run)  # the tick reads the current run
+        app._follow_bt_wait(app._run)  # the tick reads the current run
 
     app._shown = make_shown(app)
     return app, stream, tick
@@ -209,7 +209,7 @@ def test_the_next_wait_starts_with_no_drops(wait):
         tick(drop, connected=False)
     stream.start = MagicMock(return_value=True)
     run_in(app, Phase.STARTING).connect_start = am.time.time()  # a Retry is a new Start: a run with its own drops
-    assert app._bt_wait.begin(app._run)
+    assert app._begin_bt_wait(app._run)
     tick(30.0, connected=True)
     tick(35.5, connected=False)  # this wait's first drop, not the third
     assert not _gave_up(stream)

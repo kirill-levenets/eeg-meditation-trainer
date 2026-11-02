@@ -426,7 +426,7 @@ def test_btwait_arms_countdown_synchronously_on_connect():
     # deferred to _on_main (here a no-op MagicMock), remaining stays 0 and the
     # next tick fires the timer immediately → a 0s "timer-ended" session.
     app = _make_btwait_app()
-    app._bt_wait.tick(app._run)
+    app._follow_bt_wait(app._run)
 
     assert app._run.phase is Phase.STARTED
     assert app._timer_state.remaining_seconds == 15 * 60
@@ -439,7 +439,7 @@ def test_btwait_does_not_start_audio_on_tick_thread():
     # deferred to the main-thread callback (atomic with hide_overlay), never run
     # synchronously on the tick thread.
     app = _make_btwait_app()
-    app._bt_wait.tick(app._run)
+    app._follow_bt_wait(app._run)
 
     app._audio.start.assert_not_called()
     app._audio.play_connect_sound.assert_not_called()

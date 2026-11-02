@@ -392,10 +392,8 @@ class EEGMeditationApp(App):
                                 serial_override=lambda: self.serial_device_override)
         self._headset.load_aliases()
         self._power = PowerExemption(self._ctx, self._settings_screen.device)
-        self._bt_wait = BtWait(
-            self._real_stream, self._live_screen, headset_name=self._headset.name, on_main_for=self._on_main_for,
-            start_session=self._start_on_first_data, on_connected=self._on_session_connected,
-            abort=self._abort_bt_wait, undo_setup=self._undo_session_setup)
+        self._bt_wait = BtWait(self._real_stream, self._live_screen, headset_name=self._headset.name,
+                               on_main_for=self._on_main_for)
         self._watch = SessionWatch(self._real_stream, self._audio, self._live_screen, self._headset,
                                    on_main=self._on_main)
 
@@ -845,11 +843,40 @@ class EEGMeditationApp(App):
             self._timer_state.start_countdown()
             self._on_session_connected(name)
             logger.info(f"Reusing existing BT connection to {name}")
-        elif not self._bt_wait.begin(run):
+        elif not self._begin_bt_wait(run):
             return
 
         self._ticker.start()
         logger.info("Session started via UI")
+
+    def _begin_bt_wait(self, run: SessionRun) -> bool:
+        """Main thread: enter the run's BT wait; False if the reader refused to start (the start undone, Retry offered)."""
+        end = self._bt_wait.begin(run)
+        if end is not None:
+            self._undo_failed_start(end.message)
+        return end is None
+
+    def _follow_bt_wait(self, run: SessionRun) -> None:
+        """Tick thread: one step of the run's BT wait. Its first data starts the session against the threshold in force
+        (it may have moved); a give-up tears the wait down here and undoes the start on the main thread."""
+        end = self._bt_wait.tick(run)
+        if end is None:
+            return
+        if not end.started:
+            self._abort_bt_wait()
+            self._on_main_for(run, lambda: self._undo_failed_start(end.message))
+            return
+        # Armed on this thread before the next tick reads it: deferred to main, a stalled main thread ended a 0 s session.
+        self._session_manager.start()
+        self._timer_state.start_countdown()
+        run.phase = Phase.STARTED
+        name = self._headset.name()
+        self._on_main_for(run, lambda: self._on_session_connected(name))
+
+    def _undo_failed_start(self, message: str) -> None:
+        """Main thread: a start whose BT wait ended without a session is undone, and Retry offered."""
+        self._undo_session_setup()
+        self._bt_wait.show_retry(message)
 
     def _abort_bt_wait(self) -> None:
         """Tear down a BT-connect wait; the tick watcher stops first or it reads our stop as a failed connect."""
@@ -1054,13 +1081,6 @@ class EEGMeditationApp(App):
             f"Session stopped and saved (took {time.monotonic() - t_start:.3f}s)"
         )
 
-    def _start_on_first_data(self) -> None:
-        """Tick thread: the BT wait's first data starts the session, against the threshold in force (it may have moved).
-        The countdown is armed on this thread before the next tick reads it: deferred to the main thread, a stalled main
-        thread left remaining_seconds at 0 and the next tick ended a 0 s "timer-ended" session."""
-        self._session_manager.start()
-        self._timer_state.start_countdown()
-
     def _on_session_connected(self, name: str) -> None:
         """Main thread: a headset session has started (the BT wait's first data, or a kept-alive connection)."""
         self._live_screen.update_device_status(True, device_name=name)
@@ -1094,7 +1114,7 @@ class EEGMeditationApp(App):
         if run is None:
             return
         if run.phase is Phase.CONNECTING:
-            self._bt_wait.tick(run)
+            self._follow_bt_wait(run)
             return
 
         if self._session_manager.state != SessionState.RUNNING:
