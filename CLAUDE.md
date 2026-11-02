@@ -208,6 +208,7 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 · notes `HistoryFlow.save_notes`
 · confirm `theme.confirm_popup` (via `_confirm_action`)
 · save under a unique name `settings_sections.common.save_under_unique_name`
+· delete a saved formula or program `settings_sections.common.confirm_saved_delete`
 · whether a formula can run `custom_formula.compile_formula`
 · a saved session's formula lines `formula_slots.session_formulas`
 · a saved session's program `session_program.recorded_plan`

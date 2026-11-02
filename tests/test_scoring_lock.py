@@ -133,7 +133,7 @@ def test_loading_a_saved_formula_into_the_driving_slot_is_refused(app, monkeypat
 
 @pytest.mark.parametrize("call, doing", [
     (lambda a: make_profiles(a).on_switch(7), "switching profiles"),
-    (lambda a: make_flow(refused_while_session_runs=a._refused_while_session_runs).on_restore_pressed(),
+    (lambda a: make_flow(refused=a._refused_while_session_runs).on_restore_pressed(),
      "restoring a backup"),
 ])
 def test_the_other_session_locks_say_the_same(app, call, doing):

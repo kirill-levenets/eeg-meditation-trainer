@@ -5,29 +5,26 @@ from collections.abc import Callable
 from app.logger import logger
 from app.session.manager import SessionState
 from app.session.session_program import SessionProgram, runnable_plan
+from app.ui.app_context import AppContext
 from app.ui.program_run import show_program_series
-from app.ui.settings_sections.common import save_under_unique_name, saved_program_label
+from app.ui.settings_sections.common import (
+    confirm_saved_delete,
+    save_under_unique_name,
+    saved_program_label,
+)
 
 
 class ProgramSettings:
     """The profile's timer mode and the program it edits, with that program's name. A session runs a snapshot of it
     (ProgramRun), so an edit made during a session waits for the next one."""
 
-    def __init__(self, db, timer_section, live_screen, session_manager, *, user_id: Callable[[], int | None],
-                 require_user: Callable[[str], int | None], confirm: Callable[..., None],
-                 info: Callable[[str, str], None], confirm_saved_delete: Callable[..., None],
-                 show_saved_series: Callable[[int], None], save_settings: Callable[[], None]) -> None:
-        self._db = db
+    def __init__(self, ctx: AppContext, timer_section, live_screen, session_manager, *,
+                 show_saved_series: Callable[[int], None]) -> None:
+        self._ctx = ctx
         self._timer_section = timer_section
         self._live_screen = live_screen
         self._session_manager = session_manager
-        self._user_id = user_id
-        self._require_user = require_user
-        self._confirm = confirm
-        self._info = info
-        self._confirm_saved_delete = confirm_saved_delete
         self._show_saved_series = show_saved_series
-        self._save_settings = save_settings
         self.mode = "simple"
         self.segments: list[dict] = []
         self.name = ""  # the loaded or saved program's name
@@ -36,15 +33,15 @@ class ProgramSettings:
         """Persist the active editable program + its name + timer mode for a user."""
         if not uid:
             return  # silent-ok: persistence helper; no active user = nothing to persist
-        self._db.set_user_json_setting(uid, "session_program", self.segments)
-        self._db.set_user_setting(uid, "timer_mode", self.mode)
-        self._db.set_user_setting(uid, "session_program_name", self.name)
+        self._ctx.db.set_user_json_setting(uid, "session_program", self.segments)
+        self._ctx.db.set_user_setting(uid, "timer_mode", self.mode)
+        self._ctx.db.set_user_setting(uid, "session_program_name", self.name)
 
     def load(self, uid: int) -> None:
         """Restore the active editable program + its name + timer mode for a user, and show them in Settings."""
-        self.segments = self._db.get_user_json_setting(uid, "session_program", default=[]) or []
-        self.mode = self._db.get_user_setting(uid, "timer_mode") or "simple"
-        self.name = self._db.get_user_setting(uid, "session_program_name") or ""
+        self.segments = self._ctx.db.get_user_json_setting(uid, "session_program", default=[]) or []
+        self.mode = self._ctx.db.get_user_setting(uid, "timer_mode") or "simple"
+        self.name = self._ctx.db.get_user_setting(uid, "session_program_name") or ""
         self._show_in_settings()
 
     def _show_in_settings(self) -> None:
@@ -70,7 +67,7 @@ class ProgramSettings:
         saved selection. No-op while a session runs (the session owns the graph then)."""
         if self._session_manager.state in (SessionState.RUNNING, SessionState.PAUSED):
             return
-        uid = self._user_id()
+        uid = self._ctx.user_id()
         if not uid:
             return  # silent-ok: idle live-graph preview; nothing to show without a user
         if self.governs_live_series():
@@ -98,46 +95,46 @@ class ProgramSettings:
             self._timer_section.timer_minutes = value
         self.mode = "simple"
         self._timer_section.set_program_mode("simple")
-        self.persist(self._user_id())
-        self._save_settings()
+        self.persist(self._ctx.user_id())
+        self._ctx.save_settings()
         self.sync_picker()
 
     def on_mode_change(self, mode: str) -> None:
         self.mode = mode
-        self.persist(self._user_id())
+        self.persist(self._ctx.user_id())
         self.sync_picker()
 
     def on_changed(self, segments: list) -> None:
         self.segments = segments
-        self.persist(self._user_id())
+        self.persist(self._ctx.user_id())
 
     def on_save(self, name: str) -> None:
         """Save the active program under `name`. Unique names: an existing name
         overwrites (after confirm); a new name is added directly."""
         name = name.strip()
         if not name:
-            self._info("Name required", "Enter a name for the program before saving.")
+            self._ctx.info("Name required", "Enter a name for the program before saving.")
             return
-        uid = self._require_user("save a program")
+        uid = self._ctx.require_user("save a program")
         if uid is None:
             return
-        save_under_unique_name("program", self._db.get_saved_programs(uid), name, "the current segments",
-                               lambda index: self._save(index, name), self._confirm)
+        save_under_unique_name("program", self._ctx.db.get_saved_programs(uid), name, "the current segments",
+                               lambda index: self._save(index, name), self._ctx.confirm)
 
     def _save(self, index, name: str) -> None:
         """Add (index=None) or overwrite (index set) a saved program by name."""
-        uid = self._user_id()
+        uid = self._ctx.user_id()
         if index is None:
-            if not self._db.add_saved_program(uid, name, self.segments):
-                self._info(
+            if not self._ctx.db.add_saved_program(uid, name, self.segments):
+                self._ctx.info(
                     "Program library full",
-                    f"You can keep up to {self._db._MAX_SAVED_PROGRAMS} saved "
+                    f"You can keep up to {self._ctx.db._MAX_SAVED_PROGRAMS} saved "
                     f"programs. Delete one before saving another.",
                 )
                 return
             logger.info(f"Saved new program '{name}'")
         else:
-            if not self._db.update_saved_program(uid, index, name, self.segments):
+            if not self._ctx.db.update_saved_program(uid, index, name, self.segments):
                 logger.warning(f"Overwrite skipped: program index {index} out of range")
                 return  # no write happened — don't flash a false 'Saved' confirmation
             logger.info(f"Overwrote program '{name}'")
@@ -153,17 +150,17 @@ class ProgramSettings:
             return False
         if not self.name:
             return True
-        saved = next((p for p in self._db.get_saved_programs(self._user_id()) if p.get("name") == self.name), None)
+        saved = next((p for p in self._ctx.db.get_saved_programs(self._ctx.user_id()) if p.get("name") == self.name), None)
         if saved is None:
             return True
         return saved.get("segments") != self.segments
 
     def on_load(self, index: int) -> None:
         """Load a saved program from Settings or the Session screen's 'Programs…' pick, and switch to program mode."""
-        uid = self._require_user("load a program")
+        uid = self._ctx.require_user("load a program")
         if uid is None:
             return
-        progs = self._db.get_saved_programs(uid)
+        progs = self._ctx.db.get_saved_programs(uid)
         if not (0 <= index < len(progs)):
             return
         name = progs[index].get("name", "")
@@ -171,7 +168,7 @@ class ProgramSettings:
         if not self.has_unsaved_changes():
             self._load(index, name)
             return
-        self._confirm(
+        self._ctx.confirm(
             "Load program",
             f"Load '{name}'?\nUnsaved changes to the current program will be lost.",
             "Load",
@@ -179,8 +176,8 @@ class ProgramSettings:
         )
 
     def _load(self, index: int, name: str) -> None:
-        uid = self._user_id()
-        progs = self._db.get_saved_programs(uid)
+        uid = self._ctx.user_id()
+        progs = self._ctx.db.get_saved_programs(uid)
         if not (0 <= index < len(progs)):
             return
         self.segments = progs[index]["segments"]
@@ -193,20 +190,22 @@ class ProgramSettings:
         logger.info(f"Loaded program '{name}'")
 
     def on_delete(self, index: int) -> None:
-        uid = self._require_user("delete a program")
+        uid = self._ctx.require_user("delete a program")
         if uid is None:
             return
-        self._confirm_saved_delete("program", self._db.get_saved_programs(uid), index, saved_program_label,
-                                   self._delete)
+        programs = self._ctx.db.get_saved_programs(uid)
+        if 0 <= index < len(programs):
+            confirm_saved_delete(self._ctx.confirm, "program", saved_program_label(index, programs[index]),
+                                 lambda: self._delete(index))
 
     def _delete(self, index: int) -> None:
-        self._db.remove_saved_program(self._user_id(), index)
+        self._ctx.db.remove_saved_program(self._ctx.user_id(), index)
         logger.info(f"Deleted saved program #{index}")
         self.refresh_saved()
 
     def refresh_saved(self) -> None:
         """Push the current saved-programs list to the settings + session UIs."""
-        uid = self._user_id()
-        progs = self._db.get_saved_programs(uid) if uid else []
+        uid = self._ctx.user_id()
+        progs = self._ctx.db.get_saved_programs(uid) if uid else []
         self._timer_section.set_saved_programs(progs)
         self._live_screen.set_session_programs(progs, self.name)

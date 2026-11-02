@@ -11,6 +11,7 @@ import app.ui.power_exemption as pe
 from app.ui.power_exemption import PowerExemption, advice, maker_screen
 from app.ui.settings_screen import SettingsScreen
 from app.ui.theme import StyledButton
+from tests._context import stub_context
 from tests._profiles import make_gate
 
 
@@ -49,7 +50,7 @@ def popups(monkeypatch):
 
 
 def _power(db=None, section=None):
-    return PowerExemption(db or _Db(), section or MagicMock(), toast=MagicMock(), main=lambda fn: fn())
+    return PowerExemption(stub_context(db=db or _Db()), section or MagicMock())
 
 
 @pytest.mark.parametrize(("exempt", "maker", "want"), [
@@ -114,7 +115,7 @@ def test_battery_asks_androids_dialog_then_falls_back_to_the_list(android, monke
     power.on_battery_settings()
     assert tried == [("android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS", True),
                      ("android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS", False)]
-    power._toast.assert_called_once()  # none opened: said so, not silence
+    power._ctx.toast.assert_called_once()  # none opened: said so, not silence
 
 
 @pytest.mark.parametrize(("maker", "screens"), [
@@ -234,7 +235,7 @@ def test_a_jni_failure_behind_a_button_says_so_instead_of_crashing(android, monk
     power = _power()
     power.on_battery_settings()
     power.on_maker_settings()
-    assert power._toast.call_count == 2
+    assert power._ctx.toast.call_count == 2
 
 
 def test_an_alert_that_fails_to_open_doesnt_take_the_app_down_and_comes_again(android, monkeypatch):

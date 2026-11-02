@@ -377,31 +377,21 @@ class EEGMeditationApp(App):
         self._sm = ScreenManager(transition=SlideTransition())
 
         self._live_screen = LiveSessionScreen()
-        self._program_run = ProgramRun(self._session_manager, self._audio, self._live_screen, on_main=self._on_main,
-                                       formula_vars=self._eval_formula_vars, info=self._info_popup)
+        self._program_run = ProgramRun(self._ctx, self._session_manager, self._audio, self._live_screen,
+                                       formula_vars=self._eval_formula_vars)
         self._settings_screen = SettingsScreen()
         self._history_screen = HistoryScreen()
         self._diary_screen = DiaryScreen()
         self._timer_state = TimerState()
         self._program_settings = ProgramSettings(
-            self._db, self._settings_screen.timer, self._live_screen, self._session_manager,
-            user_id=lambda: self._current_user_id, require_user=self._require_user, confirm=self._confirm_action,
-            info=self._info_popup, confirm_saved_delete=self._confirm_saved_delete,
-            show_saved_series=lambda uid: self._graph_series.apply_saved(self._live_screen.graph, uid),
-            save_settings=self._save_user_settings)
-        self._formula_settings = FormulaSettings(
-            self._db, self._settings_screen.formulas, self._live_screen.graph, self._formulas,
-            user_id=lambda: self._current_user_id, require_user=self._require_user,
-            scoring_locked=self._scoring_locked, audio_key=lambda: self._settings_store.value("audio_metric"),
-            confirm=self._confirm_action, info=self._info_popup, confirm_saved_delete=self._confirm_saved_delete)
-        self._headset = Headset(
-            self._db, self._real_stream, self._settings_screen.device, self._live_screen,
-            user_id=lambda: self._current_user_id, refused_while_session_runs=self._refused_while_session_runs,
-            session_live=self._session_pipeline_live, waiting_for_bt=self._connecting,
-            serial_override=lambda: self.serial_device_override,
-            report=lambda label, detail, force=False: report_soft_error(label, detail, app=self, force=force))
+            self._ctx, self._settings_screen.timer, self._live_screen, self._session_manager,
+            show_saved_series=lambda uid: self._graph_series.apply_saved(self._live_screen.graph, uid))
+        self._formula_settings = FormulaSettings(self._ctx, self._settings_screen.formulas, self._live_screen.graph,
+                                                 self._formulas, scoring_locked=self._formula_scoring_locked)
+        self._headset = Headset(self._ctx, self._real_stream, self._settings_screen.device, self._live_screen,
+                                serial_override=lambda: self.serial_device_override)
         self._headset.load_aliases()
-        self._power = PowerExemption(self._db, self._settings_screen.device, toast=self._toast, main=self._on_main)
+        self._power = PowerExemption(self._ctx, self._settings_screen.device)
         self._bt_wait = BtWait(
             self._real_stream, self._live_screen, headset_name=self._headset.name, on_main_for=self._on_main_for,
             start_session=self._start_on_first_data, on_connected=self._on_session_connected,
@@ -434,10 +424,9 @@ class EEGMeditationApp(App):
         self._float_root = float_root
         self._fullscreen = GraphFullscreen(float_root)
         self._graph_series = GraphSeries(
-            self._db, self._live_screen.graph, self._formulas, self._program_run, self._program_settings,
+            self._ctx, self._live_screen.graph, self._formulas, self._program_run, self._program_settings,
             self._formula_settings, graphs=self._all_graphs, detail_program=self._diary_screen.program_lines_of,
-            legacy_defaults=self._settings_screen._graph_toggles, user_id=lambda: self._current_user_id,
-            require_user=self._require_user)
+            legacy_defaults=self._settings_screen._graph_toggles)
         self._shown = ShownSession(
             self._live_screen, self._mirror, self._audio,
             save_notes=lambda sid, notes: self._history.save_notes(sid, notes=notes),
@@ -642,12 +631,8 @@ class EEGMeditationApp(App):
         wire(self._diary_screen.what_if, on_collapse=lambda _collapsed: self._persist_user_setting("what_if_collapsed"))
 
         # Data Backup section
-        self._backup_flow = BackupFlow(
-            self._db, self._settings_screen, user_name=self._profiles.current_name,
-            save_settings=self._save_user_settings, checkpoint=self._checkpoint_or_report,
-            refused_while_session_runs=self._refused_while_session_runs, confirm=self._confirm_action,
-            info=self._info_popup, on_db_replaced=self._on_db_replaced,
-        )
+        self._backup_flow = BackupFlow(self._ctx, self._settings_screen, user_name=self._profiles.current_name,
+                                       checkpoint=self._checkpoint_or_report, on_db_replaced=self._on_db_replaced)
         wire(
             self._settings_screen,
             on_backup_pressed=self._backup_flow.on_backup_pressed,
@@ -1492,6 +1477,10 @@ class EEGMeditationApp(App):
             # Load derives the index from audio_metric, so persist both or a reload reverts the switch.
             self._change_setting("audio_metric", FORMULA_KEYS[idx])
 
+    def _formula_scoring_locked(self, key: str, doing: str) -> bool:
+        """True (after telling the user) when the formula slot `key` drives the sound of a simple session running."""
+        return key == self._settings_store.value("audio_metric") and self._scoring_locked(doing)
+
     def _scoring_locked(self, doing: str) -> bool:
         """True (after telling the user) while a simple session runs: it is scored on the audio control metric (#51)
         until it stops. A program session is scored on its segments' metrics, so the control stays free."""
@@ -1516,14 +1505,6 @@ class EEGMeditationApp(App):
         """Persist the theme per user; the selector already applied it to C."""
         self._persist_user_setting("theme")
         logger.info(f"Theme changed to: {theme_name}")
-
-    def _confirm_saved_delete(self, kind: str, entries: list[dict], index: int, label: Callable,
-                              delete: Callable[[int], None]) -> None:
-        """Ask before deleting a saved formula or program, named as its list row names it."""
-        if not (0 <= index < len(entries)):
-            return
-        self._confirm_action(f"Delete {kind}", f"Delete saved {kind} '{label(index, entries[index])}'?", "Delete",
-                             lambda: delete(index), ok_color=C.DANGER)
 
     def _require_user(self, action: str) -> Optional[int]:
         """Return the active uid, or explain why the action can't run and return

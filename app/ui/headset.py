@@ -7,8 +7,10 @@ from types import MappingProxyType
 from kivy.clock import Clock
 
 from app.config import APP
+from app.crash_handler import report_soft_error
 from app.eeg.neurosky_stream import NeuroSkyStream
 from app.logger import logger
+from app.ui.app_context import AppContext
 from app.ui.device_labels import MAX_DEVICE_ALIAS, device_label
 
 
@@ -27,27 +29,20 @@ class Headset:
     refused while a session runs, and the selected headset is the active profile's own or none. A headset's alias is
     the same for every profile: it is the same headset whoever uses it."""
 
-    def __init__(self, db, stream, device_section, live_screen, *, user_id: Callable[[], int | None],
-                 refused_while_session_runs: Callable[[str], bool], session_live: Callable[[], bool],
-                 waiting_for_bt: Callable[[], bool], serial_override: Callable[[], str | None],
-                 report: Callable[..., None]) -> None:
-        self._db = db
+    def __init__(self, ctx: AppContext, stream, device_section, live_screen, *,
+                 serial_override: Callable[[], str | None]) -> None:
+        self._ctx = ctx
         self._stream = stream
         self._device_section = device_section
         self._live_screen = live_screen
-        self._user_id = user_id
-        self._refused = refused_while_session_runs
-        self._session_live = session_live
-        self._waiting_for_bt = waiting_for_bt
         self._serial_override = serial_override
-        self._report = report  # report_soft_error(label, detail, force=...) shown by the app
         # address -> the name its user gave the headset; replaced, never changed in place (the tick thread reads it)
         self.aliases: Mapping[str, str] = MappingProxyType({})
         # Moved by a profile load, a pick, a mode change and each profile scan: a profile scan applies while current.
         self._scan_seq = 0
 
     def load_aliases(self) -> None:
-        aliases = self._db.get_json_setting("bt_device_aliases", {})
+        aliases = self._ctx.db.get_json_setting("bt_device_aliases", {})
         valid = isinstance(aliases, dict) and all(isinstance(v, str) for v in aliases.values())
         self.aliases = MappingProxyType(aliases if valid else {})
 
@@ -77,7 +72,7 @@ class Headset:
         connected = self._stream.is_connected
         label = self.name()
         self._live_screen.update_device_status(connected, device_name=label,
-                                               connecting=self._waiting_for_bt() and not connected)
+                                               connecting=self._ctx.session.connecting() and not connected)
         if connected:
             self._device_section.update_device_status(True, name=label)
         else:
@@ -87,11 +82,11 @@ class Headset:
         """Select the profile's own headset, or none (closing a link to another profile's) and, in real mode, scan for
         one. The --serial override keeps its device, and a running session (its own profile re-picked) its headset."""
         self._scan_seq += 1
-        if self._session_live():
+        if self._ctx.session.live():
             return
         if not self._serial_override():
-            address = self._db.get_user_setting(uid, "bt_device_address") or None
-            self._stream.set_device(address, self._db.get_user_setting(uid, "bt_device_name") or "")
+            address = self._ctx.db.get_user_setting(uid, "bt_device_address") or None
+            self._stream.set_device(address, self._ctx.db.get_user_setting(uid, "bt_device_name") or "")
             self._device_section.update_device_status(False, meta=f"Saved device: {self.name()}" if address else "")
         self._device_section.clear_picker_banner()  # it asked the last profile
         self._live_screen.update_device_status(False, device_name=self._session_label())
@@ -106,9 +101,9 @@ class Headset:
         self._device_section.update_device_status(False, meta="Mode: Mock Data" if use_mock
                                                   else f"Mode: Real Device ({addr})")
         self._live_screen.update_device_status(False, device_name=self._session_label())
-        uid = self._user_id()
+        uid = self._ctx.user_id()
         if uid:
-            self._db.set_user_setting(uid, "use_mock", str(use_mock))
+            self._ctx.db.set_user_setting(uid, "use_mock", str(use_mock))
         logger.info(f"Device mode: {'Mock' if use_mock else 'Real'}")
 
     def on_scan(self) -> None:
@@ -117,7 +112,7 @@ class Headset:
 
     def on_select(self, address: str, name: str) -> None:
         """A headset picked in the list, or the one a scan found: the profile's, in real mode."""
-        if address != self._stream._device_address and self._refused("switching headsets"):
+        if address != self._stream._device_address and self._ctx.session.refused("switching headsets"):
             return
         self._scan_seq += 1
         self._stream.set_device(address, name)
@@ -125,10 +120,10 @@ class Headset:
         self._device_section.clear_picker_banner()
         self.show_selected()
         logger.info(f"BT device selected: {name} ({address}), switched to real mode")
-        uid = self._user_id()
+        uid = self._ctx.user_id()
         if uid:
-            self._db.set_user_setting(uid, "bt_device_address", address)
-            self._db.set_user_setting(uid, "bt_device_name", name)
+            self._ctx.db.set_user_setting(uid, "bt_device_address", address)
+            self._ctx.db.set_user_setting(uid, "bt_device_name", name)
 
     def on_rename(self, address: str, name: str, text: str) -> None:
         """Name a headset (`name` is its Bluetooth one) for every profile: it is the same headset whoever uses it.
@@ -137,7 +132,7 @@ class Headset:
         aliases = {k: v for k, v in self.aliases.items() if k != address}
         if alias and alias != name:
             aliases[address] = alias
-        self._db.set_json_setting("bt_device_aliases", aliases)
+        self._ctx.db.set_json_setting("bt_device_aliases", aliases)
         self.aliases = MappingProxyType(aliases)
         self._device_section.relabel_bt_device(address, aliases.get(address, ""))
         logger.info(f"BT device {address} named {aliases.get(address)!r}")
@@ -178,7 +173,7 @@ class Headset:
         seq = self._scan_seq
 
         def done(devices: list[dict]) -> None:
-            if seq != self._scan_seq or self._session_live():
+            if seq != self._scan_seq or self._ctx.session.live():
                 logger.info("BT scan result dropped: the headset choice or a session changed while it ran")
                 return
             mindwaves = self.adopt(devices)
@@ -231,4 +226,4 @@ class Headset:
             f"Paired BT devices ({len(paired)}):\n{paired_summary}\n"
         )
 
-        self._report("user_diagnostics", detail, force=True)
+        report_soft_error("user_diagnostics", detail, force=True)

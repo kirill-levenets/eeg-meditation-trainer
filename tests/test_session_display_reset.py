@@ -248,8 +248,7 @@ def test_deleting_the_shown_session_in_history_drops_it_from_the_session_screen(
     app._recorder = make_recorder(app)
     app._recorder.session_id = 9
     app._on_main = lambda fn: fn()
-    for name in ("show_loading", "hide_loading", "_session_pipeline_live"):
-        setattr(app, name, MagicMock(return_value=False))
+    app._session_pipeline_live = MagicMock(return_value=False)
     app._shown = make_shown(app)
     app._shown.drop = MagicMock()
     app._history = make_history_flow(app)

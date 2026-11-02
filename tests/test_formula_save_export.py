@@ -10,7 +10,6 @@ from app.metrics.formula_slots import FormulaSlots
 from app.storage.database import DatabaseManager
 from app.ui import formula_settings
 from tests._formula_settings import make_formula_settings
-from tests._settings import held_store
 
 
 @pytest.fixture
@@ -24,7 +23,7 @@ def make(tmp_path):
         uid = db.create_user("A") if profile else None
         app = SimpleNamespace(_db=db, _formulas=FormulaSlots(), _current_user_id=uid,
                               _require_user=MagicMock(return_value=uid),
-                              _settings_store=held_store(audio_metric="shamatha_score"),
+                              _formula_scoring_locked=lambda _key, _doing: False,
                               _confirm_action=MagicMock(), _info_popup=MagicMock())
         return make_formula_settings(app), app, db, uid
     yield build

@@ -407,8 +407,8 @@ def test_history_loads_without_the_full_screen_spinner(monkeypatch):
     app._history_screen = MagicMock()
     app._current_user_id = 1
     app._session_manager = SessionManager()  # no session running
-    app.show_loading = MagicMock()
+    app._loading_overlay = MagicMock()
     monkeypatch.setattr(history_flow, "sessions_for_view", lambda db, uid: _sessions(3))
     make_history_flow(app).refresh(force=True)
-    app.show_loading.assert_not_called()
+    app._loading_overlay.show.assert_not_called()
     app._history_screen.load_sessions.assert_called_once()

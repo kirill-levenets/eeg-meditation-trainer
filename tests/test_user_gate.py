@@ -229,7 +229,7 @@ def test_restore_refused_while_session_running(monkeypatch):
     app._info_popup = MagicMock()
     on_android = MagicMock()
     monkeypatch.setattr(android_jni, "on_android", on_android)
-    make_flow(refused_while_session_runs=app._refused_while_session_runs).on_restore_pressed()
+    make_flow(refused=app._refused_while_session_runs).on_restore_pressed()
     app._info_popup.assert_called_once()      # explained, not silent
     on_android.assert_not_called()             # restore flow never started
 
@@ -246,7 +246,7 @@ def test_restore_refused_during_bt_connect_window(monkeypatch):
     app._info_popup = MagicMock()
     on_android = MagicMock()
     monkeypatch.setattr(android_jni, "on_android", on_android)
-    make_flow(refused_while_session_runs=app._refused_while_session_runs).on_restore_pressed()
+    make_flow(refused=app._refused_while_session_runs).on_restore_pressed()
     app._info_popup.assert_called_once()
     on_android.assert_not_called()
 

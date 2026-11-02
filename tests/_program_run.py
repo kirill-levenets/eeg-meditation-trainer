@@ -3,6 +3,7 @@ formula variables are the raw sample and the metrics."""
 from unittest.mock import MagicMock
 
 from app.ui.program_run import ProgramRun
+from tests._context import make_context, stub_context
 
 
 def make_run(app=None, *, program=None, name: str = "", audio_key: str = "", session_manager=None, audio=None,
@@ -14,9 +15,10 @@ def make_run(app=None, *, program=None, name: str = "", audio_key: str = "", ses
             given = getattr(app, attr, None)
         return MagicMock() if given is None else given
 
-    run = ProgramRun(dep(session_manager, "_session_manager"), dep(audio, "_audio"), dep(live_screen, "_live_screen"),
-                     on_main=on_main or (lambda fn: fn()), formula_vars=lambda raw, metrics: {**raw, **metrics},
-                     info=info or (MagicMock() if app is None else lambda title, msg: app._info_popup(title, msg)))
+    fields = {"on_main": on_main or (lambda fn: fn()), **({"info": info} if info else {})}
+    ctx = stub_context(**fields) if app is None else make_context(app, **fields)
+    run = ProgramRun(ctx, dep(session_manager, "_session_manager"), dep(audio, "_audio"),
+                     dep(live_screen, "_live_screen"), formula_vars=lambda raw, metrics: {**raw, **metrics})
     run.program = program
     run.name = name
     run.audio_key = audio_key

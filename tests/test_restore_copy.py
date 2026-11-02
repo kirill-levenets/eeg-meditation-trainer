@@ -137,7 +137,7 @@ def test_cancelling_the_restore_confirm_discards_the_temp_copy(tmp_path, monkeyp
     flow = _restore_flow(tmp_path, monkeypatch)
     cand = _candidate(tmp_path)
     flow._confirm_restore(str(cand), discard_after=True)
-    flow._confirm.call_args.kwargs["on_cancel"]()
+    flow._ctx.confirm.call_args.kwargs["on_cancel"]()
     assert not cand.exists()
     flow._do_restore_and_restart.assert_not_called()
 
@@ -148,7 +148,7 @@ def test_confirming_the_restore_restores_then_discards_the_temp_copy(tmp_path, m
     present_during_restore = []
     flow._do_restore_and_restart.side_effect = lambda path: present_during_restore.append(os.path.exists(path))
     flow._confirm_restore(str(cand), discard_after=True)
-    flow._confirm.call_args.args[3]()  # the user confirms
+    flow._ctx.confirm.call_args.args[3]()  # the user confirms
     flow._do_restore_and_restart.assert_called_once_with(str(cand))
     assert present_during_restore == [True]
     assert not cand.exists()
@@ -159,8 +159,8 @@ def test_a_desktop_restore_never_deletes_the_users_own_file(tmp_path, monkeypatc
     picked = tmp_path / "my_backup.db"
     _db_with_user(picked, "from-backup")
     flow._confirm_restore(str(picked))
-    flow._confirm.call_args.args[3]()
-    flow._confirm.call_args.kwargs["on_cancel"]()
+    flow._ctx.confirm.call_args.args[3]()
+    flow._ctx.confirm.call_args.kwargs["on_cancel"]()
     assert picked.exists()
 
 
@@ -243,7 +243,7 @@ def test_a_failed_restore_keeps_the_same_live_db_for_everything_holding_it(tmp_p
     monkeypatch.setattr(bf, "restore_backup", _disk_full)
     try:
         flow._do_restore_and_restart(str(tmp_path / "backup.db"))
-        assert flow._db is db  # the settings store and any other holder keep a working reference
+        assert flow._ctx.db is db  # the settings store and any other holder keep a working reference
         db.set_user_setting(uid, "threshold", "70")
         assert db.get_user_setting(uid, "threshold") == "70"
     finally:

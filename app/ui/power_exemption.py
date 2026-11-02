@@ -1,8 +1,8 @@
 """What may close a locked session: Android's battery optimisation and the maker's power manager, which has no API."""
-from collections.abc import Callable
 
 from app import android_jni
 from app.logger import logger
+from app.ui.app_context import AppContext
 from app.ui.theme import C, StyledButton, cancel_button, make_message_popup
 
 # dontkillmyapp.com scores these makers 3 of 5 or worse: their power managers close foreground services too.
@@ -42,11 +42,9 @@ def advice(exempt: bool, maker: str) -> list[str]:
 class PowerExemption:
     """Settings › Device's locked-session row and the first-start alert: they explain; the user decides."""
 
-    def __init__(self, db, device_section, *, toast: Callable[[str], None], main: Callable[[Callable], None]) -> None:
-        self._db = db
+    def __init__(self, ctx: AppContext, device_section) -> None:
+        self._ctx = ctx
         self._section = device_section
-        self._toast = toast
-        self._main = main  # runs a callable on Kivy's thread: the screens open on Android's UI thread
 
     def _state(self) -> tuple[bool, str] | None:
         """(exempt, maker) on Android; None off it or when Android can't be asked."""
@@ -75,7 +73,7 @@ class PowerExemption:
 
     def offer_once(self) -> None:
         """Once, at the first start with something left to allow; the same buttons stay in Settings › Device."""
-        if self._db.get_setting(SHOWN_KEY):
+        if self._ctx.db.get_setting(SHOWN_KEY):
             return
         state = self._state()
         if state is None:
@@ -106,7 +104,7 @@ class PowerExemption:
         except Exception:  # at start-up: an alert that can't be shown must not take the app down
             logger.exception("Locked-session alert: couldn't show it; it comes again at the next start")
             return
-        self._db.set_setting(SHOWN_KEY, "1")  # after it opened: one that failed comes again at the next start
+        self._ctx.db.set_setting(SHOWN_KEY, "1")  # after it opened: one that failed comes again at the next start
         logger.info(f"Locked-session alert shown (exempt={exempt}, maker={maker})")
 
     def on_battery_settings(self) -> None:
@@ -145,4 +143,4 @@ class PowerExemption:
     def _opened(self, ok: bool) -> None:
         if not ok:
             logger.warning("Locked-session settings: no screen could be opened")
-            self._main(lambda: self._toast("Couldn't open the phone's settings"))
+            self._ctx.on_main(lambda: self._ctx.toast("Couldn't open the phone's settings"))

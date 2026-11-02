@@ -64,8 +64,6 @@ def app(db, monkeypatch):
     a._formulas = FormulaSlots()
     a._graph_series = make_graph_series(a, graphs=a._detail_graphs)  # the diary's program lines, as build() wires them
     a._detail = make_detail_flow(a)
-    a.show_loading = MagicMock()
-    a.hide_loading = MagicMock()
     workers = []
     monkeypatch.setattr(session_detail_flow.threading, "Thread",
                         lambda target, args=(), **k: MagicMock(start=lambda: workers.append(lambda: target(*args))))
@@ -110,7 +108,6 @@ def test_the_detail_opens_at_once_with_title_stats_and_notes(app):
     a._detail.on_session_select(a.sessions["A"])
     d = a._diary_screen
     assert a._sm.current == "diary" and workers  # on screen before the worker has read anything
-    a.show_loading.assert_not_called()  # no full-screen spinner
     assert d._detail_title.text.endswith("Morning sit")
     assert ("Metric", "Shamatha") in [(t.text, v.text) for t, v in d._detail_rows]
     assert d._notes_input.text == "Calm, then sleepy" and not d._notes_input.disabled

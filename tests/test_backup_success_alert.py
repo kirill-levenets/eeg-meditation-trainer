@@ -12,7 +12,7 @@ def test_desktop_success_names_the_file_and_the_sound_note():
     flow = make_flow()
     flow._report_backup_saved("/home/u/eeg_backup_carl_2026-09-29_17-49.db")
     flow._settings_screen.show_backup_status.assert_called_once_with("Backup saved")
-    title, body = flow._info.call_args.args
+    title, body = flow._ctx.info.call_args.args
     assert title == "Backup saved"
     assert "/home/u/eeg_backup_carl_2026-09-29_17-49.db" in body
     assert BACKUP_SOUND_NOTE in body
@@ -25,7 +25,7 @@ def test_saf_success_pops_up_without_the_content_uri(monkeypatch):
     monkeypatch.setattr(bf._saf, "write_file_to_uri", lambda u, p: True)
     monkeypatch.setattr(bf.Clock, "schedule_once", lambda fn, *a: fn(0))
     flow._backup_to_uri_worker(uri)
-    title, body = flow._info.call_args.args
+    title, body = flow._ctx.info.call_args.args
     assert title == "Backup saved"
     assert uri not in body
     assert BACKUP_SOUND_NOTE in body
@@ -40,7 +40,7 @@ def test_saf_write_failure_is_reported_not_announced(monkeypatch):
     monkeypatch.setattr(bf, "report_soft_error", lambda label, detail, **k: reported.append(label))
     flow._backup_to_uri_worker("content://x")
     assert reported == ["backup_failed"]
-    flow._info.assert_not_called()
+    flow._ctx.info.assert_not_called()
 
 
 def test_the_backup_is_named_for_the_active_profile_after_its_settings_are_saved(monkeypatch):

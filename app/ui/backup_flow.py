@@ -18,6 +18,7 @@ from app.storage import android_saf as _saf
 from app.storage import backup as _backup
 from app.storage.backup import restore_backup, validate_backup
 from app.storage.fileops import discard_file
+from app.ui.app_context import AppContext
 from app.ui.theme import (
     C,
     CenteredTextInput,
@@ -35,25 +36,19 @@ class BackupFlow:
     """Backup and Restore: the file pickers, the copy on a worker thread, the restore's confirmation and replace.
     It reaches the app only through what it is given."""
 
-    def __init__(self, db, settings_screen, *, user_name: Callable[[], str | None], save_settings: Callable[[], None],
-                 checkpoint: Callable[[], None], refused_while_session_runs: Callable[[str], bool],
-                 confirm: Callable[..., None], info: Callable[[str, str], None],
-                 on_db_replaced: Callable[[], None]) -> None:
-        self._db = db
+    def __init__(self, ctx: AppContext, settings_screen, *, user_name: Callable[[], str | None],
+                 checkpoint: Callable[[], None], on_db_replaced: Callable[[], None]) -> None:
+        self._ctx = ctx
         self._settings_screen = settings_screen
         self._user_name = user_name
-        self._save_settings = save_settings
         self._checkpoint = checkpoint
-        self._refused = refused_while_session_runs
-        self._confirm = confirm
-        self._info = info
         self._on_db_replaced = on_db_replaced
 
 
     def on_backup_pressed(self) -> None:
         """Backup the live DB to a user-visible location."""
         # Flush first so a mid-session backup holds current settings, not the last pause snapshot.
-        self._save_settings()
+        self._ctx.save_settings()
         filename = _backup.backup_filename(self._user_name(), _dt.now())
 
         if android_jni.on_android():
@@ -84,7 +79,7 @@ class BackupFlow:
         tmp_path = None
         try:
             self._checkpoint()  # a running session is in the backup as of now
-            tmp_path = _backup.online_backup_to_tempfile(self._db)
+            tmp_path = _backup.online_backup_to_tempfile(self._ctx.db)
             if _saf.write_file_to_uri(uri_str, tmp_path):
                 Clock.schedule_once(lambda dt: self._report_backup_saved(uri_str, show_location=False))
             else:
@@ -105,7 +100,7 @@ class BackupFlow:
         def _worker():
             try:
                 self._checkpoint()  # a running session is in the backup as of now
-                _backup.make_backup(self._db, target_path)
+                _backup.make_backup(self._ctx.db, target_path)
             except (OSError, sqlite3.Error) as exc:
                 err_msg = f"Backup to {target_path} failed: {exc}"
                 Clock.schedule_once(
@@ -121,12 +116,12 @@ class BackupFlow:
         logger.info(f"Backup saved to {location}")
         self._settings_screen.show_backup_status("Backup saved")
         body = f"Saved to:\n{location}\n\n{BACKUP_SOUND_NOTE}" if show_location else BACKUP_SOUND_NOTE
-        self._info("Backup saved", body)
+        self._ctx.info("Backup saved", body)
 
     def on_restore_pressed(self) -> None:
         """Pick a backup file and restore it."""
         # A restore closes the DB and force-relaunches: a running (or connecting) session would be silently dropped.
-        if self._refused("restoring a backup"):
+        if self._ctx.session.refused("restoring a backup"):
             return
         if android_jni.on_android():
             self._run_restore_saf()
@@ -209,8 +204,8 @@ class BackupFlow:
             finally:
                 _done()
 
-        counts = self._db.get_record_counts()
-        self._confirm(
+        counts = self._ctx.db.get_record_counts()
+        self._ctx.confirm(
             "Restore database",
             f"Replace the ENTIRE database with this backup?\n\n"
             f"Everything on this device ({format_count(counts['users'], 'profile')}, "
@@ -226,19 +221,19 @@ class BackupFlow:
 
     def _do_restore_and_restart(self, source_path: str) -> None:
         # Defense for the async picker flow: a session may have started, or begun connecting, since _on_restore_pressed.
-        if self._refused("restoring a backup"):
+        if self._ctx.session.refused("restoring a backup"):
             return
         try:
             # No-op every DB access during the restore + relaunch window so nothing
             # reopens the connection and clobbers the freshly-imported file. Error
             # paths below reopen the same manager, so every holder (the settings
             # store, …) is live again; a replaced manager left them on the null connection.
-            self._db.mark_shutting_down()
-            self._db.close()
+            self._ctx.db.mark_shutting_down()
+            self._ctx.db.close()
         except Exception as e:
             logger.exception("DB close before restore failed")
             report_soft_error("restore_failed", f"Could not close the database to restore: {e}")
-            self._db.reopen()
+            self._ctx.db.reopen()
             return
 
         try:
@@ -246,7 +241,7 @@ class BackupFlow:
         except Exception as e:
             # restore_backup replaces the file atomically, so a failure means the live DB is untouched.
             report_soft_error("restore_failed", f"Restore from {source_path} failed: {e}")
-            self._db.reopen()
+            self._ctx.db.reopen()
             return
 
         # DB is now closed and the file replaced: the app must not flush its settings over it.
