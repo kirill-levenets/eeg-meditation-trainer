@@ -32,7 +32,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   **Pause keeps the player set** (#37): `_on_pause` calls `AudioEngine.pause()` and `resume()`, never `stop()`/`start()`.
   `pause()` sets every prepared player to volume 0 and stops it, stops the ramp and clears `_is_playing`, so the bell/chime alert gates and `update()` go quiet;
   `resume()` replays the same players (`_play_prepared`), and the ramp restores each role's last target.
-  `stop()`, the session-end teardown, tears the prepared set down, which only `_start_session_common`'s `prepare_feedback` + `set_reward` rebuild, so both channels would stay silent after Resume.
+  `stop()`, the session-end teardown, tears the prepared set down, which only a session start's `prepare_feedback` + `set_reward` rebuild (`_prepare_session_audio`), so both channels would stay silent after Resume.
   The `"tone"` source is a harmonic-pad drone (fundamental + fifth), generated on first use.
   The `"heartbeat"` source (#11 — stable internal id; the timbre is **Crickets**) is a looping `_NOISE_BUFFER_SECONDS`-long (10 s) WAV: a silent bed with one `_HEARTBEAT_PULSE_SECONDS` (0.1 s) cricket chirp
   — a high tonal carrier (~4.8 kHz) + 2nd harmonic gated by a ~40 Hz half-wave amplitude trill, Hann-windowed to zero at both ends (`_generate_heartbeat_wav`, cached at `_heartbeat_path`)

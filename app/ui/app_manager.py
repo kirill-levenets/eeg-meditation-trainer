@@ -776,50 +776,62 @@ class EEGMeditationApp(App):
         # The session takes the audio over: the last session's gong stops, and so does a Settings test still running.
         self._audio.stop_timer_bell()
         self._audio.end_test()
-        threshold = self._settings_screen.threshold
         program = self._program_settings.for_session()
-        self._cancel_settle("apply_threshold")  # a slider move just before Start: the start applies the slider itself
-        if program:
-            # Program total drives the timer so auto-stop reuses the proven
-            # timer-expiry path; the first segment's target seeds the threshold.
-            threshold = segment_target(program.segments[0])
-            self._timer_state.set_enabled(True)
-            self._timer_state.set_duration(max(1, int(round(program.total_seconds / 60))))
-            logger.info(f"Program session: {format_count(len(program.segments), 'segment')}, "
-                        f"{program.total_seconds:.0f}s total drives the end gong")
-        else:
-            # Session start is authoritative: re-sync the timer from Settings so a
-            # prior program session's enabled/duration can't leak into a simple one.
-            self._timer_state.set_enabled(self._settings_screen.timer.timer_enabled)
-            self._timer_state.set_duration(self._settings_screen.timer.timer_minutes)
+        threshold = self._start_threshold(program)
+        self._arm_timer(program)
         self._put_threshold_in_force(threshold)  # this session's, whatever the last one left running
         run = self._run
         self._metrics_engine.reset()
         run.noise_detector = PowerLineDetector() if not APP.USE_MOCK_DEVICE else None
         self._recorder.begin()
         run.connect_start = time.time()
-
         self._shown.take(self._current_user_id)
+        self._prepare_session_audio(program)
+        self._live_screen.set_training_series(None)  # set on first segment crossing
+        self._live_screen.set_controls_running()
+        self._settings_screen.lock_threshold(self._refuse_program_threshold if self._program_run.active else None)
+        self._keep_awake.hold()
+        if self._connect_session(run, threshold):
+            self._ticker.start()
+            logger.info("Session started via UI")
+
+    def _start_threshold(self, program) -> int:
+        """The threshold a session starts with: a program's first segment target, else the Settings slider."""
+        self._cancel_settle("apply_threshold")  # a slider move just before Start: the start applies the slider itself
+        return segment_target(program.segments[0]) if program else self._settings_screen.threshold
+
+    def _arm_timer(self, program) -> None:
+        """A program's total drives the timer, so its end reuses the timer-expiry path; a simple session re-syncs the
+        timer from Settings, so a previous program's can't leak into it."""
+        if program:
+            self._timer_state.set_enabled(True)
+            self._timer_state.set_duration(max(1, int(round(program.total_seconds / 60))))
+            logger.info(f"Program session: {format_count(len(program.segments), 'segment')}, "
+                        f"{program.total_seconds:.0f}s total drives the end gong")
+        else:
+            self._timer_state.set_enabled(self._settings_screen.timer.timer_enabled)
+            self._timer_state.set_duration(self._settings_screen.timer.timer_minutes)
+
+    def _prepare_session_audio(self, program) -> None:
+        """The session's sound players: the feedback (a program's per-segment sources, handed to its run) and the reward
+        channel; a sound file that's missing is warned about."""
         gid = self._global_feedback_id()
         if program:
             fb_sources, fb_ids, fb_initial = self._feedback_plan(program, gid)
         else:
             fb_sources, fb_ids, fb_initial = {gid: self._source_spec(gid)}, [], gid
         self._program_run.begin(program, fb_ids, self._program_settings.name)
-        # Above-threshold reward channel (global; "" = none). Add its player to the set.
-        reward_id = self._reward_id()
+        reward_id = self._reward_id()  # the above-threshold channel ("" = none)
         if reward_id:
             fb_sources[reward_id] = self._source_spec(reward_id)
         timer = self._timer_state
         self._warn_missing_sound_files(fb_sources, timer.custom_sound_path if timer.enabled else "")
         self._audio.prepare_feedback(fb_sources, fb_initial)
         self._audio.set_reward(reward_id)
-        self._live_screen.set_training_series(None)  # set on first segment crossing
-        self._live_screen.set_controls_running()
-        self._settings_screen.lock_threshold(self._refuse_program_threshold if self._program_run.active else None)
 
-        self._keep_awake.hold()
-
+    def _connect_session(self, run: SessionRun, threshold: int) -> bool:
+        """Start the session on the mock headset or a link kept from the last session, or enter the BT wait; False if
+        the reader refused to start."""
         if APP.USE_MOCK_DEVICE:
             self._eeg_stream.start()
             self._session_manager.start(threshold=threshold)
@@ -830,8 +842,8 @@ class EEGMeditationApp(App):
             self._live_screen.update_state("Running")
             self._live_screen.set_start_time(self._session_manager.started_at)
             self._live_screen.hide_overlay()
-        elif self._real_stream.is_connected:
-            # BT still connected from previous session — reuse it
+            return True
+        if self._real_stream.is_connected:
             self._real_stream.reset_sample_state()
             name = self._headset.name()
             self._session_manager.start(threshold=threshold)
@@ -839,11 +851,8 @@ class EEGMeditationApp(App):
             self._timer_state.start_countdown()
             self._on_session_connected(name)
             logger.info(f"Reusing existing BT connection to {name}")
-        elif not self._begin_bt_wait(run):
-            return
-
-        self._ticker.start()
-        logger.info("Session started via UI")
+            return True
+        return self._begin_bt_wait(run)
 
     def _begin_bt_wait(self, run: SessionRun) -> bool:
         """Main thread: enter the run's BT wait; False if the reader refused to start (the start undone, Retry offered)."""
