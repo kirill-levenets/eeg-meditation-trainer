@@ -41,7 +41,7 @@ class TickThread:
         (joining the current thread raises RuntimeError, which would swallow
         the rest of the calling tick — that bug caused the connect-overlay
         countdown to freeze when BT failure paths called this from inside
-        _handle_bt_wait).
+        the BT wait's tick).
         """
         self._stop_event.set()
         t = self._thread

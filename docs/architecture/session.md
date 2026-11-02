@@ -97,7 +97,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   When the timer expires (on the tick thread, `_end_by_timer`), the order is:
   persist the session via `_persist_session_data(reason="timer")`;
   `AudioEngine.mute()` the noise (non-blocking);
-  `TickThread.stop()` (safe from the tick thread, which it doesn't join), which also ends `running`, so `_session_pipeline_live()` is False once idle and Restore and the profile switch aren't refused after a timed session;
+  `TickThread.stop()` (safe from the tick thread, which it doesn't join), so no later tick can end the session again (the stop left the session FINISHED, so `_session_pipeline_live()` is False and Restore and the profile switch aren't refused after a timed session;
   `_on_main(_finish_on_main)` to defer `_audio.stop()` + `_finalize_stop_ui` to the main thread;
   then `play_timer_sound()` **last** (a one-shot `MediaPlayer` gong, which rings through the lock).
   Persisting first and ringing last means a hung audio call can never cost the session or the summary.

@@ -5,7 +5,6 @@ import threading
 import time
 from collections.abc import Callable
 from datetime import datetime as _dt
-from typing import Optional
 
 from app.crash_handler import report_soft_error
 from app.logger import logger, timed
@@ -70,8 +69,8 @@ class HistoryFlow:
 
     # ---- a session's row ----
 
-    def save_notes(self, session_id: int, notes: Optional[str] = None,
-                   tags: Optional[str] = None, mood: Optional[int] = None) -> bool:
+    def save_notes(self, session_id: int, notes: str | None = None,
+                   tags: str | None = None, mood: int | None = None) -> bool:
         """The one notes-save path (session-end card, diary): writes only the given fields; failures are reported."""
         try:
             saved = self._db.update_session_notes(session_id, notes=notes, tags=tags, mood_rating=mood)
@@ -87,7 +86,7 @@ class HistoryFlow:
         logger.info(f"Notes saved for session {session_id}")
         return True
 
-    def delete_sessions(self, session_ids: list[int], on_done: Optional[Callable[[bool], None]] = None) -> None:
+    def delete_sessions(self, session_ids: list[int], on_done: Callable[[bool], None] | None = None) -> None:
         """The one session-delete path (a History row, the selection, the session-end card): one transaction on a worker
         thread, then History drops the rows in place and the end card closes if it shows one of them. on_done(True)
         once deleted; on_done(False) when refused or failed, with nothing deleted."""
@@ -133,7 +132,7 @@ class HistoryFlow:
 
     # ---- export ----
 
-    def on_export_csv(self, session_id: int, path: Optional[str] = None) -> Optional[str]:
+    def on_export_csv(self, session_id: int, path: str | None = None) -> str | None:
         """Export session data as CSV file. Returns file path or None."""
         csv_data = self._db.export_session_csv(
             session_id, custom_formula=self._formulas.evaluators[0]

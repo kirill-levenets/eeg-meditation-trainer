@@ -195,7 +195,8 @@ The linked file explains the mechanism.
   A silent user-gate return or an ignored bool DB write fails `tests/test_silent_failure_guardrail.py` unless marked `# silent-ok: <reason>`. → [app-platform](docs/architecture/app-platform.md#user-gate-and-profiles)
 - Scalar per-user settings are `Setting` descriptors in `app/settings/registry.py`;
   `SettingsStore.load` always applies a value (stored or default), so no profile inherits another's.
-  Add a new scalar setting as a descriptor, not a hand-written save/load. → [storage](docs/architecture/storage.md#per-user-settings)
+  Add a new scalar setting as a descriptor, not a hand-written save/load.
+  A setting the store holds (`get=None`, the one copy while its profile is active) changes only through `_change_setting(key, value)`: hold, apply, persist. → [storage](docs/architecture/storage.md#per-user-settings)
 
 ### Shared paths — reuse, don't add a second
 

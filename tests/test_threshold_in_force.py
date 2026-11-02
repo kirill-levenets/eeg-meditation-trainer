@@ -76,7 +76,6 @@ def test_a_new_threshold_moves_a_simple_sessions_sound_scoring_and_pill_together
 def test_a_new_threshold_never_reaches_a_running_program():
     # A settle that lands late, or the profile's settings reloaded (re-picking the active profile), mid-program.
     a = _threshold_app(program=True)
-    a._ticker.running = True  # the program session is live
     a._apply_threshold(85)
     a._audio.set_threshold.assert_not_called()  # the sound kept the segment's 70 (it used to switch to 85)
     assert _next_target(a) == 70
@@ -364,7 +363,6 @@ def test_a_settle_runs_the_latest_function_given_for_its_input(monkeypatch):
 
 def test_a_touch_on_the_locked_controls_says_why_while_the_program_runs():
     a = _threshold_app(program=True)
-    a._ticker.running = True
     a._info_popup = MagicMock()
     assert a._refuse_program_threshold() is True
     assert a._info_popup.call_args.args == (

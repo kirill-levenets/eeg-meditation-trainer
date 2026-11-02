@@ -2,6 +2,7 @@
 from unittest.mock import MagicMock
 
 from app.session.manager import SessionManager
+from app.session.session_program import PROGRAM_FORMULA_KEYS
 from app.session.timer_state import TimerState
 from app.settings.registry import BOOL, Setting, SettingsStore
 from app.ui.app_manager import EEGMeditationApp
@@ -58,6 +59,16 @@ def test_audio_formula_index_switch_copersists_metric():
     app._on_audio_formula_index(1)
     stored = {k: v for _, k, v in app._db.writes}
     assert stored == {"audio_formula_index": "1", "audio_metric": "custom_formula_2"}
+
+
+def test_a_program_slot_is_never_saved_as_the_audio_metric():
+    # A program slot outside a program reads 0: constant max noise. Healed on save as well as on load.
+    app = _app()
+    app._settings_screen = MagicMock()
+    store = app._settings_store = SettingsStore(app._db, app._audio_metric_settings())
+    store.change("audio_metric", PROGRAM_FORMULA_KEYS[0])  # nothing writes one today; the save keeps it so
+    store.persist(7, "audio_metric")
+    assert app._db.writes == [(7, "audio_metric", "shamatha_score")]
 
 
 def test_persist_noop_without_store():

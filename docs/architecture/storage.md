@@ -37,7 +37,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 ## Per-user settings
 
 - **Per-user settings registry** (`app/settings/registry.py`):
-  each scalar per-user setting is declared once as a `Setting(key, default, parse, serialize, get, set)` descriptor,
+  each scalar per-user setting is declared once as a `Setting(key, default, parse, serialize, get, set, settle=False)` descriptor,
   built in `_build_settings_store()` (in `build()`, after the screens exist and BEFORE any user load, so each default is snapshotted from the app's constructed initial state).
   They are the threshold, audio metric/index, feedback+reward source/path, alert toggles, timer enable/minutes/sound, line width and colours, rotation, graph zoom, marker hotkey, stats mode, device mock, the fold states (History chart, What-if, band power), **theme** and text size.
   `SettingsStore.load(uid)` applies each setting as its parsed stored value **or its default when absent/invalid**
@@ -55,7 +55,6 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `_persist_user_setting(key)` (key only — the store reads the live value) catches `sqlite3.Error` → soft error;
   the threshold slider, the timer sound and the held settings with `settle=True` go through `_persist_user_setting_later(key)`:
   a per-key Kivy `Clock` trigger (`_after_settle`) restarted on every change (`_PERSIST_SETTLE_S` = 0.5 s), so a drag is one write, not one fsync per step on the UI thread.
-  `timer_sound`'s getter reads its widget (like `timer_enabled`/`timer_minutes`).
   `_load_user_settings`/`_save_user_settings`/`_persist_user_setting` are thin calls into the store;
   the **aggregates** (custom formulas, saved programs/formulas, the edited program, per-graph series) keep their own handling (`FormulaSettings`, `ProgramSettings`, `GraphSeries`).
   **Theme is per-user** (its descriptor, `get=C.theme_name`/`set=C.set_theme`);

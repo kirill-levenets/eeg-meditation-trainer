@@ -954,7 +954,7 @@ class EEGMeditationApp(App):
             logger.info("Session resumed")
 
     def _on_stop(self, *args) -> None:
-        # Decided by the session, not by the wait flag: a wait that has just ended cleared the flag before its idle UI.
+        # Decided by the session, not the run's phase: a wait that has just ended is over before its idle UI shows.
         if self._session_manager.state == SessionState.FINISHED:
             logger.info("Stop ignored: the session has already ended and its teardown is queued")
             return
@@ -1231,6 +1231,7 @@ class EEGMeditationApp(App):
         """Tick thread: a check ended the session. It is frozen here (its duration ends now, its sound goes quiet, no
         later tick can end it again) and saved on the main thread, once, while its run is current."""
         self._session_manager.pause()
+        self._checkpoint_or_report()  # Android may close a locked app before the unlock: its ticks so far are saved now
         self._audio.mute()
         self._ticker.stop()
         self._on_main_for(run, lambda: (self._live_screen.show_alert(alert), self._stop_and_save(reason=reason)))
@@ -1247,7 +1248,7 @@ class EEGMeditationApp(App):
         # The real stop()/release() teardown is deferred to the main
         # thread below, where the Looper is live and release() won't hang.
         self._audio.mute()
-        # Stop the loop now (safe from this thread); also ends `running`, so idle isn't "live".
+        # Stop the loop now (safe from this thread): no later tick can end the session again.
         self._ticker.stop()
 
         def _finish_on_main(_dt=None):
@@ -1346,8 +1347,9 @@ class EEGMeditationApp(App):
 
     def _on_marker(self, *args) -> None:
         """Place a marker at the current position in the session."""
-        if self._session_manager.state == SessionState.RUNNING:
-            self._run.pending_marker = True
+        run = self._run  # a tick that outlived a Cancel can start the session for a run already ended
+        if run is not None and self._session_manager.state == SessionState.RUNNING:
+            run.pending_marker = True
             logger.info("Marker placed")
 
     def _on_threshold_change(self, value: int) -> None:
@@ -1720,8 +1722,8 @@ class EEGMeditationApp(App):
 
         # A stored program slot heals to the baseline: outside a program it reads 0, constant max noise.
         return [Setting("audio_formula_index", 0, parse_slot, INT[1], None, lambda _v: None),  # shown with the metric
-                Setting("audio_metric", "shamatha_score", self._baseline_audio_metric, STR[1], None,
-                        apply_audio_metric)]
+                Setting("audio_metric", "shamatha_score", self._baseline_audio_metric, self._baseline_audio_metric,
+                        None, apply_audio_metric)]
 
     def _apply_stats_mode(self, mode: str) -> None:
         self._live_screen.set_stats_mode(mode)

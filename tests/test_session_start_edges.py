@@ -64,7 +64,6 @@ def _waiting(app) -> EEGMeditationApp:
     run_in(app, Phase.STARTING)  # as _on_start makes it
     app._real_stream.start.return_value = True
     assert app._bt_wait.begin(app._run)
-    app._ticker.running = True
     app._run.connect_start = time.time()
     app._real_stream.is_connected = True
     app._real_stream.read_sample.return_value = dict(BANDS)
@@ -170,7 +169,6 @@ def test_stop_after_the_timer_ended_the_session_leaves_its_teardown_alone():
     app = _app()
     app._session_manager.start()
     app._session_manager.stop(reason="timer")  # saved on the tick thread; its UI teardown is queued
-    app._ticker.running = True
     app._on_stop()
     app._real_stream.stop.assert_not_called()  # the kept-alive headset link stays up
     app._confirm_action.assert_not_called()

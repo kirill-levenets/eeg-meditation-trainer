@@ -56,6 +56,15 @@ def test_a_stale_stop_freezes_the_session_on_the_tick_thread(monkeypatch):
     assert len(queued) == 1
 
 
+def test_a_stale_stop_saves_its_ticks_before_the_unlock(monkeypatch):
+    # Android may close a locked app before the main thread runs: the ticks so far must already be in the DB.
+    app, queued, _reasons = _locked_app(monkeypatch)
+    app._real_stream.seconds_since_last_packet = app._watch.STALE_DATA_THRESHOLD + 1
+    _drive_tick(app, _raw_sample(), _metrics())
+    assert queued  # the main thread hasn't run
+    app._db.checkpoint_session.assert_called_once()
+
+
 def test_the_recording_limit_ends_it_once_however_many_ticks_pass_before_the_unlock(monkeypatch):
     app, queued, reasons = _locked_app(monkeypatch)
     monkeypatch.setattr(APP, "SESSION_MAX_SECONDS", 0)
