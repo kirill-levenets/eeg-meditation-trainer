@@ -30,6 +30,8 @@ def make_context(app, **fields) -> AppContext:
                 "on_main": lambda fn: app._on_main(fn), "switch_screen": lambda name: app._switch_screen(name),
                 "info": lambda title, message: app._info_popup(title, message),
                 "toast": lambda message: app._toast(message), "confirm": lambda *a, **k: app._confirm_action(*a, **k),
+                "setting": lambda key: app._settings_store.value(key),
+                "change_setting": lambda key, value: app._change_setting(key, value),
                 "save_settings": lambda: app._save_user_settings()}
     return _build(defaults, session, fields)
 
@@ -41,5 +43,6 @@ def stub_context(**fields) -> AppContext:
                "refused": MagicMock(return_value=False), "discard": MagicMock()}
     defaults = {"db": MagicMock(), "user_id": user_id, "activate_user": MagicMock(),
                 "require_user": lambda _action: user_id(), "on_main": lambda fn: fn(), "switch_screen": MagicMock(),
-                "info": MagicMock(), "toast": MagicMock(), "confirm": MagicMock(), "save_settings": MagicMock()}
+                "info": MagicMock(), "toast": MagicMock(), "confirm": MagicMock(), "setting": MagicMock(),
+                "change_setting": MagicMock(), "save_settings": MagicMock()}
     return _build(defaults, session, fields)

@@ -1,20 +1,22 @@
 from app.metrics.formula_slots import FormulaSlots
 from app.session.session_program import SessionProgram
 from app.ui.app_manager import EEGMeditationApp
+from app.ui.sound_sources import feedback_plan, source_spec
 from tests._program_run import make_run
 from tests._settings import audio_store, held_store
+from tests._sound_sources import make_sounds
 
 
 def test_source_spec_builtins_and_custom():
-    assert EEGMeditationApp._source_spec("noise") == ("noise", "")
-    assert EEGMeditationApp._source_spec("tone") == ("tone", "")
-    assert EEGMeditationApp._source_spec("/a/b.wav") == ("custom", "/a/b.wav")
+    assert source_spec("noise") == ("noise", "")
+    assert source_spec("tone") == ("tone", "")
+    assert source_spec("/a/b.wav") == ("custom", "/a/b.wav")
 
 
-def test_feedback_source_id_inherits_global_on_blank():
-    assert EEGMeditationApp._feedback_source_id("", "tone") == "tone"
-    assert EEGMeditationApp._feedback_source_id("noise", "tone") == "noise"
-    assert EEGMeditationApp._feedback_source_id("/x.wav", "noise") == "/x.wav"
+def test_a_segment_with_no_sound_of_its_own_inherits_the_global_source():
+    prog = SessionProgram([{"minutes": 1, "target": 50, "formula": "shamatha_score", "feedback_sound": sound}
+                           for sound in ("", "noise", "/x.wav")])
+    assert feedback_plan(prog, "tone")[1] == ["tone", "noise", "/x.wav"]
 
 
 def test_feedback_plan_distinct_sources_and_segment_ids():
@@ -23,7 +25,7 @@ def test_feedback_plan_distinct_sources_and_segment_ids():
         {"minutes": 5, "target": 70, "formula": "meditation_score", "feedback_sound": "tone"},
         {"minutes": 5, "target": 90, "formula": "shamatha_score", "feedback_sound": "/c.wav"},
     ])
-    sources, seg_ids, initial = EEGMeditationApp._feedback_plan(prog, "noise")
+    sources, seg_ids, initial = feedback_plan(prog, "noise")
     assert seg_ids == ["noise", "tone", "/c.wav"]   # '' resolved to global 'noise'
     assert initial == "noise"                        # first segment's source
     assert sources == {
@@ -38,7 +40,7 @@ def test_feedback_plan_global_tone_default_segments():
         {"minutes": 5, "target": 50, "formula": "shamatha_score"},
         {"minutes": 5, "target": 70, "formula": "meditation_score"},
     ])
-    sources, seg_ids, initial = EEGMeditationApp._feedback_plan(prog, "tone")
+    sources, seg_ids, initial = feedback_plan(prog, "tone")
     assert seg_ids == ["tone", "tone"]
     assert initial == "tone"
     assert sources == {"tone": ("tone", "")}
@@ -47,14 +49,14 @@ def test_feedback_plan_global_tone_default_segments():
 def test_global_feedback_id_resolves_source():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     store = app._settings_store = held_store(feedback_source="noise", feedback_sound_path="")
-    assert app._global_feedback_id() == "noise"
+    assert make_sounds(app).global_feedback_id() == "noise"
     store.change("feedback_source", "tone")
-    assert app._global_feedback_id() == "tone"
+    assert make_sounds(app).global_feedback_id() == "tone"
     store.change("feedback_source", "custom")
     store.change("feedback_sound_path", "/my.wav")
-    assert app._global_feedback_id() == "/my.wav"
+    assert make_sounds(app).global_feedback_id() == "/my.wav"
     store.change("feedback_sound_path", "")              # custom selected but no file
-    assert app._global_feedback_id() == "noise"         # falls back to rain
+    assert make_sounds(app).global_feedback_id() == "noise"         # falls back to rain
 
 
 def test_on_test_audio_prepares_selected_source(monkeypatch):
@@ -64,7 +66,7 @@ def test_on_test_audio_prepares_selected_source(monkeypatch):
     app._settings_store = held_store(feedback_source="tone", feedback_sound_path="", reward_source="none",
                                      reward_sound_path="")
     app._audio = MagicMock()
-    app._on_test_audio()
+    make_sounds(app).on_test_audio()
     app._audio.prepare_feedback.assert_called_once_with({"tone": ("tone", "")}, "tone")
     app._audio.test_audio.assert_called_once()
 

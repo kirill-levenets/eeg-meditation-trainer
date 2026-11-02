@@ -3,7 +3,9 @@ import os
 from app.audio_feedback.noise import AudioEngine
 from app.config import APP
 from app.ui.app_manager import EEGMeditationApp
+from app.ui.sound_sources import source_spec
 from tests._settings import held_store
+from tests._sound_sources import make_sounds
 
 
 def _engine(threshold):
@@ -80,27 +82,27 @@ def test_resolve_active_empty_is_no_below_not_a_fallback():
 
 
 def test_source_spec_none_is_silent_sentinel():
-    assert EEGMeditationApp._source_spec("none") == ("none", "")
-    assert EEGMeditationApp._source_spec("") == ("none", "")
-    assert EEGMeditationApp._source_spec("noise") == ("noise", "")
-    assert EEGMeditationApp._source_spec("/x.wav") == ("custom", "/x.wav")
+    assert source_spec("none") == ("none", "")
+    assert source_spec("") == ("none", "")
+    assert source_spec("noise") == ("noise", "")
+    assert source_spec("/x.wav") == ("custom", "/x.wav")
 
 
 def test_source_spec_heartbeat_is_builtin_not_custom():
-    assert EEGMeditationApp._source_spec("heartbeat") == ("heartbeat", "")
+    assert source_spec("heartbeat") == ("heartbeat", "")
 
 
 def test_reward_id_resolves_heartbeat_builtin():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._settings_store = held_store(reward_source="heartbeat", reward_sound_path="")
-    assert app._reward_id() == "heartbeat"
+    assert make_sounds(app).reward_id() == "heartbeat"
 
 
 def test_test_audio_sources_include_below_and_reward():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._settings_store = held_store(feedback_source="tone", feedback_sound_path="", reward_source="heartbeat",
                                      reward_sound_path="")
-    sources, gid, reward_id = app._test_audio_sources()
+    sources, gid, reward_id = make_sounds(app).test_sources()
     assert gid == "tone"
     assert reward_id == "heartbeat"
     assert sources == {"tone": ("tone", ""), "heartbeat": ("heartbeat", "")}
@@ -110,7 +112,7 @@ def test_test_audio_sources_omit_reward_when_off():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._settings_store = held_store(feedback_source="noise", feedback_sound_path="", reward_source="none",
                                      reward_sound_path="")
-    sources, gid, reward_id = app._test_audio_sources()
+    sources, gid, reward_id = make_sounds(app).test_sources()
     assert reward_id == ""
     assert sources == {"noise": ("noise", "")}
 
@@ -128,10 +130,10 @@ def test_heartbeat_resolves_to_a_generated_playable_file():
 def test_reward_id_resolves_none_builtin_and_missing_custom():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     store = app._settings_store = held_store(reward_source="none", reward_sound_path="")
-    assert app._reward_id() == ""
+    assert make_sounds(app).reward_id() == ""
     store.change("reward_source", "tone")
-    assert app._reward_id() == "tone"
+    assert make_sounds(app).reward_id() == "tone"
     store.change("reward_source", "custom")
-    assert app._reward_id() == ""          # missing custom -> silent, no rain surprise
+    assert make_sounds(app).reward_id() == ""          # missing custom -> silent, no rain surprise
     store.change("reward_sound_path", "/x.wav")
-    assert app._reward_id() == "/x.wav"
+    assert make_sounds(app).reward_id() == "/x.wav"

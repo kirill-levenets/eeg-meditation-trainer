@@ -1,7 +1,8 @@
 """What a flow reaches the app through: its database, the active profile, the main thread, navigation, the user's dialogs,
-the settings save and the running session. Built once by the app; a flow takes it and then only what is its own."""
+the profile's settings and the running session. Built once by the app; a flow takes it and then only what is its own."""
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from app.storage.database import DatabaseManager
 
@@ -27,5 +28,7 @@ class AppContext:
     info: Callable[[str, str], None]
     toast: Callable[[str], None]
     confirm: Callable[..., None]  # (title, message, ok_text, on_ok, ok_color=None, on_cancel=None)
+    setting: Callable[[str], Any]  # a held setting's value for the active profile
+    change_setting: Callable[[str, Any], None]  # a held setting's one change path: hold, apply, persist
     save_settings: Callable[[], None]
     session: SessionAccess

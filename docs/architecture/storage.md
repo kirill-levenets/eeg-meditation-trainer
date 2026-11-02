@@ -45,14 +45,17 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `SettingsStore.load(uid)` applies each setting as its parsed stored value **or its default when absent/invalid**
   — it ALWAYS applies a value, so a fresh/partial user can never inherit the previously-active user's in-memory value.
   `save(uid)` serializes all in **one transaction** (`DatabaseManager.set_user_settings`, one `executemany` + commit, not one commit per key); `persist(uid, key)` writes one key immediately (change-callback path), suppressed while loading.
-  **The store holds a setting's value** when its descriptor has no `get` (`get=None`): the store's copy is the only one while the profile is active, `set` applies it (its consumers and its widget, idempotent), and `SettingsStore.change(key, value)` is its one change path.
+  **The store holds a setting's value** when its descriptor has no `get` (`get=None`): the store's copy is the only one while the profile is active;
+  `set` applies it (its consumers and its widget, idempotent), and `SettingsStore.change(key, value)` is its one change path.
   The app's `_change_setting(key, value)` is what a widget's hook calls: the store holds and applies the value, then it is persisted at once or, for a continuous input (`settle=True`: a slider, typing), once it settles.
   Readers ask the store (`value(key)`), the tick thread included; save and persist write the held value, never a widget's.
   The store holds every setting that had two copies kept in step by hand (a consumer and its widget, or an app field and its widget):
   the three alert toggles, the line width (persisted once a drag settles), the rotation, the feedback and reward sources and their paths, the timer sound (once typing settles).
   A setting with one holder elsewhere keeps its `get`, since there is no second copy to keep in step:
-  the theme, text size and line colours (their globals, with listeners), the fold states (their widgets), the graph zoom (the live graph), the stats view and the marker hotkey (their widgets), the timer's enable and minutes (the Timer section).
-  The audio metric and its formula slot are held too (`_audio_metric_settings`: a stored program slot heals to the baseline at load, an out-of-range slot clamps), behind controllers that can refuse a change while a session runs and show the one in force again (`_show_audio_metric`).
+  the theme, text size and line colours (their globals, with listeners), the fold states (their widgets), the graph zoom (the live graph);
+  the stats view and the marker hotkey (their widgets), the timer's enable and minutes (the Timer section).
+  The audio metric and its formula slot are held too (`_audio_metric_settings`: a stored program slot heals to the baseline at load, an out-of-range slot clamps);
+  behind controllers that can refuse a change while a session runs and show the one in force again (`_show_audio_metric`).
   The threshold keeps its slider as the one holder of the stored value (the value in force is `_put_threshold_in_force`'s); the device mode keeps `APP.USE_MOCK_DEVICE`, written by `Headset.on_mode_toggle`.
   `_persist_user_setting(key)` (key only — the store reads the live value) catches `sqlite3.Error` → soft error;
   the threshold slider, the timer sound and the held settings with `settle=True` go through `_persist_user_setting_later(key)`:
@@ -115,7 +118,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `_save_user_settings` catches `sqlite3.Error` and reports a soft error: it runs from UI callbacks (backup, pause, profile switch), where an escaping error would open the fatal dialog, and a failed flush doesn't abort the backup.
   It **never touches `_timer_state`**:
   a running session — especially a program, which force-enables the timer and seeds its countdown from the program total — OWNS it, and re-applying the Settings timer widgets on a pause/backup flush would kill or shift its auto-stop.
-  Session start re-applies enabled/duration, and `_on_timer_sound_change` keeps the gong path current, so nothing needs an idle sync.
+  Session start re-applies enabled/duration, and `SoundSources.on_timer_sound_change` keeps the gong path current, so nothing needs an idle sync.
   Both backup workers checkpoint a running session first (`_checkpoint_or_report` → `SessionRecorder.checkpoint`, see [session](session.md#persistence)), so a mid-session backup holds it as of the backup.
   The restore confirm (`_confirm_action`) states it replaces the **entire DB**, with the profile and session counts from `get_record_counts()`.
   Both backup paths end in `_report_backup_saved(location)`:
@@ -123,7 +126,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   the status line alone is small and sits at the bottom of a collapsed section.
   The suggested file name is `backup.backup_filename(user_name, now)` → `eeg_backup_<profile>_<YYYY-MM-DD_HH-MM>.db` (profile first, so the narrow SAF name field still shows it;
   path separators, whitespace and FAT-illegal characters become `_`; no usable name → just the time).
-  Missing custom sound files are reported by **one** `_warn_missing_sound_files(feedback_sources, timer_path)` report at session start and from both Test buttons:
+  Missing custom sound files are reported by **one** `SoundSources.warn_missing(feedback_sources, timer_path)` report at session start and from both Test buttons:
   a second `report_soft_error` while the first's dialog is pending is dropped.
   The Test buttons pass `force=True` (user-initiated, like Copy Diagnostics):
   the label's 60 s cooldown after a session-start report can't hide the file the user just tested, so `play_timer_sound`'s fallback to the default gong is never silent.

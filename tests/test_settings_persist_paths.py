@@ -9,6 +9,7 @@ from app.session.manager import SessionManager
 from app.ui.app_manager import EEGMeditationApp
 from tests._program_run import make_run
 from tests._shown_session import make_shown
+from tests._sound_sources import make_sounds
 
 
 class _FakeTrigger:
@@ -52,6 +53,7 @@ def _make_app(monkeypatch):
     app._program_run = make_run(app)
     app._settings_screen = MagicMock(threshold=180)
     app._shown = make_shown(app)
+    app._sounds = make_sounds(app)
     return app, triggers, reports
 
 
@@ -72,7 +74,7 @@ def test_typing_a_gong_path_writes_once_after_it_settles(monkeypatch):
     app, triggers, _ = _make_app(monkeypatch)
     path = "/home/user/sounds/my_custom_gong_sound.wav"
     for i in range(1, len(path) + 1):
-        app._on_timer_sound_change(path[:i])
+        app._sounds.on_timer_sound_change(path[:i])
 
     app._settings_store.persist.assert_not_called()
     triggers[0].fire()

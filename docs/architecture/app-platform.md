@@ -8,7 +8,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 - The app builds the screens (`_build_screens`) and the classes that own each concern (`_build_flows`: `HistoryFlow`, `SessionDetailFlow`, `ProfileGate`, `Profiles`, …), wires the screens' hooks to them,
   and gives each the same `AppContext` (`app/ui/app_context.py`, built once by `_make_context`).
   It holds what a flow reaches the app through: the database, the active profile (`user_id`, `activate_user`, `require_user`), the main thread (`on_main`), navigation (`switch_screen`);
-  the user's dialogs (`info`, `toast`, `confirm`), the settings save, and `SessionAccess` (whether a session runs or waits for the headset, its row, the refusal while it runs, its discard).
+  the user's dialogs (`info`, `toast`, `confirm`), the profile's settings (`setting`, `change_setting`: a held value and its one change path, `save_settings`);
+  and `SessionAccess` (whether a session runs or waits for the headset, its row, the refusal while it runs, its discard).
   A flow takes the context and then only what is its own (its screens, the objects it works with); the context's callables read the app when called, so they see the profile and the session as they are then.
   Tests build it from an app built with `__new__` (`tests/_context.make_context(app)`) or stand-alone (`stub_context()`: no profile, no session, UI calls at once or mocks);
   either takes any field, a `SessionAccess` field included, and a test helper takes them through `context_fields(deps)`.
@@ -95,7 +96,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 ## Tests
 
 - Most app tests build the app with `__new__` and only the parts they need (`tests/_context.py` and a helper per flow).
-  `tests/test_app_build.py` runs the real constructor and `build()` on a temp DB, as `main.py` does: a restored profile with hooks driven through to their flows and a profile switch, and a DB with no last profile, where the gate blocks the app until one is made;
+  `tests/test_app_build.py` runs the real constructor and `build()` on a temp DB, as `main.py` does:
+  a restored profile with hooks driven through to their flows and a profile switch, and a DB with no last profile, where the gate blocks the app until one is made;
   it stubs only the BT scan and the crash handler's install (its hooks are process-wide) and restores the theme, text size, line colours and the Window's key bindings after.
 - `tests/test_silent_failure_guardrail.py` is an AST guardrail run on every `pytest` (issue #29 invariant): it scans `app/` and fails on
   a **silent user-gate return** (`if not self._current_user_id: return/pass`, or through a local alias of it, with no user-feedback call)

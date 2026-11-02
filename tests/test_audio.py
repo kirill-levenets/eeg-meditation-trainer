@@ -17,6 +17,7 @@ from app.audio_feedback.noise import (
 from app.config import APP
 from app.ui.app_manager import EEGMeditationApp
 from tests._audio_sequence import record_sequences, sequence_sleep
+from tests._sound_sources import make_sounds
 
 
 def _pcm_samples(pcm: bytes) -> tuple[int, ...]:
@@ -510,7 +511,7 @@ def test_the_settings_audio_test_is_refused_while_a_session_runs(monkeypatch):
     monkeypatch.setattr(EEGMeditationApp, "_session_pipeline_live", lambda self: True)  # running, paused or connecting
     app._info_popup = MagicMock()
     app._audio = MagicMock()
-    app._on_test_audio()
+    make_sounds(app).on_test_audio()
     app._audio.prepare_feedback.assert_not_called()  # it would replace the session's players
     app._audio.test_audio.assert_not_called()
     assert app._info_popup.call_args.args[0] == "Session in progress"

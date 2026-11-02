@@ -83,6 +83,7 @@ from app.ui.settings_screen import (
     SettingsScreen,
 )
 from app.ui.shown_session import ShownSession
+from app.ui.sound_sources import SoundSources
 from app.ui.theme import (
     DEFAULT_THEME,
     TEXT_SIZES,
@@ -268,64 +269,6 @@ class EEGMeditationApp(App):
                                              self._settings_store.value("audio_metric"))
 
     @staticmethod
-    def _source_spec(source_id: str) -> tuple[str, str]:
-        """Map a feedback source id to (kind, custom_path); non-builtin ids are custom file paths.
-        "" / "none" -> the silent sentinel (no player is instantiated for it)."""
-        if source_id in ("", "none"):
-            return ("none", "")
-        if source_id in ("noise", "tone", "heartbeat"):
-            return (source_id, "")
-        return ("custom", source_id)
-
-    def _reward_id(self) -> str:
-        """The above-threshold reward source id ("" = none). A custom selection with
-        no file resolves to silent (unlike the noise channel, which falls back to rain)."""
-        src = self._settings_store.value("reward_source")
-        if src in ("", "none"):
-            return ""
-        if src == "custom":
-            return self._settings_store.value("reward_sound_path") or ""
-        return src
-
-    @staticmethod
-    def _feedback_source_id(value: str, global_id: str) -> str:
-        """A segment's feedback_sound value as a source id; blank inherits the global source."""
-        return value if value else global_id
-
-    @staticmethod
-    def _feedback_plan(prog, global_id: str) -> tuple[dict, list, str]:
-        """(distinct sources, per-segment ids, initial id) for a program; blanks inherit the global."""
-        seg_ids = [
-            EEGMeditationApp._feedback_source_id(s.get("feedback_sound", "") or "", global_id)
-            for s in prog.segments
-        ]
-        sources = {sid: EEGMeditationApp._source_spec(sid) for sid in [global_id, *seg_ids]}
-        initial = seg_ids[0] if seg_ids else global_id
-        return sources, seg_ids, initial
-
-    def _global_feedback_id(self) -> str:
-        """The active global feedback source id; a custom selection with no file falls back to noise."""
-        src = self._settings_store.value("feedback_source")
-        if src in ("", "none"):
-            return "none"
-        if src == "custom":
-            return self._settings_store.value("feedback_sound_path") or "noise"
-        return src
-
-    def _warn_missing_sound_files(self, feedback_sources: dict, timer_path: str = "", *, force: bool = False) -> None:
-        """Surface missing custom sound files in ONE report; `force` for user-initiated checks (Test buttons)."""
-        problems = []
-        missing = [path for kind, path in feedback_sources.values()
-                   if kind == "custom" and not (path and os.path.isfile(path))]
-        if missing:
-            problems.append(f"{format_count(len(missing), 'custom feedback file')} not found: "
-                            + ", ".join(repr(p) for p in missing) + " - using rain noise instead.")
-        if timer_path and not os.path.isfile(timer_path):
-            problems.append(f"Custom timer sound not found: {timer_path!r} - using the default gong instead.")
-        if problems:
-            report_soft_error("sound_files_missing", "\n".join(problems), app=self, force=force)
-
-    @staticmethod
     def _shamatha_transition(
         active: bool, above: bool, streak: int, enter_ticks: int = 3, exit_ticks: int = 3
     ) -> tuple[bool, int]:
@@ -410,6 +353,7 @@ class EEGMeditationApp(App):
     def _build_flows(self) -> None:
         """The objects that own each concern, each given the app context and the screens it works on."""
         self._timer_state = TimerState()
+        self._sounds = SoundSources(self._ctx, self._audio, self._timer_state, self._settings_screen.timer)
         self._program_run = ProgramRun(self._ctx, self._session_manager, self._audio, self._live_screen,
                                        formula_vars=self._eval_formula_vars)
         self._program_settings = ProgramSettings(
@@ -450,6 +394,7 @@ class EEGMeditationApp(App):
         return AppContext(db=self._db, user_id=lambda: self._current_user_id, activate_user=self._activate_user,
                           require_user=self._require_user, on_main=self._on_main, switch_screen=self._switch_screen,
                           info=self._info_popup, toast=self._toast, confirm=self._confirm_action,
+                          setting=lambda key: self._settings_store.value(key), change_setting=self._change_setting,
                           save_settings=self._save_user_settings, session=session)
 
     def _all_graphs(self) -> tuple:
@@ -540,12 +485,12 @@ class EEGMeditationApp(App):
         )
         wire(
             self._settings_screen.audio,
-            on_test_audio=self._on_test_audio,
+            on_test_audio=self._sounds.on_test_audio,
             on_sinking_alert_toggle=self._on_sinking_alert_toggle,
             on_subtle_alert_toggle=self._on_subtle_alert_toggle,
             on_disconnect_alert_toggle=self._on_disconnect_alert_toggle,
-            on_feedback_source_change=self._on_feedback_source_change,
-            on_reward_source_change=self._on_reward_source_change,
+            on_feedback_source_change=self._sounds.on_feedback_source_change,
+            on_reward_source_change=self._sounds.on_reward_source_change,
         )
         wire(
             self._settings_screen.device,
@@ -580,9 +525,9 @@ class EEGMeditationApp(App):
             on_program_save=self._program_settings.on_save,
             on_program_load=self._program_settings.on_load,
             on_program_delete=self._program_settings.on_delete,
-            on_test_timer_sound=self._on_test_timer_sound,
-            on_stop_timer_sound=self._on_stop_test_timer_sound,
-            on_timer_sound_change=self._on_timer_sound_change,
+            on_test_timer_sound=self._sounds.on_test_timer_sound,
+            on_stop_timer_sound=self._sounds.on_stop_test_timer_sound,
+            on_timer_sound_change=self._sounds.on_timer_sound_change,
         )
         wire(self._settings_screen, on_backup_pressed=self._backup_flow.on_backup_pressed,
              on_restore_pressed=self._backup_flow.on_restore_pressed)
@@ -748,7 +693,7 @@ class EEGMeditationApp(App):
         self._recorder.begin()
         run.connect_start = time.time()
         self._shown.take(self._current_user_id)
-        self._prepare_session_audio(program)
+        self._program_run.begin(program, self._sounds.prepare_session(program), self._program_settings.name)
         self._live_screen.set_training_series(None)  # set on first segment crossing
         self._live_screen.set_controls_running()
         self._settings_screen.lock_threshold(self._refuse_program_threshold if self._program_run.active else None)
@@ -773,23 +718,6 @@ class EEGMeditationApp(App):
         else:
             self._timer_state.set_enabled(self._settings_screen.timer.timer_enabled)
             self._timer_state.set_duration(self._settings_screen.timer.timer_minutes)
-
-    def _prepare_session_audio(self, program) -> None:
-        """The session's sound players: the feedback (a program's per-segment sources, handed to its run) and the reward
-        channel; a sound file that's missing is warned about."""
-        gid = self._global_feedback_id()
-        if program:
-            fb_sources, fb_ids, fb_initial = self._feedback_plan(program, gid)
-        else:
-            fb_sources, fb_ids, fb_initial = {gid: self._source_spec(gid)}, [], gid
-        self._program_run.begin(program, fb_ids, self._program_settings.name)
-        reward_id = self._reward_id()  # the above-threshold channel ("" = none)
-        if reward_id:
-            fb_sources[reward_id] = self._source_spec(reward_id)
-        timer = self._timer_state
-        self._warn_missing_sound_files(fb_sources, timer.custom_sound_path if timer.enabled else "")
-        self._audio.prepare_feedback(fb_sources, fb_initial)
-        self._audio.set_reward(reward_id)
 
     def _connect_session(self, run: SessionRun, threshold: int) -> bool:
         """Start the session on the mock headset or a link kept from the last session, or enter the BT wait; False if
@@ -1345,25 +1273,6 @@ class EEGMeditationApp(App):
         self._session_manager.set_threshold(value)  # also what a session waiting for the headset starts with
         self._live_screen.graph.set_threshold(float(value))  # drawn until ticks step the line
 
-    def _test_audio_sources(self) -> tuple[dict, str, str]:
-        """(prepared sources, below id, reward id) for the Test button — both the
-        selected below feedback source and the reward source (so Crickets etc. preview)."""
-        gid = self._global_feedback_id()
-        sources = {gid: self._source_spec(gid)}
-        reward_id = self._reward_id()
-        if reward_id:
-            sources[reward_id] = self._source_spec(reward_id)
-        return sources, gid, reward_id
-
-    def _on_test_audio(self) -> None:
-        """Sample the selected feedback + reward sources, then the alert channels."""
-        if self._refused_while_session_runs("testing the audio", why="The test plays through the session's sounds."):
-            return
-        sources, gid, reward_id = self._test_audio_sources()
-        self._warn_missing_sound_files(sources, force=True)
-        self._audio.prepare_feedback(sources, gid)
-        self._audio.test_audio(reward_id)
-
     def _on_line_width_change(self, width: float) -> None:
         self._change_setting("line_width", width)
 
@@ -1433,19 +1342,6 @@ class EEGMeditationApp(App):
             return
         self._change_setting("audio_metric", new_key)
         logger.info(f"Audio threshold metric changed to: {new_key}")
-
-    def _on_feedback_source_change(self, source: str, path: str) -> None:
-        """The global (below-threshold) feedback source chosen in Settings; its path first, so the source shows with
-        it."""
-        self._change_setting("feedback_sound_path", (path or "").strip())
-        self._change_setting("feedback_source", source)
-        logger.info(f"Feedback source -> {source} {self._settings_store.value('feedback_sound_path')!r}")
-
-    def _on_reward_source_change(self, source: str, path: str) -> None:
-        """The above-threshold reward source chosen in Settings; its path first, so the source shows with it."""
-        self._change_setting("reward_sound_path", (path or "").strip())
-        self._change_setting("reward_source", source)
-        logger.info(f"Reward source -> {source} {self._settings_store.value('reward_sound_path')!r}")
 
     def _on_audio_formula_index(self, idx: int) -> None:
         """Pick which formula slot drives audio. Only rebinds the live key when a
@@ -1521,27 +1417,6 @@ class EEGMeditationApp(App):
     def _on_disconnect_alert_toggle(self, active: bool) -> None:
         self._change_setting("disconnect_alert", active)
         logger.info(f"Disconnect alert {'enabled' if active else 'disabled'}")
-
-    def _on_timer_sound_change(self, path: str) -> None:
-        """The custom timer-gong path ("" for the default bell), persisted once typing settles."""
-        self._change_setting("timer_sound", path)
-
-    def _on_test_timer_sound(self) -> None:
-        path = self._timer_state.custom_sound_path
-        logger.debug(f"Test timer sound, path='{path}'")
-        self._warn_missing_sound_files({}, path, force=True)
-        # The gong's end flips the Test button back from Stop (the engine calls it on Kivy's thread).
-        played = self._audio.play_timer_sound(path, on_end=self._settings_screen.timer.notify_timer_sound_test_ended)
-        if not played:
-            report_soft_error("timer_sound_unplayable", "The timer sound can't be played.", app=self, force=True)
-        elif path and played != path and os.path.isfile(path):
-            report_soft_error("timer_sound_unplayable",
-                              f"Custom timer sound can't be played: {path!r} - using the default gong instead.",
-                              app=self, force=True)
-
-    def _on_stop_test_timer_sound(self) -> None:
-        logger.debug("Stop timer test sound")
-        self._audio.stop_timer_bell()
 
     # The current Start, from the press to its ending (_undo_session_setup): a callback queued for an earlier one (the
     # device scan's result, the BT wait's UI and audio) finds it replaced and does nothing.
