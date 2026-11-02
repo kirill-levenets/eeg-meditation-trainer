@@ -92,7 +92,6 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     # All slots invalid by default (no formula set)
 
     app._audio = MagicMock()
-    audio_store(app)
 
     app._timer_state = MagicMock()
     app._timer_state.tick.return_value = False  # never expire
@@ -110,6 +109,7 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     app._ticker = TickThread(lambda dt: None)  # as __init__ leaves it: not started
 
     app._program_run = make_run(app)
+    audio_store(app)  # after the program run and the slots it reads, as build() makes them
     app._program_settings = make_programs(app._db, app._current_user_id)
 
     app._shamatha_threshold = 50
@@ -528,6 +528,6 @@ def test_timer_expiry_updates_existing_session_row():
     app._db.checkpoint_session.assert_called_once()
     (sid, stats, _ticks), kwargs = app._db.checkpoint_session.call_args
     assert sid == 7 and stats["duration"] == 100  # the row the earlier flush created, with the final stats
-    assert stats["score_metric_key"] == app._audio_drive_key() and "score_metric_name" in stats  # #51
+    assert stats["score_metric_key"] == app._audio_metric.drive_key() and "score_metric_name" in stats  # #51
     assert (kwargs["custom_formulas"], kwargs["session_program"], kwargs["engine_version"]) == (
         "[]", "", MetricsEngine.ENGINE_VERSION)

@@ -54,8 +54,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   A setting with one holder elsewhere keeps its `get`, since there is no second copy to keep in step:
   the theme, text size and line colours (their globals, with listeners), the fold states (their widgets), the graph zoom (the live graph);
   the stats view and the marker hotkey (their widgets), the timer's enable and minutes (the Timer section).
-  The audio metric and its formula slot are held too (`_audio_metric_settings`: a stored program slot heals to the baseline at load, an out-of-range slot clamps);
-  behind controllers that can refuse a change while a session runs and show the one in force again (`_show_audio_metric`).
+  The audio metric and its formula slot are held too (`AudioMetric.settings`: a stored program slot heals to the baseline at load, an out-of-range slot clamps);
+  behind controllers that can refuse a change while a session runs and show the one in force again (`AudioMetric.show`).
   The threshold keeps its slider as the one holder of the stored value (the value in force is `_put_threshold_in_force`'s); the device mode keeps `APP.USE_MOCK_DEVICE`, written by `Headset.on_mode_toggle`.
   `_persist_user_setting(key)` (key only — the store reads the live value) catches `sqlite3.Error` → soft error;
   the threshold slider, the timer sound and the held settings with `settle=True` go through `_persist_user_setting_later(key)`:

@@ -12,7 +12,7 @@ def make_formula_settings(app, **deps) -> FormulaSettings:
     live_screen = getattr(app, "_live_screen", None)
     settings_screen = getattr(app, "_settings_screen", None)
     ctx = make_context(app, **context_fields(deps))
-    defaults = {"scoring_locked": lambda key, doing: app._formula_scoring_locked(key, doing)}
+    defaults = {"scoring_locked": lambda key, doing: app._audio_metric.formula_scoring_locked(key, doing)}
     return FormulaSettings(ctx, MagicMock() if settings_screen is None else settings_screen.formulas,
                            MagicMock() if live_screen is None else live_screen.graph, app._formulas,
                            **{**defaults, **deps})

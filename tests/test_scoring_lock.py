@@ -28,8 +28,8 @@ def app(monkeypatch):
     a._formulas = FormulaSlots()
     a._formulas.evaluators[0].set_formula("alpha1 / beta1 * 100")
     a._formulas.evaluators[1].set_formula("theta / alpha1 * 100")
-    audio_store(a)
     a._program_run = make_run(a)
+    audio_store(a)  # after the program run and the slots it reads, as build() makes them
     a._formula_settings = make_formula_settings(a)
     return a
 
@@ -43,7 +43,7 @@ def _refused(a) -> bool:
 
 
 def test_the_audio_metric_cant_change_while_a_session_runs(app):
-    app._on_audio_metric_change("meditation_score")
+    app._audio_metric.on_change("meditation_score")
     assert _refused(app)
     assert app._settings_store.value("audio_metric") == "shamatha_score"
     app._persist_user_setting.assert_not_called()
@@ -52,19 +52,19 @@ def test_the_audio_metric_cant_change_while_a_session_runs(app):
 
 def test_the_audio_metric_changes_when_no_session_runs(app):
     app._live = False
-    app._on_audio_metric_change("meditation_score")
+    app._audio_metric.on_change("meditation_score")
     assert not _refused(app)
     assert app._settings_store.value("audio_metric") == "meditation_score"
 
 
 def test_the_metric_in_force_reselected_is_not_a_change(app):
     # The radio's snap-back re-selects it, which calls the handler again.
-    app._on_audio_metric_change("shamatha_score")
+    app._audio_metric.on_change("shamatha_score")
     assert not _refused(app)
 
 
 def test_switching_to_a_formula_while_a_session_runs_is_refused(app):
-    app._on_audio_metric_change("custom_formula")
+    app._audio_metric.on_change("custom_formula")
     assert _refused(app)
     assert app._settings_store.value("audio_metric") == "shamatha_score"
     assert app._settings_screen.audio_metric == "shamatha_score"
@@ -72,7 +72,7 @@ def test_switching_to_a_formula_while_a_session_runs_is_refused(app):
 
 def test_the_formula_slot_that_drives_the_sound_cant_change_while_a_session_runs(app):
     app._settings_store.change("audio_metric", FORMULA_KEYS[0])
-    app._on_audio_formula_index(1)
+    app._audio_metric.on_formula_index(1)
     assert _refused(app)
     store = app._settings_store
     assert (store.value("audio_metric"), store.value("audio_formula_index")) == (FORMULA_KEYS[0], 0)
@@ -81,7 +81,7 @@ def test_the_formula_slot_that_drives_the_sound_cant_change_while_a_session_runs
 
 def test_picking_a_slot_while_another_metric_drives_is_only_remembered(app):
     # Shamatha drives the sound: the slot choice waits for Custom Formula to be picked, so it changes no scoring.
-    app._on_audio_formula_index(2)
+    app._audio_metric.on_formula_index(2)
     assert not _refused(app)
     store = app._settings_store
     assert (store.value("audio_metric"), store.value("audio_formula_index")) == ("shamatha_score", 2)
@@ -147,7 +147,7 @@ def test_a_program_session_leaves_the_audio_metric_free(app):
     # A program is scored per segment, on the segments' own metrics: the audio control metric plays no part.
     app._program_run.program = MagicMock()
     app._settings_store.change("audio_metric", FORMULA_KEYS[0])
-    app._on_audio_metric_change("meditation_score")
+    app._audio_metric.on_change("meditation_score")
     app._formula_settings.on_slot_change(1, "Drowsy", "theta / beta1 * 100")
     assert not _refused(app)
     assert app._settings_store.value("audio_metric") == "meditation_score"

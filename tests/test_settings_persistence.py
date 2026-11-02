@@ -8,6 +8,7 @@ from app.settings.registry import BOOL, Setting, SettingsStore
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.hooks import wire
 from app.ui.settings_screen import SettingsScreen
+from tests._audio_metric import make_audio_metric
 from tests._program_run import make_run
 
 
@@ -54,9 +55,10 @@ def test_audio_formula_index_switch_copersists_metric():
     # or a reload (which reconciles the index from audio_metric) reverts it.
     app = _app()
     app._settings_screen = MagicMock()
-    store = app._settings_store = SettingsStore(app._db, app._audio_metric_settings())
+    app._audio_metric = make_audio_metric(app)
+    store = app._settings_store = SettingsStore(app._db, app._audio_metric.settings())
     store.change("audio_metric", "custom_formula")  # a FORMULA_KEY -> this slot drives audio
-    app._on_audio_formula_index(1)
+    app._audio_metric.on_formula_index(1)
     stored = {k: v for _, k, v in app._db.writes}
     assert stored == {"audio_formula_index": "1", "audio_metric": "custom_formula_2"}
 
@@ -65,7 +67,7 @@ def test_a_program_slot_is_never_saved_as_the_audio_metric():
     # A program slot outside a program reads 0: constant max noise. Healed on save as well as on load.
     app = _app()
     app._settings_screen = MagicMock()
-    store = app._settings_store = SettingsStore(app._db, app._audio_metric_settings())
+    store = app._settings_store = SettingsStore(app._db, make_audio_metric(app).settings())
     store.change("audio_metric", PROGRAM_FORMULA_KEYS[0])  # nothing writes one today; the save keeps it so
     store.persist(7, "audio_metric")
     assert app._db.writes == [(7, "audio_metric", "shamatha_score")]

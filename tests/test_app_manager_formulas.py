@@ -92,21 +92,21 @@ class TestAudioDriveKey(unittest.TestCase):
     def test_audio_falls_back_to_shamatha_when_bound_slot_invalid(self):
         app = self._app()
         audio_store(app, "custom_formula_2", 1)  # slot 2 bound, but slot 2 has no formula
-        self.assertEqual(app._audio_drive_key(), "shamatha_score")
+        self.assertEqual(app._audio_metric.drive_key(), "shamatha_score")
         app._formulas.evaluators[1].set_formula("alpha + beta")  # now valid
-        self.assertEqual(app._audio_drive_key(), "custom_formula_2")
+        self.assertEqual(app._audio_metric.drive_key(), "custom_formula_2")
 
     def test_audio_drive_key_passthrough_for_non_formula(self):
         app = self._app()
         audio_store(app)
-        self.assertEqual(app._audio_drive_key(), "shamatha_score")
+        self.assertEqual(app._audio_metric.drive_key(), "shamatha_score")
 
     def test_index_tap_does_not_rebind_when_non_formula_active(self):
         # Tapping a slot button while a non-formula metric drives audio only
         # remembers the slot; it must not silently switch the live key.
         app = self._app()
         audio_store(app)
-        app._on_audio_formula_index(1)
+        app._audio_metric.on_formula_index(1)
         self.assertEqual(app._settings_store.value("audio_metric"), "shamatha_score")
         self.assertEqual(app._settings_store.value("audio_formula_index"), 1)
 

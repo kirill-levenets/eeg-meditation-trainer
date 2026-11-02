@@ -291,7 +291,7 @@ def test_choosing_a_saved_formula_renames_its_picker_row_at_once(tmp_path, monke
     db.add_saved_formula(uid, "Calm", "alpha1 * 2")
     graph = _LiveGraph()
     app = types.SimpleNamespace(_db=db, _formulas=FormulaSlots(), _current_user_id=uid, _require_user=lambda _a: uid,
-                                _formula_scoring_locked=lambda _key, _doing: False,
+                                _audio_metric=types.SimpleNamespace(formula_scoring_locked=lambda _key, _doing: False),
                                 _live_screen=types.SimpleNamespace(graph=graph))
     app._formula_settings = make_formula_settings(app)
     series = make_graph_series(app, graphs=lambda: [graph])

@@ -2,6 +2,7 @@
 from unittest.mock import MagicMock
 
 from app.settings.registry import STR, Setting, SettingsStore
+from tests._audio_metric import make_audio_metric
 
 
 def held_store(**values) -> SettingsStore:
@@ -10,11 +11,13 @@ def held_store(**values) -> SettingsStore:
 
 
 def audio_store(app, metric: str = "shamatha_score", index: int = 0) -> SettingsStore:
-    """The app's own audio-metric settings, holding `metric` (and its slot): what the tick, the scoring and the
-    controllers read. The metric in force is shown on the app's Settings screen, a stand-in if it has none."""
+    """The app's AudioMetric (`app._audio_metric`) and its settings, holding `metric` (and its slot): what the tick, the
+    scoring and the controllers read. The metric in force is shown on the app's Settings screen, a stand-in if it has
+    none; a change is held and applied (the store's database is a stand-in, so nothing it persists is read back)."""
     if not hasattr(app, "_settings_screen"):
         app._settings_screen = MagicMock()
-    store = app._settings_store = SettingsStore(MagicMock(), app._audio_metric_settings())
+    app._audio_metric = make_audio_metric(app, change_setting=lambda key, value: app._settings_store.change(key, value))
+    store = app._settings_store = SettingsStore(MagicMock(), app._audio_metric.settings())
     store.change("audio_formula_index", index)
     store.change("audio_metric", metric)
     return store

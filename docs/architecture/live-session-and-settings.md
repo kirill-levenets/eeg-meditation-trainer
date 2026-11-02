@@ -55,7 +55,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   User Profile uses the shared `UserPickerForm`; Data Backup has Backup/Restore buttons.
   Graph series are picked on the graph (the series picker); `_graph_toggles` is only the first-run default set.
   Custom Formula has **three named slots** (Formula 1/2/3, named Custom 1–3 by default), each with name input, expression input, Apply, Save, and per-slot status.
-  In Threshold, a `[1][2][3]` button group below the "Custom Formula" audio-metric radio selects which slot drives the audio (the `on_audio_formula_index` hook → `_on_audio_formula_index` in `app_manager`).
+  In Threshold, a `[1][2][3]` button group below the "Custom Formula" audio-metric radio selects which slot drives the audio (the `on_audio_formula_index` hook → `AudioMetric.on_formula_index`).
   **Timer / Program** has a **Simple | Program** toggle: Simple = single duration + Enable-Timer checkbox;
   Program = the segment editor (`TimerSection`, `settings_sections/timer.py`: `_segments_box`, rows with duration, formula, target, end-cue picker (Chime/Warble), feedback-source picker);
   with it the loaded-program label (`_program_loaded_label`) and the saved-programs library (save/load/delete named programs).

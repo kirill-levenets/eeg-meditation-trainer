@@ -37,10 +37,10 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Slot names reach the graph via `graph.set_series_name(key, name)`.
   Active names and expressions persist as `active_formulas` (JSON list of `{name, formula}`, per user), the audio-driving slot index as `audio_formula_index` (flat KV string, per user).
   At load `formula_slots.read_active` seeds slot 1 from the legacy `custom_formula` scalar if no JSON exists yet.
-  When "Custom Formula" is the audio metric, the held `audio_metric` is `FORMULA_KEYS[audio_formula_index]` (both in the settings store, `_audio_metric_settings`; the metric's apply reconciles the slot).
-  `_audio_drive_key()` resolves the live drive key: the program's transient `ProgramRun.audio_key` while a program runs, else the user's baseline.
+  When "Custom Formula" is the audio metric, the held `audio_metric` is `FORMULA_KEYS[audio_formula_index]` (both in the settings store, `AudioMetric.settings`; the metric's apply reconciles the slot).
+  `AudioMetric.drive_key()` (`app/ui/audio_metric.py`, the app's `_audio_metric`) resolves the live drive key: the program's transient `ProgramRun.audio_key` while a program runs, else the user's baseline.
   It falls back to `shamatha_score` for an invalid (empty or unparsable) formula slot **or** a `PROGRAM_FORMULA_KEYS` value outside a program: both are absent from `metrics`, so they would read 0 → constant max noise.
-  `_baseline_audio_metric(key)` keeps program slots out of the persisted/baseline `audio_metric`, sanitizing on both save and load (load also heals a leaked value).
+  `baseline_audio_metric(key)` keeps program slots out of the persisted/baseline `audio_metric`, sanitizing on both save and load (load also heals a leaked value).
   On the *live metrics* graph the series picker has a **Choose…** button on each custom-formula row, which opens the saved-formula library (`GraphSeries._choose_saved_formula(slot_idx, toggle_btn)`).
   The chosen entry goes to `FormulaSettings.assign_saved(slot_idx, entry)`, which sets the evaluator, the graph name and visibility (`on_slot_change`, persisted) and the Settings UI in one step;
   the picker's row then re-reads its name and state from the graph (`_show_row`, as every row does).
@@ -57,7 +57,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 - `SessionManager.set_active_goal(metric_key)` accrues `time_above_threshold`/`longest_streak` (and `avg_score`) against that metric and the threshold in force; `start_segment(metric_key, target)` against a program segment's target;
   it scores at the formula's own scale, independent of `meditation_threshold`'s 0–100 clamp.
   **A session is scored on the metric that drives the feedback sound (#51).**
-  In a simple session (decided by `ProgramRun.active`, fixed at session start, never the editable `ProgramSettings.mode` toggle) `_session_tick` calls `_score_on_drive_key()` → `set_active_goal(self._audio_drive_key())` every tick;
+  In a simple session (decided by `ProgramRun.active`, fixed at session start, never the editable `ProgramSettings.mode` toggle) `_session_tick` calls `_score_on_drive_key()` → `set_active_goal(self._audio_metric.drive_key())` every tick;
   it feeds the audio from that same resolved key, so scoring and sound can't diverge (an invalid formula's shamatha fallback moves both).
   The legend's `»` marks the scored series through the tick's single `_ui_update` dispatch:
   `_scored_mark(run, key)` leaves the run's `scored_key` untouched while the screen is locked, so the first tick after it marks the change; a program session's segments set the mark instead.
@@ -68,9 +68,9 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   the UI shows their average shamatha and Threshold Used (`app/ui/session_labels.py`).
   SessionManager reports no key and a NULL `avg_score` when no tick was scored (a session stopped within its first tick).
   **A running simple session's scored metric can't change**: `SessionManager` keeps one running sum, time above and streak, so a mid-session switch would mix two metrics' scales under the last one's name.
-  While a simple session runs or connects, `_on_audio_metric_change`, `_on_audio_formula_index` (when a formula slot drives) and `FormulaSettings.on_slot_change` (a formula change to the slot the sound is set to; a name-only rename passes) refuse;
-  they put Settings back (`_show_audio_metric`, `set_formula_slot`).
-  The check is `_scoring_locked(doing)`: not `ProgramRun.active`, then the shared refusal; a program is scored on its segments' metrics, so the control stays free.
+  While a simple session runs or connects, `AudioMetric.on_change`, `on_formula_index` (when a formula slot drives) and `FormulaSettings.on_slot_change` (a formula change to the slot the sound is set to; a name-only rename passes) refuse;
+  they put Settings back (`AudioMetric.show`, `set_formula_slot`).
+  The check is `AudioMetric.scoring_locked(doing)`: not `ProgramRun.active`, then the shared refusal; a program is scored on its segments' metrics, so the control stays free.
   The other slots and, in a simple session, the threshold stay editable.
   Every such refusal is `_refused_while_session_runs(doing, why="")`: "Session in progress" / "<why> Stop the current session before <doing>.";
   the others are the profile switch, a headset switch, both Restore checks, Settings › Audio's Test and a running program's threshold.

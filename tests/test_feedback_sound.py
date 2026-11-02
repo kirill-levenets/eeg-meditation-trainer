@@ -1,6 +1,7 @@
 from app.metrics.formula_slots import FormulaSlots
 from app.session.session_program import SessionProgram
 from app.ui.app_manager import EEGMeditationApp
+from app.ui.audio_metric import baseline_audio_metric
 from app.ui.sound_sources import feedback_plan, source_spec
 from tests._program_run import make_run
 from tests._settings import audio_store, held_store
@@ -74,31 +75,31 @@ def test_on_test_audio_prepares_selected_source(monkeypatch):
 # --- Bug: program-formula key leaked into the persisted audio metric, driving
 #     simple-session volume from a key that's 0 (missing) -> constant max volume.
 def test_baseline_audio_metric_rejects_program_keys():
-    assert EEGMeditationApp._baseline_audio_metric("program_formula_2") == "shamatha_score"
-    assert EEGMeditationApp._baseline_audio_metric("") == "shamatha_score"
-    assert EEGMeditationApp._baseline_audio_metric("native_attention") == "native_attention"
-    assert EEGMeditationApp._baseline_audio_metric("custom_formula") == "custom_formula"
+    assert baseline_audio_metric("program_formula_2") == "shamatha_score"
+    assert baseline_audio_metric("") == "shamatha_score"
+    assert baseline_audio_metric("native_attention") == "native_attention"
+    assert baseline_audio_metric("custom_formula") == "custom_formula"
 
 
 def _drive_app(metric_key, program_active=False, program_key=""):
     app = EEGMeditationApp.__new__(EEGMeditationApp)
-    audio_store(app, metric_key)
     app._program_run = make_run(program=SessionProgram([{"minutes": 1}]) if program_active else None,
                                 audio_key=program_key)
     app._formulas = FormulaSlots()
+    audio_store(app, metric_key)  # its AudioMetric reads the program run and the slots above
     return app
 
 
 def test_drive_key_program_slot_outside_program_falls_back():
     # The leaked saved value: simple session must not drive audio from a 0/missing program key.
-    assert _drive_app("program_formula_2").  _audio_drive_key() == "shamatha_score"
+    assert _drive_app("program_formula_2")._audio_metric.drive_key() == "shamatha_score"
 
 
 def test_drive_key_uses_program_key_during_program():
     app = _drive_app("shamatha_score", program_active=True, program_key="program_formula_2")
-    assert app._audio_drive_key() == "program_formula_2"
+    assert app._audio_metric.drive_key() == "program_formula_2"
 
 
 def test_drive_key_normal_metric_passthrough():
-    assert _drive_app("native_attention")._audio_drive_key() == "native_attention"
-    assert _drive_app("shamatha_score")._audio_drive_key() == "shamatha_score"
+    assert _drive_app("native_attention")._audio_metric.drive_key() == "native_attention"
+    assert _drive_app("shamatha_score")._audio_metric.drive_key() == "shamatha_score"

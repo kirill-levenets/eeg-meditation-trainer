@@ -78,6 +78,7 @@ Read it before changing that subsystem.
   `app/ui/app_context.py` — `AppContext`: what every flow reaches the app through (`_make_context`). → [app-platform](docs/architecture/app-platform.md#flows-and-the-app-context)
   `app/ui/profiles.py` — `ProfileGate` (the blocking profile picker), `Profiles` (Settings → Profile). → [app-platform](docs/architecture/app-platform.md#user-gate-and-profiles)
   `app/ui/startup.py` — the startup profile (`resolve_startup_user`), the theme, text size and line colours the UI is built in; `app/ui/toast.py` — the toast.
+  `app/ui/audio_metric.py` `AudioMetric` — which metric drives the sound, its Settings controls, their lock while a session is scored on it. → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
 - `app/ui/theme.py`, `app/ui/widgets/` — palette `C`/`F`/`S`, themed widgets, modals, legends, overlays.
   `app/ui/hooks.py` — `Hook`/`wire()`: the handlers the app plugs into a widget. → [ui-theme](docs/architecture/ui-theme.md)
 - `app/ui/raw_eeg_screen.py` — `ScrollableGraphWidget`, the one time-series graph class;
@@ -139,11 +140,11 @@ The linked file explains the mechanism.
   A check that ends it on the tick thread (stale data, the recording limit) freezes it there (`_end_from_tick`: pause, mute, checkpoint, stop the tick) and saves once on main;
   every queued finish runs only for its own run. → [session](docs/architecture/session.md#persistence)
 - While a session runs or connects (`_session_pipeline_live()`), anything that would break it is refused through `_refused_while_session_runs(doing)`:
-  profile switch, Restore, the scored metric (`_scoring_locked`), a running program's threshold, Settings › Audio's Test. → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
+  profile switch, Restore, the scored metric (`AudioMetric.scoring_locked`), a running program's threshold, Settings › Audio's Test. → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
 - The Session screen shows one profile's session (`ShownSession`, `app/ui/shown_session.py`, the app's `_shown`; its `owner` set at Start):
   picking another profile drops it through `ShownSession.drop`; re-picking the shown one (allowed mid-session) resets nothing.
   Every end-card close goes through `ShownSession.close`. → [live-session-and-settings](docs/architecture/live-session-and-settings.md#session-screen)
-- **A session is scored on the metric that drives the feedback sound** (`_audio_drive_key()`).
+- **A session is scored on the metric that drives the feedback sound** (`AudioMetric.drive_key()`, `app/ui/audio_metric.py`, the app's `_audio_metric`).
   The Settings threshold takes effect only through `_put_threshold_in_force` (the slider and profile load go through `_apply_threshold`). → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
 - `ProgramRun.audio_key` is transient and never written to the stored `audio_metric`;
   `PROGRAM_FORMULA_KEYS` are never persisted to `graph_series_*` or the baseline audio metric, nor a program's series set (live or a session detail's) as the profile's selection.

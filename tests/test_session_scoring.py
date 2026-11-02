@@ -32,12 +32,12 @@ SHAMATHA_HIGH = _ticks(shamatha_score=[80, 85, 90, 20, 95], meditation_score=[10
 
 def _app(metric_key: str = "shamatha_score", formulas=()):
     app = EEGMeditationApp.__new__(EEGMeditationApp)
-    audio_store(app, metric_key)
     app._program_run = make_run()
     app._program_settings = make_programs()
     app._formulas = FormulaSlots()
     if formulas:
         app._formulas.evaluators = list(formulas)
+    audio_store(app, metric_key)  # after the program run and the slots it reads, as build() makes them
     app._live_screen = MagicMock()
     app._live_screen.graph.series_name.side_effect = lambda k: {"shamatha_score": "Shamatha",
                                                                 "meditation_score": "Meditation",
@@ -177,7 +177,7 @@ def test_the_saved_stats_carry_the_scored_metric_and_its_name():
 @pytest.mark.parametrize("name,recorded", [("Evening program", "Evening program"), ("", "Program")])
 def test_a_program_session_records_program_its_name_and_no_average(name, recorded):
     app = _app()
-    app._program_run = make_run(program=MagicMock(segments=[{"duration": 60}]), name=name)
+    app._program_run.program, app._program_run.name = MagicMock(segments=[{"duration": 60}]), name
     stats = app._with_score(_run(app, SHAMATHA_HIGH))
     assert (stats["score_metric_key"], stats["score_metric_name"], stats["avg_score"]) == ("program", recorded, None)
 
@@ -185,7 +185,7 @@ def test_a_program_session_records_program_its_name_and_no_average(name, recorde
 def test_a_program_session_keeps_the_name_of_the_program_it_ran():
     # Settings loads or saves another program during the session: the editor's name changes, not the run's.
     app = _app()
-    app._program_run = make_run(program=MagicMock(segments=[{"duration": 60}]), name="Evening program")
+    app._program_run.program, app._program_run.name = MagicMock(segments=[{"duration": 60}]), "Evening program"
     app._program_settings.name = "Morning program"
     stats = app._with_score(_run(app, SHAMATHA_HIGH))
     assert stats["score_metric_name"] == "Evening program"
@@ -277,7 +277,7 @@ def test_a_simple_session_tick_scores_on_the_feedback_metric_and_marks_it():
 def test_a_program_session_tick_leaves_the_goal_to_the_program():
     app = _make_tick_app()
     app._program_settings.mode = "program"
-    app._program_run = make_run(app, program=MagicMock())
+    app._program_run.program = MagicMock()
     app._program_run.tick = MagicMock()
     _drive_tick(app, _raw_sample(), _metrics())
     app._session_manager.set_active_goal.assert_not_called()
@@ -286,7 +286,6 @@ def test_a_program_session_tick_leaves_the_goal_to_the_program():
 def test_program_mode_with_no_usable_program_is_scored_like_a_simple_session():
     app = _make_tick_app()
     app._program_settings.mode = "program"  # the Settings toggle; the session started without a program
-    app._program_run = make_run(app)
     app._settings_store.change("audio_metric", "shamatha_score")
     _drive_tick(app, _raw_sample(), _metrics())
     app._session_manager.set_active_goal.assert_called_with("shamatha_score")
@@ -295,7 +294,7 @@ def test_program_mode_with_no_usable_program_is_scored_like_a_simple_session():
 def test_one_tick_scores_and_sounds_the_same_metric():
     app = _make_tick_app()
     app._program_settings.mode = "simple"
-    app._audio_drive_key = MagicMock(side_effect=["shamatha_score", "meditation_score"])  # changes mid-tick
+    app._audio_metric.drive_key = MagicMock(side_effect=["shamatha_score", "meditation_score"])  # changes mid-tick
     metrics = {**_metrics(), "shamatha_score": 11.0, "meditation_score": 77.0}
     _drive_tick(app, _raw_sample(), metrics)
     app._session_manager.set_active_goal.assert_called_with("shamatha_score")
