@@ -50,6 +50,8 @@ from app.settings.registry import (
     STR,
     Setting,
     SettingsStore,
+    held,
+    kept,
     stored_value,
 )
 from app.storage.database import DatabaseManager
@@ -1606,28 +1608,9 @@ class EEGMeditationApp(App):
         popup.open()
 
     def _build_settings_store(self) -> None:
-        """Build the settings registry; call once in build() before any user load, as get() snapshots defaults."""
+        """Build the settings registry; call once in build() before any user load, as a kept setting's default is its
+        holder's value now. A profile load applies them in this order."""
         ss = self._settings_screen
-        ls = self._live_screen
-        settings: list[Setting] = []
-
-        def set_timer_enabled(v):
-            self._timer_state.set_enabled(v); ss.timer.timer_enabled = v
-
-        def set_timer_minutes(v):
-            self._timer_state.set_duration(v); ss.timer.timer_minutes = v
-
-        def apply_timer_sound(v):
-            self._timer_state.set_custom_sound_path(v); ss.timer.timer_sound_path = v
-
-        def apply_sinking(v):
-            self._audio.sinking_alert_enabled = v; ss.audio._sinking_alert_cb.active = v
-
-        def apply_subtle(v):
-            self._audio.subtle_alert_enabled = v; ss.audio._subtle_alert_cb.active = v
-
-        def apply_disconnect(v):
-            self._audio.disconnect_alert_enabled = v; ss.audio._disconnect_alert_cb.active = v
 
         def set_threshold(v):
             ss.threshold = v
@@ -1636,66 +1619,93 @@ class EEGMeditationApp(App):
         def set_use_mock(v):
             APP.USE_MOCK_DEVICE = v; ss.device._device_mode_cb.active = v
 
-        def apply_line_width(v):
-            ss.display._line_width_slider.value = v; self._apply_line_width(v)
+        self._settings_store = SettingsStore(self._db, [
+            *self._timer_settings(), *self._alert_settings(), *self._fold_settings(),
+            kept("threshold", INT, lambda: int(ss.threshold), set_threshold),
+            kept("use_mock", BOOL, lambda: APP.USE_MOCK_DEVICE, set_use_mock),
+            *self._sound_settings(), *self._display_settings()])
 
-        def apply_rotation(v):
-            ss.display._current_rotation = v
-            ss.display._rotate_btn.text = f"Rotate Screen ({v}°)"
-            Window.rotation = v
+    def _timer_settings(self) -> list[Setting]:
+        timer = self._settings_screen.timer
 
+        def set_timer_enabled(v):
+            self._timer_state.set_enabled(v); timer.timer_enabled = v
+
+        def set_timer_minutes(v):
+            self._timer_state.set_duration(v); timer.timer_minutes = v
+
+        def apply_timer_sound(v):
+            self._timer_state.set_custom_sound_path(v); timer.timer_sound_path = v
+
+        return [kept("timer_enabled", BOOL, lambda: timer.timer_enabled, set_timer_enabled),
+                kept("timer_minutes", INT, lambda: timer.timer_minutes, set_timer_minutes),
+                held("timer_sound", STR, timer.timer_sound_path, apply_timer_sound, settle=True)]
+
+    def _alert_settings(self) -> list[Setting]:
+        audio = self._settings_screen.audio
+
+        def apply_sinking(v):
+            self._audio.sinking_alert_enabled = v; audio._sinking_alert_cb.active = v
+
+        def apply_subtle(v):
+            self._audio.subtle_alert_enabled = v; audio._subtle_alert_cb.active = v
+
+        def apply_disconnect(v):
+            self._audio.disconnect_alert_enabled = v; audio._disconnect_alert_cb.active = v
+
+        return [held("sinking_alert", BOOL, audio._sinking_alert_cb.active, apply_sinking),
+                held("subtle_alert", BOOL, audio._subtle_alert_cb.active, apply_subtle),
+                held("disconnect_alert", BOOL, audio._disconnect_alert_cb.active, apply_disconnect)]
+
+    def _fold_settings(self) -> list[Setting]:
+        """What each screen keeps folded: History's chart, a session detail's What-if and band power."""
+        hs, ds = self._history_screen, self._diary_screen
+        return [kept("history_chart_collapsed", BOOL, lambda: hs.chart_collapsed, hs.set_chart_collapsed),
+                kept("what_if_collapsed", BOOL, lambda: ds.what_if.collapsed, ds.what_if.set_collapsed),
+                kept("band_power_collapsed", BOOL, lambda: ds.band_collapsed, ds.set_band_collapsed)]
+
+    def _sound_settings(self) -> list[Setting]:
+        """The metric that drives the sound, and the below and reward sources; a source's apply reads its path, so
+        each pair applies source first."""
+        audio, store = self._settings_screen.audio, lambda key: self._settings_store.value(key)
 
         def apply_feedback_source(v):
-            ss.audio.set_feedback_source(v, self._settings_store.value("feedback_sound_path"))
+            audio.set_feedback_source(v, store("feedback_sound_path"))
 
         def apply_feedback_path(v):
-            ss.audio.set_feedback_source(self._settings_store.value("feedback_source"), v)
+            audio.set_feedback_source(store("feedback_source"), v)
 
         def apply_reward_source(v):
-            ss.audio.set_reward_source(v, self._settings_store.value("reward_sound_path"))
+            audio.set_reward_source(v, store("reward_sound_path"))
 
         def apply_reward_path(v):
-            ss.audio.set_reward_source(self._settings_store.value("reward_source"), v)
+            audio.set_reward_source(store("reward_source"), v)
 
-        def add(key, codec, get, set_):
-            settings.append(Setting(key, get(), codec[0], codec[1], get, set_))
+        return [*self._audio_metric_settings(),
+                held("feedback_source", STR, "noise", apply_feedback_source),
+                held("feedback_sound_path", STR, "", apply_feedback_path),
+                held("reward_source", STR, "none", apply_reward_source),  # the above-threshold channel: off by default
+                held("reward_sound_path", STR, "", apply_reward_path)]
 
-        def hold(key, codec, default, apply_, settle=False):
-            settings.append(Setting(key, default, codec[0], codec[1], None, apply_, settle))
+    def _display_settings(self) -> list[Setting]:
+        display, ls = self._settings_screen.display, self._live_screen
 
-        add("timer_enabled", BOOL, lambda: ss.timer.timer_enabled, set_timer_enabled)
-        add("timer_minutes", INT, lambda: ss.timer.timer_minutes, set_timer_minutes)
-        hold("timer_sound", STR, ss.timer.timer_sound_path, apply_timer_sound, settle=True)
-        hold("sinking_alert", BOOL, ss.audio._sinking_alert_cb.active, apply_sinking)
-        hs = self._history_screen
-        add("history_chart_collapsed", BOOL, lambda: hs.chart_collapsed, hs.set_chart_collapsed)
-        what_if = self._diary_screen.what_if
-        add("what_if_collapsed", BOOL, lambda: what_if.collapsed, what_if.set_collapsed)
-        ds = self._diary_screen
-        add("band_power_collapsed", BOOL, lambda: ds.band_collapsed, ds.set_band_collapsed)
-        hold("subtle_alert", BOOL, ss.audio._subtle_alert_cb.active, apply_subtle)
-        hold("disconnect_alert", BOOL, ss.audio._disconnect_alert_cb.active, apply_disconnect)
-        add("threshold", INT, lambda: int(ss.threshold), set_threshold)
-        add("use_mock", BOOL, lambda: APP.USE_MOCK_DEVICE, set_use_mock)
-        hold("line_width", FLOAT, ss.display._line_width_slider.value, apply_line_width, settle=True)
-        hold("rotation", INT, ss.display._current_rotation, apply_rotation)
-        add("graph_zoom_seconds", FLOAT, self._saved_zoom_seconds, self._apply_saved_zoom)
-        # audio_formula_index BEFORE audio_metric: metric reconciles the index when it's a slot.
-        settings += self._audio_metric_settings()
-        hold("feedback_source", STR, "noise", apply_feedback_source)
-        hold("feedback_sound_path", STR, "", apply_feedback_path)
-        hold("reward_source", STR, "none", apply_reward_source)  # the above-threshold channel: off by default
-        hold("reward_sound_path", STR, "", apply_reward_path)
-        add("marker_hotkey", STR, lambda: ss.display.marker_hotkey,
-            lambda v: setattr(ss, "marker_hotkey", v))
-        add("stats_view_mode", STR, lambda: getattr(ls, "_stats_mode", "live"),
-            self._apply_stats_mode)
-        # Its default is the seed, not the startup profile's theme the UI was built in.
-        settings.append(theme_setting(self._theme_seed))
-        settings.append(text_size_setting())
-        settings.append(line_colours_setting())
+        def apply_line_width(v):
+            display._line_width_slider.value = v; self._apply_line_width(v)
 
-        self._settings_store = SettingsStore(self._db, settings)
+        def apply_rotation(v):
+            display._current_rotation = v
+            display._rotate_btn.text = f"Rotate Screen ({v}°)"
+            Window.rotation = v
+
+        return [held("line_width", FLOAT, display._line_width_slider.value, apply_line_width, settle=True),
+                held("rotation", INT, display._current_rotation, apply_rotation),
+                kept("graph_zoom_seconds", FLOAT, self._saved_zoom_seconds, self._apply_saved_zoom),
+                kept("marker_hotkey", STR, lambda: display.marker_hotkey,
+                     lambda v: setattr(self._settings_screen, "marker_hotkey", v)),
+                kept("stats_view_mode", STR, lambda: getattr(ls, "_stats_mode", "live"), self._apply_stats_mode),
+                # Its default is the seed, not the startup profile's theme the UI was built in.
+                theme_setting(self._theme_seed), text_size_setting(), line_colours_setting()]
 
     def _audio_metric_settings(self) -> list[Setting]:
         """The metric that drives the sound and its formula slot; the slot first: the metric reconciles it."""

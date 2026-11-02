@@ -39,6 +39,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 - **Per-user settings registry** (`app/settings/registry.py`):
   each scalar per-user setting is declared once as a `Setting(key, default, parse, serialize, get, set, settle=False)` descriptor,
   built in `_build_settings_store()` (in `build()`, after the screens exist and BEFORE any user load, so each default is snapshotted from the app's constructed initial state).
+  It joins one list per Settings section (`_timer_settings`, `_alert_settings`, `_fold_settings`, `_sound_settings`, `_display_settings`), made with `kept` (another object holds the value) or `held` (the store holds it);
+  a load applies them in that order, which matters only within a pair that reads each other (a sound source and its path, the formula slot and the audio metric).
   They are the threshold, audio metric/index, feedback+reward source/path, alert toggles, timer enable/minutes/sound, line width and colours, rotation, graph zoom, marker hotkey, stats mode, device mock, the fold states (History chart, What-if, band power), **theme** and text size.
   `SettingsStore.load(uid)` applies each setting as its parsed stored value **or its default when absent/invalid**
   — it ALWAYS applies a value, so a fresh/partial user can never inherit the previously-active user's in-memory value.

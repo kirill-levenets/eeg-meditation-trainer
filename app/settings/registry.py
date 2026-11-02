@@ -25,6 +25,16 @@ FLOAT = (lambda s: float(s), lambda v: str(float(v)))
 STR = (lambda s: s, lambda v: "" if v is None else str(v))
 
 
+def kept(key: str, codec: tuple, get: Callable[[], Any], set_: Callable[[Any], None]) -> Setting:
+    """A setting another object holds (its widget, a screen): its default is that holder's value when registered."""
+    return Setting(key, get(), codec[0], codec[1], get, set_)
+
+
+def held(key: str, codec: tuple, default: Any, apply: Callable[[Any], None], settle: bool = False) -> Setting:
+    """A setting the store holds, applied to its consumers and its widget on each change."""
+    return Setting(key, default, codec[0], codec[1], None, apply, settle)
+
+
 def stored_value(db, uid: int | None, s: Setting) -> Any:
     """`s` for `uid`: its stored value if present and valid, else its default."""
     raw = db.get_user_setting(uid, s.key) if uid else None
