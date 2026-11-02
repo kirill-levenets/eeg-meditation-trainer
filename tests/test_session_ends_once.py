@@ -108,3 +108,14 @@ def test_a_stale_stop_still_says_why(monkeypatch):
     _drive_tick(app, _raw_sample(), _metrics())
     _unlock(queued)
     assert any("No EEG data" in c.args[0] for c in app._live_screen.show_alert.call_args_list)
+
+
+def test_a_freeze_mutes_before_its_checkpoint(monkeypatch):
+    # The checkpoint may wait on the write lock: the noise must not play on through it.
+    app, _queued, _reasons = _locked_app(monkeypatch)
+    order = []
+    app._audio.mute.side_effect = lambda: order.append("mute")
+    app._db.checkpoint_session.side_effect = lambda *a, **k: (order.append("checkpoint"), 7)[1]
+    app._real_stream.seconds_since_last_packet = app._watch.STALE_DATA_THRESHOLD + 1
+    _drive_tick(app, _raw_sample(), _metrics())
+    assert order == ["mute", "checkpoint"]

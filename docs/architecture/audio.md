@@ -55,7 +55,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Both zones are 0 exactly at the threshold → clean cross-fade.
   The ramp loop drives **every** prepared player toward its role target (below→`_target_volume`, reward→`_reward_target_volume`, others→0); volume-only, tick/lock-safe.
   A channel source of `"none"`/`""` (`source_spec`→`("none","")`) instantiates no player; `prepare_feedback` skips `kind=="none"`, and `_resolve_active("" | "none")` returns `""` so a None **below** channel never grabs the reward player.
-  `_teardown_feedback_players` (run by `prepare_feedback` and `stop`) resets `_reward_feedback`, so `set_reward` must be called **after** `prepare_feedback` at session start (the order `_start_session_common` uses).
+  `_teardown_feedback_players` (run by `prepare_feedback` and `stop`) resets `_reward_feedback`, so `set_reward` must be called **after** `prepare_feedback` at session start (the order `SoundSources.prepare_session` uses).
   Reward is **global only** — programs keep per-segment switching on the below channel; reward stays armed across segments.
   `SoundSources.reward_id()` resolves the reward source: a custom selection with no file is silent, where the below channel falls back to rain.
   Persisted per-user: `reward_source` (`"none"`/`"noise"`/`"tone"`/`"heartbeat"`/`"custom"`, default `"none"`) + `reward_sound_path`; `SoundSources.on_reward_source_change` mirrors `on_feedback_source_change`.

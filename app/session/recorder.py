@@ -2,15 +2,26 @@
 session's row and the buffered rows in one transaction."""
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from app.config import APP
 from app.logger import logger
 from app.session.manager import SessionState
 
 
+@dataclass(frozen=True)
+class RecordedTick:
+    """A tick as the session recorded it: its metrics, the headset's sample, its score and whether it carries a marker."""
+
+    metrics: dict
+    raw_sample: dict
+    score: dict
+    marked: bool
+
+
 class SessionRecorder:
-    """A session reaches the DB only through checkpoint(): at the 60 s flush, on leaving the app, at a backup, when a
-    tick-thread check ends it, and at the final save. A process killed between checkpoints keeps the row and the data of the last one, which agree. Any
+    """A session reaches the DB only through checkpoint(): at the 60 s flush, on leaving the app, at a backup, when
+    a tick-thread check ends it, and at the final save. A process killed between checkpoints keeps the row and the data of the last one, which agree. Any
     thread, no Kivy."""
 
     def __init__(self, db, session_manager, *, with_score: Callable[[dict], dict],

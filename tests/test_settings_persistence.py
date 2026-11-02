@@ -1,6 +1,7 @@
 """Change-callbacks persist through the settings registry; a settings save never touches the live timer."""
 from unittest.mock import MagicMock
 
+from app.metrics.formula_slots import FORMULA_KEYS
 from app.session.manager import SessionManager
 from app.session.session_program import PROGRAM_FORMULA_KEYS
 from app.session.timer_state import TimerState
@@ -110,3 +111,16 @@ def test_the_formula_slot_switch_tells_the_app_and_shows_a_slot_set_elsewhere():
     assert (picked, screen.audio_formula_index, screen._slot_toggle.chosen) == ([2], 2, 2)
     screen.audio_formula_index = 0  # a profile's load
     assert (picked, screen._slot_toggle.chosen) == ([2], 0)
+
+
+def test_a_stored_formula_metric_loads_its_slot_and_the_load_writes_nothing():
+    app = _app()
+    app._loading_settings = True  # as _load_user_settings holds it
+    app._db.writes.append((7, "audio_metric", FORMULA_KEYS[1]))
+    app._settings_screen = MagicMock()
+    app._audio_metric = make_audio_metric(app)
+    store = app._settings_store = SettingsStore(app._db, app._audio_metric.settings())
+    store.load(7)
+    assert (store.value("audio_metric"), store.value("audio_formula_index")) == (FORMULA_KEYS[1], 1)
+    assert app._db.writes == [(7, "audio_metric", FORMULA_KEYS[1])]  # nothing of the load's own
+    assert app._settings_screen.audio_formula_index == 1  # Settings shows the slot that drives the sound

@@ -302,7 +302,7 @@ def test_the_settings_test_button_hears_the_gongs_end():
     ("gong.xyz", True, "", "The timer sound can't be played."),  # nothing rang
     ("", False, "", "The timer sound can't be played."),
     ("gong.xyz", True, "custom", None),
-    ("gong.xyz", False, "default", None),  # missing: _warn_missing_sound_files says so
+    ("gong.xyz", False, "default", None),  # missing: SoundSources.warn_missing says so
     ("", False, "default", None),
 ])
 def test_the_settings_test_says_what_it_could_not_play(monkeypatch, tmp_path, custom, exists, played, said):

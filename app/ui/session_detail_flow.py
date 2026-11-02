@@ -118,11 +118,6 @@ class SessionDetailFlow:
         series = self._ctx.db.recompute_formula_series(session_id, evaluators, rows) if evaluators else {}
         return series, names
 
-    def inject_session_formulas(self, session_id: int, session: dict) -> None:
-        """Recompute + apply the session's recorded formulas (synchronous)."""
-        series, names = self.compute_session_formulas(session_id, session)
-        self._diary_screen.set_session_formulas(series, names)
-
     def on_diary_back(self) -> None:
         """Return from diary detail to previous screen (usually history)."""
         self._ctx.switch_screen(self._session_detail_back)

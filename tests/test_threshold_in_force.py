@@ -26,6 +26,7 @@ from tests._program_settings import make_programs
 from tests._recorder import make_recorder
 from tests._session_run import run_in
 from tests._shown_session import make_shown
+from tests._sound_sources import make_sounds
 from tests.test_bt_wait_reconnect import wait  # noqa: F401  (fixture)
 from tests.test_resume_mirror import _drive_tick, _make_tick_app, _metrics, _raw_sample
 from tests.test_session_detail_open import _frames, app, db  # noqa: F401  (fixtures)
@@ -292,9 +293,10 @@ def _start(program: bool, monkeypatch, prepare=None, **before) -> EEGMeditationA
     a._program_settings = make_programs()
     a._program_settings.segments = prog.segments
     a._program_settings.mode = "program" if program else "simple"
-    a._timer_state = MagicMock()
+    a._timer_state = MagicMock(custom_sound_path="")
     a._keep_awake = MagicMock()
-    a._sounds = MagicMock(**{"prepare_session.return_value": ["noise", "noise"] if program else []})
+    a._sounds = make_sounds(a, setting={"feedback_source": "noise", "feedback_sound_path": "", "reward_source": "none",
+                                        "reward_sound_path": ""}.__getitem__)  # over the mock audio
     a._eeg_stream = MagicMock()
     a._live_screen.graph.set_threshold_steps([(0, 50)])  # the last session's steps
     for name, value in before.items():

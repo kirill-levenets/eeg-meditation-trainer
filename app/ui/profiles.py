@@ -153,6 +153,7 @@ class ProfileGate:
         self._offer_power_exemption()
         logger.info(f"First run complete: {what}")
 
+
 class Profiles:
     """Settings → Profile: the profile list, a switch, a create, a delete. A session's part in a switch or a delete is
     the app's, through the callables given; a delete that leaves no active profile opens the gate."""

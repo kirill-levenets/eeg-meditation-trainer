@@ -3,7 +3,6 @@ import sqlite3
 import time
 from collections.abc import Callable
 from datetime import datetime as _dt
-from typing import Optional
 
 from kivy.app import App
 from kivy.clock import Clock
@@ -33,7 +32,7 @@ from app.metrics.formula_slots import (
 )
 from app.metrics.noise_detector import PowerLineDetector
 from app.session.manager import SessionManager, SessionState, elapsed_clock
-from app.session.recorder import SessionRecorder
+from app.session.recorder import RecordedTick, SessionRecorder
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
     segment_target,
@@ -131,13 +130,13 @@ class EEGMeditationApp(App):
         self._recorder: SessionRecorder = SessionRecorder(
             self._db, self._session_manager, with_score=lambda stats: self._with_score(stats),
             row_fields=lambda: self._session_row_fields())
-        self._current_user_id: Optional[int] = None
+        self._current_user_id: int | None = None
         # True while _load_user_settings applies values, so its change callbacks don't re-persist them.
         self._loading_settings: bool = False
         self._settle_triggers: dict = {}  # input name -> its settle trigger (_after_settle)
         self._settle_fns: dict = {}  # input name -> the function its trigger runs (the latest one given)
         self._formulas: FormulaSlots = FormulaSlots()
-        self.serial_device_override: Optional[str] = None
+        self.serial_device_override: str | None = None
         self._keep_awake: KeepAwake = KeepAwake()  # held from a session's setup to its ending
 
     def _persist_user_setting(self, key: str) -> None:
@@ -498,7 +497,7 @@ class EEGMeditationApp(App):
             self._shown.drop(keep_notes=False)
         self._history.mark_dirty()
 
-    def _restore_last_user(self) -> Optional[int]:
+    def _restore_last_user(self) -> int | None:
         """Restore the last selected user; return the resolved uid, or None when
         the app must prompt (no/stale/corrupt last_user_id). build() opens the
         blocking user gate on None — the app is never left usable with no user."""
@@ -829,7 +828,7 @@ class EEGMeditationApp(App):
                 "session_program": self._program_run.segments_json(), "engine_version": MetricsEngine.ENGINE_VERSION,
                 "started_at": self._session_manager.started_at or None}
 
-    def _finalize_stop_ui(self, stats: dict, session_id: Optional[int]) -> None:
+    def _finalize_stop_ui(self, stats: dict, session_id: int | None) -> None:
         """Main-thread UI teardown after a session has been persisted."""
         # Reload the live graph from the mirror buffers so it shows the FULL
         # session (the locked portion never reached the live graph via the
@@ -957,25 +956,24 @@ class EEGMeditationApp(App):
         else:
             drive_key = mark = self._score_on_drive_key()
 
-        recorded = self._record_tick(run, raw_sample, metrics)
-        if recorded is None:
+        tick = self._record_tick(run, raw_sample, metrics)
+        if tick is None:
             return
-        score, marker_pending = recorded
         self._audio.update(metrics.get(drive_key, 0))
         if run.tick_count > 10:
             self._audio.update_sinking(metrics.get("sinking", 0))
             self._audio.update_subtle_distraction(metrics.get("subtle_distraction", 0))
 
-        self._shown.mirror.record(metrics, score, raw_sample)  # kept even while the screen is locked
-        self._show_tick(run, metrics, raw_sample, score, marker_pending, mark)
+        self._shown.mirror.record(metrics, tick.score, raw_sample)  # kept even while the screen is locked
+        self._show_tick(run, tick, mark)
         if self._timer_state.tick(APP.UPDATE_FREQUENCY):  # a pure counter, no UI
             self._end_by_timer(run)
             return
         self._recorder.flush_tick()  # DB opened with check_same_thread=False
 
-    def _record_tick(self, run: SessionRun, raw_sample: dict, metrics: dict) -> tuple[dict, bool] | None:
+    def _record_tick(self, run: SessionRun, raw_sample: dict, metrics: dict) -> RecordedTick | None:
         """Tick thread: record the tick, raw and computed, with a pending marker in its row before a checkpoint can write
-        it; (its score, whether it is marked), or None if the session paused or stopped while the tick was read."""
+        it; None if the session paused or stopped while the tick was read."""
         full_record = {**raw_sample, **metrics}
         marked = run.pending_marker
         if marked:
@@ -985,7 +983,7 @@ class EEGMeditationApp(App):
         if score is None:  # not part of the session: the marker goes on the next recorded tick
             run.pending_marker |= marked
             return None
-        return score, marked
+        return RecordedTick(metrics, raw_sample, score, marked)
 
     def _log_tick(self, run: SessionRun, raw_sample: dict, metrics: dict) -> None:
         """Log the raw sample and the metrics every 10 ticks (~5s at 2Hz)."""
@@ -1002,9 +1000,9 @@ class EEGMeditationApp(App):
                      f"dist={metrics.get('distraction', 0):.0f} "
                      f"native_med={native_med:.0f}{bat_str}")
 
-    def _show_tick(self, run: SessionRun, metrics: dict, raw_sample: dict, score: dict, marker_pending: bool,
-                   mark: str | None) -> None:
+    def _show_tick(self, run: SessionRun, tick: RecordedTick, mark: str | None) -> None:
         """Tick thread: queue the tick's Session screen update for the main thread, unless the screen is locked."""
+        metrics, score = tick.metrics, tick.score
         elapsed_fmt = self._session_manager.elapsed_formatted
 
         # Debounced shamatha-zone crossing (tick thread) — only the change is
@@ -1018,7 +1016,7 @@ class EEGMeditationApp(App):
         sham_changed = run.shamatha_active != sham_prev
 
         def _ui_update(
-            m=metrics, rs=raw_sample, ef=elapsed_fmt, mp=marker_pending,
+            m=metrics, rs=tick.raw_sample, ef=elapsed_fmt, mp=tick.marked,
             sa=run.shamatha_active, sc=sham_changed, sk=self._scored_mark(run, mark), tg=score["score_target"],
             on=score["score_key"], live=self._session_manager.live_score(),
         ) -> None:
@@ -1192,7 +1190,7 @@ class EEGMeditationApp(App):
         self._session_manager.set_active_goal(key)
         return key
 
-    def _scored_mark(self, run: SessionRun, key: Optional[str]) -> Optional[str]:
+    def _scored_mark(self, run: SessionRun, key: str | None) -> str | None:
         """The scored series for the legend to mark this tick: only on a change, and only while the UI is showing (a
         change during a screen lock is picked up by the first tick after it)."""
         if key is None or key == run.scored_key or self._is_paused:
@@ -1223,7 +1221,7 @@ class EEGMeditationApp(App):
         self._persist_user_setting("theme")
         logger.info(f"Theme changed to: {theme_name}")
 
-    def _require_user(self, action: str) -> Optional[int]:
+    def _require_user(self, action: str) -> int | None:
         """Return the active uid, or explain why the action can't run and return
         None. Per-user handlers call this instead of a bare silent `return` — the
         hard gate should make None unreachable, this is the defense-in-depth."""
@@ -1257,6 +1255,7 @@ class EEGMeditationApp(App):
     # The current Start, from the press to its ending (_undo_session_setup): a callback queued for an earlier one (the
     # device scan's result, the BT wait's UI and audio) finds it replaced and does nothing.
     _run: SessionRun | None = None
+
     def _running_session_id(self) -> int | None:
         """The running session's row, which History lists and Settings counts only once it ends: it exists from the
         first checkpoint, with stats as of that checkpoint (the ending marks History dirty)."""
