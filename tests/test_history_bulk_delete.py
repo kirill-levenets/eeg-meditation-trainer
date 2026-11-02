@@ -18,7 +18,6 @@ from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.history_screen import HistoryScreen
 from app.ui.hooks import wire
-from app.ui.live_mirror import LiveMirror
 from app.ui.theme import StyledButton
 from app.ui.widgets.loading_overlay import LoadingOverlay
 from tests._history_flow import make_history_flow
@@ -131,7 +130,6 @@ def _app(db, monkeypatch) -> tuple[EEGMeditationApp, _Deferred, list]:
     app._db = db
     app._history_screen = MagicMock()
     app._recorder = make_recorder(app)
-    app._mirror = LiveMirror()
     app._live_screen = MagicMock()
     app._live_screen.summary_session_id = None
     app._audio = MagicMock()

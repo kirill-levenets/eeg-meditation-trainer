@@ -127,6 +127,6 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `KeepAwake` (`app/keep_awake.py`, the app's `_keep_awake`) calls its static `start`/`stop`, together with the wake lock and the keep-screen-on flag:
   `hold()` at a session's setup, `release()` at its ending or an abandoned start; `on_stop` stops only the service.
 - While the app is paused (screen locked) the tick skips its per-tick UI update: N minutes locked would queue ~120·N full graph redraws, which froze the screen on resume.
-  The tick thread records every tick into the session-lifetime mirror instead (`LiveMirror` in `app/ui/live_mirror.py`, the app's `_mirror`, no Kivy).
+  The tick thread records every tick into the session-lifetime mirror instead (`LiveMirror` in `app/ui/live_mirror.py`, held by the shown session: `_shown.mirror`, no Kivy).
   `LiveMirror.reload_into` reloads the live graphs from it in one batch on resume (while the session runs) and at the session's end (`_finalize_stop_ui`):
   without it, after a session that ended during a lock, the graph would show only the pre-lock seconds while History shows the real duration.

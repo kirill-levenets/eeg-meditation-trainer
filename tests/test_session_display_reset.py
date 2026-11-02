@@ -6,7 +6,6 @@ import app.ui.app_manager as am
 import app.ui.history_flow as history_flow
 from app.session.manager import LiveScore, SessionManager
 from app.ui.app_manager import EEGMeditationApp
-from app.ui.live_mirror import LiveMirror
 from app.ui.live_session import LiveSessionScreen
 from tests._history_flow import make_history_flow
 from tests._profiles import make_profiles
@@ -65,10 +64,10 @@ def test_the_avg_switch_after_a_clear_shows_no_sessions_numbers(monkeypatch):
 def test_clear_live_display_empties_the_graphs_their_mirrors_and_the_readout():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._live_screen = _finished_screen()
-    app._mirror = LiveMirror()
-    app._mirror.record(METRICS, {"score_target": 70, "score_key": "shamatha_score"}, {"alpha1": 1.0, "raw_eeg_waveform": [1.0]})
-    make_shown(app).clear()
-    mirror = app._mirror
+    app._shown = make_shown(app)
+    mirror = app._shown.mirror
+    mirror.record(METRICS, {"score_target": 70, "score_key": "shamatha_score"}, {"alpha1": 1.0, "raw_eeg_waveform": [1.0]})
+    app._shown.clear()
     assert (list(mirror.metrics), list(mirror.bands), list(mirror.waveform), mirror.last_metrics) == ([], [], [], {})
     assert app._live_screen.graph.total_points == 0
     assert app._live_screen._timer_label.text == "00:00"
@@ -149,9 +148,8 @@ def test_a_deleted_sessions_card_closes_unsaved_but_its_bell_stops():
 def test_an_idle_threshold_clear_keeps_the_owner_of_an_open_card():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._live_screen = MagicMock()
-    app._mirror = LiveMirror()
-    app._mirror.metrics.append(METRICS)
     shown = make_shown(app)
+    shown.mirror.metrics.append(METRICS)
     shown.owner = 1
     shown.clear()
     assert shown.owner == 1  # a later switch to another profile still closes the card
@@ -200,7 +198,6 @@ def test_the_end_of_a_session_shows_its_numbers_before_its_scoring_is_reset():
     for value in (60, 70, 40):
         sm.add_metric({"shamatha_score": value})
     app._undo_session_setup = sm.reset  # what the real one does to the scoring
-    app._mirror = LiveMirror()
     for name in ("_history", "_settings_screen"):
         setattr(app, name, MagicMock())
     app._finalize_stop_ui({}, None)
@@ -219,10 +216,10 @@ def test_the_end_of_a_session_locked_since_its_first_minute_shows_its_whole_numb
     app._live_screen = _finished_screen()  # its readout as of the first minute
     app._session_manager = MagicMock()
     app._session_manager.live_score.return_value = replace(SCORE, average=81.5)  # the timer ran out while locked
-    app._mirror = LiveMirror()
-    app._mirror.last_metrics = METRICS
     for name in ("_undo_session_setup", "_history", "_settings_screen"):
         setattr(app, name, MagicMock())
+    app._shown = make_shown(app)
+    app._shown.mirror.last_metrics = METRICS
     app._finalize_stop_ui({"duration": 1800}, None)
     app._live_screen.set_stats_mode("aggregate")
     assert "82" in _texts(app._live_screen)
@@ -249,9 +246,9 @@ def test_deleting_the_shown_session_in_history_drops_it_from_the_session_screen(
     app._recorder.session_id = 9
     app._on_main = lambda fn: fn()
     app._session_pipeline_live = MagicMock(return_value=False)
+    app._history = make_history_flow(app)
     app._shown = make_shown(app)
     app._shown.drop = MagicMock()
-    app._history = make_history_flow(app)
     app._history.delete_sessions([7, 9])
     app._shown.drop.assert_called_once_with(keep_notes=False)
 

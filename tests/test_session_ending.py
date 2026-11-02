@@ -13,7 +13,6 @@ import app.ui.history_flow as history_flow
 from app.session.manager import SessionManager, SessionState
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
-from app.ui.live_mirror import LiveMirror
 from tests._history_flow import make_history_flow
 from tests._program_run import make_run
 from tests._recorder import make_recorder
@@ -34,7 +33,6 @@ def _app() -> EEGMeditationApp:
     app._live_screen.summary_session_id = SID
     app._live_screen.summary_notes = ""
     app._recorder = make_recorder(app)
-    app._mirror = LiveMirror()
     app._toast = MagicMock()
     app._history_screen = MagicMock()
     app._session_manager = SessionManager()  # idle: the card's session has ended
@@ -104,7 +102,6 @@ def _recorded_session(db) -> EEGMeditationApp:
     app._db = db
     app._current_user_id = db.create_user("t")
     app._recorder = make_recorder(app)
-    app._mirror = LiveMirror()
     app._recorder._buffer = []
     app._recorder._flush_counter = 0
     app._session_manager = SessionManager()

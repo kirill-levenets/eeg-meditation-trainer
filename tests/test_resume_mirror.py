@@ -114,7 +114,6 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
 
     app._shamatha_threshold = 50
 
-    app._mirror = LiveMirror()
     app._shown = make_shown(app)
     app._watch = make_watch(app)
     app._watch.check_stale = lambda run: None  # no real headset behind the stream
@@ -134,11 +133,11 @@ def test_tick_appends_to_all_mirror_buffers():
     app = _make_tick_app()
     _drive_tick(app, _raw_sample(), _metrics())
 
-    assert len(app._mirror.metrics) == 1
-    assert len(app._mirror.bands) == 1
-    assert len(app._mirror.waveform) == 3  # waveform of length 3
-    assert app._mirror.last_metrics == _metrics()
-    assert app._mirror.last_state == "Shamatha"
+    assert len(app._shown.mirror.metrics) == 1
+    assert len(app._shown.mirror.bands) == 1
+    assert len(app._shown.mirror.waveform) == 3  # waveform of length 3
+    assert app._shown.mirror.last_metrics == _metrics()
+    assert app._shown.mirror.last_state == "Shamatha"
 
 
 def test_tick_band_record_aggregates_paired_bands():
@@ -146,7 +145,7 @@ def test_tick_band_record_aggregates_paired_bands():
     raw = _raw_sample(seed=10.0)
     _drive_tick(app, raw, _metrics())
 
-    band = app._mirror.bands[-1]
+    band = app._shown.mirror.bands[-1]
     assert band["alpha"] == raw["alpha1"] + raw["alpha2"]
     assert band["beta"] == raw["beta1"] + raw["beta2"]
     assert band["gamma"] == raw["gamma1"] + raw["gamma2"]
@@ -196,9 +195,9 @@ def test_tick_waveform_fallback_appends_band_sum():
     _drive_tick(app, raw, _metrics())
 
     # No raw waveform → one synthetic point equal to the band-record sum.
-    band = app._mirror.bands[-1]
-    assert len(app._mirror.waveform) == 1
-    assert app._mirror.waveform[-1] == sum(band.values())
+    band = app._shown.mirror.bands[-1]
+    assert len(app._shown.mirror.waveform) == 1
+    assert app._shown.mirror.waveform[-1] == sum(band.values())
 
 
 def test_tick_stores_metrics_copy_not_reference():
@@ -207,7 +206,7 @@ def test_tick_stores_metrics_copy_not_reference():
     _drive_tick(app, _raw_sample(), metrics)
 
     metrics["shamatha_score"] = 999  # mutate the original after the tick
-    assert app._mirror.metrics[-1]["shamatha_score"] != 999
+    assert app._shown.mirror.metrics[-1]["shamatha_score"] != 999
 
 
 def test_mirror_fills_while_paused_but_skips_ui_dispatch():
@@ -216,9 +215,9 @@ def test_mirror_fills_while_paused_but_skips_ui_dispatch():
 
     # The whole point of the fix: data still accrues while the screen is
     # locked, but no per-tick UI work is queued onto the (paused) Clock.
-    assert len(app._mirror.metrics) == 1
-    assert len(app._mirror.bands) == 1
-    assert len(app._mirror.waveform) == 3
+    assert len(app._shown.mirror.metrics) == 1
+    assert len(app._shown.mirror.bands) == 1
+    assert len(app._shown.mirror.waveform) == 3
     app._on_main.assert_not_called()
 
 
@@ -226,7 +225,7 @@ def test_unpaused_tick_dispatches_ui_once():
     app = _make_tick_app(is_paused=False)
     _drive_tick(app, _raw_sample(), _metrics())
 
-    assert len(app._mirror.metrics) == 1
+    assert len(app._shown.mirror.metrics) == 1
     app._on_main.assert_called_once()
 
 
@@ -243,16 +242,15 @@ def _make_resume_app(running: bool = True) -> EEGMeditationApp:
     app._live_screen = MagicMock()
     app._program_run = make_run(app)
     app._settings_screen = MagicMock()
-    app._mirror = LiveMirror()
     app._shown = make_shown(app)
     return app
 
 
 def _populate(app: EEGMeditationApp, n: int) -> None:
     for i in range(n):
-        app._mirror.metrics.append(_metrics(seed=float(i)))
+        app._shown.mirror.metrics.append(_metrics(seed=float(i)))
         raw = _raw_sample(seed=float(i))
-        app._mirror.bands.append(
+        app._shown.mirror.bands.append(
             {
                 "alpha": raw["alpha1"] + raw["alpha2"],
                 "beta": raw["beta1"] + raw["beta2"],
@@ -261,9 +259,9 @@ def _populate(app: EEGMeditationApp, n: int) -> None:
                 "delta": raw["delta"],
             }
         )
-        app._mirror.waveform.extend(raw["raw_eeg_waveform"])
-    app._mirror.last_metrics = _metrics(seed=float(n - 1))
-    app._mirror.last_state = "Shamatha"
+        app._shown.mirror.waveform.extend(raw["raw_eeg_waveform"])
+    app._shown.mirror.last_metrics = _metrics(seed=float(n - 1))
+    app._shown.mirror.last_state = "Shamatha"
 
 
 def test_resume_batch_reloads_each_graph_once():

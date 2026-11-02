@@ -17,7 +17,6 @@ from app.session.session_run import Phase
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.bt_wait import BtWait
-from app.ui.live_mirror import LiveMirror
 from tests._bt_wait import make_bt_wait
 from tests._headset import fake_paired, make_headset
 from tests._program_run import make_run
@@ -32,7 +31,6 @@ BANDS = {"delta": 10.0, "theta": 10.0, "alpha1": 10.0, "alpha2": 10.0, "beta1": 
 def _app() -> EEGMeditationApp:
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._current_user_id = 1
-    app._mirror = LiveMirror()
     app._ticker = MagicMock(running=False)
     app._real_stream = MagicMock()
     app._real_stream._device_name = "MindWave"
@@ -149,7 +147,7 @@ def test_deleting_the_profile_in_the_frame_the_session_starts_leaves_no_audio_pl
     app._db = MagicMock()
     app._recorder = make_recorder(app)
     app._recorder._buffer = []
-    app._mirror = MagicMock()
+    app._shown.mirror = MagicMock()
     app._history = MagicMock()
     app._discard_running_session()
     _run_queued(app)

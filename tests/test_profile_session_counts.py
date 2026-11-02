@@ -29,7 +29,7 @@ def test_entering_settings_reads_the_counts_again():
 
 def _ending_app(shown: str) -> EEGMeditationApp:
     app = EEGMeditationApp.__new__(EEGMeditationApp)
-    for name in ("_live_screen", "_mirror", "_session_manager", "_settings_screen", "_undo_session_setup",
+    for name in ("_live_screen", "_session_manager", "_settings_screen", "_undo_session_setup",
                  "_history"):
         setattr(app, name, MagicMock())
     app._sm = MagicMock(current=shown)

@@ -68,7 +68,6 @@ from app.ui.hooks import wire
 from app.ui.line_colours import DEFAULT as LINE_DEFAULT
 from app.ui.line_colours import LINE_COLOURS
 from app.ui.line_colours import OPTIONS as LINE_OPTIONS
-from app.ui.live_mirror import LiveMirror
 from app.ui.live_session import LiveSessionScreen
 from app.ui.power_exemption import PowerExemption
 from app.ui.profiles import ProfileGate, Profiles
@@ -202,7 +201,6 @@ class EEGMeditationApp(App):
         # doesn't accumulate thousands of Clock callbacks that flood the
         # main loop on resume (which previously caused a black screen).
         self._is_paused: bool = False
-        self._mirror: LiveMirror = LiveMirror()  # the live graphs' session, kept through a screen lock
         self._recorder: SessionRecorder = SessionRecorder(
             self._db, self._session_manager, with_score=lambda stats: self._with_score(stats),
             row_fields=lambda: self._session_row_fields())
@@ -424,14 +422,10 @@ class EEGMeditationApp(App):
             self._ctx, self._live_screen.graph, self._formulas, self._program_run, self._program_settings,
             self._formula_settings, graphs=self._all_graphs, detail_program=self._diary_screen.program_lines_of,
             legacy_defaults=self._settings_screen._graph_toggles)
-        self._shown = ShownSession(
-            self._live_screen, self._mirror, self._audio,
-            save_notes=lambda sid, notes: self._history.save_notes(sid, notes=notes),
-            delete_sessions=lambda ids: self._history.delete_sessions(ids), confirm=self._confirm_action,
-            toast=self._toast, last_session_id=lambda: self._recorder.session_id)
         self._loading_overlay = LoadingOverlay()
         self._history = HistoryFlow(self._ctx, self._history_screen, self._formulas, self._loading_overlay,
-                                    on_sessions_deleted=self._shown.on_sessions_deleted)
+                                    on_sessions_deleted=lambda ids: self._shown.on_sessions_deleted(ids))
+        self._shown = ShownSession(self._ctx, self._live_screen, self._audio, self._history, self._recorder)
         self._detail = SessionDetailFlow(self._ctx, self._diary_screen, self._history_screen, self._sm,
                                          self._graph_series)
         self._gate = ProfileGate(
@@ -1017,7 +1011,7 @@ class EEGMeditationApp(App):
         # covering only the pre-lock seconds while History shows the real
         # duration.
         try:
-            self._mirror.reload_into(self._live_screen)
+            self._shown.mirror.reload_into(self._live_screen)
         except Exception:
             logger.exception("graph reload on stop failed")
         self._live_screen.update_stats(self._session_manager.live_score())  # the whole session's: no tick ran while locked
@@ -1158,7 +1152,7 @@ class EEGMeditationApp(App):
             self._audio.update_sinking(metrics.get("sinking", 0))
             self._audio.update_subtle_distraction(metrics.get("subtle_distraction", 0))
 
-        self._mirror.record(metrics, score, raw_sample)  # kept even while the screen is locked
+        self._shown.mirror.record(metrics, score, raw_sample)  # kept even while the screen is locked
         self._show_tick(run, metrics, raw_sample, score, marker_pending, mark)
 
         # Timer countdown — tick() is pure counter, no UI
@@ -1351,7 +1345,7 @@ class EEGMeditationApp(App):
             logger.info("Marker placed")
 
     def _on_threshold_change(self, value: int) -> None:
-        if self._mirror.metrics and not self._session_pipeline_live():
+        if self._shown.mirror.metrics and not self._session_pipeline_live():
             self._shown.clear()  # the last session's line is not the threshold the next one runs against
         # A drag is one change of the threshold in force, at the value it settles on, not one per slider step.
         self._after_settle("apply_threshold", lambda: self._apply_threshold(self._settings_screen.threshold))
@@ -1864,10 +1858,10 @@ class EEGMeditationApp(App):
             logger.info("on_resume: session not RUNNING → skipping graph reload")
             return
         try:
-            self._mirror.reload_into(self._live_screen)
-            if self._mirror.last_metrics:
+            self._shown.mirror.reload_into(self._live_screen)
+            if self._shown.mirror.last_metrics:
                 self._live_screen.update_stats(self._session_manager.live_score())
-                self._live_screen.update_state(self._mirror.last_state)
+                self._live_screen.update_state(self._shown.mirror.last_state)
                 self._live_screen.set_shamatha(self._run.shamatha_active)
         except Exception:
             logger.exception("graph reload on resume failed")

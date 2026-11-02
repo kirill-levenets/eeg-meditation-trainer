@@ -18,6 +18,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The bottom bar lives inside the body ScrollView.
 - **The Session screen shows one profile's session.**
   `ShownSession` (`app/ui/shown_session.py`, the app's `_shown`) is that session: its `owner` is the profile whose session the screen shows (graphs, readout, end card), set at Start (`take`), cleared by `_abort_bt_wait` when the start never became a session (the Start already emptied the display).
+  It holds the graphs' `mirror` (`LiveMirror`, which the tick records into and the graphs reload from), and the end card's notes and delete go through the history flow (`HistoryFlow.save_notes`, `delete_sessions`).
   `drop` takes it off the screen:
   the end card, if open, closes through `close` (notes saved unless the session is gone, bell stopped; the one way every card closes, OK included);
   then `clear` empties the graphs, their mirrors and the readout (`LiveSessionScreen.clear_readout`: what a fresh screen shows).
