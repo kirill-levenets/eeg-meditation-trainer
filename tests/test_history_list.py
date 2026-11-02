@@ -18,6 +18,7 @@ from kivy.weakproxy import WeakProxy as KivyWeakProxy
 
 import app.ui.history_flow as history_flow
 from app.session.manager import SessionManager
+from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.history_screen import HistoryScreen, _checkbox_glyph, _SessionRow
 from app.ui.hooks import wire
@@ -412,3 +413,25 @@ def test_history_loads_without_the_full_screen_spinner(monkeypatch):
     make_history_flow(app).refresh(force=True)
     app._loading_overlay.show.assert_not_called()
     app._history_screen.load_sessions.assert_called_once()
+
+
+def test_the_history_view_tapped_is_stored_for_the_profile(tmp_path):
+    db = DatabaseManager(db_path=str(tmp_path / "t.db"))
+    try:
+        app = EEGMeditationApp.__new__(EEGMeditationApp)
+        uid = db.create_user("me")
+        app._db, app._current_user_id = db, uid
+        app._history_screen = HistoryScreen()
+        wire(app._history_screen, on_view_mode_change=make_history_flow(app).on_view_mode_change)  # as build() does
+
+        def tap(label: str) -> None:
+            next(b for b in app._history_screen._toggle_col.walk() if getattr(b, "text", None) == label).dispatch(
+                "on_release")
+
+        tap("14d")
+        assert db.get_user_setting(uid, "history_view_mode") == "bars"
+        app._current_user_id = None  # no profile: the view changes, nothing is stored
+        tap("Cal")
+        assert app._history_screen._view_mode == "calendar" and db.get_user_setting(uid, "history_view_mode") == "bars"
+    finally:
+        db.close()

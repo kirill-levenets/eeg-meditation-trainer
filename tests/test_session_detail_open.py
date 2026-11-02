@@ -17,6 +17,7 @@ from app.metrics.formula_slots import FormulaSlots
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.diary_screen import DiaryScreen
+from app.ui.hooks import wire
 from tests._graph_series import make_graph_series
 from tests._history_flow import make_detail_flow
 
@@ -252,3 +253,17 @@ def test_every_simple_session_opens_with_the_profiles_selection(app):
     graph.set_visible("sinking", True)  # shown, never saved
     _open(a, workers, a.sessions["B"])
     assert graph.visible_keys() == ["shamatha_score"]
+
+
+def test_the_band_tables_view_is_kept_per_profile_for_the_next_detail(app):
+    a, _workers = app
+    wire(a._diary_screen, on_band_view_change=a._detail.persist_band_view)  # as build() wires it
+    a._detail.on_session_select(a.sessions["A"])
+    table = a._diary_screen._band_totals
+    table._set_mode("grouped")
+    table._toggle_sort("power")  # the user's taps: by power, largest first
+    a._detail.on_session_select(a.sessions["B"])
+    assert (table._mode, table._sort_by, table._descending) == ("grouped", "power", True)
+    a._current_user_id = a._db.create_user("other")
+    a._detail.on_session_select(a.sessions["A"])
+    assert (table._mode, table._sort_by, table._descending) == ("detailed", "band", False)  # its own: the default
