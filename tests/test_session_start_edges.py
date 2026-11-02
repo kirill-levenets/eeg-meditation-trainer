@@ -323,3 +323,51 @@ def test_a_name_made_before_the_start_uses_the_current_time(monkeypatch):
     before = time.strftime("%Y-%m-%d %H:%M")
     name = _app()._make_session_name()
     assert name in (before + " - Mock", time.strftime("%Y-%m-%d %H:%M") + " - Mock")
+
+
+# ---- how a headset session starts ----
+
+
+def test_a_link_kept_from_the_last_session_starts_the_session_at_once(monkeypatch):
+    monkeypatch.setattr(APP, "USE_MOCK_DEVICE", False)
+    app = _app()
+    run_in(app, Phase.STARTING)
+    app._real_stream.is_connected, app._real_stream._device_address = True, "00:11"
+    assert app._connect_session(app._run, 60)
+    assert app._run.phase is Phase.STARTED and app._session_manager.state == SessionState.RUNNING
+    app._real_stream.start.assert_not_called()  # no BT wait
+    app._real_stream.reset_sample_state.assert_called_once()  # the last session's sample can't start this one
+    app._live_screen.update_device_status.assert_called_with(True, device_name="MindWave", connecting=False)
+    app._audio.play_connect_sound.assert_called_once()
+
+
+def test_with_no_link_the_start_enters_the_bt_wait(monkeypatch):
+    monkeypatch.setattr(APP, "USE_MOCK_DEVICE", False)
+    app = _app()
+    run_in(app, Phase.STARTING)
+    app._real_stream.is_connected, app._real_stream._device_address = False, "00:11"
+    app._real_stream.start.return_value = True
+    assert app._connect_session(app._run, 60)
+    assert app._run.phase is Phase.CONNECTING and app._session_manager.state == SessionState.IDLE
+    app._live_screen.show_overlay.assert_called_once_with("Connecting to MindWave...")
+
+
+def test_the_tick_drives_the_wait_until_its_first_data_starts_the_session():
+    app = _waiting(_app())
+    app._update_tick(0.5)
+    assert app._run.phase is Phase.STARTED and app._session_manager.state == SessionState.RUNNING
+
+
+def test_a_marker_is_placed_only_in_a_running_session():
+    app = _app()
+    app._on_marker()  # no Start yet
+    run = run_in(app, Phase.STARTED)
+    app._on_marker()  # nothing running
+    assert not run.pending_marker
+    app._session_manager.start(threshold=50)
+    app._session_manager.pause()
+    app._on_marker()
+    assert not run.pending_marker
+    app._session_manager.resume()
+    app._on_marker()
+    assert run.pending_marker  # the next recorded tick carries it

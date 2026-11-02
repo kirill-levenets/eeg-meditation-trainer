@@ -251,6 +251,20 @@ def test_a_failed_restore_keeps_the_same_live_db_for_everything_holding_it(tmp_p
     bf.report_soft_error.assert_called_once()
 
 
+def test_a_database_that_wont_close_is_not_restored_over_and_stays_live(tmp_path, monkeypatch):
+    monkeypatch.setattr(bf, "report_soft_error", MagicMock())
+    monkeypatch.setattr(bf, "restore_backup", MagicMock())
+    db = MagicMock()
+    db.close.side_effect = sqlite3.OperationalError("database is locked")
+    replaced = MagicMock()
+    flow = make_flow(db, on_db_replaced=replaced)
+    flow._do_restore_and_restart(str(tmp_path / "backup.db"))
+    assert bf.report_soft_error.call_args.args[0] == "restore_failed"
+    bf.restore_backup.assert_not_called()
+    db.reopen.assert_called_once()  # every holder keeps a working connection
+    replaced.assert_not_called()
+
+
 def test_a_restore_replaces_the_file_then_hands_the_app_to_a_relaunch(tmp_path, monkeypatch):
     live = tmp_path / "meditation.db"
     monkeypatch.setattr(bf.APP, "DB_PATH", str(live))
