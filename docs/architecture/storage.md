@@ -87,8 +87,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The same EACCES is the harmless Kivy `Error when copying logo directory` on the first launch after an install.
   `discard_file(path)` is the shared remove-and-log for temp/leftover files.
   Custom sound files come in through the Storage Access Framework too: `android_saf.import_document` copies a picked document into app storage ([audio](audio.md#engine)).
-- The Settings → Data Backup flow around it (the pickers, the copy on a worker thread, the confirmation, the replace) is `BackupFlow` in `app/ui/backup_flow.py`, which reaches the app only through what `_bind_callbacks` gives it:
-  the DB, the Settings screen, the profile name, the settings flush, the checkpoint, the session guard, the popups, and `on_db_replaced`, where the app sets `_restoring` and shows the relaunch popup.
+- The Settings → Data Backup flow around it (the pickers, the copy on a worker thread, the confirmation, the replace) is `BackupFlow` in `app/ui/backup_flow.py`, which reaches the app only through what `_build_flows` gives it:
+  the app context (the DB, the settings flush, the session guard, the popups), the Settings screen, the profile name, the checkpoint, and `on_db_replaced`, where the app sets `_restoring` and shows the relaunch popup.
   **Android uses the Storage Access Framework** (`app/storage/android_saf.py`), not a hardcoded path
   — scoped storage (targetSdk 30+) forbids direct `/sdcard` writes:
   `WRITE_EXTERNAL_STORAGE` no longer grants them, and `buildozer.spec` declares `MANAGE_EXTERNAL_STORAGE` ("All files access", API 30+) but the app never asks the user for it.
