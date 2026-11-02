@@ -5,8 +5,10 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 ## Flows and the app context
 
-- The app builds the screens and the classes that own each concern (`HistoryFlow`, `SessionDetailFlow`, `ProfileGate`, `Profiles`, …), wires the screens' hooks to them, and gives each the same `AppContext` (`app/ui/app_context.py`, built once by `_make_context`).
-  It holds what a flow reaches the app through: the database, the active profile (`user_id`, `activate_user`, `require_user`), the main thread (`on_main`), navigation (`switch_screen`), the user's dialogs (`info`, `toast`, `confirm`), the settings save, and `SessionAccess` (whether a session runs or waits for the headset, its row, the refusal while it runs, its discard).
+- The app builds the screens (`_build_screens`) and the classes that own each concern (`_build_flows`: `HistoryFlow`, `SessionDetailFlow`, `ProfileGate`, `Profiles`, …), wires the screens' hooks to them,
+  and gives each the same `AppContext` (`app/ui/app_context.py`, built once by `_make_context`).
+  It holds what a flow reaches the app through: the database, the active profile (`user_id`, `activate_user`, `require_user`), the main thread (`on_main`), navigation (`switch_screen`);
+  the user's dialogs (`info`, `toast`, `confirm`), the settings save, and `SessionAccess` (whether a session runs or waits for the headset, its row, the refusal while it runs, its discard).
   A flow takes the context and then only what is its own (its screens, the objects it works with); the context's callables read the app when called, so they see the profile and the session as they are then.
   Tests build it from an app built with `__new__` (`tests/_context.make_context(app)`) or stand-alone (`stub_context()`: no profile, no session, UI calls at once or mocks);
   either takes any field, a `SessionAccess` field included, and a test helper takes them through `context_fields(deps)`.
@@ -145,7 +147,8 @@ CI builds start clean and are unaffected.
   The user-side lever is Battery › App launch › Manage manually.
 - **`PowerExemption`** (`app/ui/power_exemption.py`, the app's `_power`) does what the app can: it reads Android's battery optimisation (`PowerManager.isIgnoringBatteryOptimizations`) and the maker (`Build.MANUFACTURER`).
   A maker's own setting has no API, so for `AGGRESSIVE_MAKERS` (dontkillmyapp's 3-of-5 or worse) it can only explain and open a screen.
-  `offer_once` shows the alert at the first start with something to allow, after the profile gate (from `on_start`, or from `ProfileGate._finish_first_run` on a first run), and records `power_alert_shown` app-wide: it is the phone's setting.
+  `offer_once` shows the alert at the first start with something to allow, after the profile gate (from `on_start`, or from `ProfileGate._finish_first_run` on a first run);
+  it records `power_alert_shown` app-wide: it is the phone's setting.
   A phone with nothing to allow isn't marked, so a lost exemption still gets the alert.
   `refresh` keeps Settings → Device's row (`DeviceSection.show_power_state`, attached only when Android answers) current at every start and resume, since the user may change it in the phone's settings.
 - **Screens it opens**: the first that opens (`android_jni.open_first`), on Android's UI thread; none (or a JNI failure building them) → a toast.

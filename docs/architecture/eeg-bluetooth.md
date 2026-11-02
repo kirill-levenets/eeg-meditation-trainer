@@ -24,8 +24,9 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   On app exit the socket is not closed explicitly (`on_stop`): the kernel closes it while BlueZ may keep the ACL link, for a faster reconnect at the next launch.
   A session whose headset sends no packets for `STALE_DATA_THRESHOLD` (10 s) is stopped and saved (`SessionWatch.check_stale`, `app/ui/session_watch.py`, the app's `_watch`;
   each tick it also checks the recording limit, follows the headset's link and warns once of a low battery or power-line noise).
-  A link that drops or comes back mid-session is drawn by `Headset.show_selected`, the one place the headset's link is shown (the Session screen's label and Settings › Device):
-  a session's lost link shows as connecting, since the reader reconnects; the drop also plays the disconnect alert.
+  The selected headset's link as it is (a pick or rename, a session's start, a drop or a reconnect mid-session) is drawn by `Headset.show_selected` on the Session screen's label and in Settings › Device:
+  a session's lost link shows as connecting, since the reader reconnects; a drop also plays the disconnect alert.
+  The states that aren't the link draw their own: the BT wait's connecting and retry screens (`BtWait`), a profile load or mode change (`Headset.load`, `on_mode_toggle`), the mock headset, the idle screen after a session.
 - **The selected headset is the active profile's own, or none.**
   Every profile load (`_load_user_settings` → `Headset.load`, so startup, a switch and a first-run pick) selects the profile's saved `bt_device_address`, or none (`set_device(None)`), which closes a link to the last profile's headset:
   a profile with none used to keep the last one's for the rest of the run, unsaved, and get a different answer after a restart.
@@ -82,7 +83,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The watcher reads `not stream._running` as a failed connect, so stopping the stream first shows a false "Connection failed".
   **A session start is one run** (#52, `SessionRun` in `app/session/session_run.py`, the app's `_run`):
   `_on_start` makes it (the device scan belongs to it) and every ending drops it (`_undo_session_setup()`, which every ending goes through); a callback queued for a run does nothing once `_run` is no longer that run.
-  Its phase is what `SessionManager` doesn't know: STARTING (Start pressed, scanning or setting up), CONNECTING (the BT wait), STARTED (running or paused: `SessionManager.state` says which), ENDED (a wait abandoned or a session discarded, its main-thread teardown still queued).
+  Its phase is what `SessionManager` doesn't know: STARTING (Start pressed, scanning or setting up), CONNECTING (the BT wait), STARTED (running or paused: `SessionManager.state` says which);
+  ENDED (a wait abandoned or a session discarded, its main-thread teardown still queued).
   It holds the per-run state (the wait's windows and drops, the tick count, the pending marker, the shamatha pill's streak, the scored mark, the warnings), so a new Start begins from nothing the last one left.
   That covers the device scan's result in `_on_start` and every main-thread callback the BT wait queues through `_on_main_for(run, fn)`: `_on_session_connected` (the "connected" UI and audio), the exits' retry screens, the overlay text.
   Without it, a Cancel during "Scanning for MindWave…" still starts the session;

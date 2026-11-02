@@ -147,10 +147,8 @@ class FormulaSettings:
         uid = self._ctx.require_user("delete a formula")
         if uid is None:
             return
-        formulas = self._ctx.db.get_saved_formulas(uid)
-        if 0 <= index < len(formulas):
-            confirm_saved_delete(self._ctx.confirm, "formula", saved_formula_label(index, formulas[index]),
-                                 lambda: self._delete(index))
+        rows = [saved_formula_label(i, f) for i, f in enumerate(self._ctx.db.get_saved_formulas(uid))]
+        confirm_saved_delete(self._ctx.confirm, "formula", rows, index, self._delete)
 
     def _delete(self, index: int) -> None:
         self._ctx.db.remove_saved_formula(self._ctx.user_id(), index)

@@ -445,9 +445,8 @@ class EEGMeditationApp(App):
     def _make_context(self) -> AppContext:
         """What every flow reaches the app through; the callables read the app when called, so they see the profile and
         the session as they are then."""
-        session = SessionAccess(live=self._session_pipeline_live, connecting=self._connecting,
-                                running_id=self._running_session_id, refused=self._refused_while_session_runs,
-                                discard=self._discard_running_session)
+        session = SessionAccess(live=self._session_pipeline_live, running_id=self._running_session_id,
+                                refused=self._refused_while_session_runs, discard=self._discard_running_session)
         return AppContext(db=self._db, user_id=lambda: self._current_user_id, activate_user=self._activate_user,
                           require_user=self._require_user, on_main=self._on_main, switch_screen=self._switch_screen,
                           info=self._info_popup, toast=self._toast, confirm=self._confirm_action,
@@ -812,7 +811,7 @@ class EEGMeditationApp(App):
             self._session_manager.start(threshold=threshold)
             run.phase = Phase.STARTED
             self._timer_state.start_countdown()
-            self._on_session_connected(name)
+            self._on_session_connected()
             logger.info(f"Reusing existing BT connection to {name}")
             return True
         return self._begin_bt_wait(run)
@@ -838,8 +837,7 @@ class EEGMeditationApp(App):
         self._session_manager.start()
         self._timer_state.start_countdown()
         run.phase = Phase.STARTED
-        name = self._headset.name()
-        self._on_main_for(run, lambda: self._on_session_connected(name))
+        self._on_main_for(run, self._on_session_connected)
 
     def _undo_failed_start(self, message: str) -> None:
         """Main thread: a start whose BT wait ended without a session is undone, and Retry offered."""
@@ -904,7 +902,8 @@ class EEGMeditationApp(App):
             self._leaving = False
 
     def _checkpoint_or_report(self) -> None:
-        """Checkpoint a running session where a failure must not stop what follows (leaving the app, a backup)."""
+        """Checkpoint a running session where a failure must not stop what follows (leaving the app, a backup, a
+        tick-thread ending)."""
         try:
             self._recorder.checkpoint()
         except Exception as exc:
@@ -1049,13 +1048,12 @@ class EEGMeditationApp(App):
             f"Session stopped and saved (took {time.monotonic() - t_start:.3f}s)"
         )
 
-    def _on_session_connected(self, name: str) -> None:
+    def _on_session_connected(self) -> None:
         """Main thread: a headset session has started (the BT wait's first data, or a kept-alive connection)."""
-        self._live_screen.update_device_status(True, device_name=name)
+        self._headset.show_selected()
         self._live_screen.update_state("Running")
         self._live_screen.set_start_time(self._session_manager.started_at)
         self._live_screen.hide_overlay()
-        self._settings_screen.device.update_device_status(True, name=name)
         # Audio starts with the overlay hide, so the noise never plays while the connecting loader is still visible.
         self._audio.start()
         self._audio.play_connect_sound()
@@ -1197,8 +1195,8 @@ class EEGMeditationApp(App):
         """Tick thread: a check ended the session. It is frozen here (its duration ends now, its sound goes quiet, no
         later tick can end it again) and saved on the main thread, once, while its run is current."""
         self._session_manager.pause()
+        self._audio.mute()  # before the checkpoint, which may wait on the write lock
         self._checkpoint_or_report()  # Android may close a locked app before the unlock: its ticks so far are saved now
-        self._audio.mute()
         self._ticker.stop()
         self._on_main_for(run, lambda: (self._live_screen.show_alert(alert), self._stop_and_save(reason=reason)))
 

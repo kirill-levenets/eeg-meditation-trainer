@@ -28,6 +28,6 @@ class SessionRun:
         self.shamatha_streak = 0
         self.scored_key: str | None = None  # the series the live legend marks as scored
         self.noise_detector = None  # power-line noise, on a headset session
-        self.bt_connected_notified = False  # Settings was told the headset's link is up
+        self.bt_connected_notified = False  # the headset's link as the watch last followed it
         self.low_battery_warned = False
         self.stale_data_warned = False

@@ -92,7 +92,7 @@ class SessionDetailFlow:
             what_if = d.show_what_if_failed
 
         self._ctx.on_main(lambda: self._fill_detail(token, [*(lambda s=s: fill(s) for s in d.graph_fill_order()),
-                                                        what_if]))
+                                                            what_if]))
 
     def _fill_detail(self, token: int, steps: list) -> None:
         """Run one step per frame, so no frame holds them all, while this open is the detail on screen: after Back,

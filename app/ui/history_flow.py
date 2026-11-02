@@ -87,7 +87,7 @@ class HistoryFlow:
         if self._ctx.session.running_id() in ids:
             # Its row is in History after the first checkpoint; its next checkpoints would write data for no session.
             self._ctx.info("Session in progress",
-                       "Stop the session first: a running session can't be deleted. Nothing was deleted.")
+                           "Stop the session first: a running session can't be deleted. Nothing was deleted.")
             done(False)
             return
         # Modal at once, so a tap can't reach the rows or the end card being deleted; painted only if it takes a while.

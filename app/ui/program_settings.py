@@ -193,10 +193,8 @@ class ProgramSettings:
         uid = self._ctx.require_user("delete a program")
         if uid is None:
             return
-        programs = self._ctx.db.get_saved_programs(uid)
-        if 0 <= index < len(programs):
-            confirm_saved_delete(self._ctx.confirm, "program", saved_program_label(index, programs[index]),
-                                 lambda: self._delete(index))
+        rows = [saved_program_label(i, p) for i, p in enumerate(self._ctx.db.get_saved_programs(uid))]
+        confirm_saved_delete(self._ctx.confirm, "program", rows, index, self._delete)
 
     def _delete(self, index: int) -> None:
         self._ctx.db.remove_saved_program(self._ctx.user_id(), index)

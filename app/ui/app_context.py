@@ -3,13 +3,14 @@ the settings save and the running session. Built once by the app; a flow takes i
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from app.storage.database import DatabaseManager
+
 
 @dataclass(frozen=True)
 class SessionAccess:
     """What a flow may know of the running session, and the one thing it may do to it (end it, its profile deleted)."""
 
     live: Callable[[], bool]  # runs, is paused, or waits for the headset
-    connecting: Callable[[], bool]  # waits for the headset
     running_id: Callable[[], int | None]  # its row, once checkpointed, while it runs
     refused: Callable[..., bool]  # (doing, why=""): True, after telling the user, while it runs
     discard: Callable[[], None]
@@ -17,7 +18,7 @@ class SessionAccess:
 
 @dataclass(frozen=True)
 class AppContext:
-    db: object
+    db: DatabaseManager
     user_id: Callable[[], int | None]
     activate_user: Callable[[int], None]  # every profile pick: its settings load, History marked dirty
     require_user: Callable[[str], int | None]  # the active profile, or a message saying why the action can't run

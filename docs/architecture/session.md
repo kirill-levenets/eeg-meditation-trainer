@@ -56,9 +56,11 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   user Stop pauses the tick and asks `_confirm_action("Stop session?", ..., on_cancel=_cancel_stop)`, whose OK is `_stop_and_save(reason="user")`.
   There is no discard path; deleting is the end card's confirmed action.
   **A session ends once.** A check that ends it on the tick thread, data gone stale or the recording limit (`SessionWatch.check` returns its reason and alert; the tick returns after it), freezes it there through `_end_from_tick`:
-  `SessionManager.pause()` (its duration ends at the detection, not when the phone is unlocked), `AudioEngine.mute()` (setVolume only, safe on this thread), `ticker.stop()`;
+  `SessionManager.pause()` (its duration ends at the detection, not when the phone is unlocked), `AudioEngine.mute()` (setVolume only, safe on this thread),
+  a checkpoint of its ticks so far (Android may close a locked app before the unlock) and `ticker.stop()`;
   then one main-thread `_stop_and_save(reason)` with its alert, queued for that run (`_on_main_for`).
-  With the tick stopped no later tick can end it again: on a locked phone a stale stop used to be followed by the timer's ending (two saves, two teardowns), and the limit check queued a stop and played its alert on every tick until the unlock.
+  With the tick stopped no later tick can end it again:
+  on a locked phone a stale stop used to be followed by the timer's ending (two saves, two teardowns), and the limit check queued a stop and played its alert on every tick until the unlock.
   The timer's main-thread finish is queued for its run too, so an ending that ran first (a profile's delete) isn't followed by an end card for a deleted session (`tests/test_session_ends_once.py`).
   A Stop handled late, after another ending (e.g. the headset-off stale-data stop) has saved the session, must not lose it:
   a confirm that arrives after the session has ended writes nothing (`tests/test_session_ending.py::test_a_stop_confirmed_after_the_session_ended_another_way_keeps_it`).
@@ -81,7 +83,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   A `wal_checkpoint(TRUNCATE)` follows: one big transaction parks every deleted page in the WAL (40–100 MB for a few hundred long sessions), which keeps that size until a clean close;
   a failed checkpoint (e.g. "database table is locked" while another thread's read is open on the shared connection) is only logged, since the delete has committed.
   The delete runs on a worker thread (a large selection takes 0.3–0.8 s on desktop) behind the loading overlay, and reports `on_done(ok)`;
-  the overlay is modal at once and painted only past 0.15 s (`show_loading(text, delay=0.15)`), so a tap can't reach the rows or the end card being deleted.
+  the overlay is modal at once and painted only past 0.15 s (`HistoryFlow`'s overlay, `show(text, delay=0.15)`), so a tap can't reach the rows or the end card being deleted.
   A `sqlite3.Error` is reported as `session_delete_failed`.
   On success the Session screen drops a deleted session it shows (`ShownSession.on_sessions_deleted` → `drop`: the end card, whose notes would have no session to save to, closes with its gong, and the display clears).
   `HistoryScreen.remove_sessions(ids)` removes those rows and model entries in place (see the session list in [history.md](history.md)): no rebuild, no spinner, wherever the user is.
@@ -97,7 +99,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   When the timer expires (on the tick thread, `_end_by_timer`), the order is:
   persist the session via `_persist_session_data(reason="timer")`;
   `AudioEngine.mute()` the noise (non-blocking);
-  `TickThread.stop()` (safe from the tick thread, which it doesn't join), so no later tick can end the session again (the stop left the session FINISHED, so `_session_pipeline_live()` is False and Restore and the profile switch aren't refused after a timed session;
+  `TickThread.stop()` (safe from the tick thread, which it doesn't join), so no later tick can end the session again:
+  the stop left the session FINISHED, so `_session_pipeline_live()` is False and Restore and the profile switch aren't refused after a timed session;
   `_on_main(_finish_on_main)` to defer `_audio.stop()` + `_finalize_stop_ui` to the main thread;
   then `play_timer_sound()` **last** (a one-shot `MediaPlayer` gong, which rings through the lock).
   Persisting first and ringing last means a hung audio call can never cost the session or the summary.
