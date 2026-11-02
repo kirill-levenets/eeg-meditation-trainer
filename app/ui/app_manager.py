@@ -709,57 +709,42 @@ class EEGMeditationApp(App):
             return
 
         run = self._run = SessionRun(self._current_user_id)
-        if APP.USE_MOCK_DEVICE:
-            self._eeg_stream = self._mock_stream
+        if APP.USE_MOCK_DEVICE or self._real_stream._device_address:  # the profile's headset, or one picked in Settings
+            self._eeg_stream = self._mock_stream if APP.USE_MOCK_DEVICE else self._real_stream
             self._start_session_common()
             return
-
-        # Real device — need BT connection
-        if self._real_stream._device_address:
-            # The profile's headset, or one picked in Settings
-            self._eeg_stream = self._real_stream
-            self._start_session_common()
-            return
-
         # No headset selected: find the profile's among the paired devices, then connect
         self._live_screen.show_overlay("Scanning for MindWave...")
         self._live_screen.set_controls_running()
         logger.info("Auto-scanning for BT device before session start")
-        def _scanned(devices: list[dict]) -> None:
-            if run is not self._run:
-                return  # cancelled while scanning
-            if run.user_id != self._current_user_id:
-                self._cancel_session_start("IDLE")  # the Start was the profile picked away while it scanned
-                return
-            mindwaves = self._headset.adopt(devices)
-            if self._real_stream._device_address:
-                self._eeg_stream = self._real_stream
-                self._live_screen.update_overlay(f"Found {self._headset.name()}\nConnecting...")
-                self._start_session_common()
-            elif mindwaves:
-                self._live_screen.set_controls_idle()
-                self._live_screen.hide_overlay()
-                self._switch_screen("settings")
-                self._settings_screen.device.focus_device_section(
-                    f"Found {len(mindwaves)} MindWave devices.\n"
-                    "Pick the one you want to use, then press Start again."
-                )
-            elif devices:
-                self._live_screen.set_controls_idle()
-                self._live_screen.show_overlay_retry(
-                    "No MindWave found among paired devices.\n"
-                    "Pair it in system Bluetooth settings,\n"
-                    "or select manually in Settings tab."
-                )
-            else:
-                self._live_screen.set_controls_idle()
-                self._live_screen.show_overlay_retry(
-                    "No paired Bluetooth devices found.\n"
-                    "Pair your MindWave in system\n"
-                    "Bluetooth settings first."
-                )
+        self._headset.find_paired(lambda devices: self._start_after_scan(run, devices))
 
-        self._headset.find_paired(_scanned)
+    def _start_after_scan(self, run: SessionRun, devices: list[dict]) -> None:
+        """Main thread: the Start's scan of the paired devices ended; start on the profile's headset if it found one,
+        else say what to do."""
+        if run is not self._run:
+            return  # cancelled while scanning
+        if run.user_id != self._current_user_id:
+            self._cancel_session_start("IDLE")  # the Start was the profile picked away while it scanned
+            return
+        mindwaves = self._headset.adopt(devices)
+        if self._real_stream._device_address:
+            self._eeg_stream = self._real_stream
+            self._live_screen.update_overlay(f"Found {self._headset.name()}\nConnecting...")
+            self._start_session_common()
+            return
+        self._live_screen.set_controls_idle()
+        if mindwaves:
+            self._live_screen.hide_overlay()
+            self._switch_screen("settings")
+            self._settings_screen.device.focus_device_section(
+                f"Found {len(mindwaves)} MindWave devices.\nPick the one you want to use, then press Start again.")
+        elif devices:
+            self._live_screen.show_overlay_retry("No MindWave found among paired devices.\n"
+                                                 "Pair it in system Bluetooth settings,\nor select manually in Settings tab.")
+        else:
+            self._live_screen.show_overlay_retry("No paired Bluetooth devices found.\n"
+                                                 "Pair your MindWave in system\nBluetooth settings first.")
 
     def _on_main(self, fn) -> None:
         """Queue callable on Kivy's main thread.
@@ -1109,27 +1094,24 @@ class EEGMeditationApp(App):
         self._on_main(lambda: fn() if self._run is run else None)
 
     def _update_tick(self, dt: float) -> None:
-        """Main 2 Hz processing loop.
-
-        Runs on the background SessionTick thread.  All Kivy widget calls are
-        dispatched via _on_main so they execute on the main thread.  Audio,
-        metrics compute, and DB writes are thread-safe and stay direct.
-        """
+        """Tick thread, 2 Hz: a step of the run's BT wait or a tick of its running session; Kivy goes through _on_main,
+        while audio, metrics and DB writes are thread-safe."""
         run = self._run  # this tick's run: a main-thread stop waits for a tick in progress, so no newer one is begun
         if run is None:
             return
         if run.phase is Phase.CONNECTING:
             self._follow_bt_wait(run)
             return
-
         if self._session_manager.state != SessionState.RUNNING:
             return
-
         ending = self._watch.check(run, self._session_manager.elapsed_seconds)
         if ending:
             self._end_from_tick(run, *ending)
             return
+        self._session_tick(run)
 
+    def _session_tick(self, run: SessionRun) -> None:
+        """Tick thread: the headset's sample, its metrics and score recorded, sounded and shown; the timer may end it."""
         raw_sample = self._eeg_stream.read_sample()
         metrics = self._metrics_engine.process_sample(raw_sample)
         self._watch.check_sample(run, raw_sample)
@@ -1146,18 +1128,10 @@ class EEGMeditationApp(App):
         else:
             drive_key = mark = self._score_on_drive_key()
 
-        # Merge raw + computed for full storage; a pending marker is in the row before a checkpoint can write it.
-        full_record = {**raw_sample, **metrics}
-        marker_pending = run.pending_marker
-        if marker_pending:
-            run.pending_marker = False
-            full_record["marker"] = 1
-        score = self._recorder.record(metrics, full_record)
-        if score is None:  # the session paused or stopped while this tick was read: it isn't part of it
-            run.pending_marker |= marker_pending  # the marker goes on the next recorded tick
+        recorded = self._record_tick(run, raw_sample, metrics)
+        if recorded is None:
             return
-
-        # Audio is thread-safe — update directly
+        score, marker_pending = recorded
         self._audio.update(metrics.get(drive_key, 0))
         if run.tick_count > 10:
             self._audio.update_sinking(metrics.get("sinking", 0))
@@ -1165,13 +1139,24 @@ class EEGMeditationApp(App):
 
         self._shown.mirror.record(metrics, score, raw_sample)  # kept even while the screen is locked
         self._show_tick(run, metrics, raw_sample, score, marker_pending, mark)
-
-        # Timer countdown — tick() is pure counter, no UI
-        if self._timer_state.tick(APP.UPDATE_FREQUENCY):
+        if self._timer_state.tick(APP.UPDATE_FREQUENCY):  # a pure counter, no UI
             self._end_by_timer(run)
             return
-
         self._recorder.flush_tick()  # DB opened with check_same_thread=False
+
+    def _record_tick(self, run: SessionRun, raw_sample: dict, metrics: dict) -> tuple[dict, bool] | None:
+        """Tick thread: record the tick, raw and computed, with a pending marker in its row before a checkpoint can write
+        it; (its score, whether it is marked), or None if the session paused or stopped while the tick was read."""
+        full_record = {**raw_sample, **metrics}
+        marked = run.pending_marker
+        if marked:
+            run.pending_marker = False
+            full_record["marker"] = 1
+        score = self._recorder.record(metrics, full_record)
+        if score is None:  # not part of the session: the marker goes on the next recorded tick
+            run.pending_marker |= marked
+            return None
+        return score, marked
 
     def _log_tick(self, run: SessionRun, raw_sample: dict, metrics: dict) -> None:
         """Log the raw sample and the metrics every 10 ticks (~5s at 2Hz)."""
