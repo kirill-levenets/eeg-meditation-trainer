@@ -8,33 +8,35 @@ from app.session.session_run import SessionRun
 
 
 class SessionWatch:
-    """Tick thread: each check warns once per condition and ends the session where it must (end_session freezes it on
-    this thread and saves it once on the main one); alerts and the device status reach the main thread through on_main."""
+    """Tick thread: each check warns once per condition and says when the session must end, for the app to end it;
+    alerts and the headset's link reach the main thread through on_main."""
 
     STALE_DATA_THRESHOLD = 10.0  # seconds with no new packets before warning
 
-    def __init__(self, stream, session_manager, audio, live_screen, headset, *, on_main: Callable[[Callable], None],
-                 end_session: Callable[[SessionRun, str, str], None]) -> None:
+    def __init__(self, stream, audio, live_screen, headset, *, on_main: Callable[[Callable], None]) -> None:
         self._stream = stream
-        self._session_manager = session_manager
         self._audio = audio
         self._live_screen = live_screen
         self._headset = headset
         self._on_main = on_main
-        self._end_session = end_session
 
-    def at_limit(self, run: SessionRun) -> bool:
-        """End a session that reached the recording limit; True if it did."""
-        if self._session_manager.elapsed_seconds < APP.SESSION_MAX_SECONDS:
-            return False
+    def check(self, run: SessionRun, elapsed: float) -> tuple[str, str] | None:
+        """The recording limit, the headset's link and stale data, in that order: the (reason, alert) the session must
+        end with now, or None."""
+        ending = self.at_limit(elapsed)
+        if ending:
+            return ending
+        self.follow_link(run)
+        return self.check_stale(run)
+
+    def at_limit(self, elapsed: float) -> tuple[str, str] | None:
+        """A session that reached the recording limit ends, saved, with the alert sound."""
+        if elapsed < APP.SESSION_MAX_SECONDS:
+            return None
         logger.info(f"Session reached max duration ({APP.SESSION_MAX_SECONDS}s), auto-stopping")
         self._audio.play_disconnect_alert()
-        limit_msg = (
-            f"Session recording limit reached ({APP.SESSION_MAX_SECONDS // 3600}h). "
-            "Session saved. Start a new one to continue."
-        )
-        self._end_session(run, "user", limit_msg)
-        return True
+        return "user", (f"Session recording limit reached ({APP.SESSION_MAX_SECONDS // 3600}h). "
+                        "Session saved. Start a new one to continue.")
 
     def follow_link(self, run: SessionRun) -> None:
         """The headset's link coming up and dropping during a session, shown where the headset is shown (a drop as
@@ -50,21 +52,19 @@ class SessionWatch:
             self._audio.play_disconnect_alert()
             logger.warning(f"BT device {self._headset.name()} disconnected during session")
 
-    def check_stale(self, run: SessionRun) -> None:
-        """Auto-stop session when the real device stops sending EEG data."""
+    def check_stale(self, run: SessionRun) -> tuple[str, str] | None:
+        """A session whose real headset stopped sending EEG data ends, once per stall."""
         if APP.USE_MOCK_DEVICE:
-            return
+            return None
         stale_secs = self._stream.seconds_since_last_packet
-        if stale_secs <= 0:
+        if stale_secs <= self.STALE_DATA_THRESHOLD:
             run.stale_data_warned = False
-            return
-        if stale_secs > self.STALE_DATA_THRESHOLD:
-            if not run.stale_data_warned:
-                run.stale_data_warned = True
-                logger.warning(f"Stale EEG data: no packets for {stale_secs:.0f}s, auto-stopping")
-                self._end_session(run, "stale_data", "No EEG data. Session stopped.\nCheck headset and battery.")
-        else:
-            run.stale_data_warned = False
+            return None
+        if run.stale_data_warned:
+            return None
+        run.stale_data_warned = True
+        logger.warning(f"Stale EEG data: no packets for {stale_secs:.0f}s, auto-stopping")
+        return "stale_data", "No EEG data. Session stopped.\nCheck headset and battery."
 
     def check_sample(self, run: SessionRun, raw_sample: dict) -> None:
         """A low headset battery and power-line noise, each warned about once."""

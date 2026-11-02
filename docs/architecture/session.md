@@ -55,7 +55,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   **Every ending saves through this one path** (#39):
   user Stop pauses the tick and asks `_confirm_action("Stop session?", ..., on_cancel=_cancel_stop)`, whose OK is `_stop_and_save(reason="user")`.
   There is no discard path; deleting is the end card's confirmed action.
-  **A session ends once.** A check that ends it on the tick thread, data gone stale or the recording limit (`SessionWatch`), freezes it there through `_end_from_tick`:
+  **A session ends once.** A check that ends it on the tick thread, data gone stale or the recording limit (`SessionWatch.check` returns its reason and alert; the tick returns after it), freezes it there through `_end_from_tick`:
   `SessionManager.pause()` (its duration ends at the detection, not when the phone is unlocked), `AudioEngine.mute()` (setVolume only, safe on this thread), `ticker.stop()`;
   then one main-thread `_stop_and_save(reason)` with its alert, queued for that run (`_on_main_for`).
   With the tick stopped no later tick can end it again: on a locked phone a stale stop used to be followed by the timer's ending (two saves, two teardowns), and the limit check queued a stop and played its alert on every tick until the unlock.

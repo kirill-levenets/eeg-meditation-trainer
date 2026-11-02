@@ -34,8 +34,7 @@ def watch(monkeypatch):
     stream, live_screen, device, audio = MagicMock(), MagicMock(), MagicMock(), MagicMock()
     stream.is_connected, stream._device_address, stream._device_name = False, "AA:BB", "MWM2"
     headset = Headset(stub_context(live=lambda: True), stream, device, live_screen, serial_override=lambda: None)
-    w = SessionWatch(stream, MagicMock(elapsed_seconds=0), audio, live_screen, headset, on_main=queued.append,
-                     end_session=MagicMock())
+    w = SessionWatch(stream, audio, live_screen, headset, on_main=queued.append)
     run = SessionRun(1)
     run.phase = Phase.STARTED
     return w, run, queued, stream, live_screen, device, audio
@@ -112,12 +111,22 @@ def test_no_noise_found_warns_nothing(watch):
 def test_data_flowing_again_rearms_the_stale_stop(watch):
     w, run, _queued, stream, _live, _device, _audio = watch
     stream.seconds_since_last_packet = w.STALE_DATA_THRESHOLD + 1
-    w.check_stale(run)
-    w.check_stale(run)
-    w._end_session.assert_called_once_with(run, "stale_data", "No EEG data. Session stopped.\nCheck headset and battery.")
+    assert w.check_stale(run) == ("stale_data", "No EEG data. Session stopped.\nCheck headset and battery.")
+    assert w.check_stale(run) is None  # once per stall
     stream.seconds_since_last_packet = 0.3
-    w.check_stale(run)
+    assert w.check_stale(run) is None
     assert not run.stale_data_warned
+
+
+def test_the_recording_limit_ends_it_before_the_other_checks_run(watch, monkeypatch):
+    w, run, queued, stream, _live, _device, audio = watch
+    monkeypatch.setattr(APP, "SESSION_MAX_SECONDS", 60)
+    stream.is_connected, stream.seconds_since_last_packet = True, 0.2
+    assert w.check(run, elapsed=59) is None and queued  # under it: the link is followed
+    queued.clear()
+    reason, alert = w.check(run, elapsed=60)
+    assert reason == "user" and "recording limit" in alert and not queued
+    audio.play_disconnect_alert.assert_called_once()
 
 
 def test_a_reconnect_mid_session_shows_the_headset_connected_again(watch):
