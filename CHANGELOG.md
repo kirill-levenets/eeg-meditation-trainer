@@ -45,6 +45,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **Markers vanished from the Session screen's graphs** when a session ended, and when the screen was unlocked during one.
+  They stay where they were placed; the session detail in History always had them.
 - **A headset that reconnected mid-session still showed as reconnecting until the session ended**, and Settings › Device still showed it connected while the link was down.
   Both now show the link as it is: reconnecting while it is down, connected once it is back.
 - **A changed line width was saved only when leaving the app or switching profiles**, so a crash before then lost it.
