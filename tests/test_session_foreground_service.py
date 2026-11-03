@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from app import android_jni
+from app.keep_awake import KeepAwake
 from app.session.manager import SessionState
 from app.ui.app_manager import EEGMeditationApp
 
@@ -35,9 +36,9 @@ def test_on_android_a_session_starts_and_stops_the_service_through_its_static_me
         SERVICE: service, "org.kivy.android.PythonActivity": types.SimpleNamespace(mActivity=activity)}[name])
     monkeypatch.setitem(sys.modules, "jnius", jnius)
     monkeypatch.setattr(android_jni, "on_android", lambda: True)
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._start_session_keep_alive_service()
-    app._stop_session_keep_alive_service()
+    keep_awake = KeepAwake()
+    keep_awake._start_service()  # the wake lock's half has its own test (test_android_paths)
+    keep_awake.stop_service()
     assert service.start.call_args.args[0] is activity
     service.stop.assert_called_once_with(activity)
 
@@ -49,7 +50,7 @@ def test_the_service_doesnt_stop_when_the_app_is_swiped_away():
     assert "onTaskRemoved" not in java
 
 
-def test_closing_the_app_stops_the_service_with_or_without_a_session(monkeypatch):
+def test_closing_the_app_stops_the_service_with_or_without_a_session():
     # A start still waiting for the headset is no running session, so _stop_and_save never runs for it.
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._restoring = False
@@ -58,8 +59,7 @@ def test_closing_the_app_stops_the_service_with_or_without_a_session(monkeypatch
     app._stop_and_save = MagicMock()
     app._audio = MagicMock()
     app._db = MagicMock()
-    stopped = []
-    monkeypatch.setattr(app, "_stop_session_keep_alive_service", lambda: stopped.append(True))
+    app._keep_awake = MagicMock()
     app.on_stop()
     app._stop_and_save.assert_not_called()
-    assert stopped == [True]
+    app._keep_awake.stop_service.assert_called_once_with()

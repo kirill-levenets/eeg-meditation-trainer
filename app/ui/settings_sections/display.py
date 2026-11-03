@@ -20,6 +20,11 @@ from app.ui.theme import (
 )
 
 
+def _line_width(slider_value: float) -> float:
+    """The width a slider position stands for: its 0.1 step, without the float error a drag leaves."""
+    return round(slider_value, 1)
+
+
 class DisplaySection:
     """Builds the section's content into `section` and reports the user's actions through its callbacks."""
 
@@ -135,8 +140,14 @@ class DisplaySection:
         self._marker_hotkey: str = "m"
         self._waiting_for_hotkey: bool = False
 
+    def show_line_width(self, width: float) -> None:
+        """The slider shows `width`; one already showing it (a drag's unrounded value) is left as it is: a write would
+        fire its hook again."""
+        if _line_width(self._line_width_slider.value) != width:
+            self._line_width_slider.value = width
+
     def _on_line_width_slider(self, instance, value) -> None:
-        val = round(value, 1)
+        val = _line_width(value)
         self._line_width_value.text = f"{val:.1f}"
         self.on_line_width_change(val)
 

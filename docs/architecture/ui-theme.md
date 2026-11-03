@@ -118,7 +118,7 @@ With no active user the first-run popup (the user gate) is shown.
   every switch between views or modes uses it, each with its own button size: the Session screen's Metrics / Raw EEG and its stats bar's LIVE / AVG, History's Cal / 14d,
   the session detail's Metrics / Raw EEG / Frequencies and its band breakdown's Detailed / Grouped, Settings › Timer's Simple / Program, Settings › Threshold's formula Slot and Settings › Theme.
   `LoadingOverlay` (`widgets/loading_overlay.py`) is the app-global modal spinner (status + animated dots on the theme's `ModalPanel` over a dim);
-  it is mounted by wrapping the app root in a `FloatLayout` and shown via `EEGMeditationApp.show_loading(text, delay=0.0)`/`hide_loading()`.
+  `_build_screens` mounts it above the app root (a `FloatLayout`) and hands it to the flow that shows it (`HistoryFlow`'s `loading`), which calls `show(text, delay=0.0)`/`hide()`.
   With a `delay` it takes taps at once and paints only once the delay has passed, so a job that ends sooner never flashes it.
   It animates via `Clock`, so the caller must move the long work off the main thread or the overlay can't paint.
 - All legends are one wrapping `LegendBar` (`app/ui/widgets/legend.py`, a `StackLayout` flow):

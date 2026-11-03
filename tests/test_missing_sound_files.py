@@ -2,20 +2,21 @@
 
 from unittest.mock import MagicMock
 
-import app.ui.app_manager as am
+import app.ui.sound_sources as sound_sources
 from app.ui.app_manager import EEGMeditationApp
+from tests._sound_sources import make_sounds
 
 
 def _make_app(monkeypatch):
     reports: list[tuple] = []
-    monkeypatch.setattr(am, "report_soft_error", lambda label, detail="", **_: reports.append((label, detail)))
+    monkeypatch.setattr(sound_sources, "report_soft_error", lambda label, detail="", **_: reports.append((label, detail)))
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     return app, reports
 
 
 def test_missing_feedback_file_and_gong_become_one_report(monkeypatch, tmp_path):
     app, reports = _make_app(monkeypatch)
-    app._warn_missing_sound_files(
+    make_sounds(app).warn_missing(
         {"custom": ("custom", str(tmp_path / "gone_rain.wav"))}, str(tmp_path / "gone_gong.wav"),
     )
     assert len(reports) == 1
@@ -29,7 +30,7 @@ def test_present_files_report_nothing(monkeypatch, tmp_path):
     rain, gong = tmp_path / "rain.wav", tmp_path / "gong.wav"
     rain.write_bytes(b"x")
     gong.write_bytes(b"x")
-    app._warn_missing_sound_files({"custom": ("custom", str(rain)), "noise": ("noise", "")}, str(gong))
+    make_sounds(app).warn_missing({"custom": ("custom", str(rain)), "noise": ("noise", "")}, str(gong))
     assert reports == []
 
 
@@ -39,7 +40,7 @@ def test_testing_a_missing_gong_warns_instead_of_silently_playing_the_default(mo
     app._audio = MagicMock()
     app._settings_screen = MagicMock()
 
-    app._on_test_timer_sound()
+    make_sounds(app).on_test_timer_sound()
 
     assert len(reports) == 1 and "typo_gong.wav" in reports[0][1]
 
@@ -60,10 +61,10 @@ def test_a_test_button_report_is_not_swallowed_by_an_earlier_session_start_repor
     monkeypatch.setitem(ch._STATE, "in_dialog", False)
     app = EEGMeditationApp.__new__(EEGMeditationApp)
 
-    app._warn_missing_sound_files({"custom": ("custom", str(tmp_path / "gone_rain.wav"))})  # session start
+    make_sounds(app).warn_missing({"custom": ("custom", str(tmp_path / "gone_rain.wav"))})  # session start
     app._timer_state = MagicMock(custom_sound_path=str(tmp_path / "typo_gong.wav"))
     app._audio = MagicMock()
     app._settings_screen = MagicMock()
-    app._on_test_timer_sound()  # seconds later: the user tests the gong
+    make_sounds(app).on_test_timer_sound()  # seconds later: the user tests the gong
 
     assert len(shown) == 2 and "typo_gong.wav" in shown[1]

@@ -4,12 +4,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import app.ui.app_manager as am
+import app.ui.history_flow as history_flow
 from app.session.manager import SessionManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.history_screen import HistoryScreen
 from app.ui.hooks import wire
+from tests._history_flow import make_history_flow
+from tests._profiles import make_profiles
 from tests._recorder import make_recorder
+from tests._shown_session import make_shown
 
 
 def _sessions(n: int) -> list[dict]:
@@ -171,13 +174,12 @@ def test_history_keeps_the_day_filter_only_for_the_same_profile():
     app._ticker = MagicMock(running=False)  # no session's tick running
     app._db = MagicMock()
     app._history_screen = MagicMock()
-    app.show_loading = MagicMock()
-    app.hide_loading = MagicMock()
     app._session_manager = SessionManager()  # no session running
+    flow = make_history_flow(app)
     keeps = []
     for uid in (1, 1, 2, 2):
         app._current_user_id = uid
-        app._refresh_history(force=True)
+        flow.refresh(force=True)
         keeps.append(app._history_screen.load_sessions.call_args.kwargs["keep_filter"])
     assert keeps == [False, True, False, True]
 
@@ -207,28 +209,30 @@ def _app() -> EEGMeditationApp:
     app._recorder = make_recorder(app)
     app._audio = MagicMock()
     app._on_main = lambda fn: fn()
-    for name in ("_refresh_history", "show_loading", "hide_loading"):
-        setattr(app, name, MagicMock())
+    app._loading_overlay = MagicMock()
+    app._history = make_history_flow(app)
+    app._history.refresh = MagicMock()
+    app._shown = make_shown(app)
     return app
 
 
 def test_deleting_sessions_removes_their_rows_and_rebuilds_nothing(monkeypatch):
-    monkeypatch.setattr(am.threading, "Thread", lambda target, **k: MagicMock(start=target))  # the worker, inline
+    monkeypatch.setattr(history_flow.threading, "Thread", lambda target, **k: MagicMock(start=target))  # the worker, inline
     app = _app()
-    app._delete_sessions([7, 9])
+    app._history.delete_sessions([7, 9])
     app._db.delete_sessions.assert_called_once_with([7, 9])  # one transaction
     app._history_screen.remove_sessions.assert_called_once_with([7, 9])
-    app._refresh_history.assert_not_called()
+    app._history.refresh.assert_not_called()
     # No spinner: only the delayed overlay, which paints if the delete runs long, and is gone once it ends.
-    assert [c.kwargs.get("delay", 0) > 0 for c in app.show_loading.call_args_list] == [True]
-    app.hide_loading.assert_called_once()
+    assert [c.kwargs.get("delay", 0) > 0 for c in app._loading_overlay.show.call_args_list] == [True]
+    app._loading_overlay.hide.assert_called_once()
 
 
 def test_renaming_a_session_rebuilds_nothing():
     app = _app()
-    app._on_rename_session(7, "Evening sit")
+    app._history.on_rename_session(7, "Evening sit")
     app._db.rename_session.assert_called_once_with(7, "Evening sit")
-    app._refresh_history.assert_not_called()
+    app._history.refresh.assert_not_called()
 
 
 
@@ -281,9 +285,10 @@ def test_picking_a_profile_marks_history_for_a_rebuild():
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._db = MagicMock()
     app._load_user_settings = MagicMock()
-    app._history_dirty = False
+    app._history = MagicMock()
+    app._shown = MagicMock(owner=None)  # no session shown
     app._activate_user(2)
-    assert app._history_dirty is True
+    app._history.mark_dirty.assert_called_once()
 
 
 def test_deleting_another_profile_marks_history_for_a_rebuild():
@@ -291,8 +296,9 @@ def test_deleting_another_profile_marks_history_for_a_rebuild():
     app._db = MagicMock()
     app._db.get_all_users.return_value = [{"id": 1}]
     app._current_user_id = 1
-    app._refresh_profile = MagicMock()
-    app._history_dirty = False
-    app._on_user_delete(2)
+    app._settings_screen = MagicMock()
+    app._history = MagicMock()
+    app._shown = MagicMock(owner=None)
+    make_profiles(app).on_delete(2)
     app._db.delete_user.assert_called_once_with(2)
-    assert app._history_dirty is True
+    app._history.mark_dirty.assert_called_once()

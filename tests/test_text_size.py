@@ -25,13 +25,13 @@ from app.crash_handler import CrashDialog, _themed_makers
 from app.session.manager import LiveScore
 from app.settings.registry import Setting, SettingsStore
 from app.storage.database import DatabaseManager
-from app.ui.app_manager import startup_text_size, text_size_setting
 from app.ui.diary_screen import DiaryScreen
 from app.ui.history_screen import HistoryScreen
 from app.ui.hooks import wire
 from app.ui.live_session import LiveSessionScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
+from app.ui.startup import startup_text_size, text_size_setting
 from app.ui.theme import (
     TEXT_SIZES,
     BottomNav,

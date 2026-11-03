@@ -108,6 +108,15 @@ def saved_program_label(index: int, entry: dict) -> str:
     return entry.get("name", f"Program {index + 1}")
 
 
+def confirm_saved_delete(confirm: Callable[..., None], kind: str, rows: list[str], index: int,
+                         delete: Callable[[int], None]) -> None:
+    """Ask before deleting the saved formula or program at `index`, named as its list row (`rows`) names it; an index
+    the list no longer has asks nothing."""
+    if 0 <= index < len(rows):
+        confirm(f"Delete {kind}", f"Delete saved {kind} '{rows[index]}'?", "Delete", lambda: delete(index),
+                ok_color=C.DANGER)
+
+
 def save_under_unique_name(kind: str, entries: list[dict], name: str, overwrite_with: str,
                            save: Callable[[int | None], None], confirm: Callable[..., None]) -> None:
     """A saved formula or program keeps a name no other has: a new name is added (`save(None)`), and an existing one

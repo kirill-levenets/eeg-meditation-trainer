@@ -82,14 +82,18 @@ ignore = [
 "app/storage/android_saf.py" = ["PLC0415", "BLE001"]
 # pyjnius helpers: lazy pyjnius import, broad except while trying screens in turn (logged)
 "app/android_jni.py" = ["PLC0415", "BLE001"]
+# The session's keep-awake: lazy pyjnius/android imports, broad except around each Android call (logged)
+"app/keep_awake.py" = ["PLC0415", "BLE001"]
+# The native toast: lazy android/pyjnius imports, broad except around the Android call (logged)
+"app/ui/toast.py" = ["PLC0415", "BLE001"]
 # The maker's power screens: broad except around building them through pyjnius (logged, then a toast)
 "app/ui/power_exemption.py" = ["BLE001"]
 # AST validator/evaluator: deeply branched by design
 "app/metrics/custom_formula.py" = ["BLE001", "PLR0911", "PLR0912"]
 # Android storage resolution
 "app/config.py" = ["PLC0415"]
-# App manager: Android pyjnius lazy import, broad except, threading
-"app/ui/app_manager.py" = ["PLC0415", "BLE001", "PLR0912", "PLR0915"]
+# App manager: a broad except around each step whose failure must not stop the app (logged)
+"app/ui/app_manager.py" = ["BLE001"]
 # Backup/restore (moved from app_manager): broad except around SAF / pyjnius / file I/O, each logged or reported
 "app/ui/backup_flow.py" = ["BLE001"]
 # UI screens: _build_ui methods are long but flat widget construction

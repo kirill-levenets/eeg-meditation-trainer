@@ -1,16 +1,12 @@
 import os
 import sqlite3
-import threading
 import time
 from collections.abc import Callable
 from datetime import datetime as _dt
-from typing import Optional
 
-from kivy.animation import Animation
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
-from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.modalview import ModalView
@@ -27,24 +23,23 @@ from app.crash_handler import (
 from app.eeg.band_spec import BAND_KEYS
 from app.eeg.mock_stream_v2 import MockEEGStream
 from app.eeg.neurosky_stream import NeuroSkyStream
-from app.logger import logger, timed
+from app.keep_awake import KeepAwake
+from app.logger import logger
 from app.metrics.engine import MetricsEngine
 from app.metrics.formula_slots import (
     FORMULA_KEYS,
     FormulaSlots,
-    session_formulas,
 )
 from app.metrics.noise_detector import PowerLineDetector
 from app.session.manager import SessionManager, SessionState, elapsed_clock
-from app.session.recorder import SessionRecorder
+from app.session.recorder import RecordedTick, SessionRecorder
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
-    recorded_plan,
     segment_target,
 )
+from app.session.session_run import Phase, SessionRun
 from app.session.tick_thread import TickThread
 from app.session.timer_state import TimerState
-from app.session.what_if import scored_ticks
 from app.settings.registry import (
     BOOL,
     FLOAT,
@@ -52,132 +47,58 @@ from app.settings.registry import (
     STR,
     Setting,
     SettingsStore,
-    stored_value,
+    held,
+    kept,
 )
-from app.storage.android_share import copy_to_documents
-from app.storage.csv_export import build_sessions_zip
-from app.storage.database import DatabaseManager, UserExistsError
+from app.storage.database import DatabaseManager
 from app.ui import render_stats
+from app.ui.app_context import AppContext, SessionAccess
+from app.ui.audio_metric import AudioMetric
 from app.ui.backup_flow import BackupFlow
-from app.ui.diary_screen import DiaryScreen, detail_graph_data
+from app.ui.bt_wait import BtWait
+from app.ui.diary_screen import DiaryScreen
 from app.ui.formula_settings import FormulaSettings
 from app.ui.graph_fullscreen import GraphFullscreen
 from app.ui.graph_series import GraphSeries
 from app.ui.headset import Headset
+from app.ui.history_flow import HistoryFlow
 from app.ui.history_screen import HistoryScreen
 from app.ui.hooks import wire
-from app.ui.line_colours import DEFAULT as LINE_DEFAULT
-from app.ui.line_colours import LINE_COLOURS
-from app.ui.line_colours import OPTIONS as LINE_OPTIONS
-from app.ui.live_mirror import LiveMirror
 from app.ui.live_session import LiveSessionScreen
 from app.ui.power_exemption import PowerExemption
+from app.ui.profiles import ProfileGate, Profiles
 from app.ui.program_run import ProgramRun
 from app.ui.program_settings import ProgramSettings
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
+from app.ui.session_detail_flow import SessionDetailFlow
 from app.ui.session_labels import session_title, start_stamp
+from app.ui.session_watch import SessionWatch
 from app.ui.settings_screen import (
     SettingsScreen,
 )
+from app.ui.shown_session import ShownSession
+from app.ui.sound_sources import SoundSources
+from app.ui.startup import (
+    line_colours_setting,
+    resolve_startup_user,
+    startup_text_size,
+    startup_theme,
+    text_size_setting,
+    theme_seed,
+    theme_setting,
+)
 from app.ui.theme import (
-    DEFAULT_THEME,
-    TEXT_SIZES,
-    THEMES,
     BottomNav,
     C,
     F,
     StyledButton,
-    ThemedLabel,
-    ThemedPopup,
     confirm_popup,
     fill_background,
     format_count,
     make_message_popup,
-    paint_panel,
 )
+from app.ui.toast import android_toast, show_toast
 from app.ui.widgets.loading_overlay import LoadingOverlay
-from app.ui.widgets.user_picker import UserPickerForm
-
-
-def resolve_startup_user(db) -> Optional[int]:
-    """The uid to restore at startup, or None if the user must be prompted.
-
-    None covers no `last_user_id`, a corrupt value, and a stale id whose user was
-    deleted — every case must open the blocking user-select gate rather than let
-    the app run usable with no active user (issue #29 root cause)."""
-    saved = db.get_setting("last_user_id")
-    if not saved:
-        return None
-    try:
-        uid = int(saved)
-    except (ValueError, TypeError):
-        logger.warning(f"Corrupt last_user_id setting {saved!r} — prompting for user")
-        return None
-    if uid <= 0:  # not a valid AUTOINCREMENT id — don't rely on get_user(0) missing
-        return None
-    return uid if db.get_user(uid) else None
-
-
-def theme_seed(db) -> str:
-    """The theme of a profile without its own: the global setting from before themes were per-user, else the
-    default."""
-    seed = db.get_setting("theme")
-    return seed if seed in THEMES else DEFAULT_THEME
-
-
-def _parse_theme(raw: str) -> str:
-    if raw not in THEMES:
-        raise ValueError(f"unknown theme {raw!r}")
-    return raw
-
-
-def theme_setting(seed: str) -> Setting:
-    """The per-user theme. An unknown stored name loads the seed: set_theme ignores it, which kept the previous
-    profile's palette."""
-    return Setting("theme", seed, _parse_theme, STR[1], lambda: C.theme_name, C.set_theme)
-
-
-def _parse_text_size(raw: str) -> float:
-    size = float(raw)
-    if size not in {scale for scale, _name in TEXT_SIZES}:
-        raise ValueError(f"text size {raw!r} isn't on offer")
-    return size
-
-
-def text_size_setting() -> Setting:
-    """The per-user text size: loading a profile applies its size to every screen at once."""
-    return Setting("text_size", 1.0, _parse_text_size, FLOAT[1], lambda: F.SCALE, F.set_scale)
-
-
-def _parse_line_colours(raw: str) -> str:
-    if raw not in {name for name, _label in LINE_OPTIONS}:
-        raise ValueError(f"line colours {raw!r} aren't on offer")
-    return raw
-
-
-def line_colours_setting() -> Setting:
-    """The per-user scored line colours: loading a profile redraws every graph in its choice."""
-    return Setting("line_colours", LINE_DEFAULT, _parse_line_colours, STR[1], lambda: LINE_COLOURS.name,
-                   LINE_COLOURS.set)
-
-
-def startup_value(db, setting: Setting):
-    """The startup profile's value, to build the UI in: its settings load then re-applies it as a no-op."""
-    return stored_value(db, resolve_startup_user(db), setting)
-
-
-def startup_text_size(db) -> float:
-    return startup_value(db, text_size_setting())
-
-
-def startup_theme(db) -> str:
-    """The startup profile's theme, else the seed."""
-    return startup_value(db, theme_setting(theme_seed(db)))
-
-
-def sessions_for_view(db, current_uid: int | None) -> list:
-    """The active profile's sessions; none while no profile is active."""
-    return db.get_all_sessions(user_id=current_uid) if current_uid else []
 
 
 class EEGMeditationApp(App):
@@ -201,26 +122,22 @@ class EEGMeditationApp(App):
         self._audio: AudioEngine = AudioEngine()
         self._session_manager.set_audio(self._audio)
         self._ticker: TickThread = TickThread(lambda dt: self._update_tick(dt))
-        self._waiting_for_bt: bool = False
-        self._bt_signal_start: float | None = None
         # Android pause state: when True, tick thread skips per-tick UI
         # work (graph add_point, stats updates) so a long screen-lock
         # doesn't accumulate thousands of Clock callbacks that flood the
         # main loop on resume (which previously caused a black screen).
         self._is_paused: bool = False
-        self._mirror: LiveMirror = LiveMirror()  # the live graphs' session, kept through a screen lock
         self._recorder: SessionRecorder = SessionRecorder(
             self._db, self._session_manager, with_score=lambda stats: self._with_score(stats),
             row_fields=lambda: self._session_row_fields())
-        self._current_user_id: Optional[int] = None
+        self._current_user_id: int | None = None
         # True while _load_user_settings applies values, so its change callbacks don't re-persist them.
         self._loading_settings: bool = False
         self._settle_triggers: dict = {}  # input name -> its settle trigger (_after_settle)
         self._settle_fns: dict = {}  # input name -> the function its trigger runs (the latest one given)
         self._formulas: FormulaSlots = FormulaSlots()
-        self._audio_formula_index: int = 0  # the slot that drives the sound when the custom formula does
-        self.serial_device_override: Optional[str] = None
-        self._wake_lock = None
+        self.serial_device_override: str | None = None
+        self._keep_awake: KeepAwake = KeepAwake()  # held from a session's setup to its ending
 
     def _persist_user_setting(self, key: str) -> None:
         """Persist one setting now via the registry (it reads the live value); no-op mid-load or unbuilt."""
@@ -234,6 +151,15 @@ class EEGMeditationApp(App):
         except sqlite3.Error as e:
             # The value stays applied in memory; the next batch save retries it.
             report_soft_error("settings_save_failed", f"Couldn't save setting {key!r}: {e}", app=self)
+
+    def _change_setting(self, key: str, value) -> None:
+        """The one change path of a setting the store holds: it holds and applies the value, persisted now, or once a
+        continuous input settles."""
+        self._settings_store.change(key, value)
+        if self._settings_store.settles(key):
+            self._persist_user_setting_later(key)
+        else:
+            self._persist_user_setting(key)
 
     def _persist_user_setting_later(self, key: str) -> None:
         """Persist a continuous input (slider drag, typing) once it settles, not on every step."""
@@ -262,65 +188,8 @@ class EEGMeditationApp(App):
             ev.cancel()
 
     def _session_custom_formulas_json(self) -> str:
-        return self._formulas.session_record(self._live_screen.graph.is_visible, self._audio_metric_key)
-
-    @staticmethod
-    def _source_spec(source_id: str) -> tuple[str, str]:
-        """Map a feedback source id to (kind, custom_path); non-builtin ids are custom file paths.
-        "" / "none" -> the silent sentinel (no player is instantiated for it)."""
-        if source_id in ("", "none"):
-            return ("none", "")
-        if source_id in ("noise", "tone", "heartbeat"):
-            return (source_id, "")
-        return ("custom", source_id)
-
-    def _reward_id(self) -> str:
-        """The above-threshold reward source id ("" = none). A custom selection with
-        no file resolves to silent (unlike the noise channel, which falls back to rain)."""
-        src = getattr(self, "_reward_source", "none")
-        if src in ("", "none"):
-            return ""
-        if src == "custom":
-            return getattr(self, "_reward_sound_path", "") or ""
-        return src
-
-    @staticmethod
-    def _feedback_source_id(value: str, global_id: str) -> str:
-        """A segment's feedback_sound value as a source id; blank inherits the global source."""
-        return value if value else global_id
-
-    @staticmethod
-    def _feedback_plan(prog, global_id: str) -> tuple[dict, list, str]:
-        """(distinct sources, per-segment ids, initial id) for a program; blanks inherit the global."""
-        seg_ids = [
-            EEGMeditationApp._feedback_source_id(s.get("feedback_sound", "") or "", global_id)
-            for s in prog.segments
-        ]
-        sources = {sid: EEGMeditationApp._source_spec(sid) for sid in [global_id, *seg_ids]}
-        initial = seg_ids[0] if seg_ids else global_id
-        return sources, seg_ids, initial
-
-    def _global_feedback_id(self) -> str:
-        """The active global feedback source id; a custom selection with no file falls back to noise."""
-        src = getattr(self, "_feedback_source", "noise")
-        if src in ("", "none"):
-            return "none"
-        if src == "custom":
-            return getattr(self, "_feedback_sound_path", "") or "noise"
-        return src
-
-    def _warn_missing_sound_files(self, feedback_sources: dict, timer_path: str = "", *, force: bool = False) -> None:
-        """Surface missing custom sound files in ONE report; `force` for user-initiated checks (Test buttons)."""
-        problems = []
-        missing = [path for kind, path in feedback_sources.values()
-                   if kind == "custom" and not (path and os.path.isfile(path))]
-        if missing:
-            problems.append(f"{format_count(len(missing), 'custom feedback file')} not found: "
-                            + ", ".join(repr(p) for p in missing) + " - using rain noise instead.")
-        if timer_path and not os.path.isfile(timer_path):
-            problems.append(f"Custom timer sound not found: {timer_path!r} - using the default gong instead.")
-        if problems:
-            report_soft_error("sound_files_missing", "\n".join(problems), app=self, force=force)
+        return self._formulas.session_record(self._live_screen.graph.is_visible,
+                                             self._settings_store.value("audio_metric"))
 
     @staticmethod
     def _shamatha_transition(
@@ -345,80 +214,6 @@ class EEGMeditationApp(App):
         fvars.update({f"s_{k}": v for k, v in sqrt_bands.items()})
         return fvars
 
-    def _acquire_wake_lock(self) -> None:
-        """Keep CPU running + screen on during session (Android only)."""
-        if not android_jni.on_android():
-            return
-        try:
-            from android.runnable import run_on_ui_thread
-
-            @run_on_ui_thread
-            def _set_flag():
-                from jnius import autoclass
-                activity = android_jni.activity()
-                WindowManager = autoclass("android.view.WindowManager$LayoutParams")
-                activity.getWindow().addFlags(WindowManager.FLAG_KEEP_SCREEN_ON)
-            _set_flag()
-
-            # Partial wake lock keeps CPU alive when screen is off.
-            from jnius import autoclass
-            Context = autoclass("android.content.Context")
-            PowerManager = autoclass("android.os.PowerManager")
-            pm = android_jni.activity().getSystemService(Context.POWER_SERVICE)
-            self._wake_lock = pm.newWakeLock(
-                PowerManager.PARTIAL_WAKE_LOCK, "eegmeditation:session"
-            )
-            self._wake_lock.acquire()
-            logger.info("Wake lock acquired (partial + screen-on).")
-        except Exception as e:
-            logger.warning(f"Failed to acquire wake lock: {e}")
-
-    def _release_wake_lock(self) -> None:
-        """Release wake locks (Android only)."""
-        if not android_jni.on_android():
-            return
-        try:
-            if self._wake_lock is not None:
-                try:
-                    self._wake_lock.release()
-                except Exception as e:  # already released by Android; the flag still clears below
-                    logger.warning(f"Wake lock release failed: {e}")
-                self._wake_lock = None
-            from android.runnable import run_on_ui_thread
-
-            @run_on_ui_thread
-            def _clear_flag():
-                from jnius import autoclass
-                activity = android_jni.activity()
-                WindowManager = autoclass("android.view.WindowManager$LayoutParams")
-                activity.getWindow().clearFlags(WindowManager.FLAG_KEEP_SCREEN_ON)
-            _clear_flag()
-            logger.info("Wake lock released.")
-        except Exception as e:
-            logger.warning(f"Failed to release wake lock: {e}")
-
-    def _start_session_keep_alive_service(self) -> None:
-        """Start the session's foreground service: it runs in this process, so the OS keeps this process up."""
-        if not android_jni.on_android():
-            return
-        try:
-            from jnius import autoclass
-            service_cls = autoclass("org.eeg.eegmeditation.SessionForegroundService")
-            service_cls.start(android_jni.activity(), "EEG Meditation", "Meditation session in progress")
-            logger.info("Session foreground service started.")
-        except Exception as e:
-            logger.warning(f"Failed to start the session foreground service: {e}")
-
-    def _stop_session_keep_alive_service(self) -> None:
-        if not android_jni.on_android():
-            return
-        try:
-            from jnius import autoclass
-            autoclass("org.eeg.eegmeditation.SessionForegroundService").stop(android_jni.activity())
-            logger.info("Session foreground service stopped.")
-        except Exception as e:
-            logger.warning(f"Failed to stop the session foreground service: {e}")
-
     # Map bottom-nav tab keys to screen groups
     _TAB_SCREENS = {
         "session": "live_session",
@@ -428,6 +223,7 @@ class EEGMeditationApp(App):
 
     def build(self) -> FloatLayout:
         install_crash_handler(self)
+        self._ctx = self._make_context()
 
         self._theme_seed = theme_seed(self._db)
         C.set_theme(startup_theme(self._db))
@@ -440,101 +236,90 @@ class EEGMeditationApp(App):
             APP.USE_MOCK_DEVICE = False
             logger.info(f"Serial device override: {path}")
 
-        root = BoxLayout(orientation="vertical")
-        fill_background(root, C.BG_DARK)
-
-        # --- Screen manager (routed via nav) ---
-        self._sm = ScreenManager(transition=SlideTransition())
-
-        self._live_screen = LiveSessionScreen()
-        self._program_run = ProgramRun(self._session_manager, self._audio, self._live_screen, on_main=self._on_main,
-                                       formula_vars=self._eval_formula_vars, info=self._info_popup)
-        self._settings_screen = SettingsScreen()
-        self._history_screen = HistoryScreen()
-        self._diary_screen = DiaryScreen()
-        self._timer_state = TimerState()
-        self._program_settings = ProgramSettings(
-            self._db, self._settings_screen.timer, self._live_screen, self._session_manager,
-            user_id=lambda: self._current_user_id, require_user=self._require_user, confirm=self._confirm_action,
-            info=self._info_popup, confirm_saved_delete=self._confirm_saved_delete,
-            show_saved_series=lambda uid: self._graph_series.apply_saved(self._live_screen.graph, uid),
-            save_settings=self._save_user_settings)
-        self._formula_settings = FormulaSettings(
-            self._db, self._settings_screen.formulas, self._live_screen.graph, self._formulas,
-            user_id=lambda: self._current_user_id, require_user=self._require_user,
-            scoring_locked=self._scoring_locked, audio_key=lambda: self._audio_metric_key,
-            confirm=self._confirm_action, info=self._info_popup, confirm_saved_delete=self._confirm_saved_delete)
-        self._headset = Headset(
-            self._db, self._real_stream, self._settings_screen.device, self._live_screen,
-            user_id=lambda: self._current_user_id, refused_while_session_runs=self._refused_while_session_runs,
-            session_live=self._session_pipeline_live, waiting_for_bt=lambda: self._waiting_for_bt,
-            serial_override=lambda: self.serial_device_override,
-            report=lambda label, detail, force=False: report_soft_error(label, detail, app=self, force=force))
-        self._headset.load_aliases()
-        self._power = PowerExemption(self._db, self._settings_screen.device, toast=self._toast, main=self._on_main)
-
-        self._sm.add_widget(self._live_screen)
-        self._sm.add_widget(self._history_screen)
-        self._sm.add_widget(self._settings_screen)
-        self._sm.add_widget(self._diary_screen)
-
-        root.add_widget(self._sm)
-
-        # --- Bottom navigation ---
-        self._bottom_nav = BottomNav(
-            tabs=[
-                ("Session", "session"),
-                ("History", "history"),
-                ("Settings", "settings"),
-            ],
-            callback=self._on_nav_tab,
-        )
-        root.add_widget(self._bottom_nav)
-
-        # Wrap in a FloatLayout so app-global overlays (loading spinner,
-        # fullscreen graph) can sit on top of every screen.
-        float_root = FloatLayout()
-        self._float_root = float_root
-        self._fullscreen = GraphFullscreen(float_root)
-        self._graph_series = GraphSeries(
-            self._db, self._live_screen.graph, self._formulas, self._program_run, self._program_settings,
-            self._formula_settings, graphs=self._all_graphs, detail_program=self._diary_screen.program_lines_of,
-            legacy_defaults=self._settings_screen._graph_toggles, user_id=lambda: self._current_user_id,
-            require_user=self._require_user)
-        self._last_back_time = 0.0  # for double-back-to-exit on the root screen
-        float_root.add_widget(root)
-        self._loading_overlay = LoadingOverlay()
-        float_root.add_widget(self._loading_overlay)
-
+        float_root = self._build_screens()
+        self._build_flows()
         self._bind_callbacks()
         self._link_graph_zoom()
         # After _bind_callbacks (it sets the fields get() snapshots as defaults), before any user load.
         self._build_settings_store()
         resolved_user = self._restore_last_user()
-        self._refresh_profile()
-
-        # Hard user gate: the app is never usable without a resolved concrete
-        # user. Gate on "did we resolve a user", NOT on whether the users table
-        # is non-empty — reinstall / restored DB / deleted-active-profile /
-        # corrupt last_user_id all leave users present but none current. Disable
-        # nav synchronously so there is no cold-start window where the app is
-        # tappable with no user; the selection modal re-enables it. The modal
-        # is a Popup, not a Screen, because a TextInput inside a
-        # Screen doesn't get keyboard focus on some platforms.
+        self._profiles.refresh()
+        # The gate is on a resolved user, not on users existing: a reinstall, a restored DB, a deleted active profile or
+        # a corrupt last_user_id leave users but none current. The nav is disabled at once: no cold-start tap window.
         if resolved_user is None:
-            self._open_user_gate(0.5)
-
+            self._gate.open(0.5)
         return float_root
 
-    def show_loading(self, text: str = "Loading…", delay: float = 0.0) -> None:
-        """Show the app-global loading overlay (no-op before build); `delay` as in LoadingOverlay.show."""
-        if getattr(self, "_loading_overlay", None) is not None:
-            self._loading_overlay.show(text, delay)
+    def _build_screens(self) -> FloatLayout:
+        """The four screens under the bottom nav, with the app-wide overlays (loading, a fullscreen graph) above them."""
+        root = BoxLayout(orientation="vertical")
+        fill_background(root, C.BG_DARK)
+        self._sm = ScreenManager(transition=SlideTransition())
+        self._live_screen = LiveSessionScreen()
+        self._settings_screen = SettingsScreen()
+        self._history_screen = HistoryScreen()
+        self._diary_screen = DiaryScreen()
+        for screen in (self._live_screen, self._history_screen, self._settings_screen, self._diary_screen):
+            self._sm.add_widget(screen)
+        root.add_widget(self._sm)
+        self._bottom_nav = BottomNav(tabs=[("Session", "session"), ("History", "history"), ("Settings", "settings")],
+                                     callback=self._on_nav_tab)
+        root.add_widget(self._bottom_nav)
+        float_root = FloatLayout()
+        self._float_root = float_root
+        self._fullscreen = GraphFullscreen(float_root)
+        self._loading_overlay = LoadingOverlay()
+        float_root.add_widget(root)
+        float_root.add_widget(self._loading_overlay)
+        return float_root
 
-    def hide_loading(self) -> None:
-        """Hide the app-global loading overlay (no-op before build)."""
-        if getattr(self, "_loading_overlay", None) is not None:
-            self._loading_overlay.hide()
+    def _build_flows(self) -> None:
+        """The objects that own each concern, each given the app context and the screens it works on."""
+        self._timer_state = TimerState()
+        self._sounds = SoundSources(self._ctx, self._audio, self._timer_state, self._settings_screen.timer)
+        self._program_run = ProgramRun(self._ctx, self._session_manager, self._audio, self._live_screen,
+                                       formula_vars=self._eval_formula_vars)
+        self._audio_metric = AudioMetric(self._ctx, self._formulas, self._program_run, self._settings_screen)
+        self._program_settings = ProgramSettings(
+            self._ctx, self._settings_screen.timer, self._live_screen, self._session_manager,
+            show_saved_series=lambda uid: self._graph_series.apply_saved(self._live_screen.graph, uid))
+        self._formula_settings = FormulaSettings(self._ctx, self._settings_screen.formulas, self._live_screen.graph,
+                                                 self._formulas, scoring_locked=self._audio_metric.formula_scoring_locked)
+        self._headset = Headset(self._ctx, self._real_stream, self._settings_screen.device, self._live_screen,
+                                serial_override=lambda: self.serial_device_override)
+        self._headset.load_aliases()
+        self._power = PowerExemption(self._ctx, self._settings_screen.device)
+        self._bt_wait = BtWait(self._real_stream, self._live_screen, headset_name=self._headset.name,
+                               on_main_for=self._on_main_for)
+        self._watch = SessionWatch(self._real_stream, self._audio, self._live_screen, self._headset,
+                                   on_main=self._on_main)
+        self._graph_series = GraphSeries(
+            self._ctx, self._live_screen.graph, self._formulas, self._program_run, self._program_settings,
+            self._formula_settings, graphs=self._all_graphs, detail_program=self._diary_screen.program_lines_of,
+            legacy_defaults=self._settings_screen._graph_toggles)
+        self._history = HistoryFlow(self._ctx, self._history_screen, self._formulas, self._loading_overlay,
+                                    on_sessions_deleted=lambda ids: self._shown.on_sessions_deleted(ids))
+        self._shown = ShownSession(self._ctx, self._live_screen, self._audio, self._history, self._recorder)
+        self._detail = SessionDetailFlow(self._ctx, self._diary_screen, self._history_screen, self._sm,
+                                         self._graph_series)
+        self._gate = ProfileGate(
+            self._ctx, self._bottom_nav, refresh_profiles=lambda: self._profiles.refresh(),
+            scan_for_new_profile=self._headset.scan_for_new_profile, offer_power_exemption=self._power.offer_once)
+        self._profiles = Profiles(self._ctx, self._settings_screen, self._gate, deactivate=self._deactivate_user,
+                                  on_deleted=self._on_profile_deleted)
+        self._backup_flow = BackupFlow(self._ctx, self._settings_screen, user_name=self._profiles.current_name,
+                                       checkpoint=self._checkpoint_or_report, on_db_replaced=self._on_db_replaced)
+
+    def _make_context(self) -> AppContext:
+        """What every flow reaches the app through; the callables read the app when called, so they see the profile and
+        the session as they are then."""
+        session = SessionAccess(live=self._session_pipeline_live, running_id=self._running_session_id,
+                                refused=self._refused_while_session_runs, discard=self._discard_running_session)
+        return AppContext(db=self._db, user_id=lambda: self._current_user_id, activate_user=self._activate_user,
+                          require_user=self._require_user, on_main=self._on_main, switch_screen=self._switch_screen,
+                          info=self._info_popup, toast=self._toast, confirm=self._confirm_action,
+                          setting=lambda key: self._settings_store.value(key), change_setting=self._change_setting,
+                          save_settings=self._save_user_settings, session=session)
 
     def _all_graphs(self) -> tuple:
         """Every mounted graph, for the cross-graph affordances (expand, picker, fit, restore); zoom links per group."""
@@ -571,6 +356,17 @@ class EEGMeditationApp(App):
         ScrollableGraphWidget.link_zoom(*self._detail_graphs())
 
     def _bind_callbacks(self) -> None:
+        """Every screen's handlers, and the keys: the marker hotkey and Android's back button."""
+        self._wire_session_screen()
+        self._wire_settings_screen()
+        self._wire_history_screens()
+        Window.bind(on_key_down=self._on_key_down)
+        # Android's back (key 27) is consumed, so Kivy's exit-on-escape doesn't fire: it navigates, or exits on a double tap.
+        self._last_back_time = 0.0
+        Window.bind(on_keyboard=self._on_keyboard)
+
+    def _wire_session_screen(self) -> None:
+        """The Session screen's controls, its end card, its graphs' glyphs and the series its graph starts with."""
         self._live_screen.btn_start.bind(on_release=self._on_start)
         self._live_screen.btn_pause.bind(on_release=self._on_pause)
         self._live_screen.btn_stop.bind(on_release=self._on_stop)
@@ -582,9 +378,9 @@ class EEGMeditationApp(App):
         )
         self._live_screen.overlay_cancel_btn.bind(on_release=self._on_connect_cancel)
         self._live_screen.overlay_retry_btn.bind(on_release=self._on_connect_retry)
-        self._live_screen.summary_ok_btn.bind(on_release=self._on_summary_ok)
-        self._live_screen.summary_save_notes_btn.bind(on_release=self._on_summary_save_notes)
-        self._live_screen.summary_delete_btn.bind(on_release=self._on_summary_delete)
+        self._live_screen.summary_ok_btn.bind(on_release=self._shown.on_ok)
+        self._live_screen.summary_save_notes_btn.bind(on_release=self._shown.on_save_notes)
+        self._live_screen.summary_delete_btn.bind(on_release=self._shown.on_delete)
 
         # Tap on graph to set marker (Android — no keyboard available)
         if android_jni.on_android():
@@ -592,26 +388,33 @@ class EEGMeditationApp(App):
 
         # Shared fullscreen-expand + series-picker glyphs on every graph
         self._wire_graph_affordances()
+        # The formula series stay hidden until a formula is shown through the picker, the program ones while no program
+        # with formula segments runs; a new profile starts on Shamatha alone (a profile load applies its own).
+        for key in (*FORMULA_KEYS, *PROGRAM_FORMULA_KEYS):
+            self._live_screen.graph.set_visible(key, False)
+        for key, active in self._settings_screen._graph_toggles.items():
+            self._live_screen.graph.set_visible(key, active)
 
+    def _wire_settings_screen(self) -> None:
         wire(
             self._settings_screen,
             on_threshold_change=self._on_threshold_change,
-            on_audio_metric_change=self._on_audio_metric_change,
-            on_audio_formula_index=self._on_audio_formula_index,
+            on_audio_metric_change=self._audio_metric.on_change,
+            on_audio_formula_index=self._audio_metric.on_formula_index,
             on_theme_change=self._on_theme_change,
-            on_profile_switch=self._on_user_switch,
-            on_profile_create=self._on_user_create,
-            on_profile_delete=self._on_user_delete,
-            session_counter=self._count_sessions_for_user,
+            on_profile_switch=self._profiles.on_switch,
+            on_profile_create=self._profiles.on_create,
+            on_profile_delete=self._profiles.on_delete,
+            session_counter=self._profiles.count_sessions,
         )
         wire(
             self._settings_screen.audio,
-            on_test_audio=self._on_test_audio,
+            on_test_audio=self._sounds.on_test_audio,
             on_sinking_alert_toggle=self._on_sinking_alert_toggle,
             on_subtle_alert_toggle=self._on_subtle_alert_toggle,
             on_disconnect_alert_toggle=self._on_disconnect_alert_toggle,
-            on_feedback_source_change=self._on_feedback_source_change,
-            on_reward_source_change=self._on_reward_source_change,
+            on_feedback_source_change=self._sounds.on_feedback_source_change,
+            on_reward_source_change=self._sounds.on_reward_source_change,
         )
         wire(
             self._settings_screen.device,
@@ -646,77 +449,55 @@ class EEGMeditationApp(App):
             on_program_save=self._program_settings.on_save,
             on_program_load=self._program_settings.on_load,
             on_program_delete=self._program_settings.on_delete,
-            on_test_timer_sound=self._on_test_timer_sound,
-            on_stop_timer_sound=self._on_stop_test_timer_sound,
-            on_timer_sound_change=self._on_timer_sound_change,
+            on_test_timer_sound=self._sounds.on_test_timer_sound,
+            on_stop_timer_sound=self._sounds.on_stop_test_timer_sound,
+            on_timer_sound_change=self._sounds.on_timer_sound_change,
         )
+        wire(self._settings_screen, on_backup_pressed=self._backup_flow.on_backup_pressed,
+             on_restore_pressed=self._backup_flow.on_restore_pressed)
 
-        # Keyboard hotkey for marker
-        Window.bind(on_key_down=self._on_key_down)
-        # Android hardware back button (key 27) — consume it so Kivy's default
-        # exit-on-escape doesn't fire; navigate / double-tap-to-exit instead.
-        Window.bind(on_keyboard=self._on_keyboard)
-
-        # Hide all custom-formula series until a formula is set + shown via picker
-        for _fk in FORMULA_KEYS:
-            self._live_screen.graph.set_visible(_fk, False)
-        # The program-formula lines are shown only while a program with
-        # custom-formula segments runs.
-        for _pk in PROGRAM_FORMULA_KEYS:
-            self._live_screen.graph.set_visible(_pk, False)
-        # Apply default metric visibility (Shamatha only for new users;
-        # _load_user_settings will override for existing users)
-        for key, active in self._settings_screen._graph_toggles.items():
-            self._live_screen.graph.set_visible(key, active)
-        self._audio_metric_key: str = "shamatha_score"
-        self._feedback_source: str = "noise"
-        self._feedback_sound_path: str = ""
-        self._reward_source: str = "none"   # above-threshold reward channel (off by default)
-        self._reward_sound_path: str = ""
-
+    def _wire_history_screens(self) -> None:
+        """History's list and chart, and a session's detail."""
         wire(
             self._diary_screen,
-            on_save_notes=self._on_save_notes,
-            on_export_csv=self._on_export_csv,
-            on_back=self._on_diary_back,
-            on_band_view_change=self._persist_band_view,
+            on_save_notes=self._history.save_notes,
+            on_export_csv=self._history.on_export_csv,
+            on_back=self._detail.on_diary_back,
+            on_band_view_change=self._detail.persist_band_view,
             on_band_collapse=lambda _collapsed: self._persist_user_setting("band_power_collapsed"),
         )
 
         wire(
             self._history_screen,
-            on_session_select=self._on_session_select,
-            on_delete_sessions=self._delete_sessions,
-            on_rename_session=self._on_rename_session,
-            on_view_mode_change=self._on_history_view_mode_change,
-            on_export_sessions=self._on_export_sessions_csv,
+            on_session_select=self._detail.on_session_select,
+            on_delete_sessions=self._history.delete_sessions,
+            on_rename_session=self._history.on_rename_session,
+            on_view_mode_change=self._history.on_view_mode_change,
+            on_export_sessions=self._history.on_export_sessions_csv,
             on_chart_collapse=lambda _collapsed: self._persist_user_setting("history_chart_collapsed"),
         )
         wire(self._diary_screen.what_if, on_collapse=lambda _collapsed: self._persist_user_setting("what_if_collapsed"))
 
-        # Data Backup section
-        self._backup_flow = BackupFlow(
-            self._db, self._settings_screen, user_name=self._current_user_name,
-            save_settings=self._save_user_settings, checkpoint=self._checkpoint_or_report,
-            refused_while_session_runs=self._refused_while_session_runs, confirm=self._confirm_action,
-            info=self._info_popup, on_db_replaced=self._on_db_replaced,
-        )
-        wire(
-            self._settings_screen,
-            on_backup_pressed=self._backup_flow.on_backup_pressed,
-            on_restore_pressed=self._backup_flow.on_restore_pressed,
-        )
-
     def _activate_user(self, uid: int) -> None:
         """Make `uid` the active profile and load its settings; every path that picks a user goes here."""
-        if self._live_display_uid not in (None, uid):  # the Session screen shows another profile's session
-            self._drop_shown_session(keep_notes=True)
+        if self._shown.owner not in (None, uid):  # the Session screen shows another profile's session
+            self._shown.drop(keep_notes=True)
         self._current_user_id = uid
         self._db.set_setting("last_user_id", str(uid))
         self._load_user_settings(uid)
-        self._mark_history_dirty()  # History still lists the previous profile's sessions
+        self._history.mark_dirty()  # History still lists the previous profile's sessions
 
-    def _restore_last_user(self) -> Optional[int]:
+    def _deactivate_user(self) -> None:
+        """No active profile (its own was deleted, the gate opens next): its programs leave the UI now."""
+        self._current_user_id = None
+        self._program_settings.refresh_saved()
+
+    def _on_profile_deleted(self, uid: int) -> None:
+        if uid == self._shown.owner:  # its session went with it: the card has nothing left to save
+            self._shown.drop(keep_notes=False)
+        self._history.mark_dirty()
+
+    def _restore_last_user(self) -> int | None:
         """Restore the last selected user; return the resolved uid, or None when
         the app must prompt (no/stale/corrupt last_user_id). build() opens the
         blocking user gate on None — the app is never left usable with no user."""
@@ -726,19 +507,6 @@ class EEGMeditationApp(App):
         self._activate_user(uid)
         logger.info(f"Restored last user id={uid}")
         return uid
-
-    def _open_user_gate(self, delay: float = 0.0) -> None:
-        """Enter the hard user gate: disable the bottom nav and open the blocking
-        selection modal. Single source for build() / on_resume / self-delete so
-        the 'app unusable without a user' enforcement can't drift between them."""
-        # Disable nav BEFORE any dedupe return — the gate state must be enforced
-        # even when a popup is already open/scheduled.
-        self._bottom_nav.disabled = True
-        if getattr(self, "_gate_popup", None) is not None:
-            return  # a gate popup is already open — don't stack another
-        if getattr(self, "_gate_event", None) is not None:
-            return  # one is already scheduled (pre-popup window) — don't stack
-        self._gate_event = Clock.schedule_once(self._show_first_run_popup, delay)
 
     def _handle_gate_back(self) -> bool:
         """Back/Esc while gated: never fall through into the app, but the user must
@@ -756,108 +524,6 @@ class EEGMeditationApp(App):
         self._toast("Press back again to exit")
         return True
 
-    def _gate_active(self) -> bool:
-        """True while the app is gated on user selection — nav disabled, no concrete
-        user. Covers both the popup-open state and the schedule window before the
-        popup exists, so the gate is un-escapable throughout."""
-        nav = getattr(self, "_bottom_nav", None)
-        return bool(nav is not None and nav.disabled and not getattr(self, "_current_user_id", None))
-
-    def _reopen_gate_if_unresolved(self) -> None:
-        """After a gate create/pick attempt, re-open the gate if no concrete user
-        ended up set (invalid name, or a stale/deleted profile row) — otherwise the
-        popup is gone, nav stays disabled, and the app is stranded with no user."""
-        if not self._current_user_id:
-            self._refresh_profile()  # drop any stale row from the picker list
-            self._open_user_gate(0)
-
-    def _show_first_run_popup(self, dt) -> None:
-        """Show a name-entry popup on first run (no users in DB).
-
-        After uninstall→reinstall on Android, the DB may persist with
-        existing profiles — UserPickerForm surfaces them so the user can
-        adopt instead of creating a duplicate name.
-        """
-        self._gate_event = None  # the scheduled open is now firing
-        if getattr(self, "_gate_popup", None) is not None:
-            return  # a gate popup is already open — never stack a second modal
-
-        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
-
-        welcome = ThemedLabel(
-            text="Welcome! Create a profile or pick an existing one:",
-            font_size=F.BODY, color=C.TEXT,
-            size_hint_y=None, height=dp(48),
-            halign="center",
-        )
-        welcome.bind(size=welcome.setter("text_size"))
-        content.add_widget(welcome)
-
-        popup = ThemedPopup(
-            title="Select Profile",
-            content=content,
-            size_hint=(0.9, None),
-            auto_dismiss=False,
-        )
-        # Tracked so _on_keyboard can make the gate un-escapable (back/Esc must
-        # not dismiss it or exit the app out from under an unresolved user).
-        self._gate_popup = popup
-        # A dismissal from ANY path clears the handle, so a stale non-None
-        # _gate_popup can never block re-gating forever.
-        popup.bind(on_dismiss=lambda *_a: setattr(self, "_gate_popup", None))
-
-        def _on_create(name: str) -> None:
-            self._gate_popup = None
-            popup.dismiss()
-            self._complete_first_run(name)
-            self._reopen_gate_if_unresolved()
-
-        def _on_pick(user_id: int) -> None:
-            self._gate_popup = None
-            popup.dismiss()
-            self._on_pick_existing_user(user_id)
-            self._reopen_gate_if_unresolved()
-
-        form = UserPickerForm(
-            on_create=_on_create,
-            on_pick_existing=_on_pick,
-        )
-        existing_users = self._db.get_all_users()
-        form.populate_users(existing_users)
-        content.add_widget(form)
-        popup.open()
-
-    def _complete_first_run(self, user_name: str) -> None:
-        """First-run popup: a typed name creates that profile, in mock mode until a headset is picked; a name that
-        exists picks that profile instead."""
-        if not user_name or len(user_name.strip()) < 2:
-            logger.warning(f"First run with invalid name: '{user_name}', ignoring")
-            return
-        try:
-            uid = self._db.create_user(user_name)
-        except UserExistsError as e:
-            logger.info(f"First run: '{e.name}' exists, picking it (id={e.user_id})")
-            self._on_pick_existing_user(e.user_id)
-            return
-        except sqlite3.Error as e:  # the popup's caller reopens the gate: no profile was made
-            report_soft_error("user_create_failed", f"The profile '{user_name}' could not be created: {e}")
-            return
-        self._db.set_user_setting(uid, "use_mock", "True")  # before its load, which applies it
-        self._activate_user(uid)
-        self._headset.scan_for_new_profile()
-        logger.info("First run: using mock device until a MindWave is found")
-        self._finish_first_run(f"user '{user_name}' created")
-
-    def _finish_first_run(self, what: str) -> None:
-        """Leave the first-run popup for the Session screen, the nav usable again."""
-        self._bottom_nav.opacity = 1
-        self._bottom_nav.disabled = False
-        self._refresh_profile()
-        self._sm.current = "live_session"
-        self._bottom_nav.active_tab = "session"
-        self._power.offer_once()
-        logger.info(f"First run complete: {what}")
-
     def _on_nav_tab(self, tab_key: str) -> None:
         """Handle bottom nav tab press."""
         screen_name = self._TAB_SCREENS.get(tab_key, tab_key)
@@ -872,7 +538,7 @@ class EEGMeditationApp(App):
         logger.debug(f"Screen switch: {name}")
         self._sm.current = name
         if name == "history":
-            self._refresh_history()
+            self._history.refresh()
         elif name == "live_session":
             # Reflect any Settings timer/mode change on the Start duration button.
             self._program_settings.sync_picker()
@@ -888,61 +554,43 @@ class EEGMeditationApp(App):
             logger.warning("Session start blocked: no user selected")
             return
 
-        self._start_attempt += 1
-        attempt = self._start_attempt
-        if APP.USE_MOCK_DEVICE:
-            self._eeg_stream = self._mock_stream
+        run = self._run = SessionRun(self._current_user_id)
+        if APP.USE_MOCK_DEVICE or self._real_stream._device_address:  # the profile's headset, or one picked in Settings
+            self._eeg_stream = self._mock_stream if APP.USE_MOCK_DEVICE else self._real_stream
             self._start_session_common()
             return
-
-        # Real device — need BT connection
-        if self._real_stream._device_address:
-            # The profile's headset, or one picked in Settings
-            self._eeg_stream = self._real_stream
-            self._start_session_common()
-            return
-
         # No headset selected: find the profile's among the paired devices, then connect
         self._live_screen.show_overlay("Scanning for MindWave...")
         self._live_screen.set_controls_running()
         logger.info("Auto-scanning for BT device before session start")
-        uid = self._current_user_id
+        self._headset.find_paired(lambda devices: self._start_after_scan(run, devices))
 
-        def _scanned(devices: list[dict]) -> None:
-            if attempt != self._start_attempt:
-                return  # cancelled while scanning
-            if uid != self._current_user_id:
-                self._cancel_session_start("IDLE")  # the Start was the profile picked away while it scanned
-                return
-            mindwaves = self._headset.adopt(devices)
-            if self._real_stream._device_address:
-                self._eeg_stream = self._real_stream
-                self._live_screen.update_overlay(f"Found {self._headset.name()}\nConnecting...")
-                self._start_session_common()
-            elif mindwaves:
-                self._live_screen.set_controls_idle()
-                self._live_screen.hide_overlay()
-                self._switch_screen("settings")
-                self._settings_screen.device.focus_device_section(
-                    f"Found {len(mindwaves)} MindWave devices.\n"
-                    "Pick the one you want to use, then press Start again."
-                )
-            elif devices:
-                self._live_screen.set_controls_idle()
-                self._live_screen.show_overlay_retry(
-                    "No MindWave found among paired devices.\n"
-                    "Pair it in system Bluetooth settings,\n"
-                    "or select manually in Settings tab."
-                )
-            else:
-                self._live_screen.set_controls_idle()
-                self._live_screen.show_overlay_retry(
-                    "No paired Bluetooth devices found.\n"
-                    "Pair your MindWave in system\n"
-                    "Bluetooth settings first."
-                )
-
-        self._headset.find_paired(_scanned)
+    def _start_after_scan(self, run: SessionRun, devices: list[dict]) -> None:
+        """Main thread: the Start's scan of the paired devices ended; start on the profile's headset if it found one,
+        else say what to do."""
+        if run is not self._run:
+            return  # cancelled while scanning
+        if run.user_id != self._current_user_id:
+            self._cancel_session_start("IDLE")  # the Start was the profile picked away while it scanned
+            return
+        mindwaves = self._headset.adopt(devices)
+        if self._real_stream._device_address:
+            self._eeg_stream = self._real_stream
+            self._live_screen.update_overlay(f"Found {self._headset.name()}\nConnecting...")
+            self._start_session_common()
+            return
+        self._live_screen.set_controls_idle()
+        if mindwaves:
+            self._live_screen.hide_overlay()
+            self._switch_screen("settings")
+            self._settings_screen.device.focus_device_section(
+                f"Found {len(mindwaves)} MindWave devices.\nPick the one you want to use, then press Start again.")
+        elif devices:
+            self._live_screen.show_overlay_retry("No MindWave found among paired devices.\n"
+                                                 "Pair it in system Bluetooth settings,\nor select manually in Settings tab.")
+        else:
+            self._live_screen.show_overlay_retry("No paired Bluetooth devices found.\n"
+                                                 "Pair your MindWave in system\nBluetooth settings first.")
 
     def _on_main(self, fn) -> None:
         """Queue callable on Kivy's main thread.
@@ -959,112 +607,105 @@ class EEGMeditationApp(App):
         # The session takes the audio over: the last session's gong stops, and so does a Settings test still running.
         self._audio.stop_timer_bell()
         self._audio.end_test()
-        threshold = self._settings_screen.threshold
         program = self._program_settings.for_session()
+        threshold = self._start_threshold(program)
+        self._arm_timer(program)
+        self._put_threshold_in_force(threshold)  # this session's, whatever the last one left running
+        run = self._run
+        self._metrics_engine.reset()
+        run.noise_detector = PowerLineDetector() if not APP.USE_MOCK_DEVICE else None
+        self._recorder.begin()
+        run.connect_start = time.time()
+        self._shown.take(self._current_user_id)
+        self._program_run.begin(program, self._sounds.prepare_session(program), self._program_settings.name)
+        self._live_screen.set_training_series(None)  # set on first segment crossing
+        self._live_screen.set_controls_running()
+        self._settings_screen.lock_threshold(self._refuse_program_threshold if self._program_run.active else None)
+        self._keep_awake.hold()
+        if self._connect_session(run, threshold):
+            self._ticker.start()
+            logger.info("Session started via UI")
+
+    def _start_threshold(self, program) -> int:
+        """The threshold a session starts with: a program's first segment target, else the Settings slider."""
         self._cancel_settle("apply_threshold")  # a slider move just before Start: the start applies the slider itself
+        return segment_target(program.segments[0]) if program else self._settings_screen.threshold
+
+    def _arm_timer(self, program) -> None:
+        """A program's total drives the timer, so its end reuses the timer-expiry path; a simple session re-syncs the
+        timer from Settings, so a previous program's can't leak into it."""
         if program:
-            # Program total drives the timer so auto-stop reuses the proven
-            # timer-expiry path; the first segment's target seeds the threshold.
-            threshold = segment_target(program.segments[0])
             self._timer_state.set_enabled(True)
             self._timer_state.set_duration(max(1, int(round(program.total_seconds / 60))))
             logger.info(f"Program session: {format_count(len(program.segments), 'segment')}, "
                         f"{program.total_seconds:.0f}s total drives the end gong")
         else:
-            # Session start is authoritative: re-sync the timer from Settings so a
-            # prior program session's enabled/duration can't leak into a simple one.
             self._timer_state.set_enabled(self._settings_screen.timer.timer_enabled)
             self._timer_state.set_duration(self._settings_screen.timer.timer_minutes)
-        self._put_threshold_in_force(threshold)  # this session's, whatever the last one left running
-        self._metrics_engine.reset()
-        self._noise_detector = PowerLineDetector() if not APP.USE_MOCK_DEVICE else None
-        self._recorder.begin()
-        self._tick_count = 0
-        self._bt_connected_notified = False
-        self._pending_marker = False
-        self._bt_connect_start = time.time()
 
-        self._clear_live_display()
-        self._live_display_uid = self._current_user_id
-        gid = self._global_feedback_id()
-        if program:
-            fb_sources, fb_ids, fb_initial = self._feedback_plan(program, gid)
-        else:
-            fb_sources, fb_ids, fb_initial = {gid: self._source_spec(gid)}, [], gid
-        self._program_run.begin(program, fb_ids, self._program_settings.name)
-        # Above-threshold reward channel (global; "" = none). Add its player to the set.
-        reward_id = self._reward_id()
-        if reward_id:
-            fb_sources[reward_id] = self._source_spec(reward_id)
-        timer = self._timer_state
-        self._warn_missing_sound_files(fb_sources, timer.custom_sound_path if timer.enabled else "")
-        self._audio.prepare_feedback(fb_sources, fb_initial)
-        self._audio.set_reward(reward_id)
-        self._live_screen.set_training_series(None)  # set on first segment crossing
-        self._scored_key = None  # a simple session marks its scored series on the first tick
-        self._shamatha_active = False
-        self._shamatha_streak = 0
-        self._live_screen.set_controls_running()
-        self._settings_screen.lock_threshold(self._refuse_program_threshold if self._program_run.active else None)
-
-        self._acquire_wake_lock()
-        self._start_session_keep_alive_service()
-
+    def _connect_session(self, run: SessionRun, threshold: int) -> bool:
+        """Start the session on the mock headset or a link kept from the last session, or enter the BT wait; False if
+        the reader refused to start."""
         if APP.USE_MOCK_DEVICE:
             self._eeg_stream.start()
-            self._waiting_for_bt = False
             self._session_manager.start(threshold=threshold)
+            run.phase = Phase.STARTED
             self._audio.start()
             self._timer_state.start_countdown()
             self._live_screen.update_device_status(True)
             self._live_screen.update_state("Running")
             self._live_screen.set_start_time(self._session_manager.started_at)
             self._live_screen.hide_overlay()
-        elif self._real_stream.is_connected:
-            # BT still connected from previous session — reuse it
+            return True
+        if self._real_stream.is_connected:
             self._real_stream.reset_sample_state()
-            self._waiting_for_bt = False
             name = self._headset.name()
             self._session_manager.start(threshold=threshold)
+            run.phase = Phase.STARTED
             self._timer_state.start_countdown()
-            self._on_session_connected(name)
+            self._on_session_connected()
             logger.info(f"Reusing existing BT connection to {name}")
-        elif not self._begin_bt_wait():
+            return True
+        return self._begin_bt_wait(run)
+
+    def _begin_bt_wait(self, run: SessionRun) -> bool:
+        """Main thread: enter the run's BT wait; False if the reader refused to start (the start undone, Retry offered)."""
+        end = self._bt_wait.begin(run)
+        if end is not None:
+            self._undo_failed_start(end.message)
+        return end is None
+
+    def _follow_bt_wait(self, run: SessionRun) -> None:
+        """Tick thread: one step of the run's BT wait. Its first data starts the session against the threshold in force
+        (it may have moved); a give-up tears the wait down here and undoes the start on the main thread."""
+        end = self._bt_wait.tick(run)
+        if end is None or self._outlived(run):
             return
+        if not end.started:
+            if end.report:  # a failed connect's copyable diagnostic (cooldown-gated)
+                report_soft_error("bt_connect_failed", end.report)
+            self._abort_bt_wait()
+            self._on_main_for(run, lambda: self._undo_failed_start(end.message))
+            return
+        # Armed on this thread before the next tick reads it: deferred to main, a stalled main thread ended a 0 s session.
+        self._session_manager.start()
+        self._timer_state.start_countdown()
+        run.phase = Phase.STARTED
+        self._on_main_for(run, self._on_session_connected)
 
-        self._ticker.start()
-        self._tick_count = 0
-        logger.info("Session started via UI")
-
-    def _begin_bt_wait(self) -> bool:
-        """Start the reader and show the connect overlay; False, with the session setup undone, if refused."""
-        name = self._headset.name()
-        if not self._real_stream.start():
-            # Nothing is connecting: entering the wait would misreport a refusal as a failed connect.
-            self._undo_session_setup()
-            self._live_screen.update_device_status(False, device_name=name)
-            self._live_screen.show_overlay_retry(
-                f"Can't connect to {name} yet.\n{self._real_stream._last_connect_error}"
-            )
-            logger.info(f"BT start refused: {self._real_stream._last_connect_error!r}")
-            return False
-        self._wait_attempt = self._start_attempt
-        self._waiting_for_bt = True
-        self._bt_drops = 0
-        self._live_screen.update_device_status(False, device_name=name, connecting=True)
-        self._live_screen.show_overlay(f"Connecting to {name}...")
-        logger.info(f"Waiting for BT connection to {name}")
-        return True
+    def _undo_failed_start(self, message: str) -> None:
+        """Main thread: a start whose BT wait ended without a session is undone, and Retry offered."""
+        self._undo_session_setup()
+        self._bt_wait.show_retry(message)
 
     def _abort_bt_wait(self) -> None:
-        """Tear down a BT-connect wait; the tick watcher stops first or it reads our stop as a failed connect."""
+        """Tear down a BT-connect wait: its run marked ended first, so a wait tick in progress acts on nothing, then the
+        tick watcher stopped before the stream, or it reads our stop as a failed connect."""
+        self._mark_run_ended()
         self._ticker.stop()
-        self._waiting_for_bt = False
-        self._bt_signal_start = None
         self._real_stream.stop()
-        self._release_wake_lock()
-        self._stop_session_keep_alive_service()
-        self._live_display_uid = None  # no session came of the start, which emptied the display
+        self._keep_awake.release()
+        self._shown.owner = None  # no session came of the start, which emptied the display
 
     def _on_connect_cancel(self, *args) -> None:
         """Cancel button on connection overlay."""
@@ -1073,28 +714,25 @@ class EEGMeditationApp(App):
     def _cancel_session_start(self, state: str) -> None:
         """End a start that hasn't become a session: the device scan, the BT wait, or data that arrived in the same frame
         as the Cancel."""
-        if self._waiting_for_bt or self._ticker.running:
+        if self._run is not None and self._run.phase in (Phase.CONNECTING, Phase.STARTED):
             self._abort_bt_wait()
         self._live_screen.hide_overlay()
         self._undo_session_setup()  # also resets a session that started in the frame of the Cancel
         self._live_screen.update_state(state)
 
     def _undo_session_setup(self) -> None:
-        """Main thread: undo what _start_session_common set up, for a session that ended or never started. Ends its
-        start attempt, so the callbacks still queued for it do nothing."""
-        self._start_attempt += 1
+        """Main thread: undo what _start_session_common set up, for a session that ended or never started. Drops its
+        run, so the callbacks still queued for it do nothing."""
+        self._run = None
         self._live_screen.set_training_series(None)  # clear the program "training now" marker
         self._program_run.end()
         self._live_screen.set_controls_idle()
         self._live_screen.update_device_status(False)
-        self._shamatha_active = False
-        self._shamatha_streak = 0
         self._live_screen.set_shamatha(False)
         self._timer_state.reset()
         self._session_manager.reset()
         self._settings_screen.lock_threshold(None)
-        self._release_wake_lock()
-        self._stop_session_keep_alive_service()
+        self._keep_awake.release()
 
     def _on_connect_retry(self, *args) -> None:
         """Retry button on connection overlay."""
@@ -1102,30 +740,12 @@ class EEGMeditationApp(App):
         self._live_screen.set_controls_idle()
         self._on_start()
 
-    # The session-end card: the session is already saved on every ending; the card only adds notes or deletes it.
-    _summary_saved_notes: str = ""  # notes last written from the card for the session it shows
-    _live_display_uid: int | None = None  # the profile whose session the Session screen shows: set at Start
-
-    def _on_summary_save_notes(self, *args) -> None:
-        if self._live_screen.summary_notes == self._summary_saved_notes:
-            if self._summary_saved_notes:
-                self._toast("Notes saved")  # already saved; say so rather than ignore the tap
-            return
-        self._flush_summary_notes()
-
-    def _flush_summary_notes(self) -> None:
-        """Write the card's notes only if they changed since the last save, so an untouched card writes nothing."""
-        sid = self._live_screen.summary_session_id
-        notes = self._live_screen.summary_notes
-        if sid and notes != self._summary_saved_notes and self._save_session_notes(sid, notes=notes):
-            self._summary_saved_notes = notes
-
     def _flush_on_leave(self) -> None:
         """Persist what the user changed but hasn't saved, before the app pauses or exits."""
         self._leaving = True
         try:
-            if getattr(self, "_live_screen", None) is not None:
-                self._flush_summary_notes()
+            if getattr(self, "_shown", None) is not None:
+                self._shown.flush_notes()
             self._checkpoint_or_report()  # Android may kill a backgrounded app before the next 60 s checkpoint
             # Only on screen: leaving it already saved (or reported a failed save), and a retry on every pause
             # repeated the error, e.g. for a session deleted since.
@@ -1136,55 +756,13 @@ class EEGMeditationApp(App):
             self._leaving = False
 
     def _checkpoint_or_report(self) -> None:
-        """Checkpoint a running session where a failure must not stop what follows (leaving the app, a backup)."""
+        """Checkpoint a running session where a failure must not stop what follows (leaving the app, a backup, a
+        tick-thread ending)."""
         try:
             self._recorder.checkpoint()
         except Exception as exc:
             logger.exception("Session checkpoint failed")
             report_soft_error("session_checkpoint_failed", f"The running session could not be saved: {exc}")
-
-    def _on_summary_ok(self, *args) -> None:
-        self._close_summary(keep_notes=True)
-
-    def _close_summary(self, keep_notes: bool) -> None:
-        """Close the end card and stop its bell; its notes are saved only while its session still exists."""
-        if keep_notes:
-            self._flush_summary_notes()
-        self._audio.stop_timer_bell()
-        self._live_screen.hide_summary()
-
-    def _drop_shown_session(self, keep_notes: bool) -> None:
-        """Take the shown session off the Session screen: its end card, if open, and its display."""
-        if self._live_screen.summary_session_id is not None:
-            self._close_summary(keep_notes)
-        self._clear_live_display()
-        self._live_display_uid = None
-
-    def _on_summary_delete(self, *args) -> None:
-        sid = self._live_screen.summary_session_id
-        if not sid:
-            return  # silent-ok: the card is not showing a session
-
-        # The delete closes the card and stops the gong once the session is gone; a failed one leaves both.
-        self._confirm_action("Delete session", "Delete this session permanently? This can't be undone.",
-                             "Delete", lambda: self._delete_sessions([sid]), ok_color=C.DANGER)
-
-    def _save_session_notes(self, session_id: int, notes: Optional[str] = None,
-                            tags: Optional[str] = None, mood: Optional[int] = None) -> bool:
-        """The one notes-save path (session-end card, diary): writes only the given fields; failures are reported."""
-        try:
-            saved = self._db.update_session_notes(session_id, notes=notes, tags=tags, mood_rating=mood)
-        except sqlite3.Error as exc:
-            report_soft_error("notes_save_failed", f"Notes for session {session_id} were not saved: {exc}")
-            return False
-        if not saved:
-            report_soft_error("notes_save_failed", f"Notes for session {session_id} were not saved: no such session")
-            return False
-        # In place: a reload would start the History list from the top.
-        self._history_screen.update_session(session_id, notes=notes, tags=tags, mood_rating=mood)
-        self._toast("Notes saved")
-        logger.info(f"Notes saved for session {session_id}")
-        return True
 
     def _on_pause(self, *args) -> None:
         if self._session_manager.state == SessionState.RUNNING:
@@ -1202,7 +780,7 @@ class EEGMeditationApp(App):
             logger.info("Session resumed")
 
     def _on_stop(self, *args) -> None:
-        # Decided by the session, not by the wait flag: a wait that has just ended cleared the flag before its idle UI.
+        # Decided by the session, not the run's phase: a wait that has just ended is over before its idle UI shows.
         if self._session_manager.state == SessionState.FINISHED:
             logger.info("Stop ignored: the session has already ended and its teardown is queued")
             return
@@ -1252,7 +830,7 @@ class EEGMeditationApp(App):
                 "session_program": self._program_run.segments_json(), "engine_version": MetricsEngine.ENGINE_VERSION,
                 "started_at": self._session_manager.started_at or None}
 
-    def _finalize_stop_ui(self, stats: dict, session_id: Optional[int]) -> None:
+    def _finalize_stop_ui(self, stats: dict, session_id: int | None) -> None:
         """Main-thread UI teardown after a session has been persisted."""
         # Reload the live graph from the mirror buffers so it shows the FULL
         # session (the locked portion never reached the live graph via the
@@ -1260,7 +838,7 @@ class EEGMeditationApp(App):
         # covering only the pre-lock seconds while History shows the real
         # duration.
         try:
-            self._mirror.reload_into(self._live_screen)
+            self._shown.mirror.reload_into(self._live_screen)
         except Exception:
             logger.exception("graph reload on stop failed")
         self._live_screen.update_stats(self._session_manager.live_score())  # the whole session's: no tick ran while locked
@@ -1269,17 +847,16 @@ class EEGMeditationApp(App):
         # Sync the header timer to the final duration (it froze at lock time).
         if stats:
             self._live_screen.update_timer(elapsed_clock(stats.get("duration", 0)))
-        self._mark_history_dirty()
+        self._history.mark_dirty()
         if getattr(getattr(self, "_sm", None), "current", None) == "settings":  # a timer can end it there
             self._settings_screen.refresh_profile_counts()  # else entering Settings redraws them
         if stats and session_id:
-            self._summary_saved_notes = ""
             try:
                 saved = self._db.get_session(session_id)  # titled like its History row, from what was stored
             except sqlite3.Error:
                 logger.exception(f"Session {session_id} saved, but its title couldn't be read for the end card")
                 saved = None
-            self._live_screen.show_summary(session_id, stats, title=session_title(saved) if saved else "")
+            self._shown.show_end_card(session_id, stats, session_title(saved) if saved else "")
 
     def _refused_while_session_runs(self, doing: str, why: str = "") -> bool:
         """True, after telling the user, while a session runs or connects: until it stops it owns its profile, the
@@ -1290,13 +867,13 @@ class EEGMeditationApp(App):
         return True
 
     def _session_pipeline_live(self) -> bool:
-        """True if a session is RUNNING/PAUSED *or* still in the BT-connect wait
-        (tick thread started, state still IDLE). This is the full window in which a
-        restore or active-profile delete would drop/orphan an in-flight session —
-        the state-only check misses the connecting phase (mirrors _on_connect_cancel)."""
-        return (self._session_manager.state in (SessionState.RUNNING, SessionState.PAUSED)
-                or getattr(self, "_waiting_for_bt", False)
-                or self._ticker.running)
+        """True while a session runs or is paused, or its start waits for the headset: the window in which a restore
+        or the active profile's delete would drop or orphan it (the state alone misses the wait)."""
+        return self._session_manager.state in (SessionState.RUNNING, SessionState.PAUSED) or self._connecting()
+
+    def _connecting(self) -> bool:
+        """The BT wait: the reader is up and the first data will start the session."""
+        return self._run is not None and self._run.phase is Phase.CONNECTING
 
     def _discard_running_session(self) -> None:
         """Halt a running session and DELETE its data — used when its owning
@@ -1304,8 +881,7 @@ class EEGMeditationApp(App):
         session row under the doomed profile; without the delete it survives as
         an orphan. Then reuses the shared _finalize_stop_ui teardown so the
         Session screen returns to idle."""
-        self._waiting_for_bt = False  # also halt a session still in the BT-connect wait
-        self._bt_signal_start = None
+        self._mark_run_ended()  # also halts a start still in the BT wait
         self._ticker.stop()
         self._session_manager.stop(reason="user")
         if APP.USE_MOCK_DEVICE:
@@ -1317,6 +893,7 @@ class EEGMeditationApp(App):
     def _stop_and_save(self, reason: str = "user") -> None:
         """Stop session and save data immediately (no dialog). Main-thread path."""
         t_start = time.monotonic()
+        self._mark_run_ended()
         self._ticker.stop()
         stats = self._persist_session_data(reason)
         self._audio.stop()
@@ -1325,13 +902,12 @@ class EEGMeditationApp(App):
             f"Session stopped and saved (took {time.monotonic() - t_start:.3f}s)"
         )
 
-    def _on_session_connected(self, name: str) -> None:
+    def _on_session_connected(self) -> None:
         """Main thread: a headset session has started (the BT wait's first data, or a kept-alive connection)."""
-        self._live_screen.update_device_status(True, device_name=name)
+        self._headset.show_selected()
         self._live_screen.update_state("Running")
         self._live_screen.set_start_time(self._session_manager.started_at)
         self._live_screen.hide_overlay()
-        self._settings_screen.device.update_device_status(True, name=name)
         # Audio starts with the overlay hide, so the noise never plays while the connecting loader is still visible.
         self._audio.start()
         self._audio.play_connect_sound()
@@ -1342,187 +918,37 @@ class EEGMeditationApp(App):
             self._ticker.start()
         logger.info("Stop cancelled")
 
-    def _on_main_for_wait(self, fn: Callable[[], object]) -> None:
-        """Tick thread: queue fn for the main thread as part of this BT wait; it does nothing once the wait's start
-        attempt has ended (a Cancel, Stop or profile delete handled before it)."""
-        attempt = self._wait_attempt
-        self._on_main(lambda: fn() if attempt == self._start_attempt else None)
-
-    _BT_CONNECT_TIMEOUT = 30.0  # seconds before BT socket gives up
-    _BT_SIGNAL_TIMEOUT = 8.0   # seconds to wait for EEG packets after connected
-    _bt_dropped_at: float = 0.0  # monotonic: when the wait saw the link drop; earlier packets don't count after it
-    _BT_MAX_DROPS = 2  # the third drop of the link in one wait ends it: the headset keeps closing it
-    _bt_drops: int = 0  # drops the current wait has seen
-    _STALE_DATA_THRESHOLD = 10.0  # seconds with no new packets before warning
-
-    def _check_stale_data(self) -> None:
-        """Auto-stop session when the real device stops sending EEG data.
-
-        Called from the tick thread; UI calls dispatched via _on_main.
-        """
-        if APP.USE_MOCK_DEVICE:
-            return
-        stale_secs = self._real_stream.seconds_since_last_packet
-        if stale_secs <= 0:
-            self._stale_data_warned = False
-            return
-        if stale_secs > self._STALE_DATA_THRESHOLD:
-            if not getattr(self, '_stale_data_warned', False):
-                self._stale_data_warned = True
-                logger.warning(f"Stale EEG data: no packets for {stale_secs:.0f}s, auto-stopping")
-                self._on_main(lambda: (
-                    self._live_screen.show_alert(
-                        "No EEG data. Session stopped.\n"
-                        "Check headset and battery."
-                    ),
-                    self._stop_and_save(reason="stale_data"),
-                ))
-        else:
-            self._stale_data_warned = False
-
-    def _give_up_bt_wait(self, name: str, message: str) -> None:
-        """End the wait from the tick thread with a retry screen (queued for this attempt only)."""
-        self._abort_bt_wait()
-        self._on_main_for_wait(lambda: (
-            self._undo_session_setup(),
-            self._live_screen.update_device_status(False, device_name=name),
-            self._live_screen.show_overlay_retry(message),
-        ))
-
-    def _handle_bt_wait(self) -> None:
-        """Handle the BT connection wait phase (called from _update_tick).
-
-        Runs on the background tick thread — all Kivy UI calls are dispatched
-        via _on_main so they execute safely on the main thread.
-        """
-        name = self._headset.name()
-        link_dropped = not self._real_stream.is_connected and self._bt_signal_start is not None
-        if link_dropped and self._bt_link_dropped(name):
-            return
-        elapsed = time.time() - self._bt_connect_start
-
-        if self._real_stream.is_connected:
-            self._wait_for_data(name)
-        elif not self._real_stream._running:
-            self._bt_connect_failed(name)
-        elif elapsed > self._BT_CONNECT_TIMEOUT:
-            self._bt_connect_timed_out(name)
-        else:
-            # Still waiting for BT socket — show countdown
-            remaining = int(self._BT_CONNECT_TIMEOUT - elapsed)
-            msg = f"Connecting to {name}...\nTimeout in {remaining}s"
-            self._on_main_for_wait(lambda m=msg: self._live_screen.update_overlay(m))
-
-    def _bt_link_dropped(self, name: str) -> bool:
-        """Tick thread: the link dropped and the reader reconnects; True if the headset keeps closing it (the wait ends)."""
-        # The next connection gets its own connect and no-data windows, and only its own packets count.
-        self._bt_signal_start = None
-        self._bt_dropped_at = time.monotonic()
-        self._bt_connect_start = time.time()
-        self._bt_drops += 1
-        if self._bt_drops > self._BT_MAX_DROPS:
-            self._give_up_bt_wait(name, f"{name} keeps closing the connection.\n"
-                                        "Switch the headset off and on, then retry.")
-            logger.error(f"BT wait: {name} closed the connection {self._bt_drops} times, giving up")
-            return True
-        return False
-
-    def _wait_for_data(self, name: str) -> None:
-        """Tick thread: BT socket connected — waiting for actual EEG data; the first data starts the session."""
-        if not getattr(self, '_bt_signal_start', None):
-            self._bt_signal_start = time.time()
-        signal_elapsed = time.time() - self._bt_signal_start
-        signal_remaining = int(self._BT_SIGNAL_TIMEOUT - signal_elapsed)
-
-        raw_sample = self._eeg_stream.read_sample()
-        sq = raw_sample.get("signal_quality", 200)
-        total = sum(raw_sample.get(k, 0.0) for k in BAND_KEYS)
-
-        # Is the headset streaming packets on this connection?
-        since_packet = self._real_stream.seconds_since_last_packet
-        has_packets = 0 < since_packet < time.monotonic() - self._bt_dropped_at
-
-        if total > 0 and has_packets:  # data on this connection: band values outlive a drop
-            self._waiting_for_bt = False
-            self._bt_signal_start = None
-            self._session_manager.start()  # against the threshold in force, which may have moved
-            # Arm the countdown on THIS thread before the next tick()
-            # reads it. Deferring it via _on_main let a stalled main
-            # thread leave remaining_seconds=0, so the very next tick
-            # fired the timer instantly — a 0s "timer-ended" session.
-            self._timer_state.start_countdown()
-            self._on_main_for_wait(lambda n=name: self._on_session_connected(n))
-            logger.info(f"BT device {name} connected, session started")
-        elif signal_elapsed > self._BT_SIGNAL_TIMEOUT and not has_packets:
-            # No packets — ThinkGear didn't start streaming.
-            # Don't try RFCOMM reconnect: closing the socket triggers
-            # EBUSY that blocks reconnection for 60+ seconds.
-            # The only reliable fix is a headset power cycle.
-            self._give_up_bt_wait(name, "No EEG data received.\nCheck battery or restart headset.")
-            logger.error("No ThinkGear packets — likely low battery or needs power cycle")
-        else:
-            # Show signal quality feedback (keep waiting if packets arrive)
-            if has_packets:
-                # Headset streaming — no timeout, wait for contact
-                wait_msg = "Place sensor on forehead..."
-            else:
-                wait_msg = f"Waiting for EEG data... {signal_remaining}s"
-            logger.debug(
-                f"BT signal wait: sq={sq} total={total:.0f} "
-                f"packets={'yes' if has_packets else 'no'} "
-                f"elapsed={signal_elapsed:.0f}s"
-            )
-            msg = f"Connected to {name}\n{wait_msg}\n{self._sensor_contact(sq)}"
-            self._on_main_for_wait(lambda m=msg: self._live_screen.update_overlay(m))
-
-    @staticmethod
-    def _sensor_contact(signal_quality: int) -> str:
-        """The connect overlay's line on the sensor's contact, from ThinkGear's signal quality (200 = none, 0 = good)."""
-        if signal_quality == 200:
-            return "Sensor: no contact"
-        if signal_quality > 50:
-            return f"Sensor: poor (quality {signal_quality})"
-        if signal_quality > 0:
-            return f"Sensor: fair (quality {signal_quality})"
-        return "Sensor: good"
-
-    def _bt_connect_failed(self, name: str) -> None:
-        """Tick thread: the connection thread ended with an error."""
-        hint = self._real_stream._last_connect_error or "Check device is on and paired."
-        self._give_up_bt_wait(name, f"Connection to {name} failed.\n{hint}")
-        logger.error("BT connection failed, session aborted")
-        self._report_bt_connect_failure(name, hint)
-
-    def _bt_connect_timed_out(self, name: str) -> None:
-        """Tick thread: no BT socket within _BT_CONNECT_TIMEOUT."""
-        self._give_up_bt_wait(name, f"Connection to {name} timed out.\n"
-                                    "Make sure the device is turned on\nand in range.")
-        logger.error("BT connection timed out")
+    def _on_main_for(self, run: SessionRun, fn: Callable[[], object]) -> None:
+        """Queue fn for the main thread as part of `run`; it does nothing once that run was dropped or replaced by another
+        Start. A run only marked ended still runs it: an ending marks its run first and may queue its own finish."""
+        self._on_main(lambda: fn() if self._run is run else None)
 
     def _update_tick(self, dt: float) -> None:
-        """Main 2 Hz processing loop.
-
-        Runs on the background SessionTick thread.  All Kivy widget calls are
-        dispatched via _on_main so they execute on the main thread.  Audio,
-        metrics compute, and DB writes are thread-safe and stay direct.
-        """
-        if getattr(self, '_waiting_for_bt', False):
-            self._handle_bt_wait()
+        """Tick thread, 2 Hz: a step of the run's BT wait or a tick of its running session; Kivy goes through _on_main,
+        while audio, metrics and DB writes are thread-safe."""
+        run = self._run  # this tick's run: a stop waits up to 1 s for a tick in progress, so act only while it is current
+        if run is None or self._outlived(run):  # an ending began: no check may alert or end it again
             return
-
+        if run.phase is Phase.CONNECTING:
+            self._follow_bt_wait(run)
+            return
         if self._session_manager.state != SessionState.RUNNING:
             return
-
-        if self._end_at_max_duration():
+        ending = self._watch.check(run, self._session_manager.elapsed_seconds)
+        if ending:
+            self._end_from_tick(run, *ending)
             return
-        self._follow_headset_link()
-        self._check_stale_data()
+        self._session_tick(run)
 
-        raw_sample = self._eeg_stream.read_sample()
+    def _session_tick(self, run: SessionRun) -> None:
+        """Tick thread: the headset's sample, its metrics and score recorded, sounded and shown; the timer may end it."""
+        raw_sample = self._eeg_stream.read_sample()  # may wait on the reader's lock
+        if self._outlived(run):
+            return
         metrics = self._metrics_engine.process_sample(raw_sample)
-        self._warn_from_sample(raw_sample)
-        self._tick_count = getattr(self, '_tick_count', 0) + 1
-        self._log_tick(raw_sample, metrics)
+        self._watch.check_sample(run, raw_sample)
+        run.tick_count += 1
+        self._log_tick(run, raw_sample, metrics)
 
         self._formulas.evaluate_into(metrics, lambda: self._eval_formula_vars(raw_sample, metrics))
 
@@ -1530,106 +956,45 @@ class EEGMeditationApp(App):
         # The drive key is resolved once: the tick scores and sounds the same metric.
         if self._program_run.active:
             self._program_run.tick(metrics, raw_sample)
-            drive_key, mark = self._audio_drive_key(), None
+            drive_key, mark = self._audio_metric.drive_key(), None
         else:
             drive_key = mark = self._score_on_drive_key()
 
-        # Merge raw + computed for full storage; a pending marker is in the row before a checkpoint can write it.
-        full_record = {**raw_sample, **metrics}
-        marker_pending = self._pending_marker
-        if marker_pending:
-            self._pending_marker = False
-            full_record["marker"] = 1
-        score = self._recorder.record(metrics, full_record)
-        if score is None:  # the session paused or stopped while this tick was read: it isn't part of it
-            self._pending_marker |= marker_pending  # the marker goes on the next recorded tick
+        tick = self._record_tick(run, raw_sample, metrics)
+        if tick is None:
             return
-
-        # Audio is thread-safe — update directly
         self._audio.update(metrics.get(drive_key, 0))
-        if self._tick_count > 10:
+        if run.tick_count > 10:
             self._audio.update_sinking(metrics.get("sinking", 0))
             self._audio.update_subtle_distraction(metrics.get("subtle_distraction", 0))
 
-        self._mirror.record(metrics, score, raw_sample)  # kept even while the screen is locked
-        self._show_tick(metrics, raw_sample, score, marker_pending, mark)
-
-        # Timer countdown — tick() is pure counter, no UI
-        if self._timer_state.tick(APP.UPDATE_FREQUENCY):
-            self._end_by_timer()
+        self._shown.mirror.record(tick)  # kept even while the screen is locked
+        self._show_tick(run, tick, mark)
+        if self._timer_state.tick(APP.UPDATE_FREQUENCY):  # a pure counter, no UI
+            self._end_by_timer(run)
             return
-
         self._recorder.flush_tick()  # DB opened with check_same_thread=False
 
-    def _end_at_max_duration(self) -> bool:
-        """Tick thread: stop and save a session that reached the recording limit; True if it did."""
-        if self._session_manager.elapsed_seconds < APP.SESSION_MAX_SECONDS:
-            return False
-        logger.info(f"Session reached max duration ({APP.SESSION_MAX_SECONDS}s), auto-stopping")
-        self._audio.play_disconnect_alert()
-        limit_msg = (
-            f"Session recording limit reached ({APP.SESSION_MAX_SECONDS // 3600}h). "
-            "Session saved. Start a new one to continue."
-        )
-        self._on_main(lambda m=limit_msg: self._live_screen.show_alert(m))
-        self._on_main(lambda: self._stop_and_save())
-        return True
+    def _record_tick(self, run: SessionRun, raw_sample: dict, metrics: dict) -> RecordedTick | None:
+        """Tick thread: record the tick, raw and computed, with a pending marker in its row before a checkpoint can write
+        it; None if the session paused or stopped while the tick was read."""
+        full_record = {**raw_sample, **metrics}
+        marked = run.pending_marker
+        if marked:
+            run.pending_marker = False
+            full_record["marker"] = 1
+        score = self._recorder.record(metrics, full_record)
+        if score is None:  # not part of the session: the marker goes on the next recorded tick
+            run.pending_marker |= marked
+            return None
+        return RecordedTick(metrics, raw_sample, score, marked)
 
-    def _follow_headset_link(self) -> None:
-        """Tick thread: the headset's link coming up (Settings shows it) and dropping during a session (the Session
-        screen shows it reconnecting, with the disconnect alert)."""
-        if (not self._bt_connected_notified
-                and not APP.USE_MOCK_DEVICE
-                and self._real_stream.is_connected):
-            self._bt_connected_notified = True
-            name = self._headset.name()
-            self._on_main(lambda n=name: self._settings_screen.device.update_device_status(True, name=n))
-            logger.info(f"Settings updated: {name} connected")
-
-        if (not APP.USE_MOCK_DEVICE
-                and self._bt_connected_notified
-                and not self._real_stream.is_connected):
-            self._bt_connected_notified = False
-            name = self._headset.name()
-            self._on_main(lambda n=name: self._live_screen.update_device_status(
-                False, device_name=n, connecting=True
-            ))
-            self._audio.play_disconnect_alert()
-            logger.warning(f"BT device {name} disconnected during session")
-
-    def _warn_from_sample(self, raw_sample: dict) -> None:
-        """Tick thread: a low headset battery and power-line noise, each warned about once."""
-        # Low battery warning (ThinkGear reports 0-127, warn below ~20%)
-        battery = raw_sample.get("battery", -1)
-        if battery != -1 and battery < 25 and not getattr(self, '_low_battery_warned', False):
-            self._low_battery_warned = True
-            pct = int(battery / 127 * 100)
-            bat_msg = f"Low headset battery ({pct}%)."
-            self._on_main(lambda m=bat_msg: self._live_screen.show_alert(m))
-            logger.warning(f"Low headset battery: {battery}/127 ({pct}%)")
-
-        # Feed raw waveform to power line noise detector
-        detector = getattr(self, '_noise_detector', None)
-        if detector and not detector.ready():
-            waveform = raw_sample.get("raw_eeg_waveform", [])
-            if waveform:
-                detector.feed(waveform)
-            if detector.ready():
-                detected, freq = detector.result()
-                if detected:
-                    noise_msg = (
-                        f"Warning: {freq} Hz power line noise detected. "
-                        f"Check notch filter setting or move away from electrical equipment."
-                    )
-                    self._on_main(lambda m=noise_msg: self._live_screen.show_alert(m))
-                    logger.warning(f"Power line noise detected: {freq} Hz")
-
-    def _log_tick(self, raw_sample: dict, metrics: dict) -> None:
+    def _log_tick(self, run: SessionRun, raw_sample: dict, metrics: dict) -> None:
         """Log the raw sample and the metrics every 10 ticks (~5s at 2Hz)."""
-        if self._tick_count % 10 != 0:
+        if run.tick_count % 10 != 0:
             return
         bands = {k: f"{raw_sample.get(k, 0):.0f}" for k in BAND_KEYS}
-        logger.debug(f"Raw sample #{self._tick_count}: {bands}")
+        logger.debug(f"Raw sample #{run.tick_count}: {bands}")
         native_med = raw_sample.get("meditation", -1)
         bat = raw_sample.get("battery", -1)
         bat_str = f" bat={bat}/127" if bat >= 0 else ""
@@ -1639,23 +1004,24 @@ class EEGMeditationApp(App):
                      f"dist={metrics.get('distraction', 0):.0f} "
                      f"native_med={native_med:.0f}{bat_str}")
 
-    def _show_tick(self, metrics: dict, raw_sample: dict, score: dict, marker_pending: bool, mark: str | None) -> None:
+    def _show_tick(self, run: SessionRun, tick: RecordedTick, mark: str | None) -> None:
         """Tick thread: queue the tick's Session screen update for the main thread, unless the screen is locked."""
+        metrics, score = tick.metrics, tick.score
         elapsed_fmt = self._session_manager.elapsed_formatted
 
         # Debounced shamatha-zone crossing (tick thread) — only the change is
         # dispatched, so the chip can't restyle every tick.
-        sham_prev = self._shamatha_active
-        self._shamatha_active, self._shamatha_streak = self._shamatha_transition(
+        sham_prev = run.shamatha_active
+        run.shamatha_active, run.shamatha_streak = self._shamatha_transition(
             sham_prev,
             metrics.get("shamatha_score", 0.0) >= self._shamatha_threshold,
-            self._shamatha_streak,
+            run.shamatha_streak,
         )
-        sham_changed = self._shamatha_active != sham_prev
+        sham_changed = run.shamatha_active != sham_prev
 
         def _ui_update(
-            m=metrics, rs=raw_sample, ef=elapsed_fmt, mp=marker_pending,
-            sa=self._shamatha_active, sc=sham_changed, sk=self._scored_mark(mark), tg=score["score_target"],
+            m=metrics, rs=tick.raw_sample, ef=elapsed_fmt, mp=tick.marked,
+            sa=run.shamatha_active, sc=sham_changed, sk=self._scored_mark(run, mark), tg=score["score_target"],
             on=score["score_key"], live=self._session_manager.live_score(),
         ) -> None:
             self._live_screen.graph.add_point(m, threshold=tg, scored=on)  # its line coloured from this point
@@ -1680,8 +1046,36 @@ class EEGMeditationApp(App):
         if not self._is_paused:
             self._on_main(_ui_update)
 
-    def _end_by_timer(self) -> None:
+    def _mark_run_ended(self) -> None:
+        """An ending begins: a tick of the run still in progress acts on nothing from here (`_outlived`)."""
+        run = self._run  # read once: another thread may drop the run between a check and its use
+        if run is not None:
+            run.mark_ended()
+
+    def _claim_ending(self, run: SessionRun) -> bool:
+        """Tick thread: whether this ending is the run's one: the run is current and this call marked it ended."""
+        return run is self._run and run.mark_ended()
+
+    def _outlived(self, run: SessionRun) -> bool:
+        """A tick body whose run was marked ended, or dropped or replaced (a stop's 1 s tick join timed out): it acts on
+        nothing shared."""
+        return run is not self._run or run.phase is Phase.ENDED
+
+    def _end_from_tick(self, run: SessionRun, reason: str, alert: str) -> None:
+        """Tick thread: a check ended the session. It is frozen here (its duration ends now, its sound goes quiet, no
+        later tick can end it again) and saved on the main thread, once, while its run is current."""
+        if not self._claim_ending(run):
+            return
+        self._session_manager.pause()
+        self._audio.mute()  # before the checkpoint, which may wait on the write lock
+        self._checkpoint_or_report()  # Android may close a locked app before the unlock: its ticks so far are saved now
+        self._ticker.stop()
+        self._on_main_for(run, lambda: (self._live_screen.show_alert(alert), self._stop_and_save(reason=reason)))
+
+    def _end_by_timer(self, run: SessionRun) -> None:
         """Tick thread: the timer expired; save the session, silence it, end the tick, ring the gong."""
+        if not self._claim_ending(run):
+            return
         logger.info("Timer expired, auto-stopping session")
         # Persist FIRST, before any audio teardown: the session must be saved even with the screen locked, and
         # MediaPlayer.release() on this thread waits on the main Looper, which is paused during a lock.
@@ -1692,13 +1086,13 @@ class EEGMeditationApp(App):
         # The real stop()/release() teardown is deferred to the main
         # thread below, where the Looper is live and release() won't hang.
         self._audio.mute()
-        # Stop the loop now (safe from this thread); also ends `running`, so idle isn't "live".
+        # Stop the loop now (safe from this thread): no later tick can end the session again.
         self._ticker.stop()
 
         def _finish_on_main(_dt=None):
             self._audio.stop()  # full noise teardown on the main thread
             self._finalize_stop_ui(stats, session_id)
-        self._on_main(_finish_on_main)
+        self._on_main_for(run, _finish_on_main)  # an ending that ran first (a profile's delete) has done it
         # Ring the gong LAST, on this thread, so it sounds at the timer end
         # even with the screen locked: it routes through a MediaPlayer
         # (USAGE_MEDIA), which plays through lock — SoundLoader is silenced
@@ -1733,7 +1127,7 @@ class EEGMeditationApp(App):
         # The mandatory user-selection gate: back/Esc never falls through INTO the
         # app (covers the pre-popup schedule window too), but double-press exits —
         # a fresh-install user who declines to create a profile must be able to leave.
-        if self._gate_active():
+        if self._gate.active():
             return self._handle_gate_back()
         # An open Popup/ModalView dismisses itself on escape — let it.
         if any(isinstance(c, ModalView) for c in Window.children):
@@ -1743,7 +1137,7 @@ class EEGMeditationApp(App):
             return True
         current = self._sm.current
         if current == "diary":
-            self._on_diary_back()
+            self._detail.on_diary_back()
             return True
         if current != "live_session":
             self._switch_screen("live_session")
@@ -1754,50 +1148,23 @@ class EEGMeditationApp(App):
     _leaving = False  # set while _flush_on_leave runs: nothing the app draws is seen any more
 
     def _toast(self, message: str) -> None:
-        """Short non-blocking confirmation on the theme's modal panel, above any popup. While the app is leaving it is
-        the native Android toast instead, the one thing still seen then."""
+        """A short confirmation above any popup; while the app is leaving, Android's own toast, the one thing still
+        seen then."""
         if self._leaving and android_jni.on_android():
-            self._android_toast(message)
-            return
-        lbl = ThemedLabel(text=message, font_size=F.BODY, color=C.TEXT, size_hint=(None, None),
-                          padding=(dp(16), dp(10)))
-        lbl.texture_update()
-        lbl.size = lbl.texture_size
-        lbl.pos = ((Window.width - lbl.width) / 2, Window.height * 0.12)
-        paint_panel(lbl)
-        Window.add_widget(lbl)
-        fade = Animation(opacity=0, duration=0.4)
-        fade.bind(on_complete=lambda *_a: Window.remove_widget(lbl))
-        Clock.schedule_once(lambda _dt: fade.start(lbl), 1.6)
-
-    def _android_toast(self, message: str) -> None:
-        """Short Android toast; no-op (logged) off Android."""
-        if not android_jni.on_android():
-            logger.debug(f"toast: {message}")
-            return
-        try:
-            from android.runnable import run_on_ui_thread
-
-            @run_on_ui_thread
-            def _show():
-                from jnius import autoclass
-                Toast = autoclass("android.widget.Toast")
-                Toast.makeText(
-                    android_jni.activity(), android_jni.java_string(message), Toast.LENGTH_SHORT
-                ).show()
-            _show()
-        except Exception as e:
-            logger.warning(f"Toast failed: {e}")
+            android_toast(message)
+        else:
+            show_toast(message)
 
     def _on_marker(self, *args) -> None:
         """Place a marker at the current position in the session."""
-        if self._session_manager.state == SessionState.RUNNING:
-            self._pending_marker = True
+        run = self._run  # a tick that outlived a Cancel can start the session for a run already ended
+        if run is not None and self._session_manager.state == SessionState.RUNNING:
+            run.pending_marker = True
             logger.info("Marker placed")
 
     def _on_threshold_change(self, value: int) -> None:
-        if self._mirror.metrics and not self._session_pipeline_live():
-            self._clear_live_display()  # the last session's line is not the threshold the next one runs against
+        if self._shown.mirror.metrics and not self._session_pipeline_live():
+            self._shown.clear()  # the last session's line is not the threshold the next one runs against
         # A drag is one change of the threshold in force, at the value it settles on, not one per slider step.
         self._after_settle("apply_threshold", lambda: self._apply_threshold(self._settings_screen.threshold))
         self._persist_user_setting_later("threshold")
@@ -1816,15 +1183,6 @@ class EEGMeditationApp(App):
         if not self._program_owns_threshold():
             self._put_threshold_in_force(value)
 
-    def _clear_live_display(self) -> None:
-        """Empty the Session screen of its session: graphs, their mirrors, threshold steps and the readout."""
-        self._mirror.clear()
-        self._live_screen.graph.clear_data()
-        self._live_screen.raw_graph.clear_data()
-        self._live_screen.band_graph.clear_data()
-        self._live_screen.graph.set_threshold_steps(None)  # each tick's target steps it, a program's too
-        self._live_screen.clear_readout()
-
     def _put_threshold_in_force(self, value: int) -> None:
         """The sound, the scoring, the SHAMATHA pill and the engine together; a session start calls it directly."""
         self._metrics_engine.meditation_threshold = value
@@ -1833,26 +1191,10 @@ class EEGMeditationApp(App):
         self._session_manager.set_threshold(value)  # also what a session waiting for the headset starts with
         self._live_screen.graph.set_threshold(float(value))  # drawn until ticks step the line
 
-    def _test_audio_sources(self) -> tuple[dict, str, str]:
-        """(prepared sources, below id, reward id) for the Test button — both the
-        selected below feedback source and the reward source (so Crickets etc. preview)."""
-        gid = self._global_feedback_id()
-        sources = {gid: self._source_spec(gid)}
-        reward_id = self._reward_id()
-        if reward_id:
-            sources[reward_id] = self._source_spec(reward_id)
-        return sources, gid, reward_id
-
-    def _on_test_audio(self) -> None:
-        """Sample the selected feedback + reward sources, then the alert channels."""
-        if self._refused_while_session_runs("testing the audio", why="The test plays through the session's sounds."):
-            return
-        sources, gid, reward_id = self._test_audio_sources()
-        self._warn_missing_sound_files(sources, force=True)
-        self._audio.prepare_feedback(sources, gid)
-        self._audio.test_audio(reward_id)
-
     def _on_line_width_change(self, width: float) -> None:
+        self._change_setting("line_width", width)
+
+    def _apply_line_width(self, width: float) -> None:
         self._live_screen.graph.set_line_width(width)
         self._live_screen.raw_graph.set_line_width(width)
         self._live_screen.band_graph.set_line_width(width)
@@ -1862,30 +1204,21 @@ class EEGMeditationApp(App):
         logger.debug(f"Line width changed to {width}")
 
     def _on_rotate_screen(self, rotation: int) -> None:
-        Window.rotation = rotation
-        self._persist_user_setting("rotation")
+        self._change_setting("rotation", rotation)
         logger.info(f"Screen rotation set to {rotation}")
-
-    @staticmethod
-    def _baseline_audio_metric(key: str) -> str:
-        """The user's persisted audio metric; program-formula slots are program-only
-        and must never persist as a baseline (outside a program they read 0 -> max noise)."""
-        return "shamatha_score" if (not key or key in PROGRAM_FORMULA_KEYS) else key
-
-    _scored_key: Optional[str] = None  # the series the live legend marks as scored in a simple session
 
     def _score_on_drive_key(self) -> str:
         """A simple session is scored on the metric that drives the feedback sound (#51), so they can't diverge."""
-        key = self._audio_drive_key()
+        key = self._audio_metric.drive_key()
         self._session_manager.set_active_goal(key)
         return key
 
-    def _scored_mark(self, key: Optional[str]) -> Optional[str]:
+    def _scored_mark(self, run: SessionRun, key: str | None) -> str | None:
         """The scored series for the legend to mark this tick: only on a change, and only while the UI is showing (a
         change during a screen lock is picked up by the first tick after it)."""
-        if key is None or key == self._scored_key or self._is_paused:
+        if key is None or key == run.scored_key or self._is_paused:
             return None
-        self._scored_key = key
+        run.scored_key = key
         return key
 
     def _with_score(self, stats: dict) -> dict:
@@ -1895,76 +1228,8 @@ class EEGMeditationApp(App):
         if self._program_run.active:
             return {**stats, "score_metric_key": "program",
                     "score_metric_name": self._program_run.name or "Program", "avg_score": None}
-        key = stats.get("score_metric_key") or self._audio_drive_key()  # no scored tick yet: what it would score
+        key = stats.get("score_metric_key") or self._audio_metric.drive_key()  # no scored tick yet: what it would score
         return {**stats, "score_metric_key": key, "score_metric_name": self._live_screen.graph.series_name(key)}
-
-    def _audio_drive_key(self) -> str:
-        """Metric key feeding noise. A running program drives it from the active segment's
-        slot; otherwise the user's baseline. Falls back to shamatha when the key would read
-        0 (invalid formula slot, or a program slot outside a program)."""
-        if self._program_run.active and self._program_run.audio_key:
-            key = self._program_run.audio_key
-        else:
-            key = self._baseline_audio_metric(self._audio_metric_key)
-        ev = self._formulas.for_key(key)
-        if ev is not None and not ev.is_valid:
-            return "shamatha_score"
-        return key
-
-    def _on_audio_metric_change(self, key: str) -> None:
-        """Switch which metric drives the audio threshold feedback: a running session keeps the one it is scored on
-        (#51 scores it on the drive key every tick, so a switch mixed both metrics into one average and streak)."""
-        new_key = FORMULA_KEYS[self._audio_formula_index] if key == "custom_formula" else key
-        if new_key != self._audio_metric_key and self._scoring_locked("changing the metric it is scored on"):
-            self._show_audio_metric()
-            return
-        self._audio_metric_key = new_key
-        self._persist_user_setting("audio_metric")
-        logger.info(f"Audio threshold metric changed to: {self._audio_metric_key}")
-
-    def _on_feedback_source_change(self, source: str, path: str) -> None:
-        """Apply the global (below-threshold) feedback source chosen in Settings."""
-        self._feedback_source = source
-        self._feedback_sound_path = (path or "").strip()
-        self._persist_user_setting("feedback_source")
-        self._persist_user_setting("feedback_sound_path")
-        logger.info(f"Feedback source -> {self._feedback_source} {self._feedback_sound_path!r}")
-
-    def _on_reward_source_change(self, source: str, path: str) -> None:
-        """Apply the above-threshold reward source chosen in Settings."""
-        self._reward_source = source
-        self._reward_sound_path = (path or "").strip()
-        self._persist_user_setting("reward_source")
-        self._persist_user_setting("reward_sound_path")
-        logger.info(f"Reward source -> {self._reward_source} {self._reward_sound_path!r}")
-
-    def _on_audio_formula_index(self, idx: int) -> None:
-        """Pick which formula slot drives audio. Only rebinds the live key when a
-        custom-formula slot is the selected driver — tapping it while another metric
-        is selected just remembers the choice for when custom-formula is picked."""
-        idx = max(0, min(idx, len(FORMULA_KEYS) - 1))
-        if (self._audio_metric_key in FORMULA_KEYS and FORMULA_KEYS[idx] != self._audio_metric_key
-                and self._scoring_locked("changing the metric it is scored on")):
-            self._show_audio_metric()
-            return
-        self._audio_formula_index = idx
-        if self._audio_metric_key in FORMULA_KEYS:
-            # Load derives the index from audio_metric, so persist both or a reload reverts the switch.
-            self._audio_metric_key = FORMULA_KEYS[self._audio_formula_index]
-            self._persist_user_setting("audio_metric")
-        self._persist_user_setting("audio_formula_index")
-
-    def _scoring_locked(self, doing: str) -> bool:
-        """True (after telling the user) while a simple session runs: it is scored on the audio control metric (#51)
-        until it stops. A program session is scored on its segments' metrics, so the control stays free."""
-        return (not self._program_run.active
-                and self._refused_while_session_runs(doing))
-
-    def _show_audio_metric(self) -> None:
-        """Settings' audio-metric choice and formula-slot buttons show the metric in force."""
-        key = self._audio_metric_key
-        self._settings_screen.audio_metric = "custom_formula" if key in FORMULA_KEYS else key
-        self._settings_screen.audio_formula_index = self._audio_formula_index
 
     def _on_text_size_change(self, size: float) -> None:
         self._persist_user_setting("text_size")
@@ -1979,15 +1244,7 @@ class EEGMeditationApp(App):
         self._persist_user_setting("theme")
         logger.info(f"Theme changed to: {theme_name}")
 
-    def _confirm_saved_delete(self, kind: str, entries: list[dict], index: int, label: Callable,
-                              delete: Callable[[int], None]) -> None:
-        """Ask before deleting a saved formula or program, named as its list row names it."""
-        if not (0 <= index < len(entries)):
-            return
-        self._confirm_action(f"Delete {kind}", f"Delete saved {kind} '{label(index, entries[index])}'?", "Delete",
-                             lambda: delete(index), ok_color=C.DANGER)
-
-    def _require_user(self, action: str) -> Optional[int]:
+    def _require_user(self, action: str) -> int | None:
         """Return the active uid, or explain why the action can't run and return
         None. Per-user handlers call this instead of a bare silent `return` — the
         hard gate should make None unreachable, this is the defense-in-depth."""
@@ -2007,333 +1264,27 @@ class EEGMeditationApp(App):
         confirm_popup(title, message, ok_text, on_ok, ok_color=ok_color, on_cancel=on_cancel)
 
     def _on_sinking_alert_toggle(self, active: bool) -> None:
-        self._audio.sinking_alert_enabled = active
-        self._persist_user_setting("sinking_alert")
+        self._change_setting("sinking_alert", active)
         logger.info(f"Sinking alert {'enabled' if active else 'disabled'}")
 
     def _on_subtle_alert_toggle(self, active: bool) -> None:
-        self._audio.subtle_alert_enabled = active
-        self._persist_user_setting("subtle_alert")
+        self._change_setting("subtle_alert", active)
         logger.info(f"Distraction chime {'enabled' if active else 'disabled'}")
 
     def _on_disconnect_alert_toggle(self, active: bool) -> None:
-        self._audio.disconnect_alert_enabled = active
-        self._persist_user_setting("disconnect_alert")
+        self._change_setting("disconnect_alert", active)
         logger.info(f"Disconnect alert {'enabled' if active else 'disabled'}")
 
-    def _on_timer_sound_change(self, path: str) -> None:
-        """Set the custom timer-gong path ("" for the default bell) and persist it."""
-        self._timer_state.set_custom_sound_path(path)
-        self._persist_user_setting_later("timer_sound")
-
-    def _on_test_timer_sound(self) -> None:
-        path = self._timer_state.custom_sound_path
-        logger.debug(f"Test timer sound, path='{path}'")
-        self._warn_missing_sound_files({}, path, force=True)
-        # The gong's end flips the Test button back from Stop (the engine calls it on Kivy's thread).
-        played = self._audio.play_timer_sound(path, on_end=self._settings_screen.timer.notify_timer_sound_test_ended)
-        if not played:
-            report_soft_error("timer_sound_unplayable", "The timer sound can't be played.", app=self, force=True)
-        elif path and played != path and os.path.isfile(path):
-            report_soft_error("timer_sound_unplayable",
-                              f"Custom timer sound can't be played: {path!r} - using the default gong instead.",
-                              app=self, force=True)
-
-    def _on_stop_test_timer_sound(self) -> None:
-        logger.debug("Stop timer test sound")
-        self._audio.stop_timer_bell()
-
-    def _report_bt_connect_failure(self, device_name: str, hint: str) -> None:
-        """Fire a soft-error dialog for a failed BT connect (cooldown-gated).
-
-        The retry overlay already tells the user *something* went wrong; this
-        adds a copy-pasteable technical report so they can forward it when
-        the friendly hint isn't enough.
-        """
-
-        addr = self._real_stream._device_address or "(unset)"
-        last_err = self._real_stream._last_connect_error or "(none)"
-        detail = (
-            f"Device: {device_name} ({addr})\n"
-            f"Hint shown to user: {hint}\n"
-            f"Stream last_connect_error: {last_err}\n"
-        )
-        report_soft_error("bt_connect_failed", detail, app=self)
-
-    _detail_load: int = 0  # the session-detail open in progress; a result for an earlier one is dropped
-
-    def _on_session_select(self, session_id: int) -> None:
-        """Open the session detail at once (#59): title, stats and notes from the row History holds, so they can be read
-        and edited at once; the band totals and graphs load on a worker and fill in, one section per frame."""
-        session = self._history_screen.session_by_id(session_id)
-        if session is None:  # not in History's list: nothing was tapped
-            logger.warning(f"Session detail: session {session_id} isn't listed")
-            return
-        self._detail_load += 1
-        token = self._detail_load
-        d = self._diary_screen
-        with timed("diary.open"):
-            d.set_session_formulas({}, session_formulas(session)[1])  # the legend's names from the first frame
-            d.show_session_detail(session)
-            d.set_metrics_threshold(float(session.get("threshold_used", 50)))
-            d.set_program(session.get("session_program", ""))
-            plan = recorded_plan(session.get("session_program") or "")
-            if plan is None and self._current_user_id:  # the profile's own selection, whatever the last session showed
-                self._graph_series.apply_saved(d._metrics_graph, self._current_user_id)
-            d.show_program_lines(plan)  # the program's mark goes last: lines it still shows are never saved
-            bv = {}
-            if self._current_user_id:
-                bv = self._db.get_user_json_setting(self._current_user_id, "band_breakdown_view", {}) or {}
-            d.set_band_view_state(bv.get("mode", "detailed"), bv.get("sort", "band"), bool(bv.get("desc", False)))
-            self._session_detail_back = self._sm.current
-            self._sm.current = "diary"
-        threading.Thread(target=self._load_session_detail, args=(token, session_id, session), daemon=True,
-                         name="DiaryLoad").start()
-
-    def _load_session_detail(self, token: int, session_id: int, session: dict) -> None:
-        """Worker: the band totals (one query) first, then the metric rows, read once for the graphs and the formula
-        replay, built into each graph's data off the main thread; each result goes to _fill_detail as it is ready."""
-        d = self._diary_screen
-        try:
-            with timed("diary.band_totals"):
-                totals = self._db.get_session_band_totals(session_id)
-            self._on_main(lambda: self._fill_detail(token, [lambda: d.set_band_totals(totals)]))
-            with timed("diary.get_metrics"):
-                rows = self._db.get_session_metrics(session_id)
-            with timed("diary.compute_formulas"):
-                series, names = self._compute_session_formulas(session_id, session, rows)
-            with timed("diary.graph_data"):
-                data = detail_graph_data(rows, series)
-        except Exception as e:  # any failure: the sections say so, never "Loading…" for good
-            logger.exception(f"Session detail load failed for session {session_id}")
-
-            def failed(err=e) -> None:
-                d.show_load_failed()
-                report_soft_error("session_detail_load_failed", f"Session {session_id}'s graphs: {err}")
-
-            self._on_main(lambda: self._fill_detail(token, [failed]))
-            return
-
-        def fill(section: str) -> None:
-            if section == "metrics":
-                d.set_session_formulas(series, names)  # the formula lines' names, before their graph
-            d.fill_graph(section, data)
-
-        try:
-            ticks = scored_ticks(session, rows, series)
-            what_if = lambda: d.set_what_if(ticks, session)
-        except Exception:  # broad on purpose: a row it can't score must not take the graphs down with it
-            logger.exception(f"What-if scoring failed for session {session_id}")
-            what_if = d.show_what_if_failed
-
-        self._on_main(lambda: self._fill_detail(token, [*(lambda s=s: fill(s) for s in d.graph_fill_order()),
-                                                        what_if]))
-
-    def _fill_detail(self, token: int, steps: list) -> None:
-        """Run one step per frame, so no frame holds them all, while this open is the detail on screen: after Back,
-        another tab or another session's open, the rest is dropped."""
-        if token != self._detail_load or self._sm.current != "diary" or not steps:
-            return
-        steps[0]()
-        if len(steps) > 1:
-            Clock.schedule_once(lambda dt: self._fill_detail(token, steps[1:]), 0)  # 0 from a callback: next frame
-
-    def _persist_band_view(self, mode: str, sort_by: str, descending: bool) -> None:
-        """Persist the diary band-table view (mode/sort) per user."""
-        if not self._current_user_id:
-            return  # silent-ok: view-pref persistence; no concrete user = nothing to save
-        self._db.set_user_json_setting(
-            self._current_user_id, "band_breakdown_view",
-            {"mode": mode, "sort": sort_by, "desc": descending},
-        )
-
-    def _compute_session_formulas(self, session_id: int, session: dict,
-                                  rows: list[dict] | None = None) -> tuple[dict, dict]:
-        """Recompute the session's recorded formula series + names from its band powers, over `rows` when already
-        read. Pure DB + compute, no Kivy — safe to call off the main thread."""
-        evaluators, names = session_formulas(session)
-        series = self._db.recompute_formula_series(session_id, evaluators, rows) if evaluators else {}
-        return series, names
-
-    def _inject_session_formulas(self, session_id: int, session: dict) -> None:
-        """Recompute + apply the session's recorded formulas (synchronous)."""
-        series, names = self._compute_session_formulas(session_id, session)
-        self._diary_screen.set_session_formulas(series, names)
-
-    def _on_diary_back(self) -> None:
-        """Return from diary detail to previous screen (usually history)."""
-        back = getattr(self, "_session_detail_back", "history")
-        self._switch_screen(back)
-
-    def _on_save_notes(self, session_id: int, notes: str | None = None, tags: str | None = None,
-                       mood: int | None = None) -> bool:
-        return self._save_session_notes(session_id, notes=notes, tags=tags, mood=mood)
-
-    def _delete_sessions(self, session_ids: list[int], on_done: Optional[Callable[[bool], None]] = None) -> None:
-        """The one session-delete path (a History row, the selection, the session-end card): one transaction on a worker
-        thread, then History drops the rows in place and the end card closes if it shows one of them. on_done(True)
-        once deleted; on_done(False) when refused or failed, with nothing deleted."""
-        ids = list(session_ids)
-        done = on_done or (lambda _ok: None)
-        if self._session_pipeline_live() and self._recorder.session_id in ids:
-            # Its row is in History after the first checkpoint; its next checkpoints would write data for no session.
-            self._info_popup("Session in progress",
-                             "Stop the session first: a running session can't be deleted. Nothing was deleted.")
-            done(False)
-            return
-        # Modal at once, so a tap can't reach the rows or the end card being deleted; painted only if it takes a while.
-        self.show_loading(f"Deleting {format_count(len(ids), 'session')}\u2026", delay=0.15)
-        t0 = time.monotonic()
-
-        def _finish(error) -> None:
-            self.hide_loading()
-            if error is not None:
-                report_soft_error("session_delete_failed",
-                                  f"{format_count(len(ids), 'session')} could not be deleted: {error}")
-                done(False)
-                return
-            logger.info(f"Deleted {format_count(len(ids), 'session')} {ids} in {(time.monotonic() - t0) * 1000:.0f} ms")
-            if self._recorder.session_id in ids or self._live_screen.summary_session_id in ids:
-                self._drop_shown_session(keep_notes=False)  # the Session screen shows a session that's gone
-            self._history_screen.remove_sessions(ids)
-            done(True)
-
-        def _worker() -> None:
-            try:
-                self._db.delete_sessions(ids)
-            except sqlite3.Error as e:
-                logger.exception(f"Deleting sessions {ids} failed")
-                self._on_main(lambda err=e: _finish(err))
-                return
-            self._on_main(lambda: _finish(None))
-
-        threading.Thread(target=_worker, daemon=True, name="SessionDelete").start()
-
-    def _on_rename_session(self, session_id: int, new_name: str) -> None:
-        """Rename a session; its History row already shows the new name."""
-        self._db.rename_session(session_id, new_name)
-        logger.info(f"Session {session_id} renamed to '{new_name}'")
-
-    def _on_export_csv(self, session_id: int, path: Optional[str] = None) -> Optional[str]:
-        """Export session data as CSV file. Returns file path or None."""
-        csv_data = self._db.export_session_csv(
-            session_id, custom_formula=self._formulas.evaluators[0]
-        )
-        if not csv_data:
-            return None
-        if not path:
-            export_dir = os.path.dirname(self._db._db_path)
-            path = os.path.join(export_dir, f"session_{session_id}.csv")
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        with open(path, "w") as f:
-            f.write(csv_data)
-        logger.info(f"Session {session_id} exported to {path}")
-        return path
-
-    def _on_export_sessions_csv(self, session_ids: list) -> None:
-        """Bulk-export selected sessions as one ZIP of per-session CSVs (issue #7).
-        Runs off the main thread behind the loading spinner; delivers via the shared
-        copy_to_documents path (Documents on Android, a Documents folder on desktop)."""
-        if not session_ids:
-            return
-        self.show_loading(f"Exporting {format_count(len(session_ids), 'session')}…")
-
-        def _worker():
-            try:
-                mapping = {}
-                for sid in session_ids:
-                    csv = self._db.export_session_csv(sid, custom_formula=self._formulas.evaluators[0])
-                    if csv:
-                        mapping[sid] = csv
-                ts = _dt.now().strftime("%Y%m%d_%H%M%S")
-                fname = f"sessions_{ts}.zip"
-                tmp_zip = os.path.join(os.path.dirname(self._db._db_path), fname)
-                n = build_sessions_zip(tmp_zip, mapping)
-                if n == 0:
-                    self._on_main(lambda: (self.hide_loading(), report_soft_error(
-                        "export_empty", "No data to export in the selected sessions.", app=self)))
-                    return
-                dest = tmp_zip
-                try:
-                    shared = copy_to_documents(tmp_zip, display_name=fname)
-                    if shared:
-                        dest = shared
-                except Exception:
-                    logger.exception("copy_to_documents failed for bulk export")
-                self._on_main(lambda: self._finish_bulk_export(n, dest))
-            except Exception:
-                logger.exception("Bulk CSV export failed")
-                self._on_main(lambda: (self.hide_loading(), report_soft_error(
-                    "export_failed", "Bulk CSV export failed — see logs.", app=self)))
-
-        threading.Thread(target=_worker, daemon=True, name="BulkCSVExport").start()
-
-    def _finish_bulk_export(self, count: int, dest: str) -> None:
-        self.hide_loading()
-        self._history_screen.set_select_mode(False)
-        self._info_popup("Export complete", f"Exported {format_count(count, 'session')} to:\n{dest}")
-
-    # Each Start and each ending (_undo_session_setup) moves it on: a callback queued for an earlier attempt (the device
-    # scan's result, the BT wait's UI and audio) sees it has changed and does nothing.
-    _start_attempt: int = 0
-    _wait_attempt: int = 0  # the attempt the BT wait belongs to, taken on the main thread when it begins
-    _history_dirty: bool = True
-    _history_view: int | None = None  # the profile History last loaded; a day filter survives only that
-
-    def _refresh_history(self, force: bool = False) -> None:
-        if not force and not self._history_dirty:
-            return
-        with timed("history.get_all_sessions"):
-            sessions = self._finished_sessions(self._current_user_id)
-        self._history_screen.load_sessions(sessions, keep_filter=self._current_user_id == self._history_view)
-        self._history_view = self._current_user_id
-        self._history_dirty = False
-
-    def _mark_history_dirty(self) -> None:
-        self._history_dirty = True
+    # The current Start, from the press to its ending (_undo_session_setup): a callback queued for an earlier one (the
+    # device scan's result, the BT wait's UI and audio) finds it replaced and does nothing.
+    _run: SessionRun | None = None
 
     def _running_session_id(self) -> int | None:
         """The running session's row, which History lists and Settings counts only once it ends: it exists from the
         first checkpoint, with stats as of that checkpoint (the ending marks History dirty)."""
         return self._recorder.session_id if self._session_pipeline_live() else None
 
-    def _finished_sessions(self, uid: int | None) -> list:
-        running = self._running_session_id()
-        return [s for s in sessions_for_view(self._db, uid) if running is None or s.get("id") != running]
-
-    def _on_user_switch(self, user_id: int) -> None:
-        """Switch the active user profile."""
-        # The running session owns the loaded settings and saves under its own profile.
-        if user_id != self._current_user_id and self._refused_while_session_runs("switching profiles"):
-            self._refresh_profile()  # snap the picker back to the active profile
-            return
-        # Save current user's settings before switching
-        self._save_user_settings()
-        user = self._db.get_user(user_id)
-        name = user["name"] if user else "Unknown"
-        self._activate_user(user_id)
-        logger.info(f"Switched to user: {name} (id={user_id})")
-        self._refresh_profile()
-
-    def _on_history_view_mode_change(self, mode: str) -> None:
-        """Persist the user's preferred History view layout."""
-        if not self._current_user_id:
-            return  # silent-ok: pref persistence; view already changed, no user to save to
-        self._db.set_user_setting(self._current_user_id, "history_view_mode", mode)
-
-    def _count_sessions_for_user(self, user_id: int) -> int | None:
-        """The sessions History lists for the profile, or None (a row without its count) when the read fails."""
-        try:
-            return self._db.count_sessions(user_id, self._running_session_id())
-        except sqlite3.Error:
-            logger.exception(f"Profile {user_id}'s sessions couldn't be counted")
-            return None
-
     # --- Data Backup (app/ui/backup_flow.py) ---
-
-    def _current_user_name(self) -> str | None:
-        user = self._db.get_user(self._current_user_id) if self._current_user_id else None
-        return user["name"] if user else None
 
     def _on_db_replaced(self) -> None:
         """A restore replaced the database file: on_stop/on_pause must not flush settings over it; relaunch."""
@@ -2359,86 +1310,10 @@ class EEGMeditationApp(App):
         ok.bind(on_release=_quit)
         popup.open()
 
-    def _on_pick_existing_user(self, user_id: int) -> None:
-        """First-run popup: an existing profile picked, activated as it is (its own headset and mode)."""
-        if not self._db.get_user(user_id):
-            logger.warning(f"_on_pick_existing_user: user {user_id} not found")
-            return
-        self._activate_user(user_id)
-        self._finish_first_run(f"user {user_id} picked")
-
-    def _on_user_create(self, name: str) -> None:
-        """Create a new user and refresh the profile list.
-
-        Routes UserExistsError to the active picker form (Settings) for
-        inline duplicate handling.
-        """
-
-        try:
-            self._db.create_user(name)
-        except UserExistsError as e:
-            form = getattr(self._settings_screen, "_user_picker_form", None)
-            if form is not None:
-                form.show_duplicate_error(user_id=e.user_id, name=e.name)
-            return
-        except Exception as e:
-            report_soft_error(
-                "user_create_failed", f"Could not create user '{name}': {e}",
-            )
-            return
-        self._refresh_profile()
-
-    def _on_user_delete(self, user_id: int) -> None:
-        """Delete a user profile. Deleting the ACTIVE profile drops the app into
-        the no-user state, so re-enter the hard gate instead of leaving the app
-        usable with nothing selected."""
-        deleted_active = self._current_user_id == user_id
-        if deleted_active and self._session_pipeline_live():
-            # Discard the running (or connecting) session — otherwise the tick
-            # thread keeps running and writes an orphaned session, and saving it
-            # under a profile that's about to be deleted just orphans it anyway.
-            self._discard_running_session()
-        self._db.delete_user(user_id)
-        if user_id == self._live_display_uid:  # its session went with it: the card has nothing left to save
-            self._drop_shown_session(keep_notes=False)
-        self._mark_history_dirty()
-        remaining = self._db.get_all_users()
-        # Re-enter the gate when no usable active user is left: the active profile was deleted, or no profile is left
-        # at all (the app is never usable with zero users).
-        if deleted_active or not remaining:
-            self._current_user_id = None
-            self._refresh_profile()
-            self._program_settings.refresh_saved()  # drop the deleted user's programs from the UI now
-            self._open_user_gate(0)
-        else:
-            self._refresh_profile()
-
-    def _refresh_profile(self) -> None:
-        self._settings_screen.populate_users(self._db.get_all_users(), self._current_user_id)
-
     def _build_settings_store(self) -> None:
-        """Build the settings registry; call once in build() before any user load, as get() snapshots defaults."""
+        """Build the settings registry; call once in build() before any user load, as a kept setting's default is its
+        holder's value now. A profile load applies them in this order."""
         ss = self._settings_screen
-        ls = self._live_screen
-        settings: list[Setting] = []
-
-        def set_timer_enabled(v):
-            self._timer_state.set_enabled(v); ss.timer.timer_enabled = v
-
-        def set_timer_minutes(v):
-            self._timer_state.set_duration(v); ss.timer.timer_minutes = v
-
-        def set_timer_sound(v):
-            self._timer_state.set_custom_sound_path(v); ss.timer.timer_sound_path = v
-
-        def set_sinking(v):
-            self._audio.sinking_alert_enabled = v; ss.audio._sinking_alert_cb.active = v
-
-        def set_subtle(v):
-            self._audio.subtle_alert_enabled = v; ss.audio._subtle_alert_cb.active = v
-
-        def set_disconnect(v):
-            self._audio.disconnect_alert_enabled = v; ss.audio._disconnect_alert_cb.active = v
 
         def set_threshold(v):
             ss.threshold = v
@@ -2447,74 +1322,93 @@ class EEGMeditationApp(App):
         def set_use_mock(v):
             APP.USE_MOCK_DEVICE = v; ss.device._device_mode_cb.active = v
 
-        def set_line_width(v):
-            ss.display._line_width_slider.value = v; self._on_line_width_change(v)
+        self._settings_store = SettingsStore(self._db, [
+            *self._timer_settings(), *self._alert_settings(), *self._fold_settings(),
+            kept("threshold", INT, lambda: int(ss.threshold), set_threshold),
+            kept("use_mock", BOOL, lambda: APP.USE_MOCK_DEVICE, set_use_mock),
+            *self._sound_settings(), *self._display_settings()])
 
-        def set_rotation(v):
-            ss.display._current_rotation = v
-            ss.display._rotate_btn.text = f"Rotate Screen ({v}°)"
+    def _timer_settings(self) -> list[Setting]:
+        timer = self._settings_screen.timer
+
+        def set_timer_enabled(v):
+            self._timer_state.set_enabled(v); timer.timer_enabled = v
+
+        def set_timer_minutes(v):
+            self._timer_state.set_duration(v); timer.timer_minutes = v
+
+        def apply_timer_sound(v):
+            self._timer_state.set_custom_sound_path(v); timer.timer_sound_path = v
+
+        return [kept("timer_enabled", BOOL, lambda: timer.timer_enabled, set_timer_enabled),
+                kept("timer_minutes", INT, lambda: timer.timer_minutes, set_timer_minutes),
+                held("timer_sound", STR, timer.timer_sound_path, apply_timer_sound, settle=True)]
+
+    def _alert_settings(self) -> list[Setting]:
+        audio = self._settings_screen.audio
+
+        def apply_sinking(v):
+            self._audio.sinking_alert_enabled = v; audio._sinking_alert_cb.active = v
+
+        def apply_subtle(v):
+            self._audio.subtle_alert_enabled = v; audio._subtle_alert_cb.active = v
+
+        def apply_disconnect(v):
+            self._audio.disconnect_alert_enabled = v; audio._disconnect_alert_cb.active = v
+
+        return [held("sinking_alert", BOOL, audio._sinking_alert_cb.active, apply_sinking),
+                held("subtle_alert", BOOL, audio._subtle_alert_cb.active, apply_subtle),
+                held("disconnect_alert", BOOL, audio._disconnect_alert_cb.active, apply_disconnect)]
+
+    def _fold_settings(self) -> list[Setting]:
+        """What each screen keeps folded: History's chart, a session detail's What-if and band power."""
+        hs, ds = self._history_screen, self._diary_screen
+        return [kept("history_chart_collapsed", BOOL, lambda: hs.chart_collapsed, hs.set_chart_collapsed),
+                kept("what_if_collapsed", BOOL, lambda: ds.what_if.collapsed, ds.what_if.set_collapsed),
+                kept("band_power_collapsed", BOOL, lambda: ds.band_collapsed, ds.set_band_collapsed)]
+
+    def _sound_settings(self) -> list[Setting]:
+        """The metric that drives the sound, and the below and reward sources; a source's apply reads its path, so
+        each pair applies source first."""
+        audio, store = self._settings_screen.audio, lambda key: self._settings_store.value(key)
+
+        def apply_feedback_source(v):
+            audio.set_feedback_source(v, store("feedback_sound_path"))
+
+        def apply_feedback_path(v):
+            audio.set_feedback_source(store("feedback_source"), v)
+
+        def apply_reward_source(v):
+            audio.set_reward_source(v, store("reward_sound_path"))
+
+        def apply_reward_path(v):
+            audio.set_reward_source(store("reward_source"), v)
+
+        return [*self._audio_metric.settings(),
+                held("feedback_source", STR, "noise", apply_feedback_source),
+                held("feedback_sound_path", STR, "", apply_feedback_path),
+                held("reward_source", STR, "none", apply_reward_source),  # the above-threshold channel: off by default
+                held("reward_sound_path", STR, "", apply_reward_path)]
+
+    def _display_settings(self) -> list[Setting]:
+        display, ls = self._settings_screen.display, self._live_screen
+
+        def apply_line_width(v):
+            display.show_line_width(v); self._apply_line_width(v)
+
+        def apply_rotation(v):
+            display._current_rotation = v
+            display._rotate_btn.text = f"Rotate Screen ({v}°)"
             Window.rotation = v
 
-        def set_audio_index(v):
-            self._audio_formula_index = max(0, min(int(v), len(FORMULA_KEYS) - 1))
-
-        def set_audio_metric(v):
-            v = self._baseline_audio_metric(v)  # heal a leaked program slot
-            self._audio_metric_key = v
-            if v in FORMULA_KEYS:
-                self._audio_formula_index = FORMULA_KEYS.index(v)
-            self._show_audio_metric()
-
-        def set_feedback_source(v):
-            self._feedback_source = v; ss.audio.set_feedback_source(v, self._feedback_sound_path)
-
-        def set_feedback_path(v):
-            self._feedback_sound_path = v; ss.audio.set_feedback_source(self._feedback_source, v)
-
-        def set_reward_source(v):
-            self._reward_source = v; ss.audio.set_reward_source(v, self._reward_sound_path)
-
-        def set_reward_path(v):
-            self._reward_sound_path = v; ss.audio.set_reward_source(self._reward_source, v)
-
-        def add(key, codec, get, set_):
-            settings.append(Setting(key, get(), codec[0], codec[1], get, set_))
-
-        add("timer_enabled", BOOL, lambda: ss.timer.timer_enabled, set_timer_enabled)
-        add("timer_minutes", INT, lambda: ss.timer.timer_minutes, set_timer_minutes)
-        add("timer_sound", STR, lambda: ss.timer.timer_sound_path, set_timer_sound)
-        add("sinking_alert", BOOL, lambda: self._audio.sinking_alert_enabled, set_sinking)
-        hs = self._history_screen
-        add("history_chart_collapsed", BOOL, lambda: hs.chart_collapsed, hs.set_chart_collapsed)
-        what_if = self._diary_screen.what_if
-        add("what_if_collapsed", BOOL, lambda: what_if.collapsed, what_if.set_collapsed)
-        ds = self._diary_screen
-        add("band_power_collapsed", BOOL, lambda: ds.band_collapsed, ds.set_band_collapsed)
-        add("subtle_alert", BOOL, lambda: self._audio.subtle_alert_enabled, set_subtle)
-        add("disconnect_alert", BOOL, lambda: self._audio.disconnect_alert_enabled, set_disconnect)
-        add("threshold", INT, lambda: int(ss.threshold), set_threshold)
-        add("use_mock", BOOL, lambda: APP.USE_MOCK_DEVICE, set_use_mock)
-        add("line_width", FLOAT, lambda: ss.display._line_width_slider.value, set_line_width)
-        add("rotation", INT, lambda: ss.display._current_rotation, set_rotation)
-        add("graph_zoom_seconds", FLOAT, self._saved_zoom_seconds, self._apply_saved_zoom)
-        # audio_formula_index BEFORE audio_metric: metric reconciles the index when it's a slot.
-        add("audio_formula_index", INT, lambda: self._audio_formula_index, set_audio_index)
-        add("audio_metric", STR,
-            lambda: self._baseline_audio_metric(self._audio_metric_key), set_audio_metric)
-        add("feedback_source", STR, lambda: self._feedback_source, set_feedback_source)
-        add("feedback_sound_path", STR, lambda: self._feedback_sound_path, set_feedback_path)
-        add("reward_source", STR, lambda: self._reward_source, set_reward_source)
-        add("reward_sound_path", STR, lambda: self._reward_sound_path, set_reward_path)
-        add("marker_hotkey", STR, lambda: ss.display.marker_hotkey,
-            lambda v: setattr(ss, "marker_hotkey", v))
-        add("stats_view_mode", STR, lambda: getattr(ls, "_stats_mode", "live"),
-            self._apply_stats_mode)
-        # Its default is the seed, not the startup profile's theme the UI was built in.
-        settings.append(theme_setting(self._theme_seed))
-        settings.append(text_size_setting())
-        settings.append(line_colours_setting())
-
-        self._settings_store = SettingsStore(self._db, settings)
+        return [held("line_width", FLOAT, display._line_width_slider.value, apply_line_width, settle=True),
+                held("rotation", INT, display._current_rotation, apply_rotation),
+                kept("graph_zoom_seconds", FLOAT, self._saved_zoom_seconds, self._apply_saved_zoom),
+                kept("marker_hotkey", STR, lambda: display.marker_hotkey,
+                     lambda v: setattr(self._settings_screen, "marker_hotkey", v)),
+                kept("stats_view_mode", STR, lambda: getattr(ls, "_stats_mode", "live"), self._apply_stats_mode),
+                # Its default is the seed, not the startup profile's theme the UI was built in.
+                theme_setting(self._theme_seed), text_size_setting(), line_colours_setting()]
 
     def _apply_stats_mode(self, mode: str) -> None:
         self._live_screen.set_stats_mode(mode)
@@ -2580,7 +1474,7 @@ class EEGMeditationApp(App):
             logger.exception("flush_pre_app_errors failed")
         render_stats.start()
         self._power.refresh()
-        if not self._gate_active():  # a first run offers it once the profile is picked (_finish_first_run)
+        if not self._gate.active():  # a first run offers it once the profile is picked (ProfileGate._finish_first_run)
             Clock.schedule_once(lambda _dt: self._power.offer_once(), 1.0)
 
     def on_pause(self) -> bool:
@@ -2628,10 +1522,9 @@ class EEGMeditationApp(App):
         # in an unset state and no gate is already up, re-enter it rather than
         # resume usable with no user.
         # getattr guards keep this safe if on_resume fires before build() runs.
-        if (getattr(self, "_bottom_nav", None) is not None
-                and getattr(self, "_current_user_id", None) is None
-                and getattr(self, "_gate_popup", None) is None):
-            self._open_user_gate(0)
+        gate = getattr(self, "_gate", None)
+        if gate is not None and self._current_user_id is None and not gate.shown():
+            gate.open(0)
             return
         try:
             Clock.schedule_once(lambda dt: self._refresh_ui_after_resume(), 0)
@@ -2652,7 +1545,8 @@ class EEGMeditationApp(App):
 
         While the session is RUNNING, reload all three live graphs in a
         single batch from the session-lifetime mirror buffers (one
-        ``load_static_data`` call per graph, one redraw each), then
+        ``load_static_data`` call per graph, with its markers; the metrics
+        graph redraws again for its threshold and gradient steps), then
         refresh the stats/state/timer labels from the latest sample.
         """
         t_start = time.monotonic()
@@ -2662,11 +1556,11 @@ class EEGMeditationApp(App):
             logger.info("on_resume: session not RUNNING → skipping graph reload")
             return
         try:
-            self._mirror.reload_into(self._live_screen)
-            if self._mirror.last_metrics:
+            self._shown.mirror.reload_into(self._live_screen)
+            if self._shown.mirror.last_metrics:
                 self._live_screen.update_stats(self._session_manager.live_score())
-                self._live_screen.update_state(self._mirror.last_state)
-                self._live_screen.set_shamatha(self._shamatha_active)
+                self._live_screen.update_state(self._shown.mirror.last_state)
+                self._live_screen.set_shamatha(self._run.shamatha_active)
         except Exception:
             logger.exception("graph reload on resume failed")
         try:
@@ -2699,7 +1593,7 @@ class EEGMeditationApp(App):
                 # entry points refuse to run while a session is active, so this is
                 # defense-in-depth, not a data-loss path.)
                 self._stop_and_save()
-        self._stop_session_keep_alive_service()  # a start still connecting has no session to stop it
+        self._keep_awake.stop_service()  # a start still connecting has no session to stop it
         self._audio.cleanup()
         self._db.mark_shutting_down()
         self._db.close()

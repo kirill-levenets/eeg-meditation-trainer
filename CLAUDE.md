@@ -65,28 +65,37 @@ Read it before changing that subsystem.
   `ENGINE_VERSION` stamped on sessions), `custom_formula.py` (AST-parsed user formulas, `avg(expr, N)`), `formula_slots.py` (the three Settings formulas:
   evaluators, names, their session record), `noise_detector.py`. → [metrics-scoring](docs/architecture/metrics-scoring.md)
 - `app/session/` — `manager.py` `SessionManager` (Start/Pause/Resume/Stop, accrual), `scoring.py` `GoalAccrual`, `session_program.py` (timed segments), `timer_state.py`, `what_if.py` (threshold recompute).
-  `tick_thread.py` `TickThread` (the 2 Hz tick), `recorder.py` `SessionRecorder` (the running session's checkpoints).
+  `session_run.py` `SessionRun` (one Start: its phase and per-run state), `tick_thread.py` `TickThread` (the 2 Hz tick), `recorder.py` `SessionRecorder` (the running session's checkpoints).
   `app/ui/program_run.py` `ProgramRun` — the running program: segment stepping on the tick thread, its live-graph lines.
   `app/ui/program_settings.py` `ProgramSettings` — Settings → Timer: mode, the edited program, saved programs.
   `app/ui/formula_settings.py` `FormulaSettings` — Settings → Custom Formula. → [session](docs/architecture/session.md), [programs](docs/architecture/programs.md), [metrics-scoring](docs/architecture/metrics-scoring.md)
-- `app/audio_feedback/noise.py` — `AudioEngine`: below and reward feedback channels, bell/chime/warble, timer gong; `MediaPlayer` on Android. → [audio](docs/architecture/audio.md)
+- `app/audio_feedback/noise.py` — `AudioEngine`: below and reward feedback channels, bell/chime/warble, timer gong; `MediaPlayer` on Android.
+  `app/ui/sound_sources.py` `SoundSources` — which sounds a session and Settings' Tests play, a missing file warned about. → [audio](docs/architecture/audio.md)
 - `app/storage/` — `database.py` (SQLite, migrations, write lock), `backup.py`, `fileops.py`, `android_saf.py`, `android_share.py`, `csv_export.py`.
   `app/settings/registry.py` — per-user scalar settings.
   `app/ui/backup_flow.py` `BackupFlow` — Settings → Data Backup. → [storage](docs/architecture/storage.md)
-- `app/ui/app_manager.py` — `EEGMeditationApp`: wiring, session start/stop, BT wait, user gate, settings load/save.
+- `app/ui/app_manager.py` — `EEGMeditationApp`: wiring, session start/stop, BT wait, the active profile (`_activate_user`), settings load/save.
+  `app/ui/app_context.py` — `AppContext`: what every flow reaches the app through (`_make_context`). → [app-platform](docs/architecture/app-platform.md#flows-and-the-app-context)
+  `app/ui/profiles.py` — `ProfileGate` (the blocking profile picker), `Profiles` (Settings → Profile). → [app-platform](docs/architecture/app-platform.md#user-gate-and-profiles)
+  `app/ui/startup.py` — the startup profile (`resolve_startup_user`), the theme, text size and line colours the UI is built in; `app/ui/toast.py` — the toast.
+  `app/ui/audio_metric.py` `AudioMetric` — which metric drives the sound, its Settings controls, their lock while a session is scored on it. → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
 - `app/ui/theme.py`, `app/ui/widgets/` — palette `C`/`F`/`S`, themed widgets, modals, legends, overlays.
   `app/ui/hooks.py` — `Hook`/`wire()`: the handlers the app plugs into a widget. → [ui-theme](docs/architecture/ui-theme.md)
 - `app/ui/raw_eeg_screen.py` — `ScrollableGraphWidget`, the one time-series graph class;
   `graph_series.py` `GraphSeries` (the series picker, each graph's saved selection), `line_colours.py` (the scored line's gradient), `graph_runs.py` (the run fold, Kivy-free);
   `graph_gestures.py` (its touch), `graph_glyphs.py` (its corner buttons), `graph_scroll.py` `GraphAwareScrollView` (a page of graphs), `touch_utils.py`, `render_stats.py`. → [graphs](docs/architecture/graphs.md)
-- `app/ui/headset.py` `Headset` (which headset: a profile's own, found by its one scan path; its name; Settings → Device)
+- `app/ui/bt_wait.py` `BtWait` (the BT wait at a session's start: connect, first data, give up),
+  `session_watch.py` `SessionWatch` (each tick's checks: recording limit, headset link, stale data, battery, line noise)
+  · `app/ui/headset.py` `Headset` (which headset: a profile's own, found by its one scan path; its name; Settings → Device)
   · `app/ui/power_exemption.py` `PowerExemption` (what may close a locked session: battery optimisation, the maker's power manager;
   the first-start alert and Settings → Device's row → [app-platform](docs/architecture/app-platform.md#background-running-android))
-  · `app/ui/live_session.py`, `live_mirror.py` (the live graphs' session, kept through a screen lock), `settings_screen.py` (its larger sections in `settings_sections/`), `device_labels.py` → [live-session-and-settings](docs/architecture/live-session-and-settings.md);
-  `history_screen.py`, `period_totals.py` → [history](docs/architecture/history.md);
-  `diary_screen.py` (session detail) → [session-detail](docs/architecture/session-detail.md);
+  · `app/ui/live_session.py`, `live_mirror.py` (the live graphs' session, kept through a screen lock), `shown_session.py` `ShownSession` (the session the screen shows: its graphs' mirror, its end card),
+  `settings_screen.py` (its larger sections in `settings_sections/`), `device_labels.py` → [live-session-and-settings](docs/architecture/live-session-and-settings.md);
+  `history_screen.py`, `period_totals.py`, `history_flow.py` `HistoryFlow` (what the app does with History's rows) → [history](docs/architecture/history.md);
+  `diary_screen.py` (session detail), `session_detail_flow.py` `SessionDetailFlow` (opens and loads it) → [session-detail](docs/architecture/session-detail.md);
   `session_labels.py` → [session](docs/architecture/session.md)
-- `app/crash_handler.py`, `app/logger.py`, `app/android_jni.py`, `app/ui/kivy_providers.py` (the Kivy providers the app picks itself) → [app-platform](docs/architecture/app-platform.md)
+- `app/crash_handler.py`, `app/logger.py`, `app/android_jni.py`, `app/ui/kivy_providers.py` (the Kivy providers the app picks itself),
+  `app/keep_awake.py` `KeepAwake` (a session's wake lock, screen-on flag and foreground service) → [app-platform](docs/architecture/app-platform.md)
 - `android_src/` — `SessionForegroundService` (Java), the session's foreground service, in the app's own process; its start/stop state is `ServiceStartState`, tested with `javac` (`tests/test_service_start_state.py`).
   `tools/` — BT diagnostics (`bt_test.py`, `ble_battery_scan.py`).
 
@@ -108,7 +117,9 @@ The linked file explains the mechanism.
   The selected headset is the active profile's own or none (`Headset.load`);
   a profile's headset is found by `Headset.scan`, whose result does nothing once the profile, its headset or mode changed or a session started;
   only Start opens Settings → Device to pick. → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md#connection)
-- **A session start is one attempt** (`_start_attempt`): a callback queued for an earlier attempt does nothing.
+- **A session start is one run** (`SessionRun`, `app/session/session_run.py`, the app's `_run`): its phase and per-run state, from the Start to its ending;
+  a callback queued for an earlier run does nothing (`_on_main_for(run, fn)`), and the tick works on the run it read at its start;
+  every ending marks its run ended first (`_mark_run_ended()`, or `_claim_ending(run)` in a session's tick-thread endings), and a tick whose run ended or was replaced acts on nothing (`_outlived(run)`).
   Every BT-wait exit goes through `_abort_bt_wait()` (tick watcher stopped before the stream); every ending undoes the start's setup through `_undo_session_setup()`. → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md)
 - **At most one tick thread.**
   `TickThread.start` (`app/session/tick_thread.py`, the app's `_ticker`) is a no-op while one is alive; each thread gets its own stop event. → [session](docs/architecture/session.md)
@@ -126,14 +137,17 @@ The linked file explains the mechanism.
 - **A session reaches the DB only through `SessionRecorder.checkpoint`** (`app/session/recorder.py`, the app's `_recorder`):
   the row and the buffered ticks in one transaction, at the 60 s flush, on leaving the app, at backup and at the final save. → [session](docs/architecture/session.md#persistence)
 - **Every ending saves through one path**: `_stop_and_save` → `_persist_session_data` (tick-thread-safe, no Kivy) + `_finalize_stop_ui` (main thread).
-  There is no discard path; a confirm that arrives after the session ended writes nothing. → [session](docs/architecture/session.md#persistence)
+  There is no discard path; a confirm that arrives after the session ended writes nothing.
+  A check that ends it on the tick thread (stale data, the recording limit) freezes it there (`_end_from_tick`: mark the run ended, pause, mute, checkpoint, stop the tick) and saves once on main;
+  every queued finish runs only for its own run. → [session](docs/architecture/session.md#persistence)
 - While a session runs or connects (`_session_pipeline_live()`), anything that would break it is refused through `_refused_while_session_runs(doing)`:
-  profile switch, Restore, the scored metric (`_scoring_locked`), a running program's threshold, Settings › Audio's Test. → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
-- The Session screen shows one profile's session (`_live_display_uid`, set at Start): picking another profile drops it through `_drop_shown_session`; re-picking the shown one (allowed mid-session) resets nothing.
-  Every end-card close goes through `_close_summary`. → [live-session-and-settings](docs/architecture/live-session-and-settings.md#session-screen)
-- **A session is scored on the metric that drives the feedback sound** (`_audio_drive_key()`).
+  profile switch, Restore, the scored metric (`AudioMetric.scoring_locked`), a running program's threshold, Settings › Audio's Test. → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
+- The Session screen shows one profile's session (`ShownSession`, `app/ui/shown_session.py`, the app's `_shown`; its `owner` set at Start):
+  picking another profile drops it through `ShownSession.drop`; re-picking the shown one (allowed mid-session) resets nothing.
+  Every end-card close goes through `ShownSession.close`. → [live-session-and-settings](docs/architecture/live-session-and-settings.md#session-screen)
+- **A session is scored on the metric that drives the feedback sound** (`AudioMetric.drive_key()`, `app/ui/audio_metric.py`, the app's `_audio_metric`).
   The Settings threshold takes effect only through `_put_threshold_in_force` (the slider and profile load go through `_apply_threshold`). → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
-- `ProgramRun.audio_key` is transient and never written to `_audio_metric_key`;
+- `ProgramRun.audio_key` is transient and never written to the stored `audio_metric`;
   `PROGRAM_FORMULA_KEYS` are never persisted to `graph_series_*` or the baseline audio metric, nor a program's series set (live or a session detail's) as the profile's selection.
   A program runs, and is replayed, on `runnable_plan`: a custom formula that doesn't compile gets no line and its segments use Shamatha.
   A leaked program key, or one nothing computes, reads as 0 → constant max noise. → [programs](docs/architecture/programs.md)
@@ -189,16 +203,19 @@ The linked file explains the mechanism.
   A silent user-gate return or an ignored bool DB write fails `tests/test_silent_failure_guardrail.py` unless marked `# silent-ok: <reason>`. → [app-platform](docs/architecture/app-platform.md#user-gate-and-profiles)
 - Scalar per-user settings are `Setting` descriptors in `app/settings/registry.py`;
   `SettingsStore.load` always applies a value (stored or default), so no profile inherits another's.
-  Add a new scalar setting as a descriptor, not a hand-written save/load. → [storage](docs/architecture/storage.md#per-user-settings)
+  Add a new scalar setting as a descriptor, not a hand-written save/load.
+  A setting the store holds (`get=None`, the one copy while its profile is active) changes only through `_change_setting(key, value)`: hold, apply, persist. → [storage](docs/architecture/storage.md#per-user-settings)
 
 ### Shared paths — reuse, don't add a second
 
 A widget's handler from the app:
 a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
-· Session delete `_delete_sessions(ids)`
-· notes `_save_session_notes`
+· a flow's access to the app `AppContext` (never one callable per service)
+· Session delete `HistoryFlow.delete_sessions(ids)`
+· notes `HistoryFlow.save_notes`
 · confirm `theme.confirm_popup` (via `_confirm_action`)
 · save under a unique name `settings_sections.common.save_under_unique_name`
+· delete a saved formula or program `settings_sections.common.confirm_saved_delete`
 · whether a formula can run `custom_formula.compile_formula`
 · a saved session's formula lines `formula_slots.session_formulas`
 · a saved session's program `session_program.recorded_plan`

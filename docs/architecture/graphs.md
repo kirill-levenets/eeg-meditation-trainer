@@ -79,7 +79,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The live metrics graph and the session detail's step it from the ticks' targets (#83), simple and program sessions alike.
   Live, `add_point(values, threshold=)` extends the steps with `extend_steps` at each point:
   the tick's target rides `_ui_update` and the mirror's `score_target`, so `LiveMirror.reload_into` rebuilds the same steps with `target_steps`;
-  `_start_session_common` clears them (`_clear_live_display`), and a segment switch doesn't set the line.
+  `_start_session_common` clears them (`ShownSession.take`), and a segment switch doesn't set the line.
   The detail's `detail_graph_data` returns `threshold_steps` (`target_steps` over the rows: None unless every row has a target) and the metrics fill applies them.
   A session from before #83 keeps what the open draws from its row: its program's steps (`sessions.session_program`, mapped through elapsed time) or one line at `threshold_used`.
 

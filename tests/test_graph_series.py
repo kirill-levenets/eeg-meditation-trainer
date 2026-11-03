@@ -22,6 +22,7 @@ from app.ui.widgets.band_totals import BAND_COLORS, BAND_SCALES
 from tests._formula_settings import make_formula_settings
 from tests._graph_series import make_graph_series
 from tests._program_settings import make_programs
+from tests._settings import audio_store
 
 
 def _g(colors, scales, graph_id, names=None):
@@ -64,7 +65,7 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         self.app._settings_screen = settings
         self.app._formulas = FormulaSlots()
         self.app._formulas.evaluators[0] = types.SimpleNamespace(is_valid=False)
-        self.app._audio_metric_key = "shamatha_score"  # the app's default: no formula slot drives the sound
+        audio_store(self.app)  # the app's default: no formula slot drives the sound
         self.app._program_settings = make_programs(self.app._db, self.uid)  # simple mode: the user's own series
         self.app._formula_settings = make_formula_settings(self.app)
         self.app._graph_series = make_graph_series(self.app)
@@ -290,7 +291,8 @@ def test_choosing_a_saved_formula_renames_its_picker_row_at_once(tmp_path, monke
     db.add_saved_formula(uid, "Calm", "alpha1 * 2")
     graph = _LiveGraph()
     app = types.SimpleNamespace(_db=db, _formulas=FormulaSlots(), _current_user_id=uid, _require_user=lambda _a: uid,
-                                _audio_metric_key="shamatha_score", _live_screen=types.SimpleNamespace(graph=graph))
+                                _audio_metric=types.SimpleNamespace(formula_scoring_locked=lambda _key, _doing: False),
+                                _live_screen=types.SimpleNamespace(graph=graph))
     app._formula_settings = make_formula_settings(app)
     series = make_graph_series(app, graphs=lambda: [graph])
     shown_rows = []

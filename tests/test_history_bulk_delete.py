@@ -12,16 +12,17 @@ from kivy.clock import Clock
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 
-import app.ui.app_manager as am
+import app.ui.history_flow as history_flow
 from app.session.manager import SessionManager
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.history_screen import HistoryScreen
 from app.ui.hooks import wire
-from app.ui.live_mirror import LiveMirror
 from app.ui.theme import StyledButton
 from app.ui.widgets.loading_overlay import LoadingOverlay
+from tests._history_flow import make_history_flow
 from tests._recorder import make_recorder
+from tests._shown_session import make_shown
 
 
 @pytest.fixture
@@ -114,7 +115,7 @@ class _Deferred:
 
     def __init__(self, monkeypatch):
         self.workers, self.main = [], []
-        monkeypatch.setattr(am.threading, "Thread", lambda target, **k: MagicMock(start=lambda: self.workers.append(target)))
+        monkeypatch.setattr(history_flow.threading, "Thread", lambda target, **k: MagicMock(start=lambda: self.workers.append(target)))
 
     def run(self):
         while self.workers or self.main:
@@ -129,20 +130,19 @@ def _app(db, monkeypatch) -> tuple[EEGMeditationApp, _Deferred, list]:
     app._db = db
     app._history_screen = MagicMock()
     app._recorder = make_recorder(app)
-    app._mirror = LiveMirror()
     app._live_screen = MagicMock()
     app._live_screen.summary_session_id = None
     app._audio = MagicMock()
     app._session_manager = SessionManager()
-    app._waiting_for_bt = False
     app._ticker = MagicMock(running=False)
     app._recorder = make_recorder(app)
     app._info_popup = MagicMock()
-    app.show_loading = MagicMock()
-    app.hide_loading = MagicMock()
+    app._loading_overlay = MagicMock()
     deferred = _Deferred(monkeypatch)
     app._on_main = deferred.main.append
+    app._history = make_history_flow(app)
     done = []
+    app._shown = make_shown(app)
     return app, deferred, done
 
 
@@ -153,7 +153,7 @@ def test_the_app_deletes_a_selection_off_the_main_thread_in_one_call(db, monkeyp
     calls = []
     real = db.delete_sessions
     monkeypatch.setattr(db, "delete_sessions", lambda s: calls.append(list(s)) or real(s))
-    app._delete_sessions(ids, done.append)
+    app._history.delete_sessions(ids, done.append)
     assert calls == [] and _counts(db, ids[0]) == (1, 3)  # nothing on the main thread yet
     app._history_screen.remove_sessions.assert_not_called()
     deferred.run()
@@ -167,8 +167,8 @@ class _Touch:
 
 
 def _with_overlay(app) -> LoadingOverlay:
-    del app.show_loading, app.hide_loading  # the app's own, on a real overlay
-    app._loading_overlay = LoadingOverlay()
+    app._loading_overlay = LoadingOverlay()  # the app's own
+    app._history = make_history_flow(app)
     return app._loading_overlay
 
 
@@ -184,7 +184,7 @@ def test_the_screen_is_modal_while_deleting_and_a_quick_delete_never_paints_the_
     sid = _session(db, me)
     app, deferred, done = _app(db, monkeypatch)
     overlay = _with_overlay(app)
-    app._delete_sessions([sid], done.append)
+    app._history.delete_sessions([sid], done.append)
     assert overlay.on_touch_down(_Touch()) and not overlay.is_visible  # modal at once, nothing painted yet
     deferred.run()  # finishes before the overlay's delay
     _wait(0.25)
@@ -197,7 +197,7 @@ def test_a_slow_delete_shows_the_overlay_until_it_ends(db, monkeypatch):
     sid = _session(db, me)
     app, deferred, done = _app(db, monkeypatch)
     overlay = _with_overlay(app)
-    app._delete_sessions([sid], done.append)
+    app._history.delete_sessions([sid], done.append)
     _wait(0.25)
     assert overlay.is_visible and overlay._status.text.startswith("Deleting 1 session")
     deferred.run()
@@ -207,14 +207,14 @@ def test_a_slow_delete_shows_the_overlay_until_it_ends(db, monkeypatch):
 
 def test_a_failed_delete_is_reported_and_history_keeps_the_rows(db, monkeypatch):
     reported = []
-    monkeypatch.setattr(am, "report_soft_error", lambda label, detail, **k: reported.append(label))
+    monkeypatch.setattr(history_flow, "report_soft_error", lambda label, detail, **k: reported.append(label))
     app, deferred, done = _app(db, monkeypatch)
     monkeypatch.setattr(db, "delete_sessions", lambda ids: (_ for _ in ()).throw(sqlite3.OperationalError("locked")))
-    app._delete_sessions([1, 2], done.append)
+    app._history.delete_sessions([1, 2], done.append)
     deferred.run()
     assert reported == ["session_delete_failed"] and done == [False]
     app._history_screen.remove_sessions.assert_not_called()
-    app.hide_loading.assert_called_once()
+    app._loading_overlay.hide.assert_called_once()
 
 
 def test_the_running_session_is_not_deleted(db, monkeypatch):
@@ -224,7 +224,7 @@ def test_the_running_session_is_not_deleted(db, monkeypatch):
     app, deferred, done = _app(db, monkeypatch)
     app._session_manager.start()
     app._recorder.session_id = running
-    app._delete_sessions([finished, running], done.append)
+    app._history.delete_sessions([finished, running], done.append)
     deferred.run()
     assert done == [False]
     assert _counts(db, running) == _counts(db, finished) == (1, 3)  # nothing deleted
@@ -238,18 +238,18 @@ def test_deleting_the_end_cards_session_from_history_closes_the_card(db, monkeyp
     shown, other = _session(db, me), _session(db, me)
     app, deferred, done = _app(db, monkeypatch)
     app._live_screen.summary_session_id = shown  # the session that just ended, its card still open
-    app._delete_sessions([shown, other], done.append)
+    app._history.delete_sessions([shown, other], done.append)
     deferred.run()
     app._live_screen.hide_summary.assert_called_once()
     app._audio.stop_timer_bell.assert_called_once()
 
 
 def test_a_failed_delete_leaves_the_end_card_and_its_notes(db, monkeypatch):
-    monkeypatch.setattr(am, "report_soft_error", lambda *a, **k: None)
+    monkeypatch.setattr(history_flow, "report_soft_error", lambda *a, **k: None)
     app, deferred, done = _app(db, monkeypatch)
     app._live_screen.summary_session_id = 5
     monkeypatch.setattr(db, "delete_sessions", lambda ids: (_ for _ in ()).throw(sqlite3.OperationalError("locked")))
-    app._delete_sessions([5], done.append)
+    app._history.delete_sessions([5], done.append)
     deferred.run()
     app._live_screen.hide_summary.assert_not_called()
 
@@ -390,13 +390,13 @@ def test_history_does_not_list_the_running_session_until_it_ends(db, monkeypatch
     finished, running = _session(db, me), _session(db, me)
     app, _deferred, _done = _app(db, monkeypatch)
     app._current_user_id = me
-    app._history_view = None
     app._history_screen = HistoryScreen()
+    app._history = make_history_flow(app)
     app._session_manager.start()
     app._recorder.session_id = running
-    app._refresh_history(force=True)
+    app._history.refresh(force=True)
     assert [s["id"] for s in app._history_screen._sessions] == [finished]
     app._session_manager.stop()
     app._session_manager.reset()  # the session ended (the ending marks History dirty)
-    app._refresh_history(force=True)
+    app._history.refresh(force=True)
     assert sorted(s["id"] for s in app._history_screen._sessions) == sorted([finished, running])

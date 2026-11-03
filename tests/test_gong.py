@@ -16,6 +16,7 @@ from app.audio_feedback.noise import (
     _KivyNoisePlayer,
 )
 from app.ui.app_manager import EEGMeditationApp
+from tests._sound_sources import make_sounds
 
 
 @pytest.fixture
@@ -288,8 +289,9 @@ def test_the_settings_test_button_hears_the_gongs_end():
     app._timer_state = MagicMock(custom_sound_path="")
     app._audio = MagicMock()
     app._settings_screen = MagicMock()
-    app._warn_missing_sound_files = MagicMock()
-    app._on_test_timer_sound()
+    sounds = make_sounds(app)
+    sounds.warn_missing = MagicMock()  # its own report, tested apart
+    sounds.on_test_timer_sound()
     on_end = app._audio.play_timer_sound.call_args.kwargs["on_end"]
     assert on_end == app._settings_screen.timer.notify_timer_sound_test_ended
 
@@ -300,12 +302,12 @@ def test_the_settings_test_button_hears_the_gongs_end():
     ("gong.xyz", True, "", "The timer sound can't be played."),  # nothing rang
     ("", False, "", "The timer sound can't be played."),
     ("gong.xyz", True, "custom", None),
-    ("gong.xyz", False, "default", None),  # missing: _warn_missing_sound_files says so
+    ("gong.xyz", False, "default", None),  # missing: SoundSources.warn_missing says so
     ("", False, "default", None),
 ])
 def test_the_settings_test_says_what_it_could_not_play(monkeypatch, tmp_path, custom, exists, played, said):
     reported = []
-    monkeypatch.setattr("app.ui.app_manager.report_soft_error", lambda label, detail, **k: reported.append(detail))
+    monkeypatch.setattr("app.ui.sound_sources.report_soft_error", lambda label, detail, **k: reported.append(detail))
     path = str(tmp_path / custom) if custom else ""
     if exists:
         (tmp_path / custom).write_bytes(b"x")
@@ -314,6 +316,7 @@ def test_the_settings_test_says_what_it_could_not_play(monkeypatch, tmp_path, cu
     app._audio = MagicMock()
     app._audio.play_timer_sound.return_value = {"default": "/tmp/timer_bell.wav", "custom": path, "": ""}[played]
     app._settings_screen = MagicMock()
-    app._warn_missing_sound_files = MagicMock()
-    app._on_test_timer_sound()
+    sounds = make_sounds(app)
+    sounds.warn_missing = MagicMock()  # its own report, tested apart
+    sounds.on_test_timer_sound()
     assert [d.split(":")[0] if ":" in d else d for d in reported] == ([said] if said else [])

@@ -377,7 +377,7 @@ class DiaryScreen(Screen):
             show_value_labels=True,
             show_timestamps=True,
             sample_rate=_SYNTH_RATE,
-            max_points=int(_SYNTH_RATE * 60),
+            max_points=_RAW_MAX_SAMPLES,  # what the synthesizer keeps: the raw marker indices count into it
             bipolar=True,
             size_hint_y=1,
             graph_id="diary_raw",
@@ -578,8 +578,7 @@ class DiaryScreen(Screen):
         series, markers = data[section]
         graph = self._graph_for_tab(section)
         with timed(f"diary.fill_{section}"):
-            graph.load_static_data(series)
-            graph.set_markers(markers)
+            graph.load_static_data(series, markers=markers)
             if section == "metrics" and data["threshold_steps"]:  # else the line the open drew from the session row
                 graph.set_threshold_steps(data["threshold_steps"])
             if section == "metrics" and data["gradient_steps"]:  # else the series the open coloured from the row

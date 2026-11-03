@@ -15,6 +15,8 @@ from app.ui.app_manager import EEGMeditationApp
 from tests._program_run import make_run
 from tests._program_settings import make_programs
 from tests._recorder import make_recorder
+from tests._session_run import run_in
+from tests._settings import audio_store
 from tests.test_resume_mirror import _drive_tick, _make_tick_app, _metrics, _raw_sample
 
 
@@ -30,18 +32,18 @@ SHAMATHA_HIGH = _ticks(shamatha_score=[80, 85, 90, 20, 95], meditation_score=[10
 
 def _app(metric_key: str = "shamatha_score", formulas=()):
     app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._audio_metric_key = metric_key
     app._program_run = make_run()
     app._program_settings = make_programs()
     app._formulas = FormulaSlots()
     if formulas:
         app._formulas.evaluators = list(formulas)
+    audio_store(app, metric_key)  # after the program run and the slots it reads, as build() makes them
     app._live_screen = MagicMock()
     app._live_screen.graph.series_name.side_effect = lambda k: {"shamatha_score": "Shamatha",
                                                                 "meditation_score": "Meditation",
                                                                 "custom_formula": "Calm ratio"}.get(k, k)
     app._is_paused = False
-    app._scored_key = None
+    run_in(app)  # a session's run, nothing marked yet
     sm = SessionManager()
     sm.start(threshold=50)
     sm._state = SessionState.RUNNING
@@ -82,7 +84,7 @@ def test_a_valid_custom_formula_scores_the_session_and_an_invalid_one_falls_back
 def test_changing_the_feedback_metric_mid_session_moves_the_scoring():
     app = _app("shamatha_score")
     _run(app, SHAMATHA_HIGH[:3])  # 3 ticks above on shamatha
-    app._audio_metric_key = "meditation_score"
+    app._settings_store.change("audio_metric", "meditation_score")
     stats = _run(app, SHAMATHA_HIGH[3:])  # meditation: tick 4 above (90), tick 5 not
     assert stats["score_metric_key"] == "meditation_score"
     assert app._session_manager._time_above_threshold == 2.0  # 3 + 1 ticks
@@ -90,20 +92,20 @@ def test_changing_the_feedback_metric_mid_session_moves_the_scoring():
 
 def test_the_legend_marks_the_scored_series_once_per_change():
     app = _app("shamatha_score")
-    marks = [app._scored_mark(app._score_on_drive_key()) for _ in range(3)]
-    app._audio_metric_key = "meditation_score"
-    marks.append(app._scored_mark(app._score_on_drive_key()))
+    marks = [app._scored_mark(app._run, app._score_on_drive_key()) for _ in range(3)]
+    app._settings_store.change("audio_metric", "meditation_score")
+    marks.append(app._scored_mark(app._run, app._score_on_drive_key()))
     assert marks == ["shamatha_score", None, None, "meditation_score"]
 
 
 def test_a_change_during_a_screen_lock_is_marked_by_the_first_tick_after_it():
     app = _app("shamatha_score")
-    app._scored_mark(app._score_on_drive_key())
-    app._audio_metric_key = "meditation_score"
+    app._scored_mark(app._run, app._score_on_drive_key())
+    app._settings_store.change("audio_metric", "meditation_score")
     app._is_paused = True
-    assert app._scored_mark(app._score_on_drive_key()) is None  # no UI dispatch while locked
+    assert app._scored_mark(app._run, app._score_on_drive_key()) is None  # no UI dispatch while locked
     app._is_paused = False
-    assert app._scored_mark(app._score_on_drive_key()) == "meditation_score"
+    assert app._scored_mark(app._run, app._score_on_drive_key()) == "meditation_score"
 
 
 def test_a_program_session_keeps_its_segment_goal():
@@ -175,7 +177,7 @@ def test_the_saved_stats_carry_the_scored_metric_and_its_name():
 @pytest.mark.parametrize("name,recorded", [("Evening program", "Evening program"), ("", "Program")])
 def test_a_program_session_records_program_its_name_and_no_average(name, recorded):
     app = _app()
-    app._program_run = make_run(program=MagicMock(segments=[{"duration": 60}]), name=name)
+    app._program_run.program, app._program_run.name = MagicMock(segments=[{"duration": 60}]), name
     stats = app._with_score(_run(app, SHAMATHA_HIGH))
     assert (stats["score_metric_key"], stats["score_metric_name"], stats["avg_score"]) == ("program", recorded, None)
 
@@ -183,7 +185,7 @@ def test_a_program_session_records_program_its_name_and_no_average(name, recorde
 def test_a_program_session_keeps_the_name_of_the_program_it_ran():
     # Settings loads or saves another program during the session: the editor's name changes, not the run's.
     app = _app()
-    app._program_run = make_run(program=MagicMock(segments=[{"duration": 60}]), name="Evening program")
+    app._program_run.program, app._program_run.name = MagicMock(segments=[{"duration": 60}]), "Evening program"
     app._program_settings.name = "Morning program"
     stats = app._with_score(_run(app, SHAMATHA_HIGH))
     assert stats["score_metric_name"] == "Evening program"
@@ -264,7 +266,7 @@ def test_recomputing_from_the_stored_ticks_reproduces_the_stored_stats():
 def test_a_simple_session_tick_scores_on_the_feedback_metric_and_marks_it():
     app = _make_tick_app()
     app._program_settings.mode = "simple"
-    app._audio_metric_key = "meditation_score"
+    app._settings_store.change("audio_metric", "meditation_score")
     _drive_tick(app, _raw_sample(), _metrics())
     app._session_manager.set_active_goal.assert_called_with("meditation_score")
     ui_update = app._on_main.call_args_list[-1].args[0]
@@ -275,7 +277,7 @@ def test_a_simple_session_tick_scores_on_the_feedback_metric_and_marks_it():
 def test_a_program_session_tick_leaves_the_goal_to_the_program():
     app = _make_tick_app()
     app._program_settings.mode = "program"
-    app._program_run = make_run(app, program=MagicMock())
+    app._program_run.program = MagicMock()
     app._program_run.tick = MagicMock()
     _drive_tick(app, _raw_sample(), _metrics())
     app._session_manager.set_active_goal.assert_not_called()
@@ -284,8 +286,7 @@ def test_a_program_session_tick_leaves_the_goal_to_the_program():
 def test_program_mode_with_no_usable_program_is_scored_like_a_simple_session():
     app = _make_tick_app()
     app._program_settings.mode = "program"  # the Settings toggle; the session started without a program
-    app._program_run = make_run(app)
-    app._audio_metric_key = "shamatha_score"
+    app._settings_store.change("audio_metric", "shamatha_score")
     _drive_tick(app, _raw_sample(), _metrics())
     app._session_manager.set_active_goal.assert_called_with("shamatha_score")
 
@@ -293,7 +294,7 @@ def test_program_mode_with_no_usable_program_is_scored_like_a_simple_session():
 def test_one_tick_scores_and_sounds_the_same_metric():
     app = _make_tick_app()
     app._program_settings.mode = "simple"
-    app._audio_drive_key = MagicMock(side_effect=["shamatha_score", "meditation_score"])  # changes mid-tick
+    app._audio_metric.drive_key = MagicMock(side_effect=["shamatha_score", "meditation_score"])  # changes mid-tick
     metrics = {**_metrics(), "shamatha_score": 11.0, "meditation_score": 77.0}
     _drive_tick(app, _raw_sample(), metrics)
     app._session_manager.set_active_goal.assert_called_with("shamatha_score")

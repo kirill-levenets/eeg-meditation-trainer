@@ -23,15 +23,22 @@ from app.config import APP
 from app.metrics.engine import MetricsEngine
 from app.metrics.formula_slots import FormulaSlots
 from app.session.manager import SessionState
+from app.session.recorder import RecordedTick
+from app.session.session_run import Phase
 from app.session.tick_thread import TickThread
 from app.session.timer_state import TimerState
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.live_mirror import LiveMirror
 from app.ui.live_session import METRICS_COLORS, LiveSessionScreen
+from tests._bt_wait import make_bt_wait
 from tests._headset import make_headset
 from tests._program_run import make_run
 from tests._program_settings import make_programs
 from tests._recorder import make_recorder
+from tests._session_run import run_in
+from tests._session_watch import make_watch
+from tests._settings import audio_store
+from tests._shown_session import make_shown
 
 BAND_KEYS = ("alpha", "beta", "gamma", "theta", "delta")
 
@@ -78,23 +85,19 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     # Skip the real-BT notify/disconnect branches regardless of USE_MOCK_DEVICE.
     app._real_stream = MagicMock()
     app._real_stream.is_connected = True
-    app._bt_connected_notified = True
+    run_in(app).bt_connected_notified = True  # a running session's run
 
-    app._check_stale_data = MagicMock()
     app._eeg_stream = MagicMock()
     app._metrics_engine = MagicMock()
-    app._noise_detector = None  # skip power-line feed branch
     app._formulas = FormulaSlots()
     # All slots invalid by default (no formula set)
 
     app._audio = MagicMock()
-    app._audio_metric_key = "shamatha_score"
 
     app._timer_state = MagicMock()
     app._timer_state.tick.return_value = False  # never expire
 
     app._recorder = make_recorder(app)  # its 60s flush never triggers within these short tests
-    app._pending_marker = False
     app._on_main = MagicMock()
     app._is_paused = is_paused
     app._live_screen = MagicMock()
@@ -107,13 +110,14 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     app._ticker = TickThread(lambda dt: None)  # as __init__ leaves it: not started
 
     app._program_run = make_run(app)
+    audio_store(app)  # after the program run and the slots it reads, as build() makes them
     app._program_settings = make_programs(app._db, app._current_user_id)
 
-    app._shamatha_active = False
-    app._shamatha_streak = 0
     app._shamatha_threshold = 50
 
-    app._mirror = LiveMirror()
+    app._shown = make_shown(app)
+    app._watch = make_watch(app)
+    app._watch.check_stale = lambda run: None  # no real headset behind the stream
     return app
 
 
@@ -130,11 +134,11 @@ def test_tick_appends_to_all_mirror_buffers():
     app = _make_tick_app()
     _drive_tick(app, _raw_sample(), _metrics())
 
-    assert len(app._mirror.metrics) == 1
-    assert len(app._mirror.bands) == 1
-    assert len(app._mirror.waveform) == 3  # waveform of length 3
-    assert app._mirror.last_metrics == _metrics()
-    assert app._mirror.last_state == "Shamatha"
+    assert len(app._shown.mirror.metrics) == 1
+    assert len(app._shown.mirror.bands) == 1
+    assert len(app._shown.mirror.waveform) == 3  # waveform of length 3
+    assert app._shown.mirror.last_metrics == _metrics()
+    assert app._shown.mirror.last_state == "Shamatha"
 
 
 def test_tick_band_record_aggregates_paired_bands():
@@ -142,7 +146,7 @@ def test_tick_band_record_aggregates_paired_bands():
     raw = _raw_sample(seed=10.0)
     _drive_tick(app, raw, _metrics())
 
-    band = app._mirror.bands[-1]
+    band = app._shown.mirror.bands[-1]
     assert band["alpha"] == raw["alpha1"] + raw["alpha2"]
     assert band["beta"] == raw["beta1"] + raw["beta2"]
     assert band["gamma"] == raw["gamma1"] + raw["gamma2"]
@@ -192,9 +196,9 @@ def test_tick_waveform_fallback_appends_band_sum():
     _drive_tick(app, raw, _metrics())
 
     # No raw waveform → one synthetic point equal to the band-record sum.
-    band = app._mirror.bands[-1]
-    assert len(app._mirror.waveform) == 1
-    assert app._mirror.waveform[-1] == sum(band.values())
+    band = app._shown.mirror.bands[-1]
+    assert len(app._shown.mirror.waveform) == 1
+    assert app._shown.mirror.waveform[-1] == sum(band.values())
 
 
 def test_tick_stores_metrics_copy_not_reference():
@@ -203,7 +207,7 @@ def test_tick_stores_metrics_copy_not_reference():
     _drive_tick(app, _raw_sample(), metrics)
 
     metrics["shamatha_score"] = 999  # mutate the original after the tick
-    assert app._mirror.metrics[-1]["shamatha_score"] != 999
+    assert app._shown.mirror.metrics[-1]["shamatha_score"] != 999
 
 
 def test_mirror_fills_while_paused_but_skips_ui_dispatch():
@@ -212,9 +216,9 @@ def test_mirror_fills_while_paused_but_skips_ui_dispatch():
 
     # The whole point of the fix: data still accrues while the screen is
     # locked, but no per-tick UI work is queued onto the (paused) Clock.
-    assert len(app._mirror.metrics) == 1
-    assert len(app._mirror.bands) == 1
-    assert len(app._mirror.waveform) == 3
+    assert len(app._shown.mirror.metrics) == 1
+    assert len(app._shown.mirror.bands) == 1
+    assert len(app._shown.mirror.waveform) == 3
     app._on_main.assert_not_called()
 
 
@@ -222,7 +226,7 @@ def test_unpaused_tick_dispatches_ui_once():
     app = _make_tick_app(is_paused=False)
     _drive_tick(app, _raw_sample(), _metrics())
 
-    assert len(app._mirror.metrics) == 1
+    assert len(app._shown.mirror.metrics) == 1
     app._on_main.assert_called_once()
 
 
@@ -239,15 +243,15 @@ def _make_resume_app(running: bool = True) -> EEGMeditationApp:
     app._live_screen = MagicMock()
     app._program_run = make_run(app)
     app._settings_screen = MagicMock()
-    app._mirror = LiveMirror()
+    app._shown = make_shown(app)
     return app
 
 
 def _populate(app: EEGMeditationApp, n: int) -> None:
     for i in range(n):
-        app._mirror.metrics.append(_metrics(seed=float(i)))
+        app._shown.mirror.metrics.append(_metrics(seed=float(i)))
         raw = _raw_sample(seed=float(i))
-        app._mirror.bands.append(
+        app._shown.mirror.bands.append(
             {
                 "alpha": raw["alpha1"] + raw["alpha2"],
                 "beta": raw["beta1"] + raw["beta2"],
@@ -256,9 +260,9 @@ def _populate(app: EEGMeditationApp, n: int) -> None:
                 "delta": raw["delta"],
             }
         )
-        app._mirror.waveform.extend(raw["raw_eeg_waveform"])
-    app._mirror.last_metrics = _metrics(seed=float(n - 1))
-    app._mirror.last_state = "Shamatha"
+        app._shown.mirror.waveform.extend(raw["raw_eeg_waveform"])
+    app._shown.mirror.last_metrics = _metrics(seed=float(n - 1))
+    app._shown.mirror.last_state = "Shamatha"
 
 
 def test_resume_batch_reloads_each_graph_once():
@@ -303,9 +307,8 @@ def test_finalize_stop_ui_reloads_full_graph_and_sets_duration():
     app = _make_resume_app(running=False)  # session already FINISHED
     _populate(app, n=10)
     app._timer_state = MagicMock()
-    app._release_wake_lock = MagicMock()
-    app._stop_session_keep_alive_service = MagicMock()
-    app._mark_history_dirty = MagicMock()
+    app._keep_awake = MagicMock()
+    app._history = MagicMock()
     app._db = MagicMock()
     app._db.get_session.return_value = None
 
@@ -335,7 +338,8 @@ def test_a_reload_keeps_each_points_colouring():
     """A screen lock's reload redraws the line as it was scored, segment by segment (#113)."""
     mirror = LiveMirror()
     for key in ["shamatha_score"] * 3 + ["custom_formula"] * 2:
-        mirror.record(_metrics(seed=1.0), {"score_target": 50, "score_key": key}, _raw_sample(seed=1.0))
+        mirror.record(RecordedTick(_metrics(seed=1.0), _raw_sample(seed=1.0), {"score_target": 50, "score_key": key},
+                                   False))
     screen = LiveSessionScreen()
     mirror.reload_into(screen)
     assert screen.graph.gradient_steps == [(0, "shamatha_score"), (3, "custom_formula")]
@@ -388,18 +392,15 @@ def test_tick_then_resume_roundtrip_preserves_data():
 
 
 def _make_btwait_app() -> EEGMeditationApp:
-    """An app stubbed to run the real ``_handle_bt_wait`` success branch."""
+    """An app stubbed to run the real BT wait's success branch."""
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._real_stream = MagicMock()
     app._real_stream.is_connected = True
     app._real_stream._device_name = "MindWave"
     app._real_stream.seconds_since_last_packet = 1.0
-    app._bt_signal_start = None
-    app._bt_connect_start = time.time()
-    app._waiting_for_bt = True
+    run_in(app, Phase.CONNECTING).connect_start = time.time()
 
-    app._eeg_stream = MagicMock()
-    app._eeg_stream.read_sample.return_value = {
+    app._real_stream.read_sample.return_value = {
         "delta": 10.0, "theta": 10.0, "alpha1": 10.0, "alpha2": 10.0,
         "beta1": 10.0, "beta2": 10.0, "gamma1": 10.0, "gamma2": 10.0,
     }
@@ -414,6 +415,8 @@ def _make_btwait_app() -> EEGMeditationApp:
     ts.set_duration(15)
     app._timer_state = ts
     app._headset = make_headset(app)
+    app._bt_wait = make_bt_wait(app)
+    app._shown = make_shown(app)
     return app
 
 
@@ -423,9 +426,9 @@ def test_btwait_arms_countdown_synchronously_on_connect():
     # deferred to _on_main (here a no-op MagicMock), remaining stays 0 and the
     # next tick fires the timer immediately → a 0s "timer-ended" session.
     app = _make_btwait_app()
-    EEGMeditationApp._handle_bt_wait(app)
+    app._follow_bt_wait(app._run)
 
-    assert app._waiting_for_bt is False
+    assert app._run.phase is Phase.STARTED
     assert app._timer_state.remaining_seconds == 15 * 60
     app._session_manager.start.assert_called_once_with()  # against the threshold in force
     app._on_main.assert_called_once()  # UI/audio still deferred to main thread
@@ -436,7 +439,7 @@ def test_btwait_does_not_start_audio_on_tick_thread():
     # deferred to the main-thread callback (atomic with hide_overlay), never run
     # synchronously on the tick thread.
     app = _make_btwait_app()
-    EEGMeditationApp._handle_bt_wait(app)
+    app._follow_bt_wait(app._run)
 
     app._audio.start.assert_not_called()
     app._audio.play_connect_sound.assert_not_called()
@@ -481,7 +484,6 @@ def test_timer_expiry_leaves_no_live_pipeline_behind():
     app._timer_state.custom_sound_path = ""
     app._session_manager.stop.return_value = {"duration": 100}
     app._recorder._buffer = []
-    app._waiting_for_bt = False
     app._ticker._thread = MagicMock()  # the running SessionTick thread
 
     def stop(reason):
@@ -528,6 +530,6 @@ def test_timer_expiry_updates_existing_session_row():
     app._db.checkpoint_session.assert_called_once()
     (sid, stats, _ticks), kwargs = app._db.checkpoint_session.call_args
     assert sid == 7 and stats["duration"] == 100  # the row the earlier flush created, with the final stats
-    assert stats["score_metric_key"] == app._audio_drive_key() and "score_metric_name" in stats  # #51
+    assert stats["score_metric_key"] == app._audio_metric.drive_key() and "score_metric_name" in stats  # #51
     assert (kwargs["custom_formulas"], kwargs["session_program"], kwargs["engine_version"]) == (
         "[]", "", MetricsEngine.ENGINE_VERSION)

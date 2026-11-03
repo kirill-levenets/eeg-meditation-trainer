@@ -19,8 +19,9 @@ def _app(current="live_session"):
     app._diary_back_calls = 0
     app._toasts = []
     app._switch_screen = lambda name: app._switched.append(name)
-    app._on_diary_back = lambda: setattr(app, "_diary_back_calls", app._diary_back_calls + 1)
+    app._detail = types.SimpleNamespace(on_diary_back=lambda: setattr(app, "_diary_back_calls", app._diary_back_calls + 1))
     app._toast = lambda msg: app._toasts.append(msg)
+    app._gate = types.SimpleNamespace(active=lambda: False)  # a profile is active
     return app
 
 

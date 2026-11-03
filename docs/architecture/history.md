@@ -42,7 +42,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The confirm is the shared `theme.confirm_popup`, which decides once: Kivy still delivers taps to a popup while it fades out, so a Delete tapped during the fade after Cancel would otherwise delete the selection.
   A selection survives a day-filter change, as Export's does: the count on the button and the confirm's day span show what goes.
   `_selected_ids` and `toggle_session_selection` / `select_all_shown` / `export_selected` are the model (unit-tested).
-  `export_selected` calls the `on_export_sessions` hook with sorted ids → `AppManager._on_export_sessions_csv`:
+  `export_selected` calls the `on_export_sessions` hook with sorted ids → `HistoryFlow.on_export_sessions_csv`:
   it loops `export_session_csv` off-thread into `csv_export.build_sessions_zip(path, {sid: csv})` (one `session_<id>.csv` entry each, skips empty) and delivers it through the shared `android_share.copy_to_documents` (desktop and Android).
 - **The chart's period** (#44).
   Both charts are `_DayChart`s that `_draw` `window(end)` for the one period end `HistoryScreen` owns, read through their `period_source` hook:
@@ -65,6 +65,9 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
     one within `_TAP_SLOP` (20 dp) is a tap on the day under where the finger came down;
     anything between does nothing, so a swipe that starts on a day picks none.
     The day filter doesn't follow the period: a picked day stays picked on any page, named by the date label over the list.
+- **The app's side** is `HistoryFlow` (`app/ui/history_flow.py`, the app's `_history`), whose methods are the screen's hooks:
+  the list's reload (`refresh`, only when marked dirty unless forced; entering History runs it), a session's notes (`save_notes`), rename, the one delete (`delete_sessions`) and the CSV exports.
+  It tells the app only what the app owns: a delete reports its ids through `on_sessions_deleted`, so the Session screen drops a session it shows.
 
 ## Session list
 
@@ -96,8 +99,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Scroll programmatically through the effect (`effect_y.reset(effect_y.max * y)`): an assigned `scroll_y` leaves the effect's value behind and its next update moves the list back.
   Any other ScrollView whose content changes while the user may be scrolling needs the same override.
   The day filter has one owner, `_set_filter(date | None)` (the filtered day, both charts' highlight, the Show-all button).
-  A reload of the same profile keeps it (`load_sessions(..., keep_filter=)`, decided by `AppManager._history_view`); another profile clears it.
-  `_activate_user` and `_on_user_delete` mark History dirty.
+  A reload of the same profile keeps it (`load_sessions(..., keep_filter=)`, decided by `HistoryFlow._history_view`); another profile clears it.
+  `_activate_user` and a profile's delete (`_on_profile_deleted`) mark History dirty (`HistoryFlow.mark_dirty`).
   `_sync_date_row` lays out the list heading's row: Show All attached only while a day is picked, Select only outside select mode, each detached otherwise;
   a button hidden in place would keep its room beside the heading, which then wraps, and its taps.
   `_show_sessions` sets `_shown` even for an empty list (then `_empty_label` shows): a stale `_shown` would let Select show and export the previous profile's sessions.

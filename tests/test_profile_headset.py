@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import app.ui.headset as headset_module
 from app.config import APP
 from app.eeg.neurosky_stream import NeuroSkyStream
 from app.session.manager import SessionManager
@@ -53,7 +54,6 @@ def app(db, paired):
     a = EEGMeditationApp.__new__(EEGMeditationApp)
     a._db = db
     a._current_user_id = None
-    a._waiting_for_bt = False
     a._ticker = MagicMock(running=False)
     a._session_manager = SessionManager()
     a._real_stream = NeuroSkyStream()
@@ -390,10 +390,12 @@ def test_a_name_being_typed_survives_a_list_that_arrives(app, paired):
     assert app._headset.aliases == {BLUE: "Blue"}
 
 
-def test_diagnostics_list_the_paired_devices_off_the_main_thread(app, paired):
+def test_diagnostics_list_the_paired_devices_off_the_main_thread(app, paired, monkeypatch):
+    report = MagicMock()
+    monkeypatch.setattr(headset_module, "report_soft_error", report)
     paired.devices.append(_mindwave(BLUE))
     app._headset.on_copy_diagnostics()
-    app._headset._report.assert_not_called()  # the listing runs on its own thread
+    report.assert_not_called()  # the listing runs on its own thread
     paired.arrive()
-    label, detail = app._headset._report.call_args.args
+    label, detail = report.call_args.args
     assert label == "user_diagnostics" and f"Paired BT devices (1):\n  - MindWave Mobile  ({BLUE})" in detail

@@ -17,9 +17,10 @@ import re
 APP = pathlib.Path(__file__).resolve().parent.parent / "app"
 
 FEEDBACK_FNS = {
-    "report_soft_error", "_toast", "_android_toast", "_info_popup", "_require_user",
+    "report_soft_error", "_toast", "android_toast", "_info_popup", "_require_user",
     "set_formula_slot_status", "_confirm_program_action", "focus_device_section",
     "update_state", "show_alert", "notify_user", "show_backup_status",
+    "gate.open",  # the blocking profile picker
 }
 MARKER = re.compile(r"#\s*silent-ok:\s*\S")
 
@@ -48,21 +49,23 @@ def _marked(lines: list[str], node: ast.AST) -> bool:
     return any(MARKER.search(lines[i]) for i in range(node.lineno - 1, min(end, len(lines))))
 
 
+# The active profile as the app holds it, and as a class reads it through the app's context or a `user_id` callable.
+USER_EXPRS = ("self._current_user_id", "self._user_id()", "self._ctx.user_id()")
+
+
 def _aliases_of_current_user(fn: ast.AST) -> set[str]:
-    """Locals assigned directly from self._current_user_id inside fn — so an
-    aliased gate check (`uid = self._current_user_id; if not uid: return`) is
-    caught, not just the literal attribute."""
+    """Locals assigned directly from the active profile inside fn — so an
+    aliased gate check (`uid = self._user_id(); if not uid: return`) is
+    caught, not just the literal expression."""
     aliases = set()
     for node in ast.walk(fn):
-        if isinstance(node, ast.Assign) and ast.unparse(node.value).strip() == "self._current_user_id":
+        if isinstance(node, ast.Assign) and ast.unparse(node.value).strip() in USER_EXPRS:
             aliases.update(t.id for t in node.targets if isinstance(t, ast.Name))
     return aliases
 
 
 def _is_absence_check(test_src: str, aliases: set[str] = frozenset()) -> bool:
-    if ("not self._current_user_id" in test_src
-            or "self._current_user_id is None" in test_src
-            or "self._current_user_id == None" in test_src):
+    if any(f"not {u}" in test_src or f"{u} is None" in test_src or f"{u} == None" in test_src for u in USER_EXPRS):
         return True
     return any(f"not {a}" in test_src or f"{a} is None" in test_src
                or f"{a} == None" in test_src for a in aliases)
@@ -131,11 +134,24 @@ def test_respects_silent_ok_marker():
     assert not find_silent_gate_returns(src)
 
 
+def test_passes_gate_return_that_opens_the_profile_gate():
+    src = ("class A:\n    def h(self):\n        if self._current_user_id is None:\n"
+           "            self._gate.open(0)\n            return\n")
+    assert not find_silent_gate_returns(src)
+
+
 def test_flags_aliased_gate_return():
     # #4: `uid = self._current_user_id; if not uid: return` must be caught too.
     src = ("class A:\n    def h(self):\n        uid = self._current_user_id\n"
            "        if not uid:\n            return\n")
     assert find_silent_gate_returns(src)
+
+
+def test_flags_silent_gate_return_on_the_user_id_callable():
+    # A class given the app's user_id callable (HistoryFlow, Profiles, ProgramSettings...) gates through it.
+    direct = "class A:\n    def h(self):\n        if not self._user_id():\n            return\n"
+    aliased = "class A:\n    def h(self):\n        uid = self._user_id()\n        if not uid:\n            return\n"
+    assert find_silent_gate_returns(direct) and find_silent_gate_returns(aliased)
 
 
 def test_ignores_positive_user_check():

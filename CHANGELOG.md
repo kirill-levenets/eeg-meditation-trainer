@@ -45,6 +45,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **A Start cancelled just as the headset's first data arrived could leave a session running unseen**, so Restore and a profile switch said a session was in progress.
+  Every ending now marks its run ended first, and a tick whose run has ended or been replaced (a Cancel, a Stop, a tick-thread ending, a new Start) changes nothing.
+- **Markers vanished from the Session screen's graphs** when a session ended, and when the screen was unlocked during one.
+  They stay where they were placed; the session detail in History always had them.
+- **A headset that reconnected mid-session still showed as reconnecting until the session ended**, and Settings › Device still showed it connected while the link was down.
+  Both now show the link as it is: reconnecting while it is down, connected once it is back.
+- **A changed line width was saved only when leaving the app or switching profiles**, so a crash before then lost it.
+  It is now saved once the slider settles.
+- **A session could end twice while the phone was locked**: with the headset's data gone stale, the stop waited for the unlock while the timer could still end the session, so it was saved and torn down twice;
+  at the 3-hour recording limit the stop and its alert repeated on every tick until the unlock.
+  Such a check now freezes the session at once (its duration ends there, its sound goes quiet) and saves it once on unlock.
 - **A profile with no saved headset used the last profile's** (#99): after a profile switch, Settings › Device showed the other profile's headset as selected and Start connected to it, though nothing saved it to the profile;
   after a restart the same profile had none.
   A profile now gets its own headset or none, and a link to another profile's closes.

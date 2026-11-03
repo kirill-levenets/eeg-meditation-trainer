@@ -8,7 +8,9 @@ from app.metrics.formula_slots import FORMULA_KEYS, FormulaSlots, read_active
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from tests._formula_settings import make_formula_settings
+from tests._history_flow import make_detail_flow
 from tests._program_run import make_run
+from tests._settings import audio_store
 
 
 class TestMultiFormulaTick(unittest.TestCase):
@@ -89,25 +91,24 @@ class TestAudioDriveKey(unittest.TestCase):
 
     def test_audio_falls_back_to_shamatha_when_bound_slot_invalid(self):
         app = self._app()
-        app._audio_metric_key = "custom_formula_2"   # slot 2 bound...
-        app._audio_formula_index = 1                  # ...but slot 2 has no formula
-        self.assertEqual(app._audio_drive_key(), "shamatha_score")
+        audio_store(app, "custom_formula_2", 1)  # slot 2 bound, but slot 2 has no formula
+        self.assertEqual(app._audio_metric.drive_key(), "shamatha_score")
         app._formulas.evaluators[1].set_formula("alpha + beta")  # now valid
-        self.assertEqual(app._audio_drive_key(), "custom_formula_2")
+        self.assertEqual(app._audio_metric.drive_key(), "custom_formula_2")
 
     def test_audio_drive_key_passthrough_for_non_formula(self):
         app = self._app()
-        app._audio_metric_key = "shamatha_score"
-        self.assertEqual(app._audio_drive_key(), "shamatha_score")
+        audio_store(app)
+        self.assertEqual(app._audio_metric.drive_key(), "shamatha_score")
 
     def test_index_tap_does_not_rebind_when_non_formula_active(self):
         # Tapping a slot button while a non-formula metric drives audio only
         # remembers the slot; it must not silently switch the live key.
         app = self._app()
-        app._audio_metric_key = "shamatha_score"
-        app._on_audio_formula_index(1)
-        self.assertEqual(app._audio_metric_key, "shamatha_score")
-        self.assertEqual(app._audio_formula_index, 1)
+        audio_store(app)
+        app._audio_metric.on_formula_index(1)
+        self.assertEqual(app._settings_store.value("audio_metric"), "shamatha_score")
+        self.assertEqual(app._settings_store.value("audio_formula_index"), 1)
 
 
 class _FakeGraph:
@@ -144,9 +145,15 @@ class TestSessionFormulaSaveAndReplay(unittest.TestCase):
         self.app._formulas = FormulaSlots()
         self.app._db = DatabaseManager(db_path=self.path)
         self.app._current_user_id = self.app._db.create_user("A")
-        self.app._audio_metric_key = "shamatha_score"
+        audio_store(self.app)
         self.app._live_screen = types.SimpleNamespace(graph=_FakeGraph())
         self.app._diary_screen = _StubDiary()
+        self.detail = make_detail_flow(self.app)
+
+    def _replay(self, sid, session):
+        """The detail's formula lines as its loader makes them: recomputed from the session's stored formulas."""
+        series, names = self.detail.compute_session_formulas(sid, session)
+        self.app._diary_screen.set_session_formulas(series, names)
 
     def tearDown(self):
         self.app._db.close()
@@ -167,7 +174,7 @@ class TestSessionFormulaSaveAndReplay(unittest.TestCase):
         self.app._formulas.evaluators[0].set_formula("alpha + beta")
         self.app._formulas.names[0] = "Ratio"
         self.app._live_screen.graph.set_visible("custom_formula", True)
-        self.app._audio_metric_key = "custom_formula"
+        self.app._settings_store.change("audio_metric", "custom_formula")
         import json
         rec = json.loads(self.app._session_custom_formulas_json())
         self.assertEqual(rec[0]["name"], "Ratio")
@@ -182,7 +189,7 @@ class TestSessionFormulaSaveAndReplay(unittest.TestCase):
         # Mutate today's slot — replay must ignore it and use the stored def.
         self.app._formulas.evaluators[0].set_formula("delta")
         session = self.app._db.get_session(sid)
-        self.app._inject_session_formulas(sid, session)
+        self._replay(sid, session)
         injected = self.app._diary_screen.series[FORMULA_KEYS[0]]
         from app.metrics.custom_formula import CustomFormulaEvaluator
         ev = CustomFormulaEvaluator()
@@ -199,7 +206,7 @@ class TestSessionFormulaSaveAndReplay(unittest.TestCase):
         self.app._formulas.evaluators[2].set_formula("alpha1")
         sid = self._seed_session()
         session = self.app._db.get_session(sid)
-        self.app._inject_session_formulas(sid, session)
+        self._replay(sid, session)
         series = self.app._diary_screen.series
         self.assertIn(FORMULA_KEYS[0], series)
         self.assertIn(FORMULA_KEYS[2], series)
@@ -210,14 +217,14 @@ class TestSessionFormulaSaveAndReplay(unittest.TestCase):
     def test_replay_resets_stale_names_for_empty_slots(self):
         sid = self._seed_session()  # no valid slots
         session = self.app._db.get_session(sid)
-        self.app._inject_session_formulas(sid, session)
+        self._replay(sid, session)
         # All custom keys reset to defaults so a prior session's name can't leak.
         self.assertEqual(self.app._diary_screen.names[FORMULA_KEYS[1]], "Custom 2")
 
     def test_replay_no_formulas_is_empty(self):
         sid = self._seed_session()  # no valid slots
         session = self.app._db.get_session(sid)
-        self.app._inject_session_formulas(sid, session)
+        self._replay(sid, session)
         self.assertEqual(self.app._diary_screen.series, {})
 
     def test_replay_tolerates_malformed_json(self):
@@ -225,7 +232,7 @@ class TestSessionFormulaSaveAndReplay(unittest.TestCase):
             {"duration": 1}, user_id=self.app._current_user_id, custom_formulas="{not json"
         )
         session = self.app._db.get_session(sid)
-        self.app._inject_session_formulas(sid, session)  # must not raise
+        self._replay(sid, session)  # must not raise
         self.assertEqual(self.app._diary_screen.series, {})
 
 
@@ -234,7 +241,7 @@ class TestAssignSavedToSlot(unittest.TestCase):
         app = EEGMeditationApp.__new__(EEGMeditationApp)
         app._formulas = FormulaSlots()
         app._current_user_id = None
-        app._audio_metric_key = "shamatha_score"  # the app's default: no formula slot drives the sound
+        audio_store(app)  # the app's default: no formula slot drives the sound
         app._live_screen = types.SimpleNamespace(graph=_FakeGraph())
         app._settings_screen = types.SimpleNamespace(formulas=types.SimpleNamespace(
             set_formula_slot=lambda *a, **k: None,

@@ -301,10 +301,12 @@ def test_the_diagnostic_dialog_is_the_themed_panel_with_readable_text(theme):
         _pump()
 
 
-def _toast_app():
-    from app.ui.app_manager import EEGMeditationApp
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._android_toast = MagicMock()
+def _toast_app(monkeypatch):
+    """An app whose native toast is recorded in `app.native`."""
+    import app.ui.app_manager as am
+    app = am.EEGMeditationApp.__new__(am.EEGMeditationApp)
+    app.native = MagicMock()
+    monkeypatch.setattr(am, "android_toast", app.native)
     return app
 
 
@@ -315,14 +317,14 @@ def test_a_toast_is_the_themed_panel_above_any_popup(theme, monkeypatch):
     popup = _popups()[0]
     popup.open()
     _pump()
-    app = _toast_app()
+    app = _toast_app(monkeypatch)
     try:
         app._toast("Notes saved")
         toast = Window.children[0]  # the topmost window child: drawn over the open popup
         assert isinstance(toast, ThemedLabel) and toast.text == "Notes saved"
         assert _panel_roles(toast) == ["BG", "BORDER"]
         assert _contrast(toast.color, C.BG) >= 4.5
-        app._android_toast.assert_not_called()
+        app.native.assert_not_called()
     finally:
         Window.remove_widget(Window.children[0])
         popup.dismiss()
@@ -331,11 +333,11 @@ def test_a_toast_is_the_themed_panel_above_any_popup(theme, monkeypatch):
 
 def test_a_toast_raised_while_the_app_is_leaving_is_the_native_one(monkeypatch):
     monkeypatch.setattr(android_jni, "on_android", lambda: True)
-    app = _toast_app()
+    app = _toast_app(monkeypatch)
     before = list(Window.children)
     app._leaving = True
     app._toast("Notes saved")
-    app._android_toast.assert_called_once_with("Notes saved")
+    app.native.assert_called_once_with("Notes saved")
     assert list(Window.children) == before
 
 

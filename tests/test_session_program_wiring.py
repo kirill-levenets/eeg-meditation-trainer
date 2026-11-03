@@ -10,6 +10,7 @@ from app.ui.program_run import ProgramRun
 from tests._graph_series import make_graph_series
 from tests._program_run import make_run
 from tests._program_settings import make_programs
+from tests._settings import audio_store
 
 
 def _program_settings(db, uid, **kw):
@@ -144,7 +145,7 @@ def test_program_custom_formula_plots_and_marks():
     app._live_screen = MagicMock()
     app._live_screen.graph = graph
     app._timer_mode = "program"
-    app._audio_metric_key = "shamatha_score"
+    audio_store(app)
     app._program_run = run = make_run(app)
     run.begin(SessionProgram([{"minutes": 1, "target": 120, "formula": {"name": "AlphaPwr", "formula": "alpha1"}}]),
               [], "")  # what a program session's start does
@@ -154,7 +155,7 @@ def test_program_custom_formula_plots_and_marks():
 
     assert metrics["program_formula"] == 80.0          # custom formula evaluated + plotted
     assert run.audio_key == "program_formula"   # transient program drive
-    assert app._audio_metric_key == "shamatha_score"     # user's baseline left untouched
+    assert app._settings_store.value("audio_metric") == "shamatha_score"     # user's baseline left untouched
     graph.set_series_name.assert_any_call("program_formula", "Program: AlphaPwr")  # "Program: <formula>"
     graph.set_visible.assert_any_call("program_formula", True)            # shown on graph
     app._live_screen.set_training_series.assert_called_with("program_formula")  # legend-marked
@@ -171,7 +172,7 @@ def test_a_segment_whose_formula_cant_run_drives_and_shows_shamatha():
     app._live_screen = MagicMock()
     app._live_screen.graph = graph
     app._formulas = FormulaSlots()
-    app._audio_metric_key = "shamatha_score"
+    audio_store(app)
     app._program_run = run = make_run(app, info=MagicMock())
     run.begin(SessionProgram([{"minutes": 1, "target": 120, "formula": {"name": "Broken", "formula": "alpha1 +"}},
                               {"minutes": 1, "target": 80, "formula": {"name": "AlphaPwr", "formula": "alpha1"}}]),
@@ -181,10 +182,10 @@ def test_a_segment_whose_formula_cant_run_drives_and_shows_shamatha():
     run.tick(metrics, {"alpha1": 80.0})
 
     assert run.audio_key == "shamatha_score"
-    assert metrics.get(app._audio_drive_key(), 0) == 50  # what the tick sounds: shamatha, not 0
+    assert metrics.get(app._audio_metric.drive_key(), 0) == 50  # what the tick sounds: shamatha, not 0
     app._session_manager.start_segment.assert_called_with("shamatha_score", 120)  # scored on what it sounds
     app._live_screen.set_training_series.assert_called_with("shamatha_score")
-    assert run._info.call_args.args[0] == "Formula error in this program"  # the session's start says which
+    assert run._ctx.info.call_args.args[0] == "Formula error in this program"  # the session's start says which
     shown = {c.args[0]: c.args[1] for c in graph.set_visible.call_args_list}
     assert shown == {"shamatha_score": True, "program_formula": False, "program_formula_2": True}
     assert metrics["program_formula_2"] == 80.0  # the segment whose formula runs keeps its own line
@@ -270,7 +271,7 @@ def test_program_with_two_distinct_customs_shows_three_lines():
     app._audio = MagicMock()
     app._session_manager = MagicMock()
     app._session_manager.elapsed_seconds = 0
-    app._audio_metric_key = "shamatha_score"
+    audio_store(app)
     app._live_screen = LiveSessionScreen()
     run = make_run(app)
     g = app._live_screen.graph

@@ -9,7 +9,8 @@ import pytest
 
 from app import android_jni, crash_handler
 from app.eeg.neurosky_stream import NeuroSkyStream
-from app.ui.app_manager import EEGMeditationApp
+from app.keep_awake import KeepAwake
+from app.ui.toast import android_toast
 
 
 def _fake_jnius(monkeypatch, classes):
@@ -27,47 +28,64 @@ def _fake_run_on_ui_thread(monkeypatch):
     monkeypatch.setitem(sys.modules, "android.runnable", runnable)
 
 
-def _app():
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._wake_lock = None
-    return app
-
-
 def _off_android(monkeypatch):
     monkeypatch.setattr(android_jni, "on_android", lambda: False)
     monkeypatch.setattr(android_jni, "activity", lambda: pytest.fail("looked up the Activity off Android"))
 
 
-def test_the_wake_lock_is_taken_and_given_back_through_the_activity(monkeypatch):
+def _fake_android(monkeypatch) -> types.SimpleNamespace:
+    """Android's Activity, its window, the power manager's wake lock and the session's service, as fakes."""
     monkeypatch.setattr(android_jni, "on_android", lambda: True)
     _fake_run_on_ui_thread(monkeypatch)
-    window, lock, power = MagicMock(), MagicMock(), MagicMock()
-    power.newWakeLock.return_value = lock
-    activity = types.SimpleNamespace(getWindow=lambda: window,
-                                     getSystemService=lambda name: power if name == "power" else None)
+    fake = types.SimpleNamespace(window=MagicMock(), lock=MagicMock(), power=MagicMock(), service=MagicMock())
+    fake.power.newWakeLock.return_value = fake.lock
+    fake.activity = types.SimpleNamespace(getWindow=lambda: fake.window,
+                                          getSystemService=lambda name: fake.power if name == "power" else None)
     _fake_jnius(monkeypatch, {
-        "org.kivy.android.PythonActivity": types.SimpleNamespace(mActivity=activity),
+        "org.kivy.android.PythonActivity": types.SimpleNamespace(mActivity=fake.activity),
         "android.view.WindowManager$LayoutParams": types.SimpleNamespace(FLAG_KEEP_SCREEN_ON=128),
         "android.content.Context": types.SimpleNamespace(POWER_SERVICE="power"),
         "android.os.PowerManager": types.SimpleNamespace(PARTIAL_WAKE_LOCK=1),
+        "org.eeg.eegmeditation.SessionForegroundService": fake.service,
     })
-    app = _app()
-    app._acquire_wake_lock()
+    return fake
+
+
+def test_the_wake_lock_is_taken_and_given_back_through_the_activity(monkeypatch):
+    fake = _fake_android(monkeypatch)
+    window, lock, power = fake.window, fake.lock, fake.power
+    keep_awake = KeepAwake()
+    keep_awake._acquire_wake_lock()
     window.addFlags.assert_called_once_with(128)
     power.newWakeLock.assert_called_once_with(1, "eegmeditation:session")
     lock.acquire.assert_called_once_with()
-    app._release_wake_lock()
+    keep_awake._release_wake_lock()
     lock.release.assert_called_once_with()
     window.clearFlags.assert_called_once_with(128)
-    assert app._wake_lock is None
+    assert keep_awake._wake_lock is None
+
+
+def test_a_session_holds_the_phone_awake_and_lets_it_go(monkeypatch):
+    # hold(): the screen-on flag, the partial wake lock and the foreground service; release() undoes all three.
+    fake = _fake_android(monkeypatch)
+    window, lock, service, activity = fake.window, fake.lock, fake.service, fake.activity
+    keep_awake = KeepAwake()
+    keep_awake.hold()
+    window.addFlags.assert_called_once_with(128)
+    lock.acquire.assert_called_once_with()
+    service.start.assert_called_once_with(activity, "EEG Meditation", "Meditation session in progress")
+    keep_awake.release()
+    lock.release.assert_called_once_with()
+    window.clearFlags.assert_called_once_with(128)
+    service.stop.assert_called_once_with(activity)
 
 
 def test_off_android_the_wake_lock_does_nothing(monkeypatch):
     _off_android(monkeypatch)
-    app = _app()
-    app._acquire_wake_lock()
-    app._release_wake_lock()
-    assert app._wake_lock is None
+    keep_awake = KeepAwake()
+    keep_awake.hold()
+    keep_awake.release()
+    assert keep_awake._wake_lock is None
 
 
 def test_the_native_toast_gets_the_activity_and_a_java_string(monkeypatch):
@@ -89,13 +107,13 @@ def test_the_native_toast_gets_the_activity_and_a_java_string(monkeypatch):
         "android.widget.Toast": _Toast,
         "java.lang.String": lambda text: ("JString", text),
     })
-    _app()._android_toast("Saved")
+    android_toast("Saved")
     assert shown == [(activity, ("JString", "Saved"), 0), "show"]
 
 
 def test_off_android_the_native_toast_is_a_logged_no_op(monkeypatch):
     _off_android(monkeypatch)
-    _app()._android_toast("Saved")
+    android_toast("Saved")
 
 
 def test_bluetooth_permissions_are_asked_through_the_activity(monkeypatch):

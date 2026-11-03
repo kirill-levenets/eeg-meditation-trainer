@@ -7,8 +7,18 @@ import pytest
 
 import app.ui.app_manager as am
 from app.session.manager import SessionManager, SessionState
+from app.session.session_run import Phase
 from app.ui.app_manager import EEGMeditationApp
+from tests._bt_wait import make_bt_wait
 from tests._headset import make_headset
+from tests._session_run import run_in
+from tests._shown_session import make_shown
+
+
+@pytest.fixture(autouse=True)
+def _reports(monkeypatch):
+    """A failed connect files a diagnostic report: here it is recorded (`am.report_soft_error`), not shown."""
+    monkeypatch.setattr(am, "report_soft_error", MagicMock())
 
 T0 = 1000.0
 
@@ -51,22 +61,20 @@ def wait(monkeypatch):
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     stream = _Stream(clock)
     app._real_stream = app._eeg_stream = stream
-    app._bt_signal_start = None  # as __init__ sets it
     app._ticker = MagicMock(running=False)
-    app._release_wake_lock = MagicMock()
-    app._stop_session_keep_alive_service = MagicMock()
+    app._keep_awake = MagicMock()
     app._session_manager = SessionManager()
     app._timer_state = MagicMock()
     app._live_screen = MagicMock()
     app._settings_screen = MagicMock()
     app._headset = make_headset(app)
-    app._on_main_for_wait = MagicMock()
-    app._report_bt_connect_failure = MagicMock()
+    app._on_main_for = MagicMock()
+    app._bt_wait = make_bt_wait(app)
     app._undo_session_setup = MagicMock()
-    app._start_attempt = 1
+    run = run_in(app, Phase.STARTING)  # as Start makes it
     stream.start = MagicMock(return_value=True)
-    app._bt_connect_start = clock.now  # set by the session start that precedes the wait
-    assert app._begin_bt_wait()  # the wait as Start enters it, at T0
+    run.connect_start = clock.now  # set by the session start that precedes the wait
+    assert app._begin_bt_wait(run)  # the wait as Start enters it, at T0
 
     def tick(at: float, *, connected: bool, bands: float = 0.0, packet: bool = False) -> None:
         clock.now = T0 + at
@@ -74,8 +82,9 @@ def wait(monkeypatch):
         stream.bands = bands
         if packet:
             stream.last_packet = clock.now - 0.1  # just before the tick reads it (0.0 means none yet)
-        app._handle_bt_wait()
+        app._follow_bt_wait(app._run)  # the tick reads the current run
 
+    app._shown = make_shown(app)
     return app, stream, tick
 
 
@@ -108,7 +117,7 @@ def test_the_new_socket_still_times_out_when_it_sends_nothing(wait):
     assert not _gave_up(stream)
     tick(26.5, connected=True)  # its own 8 s, from 18 s
     assert _gave_up(stream)
-    assert app._waiting_for_bt is False
+    assert not app._connecting()
     assert _retry_message(app).startswith("No EEG data received.")
 
 
@@ -147,7 +156,7 @@ def test_packets_without_contact_keep_the_wait_open(wait):
 
 def _retry_message(app) -> str:
     """The retry screen the last wait exit queued."""
-    app._on_main_for_wait.call_args.args[0]()
+    app._on_main_for.call_args.args[1]()
     return app._live_screen.show_overlay_retry.call_args.args[0]
 
 
@@ -204,7 +213,8 @@ def test_the_next_wait_starts_with_no_drops(wait):
         tick(connect, connected=True)
         tick(drop, connected=False)
     stream.start = MagicMock(return_value=True)
-    assert app._begin_bt_wait()  # a Retry
+    run_in(app, Phase.STARTING).connect_start = am.time.time()  # a Retry is a new Start: a run with its own drops
+    assert app._begin_bt_wait(app._run)
     tick(30.0, connected=True)
     tick(35.5, connected=False)  # this wait's first drop, not the third
     assert not _gave_up(stream)

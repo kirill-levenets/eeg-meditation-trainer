@@ -4,39 +4,40 @@ from unittest.mock import MagicMock
 
 from app.session.manager import SessionState
 from app.ui.app_manager import EEGMeditationApp
+from tests._profiles import make_profiles
 
 
 def _make_app(state: SessionState) -> EEGMeditationApp:
     app = EEGMeditationApp.__new__(EEGMeditationApp)
     app._session_manager = MagicMock()
     app._session_manager.state = state
-    app._waiting_for_bt = False
     app._ticker = MagicMock(running=False)
     app._current_user_id = 1
     app._db = MagicMock()
     app._db.get_user.return_value = {"name": "B"}
     app._info_popup = MagicMock()
-    app._refresh_profile = MagicMock()
+    app._settings_screen = MagicMock()
     app._save_user_settings = MagicMock()
     app._load_user_settings = MagicMock()
-    app._mark_history_dirty = MagicMock()
+    app._history = MagicMock()
+    app._shown = MagicMock(owner=None)  # no session shown
     return app
 
 
 def test_switch_is_refused_while_a_session_runs():
     app = _make_app(SessionState.RUNNING)
-    app._on_user_switch(2)
+    make_profiles(app).on_switch(2)
 
     assert app._current_user_id == 1
     app._save_user_settings.assert_not_called()
     app._load_user_settings.assert_not_called()
     app._info_popup.assert_called_once()
-    app._refresh_profile.assert_called_once()
+    app._settings_screen.populate_users.assert_called_once()  # the picker snapped back
 
 
 def test_switch_proceeds_when_idle():
     app = _make_app(SessionState.IDLE)
-    app._on_user_switch(2)
+    make_profiles(app).on_switch(2)
 
     assert app._current_user_id == 2
     app._save_user_settings.assert_called_once()

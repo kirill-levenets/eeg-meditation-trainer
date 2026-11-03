@@ -1,7 +1,7 @@
 """The UI is built in the theme the startup profile will apply, so a launch never builds in one palette and repaints."""
 
 from app.storage.database import DatabaseManager
-from app.ui.app_manager import startup_theme, theme_seed
+from app.ui.startup import startup_theme, theme_seed, theme_setting
 from app.ui.theme import DEFAULT_THEME
 
 
@@ -41,7 +41,6 @@ def test_no_startup_profile_or_an_unknown_name_falls_back_to_the_seed(tmp_path):
 
 def test_a_profile_with_an_unknown_stored_theme_gets_the_seed_not_the_previous_profiles(tmp_path):
     from app.settings.registry import SettingsStore
-    from app.ui.app_manager import theme_setting
     from app.ui.theme import C
 
     db = _db(tmp_path)

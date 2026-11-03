@@ -8,7 +8,7 @@ from kivy.base import EventLoop
 from kivy.core.window import Window
 from kivy.tests.common import UnitTestTouch
 
-import app.ui.app_manager as am
+import app.ui.session_detail_flow as session_detail_flow
 from app.session.what_if import ScoredTicks, Segment
 from app.settings.registry import BOOL, Setting, SettingsStore
 from app.ui.hooks import wire
@@ -286,7 +286,7 @@ def test_another_session_opens_as_recorded_again(app):  # noqa: F811
     _open(a, workers, a.sessions["A"])
     _control(a._diary_screen._what_if).slider.value = 120
     _frames()
-    a._on_diary_back()
+    a._detail.on_diary_back()
     _open(a, workers, a.sessions["B"])
     panel = a._diary_screen._what_if
     assert _control(panel).slider.value == 70 and panel._btn_reset.disabled
@@ -295,8 +295,8 @@ def test_another_session_opens_as_recorded_again(app):  # noqa: F811
 def test_the_next_session_shows_loading_until_its_data_arrives(app):  # noqa: F811
     a, workers = app
     _open(a, workers, a.sessions["A"])
-    a._on_diary_back()
-    a._on_session_select(a.sessions["B"])  # its worker hasn't run yet
+    a._detail.on_diary_back()
+    a._detail.on_session_select(a.sessions["B"])  # its worker hasn't run yet
     panel = a._diary_screen._what_if
     assert panel._controls.parent is None and panel._message.text == "Loading…"  # not A's what-if
 
@@ -314,7 +314,7 @@ def test_a_formula_the_replay_couldnt_rebuild_says_so(app):  # noqa: F811
 
 def test_a_what_if_that_fails_fails_alone(app, monkeypatch):  # noqa: F811
     a, workers = app
-    monkeypatch.setattr(am, "scored_ticks", lambda *_a: (_ for _ in ()).throw(KeyError("score_value")))
+    monkeypatch.setattr(session_detail_flow, "scored_ticks", lambda *_a: (_ for _ in ()).throw(KeyError("score_value")))
     _open(a, workers, a.sessions["A"])
     d = a._diary_screen
     assert d._what_if._message.text.startswith("Couldn't load")

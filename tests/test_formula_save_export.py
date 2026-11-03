@@ -22,7 +22,8 @@ def make(tmp_path):
         dbs.append(db)
         uid = db.create_user("A") if profile else None
         app = SimpleNamespace(_db=db, _formulas=FormulaSlots(), _current_user_id=uid,
-                              _require_user=MagicMock(return_value=uid), _audio_metric_key="shamatha_score",
+                              _require_user=MagicMock(return_value=uid),
+                              _audio_metric=SimpleNamespace(formula_scoring_locked=lambda _key, _doing: False),
                               _confirm_action=MagicMock(), _info_popup=MagicMock())
         return make_formula_settings(app), app, db, uid
     yield build

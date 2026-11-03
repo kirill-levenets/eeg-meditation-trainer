@@ -13,6 +13,7 @@ from app.session.session_program import (
     runnable_plan,
     segment_target,
 )
+from app.ui.app_context import AppContext
 from app.ui.live_session import SERIES_NAMES
 
 
@@ -32,14 +33,13 @@ class ProgramRun:
     pure evaluators). Kivy widget changes go through `on_main`.
     """
 
-    def __init__(self, session_manager, audio, live_screen, *, on_main: Callable[[Callable[[], object]], None],
-                 formula_vars: Callable[[dict, dict], dict], info: Callable[[str, str], None]) -> None:
+    def __init__(self, ctx: AppContext, session_manager, audio, live_screen, *,
+                 formula_vars: Callable[[dict, dict], dict]) -> None:
+        self._ctx = ctx  # its messages are popups that stay until read: the meditator may not be looking
         self._session_manager = session_manager
         self._audio = audio
         self._live_screen = live_screen
-        self._on_main = on_main
         self._formula_vars = formula_vars
-        self._info = info  # (title, message): a popup that stays until read, as the meditator may not be looking
         self.program: SessionProgram | None = None
         self.name = ""  # the program's name at the start; Settings may load or save another during the session
         self.audio_key = ""  # the active segment's metric; transient, never written to the user's baseline
@@ -83,7 +83,7 @@ class ProgramRun:
             listed = ", ".join(f'"{n}"' for n in plan.unrunnable)
             message = f"Can't run {listed}: Shamatha is used instead.\nSettings › Timer / Program edits the program."
             # Next frame: the start finishes its setup first, whatever the popup does.
-            self._on_main(lambda: self._info("Formula error in this program", message))
+            self._ctx.on_main(lambda: self._ctx.info("Formula error in this program", message))
 
     def end(self) -> None:
         """Restore the live graph to its pre-program visibility and drop the program custom-formula
@@ -152,7 +152,7 @@ class ProgramRun:
         self._audio.set_threshold(target)
         if 0 <= idx < len(self._feedback_ids):
             self._audio.set_active_feedback(self._feedback_ids[idx])
-        self._on_main(lambda k=metric_key, nm=line_name: self._segment_ui(k, nm))
+        self._ctx.on_main(lambda k=metric_key, nm=line_name: self._segment_ui(k, nm))
         logger.info(f"Program segment {idx}: metric={metric_key} target={target}")
 
     def _segment_ui(self, metric_key: str, line_name: str | None) -> None:

@@ -17,12 +17,13 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Adaptive landscape layout: `_compute_graph_height_adaptive` uses a fixed graph height when the viewport is tall, or switches to scroll mode when the graph would fall below `dp(400)`.
   The bottom bar lives inside the body ScrollView.
 - **The Session screen shows one profile's session.**
-  `_live_display_uid` is the profile whose session the screen shows (graphs, readout, end card): set at Start, cleared by `_abort_bt_wait` when the start never became a session (the Start already emptied the display).
-  `_drop_shown_session` takes it off the screen:
-  the end card, if open, closes through `_close_summary` (notes saved unless the session is gone, bell stopped; the one way every card closes, OK included);
-  then `_clear_live_display` empties the graphs, their mirrors and the readout (`LiveSessionScreen.clear_readout`: what a fresh screen shows).
+  `ShownSession` (`app/ui/shown_session.py`, the app's `_shown`) is that session: its `owner` is the profile whose session the screen shows (graphs, readout, end card), set at Start (`take`), cleared by `_abort_bt_wait` when the start never became a session (the Start already emptied the display).
+  It holds the graphs' `mirror` (`LiveMirror`, which the tick records into and the graphs reload from), and the end card's notes and delete go through the history flow (`HistoryFlow.save_notes`, `delete_sessions`).
+  `drop` takes it off the screen:
+  the end card, if open, closes through `close` (notes saved unless the session is gone, bell stopped; the one way every card closes, OK included);
+  then `clear` empties the graphs, their mirrors and the readout (`LiveSessionScreen.clear_readout`: what a fresh screen shows).
   It runs when another profile is picked (`_activate_user`), when that profile is deleted, and when History deletes the shown session (`_recorder.session_id`, kept after the stop).
-  Re-picking the shown profile resets nothing (`_on_user_switch` allows that mid-session, and a reset there would wipe the running session's graph).
+  Re-picking the shown profile resets nothing (`Profiles.on_switch` allows that mid-session, and a reset there would wipe the running session's graph).
   An idle threshold change (#83) clears the display but keeps the owner, so a later switch still closes an open card.
   The stats bar shows the `LiveScore` each tick hands it (`update_stats`), refreshed once more at the session's end and on resume (ticks are skipped while locked), and `set_stats_mode` redraws it when a profile's LIVE/AVG choice loads.
 - Stats bar (#113): three slots on the metric the session is scored on, the end card's numbers as they build up.
@@ -54,7 +55,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   User Profile uses the shared `UserPickerForm`; Data Backup has Backup/Restore buttons.
   Graph series are picked on the graph (the series picker); `_graph_toggles` is only the first-run default set.
   Custom Formula has **three named slots** (Formula 1/2/3, named Custom 1–3 by default), each with name input, expression input, Apply, Save, and per-slot status.
-  In Threshold, a `[1][2][3]` button group below the "Custom Formula" audio-metric radio selects which slot drives the audio (the `on_audio_formula_index` hook → `_on_audio_formula_index` in `app_manager`).
+  In Threshold, a `[1][2][3]` button group below the "Custom Formula" audio-metric radio selects which slot drives the audio (the `on_audio_formula_index` hook → `AudioMetric.on_formula_index`).
   **Timer / Program** has a **Simple | Program** toggle: Simple = single duration + Enable-Timer checkbox;
   Program = the segment editor (`TimerSection`, `settings_sections/timer.py`: `_segments_box`, rows with duration, formula, target, end-cue picker (Chime/Warble), feedback-source picker);
   with it the loaded-program label (`_program_loaded_label`) and the saved-programs library (save/load/delete named programs).
@@ -79,8 +80,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 ## First run
 
-- **First run is the user gate's popup** (`_show_first_run_popup`, see [app-platform](app-platform.md#user-gate-and-profiles)): a `UserPickerForm` to create a profile or pick an existing one (e.g. after a restore) without retyping the name.
+- **First run is the user gate's popup** (`ProfileGate`, see [app-platform](app-platform.md#user-gate-and-profiles)): a `UserPickerForm` to create a profile or pick an existing one (e.g. after a restore) without retyping the name.
   It is a Popup, not a Screen, because a TextInput inside a Screen doesn't get keyboard focus on some Android devices.
-  A new profile (`_complete_first_run`) starts on the mock and is scanned for (`Headset.scan_for_new_profile`): a paired MindWave takes it off the mock, the single one selected, and with several Start asks which;
-  a picked one (`_on_pick_existing_user`) keeps its own headset and mode, and its load scans for a real-mode profile without a headset ([eeg-bluetooth](eeg-bluetooth.md#connection)).
-  Both leave through `_finish_first_run` for the Session screen.
+  A new profile (`ProfileGate.complete_first_run`) starts on the mock and is scanned for (`Headset.scan_for_new_profile`): a paired MindWave takes it off the mock, the single one selected, and with several Start asks which;
+  a picked one (`ProfileGate.pick_existing`) keeps its own headset and mode, and its load scans for a real-mode profile without a headset ([eeg-bluetooth](eeg-bluetooth.md#connection)).
+  Both leave through `ProfileGate._finish_first_run` for the Session screen.

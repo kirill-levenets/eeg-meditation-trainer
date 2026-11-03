@@ -32,7 +32,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   **Pause keeps the player set** (#37): `_on_pause` calls `AudioEngine.pause()` and `resume()`, never `stop()`/`start()`.
   `pause()` sets every prepared player to volume 0 and stops it, stops the ramp and clears `_is_playing`, so the bell/chime alert gates and `update()` go quiet;
   `resume()` replays the same players (`_play_prepared`), and the ramp restores each role's last target.
-  `stop()`, the session-end teardown, tears the prepared set down, which only `_start_session_common`'s `prepare_feedback` + `set_reward` rebuild, so both channels would stay silent after Resume.
+  `stop()`, the session-end teardown, tears the prepared set down, which only a session start's `prepare_feedback` + `set_reward` rebuild (`SoundSources.prepare_session`), so both channels would stay silent after Resume.
   The `"tone"` source is a harmonic-pad drone (fundamental + fifth), generated on first use.
   The `"heartbeat"` source (#11 — stable internal id; the timbre is **Crickets**) is a looping `_NOISE_BUFFER_SECONDS`-long (10 s) WAV: a silent bed with one `_HEARTBEAT_PULSE_SECONDS` (0.1 s) cricket chirp
   — a high tonal carrier (~4.8 kHz) + 2nd harmonic gated by a ~40 Hz half-wave amplitude trill, Hann-windowed to zero at both ends (`_generate_heartbeat_wav`, cached at `_heartbeat_path`)
@@ -44,8 +44,9 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   its sequence stops where it is, by a generation token (`_test_gen`) checked before each step;
   its deferred teardown (`_finish_test`) is called off;
   and `_is_playing`, which the test set, goes back, so the session's `start()` isn't skipped.
-  A test started again supersedes the running one the same way; `_on_test_audio`/`_test_audio_sources` prepare both the below and reward sources.
-  `EEGMeditationApp._feedback_plan` / `_source_spec` / `_feedback_source_id` / `_global_feedback_id` resolve the global setting and per-segment override (`""` inherits global);
+  A test started again supersedes the running one the same way; `SoundSources.on_test_audio`/`test_sources` prepare both the below and reward sources.
+  Which sounds play is `app/ui/sound_sources.py` (the app's `_sounds`): `SoundSources` reads the sources the settings hold and changes them through the app's settings path,
+  and the pure `feedback_plan` / `source_spec` with `SoundSources.global_feedback_id` resolve the global setting and per-segment override (`""` inherits global);
   `ProgramRun._enter_segment` calls `set_active_feedback` at each boundary.
   Persisted per-user: `feedback_source` (`"none"` / `"noise"` / `"tone"` / `"custom"`, default `"noise"`) and `feedback_sound_path`.
   **Dual-zone feedback** (#12, #9): two metric-keyed channels driven from one `update(score)`.
@@ -53,11 +54,11 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The **above-threshold reward** channel (`compute_reward_volume`: mirror log curve rising 0→max over `[threshold, threshold + APP.REWARD_SPAN(=30)]`, clamped) is a second prepared player designated by `set_reward(source_id)` (`""`=none).
   Both zones are 0 exactly at the threshold → clean cross-fade.
   The ramp loop drives **every** prepared player toward its role target (below→`_target_volume`, reward→`_reward_target_volume`, others→0); volume-only, tick/lock-safe.
-  A channel source of `"none"`/`""` (`_source_spec`→`("none","")`) instantiates no player; `prepare_feedback` skips `kind=="none"`, and `_resolve_active("" | "none")` returns `""` so a None **below** channel never grabs the reward player.
-  `_teardown_feedback_players` (run by `prepare_feedback` and `stop`) resets `_reward_feedback`, so `set_reward` must be called **after** `prepare_feedback` at session start (the order `_start_session_common` uses).
+  A channel source of `"none"`/`""` (`source_spec`→`("none","")`) instantiates no player; `prepare_feedback` skips `kind=="none"`, and `_resolve_active("" | "none")` returns `""` so a None **below** channel never grabs the reward player.
+  `_teardown_feedback_players` (run by `prepare_feedback` and `stop`) resets `_reward_feedback`, so `set_reward` must be called **after** `prepare_feedback` at session start (the order `SoundSources.prepare_session` uses).
   Reward is **global only** — programs keep per-segment switching on the below channel; reward stays armed across segments.
-  `EEGMeditationApp._reward_id()` resolves the reward source: a custom selection with no file is silent, where the below channel falls back to rain.
-  Persisted per-user: `reward_source` (`"none"`/`"noise"`/`"tone"`/`"heartbeat"`/`"custom"`, default `"none"`) + `reward_sound_path`; `_on_reward_source_change` mirrors `_on_feedback_source_change`.
+  `SoundSources.reward_id()` resolves the reward source: a custom selection with no file is silent, where the below channel falls back to rain.
+  Persisted per-user: `reward_source` (`"none"`/`"noise"`/`"tone"`/`"heartbeat"`/`"custom"`, default `"none"`) + `reward_sound_path`; `SoundSources.on_reward_source_change` mirrors `on_feedback_source_change`.
   **Source selection UI**: one button per channel, showing the current label (`common.source_label`), opens the shared popup picker:
   `settings_sections.common.open_source_picker(title, options, on_choose)` → `AudioSection._choose_feedback_source`/`_choose_reward_source` → `_apply_*_source`;
   `"custom"` opens the file chooser directly.

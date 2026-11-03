@@ -6,6 +6,7 @@ from kivy.uix.boxlayout import BoxLayout
 
 from app.metrics.formula_slots import FORMULA_KEYS, FormulaSlots
 from app.session.session_program import PROGRAM_FORMULA_KEYS
+from app.ui.app_context import AppContext
 from app.ui.theme import (
     C,
     S,
@@ -30,11 +31,10 @@ class GraphSeries:
     runs and computes it; a session detail lists a program session's lines while it shows them. A program's own
     series set is never saved as the profile's selection."""
 
-    def __init__(self, db, live_graph, formulas: FormulaSlots, program_run, program_settings, formula_settings,
-                 *, graphs: Callable[[], tuple], legacy_defaults: dict[str, bool],
-                 user_id: Callable[[], int | None], require_user: Callable[[str], int | None],
+    def __init__(self, ctx: AppContext, live_graph, formulas: FormulaSlots, program_run, program_settings,
+                 formula_settings, *, graphs: Callable[[], tuple], legacy_defaults: dict[str, bool],
                  detail_program: Callable[[object], frozenset[str]]) -> None:
-        self._db = db
+        self._ctx = ctx
         self._live_graph = live_graph
         self._formulas = formulas
         self._program_run = program_run
@@ -42,8 +42,6 @@ class GraphSeries:
         self._formula_settings = formula_settings
         self._graphs = graphs
         self._legacy_defaults = legacy_defaults
-        self._user_id = user_id
-        self._require_user = require_user
         self._detail_program = detail_program  # the program lines a graph shows for the session detail on screen
 
     def present_picker(self, graph) -> None:
@@ -88,10 +86,10 @@ class GraphSeries:
     def _choose_saved_formula(self, slot_idx: int, toggle_btn) -> None:
         """Open a second popup listing saved formulas; selecting one assigns it to
         slot_idx and refreshes the picker's toggle button to its new name and visible state."""
-        uid = self._require_user("choose a saved formula")
+        uid = self._ctx.require_user("choose a saved formula")
         if uid is None:
             return
-        formulas = self._db.get_saved_formulas(uid)
+        formulas = self._ctx.db.get_saved_formulas(uid)
 
         def _choose(entry):
             inner_popup.dismiss()
@@ -139,14 +137,14 @@ class GraphSeries:
         Skips the live metrics graph while a program sets its series — a running one, or the idle preview of the one
         Settings has loaded — and a detail showing a program session's: the program-driven set must not overwrite the
         user's saved manual selection."""
-        uid = self._user_id()
+        uid = self._ctx.user_id()
         if not (uid and graph.graph_id):
             return
         if graph is self._live_graph and (self._program_run.active or self._program_settings.governs_live_series()):
             return
         if self._detail_program(graph):
             return
-        self._db.set_user_json_setting(
+        self._ctx.db.set_user_json_setting(
             uid, f"graph_series_{graph.graph_id}",
             [k for k in graph.visible_keys() if k not in PROGRAM_FORMULA_KEYS],
         )
@@ -168,7 +166,7 @@ class GraphSeries:
         """Apply one graph's persisted series selection (graph_series_<id>). The live
         metrics graph migrates the pre-F2 toggle_<key> rows when it has no JSON yet and
         gates custom-formula slots on validity; other graphs default to all-visible."""
-        series = self._db.get_user_json_setting(user_id, f"graph_series_{graph.graph_id}")
+        series = self._ctx.db.get_user_json_setting(user_id, f"graph_series_{graph.graph_id}")
         if series is not None:
             sel = set(series)
         elif graph is self._live_graph:
@@ -191,10 +189,10 @@ class GraphSeries:
         for key in self._live_graph.series_keys():
             if key in FORMULA_KEYS:  # custom slots never had pre-F2 toggle_ rows
                 continue
-            saved = self._db.get_user_setting(user_id, f"toggle_{key}")
+            saved = self._ctx.db.get_user_setting(user_id, f"toggle_{key}")
             active = (saved == "True") if saved is not None else self._legacy_defaults.get(key, True)
             if active:
                 sel.add(key)
-        if self._db.get_user_setting(user_id, "custom_formula_visible") == "True":
+        if self._ctx.db.get_user_setting(user_id, "custom_formula_visible") == "True":
             sel.add("custom_formula")
         return sel

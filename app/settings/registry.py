@@ -1,4 +1,5 @@
-"""Per-user settings registry: one Setting descriptor per preference; load always applies a value, so none leak."""
+"""Per-user settings registry: one Setting descriptor per preference; load always applies a value, so none leak. The
+store holds a setting's value (the one copy while its profile is active) unless the descriptor names another holder."""
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -12,8 +13,9 @@ class Setting:
     default: Any
     parse: Callable[[str], Any]        # DB string -> typed value
     serialize: Callable[[Any], str]    # typed value -> DB string
-    get: Callable[[], Any]             # read the live value (in-memory + UI)
-    set: Callable[[Any], None]         # apply a value to the in-memory field + UI
+    get: Callable[[], Any] | None      # where another object holds the live value; None: the store holds it
+    set: Callable[[Any], None]         # apply a value: its consumers and its widget
+    settle: bool = False               # a continuous input (a slider, typing): persisted once it stops changing
 
 
 # Codecs: (parse, serialize) pairs.
@@ -21,6 +23,16 @@ BOOL = (lambda s: s == "True", lambda v: str(bool(v)))
 INT = (lambda s: int(s), lambda v: str(int(v)))
 FLOAT = (lambda s: float(s), lambda v: str(float(v)))
 STR = (lambda s: s, lambda v: "" if v is None else str(v))
+
+
+def kept(key: str, codec: tuple, get: Callable[[], Any], set_: Callable[[Any], None]) -> Setting:
+    """A setting another object holds (its widget, a screen): its default is that holder's value when registered."""
+    return Setting(key, get(), codec[0], codec[1], get, set_)
+
+
+def held(key: str, codec: tuple, default: Any, apply: Callable[[Any], None], settle: bool = False) -> Setting:
+    """A setting the store holds, applied to its consumers and its widget on each change."""
+    return Setting(key, default, codec[0], codec[1], None, apply, settle)
 
 
 def stored_value(db, uid: int | None, s: Setting) -> Any:
@@ -42,20 +54,39 @@ class SettingsStore:
         self._db = db
         self._settings = list(settings)
         self._by_key = {s.key: s for s in self._settings}
+        self._values: dict[str, Any] = {s.key: s.default for s in self._settings if s.get is None}
         self._loading = False
+
+    def value(self, key: str) -> Any:
+        """A held setting's value: its default until a profile's load."""
+        return self._values[key]
+
+    def change(self, key: str, value: Any) -> None:
+        """A held setting changed (the user, or a controller that allowed it): hold the value and apply it."""
+        self._values[key] = value
+        self._by_key[key].set(value)
+
+    def settles(self, key: str) -> bool:
+        return self._by_key[key].settle
+
+    def _live(self, s: Setting) -> Any:
+        return s.get() if s.get is not None else self._values[s.key]
 
     def load(self, uid: int) -> None:
         """Apply each setting for `uid`: stored value if present+valid, else its default."""
         self._loading = True
         try:
             for s in self._settings:
-                s.set(stored_value(self._db, uid, s))
+                value = stored_value(self._db, uid, s)
+                if s.get is None:
+                    self._values[s.key] = value
+                s.set(value)
         finally:
             self._loading = False
 
     def save(self, uid: int) -> None:
         """Persist every setting's current live value for `uid` in one transaction."""
-        self._db.set_user_settings(uid, {s.key: s.serialize(s.get()) for s in self._settings})
+        self._db.set_user_settings(uid, {s.key: s.serialize(self._live(s)) for s in self._settings})
 
     def persist(self, uid: int, key: str) -> None:
         """Write one setting now; no-op with no user or while load() applies values it would re-persist."""
@@ -63,4 +94,4 @@ class SettingsStore:
             return
         s = self._by_key.get(key)
         if s is not None:
-            self._db.set_user_setting(uid, key, s.serialize(s.get()))
+            self._db.set_user_setting(uid, key, s.serialize(self._live(s)))

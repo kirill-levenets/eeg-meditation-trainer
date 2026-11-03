@@ -51,52 +51,62 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   A pending marker is set on the tick's row before it is recorded.
   The row is dated and named by the session's start (`SessionManager.started_at`, 0.0 before a start and after `reset()` → `checkpoint_session(started_at=…)` and `_make_session_name`), not by its first save a minute later.
   Session persistence is split: `_persist_session_data(reason)` (tick-thread-safe DB write, no Kivy) + `_finalize_stop_ui(stats, id)` (main-thread UI teardown).
-  `_stop_and_save` runs both on the main thread; the timer-expiry path runs `_persist_session_data` on the tick thread and defers `_finalize_stop_ui` via `_on_main`.
+  `_stop_and_save` runs both on the main thread; the timer-expiry path runs `_persist_session_data` on the tick thread and defers `_finalize_stop_ui` via `_on_main_for(run, ...)`.
   **Every ending saves through this one path** (#39):
   user Stop pauses the tick and asks `_confirm_action("Stop session?", ..., on_cancel=_cancel_stop)`, whose OK is `_stop_and_save(reason="user")`.
   There is no discard path; deleting is the end card's confirmed action.
+  **A session ends once.** A check that ends it on the tick thread, data gone stale or the recording limit (`SessionWatch.check` returns its reason and alert; the tick returns after it), freezes it there through `_end_from_tick`:
+  its run claimed (`_claim_ending`: marked ended by this call, so no other tick-thread ending claims it, and a tick still in progress acts on nothing from its next check),
+  `SessionManager.pause()` (its duration ends at the detection, not when the phone is unlocked), `AudioEngine.mute()` (setVolume only, safe on this thread),
+  a checkpoint of its ticks so far (Android may close a locked app before the unlock) and `ticker.stop()`;
+  then one main-thread `_stop_and_save(reason)` with its alert, queued for that run (`_on_main_for`).
+  With the tick stopped no later tick can end it again:
+  on a locked phone a stale stop used to be followed by the timer's ending (two saves, two teardowns), and the limit check queued a stop and played its alert on every tick until the unlock.
+  The timer's main-thread finish is queued for its run too, so an ending that ran first (a profile's delete) isn't followed by an end card for a deleted session (`tests/test_session_ends_once.py`).
   A Stop handled late, after another ending (e.g. the headset-off stale-data stop) has saved the session, must not lose it:
   a confirm that arrives after the session has ended writes nothing (`tests/test_session_ending.py::test_a_stop_confirmed_after_the_session_ended_another_way_keeps_it`).
   `_confirm_action`'s `on_cancel` fires on any close that isn't OK (Cancel, tap outside, Android back), so the tick that Stop paused is always resumed, and it decides **once**:
   Kivy keeps delivering taps to a `ModalView` during its 0.1 s fade-out, so a second OK (or OK right after Cancel) would run the action again.
   That logic is `theme.confirm_popup`, the one confirm (OK left, Cancel right); `_confirm_action` and History's delete confirm both call it.
-  The session-end card ("Session saved") offers **Save notes** (`_on_summary_save_notes`; the card stays open), **OK** and a low-emphasis **Delete session** behind a confirm.
-  OK is `_close_summary`: it saves the notes only if they changed since the last save (`_flush_summary_notes`, against `_summary_saved_notes`, the last written text), so an untouched card writes nothing and clearing saved notes clears them;
+  The session-end card ("Session saved") offers **Save notes** (`ShownSession.on_save_notes`; the card stays open), **OK** and a low-emphasis **Delete session** behind a confirm.
+  OK is `ShownSession.close`: it saves the notes only if they changed since the last save (`flush_notes`, against the last written text), so an untouched card writes nothing and clearing saved notes clears them;
   then it stops the gong and closes.
-  Delete is `_on_summary_delete` → `_delete_sessions`, which closes the card once the session is gone; a failed delete leaves the card and its typed notes.
+  Delete is `ShownSession.on_delete` → `HistoryFlow.delete_sessions`, which closes the card once the session is gone; a failed delete leaves the card and its typed notes.
   `on_pause` and `on_stop` both flush the card's notes with the settings through `_flush_on_leave`, skipped while `_restoring`.
-  Notes go through the one `_save_session_notes(sid, notes=, tags=, mood=)` (also the diary's Save and its leave-flush):
+  Notes go through the one `HistoryFlow.save_notes(sid, notes=, tags=, mood=)` (also the diary's Save and its leave-flush):
   `DatabaseManager.update_session_notes` writes only the fields given and returns whether a row changed; a failure goes to `report_soft_error`.
   Success shows `_toast("Notes saved")` and calls `HistoryScreen.update_session(sid, ...)`, which updates the History model's session in place (a reload would start the list from the top);
   `_update_item` re-derives that row's item, so its notes line appears, changes or goes (and the row's height with it) at once.
-  `_toast` is the one toast (also the double-back "Press back again to exit"): `C.TEXT` on `paint_panel`, added to the `Window` so it shows above any open popup, on every platform;
+  `_toast` is the one toast (also the double-back "Press back again to exit"; `show_toast` in `app/ui/toast.py`): `C.TEXT` on `paint_panel`, added to the `Window` so it shows above any open popup, on every platform;
   only while the app is leaving (`_leaving`, set by `_flush_on_leave`, when nothing the app draws is seen) is it the native Android toast.
-  `_delete_sessions(ids)` is the one delete (a History row, the History selection, the end card):
+  `HistoryFlow.delete_sessions(ids)` is the one delete (a History row, the History selection, the end card):
   one `DatabaseManager.delete_sessions(ids)` transaction over metrics and rows, so an error deletes none of them (`delete_session(sid)` is a selection of one).
   A `wal_checkpoint(TRUNCATE)` follows: one big transaction parks every deleted page in the WAL (40–100 MB for a few hundred long sessions), which keeps that size until a clean close;
   a failed checkpoint (e.g. "database table is locked" while another thread's read is open on the shared connection) is only logged, since the delete has committed.
   The delete runs on a worker thread (a large selection takes 0.3–0.8 s on desktop) behind the loading overlay, and reports `on_done(ok)`;
-  the overlay is modal at once and painted only past 0.15 s (`show_loading(text, delay=0.15)`), so a tap can't reach the rows or the end card being deleted.
+  the overlay is modal at once and painted only past 0.15 s (`HistoryFlow`'s overlay, `show(text, delay=0.15)`), so a tap can't reach the rows or the end card being deleted.
   A `sqlite3.Error` is reported as `session_delete_failed`.
-  On success the Session screen drops a deleted session it shows (`_drop_shown_session`: the end card, whose notes would have no session to save to, closes with its gong, and the display clears).
+  On success the Session screen drops a deleted session it shows (`ShownSession.on_sessions_deleted` → `drop`: the end card, whose notes would have no session to save to, closes with its gong, and the display clears).
   `HistoryScreen.remove_sessions(ids)` removes those rows and model entries in place (see the session list in [history.md](history.md)): no rebuild, no spinner, wherever the user is.
   History never lists the running session: its row exists from the first checkpoint, with that checkpoint's stats, and a History reload during the session would list it with them, frozen there until the next reload.
-  `_running_session_id()` (`_recorder.session_id` while `_session_pipeline_live()`) is left out of History's list (`_finished_sessions`) and Settings' profile counts.
+  `_running_session_id()` (`_recorder.session_id` while `_session_pipeline_live()`) is left out of History's list (`HistoryFlow.finished_sessions`) and Settings' profile counts.
   `_finalize_stop_ui` marks History dirty, so the session appears once it ends.
-  `_delete_sessions` also refuses it (`_recorder.session_id` among the ids while live): its next checkpoints would write ticks for no session.
+  `delete_sessions` also refuses it (`_running_session_id()` among the ids): its next checkpoints would write ticks for no session.
 
 ## Timer
 
 - The meditation timer is split: a headless `TimerState` (`app/session/timer_state.py`) drives the tick-loop countdown;
   the user-visible controls (enable, duration, the end-sound picker: Default bell or Custom file..., through the shared source picker, and Test) live in Settings → Timer (`TimerSection`, `app/ui/settings_sections/timer.py`).
   When the timer expires (on the tick thread, `_end_by_timer`), the order is:
+  claim its run (`_claim_ending`, as above);
   persist the session via `_persist_session_data(reason="timer")`;
   `AudioEngine.mute()` the noise (non-blocking);
-  `TickThread.stop()` (safe from the tick thread, which it doesn't join), which also ends `running`, so `_session_pipeline_live()` is False once idle and Restore and the profile switch aren't refused after a timed session;
-  `_on_main(_finish_on_main)` to defer `_audio.stop()` + `_finalize_stop_ui` to the main thread;
+  `TickThread.stop()` (safe from the tick thread, which it doesn't join), so no later tick can end the session again:
+  the stop left the session FINISHED, so `_session_pipeline_live()` is False and Restore and the profile switch aren't refused after a timed session;
+  `_on_main_for(run, _finish_on_main)` to defer `_audio.stop()` + `_finalize_stop_ui` to the main thread;
   then `play_timer_sound()` **last** (a one-shot `MediaPlayer` gong, which rings through the lock).
   Persisting first and ringing last means a hung audio call can never cost the session or the summary.
-  The gong plays until the file ends or the end card closes (every close goes through `_close_summary`), which calls `AudioEngine.stop_timer_bell()` (releases the gong `MediaPlayer` on the main thread);
+  The gong plays until the file ends or the end card closes (every close goes through `ShownSession.close`), which calls `AudioEngine.stop_timer_bell()` (releases the gong `MediaPlayer` on the main thread);
   `_start_session_common` also calls it, to stop a long custom gong still ringing from the previous session.
 
 ## Screen lock and Android
@@ -119,8 +129,12 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `tests/test_service_start_state.py` compiles it with `javac` and runs its transition table (`tests/java/`); without a JDK the test is skipped.
   `START_NOT_STICKY` keeps the system from restarting it alone.
   A maker's power manager can still close the app at this priority ([app-platform](app-platform.md#background-running-android)).
-  `_start_session_keep_alive_service`/`_stop_session_keep_alive_service` call its static `start`/`stop`.
+  `KeepAwake` (`app/keep_awake.py`, the app's `_keep_awake`) calls its static `start`/`stop`, together with the wake lock and the keep-screen-on flag:
+  `hold()` at a session's setup, `release()` at its ending or an abandoned start; `on_stop` stops only the service.
 - While the app is paused (screen locked) the tick skips its per-tick UI update: N minutes locked would queue ~120·N full graph redraws, which froze the screen on resume.
-  The tick thread records every tick into the session-lifetime mirror instead (`LiveMirror` in `app/ui/live_mirror.py`, the app's `_mirror`, no Kivy).
+  The tick thread records every tick into the session-lifetime mirror instead (`LiveMirror` in `app/ui/live_mirror.py`, held by the shown session: `_shown.mirror`, no Kivy).
   `LiveMirror.reload_into` reloads the live graphs from it in one batch on resume (while the session runs) and at the session's end (`_finalize_stop_ui`):
   without it, after a session that ended during a lock, the graph would show only the pre-lock seconds while History shows the real duration.
+  The mirror records each marked tick as (tick, raw sample) counts since the session's start, and the reload hands the markers to each graph's `load_static_data` with its data;
+  counts, not indices, because a full buffer drops its oldest: a marker's index shifts with it, and one that fell off is gone.
+  One lock covers `record`, `clear` and the reload's snapshot, so the counts a reload reads match the buffers it copies.
