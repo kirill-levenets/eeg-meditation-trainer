@@ -857,11 +857,6 @@ class ScrollableGraphWidget(GraphGestures, GraphGlyphs, Widget):
         self._markers.append(idx)
         self._redraw()
 
-    def set_markers(self, markers: list[int]) -> None:
-        """Set all markers (for loading from DB)."""
-        self._markers = list(markers)
-        self._redraw()
-
     def clear_data(self) -> None:
         for key in self._data:
             self._data[key].clear()

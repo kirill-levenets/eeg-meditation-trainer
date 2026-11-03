@@ -7,7 +7,7 @@ from app.config import APP
 from app.eeg.band_spec import GROUP_KEYS, group_powers
 from app.session.recorder import RecordedTick
 from app.session.scoring import scored_steps, target_steps
-from app.ui.live_session import METRICS_COLORS
+from app.ui.live_session import METRICS_COLORS, RAW_WAVEFORM_MAX
 
 
 class LiveMirror:
@@ -18,7 +18,7 @@ class LiveMirror:
     def __init__(self) -> None:
         self.metrics: deque[dict] = deque(maxlen=APP.GRAPH_POINTS_MAX)
         self.bands: deque[dict] = deque(maxlen=APP.GRAPH_POINTS_MAX)
-        self.waveform: deque[float] = deque(maxlen=512 * 60)
+        self.waveform: deque[float] = deque(maxlen=RAW_WAVEFORM_MAX)  # the raw graph's: its marker indices agree
         self.last_metrics: dict = {}
         self.last_state: str = "Neutral"
         self.marks: list[tuple[int, int]] = []  # (tick, raw sample) counts since the start: buffers drop their oldest

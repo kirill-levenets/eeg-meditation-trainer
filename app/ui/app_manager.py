@@ -1522,7 +1522,8 @@ class EEGMeditationApp(App):
 
         While the session is RUNNING, reload all three live graphs in a
         single batch from the session-lifetime mirror buffers (one
-        ``load_static_data`` call per graph, one redraw each), then
+        ``load_static_data`` call per graph, with its markers; the metrics
+        graph redraws again for its threshold and gradient steps), then
         refresh the stats/state/timer labels from the latest sample.
         """
         t_start = time.monotonic()

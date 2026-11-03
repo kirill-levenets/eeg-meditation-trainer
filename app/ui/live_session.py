@@ -62,7 +62,7 @@ _DURATION_PRESETS = [
 _RAW_SIGNAL_COLORS = {"eeg": C.MEDITATION}
 _RAW_SIGNAL_SCALES = {"eeg": 500.0}
 _RAW_WAVEFORM_RATE = 512.0
-_RAW_WAVEFORM_MAX = 512 * 60
+RAW_WAVEFORM_MAX = 512 * 60
 
 METRICS_COLORS = {
     "shamatha_score": C.SHAMATHA,
@@ -393,7 +393,7 @@ class LiveSessionScreen(Screen):
             show_value_labels=True,
             show_timestamps=True,
             sample_rate=_RAW_WAVEFORM_RATE,
-            max_points=_RAW_WAVEFORM_MAX,
+            max_points=RAW_WAVEFORM_MAX,
             bipolar=True,
             size_hint_y=0.5,
             graph_id="live_raw",

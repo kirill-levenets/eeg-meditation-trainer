@@ -16,6 +16,7 @@ with stubbed subsystems so the mirror-fill and batch-reload logic — the
 exact lines the ANR fix introduced — are exercised, not re-implemented.
 """
 
+import threading
 import time
 from unittest.mock import MagicMock
 
@@ -586,6 +587,7 @@ def test_a_marked_tick_is_mirrored_with_its_marker():
 def test_the_live_graphs_and_a_reload_put_a_marker_in_the_same_places():
     app = _make_tick_app()
     app._live_screen = LiveSessionScreen()
+    app._shown = make_shown(app)  # over the real screen, as build() wires it
     app._live_screen.update_stats = MagicMock()  # the stub session manager has no score to show
     app._recorder.record = lambda metrics, row: {"score_target": 50, "score_key": "shamatha_score"}
     app._on_main = lambda fn: fn()  # the tick's UI update runs, as the main thread would run it
@@ -595,3 +597,22 @@ def test_the_live_graphs_and_a_reload_put_a_marker_in_the_same_places():
     reloaded = LiveSessionScreen()
     app._shown.mirror.reload_into(reloaded)
     assert _markers(app._live_screen) == _markers(reloaded) == [[1], [1], [5]]
+
+
+def test_recording_and_a_reload_take_turns_on_the_mirror():
+    # A reload's snapshot sees whole ticks: its counts match the buffers it copies.
+    mirror = _marked_mirror(2, set())
+    tick = RecordedTick(_metrics(), _raw_sample(), {"score_target": 50, "score_key": "shamatha_score"}, True)
+    screen = MagicMock()
+    with mirror._lock:  # one of them holds the mirror
+        workers = [threading.Thread(target=mirror.record, args=(tick,)),
+                   threading.Thread(target=mirror.reload_into, args=(screen,))]
+        for w in workers:
+            w.start()
+        for w in workers:
+            w.join(0.2)
+        assert all(w.is_alive() for w in workers) and len(mirror.metrics) == 2
+        screen.graph.load_static_data.assert_not_called()
+    for w in workers:
+        w.join(2)
+    assert not any(w.is_alive() for w in workers) and len(mirror.metrics) == 3

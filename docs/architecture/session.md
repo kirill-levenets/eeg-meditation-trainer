@@ -133,5 +133,6 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The tick thread records every tick into the session-lifetime mirror instead (`LiveMirror` in `app/ui/live_mirror.py`, held by the shown session: `_shown.mirror`, no Kivy).
   `LiveMirror.reload_into` reloads the live graphs from it in one batch on resume (while the session runs) and at the session's end (`_finalize_stop_ui`):
   without it, after a session that ended during a lock, the graph would show only the pre-lock seconds while History shows the real duration.
-  A load clears a graph's markers, so the mirror records each marked tick as (tick, raw sample) counts since the session's start and the reload puts them back;
+  The mirror records each marked tick as (tick, raw sample) counts since the session's start, and the reload hands the markers to each graph's `load_static_data` with its data;
   counts, not indices, because a full buffer drops its oldest: a marker's index shifts with it, and one that fell off is gone.
+  One lock covers `record`, `clear` and the reload's snapshot, so the counts a reload reads match the buffers it copies.
