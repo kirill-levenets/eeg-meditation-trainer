@@ -24,6 +24,12 @@ from tests._recorder import make_recorder
 from tests._session_run import run_in
 from tests._shown_session import make_shown
 
+
+@pytest.fixture(autouse=True)
+def _reports(monkeypatch):
+    """A failed connect files a diagnostic report: here it is recorded (`am.report_soft_error`), not shown."""
+    monkeypatch.setattr(am, "report_soft_error", MagicMock())
+
 BANDS = {"delta": 10.0, "theta": 10.0, "alpha1": 10.0, "alpha2": 10.0, "beta1": 10.0, "beta2": 10.0,
          "gamma1": 10.0, "gamma2": 10.0, "signal_quality": 0}
 
@@ -126,7 +132,7 @@ def test_a_cancel_while_the_tick_reads_the_first_data_leaves_no_session_running(
 
 
 def test_a_tick_that_outlives_the_cancel_shows_nothing():
-    # The Cancel's 1 s join timed out: the tick queues the first data's "connected" UI after the Cancel has finished.
+    # The Cancel's 1 s join timed out: the tick reads the first data after the Cancel has finished, and acts on nothing.
     app = _waiting(_app())
     in_read, release = threading.Event(), threading.Event()
     app._real_stream.read_sample.side_effect = lambda: (in_read.set(), release.wait(2), dict(BANDS))[2]
@@ -139,6 +145,17 @@ def test_a_tick_that_outlives_the_cancel_shows_nothing():
     _run_queued(app)
     app._audio.start.assert_not_called()
     assert not any(c.args == ("Running",) for c in app._live_screen.update_state.call_args_list)
+    assert app._session_manager.state == SessionState.IDLE  # not started: Restore and a switch stay free
+    app._timer_state.start_countdown.assert_not_called()
+
+
+def test_a_first_data_tick_that_outlived_its_run_starts_nothing():
+    app = _waiting(_app())
+    old = app._run
+    new = run_in(app, Phase.CONNECTING)  # a Cancel and a new Start while the tick read the first data
+    app._follow_bt_wait(old)
+    assert app._session_manager.state == SessionState.IDLE and new.phase is Phase.CONNECTING and not app._queued
+    app._timer_state.start_countdown.assert_not_called()
 
 
 def test_deleting_the_profile_in_the_frame_the_session_starts_leaves_no_audio_playing():
@@ -244,7 +261,6 @@ def _end_the_wait(app, exit_case: str) -> None:
         app._real_stream.is_connected = False
         app._real_stream._running = False
         app._real_stream._last_connect_error = "Host is down"
-        app._bt_wait._report_connect_failure = MagicMock()
     elif exit_case == "no data":
         app._real_stream.read_sample.return_value = dict(BANDS, delta=0.0, theta=0.0, alpha1=0.0, alpha2=0.0,
                                                          beta1=0.0, beta2=0.0, gamma1=0.0, gamma2=0.0)
@@ -381,9 +397,9 @@ def test_a_wait_tick_that_outlived_its_run_ends_nothing(monkeypatch):
     old.connect_start = time.time()
     app._real_stream.is_connected, app._real_stream._running = False, False  # the old wait would give up
     app._real_stream._last_connect_error = "Headset is asleep or off."
-    app._bt_wait._report_connect_failure = MagicMock()
     new = run_in(app, Phase.CONNECTING)
-    app._abort_bt_wait = MagicMock()
     app._follow_bt_wait(old)
-    app._abort_bt_wait.assert_not_called()
+    app._ticker.stop.assert_not_called()  # the new run's wait goes on: no abort
+    app._real_stream.stop.assert_not_called()
+    am.report_soft_error.assert_not_called()  # and no diagnostic for a failure the new run didn't have
     assert app._run is new and new.phase is Phase.CONNECTING and not app._queued

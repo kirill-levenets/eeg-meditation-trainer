@@ -14,6 +14,12 @@ from tests._headset import make_headset
 from tests._session_run import run_in
 from tests._shown_session import make_shown
 
+
+@pytest.fixture(autouse=True)
+def _reports(monkeypatch):
+    """A failed connect files a diagnostic report: here it is recorded (`am.report_soft_error`), not shown."""
+    monkeypatch.setattr(am, "report_soft_error", MagicMock())
+
 T0 = 1000.0
 
 
@@ -64,7 +70,6 @@ def wait(monkeypatch):
     app._headset = make_headset(app)
     app._on_main_for = MagicMock()
     app._bt_wait = make_bt_wait(app)
-    app._bt_wait._report_connect_failure = MagicMock()
     app._undo_session_setup = MagicMock()
     run = run_in(app, Phase.STARTING)  # as Start makes it
     stream.start = MagicMock(return_value=True)

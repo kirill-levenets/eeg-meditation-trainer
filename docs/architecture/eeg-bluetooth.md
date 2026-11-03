@@ -92,7 +92,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   and a wait exit's queued retry screen undoes the next Start.
   A tick reads `_run` once, at its start, and passes that run on:
   a Cancel can land mid-tick and its 1 s tick join can time out (`read_sample` waits for the reader's lock), so the tick may queue after the Cancel has finished, for its own, ended run.
-  If that join times out, the late tick can still start `SessionManager` after the Cancel's reset; only its UI and audio are gated.
+  If that join times out, the late tick acts on nothing shared (`_outlived(run)`): the BT wait's end, the session tick after its read, the tick-thread endings.
   `_on_stop` decides by `SessionManager.state`, not the run's phase, because a wait exit ends the wait before its idle UI shows and a Stop in that window must not offer to save a session that never started:
   RUNNING/PAUSED asks to stop and save;
   FINISHED (the timer ended it on the tick thread and its teardown is queued) is ignored, since cancelling there would stop the kept-alive headset link;
@@ -110,7 +110,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Restarting the windows unbounds a headset that keeps connecting and closing, so a wait ends at its third drop (`MAX_DROPS` = 2, counted by the run's `drops`: a Retry is a new Start, with none) with "keeps closing the connection";
   every wait exit that gives up (keeps closing, no data, a failed connect, the connect timeout) returns its message to `_follow_bt_wait`, which aborts the wait and queues `_undo_failed_start`;
   `BtWait.show_retry` leaves the headset's name on the Session screen under its retry screen.
-  A tick that outlived its run (a new Start replaced it) acts on nothing it decided: the new run owns the stream.
+  A failed connect's diagnostic travels in the `WaitEnd` and is filed by `_follow_bt_wait` after that check, so a late tick reports nothing.
   `tests/test_bt_wait_reconnect.py` replays drops and reconnects on a fake clock.
   Android reads drain what is available in one `InputStream.read(buf, 0, n)` per chunk, the buffer sized to the read (pyjnius copies the whole array both ways, so an oversized buffer is slower);
   byte-at-a-time reads would be ~4000 JNI calls/s at the 512 Hz raw rate.

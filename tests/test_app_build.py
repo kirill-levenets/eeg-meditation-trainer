@@ -44,7 +44,7 @@ def build_app(tmp_path, monkeypatch):
     monkeypatch.setattr(NeuroSkyStream, "scan_paired_devices", staticmethod(lambda: []))
     installed: list = []
     monkeypatch.setattr(am, "install_crash_handler", installed.append)  # its hooks are process-wide
-    theme, scale, colours = C.theme_name, F.SCALE, LINE_COLOURS.name
+    theme, scale, colours, rotation = C.theme_name, F.SCALE, LINE_COLOURS.name, Window.rotation
     apps = []
 
     def build(seed):
@@ -69,6 +69,7 @@ def build_app(tmp_path, monkeypatch):
         C.set_theme(theme)
         F.set_scale(scale)
         LINE_COLOURS.set(colours)
+        Window.rotation = rotation
 
 
 def _last_used(name: str):
@@ -85,7 +86,11 @@ def test_the_built_app_restores_its_profile_and_the_hooks_reach_their_flows(buil
     assert uid is not None and not app._gate.shown() and not app._bottom_nav.disabled
     _tap(app._history_screen._toggle_col, "14d")  # History -> HistoryFlow -> the profile's setting
     assert app._db.get_user_setting(uid, "history_view_mode") == "bars"
-    app._settings_screen.audio._sinking_alert_cb.active = True  # Settings -> the settings store
+    audio = app._settings_screen.audio
+    audio._sinking_alert_cb.active = True  # Settings -> the settings store, through the real descriptors
+    audio._subtle_alert_cb.active = True
+    app._settings_screen.display.on_rotate_screen(90)
+    assert app._db.get_user_setting(uid, "subtle_alert") == "True" and app._db.get_user_setting(uid, "rotation") == "90"
     form = app._settings_screen._user_picker_form
     _create(form, "other")  # Settings -> Profiles
     other = next(u["id"] for u in app._db.get_all_users() if u["name"] == "other")
@@ -93,10 +98,12 @@ def test_the_built_app_restores_its_profile_and_the_hooks_reach_their_flows(buil
     assert "already exists" in form._error_label.text and len(app._db.get_all_users()) == 2
     app._profiles.on_switch(other)
     _frames()
-    assert app._history_screen._view_mode == "calendar" and not app._settings_screen.audio._sinking_alert_cb.active
+    assert app._history_screen._view_mode == "calendar" and not audio._sinking_alert_cb.active
+    assert not audio._subtle_alert_cb.active and Window.rotation == 0
     app._profiles.on_switch(uid)
     _frames()
-    assert app._history_screen._view_mode == "bars" and app._settings_screen.audio._sinking_alert_cb.active
+    assert app._history_screen._view_mode == "bars" and audio._sinking_alert_cb.active
+    assert audio._subtle_alert_cb.active and Window.rotation == 90
 
 
 def test_with_no_profile_to_restore_the_gate_blocks_the_app_until_one_is_made(build_app):

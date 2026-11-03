@@ -679,9 +679,11 @@ class EEGMeditationApp(App):
         """Tick thread: one step of the run's BT wait. Its first data starts the session against the threshold in force
         (it may have moved); a give-up tears the wait down here and undoes the start on the main thread."""
         end = self._bt_wait.tick(run)
-        if end is None or run is not self._run:  # a tick that outlived its run: a new Start owns the stream now
+        if end is None or self._outlived(run):
             return
         if not end.started:
+            if end.report:  # a failed connect's copyable diagnostic (cooldown-gated)
+                report_soft_error("bt_connect_failed", end.report)
             self._abort_bt_wait()
             self._on_main_for(run, lambda: self._undo_failed_start(end.message))
             return
@@ -924,7 +926,7 @@ class EEGMeditationApp(App):
     def _update_tick(self, dt: float) -> None:
         """Tick thread, 2 Hz: a step of the run's BT wait or a tick of its running session; Kivy goes through _on_main,
         while audio, metrics and DB writes are thread-safe."""
-        run = self._run  # this tick's run: a main-thread stop waits for a tick in progress, so no newer one is begun
+        run = self._run  # this tick's run: a stop waits up to 1 s for a tick in progress, so act only while it is current
         if run is None:
             return
         if run.phase is Phase.CONNECTING:
@@ -940,7 +942,9 @@ class EEGMeditationApp(App):
 
     def _session_tick(self, run: SessionRun) -> None:
         """Tick thread: the headset's sample, its metrics and score recorded, sounded and shown; the timer may end it."""
-        raw_sample = self._eeg_stream.read_sample()
+        raw_sample = self._eeg_stream.read_sample()  # may wait on the reader's lock
+        if self._outlived(run):
+            return
         metrics = self._metrics_engine.process_sample(raw_sample)
         self._watch.check_sample(run, raw_sample)
         run.tick_count += 1
@@ -1042,9 +1046,16 @@ class EEGMeditationApp(App):
         if not self._is_paused:
             self._on_main(_ui_update)
 
+    def _outlived(self, run: SessionRun) -> bool:
+        """A tick body that outlived its run (a stop's 1 s tick join timed out, then a Cancel, a Stop or a new Start):
+        it acts on nothing shared, which a newer run or no run now owns."""
+        return run is not self._run
+
     def _end_from_tick(self, run: SessionRun, reason: str, alert: str) -> None:
         """Tick thread: a check ended the session. It is frozen here (its duration ends now, its sound goes quiet, no
         later tick can end it again) and saved on the main thread, once, while its run is current."""
+        if self._outlived(run):
+            return
         self._session_manager.pause()
         self._audio.mute()  # before the checkpoint, which may wait on the write lock
         self._checkpoint_or_report()  # Android may close a locked app before the unlock: its ticks so far are saved now
@@ -1053,6 +1064,8 @@ class EEGMeditationApp(App):
 
     def _end_by_timer(self, run: SessionRun) -> None:
         """Tick thread: the timer expired; save the session, silence it, end the tick, ring the gong."""
+        if self._outlived(run):
+            return
         logger.info("Timer expired, auto-stopping session")
         # Persist FIRST, before any audio teardown: the session must be saved even with the screen locked, and
         # MediaPlayer.release() on this thread waits on the main Looper, which is paused during a lock.

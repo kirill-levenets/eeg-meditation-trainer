@@ -3,17 +3,24 @@
 import time
 from unittest.mock import MagicMock
 
+import pytest
+
 import app.ui.app_manager as am
-import app.ui.bt_wait as bt_wait
 from app.session.manager import SessionManager
 from app.session.session_run import Phase, SessionRun
 from app.ui.app_manager import EEGMeditationApp
-from app.ui.bt_wait import BtWait, WaitEnd
+from app.ui.bt_wait import BtWait
 from tests._bt_wait import make_bt_wait
 from tests._headset import make_headset
 from tests._program_run import make_run
 from tests._session_run import run_in
 from tests._shown_session import make_shown
+
+
+@pytest.fixture(autouse=True)
+def _reports(monkeypatch):
+    """A failed connect files a diagnostic report: here it is recorded (`am.report_soft_error`), not shown."""
+    monkeypatch.setattr(am, "report_soft_error", MagicMock())
 
 
 def _make_waiting_app() -> tuple[EEGMeditationApp, list]:
@@ -88,13 +95,12 @@ def test_failed_connect_exit_releases_wake_lock_and_service():
     app._real_stream._device_name = "MindWave"
     app._real_stream._last_connect_error = "Headset is asleep or off."
     app._on_main = MagicMock()
-    app._bt_wait._report_connect_failure = MagicMock()
 
     app._follow_bt_wait(app._run)
 
     _assert_unwatched_stream_stop(app, events)
     assert app._run.phase is Phase.ENDED  # its teardown is queued for the main thread
-    app._bt_wait._report_connect_failure.assert_called_once()
+    assert am.report_soft_error.call_args.args[0] == "bt_connect_failed"
 
 
 def test_refused_start_undoes_setup_without_entering_the_wait():
@@ -103,7 +109,6 @@ def test_refused_start_undoes_setup_without_entering_the_wait():
     app._real_stream.start.return_value = False
     app._real_stream._device_name = "MindWave"
     app._real_stream._last_connect_error = "Previous connection is still closing."
-    app._bt_wait._report_connect_failure = MagicMock()
 
     assert app._begin_bt_wait(app._run) is False
 
@@ -111,7 +116,7 @@ def test_refused_start_undoes_setup_without_entering_the_wait():
     app._keep_awake.release.assert_called_once()
     shown = app._live_screen.show_overlay_retry.call_args.args[0]
     assert "still closing" in shown
-    app._bt_wait._report_connect_failure.assert_not_called()
+    am.report_soft_error.assert_not_called()  # its 60 s cooldown would hide the next real failure
 
 
 def test_started_stream_enters_the_wait():
@@ -128,13 +133,11 @@ def test_started_stream_enters_the_wait():
 
 
 def test_a_failed_connect_is_reported_with_its_headset_and_hint(monkeypatch):
-    reports = []
-    monkeypatch.setattr(bt_wait, "report_soft_error", lambda label, detail="", **_k: reports.append((label, detail)))
     stream = MagicMock(is_connected=False, _running=False, _device_address="AA:BB",
                        _last_connect_error="Headset is asleep or off.")
     wait = BtWait(stream, MagicMock(), headset_name=lambda: "MWM2", on_main_for=lambda run, fn: None)
     run = SessionRun(1)
     run.connect_start = time.time()
-    assert wait.tick(run) == WaitEnd(False, "Connection to MWM2 failed.\nHeadset is asleep or off.")
-    (label, detail), = reports
-    assert label == "bt_connect_failed" and "MWM2 (AA:BB)" in detail and "Headset is asleep or off." in detail
+    end = wait.tick(run)
+    assert (end.started, end.message) == (False, "Connection to MWM2 failed.\nHeadset is asleep or off.")
+    assert "MWM2 (AA:BB)" in end.report and "Headset is asleep or off." in end.report  # the app files it

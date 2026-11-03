@@ -33,19 +33,27 @@ def _off_android(monkeypatch):
     monkeypatch.setattr(android_jni, "activity", lambda: pytest.fail("looked up the Activity off Android"))
 
 
-def test_the_wake_lock_is_taken_and_given_back_through_the_activity(monkeypatch):
+def _fake_android(monkeypatch) -> types.SimpleNamespace:
+    """Android's Activity, its window, the power manager's wake lock and the session's service, as fakes."""
     monkeypatch.setattr(android_jni, "on_android", lambda: True)
     _fake_run_on_ui_thread(monkeypatch)
-    window, lock, power = MagicMock(), MagicMock(), MagicMock()
-    power.newWakeLock.return_value = lock
-    activity = types.SimpleNamespace(getWindow=lambda: window,
-                                     getSystemService=lambda name: power if name == "power" else None)
+    fake = types.SimpleNamespace(window=MagicMock(), lock=MagicMock(), power=MagicMock(), service=MagicMock())
+    fake.power.newWakeLock.return_value = fake.lock
+    fake.activity = types.SimpleNamespace(getWindow=lambda: fake.window,
+                                          getSystemService=lambda name: fake.power if name == "power" else None)
     _fake_jnius(monkeypatch, {
-        "org.kivy.android.PythonActivity": types.SimpleNamespace(mActivity=activity),
+        "org.kivy.android.PythonActivity": types.SimpleNamespace(mActivity=fake.activity),
         "android.view.WindowManager$LayoutParams": types.SimpleNamespace(FLAG_KEEP_SCREEN_ON=128),
         "android.content.Context": types.SimpleNamespace(POWER_SERVICE="power"),
         "android.os.PowerManager": types.SimpleNamespace(PARTIAL_WAKE_LOCK=1),
+        "org.eeg.eegmeditation.SessionForegroundService": fake.service,
     })
+    return fake
+
+
+def test_the_wake_lock_is_taken_and_given_back_through_the_activity(monkeypatch):
+    fake = _fake_android(monkeypatch)
+    window, lock, power = fake.window, fake.lock, fake.power
     keep_awake = KeepAwake()
     keep_awake._acquire_wake_lock()
     window.addFlags.assert_called_once_with(128)
@@ -59,19 +67,8 @@ def test_the_wake_lock_is_taken_and_given_back_through_the_activity(monkeypatch)
 
 def test_a_session_holds_the_phone_awake_and_lets_it_go(monkeypatch):
     # hold(): the screen-on flag, the partial wake lock and the foreground service; release() undoes all three.
-    monkeypatch.setattr(android_jni, "on_android", lambda: True)
-    _fake_run_on_ui_thread(monkeypatch)
-    window, lock, power, service = MagicMock(), MagicMock(), MagicMock(), MagicMock()
-    power.newWakeLock.return_value = lock
-    activity = types.SimpleNamespace(getWindow=lambda: window,
-                                     getSystemService=lambda name: power if name == "power" else None)
-    _fake_jnius(monkeypatch, {
-        "org.kivy.android.PythonActivity": types.SimpleNamespace(mActivity=activity),
-        "android.view.WindowManager$LayoutParams": types.SimpleNamespace(FLAG_KEEP_SCREEN_ON=128),
-        "android.content.Context": types.SimpleNamespace(POWER_SERVICE="power"),
-        "android.os.PowerManager": types.SimpleNamespace(PARTIAL_WAKE_LOCK=1),
-        "org.eeg.eegmeditation.SessionForegroundService": service,
-    })
+    fake = _fake_android(monkeypatch)
+    window, lock, service, activity = fake.window, fake.lock, fake.service, fake.activity
     keep_awake = KeepAwake()
     keep_awake.hold()
     window.addFlags.assert_called_once_with(128)

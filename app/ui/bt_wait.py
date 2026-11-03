@@ -3,7 +3,6 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from app.crash_handler import report_soft_error
 from app.eeg.band_spec import BAND_KEYS
 from app.logger import logger
 from app.session.session_run import Phase, SessionRun
@@ -11,10 +10,12 @@ from app.session.session_run import Phase, SessionRun
 
 @dataclass(frozen=True)
 class WaitEnd:
-    """How a run's BT wait ended: its first data started the session, or it gave up with the retry screen's message."""
+    """How a run's BT wait ended: its first data started the session, or it gave up with the retry screen's message
+    (and, for a failed connect, the diagnostic report the app files)."""
 
     started: bool
     message: str = ""
+    report: str = ""
 
 
 STARTED = WaitEnd(started=True)
@@ -124,10 +125,9 @@ class BtWait:
         """Tick thread: the connection thread ended with an error."""
         hint = self._stream._last_connect_error or "Check device is on and paired."
         logger.error("BT connection failed, session aborted")
-        self._report_connect_failure(name, hint)
-        return WaitEnd(False, f"Connection to {name} failed.\n{hint}")
+        return WaitEnd(False, f"Connection to {name} failed.\n{hint}", report=self._connect_report(name, hint))
 
-    def _report_connect_failure(self, device_name: str, hint: str) -> None:
+    def _connect_report(self, device_name: str, hint: str) -> str:
         """Fire a soft-error dialog for a failed BT connect (cooldown-gated).
 
         The retry overlay already tells the user *something* went wrong; this
@@ -136,12 +136,11 @@ class BtWait:
         """
         addr = self._stream._device_address or "(unset)"
         last_err = self._stream._last_connect_error or "(none)"
-        detail = (
+        return (
             f"Device: {device_name} ({addr})\n"
             f"Hint shown to user: {hint}\n"
             f"Stream last_connect_error: {last_err}\n"
         )
-        report_soft_error("bt_connect_failed", detail)
 
 
 def sensor_contact(signal_quality: int) -> str:

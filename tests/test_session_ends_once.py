@@ -5,6 +5,8 @@ from unittest.mock import MagicMock
 
 from app.config import APP
 from app.session.manager import SessionManager, SessionState
+from app.session.session_run import SessionRun
+from app.ui.app_manager import EEGMeditationApp
 from tests._session_watch import make_watch
 from tests.test_resume_mirror import _drive_tick, _make_tick_app, _metrics, _raw_sample
 
@@ -119,3 +121,22 @@ def test_a_freeze_mutes_before_its_checkpoint(monkeypatch):
     app._real_stream.seconds_since_last_packet = app._watch.STALE_DATA_THRESHOLD + 1
     _drive_tick(app, _raw_sample(), _metrics())
     assert order == ["mute", "checkpoint"]
+
+
+def test_a_session_tick_that_outlived_its_run_records_nothing(monkeypatch):
+    # Its read waited on the reader's lock past the stop's 1 s join; a new Start replaced its run meanwhile.
+    app, _queued, _reasons = _locked_app(monkeypatch)
+    old, new = app._run, SessionRun(1)
+    app._eeg_stream.read_sample.side_effect = lambda: (setattr(app, "_run", new), _raw_sample())[1]
+    app._metrics_engine.process_sample.return_value = _metrics()
+    EEGMeditationApp._session_tick(app, old)
+    assert not app._shown.mirror.metrics and app._recorder._buffer == []
+
+
+def test_the_tick_thread_endings_end_only_their_own_run(monkeypatch):
+    app, queued, reasons = _locked_app(monkeypatch)
+    old = app._run
+    app._run = SessionRun(1)  # a newer run, which a late ending must not stop
+    app._end_from_tick(old, "stale_data", "No EEG data.")
+    app._end_by_timer(old)
+    assert app._session_manager.state == SessionState.RUNNING and reasons == [] and not queued
