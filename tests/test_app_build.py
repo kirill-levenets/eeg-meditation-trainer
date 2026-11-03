@@ -61,6 +61,7 @@ def build_app(tmp_path, monkeypatch):
         yield build
     finally:
         for app in apps:
+            app._ticker.stop()  # a test that failed mid-session leaves no tick thread for the next
             _frames()  # what the app queued runs while it is whole
             if app._gate._gate_popup is not None:
                 app._gate._gate_popup.dismiss()
@@ -116,3 +117,18 @@ def test_with_no_profile_to_restore_the_gate_blocks_the_app_until_one_is_made(bu
     new = next(u["id"] for u in app._db.get_all_users() if u["name"] == "new")
     assert app._current_user_id == new and not app._gate.shown() and not app._bottom_nav.disabled
     assert app._backup_flow._user_name() == "new"  # the profile a backup is named after
+
+
+def test_mock_sessions_on_the_real_tick_thread_are_each_saved_once(build_app):
+    app = build_app(_last_used("me"))
+    uid = app._current_user_id
+    for n in (1, 2):  # the second Start: a fresh run, ticking
+        app._on_start()
+        _frames_until(lambda: len(app._shown.mirror.metrics) >= 3, 5.0)
+        assert app._ticker.running and len(app._shown.mirror.metrics) >= 3
+        app._stop_and_save()
+        _frames()
+        assert app._run is None and not app._ticker.running and app._db.count_sessions(uid) == n
+        app._shown.on_ok()
+        _frames()
+    assert all(app._db.get_session_metrics(s["id"]) for s in app._db.get_all_sessions(uid))

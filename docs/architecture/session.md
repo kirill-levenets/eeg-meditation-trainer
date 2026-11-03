@@ -51,11 +51,12 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   A pending marker is set on the tick's row before it is recorded.
   The row is dated and named by the session's start (`SessionManager.started_at`, 0.0 before a start and after `reset()` → `checkpoint_session(started_at=…)` and `_make_session_name`), not by its first save a minute later.
   Session persistence is split: `_persist_session_data(reason)` (tick-thread-safe DB write, no Kivy) + `_finalize_stop_ui(stats, id)` (main-thread UI teardown).
-  `_stop_and_save` runs both on the main thread; the timer-expiry path runs `_persist_session_data` on the tick thread and defers `_finalize_stop_ui` via `_on_main`.
+  `_stop_and_save` runs both on the main thread; the timer-expiry path runs `_persist_session_data` on the tick thread and defers `_finalize_stop_ui` via `_on_main_for(run, ...)`.
   **Every ending saves through this one path** (#39):
   user Stop pauses the tick and asks `_confirm_action("Stop session?", ..., on_cancel=_cancel_stop)`, whose OK is `_stop_and_save(reason="user")`.
   There is no discard path; deleting is the end card's confirmed action.
   **A session ends once.** A check that ends it on the tick thread, data gone stale or the recording limit (`SessionWatch.check` returns its reason and alert; the tick returns after it), freezes it there through `_end_from_tick`:
+  its run claimed (`_claim_ending`: marked ended by this call, so no other tick-thread ending claims it, and a tick still in progress acts on nothing from its next check),
   `SessionManager.pause()` (its duration ends at the detection, not when the phone is unlocked), `AudioEngine.mute()` (setVolume only, safe on this thread),
   a checkpoint of its ticks so far (Android may close a locked app before the unlock) and `ticker.stop()`;
   then one main-thread `_stop_and_save(reason)` with its alert, queued for that run (`_on_main_for`).
@@ -97,11 +98,12 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 - The meditation timer is split: a headless `TimerState` (`app/session/timer_state.py`) drives the tick-loop countdown;
   the user-visible controls (enable, duration, the end-sound picker: Default bell or Custom file..., through the shared source picker, and Test) live in Settings → Timer (`TimerSection`, `app/ui/settings_sections/timer.py`).
   When the timer expires (on the tick thread, `_end_by_timer`), the order is:
+  claim its run (`_claim_ending`, as above);
   persist the session via `_persist_session_data(reason="timer")`;
   `AudioEngine.mute()` the noise (non-blocking);
   `TickThread.stop()` (safe from the tick thread, which it doesn't join), so no later tick can end the session again:
   the stop left the session FINISHED, so `_session_pipeline_live()` is False and Restore and the profile switch aren't refused after a timed session;
-  `_on_main(_finish_on_main)` to defer `_audio.stop()` + `_finalize_stop_ui` to the main thread;
+  `_on_main_for(run, _finish_on_main)` to defer `_audio.stop()` + `_finalize_stop_ui` to the main thread;
   then `play_timer_sound()` **last** (a one-shot `MediaPlayer` gong, which rings through the lock).
   Persisting first and ringing last means a hung audio call can never cost the session or the summary.
   The gong plays until the file ends or the end card closes (every close goes through `ShownSession.close`), which calls `AudioEngine.stop_timer_bell()` (releases the gong `MediaPlayer` on the main thread);

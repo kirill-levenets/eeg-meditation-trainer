@@ -3,9 +3,11 @@ so no later tick ends it again while the main thread can't run (a locked phone),
 its own run."""
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.config import APP
 from app.session.manager import SessionManager, SessionState
-from app.session.session_run import SessionRun
+from app.session.session_run import Phase, SessionRun
 from app.ui.app_manager import EEGMeditationApp
 from tests._session_watch import make_watch
 from tests.test_resume_mirror import _drive_tick, _make_tick_app, _metrics, _raw_sample
@@ -28,6 +30,11 @@ def _locked_app(monkeypatch):
     persist = app._persist_session_data
     app._persist_session_data = lambda reason: (reasons.append(reason), persist(reason))[1]
     return app, queued, reasons
+
+
+_TICK_ENDINGS = pytest.mark.parametrize(
+    "end", [lambda app, run: app._end_from_tick(run, "stale_data", "No EEG data."), lambda app, run: app._end_by_timer(run)],
+    ids=["freeze", "timer"])
 
 
 def _unlock(queued) -> None:
@@ -133,10 +140,85 @@ def test_a_session_tick_that_outlived_its_run_records_nothing(monkeypatch):
     assert not app._shown.mirror.metrics and app._recorder._buffer == []
 
 
-def test_the_tick_thread_endings_end_only_their_own_run(monkeypatch):
+@_TICK_ENDINGS
+def test_a_tick_thread_ending_ends_only_its_own_run(monkeypatch, end):
     app, queued, reasons = _locked_app(monkeypatch)
     old = app._run
     app._run = SessionRun(1)  # a newer run, which a late ending must not stop
-    app._end_from_tick(old, "stale_data", "No EEG data.")
-    app._end_by_timer(old)
+    end(app, old)
     assert app._session_manager.state == SessionState.RUNNING and reasons == [] and not queued
+
+
+def test_a_session_tick_whose_stop_began_during_its_read_computes_nothing(monkeypatch):
+    # The Stop saved the session while the tick waited on the reader's lock; its teardown, which drops the run, is queued.
+    # The recorder already refuses the tick; before it come the metrics, the alerts and a program's step and cue.
+    app, _queued, reasons = _locked_app(monkeypatch)
+    run = app._run
+    app._eeg_stream.read_sample.side_effect = lambda: (app._stop_and_save(reason="user"), _raw_sample())[1]
+    app._metrics_engine.process_sample.return_value = _metrics()
+    EEGMeditationApp._session_tick(app, run)
+    assert app._run is run and reasons == ["user"]
+    app._metrics_engine.process_sample.assert_not_called()
+
+
+def test_a_tick_that_begins_after_an_ending_began_checks_nothing(monkeypatch):
+    # It begins between an ending's mark and its stop of the tick loop: no check may alert, show the link, or end it.
+    app, queued, reasons = _locked_app(monkeypatch)
+    app._real_stream.is_connected = False  # the link dropped
+    app._run.bt_connected_notified = True
+    app._real_stream.seconds_since_last_packet = app._watch.STALE_DATA_THRESHOLD + 1
+    app._mark_run_ended()
+    _drive_tick(app, _raw_sample(), _metrics())
+    assert reasons == [] and not queued and app._session_manager.state == SessionState.RUNNING
+    app._audio.play_disconnect_alert.assert_not_called()
+
+
+@_TICK_ENDINGS
+def test_a_tick_thread_ending_ends_its_run_at_once(monkeypatch, end):
+    app, _queued, _reasons = _locked_app(monkeypatch)
+    run = app._run
+    end(app, run)
+    assert run.phase is Phase.ENDED and app._outlived(run)
+    run.phase = Phase.STARTED  # a tick that passed its check before the ending began
+    assert run.phase is Phase.ENDED
+
+
+@_TICK_ENDINGS
+def test_two_tick_bodies_past_their_checks_end_the_run_once(monkeypatch, end):
+    # A late tick of a thread whose stop join timed out overlaps the new thread's; both are past their checks before
+    # either marks the run: one ending claims it.
+    app, _queued, _reasons = _locked_app(monkeypatch)
+    run, entered, mark = app._run, [], app._run.mark_ended
+
+    def second_body_first():
+        if not entered:
+            entered.append(True)
+            end(app, run)
+        return mark()
+    run.mark_ended = second_body_first
+    end(app, run)
+    app._audio.mute.assert_called_once()
+
+
+@pytest.mark.parametrize("ending", ["_stop_and_save", "_discard_running_session"])
+def test_a_main_thread_ending_marks_its_run_before_it_joins_the_tick(monkeypatch, ending):
+    # A tick still in progress during the stop's join must find its run ended.
+    app, _queued, _reasons = _locked_app(monkeypatch)
+    run, seen = app._run, []
+    app._ticker.stop.side_effect = lambda: seen.append(app._outlived(run))
+    getattr(app, ending)()
+    assert seen == [True]
+
+
+def test_a_timer_ending_in_the_tick_a_stop_joins_leaves_the_save_to_the_stop(monkeypatch):
+    app, _queued, reasons = _locked_app(monkeypatch)
+    run, joined = app._run, []
+
+    def join():  # the tick in progress during the join: its timer expires now
+        if not joined:
+            joined.append(True)
+            EEGMeditationApp._end_by_timer(app, run)
+    app._ticker.stop.side_effect = join
+    app._stop_and_save("user")
+    assert reasons == ["user"]
+    app._audio.play_timer_sound.assert_not_called()

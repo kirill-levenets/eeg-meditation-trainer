@@ -1,6 +1,5 @@
 """The live graphs' mirror: the markers a reload puts back where the live graphs put them, its raw buffer as big as the
 raw graph's, and its buffers read and changed only under its lock."""
-import threading
 from collections import deque
 from unittest.mock import MagicMock
 
@@ -8,6 +7,7 @@ from app.config import APP
 from app.session.recorder import RecordedTick
 from app.ui.live_mirror import LiveMirror
 from app.ui.live_session import LiveSessionScreen
+from tests._noted_lock import NotedLock
 from tests._shown_session import make_shown
 from tests.test_resume_mirror import _drive_tick, _make_tick_app, _metrics, _raw_sample
 
@@ -77,22 +77,7 @@ def test_the_mirror_keeps_as_many_raw_samples_as_the_raw_graph():
     assert LiveMirror().waveform.maxlen == LiveSessionScreen().raw_graph._data["eeg"].maxlen
 
 
-class _NotedLock:
-    """The mirror's lock, noting whether it is held."""
-
-    def __init__(self) -> None:
-        self._lock, self.held = threading.Lock(), False
-
-    def __enter__(self) -> None:
-        self._lock.acquire()
-        self.held = True
-
-    def __exit__(self, *exc) -> None:
-        self.held = False
-        self._lock.release()
-
-
-def _guarded(lock: _NotedLock, base: type) -> type:
+def _guarded(lock: NotedLock, base: type) -> type:
     """`base` that fails a read or change made while the mirror's lock is not held."""
     class Guarded(base):
         def __iter__(self):
@@ -116,7 +101,7 @@ def _guarded(lock: _NotedLock, base: type) -> type:
 def test_the_mirror_is_read_and_changed_only_under_its_lock():
     # So a reload's snapshot sees whole ticks: the counts it reads match the buffers it copies.
     mirror = LiveMirror()
-    lock = mirror._lock = _NotedLock()
+    lock = mirror._lock = NotedLock()
     for name in ("metrics", "bands", "waveform"):
         setattr(mirror, name, _guarded(lock, deque)(maxlen=getattr(mirror, name).maxlen))
     mirror.marks = _guarded(lock, list)()

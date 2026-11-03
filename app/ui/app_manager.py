@@ -699,10 +699,10 @@ class EEGMeditationApp(App):
         self._bt_wait.show_retry(message)
 
     def _abort_bt_wait(self) -> None:
-        """Tear down a BT-connect wait; the tick watcher stops first or it reads our stop as a failed connect."""
+        """Tear down a BT-connect wait: its run marked ended first, so a wait tick in progress acts on nothing, then the
+        tick watcher stopped before the stream, or it reads our stop as a failed connect."""
+        self._mark_run_ended()
         self._ticker.stop()
-        if self._run is not None:
-            self._run.phase = Phase.ENDED
         self._real_stream.stop()
         self._keep_awake.release()
         self._shown.owner = None  # no session came of the start, which emptied the display
@@ -721,7 +721,7 @@ class EEGMeditationApp(App):
         self._live_screen.update_state(state)
 
     def _undo_session_setup(self) -> None:
-        """Main thread: undo what _start_session_common set up, for a session that ended or never started. Ends its
+        """Main thread: undo what _start_session_common set up, for a session that ended or never started. Drops its
         run, so the callbacks still queued for it do nothing."""
         self._run = None
         self._live_screen.set_training_series(None)  # clear the program "training now" marker
@@ -881,8 +881,7 @@ class EEGMeditationApp(App):
         session row under the doomed profile; without the delete it survives as
         an orphan. Then reuses the shared _finalize_stop_ui teardown so the
         Session screen returns to idle."""
-        if self._run is not None:
-            self._run.phase = Phase.ENDED  # also halts a start still in the BT wait
+        self._mark_run_ended()  # also halts a start still in the BT wait
         self._ticker.stop()
         self._session_manager.stop(reason="user")
         if APP.USE_MOCK_DEVICE:
@@ -894,6 +893,7 @@ class EEGMeditationApp(App):
     def _stop_and_save(self, reason: str = "user") -> None:
         """Stop session and save data immediately (no dialog). Main-thread path."""
         t_start = time.monotonic()
+        self._mark_run_ended()
         self._ticker.stop()
         stats = self._persist_session_data(reason)
         self._audio.stop()
@@ -919,15 +919,15 @@ class EEGMeditationApp(App):
         logger.info("Stop cancelled")
 
     def _on_main_for(self, run: SessionRun, fn: Callable[[], object]) -> None:
-        """Queue fn for the main thread as part of `run`; it does nothing once that run has ended (a Cancel, Stop or
-        profile delete handled before it) or another Start has replaced it."""
+        """Queue fn for the main thread as part of `run`; it does nothing once that run was dropped or replaced by another
+        Start. A run only marked ended still runs it: an ending marks its run first and may queue its own finish."""
         self._on_main(lambda: fn() if self._run is run else None)
 
     def _update_tick(self, dt: float) -> None:
         """Tick thread, 2 Hz: a step of the run's BT wait or a tick of its running session; Kivy goes through _on_main,
         while audio, metrics and DB writes are thread-safe."""
         run = self._run  # this tick's run: a stop waits up to 1 s for a tick in progress, so act only while it is current
-        if run is None:
+        if run is None or self._outlived(run):  # an ending began: no check may alert or end it again
             return
         if run.phase is Phase.CONNECTING:
             self._follow_bt_wait(run)
@@ -1046,15 +1046,25 @@ class EEGMeditationApp(App):
         if not self._is_paused:
             self._on_main(_ui_update)
 
+    def _mark_run_ended(self) -> None:
+        """An ending begins: a tick of the run still in progress acts on nothing from here (`_outlived`)."""
+        run = self._run  # read once: another thread may drop the run between a check and its use
+        if run is not None:
+            run.mark_ended()
+
+    def _claim_ending(self, run: SessionRun) -> bool:
+        """Tick thread: whether this ending is the run's one: the run is current and this call marked it ended."""
+        return run is self._run and run.mark_ended()
+
     def _outlived(self, run: SessionRun) -> bool:
-        """A tick body that outlived its run (a stop's 1 s tick join timed out, then a Cancel, a Stop or a new Start):
-        it acts on nothing shared, which a newer run or no run now owns."""
-        return run is not self._run
+        """A tick body whose run was marked ended, or dropped or replaced (a stop's 1 s tick join timed out): it acts on
+        nothing shared."""
+        return run is not self._run or run.phase is Phase.ENDED
 
     def _end_from_tick(self, run: SessionRun, reason: str, alert: str) -> None:
         """Tick thread: a check ended the session. It is frozen here (its duration ends now, its sound goes quiet, no
         later tick can end it again) and saved on the main thread, once, while its run is current."""
-        if self._outlived(run):
+        if not self._claim_ending(run):
             return
         self._session_manager.pause()
         self._audio.mute()  # before the checkpoint, which may wait on the write lock
@@ -1064,7 +1074,7 @@ class EEGMeditationApp(App):
 
     def _end_by_timer(self, run: SessionRun) -> None:
         """Tick thread: the timer expired; save the session, silence it, end the tick, ring the gong."""
-        if self._outlived(run):
+        if not self._claim_ending(run):
             return
         logger.info("Timer expired, auto-stopping session")
         # Persist FIRST, before any audio teardown: the session must be saved even with the screen locked, and

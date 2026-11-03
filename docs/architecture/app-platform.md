@@ -97,8 +97,10 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 - Most app tests build the app with `__new__` and only the parts they need (`tests/_context.py` and a helper per flow).
   `tests/test_app_build.py` runs the real constructor and `build()` on a temp DB, as `main.py` does:
-  a restored profile with hooks driven through to their flows and a profile switch, and a DB with no last profile, where the gate blocks the app until one is made;
-  it stubs only the BT scan and the crash handler's install (its hooks are process-wide) and restores the theme, text size, line colours and the Window's key bindings after.
+  a restored profile with hooks driven through to their flows and a profile switch, a DB with no last profile, where the gate blocks the app until one is made,
+  and mock sessions on the real tick thread, each saved once;
+  it stubs only the BT scan and the crash handler's install (its hooks are process-wide) and restores the theme, text size, line colours, the Window's rotation and key bindings after;
+  it stops the app's tick thread, which a test that failed mid-session would leave running.
 - `tests/test_silent_failure_guardrail.py` is an AST guardrail run on every `pytest` (issue #29 invariant): it scans `app/` and fails on
   a **silent user-gate return** (`if not self._current_user_id: return/pass`, or through a local alias of it, with no user-feedback call)
   or a **discarded bool-returning DB write** (the result of a public `DatabaseManager` method annotated to return a bool, e.g. `add_saved_program`, ignored).

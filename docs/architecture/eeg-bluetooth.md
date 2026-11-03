@@ -79,12 +79,14 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   a give-up aborts on the tick thread (`_abort_bt_wait`) and queues the undo and the retry screen (`_undo_failed_start`).
   A refused `start()` undoes the start's setup the same way, with the retry overlay showing `_last_connect_error` and no `bt_connect_failed` soft error (its 60 s cooldown would hide the next real failure).
   **Every BT-wait exit** (Cancel, Stop, no data, keeps closing, failed connect, timeout) goes through `_abort_bt_wait()`:
-  it stops the tick watcher (and marks the run ENDED, so it is no longer connecting) **before** `_real_stream.stop()`, then releases the wake lock and keep-alive service (`KeepAwake.release`).
+  it marks the run ENDED (no longer connecting, so a wait tick still in progress acts on nothing), then stops the tick watcher **before** `_real_stream.stop()`, then releases the wake lock and keep-alive service (`KeepAwake.release`).
   The watcher reads `not stream._running` as a failed connect, so stopping the stream first shows a false "Connection failed".
   **A session start is one run** (#52, `SessionRun` in `app/session/session_run.py`, the app's `_run`):
   `_on_start` makes it (the device scan belongs to it) and every ending drops it (`_undo_session_setup()`, which every ending goes through); a callback queued for a run does nothing once `_run` is no longer that run.
   Its phase is what `SessionManager` doesn't know: STARTING (Start pressed, scanning or setting up), CONNECTING (the BT wait), STARTED (running or paused: `SessionManager.state` says which);
-  ENDED (a wait abandoned or a session discarded, its main-thread teardown still queued).
+  ENDED (an ending began: a wait abandoned, a session stopped, saved or discarded; its main-thread teardown may still be queued).
+  Every ending marks it first, before it joins the tick: `_mark_run_ended()` (the main thread's endings, and `_abort_bt_wait` wherever it runs), or `_claim_ending(run)` (a session's tick-thread endings),
+  and ENDED is terminal: no later write revives the run, and only the call that marked it claims the ending (`SessionRun.mark_ended`, the only way to end a run, is a locked check-and-set).
   It holds the per-run state (the wait's windows and drops, the tick count, the pending marker, the shamatha pill's streak, the scored mark, the warnings), so a new Start begins from nothing the last one left.
   That covers the device scan's result in `_on_start` and every main-thread callback the BT wait queues through `_on_main_for(run, fn)`: `_on_session_connected` (the "connected" UI and audio), the exits' retry screens, the overlay text.
   Without it, a Cancel during "Scanning for MindWave…" still starts the session;
@@ -92,7 +94,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   and a wait exit's queued retry screen undoes the next Start.
   A tick reads `_run` once, at its start, and passes that run on:
   a Cancel can land mid-tick and its 1 s tick join can time out (`read_sample` waits for the reader's lock), so the tick may queue after the Cancel has finished, for its own, ended run.
-  If that join times out, the late tick acts on nothing shared (`_outlived(run)`): the BT wait's end, the session tick after its read, the tick-thread endings.
+  The late tick acts on nothing shared once its run has ended or been replaced (`_outlived(run)`: at the tick's start, the BT wait's end, the session tick after its read), and a session's tick-thread ending acts only if it claims the run.
+  The check precedes the act: a tick past its check when the ending begins still finishes, before the teardown only if the stop's 1 s join covers it.
   `_on_stop` decides by `SessionManager.state`, not the run's phase, because a wait exit ends the wait before its idle UI shows and a Stop in that window must not offer to save a session that never started:
   RUNNING/PAUSED asks to stop and save;
   FINISHED (the timer ended it on the tick thread and its teardown is queued) is ignored, since cancelling there would stop the kept-alive headset link;

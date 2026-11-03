@@ -46,7 +46,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 
 - **A Start cancelled just as the headset's first data arrived could leave a session running unseen**, so Restore and a profile switch said a session was in progress.
-  A tick that outlives its Start now changes nothing.
+  Every ending now marks its run ended first, and a tick whose run has ended or been replaced (a Cancel, a Stop, a tick-thread ending, a new Start) changes nothing.
 - **Markers vanished from the Session screen's graphs** when a session ended, and when the screen was unlocked during one.
   They stay where they were placed; the session detail in History always had them.
 - **A headset that reconnected mid-session still showed as reconnecting until the session ended**, and Settings › Device still showed it connected while the link was down.

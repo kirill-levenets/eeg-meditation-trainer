@@ -75,6 +75,23 @@ def _waiting(app) -> EEGMeditationApp:
     return app
 
 
+def _end_the_wait(app, exit_case: str) -> None:
+    """Make the next BT-wait tick end the wait the given way."""
+    if exit_case == "failed":
+        app._real_stream.is_connected = False
+        app._real_stream._running = False
+        app._real_stream._last_connect_error = "Host is down"
+    elif exit_case == "no data":
+        app._real_stream.read_sample.return_value = dict(BANDS, delta=0.0, theta=0.0, alpha1=0.0, alpha2=0.0,
+                                                         beta1=0.0, beta2=0.0, gamma1=0.0, gamma2=0.0)
+        app._real_stream.seconds_since_last_packet = 0
+        app._run.signal_start = time.time() - BtWait.SIGNAL_TIMEOUT - 1
+    else:
+        app._real_stream.is_connected = False
+        app._real_stream._running = True
+        app._run.connect_start = time.time() - BtWait.CONNECT_TIMEOUT - 1
+
+
 # ---- Stop decides by the session, not by the wait flag ----
 
 
@@ -93,7 +110,17 @@ def test_stop_during_a_running_session_still_asks():
     app._confirm_action.assert_called_once()
 
 
-# ---- nothing queued for an ended run runs ----
+def test_stop_after_the_timer_ended_the_session_leaves_its_teardown_alone():
+    app = _app()
+    app._session_manager.start()
+    app._session_manager.stop(reason="timer")  # saved on the tick thread; its UI teardown is queued
+    app._on_stop()
+    app._real_stream.stop.assert_not_called()  # the kept-alive headset link stays up
+    app._confirm_action.assert_not_called()
+    app._live_screen.update_state.assert_not_called()
+
+
+# ---- a run that ended or was replaced starts nothing ----
 
 
 def test_a_cancel_in_the_frame_the_session_starts_leaves_no_session_running():
@@ -158,6 +185,39 @@ def test_a_first_data_tick_that_outlived_its_run_starts_nothing():
     app._timer_state.start_countdown.assert_not_called()
 
 
+def test_a_first_data_tick_after_the_cancel_began_starts_nothing():
+    # The tick runs between the Cancel's abort and its teardown, which drops the run: the run is still current.
+    app = _waiting(_app())
+    run = app._run
+    app._abort_bt_wait()
+    app._follow_bt_wait(run)
+    assert app._session_manager.state == SessionState.IDLE and run.phase is Phase.ENDED and not app._queued
+    app._timer_state.start_countdown.assert_not_called()
+
+
+def test_the_wait_abort_marks_its_run_before_it_joins_the_tick():
+    app = _waiting(_app())
+    run, seen = app._run, []
+    app._ticker.stop = MagicMock(side_effect=lambda: seen.append(app._outlived(run)))
+    app._abort_bt_wait()
+    assert seen == [True]
+
+
+@pytest.mark.parametrize("exit_case", ["failed", "no data", "timeout"])
+def test_a_wait_exit_queued_before_a_cancel_leaves_the_next_start_alone(exit_case, monkeypatch):
+    app = _waiting(_app())
+    _end_the_wait(app, exit_case)
+    app._follow_bt_wait(app._run)  # the wait ended on the tick thread; its retry screen is queued
+    app._on_connect_cancel()
+    monkeypatch.setattr(APP, "USE_MOCK_DEVICE", True)
+    app._mock_stream = MagicMock()
+    app._start_session_common = lambda: app._session_manager.start()
+    app._on_start()  # the next Start, handled before the queued retry screen
+    _run_queued(app)
+    assert app._session_manager.state == SessionState.RUNNING
+    app._live_screen.show_overlay_retry.assert_not_called()
+
+
 def test_deleting_the_profile_in_the_frame_the_session_starts_leaves_no_audio_playing():
     app = _waiting(_app())
     app._follow_bt_wait(app._run)  # data arrived: the "Running" UI + audio are queued
@@ -169,25 +229,6 @@ def test_deleting_the_profile_in_the_frame_the_session_starts_leaves_no_audio_pl
     app._discard_running_session()
     _run_queued(app)
     app._audio.start.assert_not_called()
-
-
-def test_the_header_start_time_is_when_the_data_arrived(monkeypatch):
-    app = _waiting(_app())
-    app._follow_bt_wait(app._run)
-    started = app._session_manager.started_at
-    monkeypatch.setattr(am.time, "time", lambda: started + 600)  # the queued UI runs after a 10-min screen lock
-    _run_queued(app)
-    app._live_screen.set_start_time.assert_called_once_with(started)
-
-
-def test_stop_after_the_timer_ended_the_session_leaves_its_teardown_alone():
-    app = _app()
-    app._session_manager.start()
-    app._session_manager.stop(reason="timer")  # saved on the tick thread; its UI teardown is queued
-    app._on_stop()
-    app._real_stream.stop.assert_not_called()  # the kept-alive headset link stays up
-    app._confirm_action.assert_not_called()
-    app._live_screen.update_state.assert_not_called()
 
 
 def test_cancel_during_the_device_scan_does_not_start_the_session(monkeypatch):
@@ -238,7 +279,23 @@ def test_a_scan_result_for_a_profile_picked_away_ends_the_start(monkeypatch):
     app._live_screen.set_controls_idle.assert_called()
 
 
-# ---- an ended run undoes its program setup ----
+def test_a_wait_tick_that_outlived_its_run_ends_nothing(monkeypatch):
+    # The tick read its run, then a Cancel and a new Start replaced it: the new run owns the stream now.
+    monkeypatch.setattr(APP, "USE_MOCK_DEVICE", False)
+    app = _app()
+    old = run_in(app, Phase.CONNECTING)
+    old.connect_start = time.time()
+    app._real_stream.is_connected, app._real_stream._running = False, False  # the old wait would give up
+    app._real_stream._last_connect_error = "Headset is asleep or off."
+    new = run_in(app, Phase.CONNECTING)
+    app._follow_bt_wait(old)
+    app._ticker.stop.assert_not_called()  # the new run's wait goes on: no abort
+    app._real_stream.stop.assert_not_called()
+    am.report_soft_error.assert_not_called()  # and no diagnostic for a failure the new run didn't have
+    assert app._run is new and new.phase is Phase.CONNECTING and not app._queued
+
+
+# ---- a run's ending undoes its program setup ----
 
 
 def _with_program(app) -> EEGMeditationApp:
@@ -255,23 +312,6 @@ def test_a_cancelled_program_session_restores_the_series_and_leaves_no_program_s
     assert not app._program_run.active and app._program_run._prev_visibility == {}
 
 
-def _end_the_wait(app, exit_case: str) -> None:
-    """Make the next BT-wait tick end the wait the given way."""
-    if exit_case == "failed":
-        app._real_stream.is_connected = False
-        app._real_stream._running = False
-        app._real_stream._last_connect_error = "Host is down"
-    elif exit_case == "no data":
-        app._real_stream.read_sample.return_value = dict(BANDS, delta=0.0, theta=0.0, alpha1=0.0, alpha2=0.0,
-                                                         beta1=0.0, beta2=0.0, gamma1=0.0, gamma2=0.0)
-        app._real_stream.seconds_since_last_packet = 0
-        app._run.signal_start = time.time() - BtWait.SIGNAL_TIMEOUT - 1
-    else:
-        app._real_stream.is_connected = False
-        app._real_stream._running = True
-        app._run.connect_start = time.time() - BtWait.CONNECT_TIMEOUT - 1
-
-
 @pytest.mark.parametrize("exit_case", ["failed", "no data", "timeout"])
 def test_a_wait_that_ends_on_its_own_undoes_the_program_setup(exit_case):
     app = _with_program(_waiting(_app()))
@@ -280,21 +320,6 @@ def test_a_wait_that_ends_on_its_own_undoes_the_program_setup(exit_case):
     _run_queued(app)
     assert not app._program_run.active and app._program_run._prev_visibility == {}
     app._live_screen.show_overlay_retry.assert_called_once()
-
-
-@pytest.mark.parametrize("exit_case", ["failed", "no data", "timeout"])
-def test_a_wait_exit_queued_before_a_cancel_leaves_the_next_start_alone(exit_case, monkeypatch):
-    app = _waiting(_app())
-    _end_the_wait(app, exit_case)
-    app._follow_bt_wait(app._run)  # the wait ended on the tick thread; its retry screen is queued
-    app._on_connect_cancel()
-    monkeypatch.setattr(APP, "USE_MOCK_DEVICE", True)
-    app._mock_stream = MagicMock()
-    app._start_session_common = lambda: app._session_manager.start()
-    app._on_start()  # the next Start, handled before the queued retry screen
-    _run_queued(app)
-    assert app._session_manager.state == SessionState.RUNNING
-    app._live_screen.show_overlay_retry.assert_not_called()
 
 
 # ---- a session row is dated and named by its start ----
@@ -344,6 +369,15 @@ def test_a_name_made_before_the_start_uses_the_current_time(monkeypatch):
 # ---- how a headset session starts ----
 
 
+def test_the_header_start_time_is_when_the_data_arrived(monkeypatch):
+    app = _waiting(_app())
+    app._follow_bt_wait(app._run)
+    started = app._session_manager.started_at
+    monkeypatch.setattr(am.time, "time", lambda: started + 600)  # the queued UI runs after a 10-min screen lock
+    _run_queued(app)
+    app._live_screen.set_start_time.assert_called_once_with(started)
+
+
 def test_a_link_kept_from_the_last_session_starts_the_session_at_once(monkeypatch):
     monkeypatch.setattr(APP, "USE_MOCK_DEVICE", False)
     app = _app()
@@ -387,19 +421,3 @@ def test_a_marker_is_placed_only_in_a_running_session():
     app._session_manager.resume()
     app._on_marker()
     assert run.pending_marker  # the next recorded tick carries it
-
-
-def test_a_wait_tick_that_outlived_its_run_ends_nothing(monkeypatch):
-    # The tick read its run, then a Cancel and a new Start replaced it: the new run owns the stream now.
-    monkeypatch.setattr(APP, "USE_MOCK_DEVICE", False)
-    app = _app()
-    old = run_in(app, Phase.CONNECTING)
-    old.connect_start = time.time()
-    app._real_stream.is_connected, app._real_stream._running = False, False  # the old wait would give up
-    app._real_stream._last_connect_error = "Headset is asleep or off."
-    new = run_in(app, Phase.CONNECTING)
-    app._follow_bt_wait(old)
-    app._ticker.stop.assert_not_called()  # the new run's wait goes on: no abort
-    app._real_stream.stop.assert_not_called()
-    am.report_soft_error.assert_not_called()  # and no diagnostic for a failure the new run didn't have
-    assert app._run is new and new.phase is Phase.CONNECTING and not app._queued

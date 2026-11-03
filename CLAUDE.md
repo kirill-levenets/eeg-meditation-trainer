@@ -118,7 +118,8 @@ The linked file explains the mechanism.
   a profile's headset is found by `Headset.scan`, whose result does nothing once the profile, its headset or mode changed or a session started;
   only Start opens Settings → Device to pick. → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md#connection)
 - **A session start is one run** (`SessionRun`, `app/session/session_run.py`, the app's `_run`): its phase and per-run state, from the Start to its ending;
-  a callback queued for an earlier run does nothing (`_on_main_for(run, fn)`), and the tick works on the run it read at its start.
+  a callback queued for an earlier run does nothing (`_on_main_for(run, fn)`), and the tick works on the run it read at its start;
+  every ending marks its run ended first (`_mark_run_ended()`, or `_claim_ending(run)` in a session's tick-thread endings), and a tick whose run ended or was replaced acts on nothing (`_outlived(run)`).
   Every BT-wait exit goes through `_abort_bt_wait()` (tick watcher stopped before the stream); every ending undoes the start's setup through `_undo_session_setup()`. → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md)
 - **At most one tick thread.**
   `TickThread.start` (`app/session/tick_thread.py`, the app's `_ticker`) is a no-op while one is alive; each thread gets its own stop event. → [session](docs/architecture/session.md)
@@ -137,7 +138,7 @@ The linked file explains the mechanism.
   the row and the buffered ticks in one transaction, at the 60 s flush, on leaving the app, at backup and at the final save. → [session](docs/architecture/session.md#persistence)
 - **Every ending saves through one path**: `_stop_and_save` → `_persist_session_data` (tick-thread-safe, no Kivy) + `_finalize_stop_ui` (main thread).
   There is no discard path; a confirm that arrives after the session ended writes nothing.
-  A check that ends it on the tick thread (stale data, the recording limit) freezes it there (`_end_from_tick`: pause, mute, checkpoint, stop the tick) and saves once on main;
+  A check that ends it on the tick thread (stale data, the recording limit) freezes it there (`_end_from_tick`: mark the run ended, pause, mute, checkpoint, stop the tick) and saves once on main;
   every queued finish runs only for its own run. → [session](docs/architecture/session.md#persistence)
 - While a session runs or connects (`_session_pipeline_live()`), anything that would break it is refused through `_refused_while_session_runs(doing)`:
   profile switch, Restore, the scored metric (`AudioMetric.scoring_locked`), a running program's threshold, Settings › Audio's Test. → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
