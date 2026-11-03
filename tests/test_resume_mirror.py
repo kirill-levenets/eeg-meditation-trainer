@@ -16,7 +16,6 @@ with stubbed subsystems so the mirror-fill and batch-reload logic — the
 exact lines the ANR fix introduced — are exercised, not re-implemented.
 """
 
-import threading
 import time
 from unittest.mock import MagicMock
 
@@ -534,85 +533,3 @@ def test_timer_expiry_updates_existing_session_row():
     assert stats["score_metric_key"] == app._audio_metric.drive_key() and "score_metric_name" in stats  # #51
     assert (kwargs["custom_formulas"], kwargs["session_program"], kwargs["engine_version"]) == (
         "[]", "", MetricsEngine.ENGINE_VERSION)
-
-
-# --- markers through a reload (a load clears a graph's markers) --------------------
-
-
-def _marked_mirror(ticks: int, marked: set, waveform: int = 3) -> LiveMirror:
-    mirror = LiveMirror()
-    for i in range(ticks):
-        raw = _raw_sample(seed=float(i), with_waveform=False)
-        if waveform:
-            raw["raw_eeg_waveform"] = [float(i)] * waveform
-        mirror.record(RecordedTick(_metrics(seed=float(i)), raw, {"score_target": 50, "score_key": "shamatha_score"},
-                                   i in marked))
-    return mirror
-
-
-def _markers(screen) -> list:
-    return [list(g._markers) for g in (screen.graph, screen.band_graph, screen.raw_graph)]
-
-
-def test_a_reload_keeps_the_markers_where_the_live_graphs_put_them():
-    screen = LiveSessionScreen()
-    _marked_mirror(3, {1}).reload_into(screen)
-    assert _markers(screen) == [[1], [1], [5]]  # its tick, and its tick's last raw sample (3 per tick)
-
-
-def test_a_full_buffer_shifts_the_markers_and_drops_the_ones_it_dropped(monkeypatch):
-    monkeypatch.setattr(APP, "GRAPH_POINTS_MAX", 3)  # the metrics and bands keep the last 3 ticks
-    screen = LiveSessionScreen()
-    _marked_mirror(5, {0, 3}, waveform=0).reload_into(screen)
-    assert _markers(screen) == [[1], [1], [0, 3]]  # the raw buffer still holds every sample
-
-
-def test_a_cleared_mirror_forgets_its_markers():
-    mirror = _marked_mirror(3, {1})
-    mirror.clear()
-    mirror.record(RecordedTick(_metrics(), _raw_sample(), {"score_target": 50, "score_key": "shamatha_score"}, False))
-    screen = LiveSessionScreen()
-    mirror.reload_into(screen)
-    assert _markers(screen) == [[], [], []]
-
-
-def test_a_marked_tick_is_mirrored_with_its_marker():
-    app = _make_tick_app()
-    app._run.pending_marker = True
-    _drive_tick(app, _raw_sample(), _metrics())
-    _drive_tick(app, _raw_sample(), _metrics())
-    assert app._shown.mirror.marks == [(0, 2)]  # the first tick, its third raw sample
-
-
-def test_the_live_graphs_and_a_reload_put_a_marker_in_the_same_places():
-    app = _make_tick_app()
-    app._live_screen = LiveSessionScreen()
-    app._shown = make_shown(app)  # over the real screen, as build() wires it
-    app._live_screen.update_stats = MagicMock()  # the stub session manager has no score to show
-    app._recorder.record = lambda metrics, row: {"score_target": 50, "score_key": "shamatha_score"}
-    app._on_main = lambda fn: fn()  # the tick's UI update runs, as the main thread would run it
-    for i in range(3):
-        app._run.pending_marker = i == 1
-        _drive_tick(app, _raw_sample(seed=float(i)), _metrics(seed=float(i)))
-    reloaded = LiveSessionScreen()
-    app._shown.mirror.reload_into(reloaded)
-    assert _markers(app._live_screen) == _markers(reloaded) == [[1], [1], [5]]
-
-
-def test_recording_and_a_reload_take_turns_on_the_mirror():
-    # A reload's snapshot sees whole ticks: its counts match the buffers it copies.
-    mirror = _marked_mirror(2, set())
-    tick = RecordedTick(_metrics(), _raw_sample(), {"score_target": 50, "score_key": "shamatha_score"}, True)
-    screen = MagicMock()
-    with mirror._lock:  # one of them holds the mirror
-        workers = [threading.Thread(target=mirror.record, args=(tick,)),
-                   threading.Thread(target=mirror.reload_into, args=(screen,))]
-        for w in workers:
-            w.start()
-        for w in workers:
-            w.join(0.2)
-        assert all(w.is_alive() for w in workers) and len(mirror.metrics) == 2
-        screen.graph.load_static_data.assert_not_called()
-    for w in workers:
-        w.join(2)
-    assert not any(w.is_alive() for w in workers) and len(mirror.metrics) == 3

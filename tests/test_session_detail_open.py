@@ -16,7 +16,7 @@ import app.ui.session_detail_flow as session_detail_flow
 from app.metrics.formula_slots import FormulaSlots
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
-from app.ui.diary_screen import DiaryScreen
+from app.ui.diary_screen import DiaryScreen, detail_graph_data
 from app.ui.hooks import wire
 from tests._graph_series import make_graph_series
 from tests._history_flow import make_detail_flow
@@ -267,3 +267,14 @@ def test_the_band_tables_view_is_kept_per_profile_for_the_next_detail(app):
     a._current_user_id = a._db.create_user("other")
     a._detail.on_session_select(a.sessions["A"])
     assert (table._mode, table._sort_by, table._descending) == ("detailed", "band", False)  # its own: the default
+
+
+def test_a_details_graphs_carry_the_sessions_markers():
+    rows = [{"timestamp": float(i), "marker": 1 if i == 2 else 0} for i in range(4)]
+    detail = DiaryScreen()
+    detail.show_session_detail({"id": 1, "date_time": "2026-10-10T07:30:00", "duration": 600})
+    data = detail_graph_data(rows, {})
+    for section in ("metrics", "raw", "freq"):
+        detail.fill_graph(section, data)
+    shown = [list(detail._graph_for_tab(s)._markers) for s in ("metrics", "raw", "freq")]
+    assert shown == [[2], [2 * 256], [2]]  # its tick, and its tick's first synthesized raw sample (256 per tick)

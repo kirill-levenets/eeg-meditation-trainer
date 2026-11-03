@@ -377,7 +377,7 @@ class DiaryScreen(Screen):
             show_value_labels=True,
             show_timestamps=True,
             sample_rate=_SYNTH_RATE,
-            max_points=int(_SYNTH_RATE * 60),
+            max_points=_RAW_MAX_SAMPLES,  # what the synthesizer keeps: the raw marker indices count into it
             bipolar=True,
             size_hint_y=1,
             graph_id="diary_raw",
