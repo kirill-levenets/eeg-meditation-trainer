@@ -119,6 +119,17 @@ def test_with_no_profile_to_restore_the_gate_blocks_the_app_until_one_is_made(bu
     assert app._backup_flow._user_name() == "new"  # the profile a backup is named after
 
 
+def test_a_slider_value_off_by_rounding_applies_its_width_once(build_app, monkeypatch):
+    # The setting holds the rounded value; written back onto the slider, it would fire the slider's hook again.
+    app = build_app(_last_used("me"))
+    applied = []
+    monkeypatch.setattr(app, "_apply_line_width", applied.append)
+    app._settings_screen.display._line_width_slider.value = 1.3000000000000003  # a drag's raw value
+    assert applied == [1.3] and app._settings_store.value("line_width") == 1.3
+    app._change_setting("line_width", 2.0)  # set from code (a profile's load): the slider follows
+    assert app._settings_screen.display._line_width_slider.value == 2.0 and applied[-1] == 2.0
+
+
 def test_mock_sessions_on_the_real_tick_thread_are_each_saved_once(build_app):
     app = build_app(_last_used("me"))
     uid = app._current_user_id

@@ -1394,7 +1394,7 @@ class EEGMeditationApp(App):
         display, ls = self._settings_screen.display, self._live_screen
 
         def apply_line_width(v):
-            display._line_width_slider.value = v; self._apply_line_width(v)
+            display.show_line_width(v); self._apply_line_width(v)
 
         def apply_rotation(v):
             display._current_rotation = v
