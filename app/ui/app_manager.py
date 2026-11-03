@@ -679,7 +679,7 @@ class EEGMeditationApp(App):
         """Tick thread: one step of the run's BT wait. Its first data starts the session against the threshold in force
         (it may have moved); a give-up tears the wait down here and undoes the start on the main thread."""
         end = self._bt_wait.tick(run)
-        if end is None:
+        if end is None or run is not self._run:  # a tick that outlived its run: a new Start owns the stream now
             return
         if not end.started:
             self._abort_bt_wait()

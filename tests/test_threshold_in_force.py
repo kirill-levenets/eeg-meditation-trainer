@@ -501,3 +501,8 @@ def test_moving_the_slider_during_a_simple_session_keeps_its_graphs():
     a._on_threshold_change(85)
     a._live_screen.graph.clear_data.assert_not_called()
     a._live_screen.graph.set_threshold_steps.assert_not_called()
+
+
+def test_a_session_start_holds_the_phone_awake(monkeypatch):
+    a = _start(False, monkeypatch)
+    a._keep_awake.hold.assert_called_once_with()  # the wake lock, the screen-on flag, the foreground service

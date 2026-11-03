@@ -286,6 +286,15 @@ def test_on_resume_during_restore_reshows_relaunch_popup():
     app._gate.open.assert_not_called()
 
 
+def test_a_resume_with_no_profile_reopens_the_gate():
+    # The process survived in the background with no active profile: the app is never usable without one.
+    app = EEGMeditationApp.__new__(EEGMeditationApp)
+    app._is_paused, app._current_user_id = True, None
+    app._gate = MagicMock(**{"shown.return_value": False})
+    EEGMeditationApp.on_resume(app)
+    app._gate.open.assert_called_once_with(0)
+
+
 def test_gate_active_during_schedule_window_before_popup_exists():
     # #5: un-escapable even before the popup is created (nav disabled, no user).
     app = EEGMeditationApp.__new__(EEGMeditationApp)

@@ -4,9 +4,11 @@ import time
 from unittest.mock import MagicMock
 
 import app.ui.app_manager as am
+import app.ui.bt_wait as bt_wait
 from app.session.manager import SessionManager
-from app.session.session_run import Phase
+from app.session.session_run import Phase, SessionRun
 from app.ui.app_manager import EEGMeditationApp
+from app.ui.bt_wait import BtWait, WaitEnd
 from tests._bt_wait import make_bt_wait
 from tests._headset import make_headset
 from tests._program_run import make_run
@@ -123,3 +125,16 @@ def test_started_stream_enters_the_wait():
     assert app._connecting()
     app._live_screen.show_overlay.assert_called_once()
     app._keep_awake.release.assert_not_called()
+
+
+def test_a_failed_connect_is_reported_with_its_headset_and_hint(monkeypatch):
+    reports = []
+    monkeypatch.setattr(bt_wait, "report_soft_error", lambda label, detail="", **_k: reports.append((label, detail)))
+    stream = MagicMock(is_connected=False, _running=False, _device_address="AA:BB",
+                       _last_connect_error="Headset is asleep or off.")
+    wait = BtWait(stream, MagicMock(), headset_name=lambda: "MWM2", on_main_for=lambda run, fn: None)
+    run = SessionRun(1)
+    run.connect_start = time.time()
+    assert wait.tick(run) == WaitEnd(False, "Connection to MWM2 failed.\nHeadset is asleep or off.")
+    (label, detail), = reports
+    assert label == "bt_connect_failed" and "MWM2 (AA:BB)" in detail and "Headset is asleep or off." in detail

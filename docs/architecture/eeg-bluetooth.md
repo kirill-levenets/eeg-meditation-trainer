@@ -108,7 +108,9 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   It also records the run's `dropped_at` (monotonic): only packets after the drop count as streaming, since a streaming headset's wait has no no-data timeout and an older packet would keep a silent socket's wait open.
   The session starts only on band data with a packet on this connection (`total > 0 and has_packets`), since the reader keeps the last band values across a reconnect.
   Restarting the windows unbounds a headset that keeps connecting and closing, so a wait ends at its third drop (`MAX_DROPS` = 2, counted by the run's `drops`: a Retry is a new Start, with none) with "keeps closing the connection";
-  every wait exit that gives up (keeps closing, no data, a failed connect, the connect timeout) goes through `BtWait._give_up(run, name, message)`, which leaves the headset's name on the Session screen under its retry screen.
+  every wait exit that gives up (keeps closing, no data, a failed connect, the connect timeout) returns its message to `_follow_bt_wait`, which aborts the wait and queues `_undo_failed_start`;
+  `BtWait.show_retry` leaves the headset's name on the Session screen under its retry screen.
+  A tick that outlived its run (a new Start replaced it) acts on nothing it decided: the new run owns the stream.
   `tests/test_bt_wait_reconnect.py` replays drops and reconnects on a fake clock.
   Android reads drain what is available in one `InputStream.read(buf, 0, n)` per chunk, the buffer sized to the read (pyjnius copies the whole array both ways, so an oversized buffer is slower);
   byte-at-a-time reads would be ~4000 JNI calls/s at the 512 Hz raw rate.

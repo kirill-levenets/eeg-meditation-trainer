@@ -57,6 +57,32 @@ def test_the_wake_lock_is_taken_and_given_back_through_the_activity(monkeypatch)
     assert keep_awake._wake_lock is None
 
 
+def test_a_session_holds_the_phone_awake_and_lets_it_go(monkeypatch):
+    # hold(): the screen-on flag, the partial wake lock and the foreground service; release() undoes all three.
+    monkeypatch.setattr(android_jni, "on_android", lambda: True)
+    _fake_run_on_ui_thread(monkeypatch)
+    window, lock, power, service = MagicMock(), MagicMock(), MagicMock(), MagicMock()
+    power.newWakeLock.return_value = lock
+    activity = types.SimpleNamespace(getWindow=lambda: window,
+                                     getSystemService=lambda name: power if name == "power" else None)
+    _fake_jnius(monkeypatch, {
+        "org.kivy.android.PythonActivity": types.SimpleNamespace(mActivity=activity),
+        "android.view.WindowManager$LayoutParams": types.SimpleNamespace(FLAG_KEEP_SCREEN_ON=128),
+        "android.content.Context": types.SimpleNamespace(POWER_SERVICE="power"),
+        "android.os.PowerManager": types.SimpleNamespace(PARTIAL_WAKE_LOCK=1),
+        "org.eeg.eegmeditation.SessionForegroundService": service,
+    })
+    keep_awake = KeepAwake()
+    keep_awake.hold()
+    window.addFlags.assert_called_once_with(128)
+    lock.acquire.assert_called_once_with()
+    service.start.assert_called_once_with(activity, "EEG Meditation", "Meditation session in progress")
+    keep_awake.release()
+    lock.release.assert_called_once_with()
+    window.clearFlags.assert_called_once_with(128)
+    service.stop.assert_called_once_with(activity)
+
+
 def test_off_android_the_wake_lock_does_nothing(monkeypatch):
     _off_android(monkeypatch)
     keep_awake = KeepAwake()

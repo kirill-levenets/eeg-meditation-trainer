@@ -371,3 +371,19 @@ def test_a_marker_is_placed_only_in_a_running_session():
     app._session_manager.resume()
     app._on_marker()
     assert run.pending_marker  # the next recorded tick carries it
+
+
+def test_a_wait_tick_that_outlived_its_run_ends_nothing(monkeypatch):
+    # The tick read its run, then a Cancel and a new Start replaced it: the new run owns the stream now.
+    monkeypatch.setattr(APP, "USE_MOCK_DEVICE", False)
+    app = _app()
+    old = run_in(app, Phase.CONNECTING)
+    old.connect_start = time.time()
+    app._real_stream.is_connected, app._real_stream._running = False, False  # the old wait would give up
+    app._real_stream._last_connect_error = "Headset is asleep or off."
+    app._bt_wait._report_connect_failure = MagicMock()
+    new = run_in(app, Phase.CONNECTING)
+    app._abort_bt_wait = MagicMock()
+    app._follow_bt_wait(old)
+    app._abort_bt_wait.assert_not_called()
+    assert app._run is new and new.phase is Phase.CONNECTING and not app._queued

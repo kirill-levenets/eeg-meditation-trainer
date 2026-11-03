@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, call
 from app.session.session_program import SessionProgram
 from app.ui.sound_sources import SoundSources
 from tests._context import stub_context
+from tests._settings import held_store
 
 SETTINGS = {"feedback_source": "tone", "feedback_sound_path": "", "reward_source": "heartbeat",
             "reward_sound_path": ""}
@@ -42,3 +43,14 @@ def test_the_gong_is_checked_only_while_the_timer_is_on():
     off, _ = _sounds(timer_on=False)
     off.prepare_session(None)
     assert off.warn_missing.call_args.args[1] == ""
+
+
+def test_a_source_chosen_in_settings_is_held_with_its_path_first():
+    store = held_store(feedback_source="noise", feedback_sound_path="", reward_source="none", reward_sound_path="")
+    order = []
+    ctx = stub_context(setting=store.value, change_setting=lambda key, value: (order.append(key), store.change(key, value)))
+    sounds = SoundSources(ctx, MagicMock(), MagicMock(), MagicMock())
+    sounds.on_feedback_source_change("custom", " /sounds/rain.wav ")
+    sounds.on_reward_source_change("heartbeat", "")
+    assert order == ["feedback_sound_path", "feedback_source", "reward_sound_path", "reward_source"]
+    assert (sounds.global_feedback_id(), sounds.reward_id()) == ("/sounds/rain.wav", "heartbeat")

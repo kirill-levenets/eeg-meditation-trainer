@@ -5,7 +5,7 @@ from app.metrics.formula_slots import FORMULA_KEYS
 from app.session.manager import SessionManager
 from app.session.session_program import PROGRAM_FORMULA_KEYS
 from app.session.timer_state import TimerState
-from app.settings.registry import BOOL, Setting, SettingsStore
+from app.settings.registry import BOOL, INT, Setting, SettingsStore
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.hooks import wire
 from app.ui.settings_screen import SettingsScreen
@@ -49,6 +49,18 @@ def test_disconnect_alert_toggle_persists_via_store():
     app._on_disconnect_alert_toggle(True)
     assert app._audio.disconnect_alert_enabled is True
     assert (7, "disconnect_alert", "True") in app._db.writes
+
+
+def test_the_subtle_alert_and_the_rotation_persist_via_store():
+    app = _app()
+    applied = {}
+    held = [Setting(key, default, codec[0], codec[1], None, lambda v, k=key: applied.__setitem__(k, v))
+            for key, default, codec in (("subtle_alert", False, BOOL), ("rotation", 0, INT))]
+    app._settings_store = SettingsStore(app._db, held)
+    app._on_subtle_alert_toggle(True)
+    app._on_rotate_screen(90)
+    assert applied == {"subtle_alert": True, "rotation": 90}
+    assert {(7, "subtle_alert", "True"), (7, "rotation", "90")} <= set(app._db.writes)
 
 
 def test_audio_formula_index_switch_copersists_metric():
