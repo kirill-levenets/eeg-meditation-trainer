@@ -83,7 +83,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Every open takes a load token (`_detail_load`):
   a result for an earlier open, or for a detail no longer on screen (Back, another tab), is dropped, so opening B right after A shows only B.
   A failed load reports `session_detail_load_failed` and the sections say "Couldn't load this session's data."; the stats and notes keep working.
-  `load_metrics_preview(rows)` is the same builder and fills, synchronously, as `inject_session_formulas` is the formula replay's: both for tests.
+  `load_metrics_preview(rows)` is the same builder and fills, synchronously, for tests.
   The metric-row read (`SELECT *` into dicts) is nearly all of the graphs' wait.
   DB reads off-thread are safe (`check_same_thread=False` + WAL).
 - Diary raw-EEG `_synthesize_waveform` synthesizes only the **tail** the graph retains (`_RAW_MAX_SAMPLES = sample_rate*60`), starting the global sample index at the first kept tick so the tail is phase-identical to a full synthesis;

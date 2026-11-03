@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import app.ui.app_manager as am
 import app.ui.history_flow as history_flow
 from app.session.manager import LiveScore, SessionManager
+from app.session.recorder import RecordedTick
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.live_session import LiveSessionScreen
 from tests._history_flow import make_history_flow
@@ -66,9 +67,11 @@ def test_clear_live_display_empties_the_graphs_their_mirrors_and_the_readout():
     app._live_screen = _finished_screen()
     app._shown = make_shown(app)
     mirror = app._shown.mirror
-    mirror.record(METRICS, {"score_target": 70, "score_key": "shamatha_score"}, {"alpha1": 1.0, "raw_eeg_waveform": [1.0]})
+    mirror.record(RecordedTick(METRICS, {"alpha1": 1.0, "raw_eeg_waveform": [1.0]},
+                               {"score_target": 70, "score_key": "shamatha_score"}, True))
     app._shown.clear()
-    assert (list(mirror.metrics), list(mirror.bands), list(mirror.waveform), mirror.last_metrics) == ([], [], [], {})
+    assert (list(mirror.metrics), list(mirror.bands), list(mirror.waveform), mirror.last_metrics, mirror.marks) == (
+        [], [], [], {}, [])
     assert app._live_screen.graph.total_points == 0
     assert app._live_screen._timer_label.text == "00:00"
     assert _texts(app._live_screen) == _texts(LiveSessionScreen())

@@ -23,6 +23,7 @@ from app.config import APP
 from app.metrics.engine import MetricsEngine
 from app.metrics.formula_slots import FormulaSlots
 from app.session.manager import SessionState
+from app.session.recorder import RecordedTick
 from app.session.session_run import Phase
 from app.session.tick_thread import TickThread
 from app.session.timer_state import TimerState
@@ -337,7 +338,8 @@ def test_a_reload_keeps_each_points_colouring():
     """A screen lock's reload redraws the line as it was scored, segment by segment (#113)."""
     mirror = LiveMirror()
     for key in ["shamatha_score"] * 3 + ["custom_formula"] * 2:
-        mirror.record(_metrics(seed=1.0), {"score_target": 50, "score_key": key}, _raw_sample(seed=1.0))
+        mirror.record(RecordedTick(_metrics(seed=1.0), _raw_sample(seed=1.0), {"score_target": 50, "score_key": key},
+                                   False))
     screen = LiveSessionScreen()
     mirror.reload_into(screen)
     assert screen.graph.gradient_steps == [(0, "shamatha_score"), (3, "custom_formula")]
@@ -542,7 +544,8 @@ def _marked_mirror(ticks: int, marked: set, waveform: int = 3) -> LiveMirror:
         raw = _raw_sample(seed=float(i), with_waveform=False)
         if waveform:
             raw["raw_eeg_waveform"] = [float(i)] * waveform
-        mirror.record(_metrics(seed=float(i)), {"score_target": 50, "score_key": "shamatha_score"}, raw, i in marked)
+        mirror.record(RecordedTick(_metrics(seed=float(i)), raw, {"score_target": 50, "score_key": "shamatha_score"},
+                                   i in marked))
     return mirror
 
 
@@ -566,7 +569,7 @@ def test_a_full_buffer_shifts_the_markers_and_drops_the_ones_it_dropped(monkeypa
 def test_a_cleared_mirror_forgets_its_markers():
     mirror = _marked_mirror(3, {1})
     mirror.clear()
-    mirror.record(_metrics(), {"score_target": 50, "score_key": "shamatha_score"}, _raw_sample())
+    mirror.record(RecordedTick(_metrics(), _raw_sample(), {"score_target": 50, "score_key": "shamatha_score"}, False))
     screen = LiveSessionScreen()
     mirror.reload_into(screen)
     assert _markers(screen) == [[], [], []]
@@ -578,3 +581,17 @@ def test_a_marked_tick_is_mirrored_with_its_marker():
     _drive_tick(app, _raw_sample(), _metrics())
     _drive_tick(app, _raw_sample(), _metrics())
     assert app._shown.mirror.marks == [(0, 2)]  # the first tick, its third raw sample
+
+
+def test_the_live_graphs_and_a_reload_put_a_marker_in_the_same_places():
+    app = _make_tick_app()
+    app._live_screen = LiveSessionScreen()
+    app._live_screen.update_stats = MagicMock()  # the stub session manager has no score to show
+    app._recorder.record = lambda metrics, row: {"score_target": 50, "score_key": "shamatha_score"}
+    app._on_main = lambda fn: fn()  # the tick's UI update runs, as the main thread would run it
+    for i in range(3):
+        app._run.pending_marker = i == 1
+        _drive_tick(app, _raw_sample(seed=float(i)), _metrics(seed=float(i)))
+    reloaded = LiveSessionScreen()
+    app._shown.mirror.reload_into(reloaded)
+    assert _markers(app._live_screen) == _markers(reloaded) == [[1], [1], [5]]

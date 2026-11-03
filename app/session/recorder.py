@@ -11,7 +11,7 @@ from app.session.manager import SessionState
 
 @dataclass(frozen=True)
 class RecordedTick:
-    """A tick as the session recorded it: its metrics, the headset's sample, its score and whether it carries a marker."""
+    """A tick as the session recorded it: its metrics, the headset's sample, its score, whether it is marked."""
 
     metrics: dict
     raw_sample: dict
@@ -21,8 +21,8 @@ class RecordedTick:
 
 class SessionRecorder:
     """A session reaches the DB only through checkpoint(): at the 60 s flush, on leaving the app, at a backup, when
-    a tick-thread check ends it, and at the final save. A process killed between checkpoints keeps the row and the data of the last one, which agree. Any
-    thread, no Kivy."""
+    a tick-thread check ends it, and at the final save. A process killed between checkpoints keeps the row and the data
+    of the last one, which agree. Any thread, no Kivy."""
 
     def __init__(self, db, session_manager, *, with_score: Callable[[dict], dict],
                  row_fields: Callable[[], dict]) -> None:

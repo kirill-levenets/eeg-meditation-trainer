@@ -14,6 +14,7 @@ from kivy.tests.common import UnitTestTouch
 import app.ui.app_manager as am
 from app.config import APP
 from app.session.manager import SessionManager, SessionState
+from app.session.recorder import RecordedTick
 from app.session.scoring import target_steps
 from app.session.session_program import SessionProgram
 from app.session.session_run import Phase
@@ -461,7 +462,7 @@ def test_a_program_start_that_fails_in_its_setup_leaves_the_controls_unlocked(mo
 
 def _idle_app() -> EEGMeditationApp:
     a = _threshold_app(state=SessionState.FINISHED)  # the last session ended; its graphs are still on screen
-    a._shown.mirror.record({}, {"score_target": 70, "score_key": "shamatha_score"}, {})
+    a._shown.mirror.record(RecordedTick({}, {}, {"score_target": 70, "score_key": "shamatha_score"}, False))
     a._after_settle = MagicMock()
     return a
 

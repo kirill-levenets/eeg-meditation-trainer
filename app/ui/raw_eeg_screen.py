@@ -273,8 +273,10 @@ class ScrollableGraphWidget(GraphGestures, GraphGlyphs, Widget):
         self._follow_fit()
         self._redraw_for_data()
 
-    def load_static_data(self, series: dict[str, list[float]], new_session: bool = True) -> None:
-        """Load pre-recorded data for static display (e.g. diary preview); a live session's reload is the same one."""
+    def load_static_data(self, series: dict[str, list[float]], new_session: bool = True,
+                         markers: list[int] | None = None) -> None:
+        """Load pre-recorded data for static display (e.g. diary preview), with its markers (indices into it); a live
+        session's reload is the same one."""
         for key in self._data:
             d = self._data[key]
             d.clear()
@@ -287,7 +289,7 @@ class ScrollableGraphWidget(GraphGestures, GraphGlyphs, Widget):
         first_key = next(iter(self._data))
         self._total_points = len(self._data[first_key])
         self._scroll_offset = 0
-        self._markers = []
+        self._markers = list(markers or [])
         if new_session:
             self._new_data()
         else:

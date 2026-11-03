@@ -964,7 +964,7 @@ class EEGMeditationApp(App):
             self._audio.update_sinking(metrics.get("sinking", 0))
             self._audio.update_subtle_distraction(metrics.get("subtle_distraction", 0))
 
-        self._shown.mirror.record(metrics, tick.score, raw_sample, tick.marked)  # kept even while the screen is locked
+        self._shown.mirror.record(tick)  # kept even while the screen is locked
         self._show_tick(run, tick, mark)
         if self._timer_state.tick(APP.UPDATE_FREQUENCY):  # a pure counter, no UI
             self._end_by_timer(run)
