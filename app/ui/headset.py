@@ -95,16 +95,20 @@ class Headset:
             self.scan()
 
     def on_mode_toggle(self, use_mock: bool) -> None:
+        """Settings › Device's checkbox: the mode is a held setting (its apply writes `APP.USE_MOCK_DEVICE`), refused
+        while a session runs on the other one (it is saved under its device, and its stream stopped by it)."""
+        if use_mock == self._ctx.setting("use_mock"):  # the store's copy, held before apply writes APP and the checkbox
+            return  # a load's or a refusal's write to the checkbox: the held mode, shown by its own path
+        if self._ctx.session.refused("changing the device mode"):
+            self._device_section._device_mode_cb.active = not use_mock
+            return
         self._scan_seq += 1
-        APP.USE_MOCK_DEVICE = use_mock
+        self._ctx.change_setting("use_mock", use_mock)
         self._device_section.clear_picker_banner()  # Start's question was for the real headset
         addr = self._stream._device_address or "none"
         self._device_section.update_device_status(False, meta="Mode: Mock Data" if use_mock
                                                   else f"Mode: Real Device ({addr})")
         self._live_screen.update_device_status(False, device_name=self._session_label())
-        uid = self._ctx.user_id()
-        if uid:
-            self._ctx.db.set_user_setting(uid, "use_mock", str(use_mock))
         logger.info(f"Device mode: {'Mock' if use_mock else 'Real'}")
 
     def on_scan(self) -> None:
@@ -113,7 +117,8 @@ class Headset:
 
     def on_select(self, address: str, name: str) -> None:
         """A headset picked in the list, or the one a scan found: the profile's, in real mode."""
-        if address != self._stream._device_address and self._ctx.session.refused("switching headsets"):
+        leaves_selection = address != self._stream._device_address or APP.USE_MOCK_DEVICE  # a pick on the mock leaves it
+        if leaves_selection and self._ctx.session.refused("switching headsets"):
             return
         self._scan_seq += 1
         self._stream.set_device(address, name)
@@ -141,8 +146,7 @@ class Headset:
             self.show_selected()
 
     def _use_real_device(self) -> None:
-        APP.USE_MOCK_DEVICE = False
-        self._device_section._device_mode_cb.active = False  # its handler, on_mode_toggle, saves the mode
+        self._device_section._device_mode_cb.active = False  # its hook, on_mode_toggle, changes the held setting
 
     def find_paired(self, then: Callable[[list[dict]], None]) -> None:
         """The paired devices, listed off the main thread, to `then` on the main thread ([] when listing fails)."""

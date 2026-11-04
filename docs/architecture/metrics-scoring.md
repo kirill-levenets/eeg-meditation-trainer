@@ -73,7 +73,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The check is `AudioMetric.scoring_locked(doing)`: not `ProgramRun.active`, then the shared refusal; a program is scored on its segments' metrics, so the control stays free.
   The other slots and, in a simple session, the threshold stay editable.
   Every such refusal is `_refused_while_session_runs(doing, why="")`: "Session in progress" / "<why> Stop the current session before <doing>.";
-  the others are the profile switch, a headset switch, both Restore checks, Settings › Audio's Test and a running program's threshold.
+  the others are the profile switch, a headset switch and the device mode, both Restore checks, Settings › Audio's Test and a running program's threshold.
   Every checkpoint passes its stats through `_with_score`, which fills the key (the current drive key when none was scored) and adds `score_metric_name` (the live graph's `series_name(key)`, e.g. a formula's name).
   For a program it sets `"program"`, the name the program had when the session started (`ProgramRun.name`, `"Program"` if unsaved; Settings may load or save another during the session) and a NULL `avg_score`.
   `ProgramRun.tick` (called in `_session_tick`, program mode only) detects a boundary crossing with the pure `ProgramRun.transition` helper;

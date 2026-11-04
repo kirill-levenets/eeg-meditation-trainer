@@ -56,7 +56,10 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   the stats view and the marker hotkey (their widgets), the timer's enable and minutes (the Timer section).
   The audio metric and its formula slot are held too (`AudioMetric.settings`: a stored program slot heals to the baseline at load, an out-of-range slot clamps);
   behind controllers that can refuse a change while a session runs and show the one in force again (`AudioMetric.show`).
-  The threshold keeps its slider as the one holder of the stored value (the value in force is `_put_threshold_in_force`'s); the device mode keeps `APP.USE_MOCK_DEVICE`, written by `Headset.on_mode_toggle`.
+  The threshold keeps its slider as the one holder of the stored value (the value in force is `_put_threshold_in_force`'s).
+  The device mode is held: its apply writes `APP.USE_MOCK_DEVICE` and the checkbox, and the checkbox's hook (`Headset.on_mode_toggle`) changes it through `change_setting`; a headset pick flips the checkbox.
+  A write to the checkbox that applies the mode in force (a profile load's, a refusal's put-back) fires the hook with the value the store already holds (`ctx.setting("use_mock")`), and the hook does nothing.
+  The hook refuses a change while a session runs (`ctx.session.refused`), as the scored metric is: the session is saved under its device and its stream stopped by it.
   `_persist_user_setting(key)` (key only — the store reads the live value) catches `sqlite3.Error` → soft error;
   the threshold slider, the timer sound and the held settings with `settle=True` go through `_persist_user_setting_later(key)`:
   a per-key Kivy `Clock` trigger (`_after_settle`) restarted on every change (`_PERSIST_SETTLE_S` = 0.5 s), so a drag is one write, not one fsync per step on the UI thread.

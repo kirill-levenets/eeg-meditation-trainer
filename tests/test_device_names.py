@@ -217,7 +217,8 @@ def test_switching_headsets_while_connecting_is_refused():
     app._real_stream.set_device.assert_not_called()
 
 
-def test_picking_the_selected_headset_during_a_session_is_not_refused():
+def test_picking_the_selected_headset_during_a_session_is_not_refused(monkeypatch):
+    monkeypatch.setattr(APP, "USE_MOCK_DEVICE", False)  # in real mode it changes nothing; on the mock it would
     app = _app()
     app._session_manager.start()
     app._headset.on_select(BLUE, "MindWave Mobile")

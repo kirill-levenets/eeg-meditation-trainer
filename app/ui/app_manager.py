@@ -1319,13 +1319,13 @@ class EEGMeditationApp(App):
             ss.threshold = v
             self._apply_threshold(v)
 
-        def set_use_mock(v):
-            APP.USE_MOCK_DEVICE = v; ss.device._device_mode_cb.active = v
+        def apply_use_mock(v):
+            APP.USE_MOCK_DEVICE = v; ss.device._device_mode_cb.active = v  # an unchanged value doesn't re-fire its hook
 
         self._settings_store = SettingsStore(self._db, [
             *self._timer_settings(), *self._alert_settings(), *self._fold_settings(),
             kept("threshold", INT, lambda: int(ss.threshold), set_threshold),
-            kept("use_mock", BOOL, lambda: APP.USE_MOCK_DEVICE, set_use_mock),
+            held("use_mock", BOOL, APP.USE_MOCK_DEVICE, apply_use_mock),
             *self._sound_settings(), *self._display_settings()])
 
     def _timer_settings(self) -> list[Setting]:

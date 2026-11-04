@@ -49,7 +49,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 - **The link is always to the selected headset.**
   It stays open between sessions, so `NeuroSkyStream.set_device` to another address, or to none, stops the reader first; otherwise the next Start would reuse the old headset's socket and record its session under the new headset's name.
   Every target change goes through it: a pick in Settings, a profile load, and a scan's auto-select.
-  A pick of another headset is refused while a session runs or connects (`Headset.on_select` → `_refused_while_session_runs`), as a profile switch is.
+  A pick of another headset, or any pick on Mock Data (it leaves the mock), is refused while a session runs or connects (`Headset.on_select` → `_refused_while_session_runs`), as a profile switch and the Mock Data checkbox are.
   Settings' row marks rely on this: the connected headset is the selected one while `is_connected` (`Headset.state()`).
 
 ## Reader lifecycle and the BT wait

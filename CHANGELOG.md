@@ -45,6 +45,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **Unticking Use Mock Data during a mock session saved it as a real-headset session** and left the mock stream running; a mode change is now refused while a session runs, like the scored metric.
+  The mode is a held setting now: a profile switch that changed it used to write it back to the database through the checkbox's handler.
 - **A Start cancelled just as the headset's first data arrived could leave a session running unseen**, so Restore and a profile switch said a session was in progress.
   Every ending now marks its run ended first, and a tick whose run has ended or been replaced (a Cancel, a Stop, a tick-thread ending, a new Start) changes nothing.
 - **Markers vanished from the Session screen's graphs** when a session ended, and when the screen was unlocked during one.

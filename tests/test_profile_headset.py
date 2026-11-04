@@ -16,8 +16,10 @@ from app.eeg.neurosky_stream import NeuroSkyStream
 from app.session.manager import SessionManager
 from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
+from app.ui.headset import Headset
 from app.ui.hooks import wire
 from app.ui.settings_sections.device import DeviceSection
+from tests._context import stub_context
 from tests._headset import fake_paired, make_headset
 from tests._program_run import make_run
 from tests._settings_section import settings_section
@@ -63,10 +65,68 @@ def app(db, paired):
     a.serial_device_override = None
     device = settings_section(lambda section, scroll: DeviceSection(section, scroll=scroll))
     a._settings_screen = SimpleNamespace(device=device)
-    a._headset = make_headset(a)
+    a._headset = make_headset(a, change_setting=lambda key, v: _held_mode(a, v),  # the store, standing in
+                              setting=lambda key: APP.USE_MOCK_DEVICE)
     wire(device, on_device_mode_toggle=a._headset.on_mode_toggle, device_state=a._headset.state,
          on_device_rename=a._headset.on_rename)
     return a
+
+
+def _headset_alone(**ctx_fields) -> tuple[Headset, object]:
+    """A Headset on a stub context, with its Settings device section a mock; (headset, device section)."""
+    device = MagicMock()
+    ctx = stub_context(user_id=lambda: 1, **ctx_fields)
+    return Headset(ctx, MagicMock(_device_address=None), device, MagicMock(), serial_override=lambda: None), device
+
+
+def test_the_mode_checkbox_changes_the_held_setting_and_writes_nothing_itself(monkeypatch):
+    monkeypatch.setattr(APP, "USE_MOCK_DEVICE", True)
+    changed, ctx_db = MagicMock(), MagicMock()
+    hs, _device = _headset_alone(change_setting=changed, db=ctx_db, setting=lambda key: True)
+    hs.on_mode_toggle(False)
+    changed.assert_called_once_with("use_mock", False)
+    ctx_db.set_user_setting.assert_not_called()
+
+
+def test_a_mode_change_while_a_session_runs_is_refused_and_the_checkbox_put_back(monkeypatch):
+    monkeypatch.setattr(APP, "USE_MOCK_DEVICE", True)
+    changed = MagicMock()
+    refused = MagicMock(side_effect=[True, False])  # a second ask would be let through: the put-back must not ask
+    hs, device = _headset_alone(change_setting=changed, refused=refused, setting=lambda key: True)
+    hs.on_mode_toggle(False)
+    changed.assert_not_called()
+    assert device._device_mode_cb.active is True
+    hs.on_mode_toggle(True)  # the checkbox put back fires the hook with the mode in force: nothing happens
+    changed.assert_not_called()
+    device.update_device_status.assert_not_called()
+    assert refused.call_count == 1
+
+
+def test_the_hook_compares_with_the_held_mode_not_the_applied_flag(monkeypatch):
+    # The store holds the value before its apply writes the flag and the checkbox: the hook must read the store.
+    monkeypatch.setattr(APP, "USE_MOCK_DEVICE", False)
+    changed = MagicMock()
+    hs, _device = _headset_alone(change_setting=changed, setting=lambda key: True)
+    hs.on_mode_toggle(True)
+    changed.assert_not_called()
+
+
+def test_picking_the_saved_headset_during_a_mock_session_is_refused_as_a_whole(monkeypatch):
+    monkeypatch.setattr(APP, "USE_MOCK_DEVICE", True)
+    refused = MagicMock(return_value=True)
+    hs, device = _headset_alone(refused=refused)
+    hs._stream._device_address = "00:11"
+    hs.on_select("00:11", "MindWave Mobile")  # the same address: a pick that only changes the mode
+    refused.assert_called_once_with("switching headsets")
+    hs._stream.set_device.assert_not_called()
+    device.clear_picker_banner.assert_not_called()
+
+
+def _held_mode(app, use_mock: bool) -> None:
+    """What the store's change path does for the mode in the built app: apply it and persist it for the profile."""
+    APP.USE_MOCK_DEVICE = use_mock
+    if app._current_user_id:
+        app._db.set_user_setting(app._current_user_id, "use_mock", str(use_mock))
 
 
 def _profile(app, name: str, saved: str | None = None) -> int:
@@ -80,7 +140,7 @@ def _profile(app, name: str, saved: str | None = None) -> int:
 def _load(app, uid: int, *, mock: bool = False) -> None:
     """A profile load's headset part: the settings registry applies the profile's mode, then Headset.load runs."""
     app._current_user_id = uid
-    APP.USE_MOCK_DEVICE = mock
+    APP.USE_MOCK_DEVICE = mock  # the store's apply, before the checkbox: its hook then sees the mode in force
     app._settings_screen.device._device_mode_cb.active = mock
     app._headset.load(uid)
 

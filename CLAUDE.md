@@ -141,7 +141,8 @@ The linked file explains the mechanism.
   A check that ends it on the tick thread (stale data, the recording limit) freezes it there (`_end_from_tick`: mark the run ended, pause, mute, checkpoint, stop the tick) and saves once on main;
   every queued finish runs only for its own run. → [session](docs/architecture/session.md#persistence)
 - While a session runs or connects (`_session_pipeline_live()`), anything that would break it is refused through `_refused_while_session_runs(doing)`:
-  profile switch, Restore, the scored metric (`AudioMetric.scoring_locked`), a running program's threshold, Settings › Audio's Test. → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
+  profile switch, Restore, the scored metric (`AudioMetric.scoring_locked`), a running program's threshold,
+  Settings › Audio's Test, the device mode and a headset switch (`Headset`: any pick on Mock Data). → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
 - The Session screen shows one profile's session (`ShownSession`, `app/ui/shown_session.py`, the app's `_shown`; its `owner` set at Start):
   picking another profile drops it through `ShownSession.drop`; re-picking the shown one (allowed mid-session) resets nothing.
   Every end-card close goes through `ShownSession.close`. → [live-session-and-settings](docs/architecture/live-session-and-settings.md#session-screen)
