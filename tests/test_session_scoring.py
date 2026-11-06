@@ -298,7 +298,7 @@ def test_one_tick_scores_and_sounds_the_same_metric():
     metrics = {**_metrics(), "shamatha_score": 11.0, "meditation_score": 77.0}
     _drive_tick(app, _raw_sample(), metrics)
     app._session_manager.set_active_goal.assert_called_with("shamatha_score")
-    app._audio.update.assert_called_with(11.0)
+    assert app._audio.update.call_args.args[0] == 11.0  # the sound follows the scored metric's value
 
 
 def test_the_partial_flush_saves_the_scored_metric():

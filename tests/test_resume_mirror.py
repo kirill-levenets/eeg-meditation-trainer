@@ -113,7 +113,7 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     audio_store(app)  # after the program run and the slots it reads, as build() makes them
     app._program_settings = make_programs(app._db, app._current_user_id)
 
-    app._shamatha_threshold = 50
+    app._session_manager.threshold = 50
 
     app._shown = make_shown(app)
     app._watch = make_watch(app)

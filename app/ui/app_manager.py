@@ -945,7 +945,8 @@ class EEGMeditationApp(App):
         raw_sample = self._eeg_stream.read_sample()  # may wait on the reader's lock
         if self._outlived(run):
             return
-        metrics = self._metrics_engine.process_sample(raw_sample)
+        base = self._session_manager.threshold  # read once, so the engine and the pill are given the same value
+        metrics = self._metrics_engine.process_sample(raw_sample, base)
         self._watch.check_sample(run, raw_sample)
         run.tick_count += 1
         self._log_tick(run, raw_sample, metrics)
@@ -963,13 +964,13 @@ class EEGMeditationApp(App):
         tick = self._record_tick(run, raw_sample, metrics)
         if tick is None:
             return
-        self._audio.update(metrics.get(drive_key, 0))
+        self._audio.update(metrics.get(drive_key, 0), tick.score["score_target"])  # the tick's target: a segment's or the base
         if run.tick_count > 10:
             self._audio.update_sinking(metrics.get("sinking", 0))
             self._audio.update_subtle_distraction(metrics.get("subtle_distraction", 0))
 
         self._shown.mirror.record(tick)  # kept even while the screen is locked
-        self._show_tick(run, tick, mark)
+        self._show_tick(run, tick, mark, base)
         if self._timer_state.tick(APP.UPDATE_FREQUENCY):  # a pure counter, no UI
             self._end_by_timer(run)
             return
@@ -1004,8 +1005,9 @@ class EEGMeditationApp(App):
                      f"dist={metrics.get('distraction', 0):.0f} "
                      f"native_med={native_med:.0f}{bat_str}")
 
-    def _show_tick(self, run: SessionRun, tick: RecordedTick, mark: str | None) -> None:
-        """Tick thread: queue the tick's Session screen update for the main thread, unless the screen is locked."""
+    def _show_tick(self, run: SessionRun, tick: RecordedTick, mark: str | None, base: float) -> None:
+        """Tick thread: queue the tick's Session screen update for the main thread, unless the screen is locked; the
+        SHAMATHA pill crosses at the base threshold."""
         metrics, score = tick.metrics, tick.score
         elapsed_fmt = self._session_manager.elapsed_formatted
 
@@ -1014,7 +1016,7 @@ class EEGMeditationApp(App):
         sham_prev = run.shamatha_active
         run.shamatha_active, run.shamatha_streak = self._shamatha_transition(
             sham_prev,
-            metrics.get("shamatha_score", 0.0) >= self._shamatha_threshold,
+            metrics.get("shamatha_score", 0.0) >= base,
             run.shamatha_streak,
         )
         sham_changed = run.shamatha_active != sham_prev
@@ -1184,12 +1186,10 @@ class EEGMeditationApp(App):
             self._put_threshold_in_force(value)
 
     def _put_threshold_in_force(self, value: int) -> None:
-        """The sound, the scoring, the SHAMATHA pill and the engine together; a session start calls it directly."""
-        self._metrics_engine.meditation_threshold = value
-        self._audio.set_threshold(value)
-        self._shamatha_threshold = value
+        """The session manager owns the threshold; the graph draws it until ticks step the line. A session start calls
+        it directly."""
         self._session_manager.set_threshold(value)  # also what a session waiting for the headset starts with
-        self._live_screen.graph.set_threshold(float(value))  # drawn until ticks step the line
+        self._live_screen.graph.set_threshold(float(value))
 
     def _on_line_width_change(self, width: float) -> None:
         self._change_setting("line_width", width)

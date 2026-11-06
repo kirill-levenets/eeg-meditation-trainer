@@ -55,7 +55,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 ## Scoring
 
 - `SessionManager.set_active_goal(metric_key)` accrues `time_above_threshold`/`longest_streak` (and `avg_score`) against that metric and the threshold in force; `start_segment(metric_key, target)` against a program segment's target;
-  it scores at the formula's own scale, independent of `meditation_threshold`'s 0–100 clamp.
+  it scores at the formula's own scale, independent of the engine's 0–100 clamp of the threshold it classifies the state with.
   **A session is scored on the metric that drives the feedback sound (#51).**
   In a simple session (decided by `ProgramRun.active`, fixed at session start, never the editable `ProgramSettings.mode` toggle) `_session_tick` calls `_score_on_drive_key()` → `set_active_goal(self._audio_metric.drive_key())` every tick;
   it feeds the audio from that same resolved key, so scoring and sound can't diverge (an invalid formula's shamatha fallback moves both).
@@ -85,8 +85,9 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 - **The threshold in force** (#83):
   `SessionManager` scores a tick against `start_segment`'s target (a program segment), else `_threshold`, which `set_threshold(value)` and `start(threshold)` move.
   `start()` without one keeps it, which is how a session that waited for the headset starts with a threshold changed during the wait; `threshold_used` stays the Start value (the row's).
-  `_put_threshold_in_force(value)` is the one place the Settings threshold takes effect, on the metrics engine, the sound, the SHAMATHA pill (`_shamatha_threshold`), `SessionManager.set_threshold` and the graph's scalar line together;
-  it is the only writer of `_shamatha_threshold`.
+  `SessionManager` is the threshold's one owner: the engine (`process_sample(raw, threshold)`: the state, subtle distraction) and the SHAMATHA pill read its base (`threshold`) on each tick;
+  the sound reads the tick's target (`AudioEngine.update(score, threshold)` with `score["score_target"]`: a segment's, else the base), so a segment crossing moves the sound through the tick it is scored on and `ProgramRun` writes only `start_segment`.
+  `_put_threshold_in_force(value)` is the one place the Settings threshold takes effect: `SessionManager.set_threshold` and the graph's scalar line.
   `_start_session_common` calls it directly, with a program's first target (a lingering tick thread from the last session must not block it).
   The slider's settle and the registry's profile load go through `_apply_threshold(value)`, which does nothing while `_program_owns_threshold()` (`_program_run.active and _session_pipeline_live()`);
   a running program's segments own its targets, and re-picking the active profile mid-program reloads its settings, which must not put the slider's value over a segment's target.

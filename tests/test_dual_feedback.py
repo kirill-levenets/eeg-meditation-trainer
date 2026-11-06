@@ -8,40 +8,34 @@ from tests._settings import held_store
 from tests._sound_sources import make_sounds
 
 
-def _engine(threshold):
-    e = AudioEngine()
-    e.set_threshold(threshold)
-    return e
-
-
 def test_reward_is_zero_at_and_below_threshold():
-    e = _engine(50)
-    assert e.compute_reward_volume(50) == 0.0   # exactly at threshold: silent
-    assert e.compute_reward_volume(30) == 0.0   # below: silent
+    e = AudioEngine()
+    assert e.compute_reward_volume(50, 50) == 0.0   # exactly at threshold: silent
+    assert e.compute_reward_volume(30, 50) == 0.0   # below: silent
 
 
 def test_reward_saturates_at_threshold_plus_span():
-    e = _engine(50)
+    e = AudioEngine()
     top = 50 + APP.REWARD_SPAN
-    assert e.compute_reward_volume(top) == e._max_volume
-    assert e.compute_reward_volume(top + 40) == e._max_volume  # clamps beyond span
+    assert e.compute_reward_volume(top, 50) == e._max_volume
+    assert e.compute_reward_volume(top + 40, 50) == e._max_volume  # clamps beyond span
 
 
 def test_reward_rises_monotonically_above_threshold():
-    e = _engine(50)
-    prev = e.compute_reward_volume(50)
+    e = AudioEngine()
+    prev = e.compute_reward_volume(50, 50)
     for s in range(51, 50 + APP.REWARD_SPAN + 1):
-        v = e.compute_reward_volume(s)
+        v = e.compute_reward_volume(s, 50)
         assert v >= prev
         prev = v
-    assert e.compute_reward_volume(60) > 0.0
+    assert e.compute_reward_volume(60, 50) > 0.0
 
 
 def test_threshold_is_a_clean_crossfade_both_channels_zero():
-    e = _engine(50)
+    e = AudioEngine()
     # At the threshold both zones are silent -> seamless handoff, no overlap spike.
-    assert e.compute_volume(50) == 0.0
-    assert e.compute_reward_volume(50) == 0.0
+    assert e.compute_volume(50, 50) == 0.0
+    assert e.compute_reward_volume(50, 50) == 0.0
 
 
 def test_set_reward_designates_known_player_and_clears():
@@ -54,22 +48,32 @@ def test_set_reward_designates_known_player_and_clears():
 
 
 def test_update_drives_both_zones_when_reward_armed():
-    e = _engine(50)
-    e._is_playing = False          # exercise target-setting without the ramp thread/players
+    e = AudioEngine()
+    e._is_playing = False  # exercise target-setting without the ramp thread/players
     e._reward_feedback = "tone"
-    e.update(30)                   # below threshold: noise on, reward silent
+    e.update(30, 50)  # below threshold: noise on, reward silent
     assert e._volume > 0.0
     assert e._reward_target_volume == 0.0
-    e.update(50 + APP.REWARD_SPAN)  # well above: noise silent, reward at max
+    e.update(50 + APP.REWARD_SPAN, 50)  # well above: noise silent, reward at max
     assert e._volume == 0.0
     assert e._reward_target_volume == e._max_volume
 
 
+def test_update_measures_the_reward_against_the_threshold_it_is_given():
+    e = AudioEngine()
+    e._is_playing = False
+    e._reward_feedback = "tone"
+    e.update(60, 50)  # above a threshold of 50: the reward rises
+    assert e._reward_target_volume > 0.0
+    e.update(60, 100)  # below a threshold of 100: silent
+    assert e._reward_target_volume == 0.0
+
+
 def test_update_keeps_reward_silent_when_channel_is_none():
-    e = _engine(50)
+    e = AudioEngine()
     e._is_playing = False
     e._reward_feedback = ""        # None channel
-    e.update(80)                   # above threshold, but no reward channel
+    e.update(80, 50)                   # above threshold, but no reward channel
     assert e._reward_target_volume == 0.0
 
 

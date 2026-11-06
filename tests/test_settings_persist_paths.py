@@ -45,8 +45,6 @@ def _make_app(monkeypatch):
     app._settle_triggers = {}
     app._current_user_id = 7
     app._settings_store = MagicMock()
-    app._metrics_engine = MagicMock()
-    app._audio = MagicMock()
     app._live_screen = MagicMock()
     app._timer_state = MagicMock()
     app._session_manager = SessionManager()
@@ -67,7 +65,7 @@ def test_a_threshold_drag_writes_once_after_it_settles(monkeypatch):
     for t in triggers:
         t.fire()
     app._settings_store.persist.assert_called_once_with(7, "threshold")
-    app._audio.set_threshold.assert_called_once_with(180)
+    assert app._session_manager.threshold == 180
 
 
 def test_typing_a_gong_path_writes_once_after_it_settles(monkeypatch):

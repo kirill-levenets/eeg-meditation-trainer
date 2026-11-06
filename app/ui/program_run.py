@@ -29,8 +29,8 @@ def show_program_series(graph, plan: RunnablePlan) -> None:
 class ProgramRun:
     """The program the running session started with; None for a simple session.
 
-    `tick` runs on the daemon tick thread: only thread-safe state there (audio set_threshold/one-shot, SessionManager,
-    pure evaluators). Kivy widget changes go through `on_main`.
+    `tick` runs on the daemon tick thread: only thread-safe state there (audio one-shots, SessionManager, pure
+    evaluators). Kivy widget changes go through `on_main`.
     """
 
     def __init__(self, ctx: AppContext, session_manager, audio, live_screen, *,
@@ -148,8 +148,7 @@ class ProgramRun:
             line_name = program_line_name(formula)
         target = segment_target(seg)
         self.audio_key = metric_key
-        self._session_manager.start_segment(metric_key, target)
-        self._audio.set_threshold(target)
+        self._session_manager.start_segment(metric_key, target)  # the sound follows the tick's target from here
         if 0 <= idx < len(self._feedback_ids):
             self._audio.set_active_feedback(self._feedback_ids[idx])
         self._ctx.on_main(lambda k=metric_key, nm=line_name: self._segment_ui(k, nm))
