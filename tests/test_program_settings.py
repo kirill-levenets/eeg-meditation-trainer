@@ -4,7 +4,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.session.manager import SessionManager
 from app.storage.database import DatabaseManager
 from tests._program_settings import make_programs
 
@@ -24,8 +23,7 @@ def uid(db):
 
 
 def _programs(db, uid):
-    return make_programs(db, uid, timer_section=MagicMock(timer_enabled=False, timer_minutes=10),
-                         session_manager=SessionManager())
+    return make_programs(db, uid, timer_section=MagicMock(timer_enabled=False, timer_minutes=10))
 
 
 def test_a_duration_tap_is_a_simple_timer_and_leaves_program_mode(db, uid):

@@ -255,8 +255,8 @@ def test_program_shows_exactly_its_metric_set_whole_session():
     assert graph.series_name("program_formula") == "Program: Alpha"
 
     run.end()
-    assert graph.is_visible("program_formula") is False    # not lingering as a user selection
-    assert graph.is_visible("custom_formula") is True       # user slot restored
+    assert graph.is_visible("program_formula") is False  # not lingering as a user selection; the ending re-derives the rest
+    assert graph.program_keys == frozenset()
 
 
 def test_program_with_two_distinct_customs_shows_three_lines():
@@ -296,13 +296,10 @@ def test_program_with_two_distinct_customs_shows_three_lines():
 
 
 def test_idle_program_preview_shows_program_set(tmp_path):
-    """In program mode with a loaded program, the live graph previews EXACTLY the
-    program's metric set before any session starts; switching to simple mode restores
-    the user's saved selection (and a program's visible set is never persisted over it)."""
-    from unittest.mock import MagicMock
-
+    """In program mode with a loaded program, the live graph previews EXACTLY the program's metric set before any
+    session starts, and an ending derives it again; simple mode restores the user's saved selection. A program's set
+    is never persisted over it."""
     from app.metrics.formula_slots import FormulaSlots
-    from app.session.manager import SessionState
     from app.ui.live_session import LiveSessionScreen
     db = DatabaseManager(db_path=str(tmp_path / "preview.db"))
     uid = db.create_user("u")
@@ -312,31 +309,46 @@ def test_idle_program_preview_shows_program_set(tmp_path):
     app._db = db
     app._current_user_id = uid
     app._live_screen = LiveSessionScreen()
-    app._session_manager = MagicMock()
-    app._session_manager.state = SessionState.IDLE  # not running
     app._formulas = FormulaSlots()
-    app._program_settings = _program_settings(db, uid, live_screen=app._live_screen, session_manager=app._session_manager,
+    app._program_settings = _program_settings(db, uid, live_screen=app._live_screen,
+                              timer_section=MagicMock(timer_enabled=False, timer_minutes=10),
                               show_saved_series=lambda u: app._graph_series.apply_saved(app._live_screen.graph, u))
-    app._graph_series = make_graph_series(app)
+    app._graph_series = make_graph_series(app, live=lambda: False)  # idle: no session runs or connects
     app._program_settings.mode = "program"
     app._program_settings.segments = [
-        {"minutes": 1, "target": 50, "formula": "shamatha_score"},
+        {"minutes": 1, "target": 50, "formula": "meditation_score"},  # outside the saved selection
         {"minutes": 1, "target": 80, "formula": {"name": "Alpha", "formula": "alpha1"}},
     ]
     g = app._live_screen.graph
+    preview = {"meditation_score", "program_formula"}
 
     app._program_settings.refresh_live_series()  # idle preview
-    assert set(g.visible_keys()) == {"shamatha_score", "program_formula"}
+    assert set(g.visible_keys()) == preview and g.program_keys == preview
     assert g.series_name("program_formula") == "Program: Alpha"
-
-    # A program governs the live graph -> its set must not be persisted as the manual one.
-    app._graph_series.persist(g)
+    app._graph_series.persist(g)  # a program governs the live graph: its set is not the manual one
     assert db.get_user_json_setting(uid, "graph_series_live_metrics") == ["shamatha_score"]
 
-    # Back to simple mode -> the saved selection (shamatha only) is restored.
-    app._program_settings.mode = "simple"
+    run = make_run(app, live_screen=app._live_screen)
+    for begun in (False, True):  # a start cancelled during its scan, then a program session that ran
+        if begun:
+            run.begin(app._program_settings.program(), [], "P")
+        run.end()  # the ending, as _undo_session_setup runs it: the program dropped, the idle series derived again
+        app._program_settings.sync_picker()
+        assert g.program_keys == preview and g.is_visible("meditation_score")
+        app._graph_series.persist(g)
+        assert db.get_user_json_setting(uid, "graph_series_live_metrics") == ["shamatha_score"]
+
+    app._program_settings.on_changed([])  # the program emptied in Settings > Timer: no preview, the saved selection
+    assert set(g.visible_keys()) == {"shamatha_score"} and g.program_keys == frozenset()
+    app._program_settings.on_changed([{"minutes": 1, "target": 50, "formula": "meditation_score"}])
+    assert g.program_keys == {"meditation_score"}
+
+    app._program_settings.mode = "simple"  # back to simple: the saved selection, the user's own again
     app._program_settings.refresh_live_series()
-    assert set(g.visible_keys()) == {"shamatha_score"}
+    assert set(g.visible_keys()) == {"shamatha_score"} and g.program_keys == frozenset()
+    g.set_visible("distraction", True)
+    app._graph_series.persist(g)
+    assert set(db.get_user_json_setting(uid, "graph_series_live_metrics")) == {"shamatha_score", "distraction"}
     db.close()
 
 

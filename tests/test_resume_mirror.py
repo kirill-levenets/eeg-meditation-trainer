@@ -242,6 +242,7 @@ def _make_resume_app(running: bool = True) -> EEGMeditationApp:
     app._session_manager.elapsed_formatted = "1:23"
     app._live_screen = MagicMock()
     app._program_run = make_run(app)
+    app._program_settings = make_programs()  # idle: an ending re-derives its series
     app._settings_screen = MagicMock()
     app._shown = make_shown(app)
     return app

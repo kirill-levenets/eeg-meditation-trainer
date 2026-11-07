@@ -165,7 +165,6 @@ class DiaryScreen(Screen):
         self._scored_key: Optional[str] = None  # the series the shown session was scored on, marked in its legend
         self._saved_notes_state: tuple[str, str, int] | None = None  # the fields as loaded or last saved
         self._session_formula_series: dict[str, list[float]] = {}
-        self._program_keys: frozenset[str] = frozenset()  # the program lines a program session shows, none otherwise
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -553,15 +552,12 @@ class DiaryScreen(Screen):
             self._metrics_graph.set_series_name(key, name)
 
     def show_program_lines(self, plan: RunnablePlan | None) -> None:
-        """A program session shows exactly its program's lines, as the Session screen did while it ran, and marks them
-        as the program's, so they are never saved as the profile's selection; None, a simple session, clears the mark."""
-        self._program_keys = frozenset(plan.keys) if plan is not None else frozenset()
+        """A program session shows exactly its program's lines, as the Session screen did while it ran, marked as the
+        program's (never saved as the profile's selection); None, a simple session, clears the mark."""
         if plan is not None:
             show_program_series(self._metrics_graph, plan)
-
-    def program_lines_of(self, graph) -> frozenset[str]:
-        """The program lines `graph` shows for the session on screen: none but on the metrics graph of a program's."""
-        return self._program_keys if graph is self._metrics_graph else frozenset()
+        else:
+            self._metrics_graph.set_program_lines()
 
     def load_metrics_preview(self, metrics_rows: list[dict]) -> None:
         """Load session metrics into all three preview graphs at once (the async open fills them one per frame)."""

@@ -14,6 +14,7 @@ from app.storage.database import DatabaseManager
 from app.ui.line_colours import LINE_COLOURS
 from app.ui.theme import C, F
 from app.ui.widgets.user_picker import UserPickerForm
+from tests._picker import picker_rows
 
 
 def _frames(n: int = 10) -> None:
@@ -213,3 +214,84 @@ def test_mock_sessions_on_the_real_tick_thread_are_each_saved_once(build_app):
         app._shown.on_ok()
         _frames()
     assert all(app._db.get_session_metrics(s["id"]) for s in app._db.get_all_sessions(uid))
+
+
+_DEEP = [{"minutes": 5, "target": 60, "formula": {"name": "Deep", "formula": "alpha1"}},
+         {"minutes": 5, "target": 60, "formula": "meditation_score"}]
+
+
+def _saved_selection(app, keys: list[str]) -> list[str]:
+    """The profile's saved live series, applied to the graph as a profile load does."""
+    app._db.set_user_json_setting(app._current_user_id, "graph_series_live_metrics", keys)
+    app._graph_series.restore(app._current_user_id)
+    return keys
+
+
+def _program_rows(app, monkeypatch) -> list[str]:
+    return [row for row in picker_rows(app, monkeypatch) if row.startswith("Program")]
+
+
+def _start_and_tick(app) -> None:
+    app._on_start()
+    _frames_until(lambda: len(app._shown.mirror.metrics) >= 2, 5.0)
+
+
+def test_a_program_session_owns_the_live_graph_until_its_ending_derives_the_idle_series(build_app, monkeypatch):
+    app = build_app(_last_used("me"))
+    uid, g = app._current_user_id, app._live_screen.graph
+    app._program_settings.segments = [dict(s) for s in _DEEP]
+    app._program_settings.on_mode_change("program")  # the idle preview: shown, not listed
+    assert g.is_visible("program_formula") and _program_rows(app, monkeypatch) == []
+    _start_and_tick(app)
+    assert _program_rows(app, monkeypatch) == ["Program: Deep"]
+    app._profiles.on_switch(uid)  # the active profile re-picked mid-session: the session keeps its graph
+    _frames()
+    assert g.is_visible("program_formula") and _program_rows(app, monkeypatch) == ["Program: Deep"]
+    app._program_settings.on_mode_change("simple")  # Settings > Timer, mid-session
+    assert g.is_visible("program_formula")
+    app._stop_and_save()
+    _frames()
+    app._shown.on_ok()
+    _frames()
+    assert g.program_keys == frozenset() and not g.is_visible("program_formula")  # simple mode: the saved selection
+    assert not g.is_visible("meditation_score")  # the program's built-in line went with it
+    g.set_visible("distraction", True)
+    app._graph_series.persist(g)
+    assert "distraction" in app._db.get_user_json_setting(uid, "graph_series_live_metrics")
+    _start_and_tick(app)  # the next, simple, session
+    assert _program_rows(app, monkeypatch) == []
+    app._stop_and_save()
+    _frames()
+
+
+def test_a_duration_tap_while_a_program_previews_saves_nothing_of_it(build_app):
+    app = build_app(_last_used("me"))
+    uid = app._current_user_id
+    saved = _saved_selection(app, ["shamatha_score", "distraction"])
+    app._program_settings.segments = [dict(s) for s in _DEEP]
+    app._program_settings.on_mode_change("program")
+    app._program_settings.on_duration_preset(20)  # the Session screen's duration: simple mode, the settings saved
+    assert app._db.get_user_json_setting(uid, "graph_series_live_metrics") == saved
+    assert not app._live_screen.graph.is_visible("program_formula")
+
+
+def test_a_start_derives_the_idle_series_whatever_an_editor_change_left(build_app, monkeypatch):
+    app = build_app(_last_used("me"))
+    app._program_settings.segments = [dict(s) for s in _DEEP]
+    app._program_settings.on_mode_change("program")  # the preview, marked
+    app._program_settings.segments = []  # a writer that skipped the derivation: the next Start is a simple session
+    _start_and_tick(app)
+    assert app._live_screen.graph.program_keys == frozenset() and _program_rows(app, monkeypatch) == []
+    app._stop_and_save()
+    _frames()
+
+
+def test_an_unrunnable_program_previews_the_saved_selection_and_saves_nothing(build_app):
+    app = build_app(_last_used("me"))
+    uid = app._current_user_id
+    saved = _saved_selection(app, ["shamatha_score", "distraction"])
+    app._program_settings.segments = [{"minutes": 0, "target": 60, "formula": "meditation_score"}]  # a hand-edited record
+    app._program_settings.on_mode_change("program")
+    assert not app._program_settings.governs_live_series()
+    app._save_user_settings()
+    assert app._db.get_user_json_setting(uid, "graph_series_live_metrics") == saved

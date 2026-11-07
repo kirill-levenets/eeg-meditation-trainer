@@ -247,7 +247,7 @@ def test_a_program_sessions_detail_draws_its_formula_line_as_the_session_did():
     assert graph._gradient_spans("program_formula", 0, 4) == [(2, 4)]
     assert graph._gradient_spans("shamatha_score", 0, 4) == [(0, 2)]
     detail.show_program_lines(None)  # a simple session next
-    assert detail.program_lines_of(graph) == frozenset()
+    assert graph.program_keys == frozenset()
 
 
 def test_picking_line_colours_applies_them_at_once():

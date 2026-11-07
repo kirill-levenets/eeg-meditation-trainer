@@ -18,12 +18,13 @@ from app.ui.live_session import SERIES_NAMES
 
 
 def show_program_series(graph, plan: RunnablePlan) -> None:
-    """Set the graph to EXACTLY the program's metric set and label each program custom line. Shared by a program
-    session's start, the idle preview and a program session's detail in History."""
+    """Set the graph to EXACTLY the program's metric set, label each program custom line and mark the set as the
+    program's. Shared by a program session's start, the idle preview and a program session's detail in History."""
     for slot, custom in plan.customs:
         graph.set_series_name(slot, program_line_name(custom))
     for k in graph.series_keys():
         graph.set_visible(k, k in plan.keys)
+    graph.set_program_lines(plan.keys)
 
 
 class ProgramRun:
@@ -47,19 +48,14 @@ class ProgramRun:
         self.seg_idx = -1
         self._segment_keys: list[str] = []  # metric key driven by each segment
         self._feedback_ids: list[str] = []  # feedback source of each segment
-        self._prev_visibility: dict[str, bool] = {}  # live-graph visibility before the program
 
     @property
     def active(self) -> bool:
         return self.program is not None
 
-    def computes(self, key: str) -> bool:
-        """True for a program line the running program evaluates every tick."""
-        return self.active and key in self.formula_evs
-
     def begin(self, prog: SessionProgram | None, feedback_ids: list[str], name: str) -> None:
-        """Session start: a simple session (None) runs none. A program snapshots the graph's visibility, shows EXACTLY
-        its metric set for the whole session, and arms one persistent evaluator per distinct custom formula that
+        """Session start: a simple session (None) runs none. A program shows and marks EXACTLY its metric set on the
+        live graph for the whole session, and arms one persistent evaluator per distinct custom formula that
         compiles; one that doesn't runs its segments on shamatha, and a popup names it. Each custom line is shown the
         whole program (not per-segment) and evaluated every tick, so only the legend marker changes as segments
         cross."""
@@ -72,11 +68,8 @@ class ProgramRun:
         self._feedback_ids = feedback_ids
         if prog is None:
             return
-        graph = self._live_screen.graph
-        # Snapshot every catalog key's visibility so stop restores exactly.
-        self._prev_visibility = {k: graph.is_visible(k) for k in graph.series_keys()}
         plan = runnable_plan(prog)
-        show_program_series(graph, plan)
+        show_program_series(self._live_screen.graph, plan)
         self._segment_keys, self.formula_evs = plan.segment_keys, plan.evaluators
         if plan.unrunnable:
             logger.warning(f"Program formulas that can't run, their segments use shamatha: {plan.unrunnable}")
@@ -86,8 +79,8 @@ class ProgramRun:
             self._ctx.on_main(lambda: self._ctx.info("Formula error in this program", message))
 
     def end(self) -> None:
-        """Restore the live graph to its pre-program visibility and drop the program custom-formula
-        lines/labels/evaluators."""
+        """Drop the program, its custom-formula lines, labels and evaluators, and its mark on the live graph; the
+        ending re-derives the graph's idle series (ProgramSettings.refresh_live_series)."""
         graph = self._live_screen.graph
         for slot in PROGRAM_FORMULA_KEYS:
             graph.set_series_name(slot, SERIES_NAMES.get(slot, "Program"))  # drop stale labels
@@ -97,12 +90,9 @@ class ProgramRun:
         self._segment_keys = []
         self._feedback_ids = []
         self.audio_key = ""
-        prev = self._prev_visibility or dict.fromkeys(PROGRAM_FORMULA_KEYS, False)
-        for k, on in prev.items():
-            graph.set_visible(k, on)
         for slot in PROGRAM_FORMULA_KEYS:
             graph.set_visible(slot, False)  # never linger as a user selection
-        self._prev_visibility = {}
+        graph.set_program_lines()
 
     def segments_json(self) -> str:
         """JSON of the program that ran this session (empty for a simple session).

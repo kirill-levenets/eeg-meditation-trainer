@@ -151,6 +151,8 @@ The linked file explains the mechanism.
   the threshold has one owner, `SessionManager` (`threshold`, the base; a tick's `score_target`): the sound, the engine and the SHAMATHA pill read it per tick, never a copy. → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
 - `ProgramRun.audio_key` is transient and never written to the stored `audio_metric`;
   `PROGRAM_FORMULA_KEYS` are never persisted to `graph_series_*` or the baseline audio metric, nor a program's series set (live or a session detail's) as the profile's selection.
+  A program's set on the live graph, and its mark, have two writers, the running program (`ProgramRun.begin`) and the idle derivation (`ProgramSettings.refresh_live_series`, `GraphSeries.apply_saved`),
+  which does nothing while a session runs or connects and runs again after every ending and editor change: no snapshot is restored.
   A program runs, and is replayed, on `runnable_plan`: a custom formula that doesn't compile gets no line and its segments use Shamatha.
   A leaked program key, or one nothing computes, reads as 0 → constant max noise. → [programs](docs/architecture/programs.md)
 

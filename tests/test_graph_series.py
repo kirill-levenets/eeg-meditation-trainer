@@ -21,7 +21,6 @@ from app.ui.theme import StyledButton
 from app.ui.widgets.band_totals import BAND_COLORS, BAND_SCALES
 from tests._formula_settings import make_formula_settings
 from tests._graph_series import make_graph_series
-from tests._program_settings import make_programs
 from tests._settings import audio_store
 
 
@@ -57,18 +56,15 @@ class TestGraphSeriesPersistence(unittest.TestCase):
         self.app._diary_screen = _FakeDiary()
         self.graph = self.app._live_screen.graph
 
-        metric_keys = [k for k in METRICS_COLORS if k != "custom_formula"]
         settings = types.SimpleNamespace()
-        settings._graph_toggles = {k: (k == "shamatha_score") for k in metric_keys}
         settings.formulas = types.SimpleNamespace(set_formula_slot=lambda *a, **k: None,
                                                   set_formula_slot_status=lambda *a, **k: None)
         self.app._settings_screen = settings
         self.app._formulas = FormulaSlots()
         self.app._formulas.evaluators[0] = types.SimpleNamespace(is_valid=False)
         audio_store(self.app)  # the app's default: no formula slot drives the sound
-        self.app._program_settings = make_programs(self.app._db, self.uid)  # simple mode: the user's own series
         self.app._formula_settings = make_formula_settings(self.app)
-        self.app._graph_series = make_graph_series(self.app)
+        self.app._graph_series = make_graph_series(self.app, live=lambda: False)  # no session runs
 
     def tearDown(self):
         self.app._db.close()
@@ -109,7 +105,7 @@ class TestGraphSeriesPersistence(unittest.TestCase):
 
     def test_first_run_defaults(self):
         self.app._graph_series.restore(self.uid)
-        # Live metrics: _graph_toggles default = Shamatha only.
+        # Live metrics: FIRST_RUN_LIVE_SERIES = Shamatha only.
         self.assertTrue(self.graph.is_visible("shamatha_score"))
         self.assertFalse(self.graph.is_visible("distraction"))
         # Other multi-series graphs: all visible.
@@ -146,9 +142,10 @@ class TestGraphSeriesPersistence(unittest.TestCase):
     def test_a_detail_showing_a_programs_lines_lists_them_and_saves_none_of_its_set(self):
         diary = self.app._diary_screen._metrics_graph
         shown = frozenset({"shamatha_score", "program_formula"})
-        series = make_graph_series(self.app, detail_program=lambda g: shown if g is diary else frozenset())
+        series = self.app._graph_series
         for key in diary.series_keys():
             diary.set_visible(key, key in shown)  # what show_program_series does for a program session
+        diary.set_program_lines(shown)
         listed = []
 
         def capture(_title, rows, footer=None, **_kw):
@@ -294,7 +291,7 @@ def test_choosing_a_saved_formula_renames_its_picker_row_at_once(tmp_path, monke
                                 _audio_metric=types.SimpleNamespace(formula_scoring_locked=lambda _key, _doing: False),
                                 _live_screen=types.SimpleNamespace(graph=graph))
     app._formula_settings = make_formula_settings(app)
-    series = make_graph_series(app, graphs=lambda: [graph])
+    series = make_graph_series(app, graphs=lambda: [graph], live=lambda: False)
     shown_rows = []
     monkeypatch.setattr(graph_series, "make_scroll_popup",
                         lambda title, rows, **kw: shown_rows.extend(rows) or MagicMock())

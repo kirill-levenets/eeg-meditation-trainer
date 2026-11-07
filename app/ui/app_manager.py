@@ -59,7 +59,7 @@ from app.ui.bt_wait import BtWait
 from app.ui.diary_screen import DiaryScreen
 from app.ui.formula_settings import FormulaSettings
 from app.ui.graph_fullscreen import GraphFullscreen
-from app.ui.graph_series import GraphSeries
+from app.ui.graph_series import FIRST_RUN_LIVE_SERIES, GraphSeries
 from app.ui.headset import Headset
 from app.ui.history_flow import HistoryFlow
 from app.ui.history_screen import HistoryScreen
@@ -281,7 +281,7 @@ class EEGMeditationApp(App):
                                        formula_vars=self._eval_formula_vars)
         self._audio_metric = AudioMetric(self._ctx, self._formulas, self._program_run, self._settings_screen)
         self._program_settings = ProgramSettings(
-            self._ctx, self._settings_screen.timer, self._live_screen, self._session_manager,
+            self._ctx, self._settings_screen.timer, self._live_screen,
             show_saved_series=lambda uid: self._graph_series.apply_saved(self._live_screen.graph, uid))
         self._formula_settings = FormulaSettings(self._ctx, self._settings_screen.formulas, self._live_screen.graph,
                                                  self._formulas, scoring_locked=self._audio_metric.formula_scoring_locked)
@@ -293,10 +293,8 @@ class EEGMeditationApp(App):
                                on_main_for=self._on_main_for)
         self._watch = SessionWatch(self._real_stream, self._audio, self._live_screen, self._headset,
                                    on_main=self._on_main)
-        self._graph_series = GraphSeries(
-            self._ctx, self._live_screen.graph, self._formulas, self._program_run, self._program_settings,
-            self._formula_settings, graphs=self._all_graphs, detail_program=self._diary_screen.program_lines_of,
-            legacy_defaults=self._settings_screen._graph_toggles)
+        self._graph_series = GraphSeries(self._ctx, self._live_screen.graph, self._formulas, self._formula_settings,
+                                         graphs=self._all_graphs)
         self._history = HistoryFlow(self._ctx, self._history_screen, self._formulas, self._loading_overlay,
                                     on_sessions_deleted=lambda ids: self._shown.on_sessions_deleted(ids))
         self._shown = ShownSession(self._ctx, self._live_screen, self._audio, self._history, self._recorder)
@@ -392,7 +390,7 @@ class EEGMeditationApp(App):
         # with formula segments runs; a new profile starts on Shamatha alone (a profile load applies its own).
         for key in (*FORMULA_KEYS, *PROGRAM_FORMULA_KEYS):
             self._live_screen.graph.set_visible(key, False)
-        for key, active in self._settings_screen._graph_toggles.items():
+        for key, active in FIRST_RUN_LIVE_SERIES.items():
             self._live_screen.graph.set_visible(key, active)
 
     def _wire_settings_screen(self) -> None:
@@ -617,6 +615,7 @@ class EEGMeditationApp(App):
         self._recorder.begin()
         run.connect_start = time.time()
         self._shown.take(self._current_user_id)
+        self._program_settings.refresh_live_series()  # the idle series of the editor as it is now: begin builds on it
         self._program_run.begin(program, self._sounds.prepare_session(program), self._program_settings.name)
         self._live_screen.set_training_series(None)  # set on first segment crossing
         self._live_screen.set_controls_running()
@@ -733,6 +732,7 @@ class EEGMeditationApp(App):
         self._session_manager.reset()
         self._settings_screen.lock_threshold(None)
         self._keep_awake.release()
+        self._program_settings.sync_picker()  # after the reset: while the session still reads live, nothing is derived
 
     def _on_connect_retry(self, *args) -> None:
         """Retry button on connection overlay."""

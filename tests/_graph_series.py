@@ -4,22 +4,13 @@ from unittest.mock import MagicMock
 
 from app.ui.graph_series import GraphSeries
 from tests._context import context_fields, make_context
-from tests._program_run import make_run
-from tests._program_settings import make_programs
 
 
 def make_graph_series(app, **deps) -> GraphSeries:
-    """The app's parts; for the ones it lacks, no program running or loaded and mocks."""
-    def attr(name, default):
-        value = getattr(app, name, None)
-        return default() if value is None else value
-
+    """The app's parts; for the ones it lacks, mocks."""
     live_screen = getattr(app, "_live_screen", None)
     ctx = make_context(app, **context_fields(deps))
-    defaults = {"graphs": lambda: app._all_graphs(),
-                "legacy_defaults": getattr(getattr(app, "_settings_screen", None), "_graph_toggles", {}),
-                "detail_program": getattr(getattr(app, "_diary_screen", None), "program_lines_of",
-                                          lambda _graph: frozenset())}
+    formula_settings = getattr(app, "_formula_settings", None)
     return GraphSeries(ctx, MagicMock() if live_screen is None else live_screen.graph, app._formulas,
-                       attr("_program_run", make_run), attr("_program_settings", make_programs),
-                       attr("_formula_settings", MagicMock), **{**defaults, **deps})
+                       MagicMock() if formula_settings is None else formula_settings,
+                       **{"graphs": lambda: app._all_graphs(), **deps})

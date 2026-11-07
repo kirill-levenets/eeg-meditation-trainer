@@ -24,7 +24,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Formula series aren't stored per tick:
   `detail_graph_data(rows, series)` takes them from the replay (a slot the session didn't record stays empty), and the metrics graph's fill step calls `set_session_formulas(series, names)` first, which names the series.
   A program session shows exactly its program's lines, as the Session screen did while it ran: the open calls `show_program_lines(recorded_plan(...))`, which runs the live graph's `show_program_series`.
-  While it does, the picker lists those lines and `GraphSeries.persist` saves nothing (`detail_program`, as a running program skips the live graph), so the profile's History selection is never overwritten;
+  While it does, the picker lists those lines and `GraphSeries.persist` saves nothing (the graph's `program_keys`, as a running program's on the live graph), so the profile's History selection is never overwritten;
   every simple session opens with that selection (`apply_saved`), which costs nothing when it already shows: `set_visible` changes and redraws only what differs.
   So a program session draws as it did live: each segment's line, a program formula's too, in the gradient over its segment by the stored ticks' `score_key` ([graphs](graphs.md)).
   **Try another threshold** (#50, the what-if):

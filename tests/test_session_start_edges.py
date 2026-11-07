@@ -20,6 +20,7 @@ from app.ui.bt_wait import BtWait
 from tests._bt_wait import make_bt_wait
 from tests._headset import fake_paired, make_headset
 from tests._program_run import make_run
+from tests._program_settings import make_programs
 from tests._recorder import make_recorder
 from tests._session_run import run_in
 from tests._shown_session import make_shown
@@ -49,6 +50,7 @@ def _app() -> EEGMeditationApp:
     app._keep_awake = MagicMock()
     app._confirm_action = MagicMock()
     app._program_run = make_run(app)
+    app._program_settings = make_programs()  # idle: an ending re-derives its series
     queued = []
     app._on_main = queued.append
     app._queued = queued
@@ -299,17 +301,28 @@ def test_a_wait_tick_that_outlived_its_run_ends_nothing(monkeypatch):
 
 
 def _with_program(app) -> EEGMeditationApp:
-    """What _start_session_common's ProgramRun.begin left before the wait."""
+    """What _start_session_common's ProgramRun.begin left before the wait; the idle series derivation watched."""
     app._program_run.program = MagicMock()
-    app._program_run._prev_visibility = {"shamatha_score": True, "program_formula": False}
-    app._live_screen.graph.series_keys.return_value = ["shamatha_score", "program_formula"]
+    app._program_settings.sync_picker = MagicMock()
     return app
 
 
-def test_a_cancelled_program_session_restores_the_series_and_leaves_no_program_state():
+def test_an_ending_derives_the_idle_series_once_the_session_no_longer_reads_live():
+    # A Start cancelled in the frame its first data arrived: the session manager is still RUNNING at the teardown.
+    app = _app()
+    shown_saved = MagicMock()
+    app._program_settings = make_programs(MagicMock(), 1, live=lambda: app._session_pipeline_live(),
+                                          show_saved_series=shown_saved, timer_section=MagicMock(timer_minutes=10))
+    app._session_manager.start()
+    app._undo_session_setup()
+    shown_saved.assert_called_once_with(1)  # derived after the reset: the profile's own selection
+
+
+def test_a_cancelled_program_session_derives_the_idle_series_and_leaves_no_program_state():
     app = _with_program(_waiting(_app()))
     app._on_connect_cancel()
-    assert not app._program_run.active and app._program_run._prev_visibility == {}
+    assert not app._program_run.active
+    app._program_settings.sync_picker.assert_called_once()
 
 
 @pytest.mark.parametrize("exit_case", ["failed", "no data", "timeout"])
@@ -318,7 +331,8 @@ def test_a_wait_that_ends_on_its_own_undoes_the_program_setup(exit_case):
     _end_the_wait(app, exit_case)
     app._follow_bt_wait(app._run)
     _run_queued(app)
-    assert not app._program_run.active and app._program_run._prev_visibility == {}
+    assert not app._program_run.active
+    app._program_settings.sync_picker.assert_called_once()
     app._live_screen.show_overlay_retry.assert_called_once()
 
 

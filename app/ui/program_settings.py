@@ -3,7 +3,6 @@ screen's duration picker, which shows what the next Start runs."""
 from collections.abc import Callable
 
 from app.logger import logger
-from app.session.manager import SessionState
 from app.session.session_program import SessionProgram, runnable_plan
 from app.ui.app_context import AppContext
 from app.ui.program_run import show_program_series
@@ -18,12 +17,11 @@ class ProgramSettings:
     """The profile's timer mode and the program it edits, with that program's name. A session runs a snapshot of it
     (ProgramRun), so an edit made during a session waits for the next one."""
 
-    def __init__(self, ctx: AppContext, timer_section, live_screen, session_manager, *,
+    def __init__(self, ctx: AppContext, timer_section, live_screen, *,
                  show_saved_series: Callable[[int], None]) -> None:
         self._ctx = ctx
         self._timer_section = timer_section
         self._live_screen = live_screen
-        self._session_manager = session_manager
         self._show_saved_series = show_saved_series
         self.mode = "simple"
         self.segments: list[dict] = []
@@ -57,15 +55,14 @@ class ProgramSettings:
         return prog if self.mode == "program" and prog else None
 
     def governs_live_series(self) -> bool:
-        """True when the live metrics graph's visibility is program-driven (program mode
-        with a loaded program) — so it must not be persisted as the manual selection."""
-        return self.mode == "program" and bool(self.segments)
+        """A program is in force: the one the next Start runs, which the idle live graph previews."""
+        return self.for_session() is not None
 
     def refresh_live_series(self) -> None:
         """Idle preview: in program mode with a loaded program, show the program's metric
         set on the live graph (legend + lines) before Start; otherwise restore the user's
-        saved selection. No-op while a session runs (the session owns the graph then)."""
-        if self._session_manager.state in (SessionState.RUNNING, SessionState.PAUSED):
+        saved selection. No-op while a session runs or connects (the session owns the graph then)."""
+        if self._ctx.session.live():
             return
         uid = self._ctx.user_id()
         if not uid:
@@ -101,12 +98,16 @@ class ProgramSettings:
 
     def on_mode_change(self, mode: str) -> None:
         self.mode = mode
-        self.persist(self._ctx.user_id())
-        self.sync_picker()
+        self._edited()
 
     def on_changed(self, segments: list) -> None:
         self.segments = segments
+        self._edited()
+
+    def _edited(self) -> None:
+        """An edit of the mode or the program: saved, and the idle preview follows it."""
         self.persist(self._ctx.user_id())
+        self.sync_picker()
 
     def on_save(self, name: str) -> None:
         """Save the active program under `name`. Unique names: an existing name

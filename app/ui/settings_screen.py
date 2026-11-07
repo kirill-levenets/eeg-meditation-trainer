@@ -117,15 +117,6 @@ class SettingsScreen(Screen):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.name = "settings"
-        self._graph_toggles: dict[str, bool] = {
-            "shamatha_score": True,
-            "meditation_score": False,
-            "distraction": False,
-            "sinking": False,
-            "subtle_distraction": False,
-            "native_attention": False,
-            "native_meditation": False,
-        }
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -298,10 +289,6 @@ class SettingsScreen(Screen):
 
         # --- Display section ---
         self.display = DisplaySection(accordion.add_section("Display", collapsed=True))
-
-        # Graph series are now chosen via the on-graph series picker (combobox);
-        # the former "Graph Metrics" checkbox section was removed (subsumed).
-        # _graph_toggles (above) remains as the first-run default selection.
 
         # --- Custom Formula section ---
         self.formulas = FormulaSection(accordion.add_section("Custom Formula", collapsed=True))

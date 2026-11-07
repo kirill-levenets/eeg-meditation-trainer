@@ -101,7 +101,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   FINISHED (the timer ended it on the tick thread and its teardown is queued) is ignored, since cancelling there would stop the kept-alive headset link;
   anything else cancels the start (`_cancel_session_start`).
   Every ending (`_finalize_stop_ui`, a cancelled start, a refused connect and the tick-thread wait exits' queued callbacks) undoes the start's setup through the one `_undo_session_setup()`:
-  program series and state via `ProgramRun.end`, the training marker, the shamatha pill, timer and session manager reset, wake lock and keep-alive service (the releases are idempotent).
+  program series and state via `ProgramRun.end`, the training marker, the shamatha pill, timer and session manager reset, wake lock and keep-alive service (the releases are idempotent),
+  then the live graph's idle series derived again (`ProgramSettings.sync_picker`: after the reset, so the session no longer reads live).
   A program left behind would have a later simple session persist the program's series over the user's series selection.
   A kept-alive connection's start shows the same `_on_session_connected` as the wait's.
   The header's start time and the graph's wall-clock axis come from `SessionManager.started_at`, not from when the queued UI ran (after a screen lock, the unlock time).
