@@ -1,109 +1,78 @@
 """Android hardware-back (key 27) handling: overlay close / navigate / double-exit."""
 import time
-import types
-import unittest
-from unittest import mock
 
-from kivy.uix.floatlayout import FloatLayout
+import pytest
+from kivy.core.window import Window
+from kivy.uix.modalview import ModalView
 
-from app.ui.app_manager import EEGMeditationApp
-from app.ui.graph_fullscreen import GraphFullscreen
+import app.ui.app_manager as am
+from tests._app import open_detail, saved_session
 
 
-def _app(current="live_session"):
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._sm = types.SimpleNamespace(current=current)
-    app._fullscreen = GraphFullscreen(FloatLayout())
-    app._last_back_time = 0.0
-    app._switched = []
-    app._diary_back_calls = 0
-    app._toasts = []
-    app._switch_screen = lambda name: app._switched.append(name)
-    app._detail = types.SimpleNamespace(on_diary_back=lambda: setattr(app, "_diary_back_calls", app._diary_back_calls + 1))
-    app._toast = lambda msg: app._toasts.append(msg)
-    app._gate = types.SimpleNamespace(active=lambda: False)  # a profile is active
+@pytest.fixture
+def app(fresh_app, monkeypatch):
+    """The app on its Session screen; `app.toasts` and `app.stops` record what a back press said and whether it
+    exited."""
+    app = fresh_app
+    app.toasts, app.stops = [], []
+    monkeypatch.setattr(am, "show_toast", app.toasts.append)
+    monkeypatch.setattr(app, "stop", lambda: app.stops.append(True))
     return app
 
 
-class TestBackButton(unittest.TestCase):
-    def _press(self, app, key=27):
-        # No modal open by default; stop() patched so the exit path is observable.
-        with mock.patch("app.ui.app_manager.Window") as W, \
-             mock.patch("app.ui.app_manager.App") as A:
-            W.children = []
-            stop = mock.Mock()
-            A.get_running_app.return_value = types.SimpleNamespace(stop=stop)
-            handled = app._on_keyboard(None, key, 0, None, [])
-            return handled, stop
-
-    def test_non_back_key_ignored(self):
-        app = _app()
-        handled, _ = self._press(app, key=97)  # 'a'
-        self.assertFalse(handled)
-        self.assertEqual(app._toasts, [])
-
-    def test_open_modal_not_intercepted(self):
-        app = _app(current="history")
-        with mock.patch("app.ui.app_manager.Window") as W, \
-             mock.patch("app.ui.app_manager.App"):
-            from kivy.uix.modalview import ModalView
-            W.children = [ModalView()]
-            handled = app._on_keyboard(None, 27, 0, None, [])
-        self.assertFalse(handled)  # let the popup dismiss itself
-        self.assertEqual(app._switched, [])
-
-    def test_fullscreen_overlay_closes(self):
-        app = _app()
-        closed = []
-        app._fullscreen._overlay = object()
-        app._fullscreen._close = lambda: closed.append(True)
-        handled, _ = self._press(app)
-        self.assertTrue(handled)
-        self.assertEqual(closed, [True])
-
-    def test_diary_back(self):
-        app = _app(current="diary")
-        handled, _ = self._press(app)
-        self.assertTrue(handled)
-        self.assertEqual(app._diary_back_calls, 1)
-        self.assertEqual(app._switched, [])
-
-    def test_history_navigates_to_session(self):
-        app = _app(current="history")
-        handled, _ = self._press(app)
-        self.assertTrue(handled)
-        self.assertEqual(app._switched, ["live_session"])
-
-    def test_settings_navigates_to_session(self):
-        app = _app(current="settings")
-        handled, _ = self._press(app)
-        self.assertTrue(handled)
-        self.assertEqual(app._switched, ["live_session"])
-
-    def test_root_first_press_toasts_no_exit(self):
-        app = _app(current="live_session")
-        app._last_back_time = 0.0  # epoch → far in the past
-        handled, stop = self._press(app)
-        self.assertTrue(handled)
-        self.assertEqual(app._toasts, ["Press back again to exit"])
-        stop.assert_not_called()
-        self.assertGreater(app._last_back_time, 0.0)
-
-    def test_root_double_press_exits(self):
-        app = _app(current="live_session")
-        app._last_back_time = time.time()  # a press just happened
-        handled, stop = self._press(app)
-        self.assertTrue(handled)
-        stop.assert_called_once()
-
-    def test_root_slow_second_press_does_not_exit(self):
-        app = _app(current="live_session")
-        app._last_back_time = time.time() - 5.0  # >2s ago
-        handled, stop = self._press(app)
-        self.assertTrue(handled)
-        stop.assert_not_called()
-        self.assertEqual(app._toasts, ["Press back again to exit"])
+def _back(app, key: int = 27) -> bool:
+    return app._on_keyboard(Window, key, 0, None, [])
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_non_back_key_ignored(app):
+    assert _back(app, key=97) is False  # 'a'
+    assert app.toasts == []
+
+
+def test_open_modal_not_intercepted(app):
+    app._switch_screen("history")
+    modal = ModalView()
+    modal.open(animation=False)
+    try:
+        assert _back(app) is False  # let the popup dismiss itself
+        assert app._sm.current == "history"
+    finally:
+        modal.dismiss(animation=False)
+
+
+def test_fullscreen_overlay_closes(app):
+    app._fullscreen.present(app._live_screen.graph)
+    assert app._fullscreen.is_open
+    assert _back(app) is True
+    assert not app._fullscreen.is_open and app._sm.current == "live_session" and app.toasts == []
+
+
+def test_diary_back(app):
+    open_detail(app, saved_session(app))
+    assert app._sm.current == "diary"
+    assert _back(app) is True
+    assert app._sm.current == "history"
+
+
+@pytest.mark.parametrize("screen", ["history", "settings"])
+def test_a_tab_navigates_to_session(app, screen):
+    app._switch_screen(screen)
+    assert _back(app) is True
+    assert app._sm.current == "live_session" and app.toasts == [] and app.stops == []
+
+
+def test_root_first_press_toasts_no_exit(app):
+    assert _back(app) is True
+    assert app.toasts == ["Press back again to exit"] and app.stops == []
+    assert app._last_back_time > 0.0
+
+
+def test_root_double_press_exits(app):
+    assert _back(app) is True and _back(app) is True
+    assert app.stops == [True] and app.toasts == ["Press back again to exit"]
+
+
+def test_root_slow_second_press_does_not_exit(app):
+    app._last_back_time = time.time() - 5.0  # the first press, more than 2 s ago
+    assert _back(app) is True
+    assert app.stops == [] and app.toasts == ["Press back again to exit"]

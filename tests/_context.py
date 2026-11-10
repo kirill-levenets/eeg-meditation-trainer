@@ -1,7 +1,6 @@
-"""AppContexts for tests. `make_context` is the app's, for an app built with __new__, as build() makes it: each callable
-reads the app when called, so a test can set the app's state or swap a method after; the DB is the app's at
-construction. `stub_context` stands alone: no profile, no session, UI calls run at once or are mocks. Either takes any
-field, a SessionAccess field (live, running_id, refused, discard) included."""
+"""An AppContext for a flow built on its own: `stub_context` has no profile and no session, and its UI calls run at
+once or are mocks. It takes any field, a SessionAccess field (live, running_id, refused, discard) included. The built
+app makes its own (`EEGMeditationApp._make_context`): tests/_app.py."""
 from unittest.mock import MagicMock
 
 from app.ui.app_context import AppContext, SessionAccess
@@ -19,21 +18,6 @@ def _build(defaults: dict, session_defaults: dict, fields: dict) -> AppContext:
     session = fields.pop("session", None) or SessionAccess(
         **{**session_defaults, **{k: fields.pop(k) for k in _SESSION_FIELDS if k in fields}})
     return AppContext(session=session, **{**defaults, **fields})
-
-
-def make_context(app, **fields) -> AppContext:
-    session = {"live": lambda: app._session_pipeline_live(), "running_id": lambda: app._running_session_id(),
-               "refused": lambda doing, why="": app._refused_while_session_runs(doing, why),
-               "discard": lambda: app._discard_running_session()}
-    defaults = {"db": getattr(app, "_db", None) or MagicMock(), "user_id": lambda: app._current_user_id,
-                "activate_user": lambda uid: app._activate_user(uid), "require_user": lambda a: app._require_user(a),
-                "on_main": lambda fn: app._on_main(fn), "switch_screen": lambda name: app._switch_screen(name),
-                "info": lambda title, message: app._info_popup(title, message),
-                "toast": lambda message: app._toast(message), "confirm": lambda *a, **k: app._confirm_action(*a, **k),
-                "setting": lambda key: app._settings_store.value(key),
-                "change_setting": lambda key, value: app._change_setting(key, value),
-                "save_settings": lambda: app._save_user_settings()}
-    return _build(defaults, session, fields)
 
 
 def stub_context(**fields) -> AppContext:

@@ -2,345 +2,307 @@
 
 import os
 import tempfile
-import time
-from unittest.mock import MagicMock
 
 import pytest
 from kivy.base import EventLoop
 from kivy.uix.popup import Popup
 
+import app.ui.app_manager as am
 import app.ui.history_flow as history_flow
-from app.session.manager import SessionManager, SessionState
+from app.config import APP
+from app.session.manager import SessionState
 from app.storage.database import DatabaseManager
-from app.ui.app_manager import EEGMeditationApp
-from tests._history_flow import make_history_flow
-from tests._program_run import make_run
-from tests._program_settings import make_programs
-from tests._recorder import make_recorder
-from tests._shown_session import make_shown
+from app.ui.theme import StyledButton
+from tests._app import (
+    calls_of,
+    frames,
+    frames_until,
+    open_history,
+    popup_titles,
+    popups,
+    program_mode,
+    start_ticked_by_hand,
+    tap,
+)
 
-SID = 42
+
+def _sessions(app) -> list[dict]:
+    return app._db.get_all_sessions(app._current_user_id)
 
 
-def _app() -> EEGMeditationApp:
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._ticker = MagicMock(running=False)  # no session's tick running
-    app._db = MagicMock()
-    app._db.update_session_notes.return_value = True
-    app._db.get_session.return_value = None
-    app._audio = MagicMock()
-    app._live_screen = MagicMock()
-    app._settings_screen = MagicMock()
-    app._live_screen.summary_session_id = SID
-    app._live_screen.summary_notes = ""
-    app._recorder = make_recorder(app)
-    app._toast = MagicMock()
-    app._history_screen = MagicMock()
-    app._session_manager = SessionManager()  # idle: the card's session has ended
-    app._on_main = lambda fn: fn()
-    app._history = make_history_flow(app)
-    app._history.refresh = MagicMock()
-    app._shown = make_shown(app)
+def _stored(app, sid) -> tuple | None:
+    row = app._db.get_session(sid)
+    ticks = app._db._conn.execute("SELECT COUNT(*) FROM metrics WHERE session_id = ?", (sid,)).fetchone()[0]
+    return (row["duration"], ticks) if row else None
+
+
+@pytest.fixture
+def card(fresh_app, monkeypatch):
+    """The app with a session just ended, its end card open: `app.sid` is the session, `app.toasts` what the app
+    acknowledged, `app.notes_writes` each notes text written."""
+    app = fresh_app
+    start_ticked_by_hand(app, ticks=4)
+    app._stop_and_save(reason="timer")
+    frames()
+    app.sid = app._live_screen.summary_session_id
+    assert app.sid is not None
+    app.toasts, app.notes_writes = [], []
+    monkeypatch.setattr(am, "show_toast", app.toasts.append)
+    write = app._db.update_session_notes
+    monkeypatch.setattr(app._db, "update_session_notes",
+                        lambda sid, **fields: (app.notes_writes.append(fields.get("notes")), write(sid, **fields))[1])
     return app
 
 
-def _notes_writes(app):
-    return [c.kwargs.get("notes") for c in app._db.update_session_notes.call_args_list]
+def _type(app, notes: str) -> None:
+    app._live_screen._summary_notes.text = notes
+
+
+def _card_open(app) -> bool:
+    return app._live_screen.summary_session_id is not None
 
 
 # --- Stop: one confirmed path, the same save as every other ending ---------------------------------------------
 
-def test_user_stop_confirms_then_takes_the_shared_save_path():
-    app = _app()
-    app._session_manager = MagicMock(state=SessionState.RUNNING)
-    app._ticker = MagicMock(running=False)
-    app._stop_and_save = MagicMock()
-    app._confirm_action = MagicMock()
+def test_user_stop_confirms_then_takes_the_shared_save_path(fresh_app):
+    app = fresh_app
+    start_ticked_by_hand(app, ticks=4)
     app._on_stop()
-    title, _msg, ok_text, on_ok = app._confirm_action.call_args.args[:4]
-    assert (title, ok_text) == ("Stop session?", "Stop")
-    assert app._confirm_action.call_args.kwargs["on_cancel"] == app._cancel_stop
-    app._stop_and_save.assert_not_called()
-    on_ok()
-    app._stop_and_save.assert_called_once_with(reason="user")
-    assert not hasattr(EEGMeditationApp, "_finish_stop")
+    (confirm,) = popups()
+    assert confirm.title == "Stop session?" and _sessions(app) == []
+    assert app._session_manager.state == SessionState.RUNNING  # nothing ends before the answer
+    tap(confirm.content, "Stop")
+    frames()
+    (saved,) = _sessions(app)
+    assert _stored(app, saved["id"])[1] == 4 and _card_open(app)
 
 
-def test_user_stop_derives_the_idle_series_and_clears_the_training_marker():
-    app = _app()
-    app._ticker = MagicMock(running=False)
-    app._persist_session_data = MagicMock(return_value={"duration": 30})
-    app._recorder.session_id = SID
-    for name in ("_program_run", "_keep_awake", "_program_settings"):
-        setattr(app, name, MagicMock())
-    app._timer_state = MagicMock()
-    app._session_manager = MagicMock()
+def test_user_stop_derives_the_idle_series_and_clears_the_training_marker(fresh_app, monkeypatch):
+    app = fresh_app
+    program_mode(app, [{"minutes": 5, "target": 60, "formula": {"name": "Deep", "formula": "alpha1"}}])
+    start_ticked_by_hand(app, ticks=2)
+    program_mode(app, [])  # the editor emptied meanwhile: what the idle graph is derived from after the ending
+    marks = calls_of(monkeypatch, app._live_screen, "set_training_series")
+    assert app._program_run.active and app._live_screen.graph.is_visible("program_formula")
     app._stop_and_save(reason="user")
-    app._persist_session_data.assert_called_once_with("user")
-    app._program_run.end.assert_called_once()
-    app._program_settings.sync_picker.assert_called_once()  # the live graph's idle series derived again
-    app._live_screen.set_training_series.assert_called_with(None)
-    app._live_screen.show_summary.assert_called_once_with(SID, {"duration": 30}, title="")
+    frames()
+    assert not app._program_run.active and marks[-1] == (None,)
+    assert not app._live_screen.graph.is_visible("program_formula")  # the live graph's idle series derived again
+    assert _card_open(app)
 
 
 # --- A Stop confirmed after the session already ended another way keeps it ------------------------------------
 
-
-@pytest.fixture
-def db():
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    d = DatabaseManager(db_path=path)
-    yield d
-    d.close()
-    for suffix in ("", "-wal", "-shm"):
-        if os.path.exists(path + suffix):
-            os.remove(path + suffix)
-
-
-def _recorded_session(db) -> EEGMeditationApp:
-    """A running headset session two minutes in, its ticks checkpointed: only UI, audio and Android parts are mocked."""
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._db = db
-    app._current_user_id = db.create_user("t")
-    app._recorder = make_recorder(app)
-    app._recorder._buffer = []
-    app._recorder._flush_counter = 0
-    app._session_manager = SessionManager()
-    app._session_manager.start()
-    app._with_score = lambda stats: stats
-    app._session_custom_formulas_json = lambda: ""
-    app._program_run = make_run()
-    app._program_settings = make_programs()  # idle: an ending re-derives its series
-    app._make_session_name = lambda: "2026-10-05 07:00 - MindWave Mobile"
-    app._ticker = MagicMock(running=False)
-    app._eeg_stream = MagicMock()
-    for name in ("_audio", "_live_screen", "_settings_screen", "_timer_state", "_confirm_action",
-                 "_keep_awake", "_history"):
-        setattr(app, name, MagicMock())
-    for _ in range(240):
-        metrics = {"shamatha_score": 70, "meditation_score": 60}
-        app._recorder.record(metrics, {"timestamp": 0.0, **metrics})
-    app._session_manager._start_time = time.time() - 120
-    app._recorder.checkpoint()
-    app._shown = make_shown(app)
-    return app
-
-
-def _stored(db, sid) -> tuple | None:
-    row = db.get_session(sid)
-    ticks = db._conn.execute("SELECT COUNT(*) FROM metrics WHERE session_id = ?", (sid,)).fetchone()[0]
-    return (row["duration"], ticks) if row else None
-
-
 @pytest.mark.parametrize("ended_by", ["headset off", "timer"])
-def test_a_stop_confirmed_after_the_session_ended_another_way_keeps_it(db, ended_by):
+def test_a_stop_confirmed_after_the_session_ended_another_way_keeps_it(fresh_app, ended_by):
     # A slow phone handled the Stop tap late: the session had ended meanwhile (the headset switched off, or the timer),
     # and its stop had saved it. v1.4.0's confirm then found no stats and took its Discard branch, deleting the session.
-    app = _recorded_session(db)
+    app = fresh_app
+    start_ticked_by_hand(app, ticks=240)
+    app._session_manager._start_time -= 120  # two minutes in
+    app._checkpoint_or_report()
+    sid = app._recorder.session_id
     app._on_stop()  # the user's Stop tap, handled while the session still runs: its dialog opens
-    on_ok = app._confirm_action.call_args.args[3]
+    (confirm,) = popups()
     if ended_by == "headset off":  # the stale-data stop queued behind the tap
         app._stop_and_save(reason="stale_data")
     else:  # the tick thread saved the timed session; its UI teardown runs on the main thread
-        app._finalize_stop_ui(app._persist_session_data("timer"), app._recorder.session_id)
-    saved = _stored(db, app._recorder.session_id)
+        app._finalize_stop_ui(app._persist_session_data("timer"), sid)
+    saved = _stored(app, sid)
     assert saved is not None and saved[0] >= 119 and saved[1] == 240
-    on_ok()  # the user confirms the Stop
-    assert _stored(db, app._recorder.session_id) == saved  # still there, unchanged
+    tap(confirm.content, "Stop")  # the user confirms the Stop
+    frames()
+    assert _stored(app, sid) == saved and len(_sessions(app)) == 1  # still there, unchanged
 
 
 # --- Delete: only after confirmation, through the shared delete -------------------------------------------------
 
-def test_card_delete_without_confirmation_deletes_nothing():
-    app = _app()
-    app._confirm_action = MagicMock()
-    app._shown.on_delete()
-    app._db.delete_session.assert_not_called()
-    app._live_screen.hide_summary.assert_not_called()
+def _gone(app, sid) -> None:
+    """Until the delete's worker and its main-thread half have both run."""
+    frames_until(lambda: app._db.get_session(sid) is None and app._history_screen.session_by_id(sid) is None)
+    frames()
 
 
-def test_card_delete_confirmed_removes_the_session_and_stops_the_gong(monkeypatch):
-    monkeypatch.setattr(history_flow.threading, "Thread", lambda target, **k: MagicMock(start=target))  # the worker, inline
-    app = _app()
-    app._confirm_action = MagicMock()
-    app._shown.on_delete()
-    app._confirm_action.call_args.args[3]()  # the user confirms
-    app._db.delete_sessions.assert_called_once_with([SID])
-    app._audio.stop_timer_bell.assert_called_once()
-    app._live_screen.hide_summary.assert_called_once()
-    app._history_screen.remove_sessions.assert_called_once_with([SID])
-    app._history.refresh.assert_not_called()  # the row goes in place; no full-screen rebuild spinner
+def test_card_delete_without_confirmation_deletes_nothing(card):
+    card._shown.on_delete()
+    assert popup_titles() == ["Delete session"]
+    assert card._db.get_session(card.sid) is not None and _card_open(card)
 
 
-def test_history_row_delete_removes_its_row_in_place(monkeypatch):
-    monkeypatch.setattr(history_flow.threading, "Thread", lambda target, **k: MagicMock(start=target))  # the worker, inline
-    app = _app()
-    app._history.delete_sessions([SID])
-    app._db.delete_sessions.assert_called_once_with([SID])
-    app._history_screen.remove_sessions.assert_called_once_with([SID])
-    app._history.refresh.assert_not_called()
+def test_card_delete_confirmed_removes_the_session_and_stops_the_gong(card, monkeypatch):
+    open_history(card, card.sid)
+    card._switch_screen("live_session")
+    bells = calls_of(monkeypatch, card._audio, "stop_timer_bell")
+    reloads = calls_of(monkeypatch, card._history_screen, "load_sessions")
+    card._shown.on_delete()
+    (confirm,) = popups()
+    tap(confirm.content, "Delete")  # the user confirms
+    _gone(card, card.sid)
+    assert card._db.get_session(card.sid) is None and bells and not _card_open(card)
+    assert card._history_screen.session_by_id(card.sid) is None and reloads == []  # the row goes in place: no rebuild
+
+
+def test_history_row_delete_removes_its_row_in_place(card, monkeypatch):
+    open_history(card, card.sid)
+    reloads = calls_of(monkeypatch, card._history_screen, "load_sessions")
+    card._history.delete_sessions([card.sid])
+    _gone(card, card.sid)
+    assert card._history_screen.session_by_id(card.sid) is None and reloads == []
 
 
 # --- Notes: typed notes are kept; empty or untouched notes write nothing ---------------------------------------
 
-def test_typed_notes_are_saved_on_ok():
-    app = _app()
-    app._live_screen.summary_notes = "calm, then sleepy"
-    app._shown.on_ok()
-    assert _notes_writes(app) == ["calm, then sleepy"]
-    app._toast.assert_called_once_with("Notes saved")
-    app._audio.stop_timer_bell.assert_called_once()
-    app._live_screen.hide_summary.assert_called_once()
+def test_typed_notes_are_saved_on_ok(card, monkeypatch):
+    bells = calls_of(monkeypatch, card._audio, "stop_timer_bell")
+    _type(card, "calm, then sleepy")
+    card._shown.on_ok()
+    assert card.notes_writes == ["calm, then sleepy"] and card._db.get_session(card.sid)["notes"] == "calm, then sleepy"
+    assert card.toasts == ["Notes saved"] and bells and not _card_open(card)
 
 
-def test_saved_then_edited_notes_persist_the_edit_on_ok():
-    app = _app()
-    app._live_screen.summary_notes = "first"
-    app._shown.on_save_notes()
-    app._live_screen.hide_summary.assert_not_called()  # Save notes keeps the card open
-    app._live_screen.summary_notes = "first, then more"
-    app._shown.on_ok()
-    assert _notes_writes(app) == ["first", "first, then more"]
+def test_saved_then_edited_notes_persist_the_edit_on_ok(card):
+    _type(card, "first")
+    card._shown.on_save_notes()
+    assert _card_open(card)  # Save notes keeps the card open
+    _type(card, "first, then more")
+    card._shown.on_ok()
+    assert card.notes_writes == ["first", "first, then more"]
 
 
-@pytest.mark.parametrize("typed,saved", [("", ""), ("same", "same")])
-def test_empty_or_unchanged_notes_write_nothing_on_ok(typed, saved):
-    app = _app()
-    app._live_screen.summary_notes = typed
-    app._shown._saved_notes = saved
-    app._shown.on_ok()
-    app._db.update_session_notes.assert_not_called()
-    app._toast.assert_not_called()
+def test_empty_notes_write_nothing_on_ok(card):
+    card._shown.on_ok()
+    assert card.notes_writes == [] and card.toasts == []
 
 
-def test_saved_notes_cleared_before_ok_are_cleared_in_the_db():
-    app = _app()
-    app._live_screen.summary_notes = "abc"
-    app._shown.on_save_notes()
-    app._live_screen.summary_notes = ""
-    app._shown.on_ok()
-    assert _notes_writes(app) == ["abc", ""]
+def test_unchanged_notes_write_nothing_more_on_ok(card):
+    _type(card, "same")
+    card._shown.on_save_notes()
+    card._shown.on_ok()
+    assert card.notes_writes == ["same"] and card.toasts == ["Notes saved"]
 
 
-def _leaving_app(notes: str, restoring: bool = False):
-    app = _app()
-    app._is_paused = False
-    app._restoring = restoring
-    app._save_user_settings = MagicMock()
-    app._session_manager = MagicMock()
-    app._session_manager.state = SessionState.IDLE
-    app._live_screen.summary_notes = notes
-    app._keep_awake = MagicMock()  # on_stop stops the session's service
-    return app
+def test_saved_notes_cleared_before_ok_are_cleared_in_the_db(card):
+    _type(card, "abc")
+    card._shown.on_save_notes()
+    _type(card, "")
+    card._shown.on_ok()
+    assert card.notes_writes == ["abc", ""]
 
 
-def test_app_pause_with_the_card_open_flushes_typed_notes():
-    app = _leaving_app("written before the phone locked")
-    assert app.on_pause() is True
-    assert _notes_writes(app) == ["written before the phone locked"]
-    app._save_user_settings.assert_called_once()
+def test_save_notes_on_already_saved_text_confirms_without_writing(card):
+    _type(card, "kept")
+    card._shown.on_save_notes()
+    card._shown.on_save_notes()
+    assert card.notes_writes == ["kept"] and card.toasts == ["Notes saved", "Notes saved"]
 
 
-def test_app_exit_with_the_card_open_flushes_typed_notes_before_the_db_closes():
-    app = _leaving_app("written before closing the window")
-    app._db.close.side_effect = lambda: app._db.update_session_notes.assert_called()
+def test_app_pause_with_the_card_open_flushes_typed_notes(card):
+    card._settings_screen.threshold = 62  # changed, not yet written: the pause saves the settings too
+    _type(card, "written before the phone locked")
+    assert card.on_pause() is True
+    assert card.notes_writes == ["written before the phone locked"]
+    assert card._db.get_user_setting(card._current_user_id, "threshold") == "62"
+
+
+def _ended_in_its_own_app(build_app):
+    """A private app (the test closes or restores it) with a session just ended, its end card open: (app, sid)."""
+    app = build_app()
+    start_ticked_by_hand(app, ticks=4)
+    app._stop_and_save(reason="timer")
+    frames()
+    return app, app._live_screen.summary_session_id
+
+
+def _notes_on_disk(sid) -> str | None:
+    db = DatabaseManager(db_path=APP.DB_PATH)
+    try:
+        return db.get_session(sid)["notes"]
+    finally:
+        db.close()
+
+
+def test_app_exit_with_the_card_open_flushes_typed_notes_before_the_db_closes(build_app):
+    app, sid = _ended_in_its_own_app(build_app)
+    _type(app, "written before closing the window")
     app.on_stop()
-    assert _notes_writes(app) == ["written before closing the window"]
-    app._db.close.assert_called_once()
+    assert _notes_on_disk(sid) == "written before closing the window"
 
 
 @pytest.mark.parametrize("hook", ["on_pause", "on_stop"])
-def test_leaving_during_a_restore_writes_no_notes(hook):
-    app = _leaving_app("typed", restoring=True)
+def test_leaving_during_a_restore_writes_no_notes(build_app, hook):
+    app, sid = _ended_in_its_own_app(build_app)
+    app._settings_screen.threshold = 62
+    _type(app, "typed")
+    app._on_db_replaced()
     getattr(app, hook)()
-    app._db.update_session_notes.assert_not_called()
-    app._save_user_settings.assert_not_called()
+    if hook == "on_pause":
+        app._db.close()
+    assert not _notes_on_disk(sid)
+    db = DatabaseManager(db_path=APP.DB_PATH)
+    try:
+        assert db.get_user_setting(app._current_user_id, "threshold") != "62"  # nor the settings
+    finally:
+        db.close()
 
 
-def test_a_failed_notes_save_is_reported_not_toasted(monkeypatch):
-    app = _app()
-    app._db.update_session_notes.return_value = False
+def test_a_failed_notes_save_is_reported_not_toasted(card, monkeypatch):
     reported = []
     monkeypatch.setattr(history_flow, "report_soft_error", lambda label, detail, **k: reported.append(label))
-    app._live_screen.summary_notes = "lost?"
-    app._shown.on_ok()
-    assert reported == ["notes_save_failed"]
-    app._toast.assert_not_called()
-    assert app._shown._saved_notes == ""
+    monkeypatch.setattr(card._db, "update_session_notes", lambda sid, **fields: False)
+    _type(card, "lost?")
+    card._shown.on_ok()
+    assert reported == ["notes_save_failed"] and card.toasts == []
+    assert card._shown._saved_notes == ""
 
 
 # --- The confirm dialog: Cancel, tap-outside and back all count as cancel --------------------------------------
 
-def _open_confirm(on_ok, on_cancel):
-    from kivy.core.window import Window
-    EventLoop.ensure_window()
-    EEGMeditationApp.__new__(EEGMeditationApp)._confirm_action("Stop session?", "msg", "Stop", on_ok, on_cancel=on_cancel)
+@pytest.fixture
+def confirm(fresh_app):
+    """(popup, answers): the app's confirm, open; `answers` records "ok" and "cancel" as they run."""
+    answers: list = []
+    fresh_app._confirm_action("Stop session?", "msg", "Stop", lambda: answers.append("ok"),
+                              on_cancel=lambda: answers.append("cancel"))
     for _ in range(3):
         EventLoop.idle()
-    return next(w for w in Window.children if isinstance(w, Popup))
+    (popup,) = [w for w in EventLoop.window.children if isinstance(w, Popup)]
+    return popup, answers
 
 
-def test_closing_the_confirm_without_ok_runs_on_cancel_once():
-    on_ok, on_cancel = MagicMock(), MagicMock()
-    popup = _open_confirm(on_ok, on_cancel)
+def _buttons(popup) -> dict:
+    return {w.text: w for w in popup.walk(restrict=True) if isinstance(w, StyledButton)}
+
+
+def test_closing_the_confirm_without_ok_runs_on_cancel_once(confirm):
+    popup, answers = confirm
     popup.dismiss()  # tap outside / Android back / Cancel all end here
     for _ in range(3):
         EventLoop.idle()
-    on_cancel.assert_called_once()
-    on_ok.assert_not_called()
+    assert answers == ["cancel"]
 
 
-def test_ok_on_the_confirm_does_not_run_on_cancel():
-    from app.ui.theme import StyledButton
-    on_ok, on_cancel = MagicMock(), MagicMock()
-    popup = _open_confirm(on_ok, on_cancel)
-    ok = next(w for w in popup.walk() if isinstance(w, StyledButton) and w.text == "Stop")
-    ok.dispatch("on_release")
+def test_ok_on_the_confirm_does_not_run_on_cancel(confirm):
+    popup, answers = confirm
+    _buttons(popup)["Stop"].dispatch("on_release")
     for _ in range(3):
         EventLoop.idle()
-    on_ok.assert_called_once()
-    on_cancel.assert_not_called()
+    assert answers == ["ok"]
 
 
-def _tap(btn):
-    btn.dispatch("on_release")
-    for _ in range(3):
-        EventLoop.idle()
-
-
-def test_a_second_ok_during_the_fade_out_does_not_run_the_action_again():
-    from app.ui.theme import StyledButton
-    on_ok, on_cancel = MagicMock(), MagicMock()
-    popup = _open_confirm(on_ok, on_cancel)
-    ok = next(w for w in popup.walk() if isinstance(w, StyledButton) and w.text == "Stop")
+def test_a_second_ok_during_the_fade_out_does_not_run_the_action_again(confirm):
+    popup, answers = confirm
+    ok = _buttons(popup)["Stop"]
     ok.dispatch("on_release")
     ok.dispatch("on_release")  # Kivy still delivers taps while the popup fades out
-    on_ok.assert_called_once()
-    on_cancel.assert_not_called()
+    assert answers == ["ok"]
 
 
-def test_ok_right_after_cancel_does_not_run_the_action():
-    from app.ui.theme import StyledButton
-    on_ok, on_cancel = MagicMock(), MagicMock()
-    popup = _open_confirm(on_ok, on_cancel)
-    buttons = {w.text: w for w in popup.walk() if isinstance(w, StyledButton)}
+def test_ok_right_after_cancel_does_not_run_the_action(confirm):
+    popup, answers = confirm
+    buttons = _buttons(popup)
     buttons["Cancel"].dispatch("on_release")
     buttons["Stop"].dispatch("on_release")
-    on_cancel.assert_called_once()
-    on_ok.assert_not_called()
-
-
-def test_cancelling_stop_restarts_the_tick_only_for_a_running_session():
-    app = _app()
-    app._ticker = MagicMock()
-    app._session_manager = MagicMock()
-    app._session_manager.state = SessionState.RUNNING
-    app._cancel_stop()
-    app._ticker.start.assert_called_once()
-    app._session_manager.state = SessionState.PAUSED
-    app._cancel_stop()
-    app._ticker.start.assert_called_once()
+    assert answers == ["cancel"]
 
 
 # --- Storage: a notes save touches only the fields it is given -------------------------------------------------
@@ -361,12 +323,3 @@ def test_notes_update_keeps_the_fields_it_is_not_given():
     finally:
         db.close()
         os.remove(path)
-
-
-def test_save_notes_on_already_saved_text_confirms_without_writing():
-    app = _app()
-    app._live_screen.summary_notes = "kept"
-    app._shown._saved_notes = "kept"
-    app._shown.on_save_notes()
-    app._db.update_session_notes.assert_not_called()
-    app._toast.assert_called_once_with("Notes saved")

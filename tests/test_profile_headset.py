@@ -3,9 +3,6 @@ profile's, and a real-mode profile without one scans for it. One scan path serve
 Start; a result that arrives after the profile, its headset or its mode changed, or after a session started, does
 nothing. Only Start opens Settings → Device to pick among several."""
 
-import os
-import tempfile
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -13,16 +10,11 @@ import pytest
 import app.ui.headset as headset_module
 from app.config import APP
 from app.eeg.neurosky_stream import NeuroSkyStream
-from app.session.manager import SessionManager
-from app.storage.database import DatabaseManager
-from app.ui.app_manager import EEGMeditationApp
+from app.session.session_run import Phase
 from app.ui.headset import Headset
-from app.ui.hooks import wire
-from app.ui.settings_sections.device import DeviceSection
+from tests._app import popups
 from tests._context import stub_context
-from tests._headset import fake_paired, make_headset
-from tests._program_run import make_run
-from tests._settings_section import settings_section
+from tests._headset import fake_paired
 
 BLUE = "00:11:22:33:44:01"
 GREY = "00:11:22:33:44:02"
@@ -34,42 +26,24 @@ def _mindwave(address: str) -> dict:
 
 
 @pytest.fixture
-def db():
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    d = DatabaseManager(db_path=path)
-    yield d
-    d.close()
-    for suffix in ("", "-wal", "-shm"):
-        if os.path.exists(path + suffix):
-            os.remove(path + suffix)
-
-
-@pytest.fixture
 def paired(monkeypatch):
-    monkeypatch.setattr(APP, "USE_MOCK_DEVICE", False)
     return fake_paired(monkeypatch)
 
 
 @pytest.fixture
-def app(db, paired):
-    a = EEGMeditationApp.__new__(EEGMeditationApp)
-    a._db = db
-    a._current_user_id = None
-    a._ticker = MagicMock(running=False)
-    a._session_manager = SessionManager()
-    a._real_stream = NeuroSkyStream()
-    a._live_screen = MagicMock()
-    a._info_popup = MagicMock()
-    a._switch_screen = MagicMock()
-    a.serial_device_override = None
-    device = settings_section(lambda section, scroll: DeviceSection(section, scroll=scroll))
-    a._settings_screen = SimpleNamespace(device=device)
-    a._headset = make_headset(a, change_setting=lambda key, v: _held_mode(a, v),  # the store, standing in
-                              setting=lambda key: APP.USE_MOCK_DEVICE)
-    wire(device, on_device_mode_toggle=a._headset.on_mode_toggle, device_state=a._headset.state,
-         on_device_rename=a._headset.on_rename)
-    return a
+def app(fresh_app, paired, monkeypatch):
+    """The app with the phone's paired devices faked (`paired`) and a reader that starts without Bluetooth, so a
+    connect stays in its wait."""
+    a = fresh_app
+
+    def reader_started() -> bool:
+        a._real_stream._running = True
+        return True
+
+    monkeypatch.setattr(a._real_stream, "start", reader_started)
+    yield a
+    a._db.set_json_setting("bt_device_aliases", {})  # the phone's, not a profile's: gone for the next test
+    a._headset.load_aliases()
 
 
 def _headset_alone(**ctx_fields) -> tuple[Headset, object]:
@@ -122,13 +96,6 @@ def test_picking_the_saved_headset_during_a_mock_session_is_refused_as_a_whole(m
     device.clear_picker_banner.assert_not_called()
 
 
-def _held_mode(app, use_mock: bool) -> None:
-    """What the store's change path does for the mode in the built app: apply it and persist it for the profile."""
-    APP.USE_MOCK_DEVICE = use_mock
-    if app._current_user_id:
-        app._db.set_user_setting(app._current_user_id, "use_mock", str(use_mock))
-
-
 def _profile(app, name: str, saved: str | None = None) -> int:
     uid = app._db.create_user(name)
     if saved:
@@ -138,11 +105,9 @@ def _profile(app, name: str, saved: str | None = None) -> int:
 
 
 def _load(app, uid: int, *, mock: bool = False) -> None:
-    """A profile load's headset part: the settings registry applies the profile's mode, then Headset.load runs."""
-    app._current_user_id = uid
-    APP.USE_MOCK_DEVICE = mock  # the store's apply, before the checkbox: its hook then sees the mode in force
-    app._settings_screen.device._device_mode_cb.active = mock
-    app._headset.load(uid)
+    """The profile picked, in the mode it stored: the settings load applies the mode, then Headset.load runs."""
+    app._db.set_user_setting(uid, "use_mock", str(mock))
+    app._activate_user(uid)
 
 
 def _saved(app, uid: int) -> str | None:
@@ -151,6 +116,16 @@ def _saved(app, uid: int) -> str | None:
 
 def _listed(app) -> set[str]:
     return set(app._settings_screen.device._bt_devices)
+
+
+def _shown(app) -> str:
+    """The headset as the Session screen names it."""
+    return app._live_screen._device_label.text
+
+
+def _connecting(app) -> bool:
+    """Whether a Start went through to the headset's connect."""
+    return app._run is not None and app._run.phase is Phase.CONNECTING
 
 
 # ---- a profile load ----
@@ -165,8 +140,7 @@ def test_a_profile_without_a_headset_never_shows_another_profiles(app, paired):
     paired.arrive()  # nothing paired
     assert app._real_stream._device_address is None
     assert app._headset.state() == (None, None)
-    assert app._headset.name() == "Real EEG"
-    app._live_screen.update_device_status.assert_called_with(False, device_name="Real EEG")
+    assert app._headset.name() == "Real EEG" and _shown(app) == "[Real EEG]"
     assert app._settings_screen.device._device_meta_label.text == "Mode: Real Device"
     assert _saved(app, b) is None
 
@@ -192,7 +166,7 @@ def test_with_several_mindwaves_a_load_lists_them_and_leaves_the_pick_to_start(a
     paired.arrive()
     assert app._real_stream._device_address is None
     assert _listed(app) == {BLUE, GREY}
-    app._switch_screen.assert_not_called()
+    assert app._sm.current == "live_session"
     assert app._settings_screen.device._device_picker_banner.text == ""
 
 
@@ -210,12 +184,11 @@ def test_a_mock_profile_does_not_scan(app, paired):
     _load(app, b, mock=True)
     assert not paired.queued
     assert APP.USE_MOCK_DEVICE is True
-    assert app._real_stream._device_address is None
-    app._live_screen.update_device_status.assert_called_with(False, device_name="Mock EEG")
+    assert app._real_stream._device_address is None and _shown(app) == "[Mock EEG]"
 
 
-def test_the_serial_override_keeps_its_device(app, paired):
-    app.serial_device_override = "/tmp/mindwave_b"
+def test_the_serial_override_keeps_its_device(app, paired, monkeypatch):
+    monkeypatch.setattr(app, "serial_device_override", "/tmp/mindwave_b")
     app._real_stream.set_device("/tmp/mindwave_b", "Splitter (/tmp/mindwave_b)")  # as build() applies it
     _load(app, _profile(app, "B"))
     assert not paired.queued
@@ -228,12 +201,12 @@ def test_re_picking_the_running_sessions_profile_keeps_its_headset(app, paired):
     _load(app, b)
     paired.arrive()  # nothing paired
     app._real_stream.set_device(BLUE, "MindWave Mobile")  # its session's headset, its save to the profile lost
-    app._session_manager.start()
-    app._live_screen.reset_mock()
+    app._on_start()
+    assert _connecting(app)
+    shown = _shown(app)
     _load(app, b)
     assert app._real_stream._device_address == BLUE
-    assert not paired.queued
-    app._live_screen.update_device_status.assert_not_called()
+    assert not paired.queued and _shown(app) == shown
 
 
 # ---- a scan result that comes too late ----
@@ -264,14 +237,14 @@ def test_a_new_profiles_scan_leaves_the_next_mock_profile_alone(app, paired):
 
 def test_a_scan_result_after_a_session_started_does_nothing(app, paired):
     """A Start right after launch: the result neither switches the headset nor refuses with "Session in progress"."""
-    paired.devices.extend([_mindwave(BLUE)])
-    b = _profile(app, "B")
-    _load(app, b)
-    app._session_manager.start()
+    paired.devices.append(_mindwave(BLUE))
+    _load(app, _profile(app, "New"), mock=True)
+    app._headset.scan_for_new_profile()  # still running
+    app._on_start()  # on the mock: the session runs at once
+    assert app._session_pipeline_live()
     paired.arrive()
-    assert app._real_stream._device_address is None
-    app._info_popup.assert_not_called()
-    app._switch_screen.assert_not_called()
+    assert app._real_stream._device_address is None and APP.USE_MOCK_DEVICE is True
+    assert popups() == [] and app._sm.current == "live_session"
 
 
 def test_a_scan_result_after_a_pick_keeps_the_pick_and_the_list_it_came_from(app, paired):
@@ -324,7 +297,7 @@ def test_a_new_profile_with_several_mindwaves_leaves_the_mock_for_start_to_ask(a
     assert APP.USE_MOCK_DEVICE is False and app._db.get_user_setting(uid, "use_mock") == "False"
     assert app._real_stream._device_address is None
     assert _listed(app) == {BLUE, GREY}
-    app._switch_screen.assert_not_called()
+    assert app._sm.current == "live_session"
 
 
 def test_a_new_profile_with_no_mindwave_stays_on_the_mock(app, paired):
@@ -340,14 +313,11 @@ def test_start_with_several_mindwaves_asks_which_in_settings(app, paired):
     paired.devices.extend([_mindwave(BLUE), _mindwave(GREY)])
     _load(app, _profile(app, "B"))
     paired.arrive()
-    app._program_run = make_run(app)
-    app._start_session_common = MagicMock()
     app._on_start()
     paired.arrive()
-    app._start_session_common.assert_not_called()
-    app._switch_screen.assert_called_once_with("settings")
+    assert not _connecting(app) and app._sm.current == "settings"
     assert app._settings_screen.device._device_picker_banner.text.startswith("Found 2 MindWave devices.")
-    app._live_screen.set_controls_idle.assert_called()
+    assert not app._live_screen._btn_start.disabled  # the idle controls: Start can be pressed again
 
 
 @pytest.mark.parametrize("answer", ["pick", "another profile", "Mock Data"])
@@ -355,7 +325,6 @@ def test_starts_pick_one_prompt_goes_once_answered(app, paired, answer):
     paired.devices.extend([_mindwave(BLUE), _mindwave(GREY)])
     _load(app, _profile(app, "B"))
     paired.arrive()
-    app._program_run = make_run(app)
     app._on_start()
     paired.arrive()
     banner = app._settings_screen.device._device_picker_banner
@@ -374,10 +343,9 @@ def test_start_with_one_mindwave_selects_it_for_the_profile_and_connects(app, pa
     _load(app, b)
     paired.arrive()  # nothing paired yet
     paired.devices.append(_mindwave(BLUE))  # paired before Start
-    app._start_session_common = MagicMock()
     app._on_start()
     paired.arrive()
-    app._start_session_common.assert_called_once()
+    assert _connecting(app)
     assert app._real_stream._device_address == BLUE and _saved(app, b) == BLUE
 
 
@@ -386,11 +354,10 @@ def test_a_headset_picked_while_start_scans_is_the_one_it_connects_to(app, paire
     _load(app, b)
     paired.arrive()
     paired.devices.append(_mindwave(BLUE))
-    app._start_session_common = MagicMock()
     app._on_start()
     app._headset.on_select(GREY, "MindWave Mobile")  # picked in Settings while Start scanned
     paired.arrive()
-    app._start_session_common.assert_called_once()
+    assert _connecting(app)
     assert app._real_stream._device_address == GREY and _saved(app, b) == GREY
 
 
@@ -410,12 +377,11 @@ def test_start_with_no_mindwave_paired_says_why(app, paired, monkeypatch, device
         monkeypatch.setattr(NeuroSkyStream, "scan_paired_devices", staticmethod(devices))
     else:
         paired.devices.extend(devices)
-    app._start_session_common = MagicMock()
     app._on_start()
     paired.arrive()
-    app._start_session_common.assert_not_called()
-    assert app._live_screen.show_overlay_retry.call_args.args[0].startswith(message)
-    app._live_screen.set_controls_idle.assert_called()
+    assert not _connecting(app)
+    assert app._live_screen._overlay_status.text.startswith(message)
+    assert app._live_screen._overlay_retry_btn.parent is not None and not app._live_screen._btn_start.disabled
 
 
 # ---- Settings → Device ----

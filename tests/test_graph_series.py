@@ -1,226 +1,149 @@
-import os
-import tempfile
 import types
-import unittest
-from unittest import mock
 from unittest.mock import MagicMock
 
-from app.metrics.formula_slots import FormulaSlots
+import pytest
+
 from app.session.session_program import PROGRAM_FORMULA_KEYS
-from app.storage.database import DatabaseManager
 from app.ui import graph_series
-from app.ui.app_manager import EEGMeditationApp
 from app.ui.hooks import wire
-from app.ui.live_session import (
-    METRICS_COLORS,
-    METRICS_SCALES,
-    SERIES_NAMES,
-)
+from app.ui.live_session import METRICS_COLORS, METRICS_SCALES
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.theme import StyledButton
-from app.ui.widgets.band_totals import BAND_COLORS, BAND_SCALES
-from tests._formula_settings import make_formula_settings
-from tests._graph_series import make_graph_series
-from tests._settings import audio_store
+from app.ui.widgets.band_totals import BAND_COLORS
+from tests._app import reload_with
 
 
 def _g(colors, scales, graph_id, names=None):
     return ScrollableGraphWidget(colors=colors, scales=scales, graph_id=graph_id, names=names)
 
 
-class _FakeLive:
-    def __init__(self):
-        self.graph = _g(METRICS_COLORS, METRICS_SCALES, "live_metrics", SERIES_NAMES)
-        self.raw_graph = _g({"eeg": (1, 1, 1, 1)}, {"eeg": 500.0}, "live_raw")
-        self.band_graph = _g(BAND_COLORS, dict.fromkeys(BAND_COLORS, 1.0), "live_band")
+# ---- The series picker, persistence, and restore generalized to every graph ----
 
 
-class _FakeDiary:
-    def __init__(self):
-        self._metrics_graph = _g(METRICS_COLORS, METRICS_SCALES, "diary_metrics")
-        self._raw_eeg_graph = _g({"eeg": (1, 1, 1, 1)}, {"eeg": 500.0}, "diary_raw")
-        self._freq_graph = _g(BAND_COLORS, BAND_SCALES, "diary_freq")
+def _restore(app) -> None:
+    app._graph_series.restore(app._current_user_id)
 
 
-class TestGraphSeriesPersistence(unittest.TestCase):
-    """The series picker, persistence, and restore generalized to every graph."""
-
-    def setUp(self):
-        self.db_path = os.path.join(tempfile.gettempdir(), "test_series.db")
-        self.app = EEGMeditationApp.__new__(EEGMeditationApp)
-        self.app._db = DatabaseManager(db_path=self.db_path)
-        self.uid = self.app._db.create_user("Alice")
-        self.app._current_user_id = self.uid
-
-        self.app._live_screen = _FakeLive()
-        self.app._diary_screen = _FakeDiary()
-        self.graph = self.app._live_screen.graph
-
-        settings = types.SimpleNamespace()
-        settings.formulas = types.SimpleNamespace(set_formula_slot=lambda *a, **k: None,
-                                                  set_formula_slot_status=lambda *a, **k: None)
-        self.app._settings_screen = settings
-        self.app._formulas = FormulaSlots()
-        self.app._formulas.evaluators[0] = types.SimpleNamespace(is_valid=False)
-        audio_store(self.app)  # the app's default: no formula slot drives the sound
-        self.app._formula_settings = make_formula_settings(self.app)
-        self.app._graph_series = make_graph_series(self.app, live=lambda: False)  # no session runs
-
-    def tearDown(self):
-        self.app._db.close()
-        if os.path.exists(self.db_path):
-            os.remove(self.db_path)
-
-    # ── restore ──
-
-    def test_json_selection_applied_per_graph(self):
-        self.app._db.set_user_json_setting(
-            self.uid, "graph_series_live_metrics", ["distraction", "sinking"]
-        )
-        self.app._db.set_user_json_setting(
-            self.uid, "graph_series_diary_freq", ["alpha", "beta"]
-        )
-        self.app._graph_series.restore(self.uid)
-
-        self.assertTrue(self.graph.is_visible("distraction"))
-        self.assertTrue(self.graph.is_visible("sinking"))
-        self.assertFalse(self.graph.is_visible("shamatha_score"))
-
-        freq = self.app._diary_screen._freq_graph
-        self.assertTrue(freq.is_visible("alpha"))
-        self.assertTrue(freq.is_visible("beta"))
-        self.assertFalse(freq.is_visible("gamma"))
-
-    def test_legacy_migration_only_for_live_metrics(self):
-        self.app._db.set_user_setting(self.uid, "toggle_native_attention", "True")
-        self.app._db.set_user_setting(self.uid, "toggle_shamatha_score", "False")
-        self.app._graph_series.restore(self.uid)
-
-        self.assertTrue(self.graph.is_visible("native_attention"))
-        self.assertFalse(self.graph.is_visible("shamatha_score"))
-        # Diary graphs ignore the legacy live-only keys → default to all-visible, but a program's lines, which follow
-        # the session shown.
-        diary_m = self.app._diary_screen._metrics_graph
-        self.assertEqual(set(diary_m.visible_keys()), set(diary_m.series_keys()) - set(PROGRAM_FORMULA_KEYS))
-
-    def test_first_run_defaults(self):
-        self.app._graph_series.restore(self.uid)
-        # Live metrics: FIRST_RUN_LIVE_SERIES = Shamatha only.
-        self.assertTrue(self.graph.is_visible("shamatha_score"))
-        self.assertFalse(self.graph.is_visible("distraction"))
-        # Other multi-series graphs: all visible.
-        band = self.app._live_screen.band_graph
-        self.assertEqual(set(band.visible_keys()), set(band.series_keys()))
-
-    def test_single_series_graphs_untouched(self):
-        # 1-series graphs are skipped by restore (a picker there could only blank
-        # the line); their sole series stays visible.
-        self.app._graph_series.restore(self.uid)
-        self.assertTrue(self.app._live_screen.raw_graph.is_visible("eeg"))
-        self.assertTrue(self.app._diary_screen._raw_eeg_graph.is_visible("eeg"))
-
-    # ── toggle + persist ──
-
-    def _toggle(self, graph, key):
-        self.app._graph_series._toggle(graph, key, types.SimpleNamespace())
-
-    def test_toggle_flips_and_persists_per_graph(self):
-        self.app._graph_series.restore(self.uid)  # live: shamatha only
-        self._toggle(self.graph, "distraction")
-        self.assertTrue(self.graph.is_visible("distraction"))
-        self.app._graph_series.persist(self.graph)
-        saved = self.app._db.get_user_json_setting(self.uid, "graph_series_live_metrics")
-        self.assertIn("distraction", saved)
-
-        freq = self.app._diary_screen._freq_graph
-        self._toggle(freq, "gamma")  # gamma was visible by default → now hidden
-        self.assertFalse(freq.is_visible("gamma"))
-        self.app._graph_series.persist(freq)
-        saved_freq = self.app._db.get_user_json_setting(self.uid, "graph_series_diary_freq")
-        self.assertNotIn("gamma", saved_freq)
-
-    def test_a_detail_showing_a_programs_lines_lists_them_and_saves_none_of_its_set(self):
-        diary = self.app._diary_screen._metrics_graph
-        shown = frozenset({"shamatha_score", "program_formula"})
-        series = self.app._graph_series
-        for key in diary.series_keys():
-            diary.set_visible(key, key in shown)  # what show_program_series does for a program session
-        diary.set_program_lines(shown)
-        listed = []
-
-        def capture(_title, rows, footer=None, **_kw):
-            listed.extend(getattr(row, "text", None) or row.children[-1].text for row in rows)
-            return types.SimpleNamespace(bind=lambda **_k: None, open=lambda: None)
-
-        with mock.patch.object(graph_series, "make_scroll_popup", capture):
-            series.present_picker(diary)
-        self.assertIn(diary.series_name("program_formula"), listed)
-        series.persist(diary)
-        self.assertIsNone(self.app._db.get_user_json_setting(self.uid, "graph_series_diary_metrics"))
-
-    def test_custom_formula_gated_on_live_graph_only(self):
-        # Live metrics: custom_formula stays hidden while the formula is invalid.
-        self.app._formulas.evaluators[0].is_valid = False
-        self._toggle(self.graph, "custom_formula")
-        self.assertFalse(self.graph.is_visible("custom_formula"))
-        self.app._formulas.evaluators[0].is_valid = True
-        self._toggle(self.graph, "custom_formula")
-        self.assertTrue(self.graph.is_visible("custom_formula"))
-
-        # Diary metrics: custom_formula is recorded data → toggles freely.
-        diary_m = self.app._diary_screen._metrics_graph
-        self.app._formulas.evaluators[0].is_valid = False
-        diary_m.set_visible("custom_formula", False)
-        self._toggle(diary_m, "custom_formula")
-        self.assertTrue(diary_m.is_visible("custom_formula"))
-
-    def test_custom_formula_2_gated_on_its_own_slot(self):
-        # The per-slot gate must key off slot 1's evaluator, not slot 0's.
-        self.app._formulas.evaluators[1] = types.SimpleNamespace(is_valid=False)
-        self._toggle(self.graph, "custom_formula_2")
-        self.assertFalse(self.graph.is_visible("custom_formula_2"))
-        self.app._formulas.evaluators[1].is_valid = True
-        self._toggle(self.graph, "custom_formula_2")
-        self.assertTrue(self.graph.is_visible("custom_formula_2"))
-
-    def test_custom_formula_hidden_choice_survives_reload(self):
-        # Reload round-trip: a user who HID the live custom_formula line but kept a
-        # valid saved formula must not have it force-shown on next launch. Mirrors
-        # the production order in _load_user_settings (the profile's formulas
-        # loaded, then _restore_graph_series decides visibility).
-        from app.metrics.custom_formula import CustomFormulaEvaluator
-
-        self.app._formulas.evaluators[0] = CustomFormulaEvaluator()
-        formula = "alpha + beta"
-
-        self.app._db.set_user_json_setting(
-            self.uid, "graph_series_live_metrics", ["shamatha_score", "distraction"]
-        )
-        self.app._db.set_user_setting(self.uid, "custom_formula", formula)
-
-        self.app._formula_settings.load(self.uid)
-        self.app._graph_series.restore(self.uid)
-
-        self.assertTrue(self.app._formulas.evaluators[0].is_valid)  # formula loaded
-        self.assertFalse(self.graph.is_visible("custom_formula"))  # hide survived
-
-    def test_custom_formula_visible_choice_survives_reload(self):
-        from app.metrics.custom_formula import CustomFormulaEvaluator
-
-        self.app._formulas.evaluators[0] = CustomFormulaEvaluator()
-        formula = "alpha + beta"
-
-        self.app._db.set_user_json_setting(
-            self.uid, "graph_series_live_metrics", ["shamatha_score", "custom_formula"]
-        )
-        self.app._db.set_user_setting(self.uid, "custom_formula", formula)
-
-        self.app._formula_settings.load(self.uid)
-        self.app._graph_series.restore(self.uid)
-
-        self.assertTrue(self.graph.is_visible("custom_formula"))
+def _toggle(app, graph, key: str) -> None:
+    app._graph_series._toggle(graph, key, types.SimpleNamespace())
 
 
+def test_json_selection_applied_per_graph(fresh_app):
+    app, uid = fresh_app, fresh_app._current_user_id
+    app._db.set_user_json_setting(uid, "graph_series_live_metrics", ["distraction", "sinking"])
+    app._db.set_user_json_setting(uid, "graph_series_diary_freq", ["alpha", "beta"])
+    _restore(app)
+    graph, freq = app._live_screen.graph, app._diary_screen._freq_graph
+    assert graph.is_visible("distraction") and graph.is_visible("sinking") and not graph.is_visible("shamatha_score")
+    assert freq.is_visible("alpha") and freq.is_visible("beta") and not freq.is_visible("gamma")
+
+
+def test_legacy_migration_only_for_live_metrics(fresh_app):
+    app, uid = fresh_app, fresh_app._current_user_id
+    app._db.set_user_setting(uid, "toggle_native_attention", "True")
+    app._db.set_user_setting(uid, "toggle_shamatha_score", "False")
+    _restore(app)
+    graph = app._live_screen.graph
+    assert graph.is_visible("native_attention") and not graph.is_visible("shamatha_score")
+    # Diary graphs ignore the legacy live-only keys → default to all-visible, but a program's lines, which follow
+    # the session shown.
+    diary_m = app._diary_screen._metrics_graph
+    assert set(diary_m.visible_keys()) == set(diary_m.series_keys()) - set(PROGRAM_FORMULA_KEYS)
+
+
+def test_first_run_defaults(fresh_app):
+    app = fresh_app  # a new profile's load restored them
+    # Live metrics: FIRST_RUN_LIVE_SERIES = Shamatha only.
+    assert app._live_screen.graph.visible_keys() == ["shamatha_score"]
+    # Other multi-series graphs: all visible.
+    band = app._live_screen.band_graph
+    assert set(band.visible_keys()) == set(band.series_keys())
+
+
+def test_single_series_graphs_untouched(fresh_app):
+    # 1-series graphs are skipped by restore (a picker there could only blank
+    # the line); their sole series stays visible.
+    app = fresh_app
+    _restore(app)
+    assert app._live_screen.raw_graph.is_visible("eeg") and app._diary_screen._raw_eeg_graph.is_visible("eeg")
+
+
+def test_toggle_flips_and_persists_per_graph(fresh_app):
+    app, uid = fresh_app, fresh_app._current_user_id
+    graph = app._live_screen.graph  # live: shamatha only
+    _toggle(app, graph, "distraction")
+    assert graph.is_visible("distraction")
+    app._graph_series.persist(graph)
+    assert "distraction" in app._db.get_user_json_setting(uid, "graph_series_live_metrics")
+
+    freq = app._diary_screen._freq_graph
+    _toggle(app, freq, "gamma")  # gamma was visible by default → now hidden
+    assert not freq.is_visible("gamma")
+    app._graph_series.persist(freq)
+    assert "gamma" not in app._db.get_user_json_setting(uid, "graph_series_diary_freq")
+
+
+def test_a_detail_showing_a_programs_lines_lists_them_and_saves_none_of_its_set(fresh_app, monkeypatch):
+    app, uid = fresh_app, fresh_app._current_user_id
+    diary = app._diary_screen._metrics_graph
+    shown = frozenset({"shamatha_score", "program_formula"})
+    for key in diary.series_keys():
+        diary.set_visible(key, key in shown)  # what show_program_series does for a program session
+    diary.set_program_lines(shown)
+    listed = []
+
+    def capture(_title, rows, footer=None, **_kw):
+        listed.extend(getattr(row, "text", None) or row.children[-1].text for row in rows)
+        return types.SimpleNamespace(bind=lambda **_k: None, open=lambda: None)
+
+    monkeypatch.setattr(graph_series, "make_scroll_popup", capture)
+    app._graph_series.present_picker(diary)
+    assert diary.series_name("program_formula") in listed
+    app._graph_series.persist(diary)
+    assert app._db.get_user_json_setting(uid, "graph_series_diary_metrics") is None
+
+
+def test_custom_formula_gated_on_live_graph_only(fresh_app):
+    app = fresh_app
+    graph, slot = app._live_screen.graph, app._formulas.evaluators[0]
+    # Live metrics: custom_formula stays hidden while the formula is invalid.
+    assert not slot.is_valid
+    _toggle(app, graph, "custom_formula")
+    assert not graph.is_visible("custom_formula")
+    slot.set_formula("alpha1 * 2")
+    _toggle(app, graph, "custom_formula")
+    assert graph.is_visible("custom_formula")
+
+    # Diary metrics: custom_formula is recorded data → toggles freely.
+    diary_m = app._diary_screen._metrics_graph
+    slot.set_formula("")
+    diary_m.set_visible("custom_formula", False)
+    _toggle(app, diary_m, "custom_formula")
+    assert diary_m.is_visible("custom_formula")
+
+
+def test_custom_formula_2_gated_on_its_own_slot(fresh_app):
+    # The per-slot gate must key off slot 1's evaluator, not slot 0's.
+    app = fresh_app
+    graph = app._live_screen.graph
+    app._formulas.evaluators[0].set_formula("alpha1 * 2")  # slot 0 runs; slot 1 doesn't
+    _toggle(app, graph, "custom_formula_2")
+    assert not graph.is_visible("custom_formula_2")
+    app._formulas.evaluators[1].set_formula("beta1 * 2")
+    _toggle(app, graph, "custom_formula_2")
+    assert graph.is_visible("custom_formula_2")
+
+
+@pytest.mark.parametrize("picked", [False, True])
+def test_the_custom_formulas_shown_or_hidden_choice_survives_reload(fresh_app, picked):
+    # Reload round-trip: a user who HID the live custom_formula line but kept a valid saved formula must not have it
+    # force-shown on next launch, and one who showed it keeps it; the load is the production one (the profile's
+    # formulas, then the graphs' series).
+    app = fresh_app
+    saved = ["shamatha_score", "custom_formula" if picked else "distraction"]
+    reload_with(app, {"graph_series_live_metrics": saved}, custom_formula="alpha + beta")
+    assert app._formulas.evaluators[0].is_valid  # formula loaded
+    assert app._live_screen.graph.is_visible("custom_formula") is picked
 
 
 def _threshold_ys(g) -> tuple[list[float], float, float]:
@@ -262,46 +185,19 @@ def test_the_live_screen_and_a_sessions_detail_draw_a_series_in_one_colour():
         assert detail._freq_graph.series_color(key) == live.band_graph.series_color(key), key
 
 
-class _LiveGraph:
-    """The live metrics graph as the picker and Settings use it: its series' names and visibility."""
-
-    def __init__(self):
-        self.names, self.shown = {}, {}
-
-    def set_series_name(self, key, name):
-        self.names[key] = name
-
-    def series_name(self, key):
-        return self.names.get(key, key)
-
-    def set_visible(self, key, visible):
-        self.shown[key] = visible
-
-    def is_visible(self, key):
-        return self.shown.get(key, False)
-
-
-def test_choosing_a_saved_formula_renames_its_picker_row_at_once(tmp_path, monkeypatch):
+def test_choosing_a_saved_formula_renames_its_picker_row_at_once(fresh_app, monkeypatch):
     # The open picker's row follows Choose at once, as the graph line and the legend do.
-    db = DatabaseManager(db_path=str(tmp_path / "t.db"))
-    uid = db.create_user("A")
-    db.add_saved_formula(uid, "Calm", "alpha1 * 2")
-    graph = _LiveGraph()
-    app = types.SimpleNamespace(_db=db, _formulas=FormulaSlots(), _current_user_id=uid, _require_user=lambda _a: uid,
-                                _audio_metric=types.SimpleNamespace(formula_scoring_locked=lambda _key, _doing: False),
-                                _live_screen=types.SimpleNamespace(graph=graph))
-    app._formula_settings = make_formula_settings(app)
-    series = make_graph_series(app, graphs=lambda: [graph], live=lambda: False)
+    app = fresh_app
+    app._db.add_saved_formula(app._current_user_id, "Calm", "alpha1 * 2")
     shown_rows = []
     monkeypatch.setattr(graph_series, "make_scroll_popup",
                         lambda title, rows, **kw: shown_rows.extend(rows) or MagicMock())
     row = StyledButton(text="Formula 1")
 
-    series._choose_saved_formula(0, row)
+    app._graph_series._choose_saved_formula(0, row)
     shown_rows[0].dispatch("on_release")
-    db.close()
 
-    assert graph.series_name("custom_formula") == "Calm"
+    assert app._live_screen.graph.series_name("custom_formula") == "Calm"
     assert row.text == "Calm"  # the open picker's row says what the line and the legend say
 
 

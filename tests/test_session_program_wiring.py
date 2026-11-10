@@ -2,15 +2,22 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.metrics.formula_slots import FormulaSlots
 from app.session.session_program import SessionProgram
 from app.storage.database import DatabaseManager
-from app.ui.app_manager import EEGMeditationApp
+from app.ui.live_session import LiveSessionScreen
 from app.ui.program_run import ProgramRun
-from tests._graph_series import make_graph_series
+from tests._app import (
+    FedSession,
+    calls_of,
+    frames,
+    popups,
+    program_mode,
+    reload_with,
+    start_connecting,
+    start_ticked_by_hand,
+)
 from tests._program_run import make_run
 from tests._program_settings import make_programs
-from tests._settings import audio_store
 
 
 def _program_settings(db, uid, **kw):
@@ -48,17 +55,12 @@ def test_program_transition_fires_once_per_boundary():
     assert fn(1, 120.0, p) == (1, p.segments[1], False)   # past end, clamps, no re-cross
 
 
-def test_session_program_json_records_snapshot_not_live_editor():
+def test_session_program_json_records_the_program_it_began_with():
     import json
 
-    from app.session.session_program import SessionProgram
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
     snapshot = [{"minutes": 10, "target": 50, "formula": "shamatha_score"}]
-    app._program_run = make_run(program=SessionProgram(snapshot))
-    # A mid-session edit to the live editor must NOT change what's recorded.
-    app._program_settings = make_programs()
-    app._program_settings.segments = [{"minutes": 99, "target": 1, "formula": "meditation_score"}]
-    assert json.loads(app._program_run.segments_json()) == snapshot
+    # What the session records is the run's own program: a mid-session edit in Settings changes the editor, not this.
+    assert json.loads(make_run(program=SessionProgram(snapshot)).segments_json()) == snapshot
     # A simple session records nothing.
     assert make_run().segments_json() == ""
 
@@ -133,61 +135,39 @@ def test_saved_program_unique_upsert_load_delete(tmp_path):
     db.close()
 
 
-def test_program_custom_formula_plots_and_marks():
-    from unittest.mock import MagicMock
-
-    from app.session.session_program import SessionProgram
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._audio = MagicMock()
-    app._session_manager = MagicMock()
-    app._session_manager.elapsed_seconds = 0
-    graph = MagicMock()
-    app._live_screen = MagicMock()
-    app._live_screen.graph = graph
-    app._timer_mode = "program"
-    audio_store(app)
-    app._program_run = run = make_run(app)
-    run.begin(SessionProgram([{"minutes": 1, "target": 120, "formula": {"name": "AlphaPwr", "formula": "alpha1"}}]),
-              [], "")  # what a program session's start does
-
+def test_program_custom_formula_plots_and_marks(fresh_app, monkeypatch):
+    app = fresh_app
+    program_mode(app, [{"minutes": 1, "target": 120, "formula": {"name": "AlphaPwr", "formula": "alpha1"}}])
+    fed = FedSession(app, monkeypatch)
+    marks = calls_of(monkeypatch, app._live_screen, "set_training_series")
     metrics = {"shamatha_score": 50}
-    run.tick(metrics, {"alpha1": 80.0})
+    fed.tick({**fed.raw, "alpha1": 80.0}, metrics)
+    graph = app._live_screen.graph
+    assert metrics["program_formula"] == 80.0  # custom formula evaluated + plotted
+    assert app._program_run.audio_key == "program_formula"  # transient program drive
+    assert app._settings_store.value("audio_metric") == "shamatha_score"  # user's baseline left untouched
+    assert graph.series_name("program_formula") == "Program: AlphaPwr"  # "Program: <formula>"
+    assert graph.is_visible("program_formula")  # shown on graph
+    assert marks[-1] == ("program_formula",)  # legend-marked
 
-    assert metrics["program_formula"] == 80.0          # custom formula evaluated + plotted
-    assert run.audio_key == "program_formula"   # transient program drive
-    assert app._settings_store.value("audio_metric") == "shamatha_score"     # user's baseline left untouched
-    graph.set_series_name.assert_any_call("program_formula", "Program: AlphaPwr")  # "Program: <formula>"
-    graph.set_visible.assert_any_call("program_formula", True)            # shown on graph
-    app._live_screen.set_training_series.assert_called_with("program_formula")  # legend-marked
 
-
-def test_a_segment_whose_formula_cant_run_drives_and_shows_shamatha():
+def test_a_segment_whose_formula_cant_run_drives_and_shows_shamatha(fresh_app, monkeypatch):
     # Its segments sound, show and are scored on Shamatha, never on a key nothing computes (0: constant max noise).
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._audio = MagicMock()
-    app._session_manager = MagicMock()
-    app._session_manager.elapsed_seconds = 0
-    graph = MagicMock()
-    graph.series_keys.return_value = ["shamatha_score", "program_formula", "program_formula_2"]
-    app._live_screen = MagicMock()
-    app._live_screen.graph = graph
-    app._formulas = FormulaSlots()
-    audio_store(app)
-    app._program_run = run = make_run(app, info=MagicMock())
-    run.begin(SessionProgram([{"minutes": 1, "target": 120, "formula": {"name": "Broken", "formula": "alpha1 +"}},
-                              {"minutes": 1, "target": 80, "formula": {"name": "AlphaPwr", "formula": "alpha1"}}]),
-              [], "")
-
+    app = fresh_app
+    program_mode(app, [{"minutes": 1, "target": 120, "formula": {"name": "Broken", "formula": "alpha1 +"}},
+                       {"minutes": 1, "target": 80, "formula": {"name": "AlphaPwr", "formula": "alpha1"}}])
+    fed = FedSession(app, monkeypatch)
+    marks = calls_of(monkeypatch, app._live_screen, "set_training_series")
     metrics = {"shamatha_score": 50}
-    run.tick(metrics, {"alpha1": 80.0})
-
-    assert run.audio_key == "shamatha_score"
+    fed.tick({**fed.raw, "alpha1": 80.0}, metrics)
+    graph, score = app._live_screen.graph, app._session_manager.live_score()
+    assert app._program_run.audio_key == "shamatha_score"
     assert metrics.get(app._audio_metric.drive_key(), 0) == 50  # what the tick sounds: shamatha, not 0
-    app._session_manager.start_segment.assert_called_with("shamatha_score", 120)  # scored on what it sounds
-    app._live_screen.set_training_series.assert_called_with("shamatha_score")
-    assert run._ctx.info.call_args.args[0] == "Formula error in this program"  # the session's start says which
-    shown = {c.args[0]: c.args[1] for c in graph.set_visible.call_args_list}
-    assert shown == {"shamatha_score": True, "program_formula": False, "program_formula_2": True}
+    assert (score.value, score.target) == (50, 120)  # scored on what it sounds
+    assert marks[-1] == ("shamatha_score",)
+    assert [p.title for p in popups()] == ["Formula error in this program"]  # the session's start says which
+    assert (graph.is_visible("shamatha_score"), graph.is_visible("program_formula"),
+            graph.is_visible("program_formula_2")) == (True, False, True)
     assert metrics["program_formula_2"] == 80.0  # the segment whose formula runs keeps its own line
 
 
@@ -224,12 +204,8 @@ def test_program_shows_exactly_its_metric_set_whole_session():
     series + one program-formula line for its custom formula, shown throughout (not
     per-segment). Unrelated user selections are hidden during the program and
     restored on stop; only the legend marker moves as segments cross."""
-    from app.session.session_program import SessionProgram
-    from app.ui.live_session import LiveSessionScreen
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._live_screen = LiveSessionScreen()
-    run = make_run(app)
-    graph = app._live_screen.graph
+    graph = LiveSessionScreen().graph
+    run = make_run(live_screen=MagicMock(graph=graph))
     # User had a custom slot + shamatha on; an unrelated metric off.
     graph.set_visible("custom_formula", True)
     graph.set_visible("shamatha_score", True)
@@ -263,18 +239,8 @@ def test_program_with_two_distinct_customs_shows_three_lines():
     """A program with two DIFFERENT custom formulas plots each on its own line
     (program_formula + program_formula_2), so a 3-distinct-metric program shows 3
     lines — not one shared 'Program' line. The per-tick eval fills each line."""
-    from unittest.mock import MagicMock
-
-    from app.session.session_program import SessionProgram
-    from app.ui.live_session import LiveSessionScreen
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._audio = MagicMock()
-    app._session_manager = MagicMock()
-    app._session_manager.elapsed_seconds = 0
-    audio_store(app)
-    app._live_screen = LiveSessionScreen()
-    run = make_run(app)
-    g = app._live_screen.graph
+    g = LiveSessionScreen().graph
+    run = make_run(session_manager=MagicMock(elapsed_seconds=0), live_screen=MagicMock(graph=g))
 
     prog = SessionProgram([
         {"minutes": 1, "target": 50, "formula": "shamatha_score"},
@@ -295,61 +261,49 @@ def test_program_with_two_distinct_customs_shows_three_lines():
     assert metrics["program_formula_2"] == 22.0
 
 
-def test_idle_program_preview_shows_program_set(tmp_path):
+def _saved_live_series(app) -> list | None:
+    return app._db.get_user_json_setting(app._current_user_id, "graph_series_live_metrics")
+
+
+def test_idle_program_preview_shows_program_set(fresh_app, monkeypatch):
     """In program mode with a loaded program, the live graph previews EXACTLY the program's metric set before any
     session starts, and an ending derives it again; simple mode restores the user's saved selection. A program's set
     is never persisted over it."""
-    from app.metrics.formula_slots import FormulaSlots
-    from app.ui.live_session import LiveSessionScreen
-    db = DatabaseManager(db_path=str(tmp_path / "preview.db"))
-    uid = db.create_user("u")
-    db.set_user_json_setting(uid, "graph_series_live_metrics", ["shamatha_score"])
-
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._db = db
-    app._current_user_id = uid
-    app._live_screen = LiveSessionScreen()
-    app._formulas = FormulaSlots()
-    app._program_settings = _program_settings(db, uid, live_screen=app._live_screen,
-                              timer_section=MagicMock(timer_enabled=False, timer_minutes=10),
-                              show_saved_series=lambda u: app._graph_series.apply_saved(app._live_screen.graph, u))
-    app._graph_series = make_graph_series(app, live=lambda: False)  # idle: no session runs or connects
-    app._program_settings.mode = "program"
-    app._program_settings.segments = [
-        {"minutes": 1, "target": 50, "formula": "meditation_score"},  # outside the saved selection
-        {"minutes": 1, "target": 80, "formula": {"name": "Alpha", "formula": "alpha1"}},
-    ]
+    app = fresh_app
+    reload_with(app, {"graph_series_live_metrics": ["shamatha_score"]})
     g = app._live_screen.graph
+    program_mode(app, [{"minutes": 1, "target": 50, "formula": "meditation_score"},  # outside the saved selection
+                       {"minutes": 1, "target": 80, "formula": {"name": "Alpha", "formula": "alpha1"}}])
     preview = {"meditation_score", "program_formula"}
-
-    app._program_settings.refresh_live_series()  # idle preview
-    assert set(g.visible_keys()) == preview and g.program_keys == preview
+    assert set(g.visible_keys()) == preview and g.program_keys == preview  # idle preview
     assert g.series_name("program_formula") == "Program: Alpha"
     app._graph_series.persist(g)  # a program governs the live graph: its set is not the manual one
-    assert db.get_user_json_setting(uid, "graph_series_live_metrics") == ["shamatha_score"]
+    assert _saved_live_series(app) == ["shamatha_score"]
 
-    run = make_run(app, live_screen=app._live_screen)
-    for begun in (False, True):  # a start cancelled during its scan, then a program session that ran
+    for begun in (False, True):  # a start cancelled while it connects, then a program session that ran
         if begun:
-            run.begin(app._program_settings.program(), [], "P")
-        run.end()  # the ending, as _undo_session_setup runs it: the program dropped, the idle series derived again
-        app._program_settings.sync_picker()
-        assert g.program_keys == preview and g.is_visible("meditation_score")
+            app._change_setting("use_mock", True)
+            start_ticked_by_hand(app, ticks=1)
+            app._stop_and_save()
+            frames()
+            app._shown.on_ok()
+        else:
+            start_connecting(app, monkeypatch)
+            app._on_connect_cancel()
+        assert g.program_keys == preview and g.is_visible("meditation_score")  # the idle series derived again
         app._graph_series.persist(g)
-        assert db.get_user_json_setting(uid, "graph_series_live_metrics") == ["shamatha_score"]
+        assert _saved_live_series(app) == ["shamatha_score"]
 
     app._program_settings.on_changed([])  # the program emptied in Settings > Timer: no preview, the saved selection
     assert set(g.visible_keys()) == {"shamatha_score"} and g.program_keys == frozenset()
     app._program_settings.on_changed([{"minutes": 1, "target": 50, "formula": "meditation_score"}])
     assert g.program_keys == {"meditation_score"}
 
-    app._program_settings.mode = "simple"  # back to simple: the saved selection, the user's own again
-    app._program_settings.refresh_live_series()
+    app._program_settings.on_mode_change("simple")  # back to simple: the saved selection, the user's own again
     assert set(g.visible_keys()) == {"shamatha_score"} and g.program_keys == frozenset()
     g.set_visible("distraction", True)
     app._graph_series.persist(g)
-    assert set(db.get_user_json_setting(uid, "graph_series_live_metrics")) == {"shamatha_score", "distraction"}
-    db.close()
+    assert set(_saved_live_series(app)) == {"shamatha_score", "distraction"}
 
 
 def test_diary_rebuilds_stepped_threshold():
@@ -388,24 +342,14 @@ def test_program_unsaved_changes_detection(tmp_path):
     db.close()
 
 
-def test_a_running_programs_series_are_not_saved_once_settings_is_switched_to_simple(tmp_path):
+def test_a_running_programs_series_are_not_saved_once_settings_is_switched_to_simple(fresh_app):
     """Settings → Timer can go back to simple during a program session (the edit waits for the next one): the live graph
     still shows the program's set, which closing the series picker must not save as the profile's own selection."""
-    from app.metrics.formula_slots import FormulaSlots
-    from app.session.session_program import SessionProgram
-    from app.ui.live_session import LiveSessionScreen
-    db = DatabaseManager(db_path=str(tmp_path / "running.db"))
-    uid = db.create_user("u")
-    db.set_user_json_setting(uid, "graph_series_live_metrics", ["shamatha_score"])
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._db = db
-    app._current_user_id = uid
-    app._live_screen = LiveSessionScreen()
-    app._formulas = FormulaSlots()
-    app._program_run = make_run(app)
-    app._program_run.begin(SessionProgram([{"minutes": 1, "target": 50, "formula": "meditation_score"}]), [], "")
-    app._program_settings = _program_settings(db, uid)  # mode "simple": switched back mid-session
-    app._graph_series = make_graph_series(app)
+    app = fresh_app
+    reload_with(app, {"graph_series_live_metrics": ["shamatha_score"]})
+    program_mode(app, [{"minutes": 1, "target": 50, "formula": "meditation_score"}])
+    start_ticked_by_hand(app)
+    app._program_settings.on_mode_change("simple")  # switched back mid-session
+    assert app._live_screen.graph.visible_keys() == ["meditation_score"]
     app._graph_series.persist(app._live_screen.graph)
-    assert db.get_user_json_setting(uid, "graph_series_live_metrics") == ["shamatha_score"]
-    db.close()
+    assert _saved_live_series(app) == ["shamatha_score"]

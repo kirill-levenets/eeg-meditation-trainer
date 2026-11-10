@@ -9,9 +9,10 @@ from unittest.mock import MagicMock
 import pytest
 
 import app.ui.backup_flow as bf
+from app.config import APP
 from app.storage.backup import make_backup, restore_backup
 from app.storage.database import DatabaseManager
-from app.ui.app_manager import EEGMeditationApp
+from tests._app import popup_titles
 from tests._backup_flow import make_flow
 
 
@@ -279,9 +280,16 @@ def test_a_restore_replaces_the_file_then_hands_the_app_to_a_relaunch(tmp_path, 
     assert _users(live) == ["from-backup"]
 
 
-def test_the_app_stops_flushing_and_asks_for_a_relaunch_once_the_db_is_replaced():
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._show_relaunch_popup = MagicMock()
+def test_the_app_stops_flushing_and_asks_for_a_relaunch_once_the_db_is_replaced(build_app):
+    app = build_app()
+    uid = app._current_user_id
+    app._settings_screen.threshold = 62  # changed, not yet written
     app._on_db_replaced()
-    assert app._restoring is True
-    app._show_relaunch_popup.assert_called_once()
+    assert app._restoring is True and popup_titles() == ["Restore complete"]
+    app.on_pause()
+    app.on_stop()
+    reopened = DatabaseManager(db_path=APP.DB_PATH)
+    try:
+        assert reopened.get_user_setting(uid, "threshold") != "62"  # nothing of the old state over the restored file
+    finally:
+        reopened.close()

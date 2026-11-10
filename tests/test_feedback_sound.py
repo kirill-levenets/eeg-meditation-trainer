@@ -1,11 +1,11 @@
-from app.metrics.formula_slots import FormulaSlots
+from unittest.mock import MagicMock
+
 from app.session.session_program import SessionProgram
-from app.ui.app_manager import EEGMeditationApp
 from app.ui.audio_metric import baseline_audio_metric
 from app.ui.sound_sources import feedback_plan, source_spec
+from tests._audio_metric import audio_metric_alone
 from tests._program_run import make_run
-from tests._settings import audio_store, held_store
-from tests._sound_sources import make_sounds
+from tests._sound_sources import sounds_alone
 
 
 def test_source_spec_builtins_and_custom():
@@ -48,28 +48,24 @@ def test_feedback_plan_global_tone_default_segments():
 
 
 def test_global_feedback_id_resolves_source():
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    store = app._settings_store = held_store(feedback_source="noise", feedback_sound_path="")
-    assert make_sounds(app).global_feedback_id() == "noise"
-    store.change("feedback_source", "tone")
-    assert make_sounds(app).global_feedback_id() == "tone"
-    store.change("feedback_source", "custom")
-    store.change("feedback_sound_path", "/my.wav")
-    assert make_sounds(app).global_feedback_id() == "/my.wav"
-    store.change("feedback_sound_path", "")              # custom selected but no file
-    assert make_sounds(app).global_feedback_id() == "noise"         # falls back to rain
+    settings = {"feedback_source": "noise", "feedback_sound_path": ""}
+    sounds = sounds_alone(settings)
+    assert sounds.global_feedback_id() == "noise"
+    settings["feedback_source"] = "tone"
+    assert sounds.global_feedback_id() == "tone"
+    settings.update(feedback_source="custom", feedback_sound_path="/my.wav")
+    assert sounds.global_feedback_id() == "/my.wav"
+    settings["feedback_sound_path"] = ""              # custom selected but no file
+    assert sounds.global_feedback_id() == "noise"         # falls back to rain
 
 
-def test_on_test_audio_prepares_selected_source(monkeypatch):
-    from unittest.mock import MagicMock
-    monkeypatch.setattr(EEGMeditationApp, "_session_pipeline_live", lambda self: False)  # no session: not refused
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._settings_store = held_store(feedback_source="tone", feedback_sound_path="", reward_source="none",
-                                     reward_sound_path="")
-    app._audio = MagicMock()
-    make_sounds(app).on_test_audio()
-    app._audio.prepare_feedback.assert_called_once_with({"tone": ("tone", "")}, "tone")
-    app._audio.test_audio.assert_called_once()
+def test_on_test_audio_prepares_selected_source():
+    audio = MagicMock()
+    sounds = sounds_alone({"feedback_source": "tone", "feedback_sound_path": "", "reward_source": "none",
+                           "reward_sound_path": ""}, audio=audio)  # no session: not refused
+    sounds.on_test_audio()
+    audio.prepare_feedback.assert_called_once_with({"tone": ("tone", "")}, "tone")
+    audio.test_audio.assert_called_once()
 
 
 # --- Bug: program-formula key leaked into the persisted audio metric, driving
@@ -81,25 +77,20 @@ def test_baseline_audio_metric_rejects_program_keys():
     assert baseline_audio_metric("custom_formula") == "custom_formula"
 
 
-def _drive_app(metric_key, program_active=False, program_key=""):
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._program_run = make_run(program=SessionProgram([{"minutes": 1}]) if program_active else None,
-                                audio_key=program_key)
-    app._formulas = FormulaSlots()
-    audio_store(app, metric_key)  # its AudioMetric reads the program run and the slots above
-    return app
+def _drive_key(metric_key, program_active=False, program_key="") -> str:
+    run = make_run(program=SessionProgram([{"minutes": 1}]) if program_active else None, audio_key=program_key)
+    return audio_metric_alone(metric_key, program_run=run).drive_key()
 
 
 def test_drive_key_program_slot_outside_program_falls_back():
     # The leaked saved value: simple session must not drive audio from a 0/missing program key.
-    assert _drive_app("program_formula_2")._audio_metric.drive_key() == "shamatha_score"
+    assert _drive_key("program_formula_2") == "shamatha_score"
 
 
 def test_drive_key_uses_program_key_during_program():
-    app = _drive_app("shamatha_score", program_active=True, program_key="program_formula_2")
-    assert app._audio_metric.drive_key() == "program_formula_2"
+    assert _drive_key("shamatha_score", program_active=True, program_key="program_formula_2") == "program_formula_2"
 
 
 def test_drive_key_normal_metric_passthrough():
-    assert _drive_app("native_attention")._audio_metric.drive_key() == "native_attention"
-    assert _drive_app("shamatha_score")._audio_metric.drive_key() == "shamatha_score"
+    assert _drive_key("native_attention") == "native_attention"
+    assert _drive_key("shamatha_score") == "shamatha_score"

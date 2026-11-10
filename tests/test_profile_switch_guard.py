@@ -1,45 +1,40 @@
 """A profile switch mid-session would reload timer/threshold/sound settings under the running session."""
+import pytest
 
-from unittest.mock import MagicMock
-
-from app.session.manager import SessionState
-from app.ui.app_manager import EEGMeditationApp
-from tests._profiles import make_profiles
+from tests._app import frames, popup_titles, reload_with
 
 
-def _make_app(state: SessionState) -> EEGMeditationApp:
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._session_manager = MagicMock()
-    app._session_manager.state = state
-    app._ticker = MagicMock(running=False)
-    app._current_user_id = 1
-    app._db = MagicMock()
-    app._db.get_user.return_value = {"name": "B"}
-    app._info_popup = MagicMock()
-    app._settings_screen = MagicMock()
-    app._save_user_settings = MagicMock()
-    app._load_user_settings = MagicMock()
-    app._history = MagicMock()
-    app._shown = MagicMock(owner=None)  # no session shown
+@pytest.fixture
+def app(fresh_app):
+    """The app on its profile (`app.mine`, threshold 60), with a profile B (`app.other`, threshold 85) to switch to."""
+    app = fresh_app
+    reload_with(app, threshold="60")
+    app.mine, app.other = app._current_user_id, app._db.create_user("B")
+    app._db.set_user_setting(app.other, "threshold", "85")
+    app._db.set_user_setting(app.other, "use_mock", "True")
+    app._profiles.refresh()
     return app
 
 
-def test_switch_is_refused_while_a_session_runs():
-    app = _make_app(SessionState.RUNNING)
-    make_profiles(app).on_switch(2)
-
-    assert app._current_user_id == 1
-    app._save_user_settings.assert_not_called()
-    app._load_user_settings.assert_not_called()
-    app._info_popup.assert_called_once()
-    app._settings_screen.populate_users.assert_called_once()  # the picker snapped back
+def _current(app) -> str:
+    return app._settings_screen._profile_current_label.text
 
 
-def test_switch_proceeds_when_idle():
-    app = _make_app(SessionState.IDLE)
-    make_profiles(app).on_switch(2)
+def test_switch_is_refused_while_a_session_runs(app):
+    mine = _current(app)
+    app._on_start()
+    app._settings_screen._profile_current_label.text = "Current: B"  # what the picker's tap showed
+    app._profiles.on_switch(app.other)
+    frames()
+    assert app._current_user_id == app.mine and popup_titles() == ["Session in progress"]
+    assert app._settings_screen.threshold == 60  # B's settings were not loaded under the running session
+    assert _current(app) == mine  # the picker snapped back
 
-    assert app._current_user_id == 2
-    app._save_user_settings.assert_called_once()
-    app._load_user_settings.assert_called_once_with(2)
-    app._info_popup.assert_not_called()
+
+def test_switch_proceeds_when_idle(app):
+    app._settings_screen.threshold = 62  # changed, not yet saved
+    app._profiles.on_switch(app.other)
+    frames()
+    assert app._current_user_id == app.other and popup_titles() == []
+    assert app._settings_screen.threshold == 85 and _current(app) == "Current: B"
+    assert app._db.get_user_setting(app.mine, "threshold") == "62"  # the first profile's settings were saved first

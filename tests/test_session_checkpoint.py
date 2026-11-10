@@ -12,11 +12,9 @@ import app.ui.app_manager as am
 import app.ui.backup_flow as bf
 from app.config import APP
 from app.session.manager import SessionManager
+from app.session.recorder import SessionRecorder
 from app.storage.database import DatabaseManager
-from app.ui.app_manager import EEGMeditationApp
-from tests._backup_flow import make_flow
-from tests._program_run import make_run
-from tests._recorder import make_recorder
+from tests._app import popup_titles, start_ticked_by_hand
 
 
 @pytest.fixture
@@ -68,92 +66,49 @@ def test_a_failed_checkpoint_leaves_the_previous_one_whole(db, monkeypatch):
     assert _row(db, sid) == (60, 120)  # the row didn't move without its data
 
 
-# ---- the app: every snapshot point goes through one checkpoint ----
+# ---- the recorder: every snapshot point goes through one checkpoint ----
 
 
-def _app(db) -> EEGMeditationApp:
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._db = db
-    app._current_user_id = db.create_user("t")
-    app._recorder = make_recorder(app)
-    app._recorder._buffer = []
-    app._recorder._flush_counter = 0
-    app._session_manager = SessionManager()
-    app._session_manager.start()
-    app._with_score = lambda stats: stats
-    app._session_custom_formulas_json = lambda: ""
-    app._program_run = make_run()
-    app._make_session_name = lambda: "06:00 - Mock"
-    return app
+class _Recording:
+    """A SessionRecorder built by its constructor on `db`, its session running; `with_score` can be made to fail."""
+
+    def __init__(self, db) -> None:
+        self.db, self.manager = db, SessionManager()
+        uid = db.create_user("t")
+        self.with_score = lambda stats: stats
+        self.recorder = SessionRecorder(db, self.manager, with_score=lambda stats: self.with_score(stats),
+                                        row_fields=lambda: {"user_id": uid, "session_name": "06:00 - Mock"})
+        self.recorder.begin()
+        self.manager.start()
+
+    def ticks(self, n: int) -> None:
+        for _ in range(n):
+            metrics = {"shamatha_score": 70, "meditation_score": 60}
+            self.recorder.record(metrics, {"timestamp": 0.0, **metrics})
+
+    def run_for(self, seconds: float) -> None:
+        self.manager._start_time = time.time() - seconds
+
+    def row(self) -> tuple:
+        return _row(self.db, self.recorder.session_id)
 
 
-def _ticks(app, n: int) -> None:
-    for _ in range(n):
-        metrics = {"shamatha_score": 70, "meditation_score": 60}
-        app._recorder.record(metrics, {"timestamp": 0.0, **metrics})
-
-
-def _run_for(app, seconds: float) -> None:
-    app._session_manager._start_time = time.time() - seconds
-
-
-def test_every_tick_flush_brings_the_row_up_to_date():
+def test_every_tick_flush_brings_the_row_up_to_date(db):
     # The kill repro: 150 s into a session the row still said 59 s (written once, at the first flush).
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db = DatabaseManager(db_path=path)
-    try:
-        app = _app(db)
-        per_flush = int(APP.FLUSH_INTERVAL_SECONDS / APP.UPDATE_FREQUENCY)
-        for minute in (1, 2):
-            _ticks(app, per_flush)
-            _run_for(app, 60 * minute)
-            for _ in range(per_flush):
-                app._recorder.flush_tick()
-        assert _row(db, app._recorder.session_id) == (120, 2 * per_flush)
-        assert app._recorder._buffer == []
-    finally:
-        db.close()
-        os.remove(path)
-
-
-def test_leaving_the_app_mid_session_checkpoints_it(db):
-    app = _app(db)
-    app._live_screen = None
-    app._save_user_settings = MagicMock()
-    app._leaving = False
-    _ticks(app, 50)  # under a minute: nothing flushed yet
-    _run_for(app, 25)
-    app._flush_on_leave()
-    assert _row(db, app._recorder.session_id) == (25, 50)
-
-
-def test_leaving_the_app_without_a_session_writes_nothing(db):
-    app = _app(db)
-    app._session_manager = SessionManager()  # idle
-    app._live_screen = None
-    app._save_user_settings = MagicMock()
-    app._leaving = False
-    app._flush_on_leave()
-    assert db._conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
-
-
-def test_a_backup_holds_the_running_session_as_of_the_backup(db, monkeypatch):
-    app = _app(db)
-    flow = make_flow(db, checkpoint=app._checkpoint_or_report)
-    _ticks(app, 40)
-    _run_for(app, 20)
-    seen = []
-    monkeypatch.setattr(bf._backup, "make_backup", lambda d, path: seen.append(_row(d, app._recorder.session_id)))
-    monkeypatch.setattr(bf.threading, "Thread", lambda target, **k: MagicMock(start=target))
-    monkeypatch.setattr(bf.Clock, "schedule_once", lambda *a, **k: None)
-    flow._run_backup_async("/tmp/unused.db")
-    assert seen == [(20, 40)]
+    session = _Recording(db)
+    per_flush = int(APP.FLUSH_INTERVAL_SECONDS / APP.UPDATE_FREQUENCY)
+    for minute in (1, 2):
+        session.ticks(per_flush)
+        session.run_for(60 * minute)
+        for _ in range(per_flush):
+            session.recorder.flush_tick()
+    assert session.row() == (120, 2 * per_flush)
+    assert session.recorder._buffer == []
 
 
 def test_a_tick_recorded_during_a_checkpoint_waits_for_it_and_is_kept(db):
-    app = _app(db)
-    _ticks(app, 10)
+    session = _Recording(db)
+    session.ticks(10)
     started, release = threading.Event(), threading.Event()
     real = db.checkpoint_session
 
@@ -163,52 +118,32 @@ def test_a_tick_recorded_during_a_checkpoint_waits_for_it_and_is_kept(db):
         return real(*a, **k)
 
     db.checkpoint_session = slow
-    writer = threading.Thread(target=app._recorder.checkpoint)
+    writer = threading.Thread(target=session.recorder.checkpoint)
     writer.start()
     assert started.wait(2)
-    ticker = threading.Thread(target=_ticks, args=(app, 1))
+    ticker = threading.Thread(target=session.ticks, args=(1,))
     ticker.start()
     ticker.join(0.2)
     assert ticker.is_alive()  # the tick waits: the checkpoint's stats and data stay one consistent snapshot
     release.set()
     writer.join(2)
     ticker.join(2)
-    assert len(app._recorder._buffer) == 1  # recorded after the snapshot, kept for the next checkpoint
-    assert _row(db, app._recorder.session_id)[1] == 10
-
-
-def test_an_android_backup_holds_the_running_session_as_of_the_backup(db, monkeypatch):
-    app = _app(db)
-    flow = make_flow(db, checkpoint=app._checkpoint_or_report)
-    _ticks(app, 30)
-    _run_for(app, 15)
-    seen = []
-
-    def snapshot(d):
-        seen.append(_row(d, app._recorder.session_id))
-        raise OSError("stop here")  # the copy itself isn't under test
-
-    monkeypatch.setattr(bf._backup, "online_backup_to_tempfile", snapshot)
-    monkeypatch.setattr(bf.Clock, "schedule_once", lambda *a, **k: None)
-    flow._backup_to_uri_worker("content://unused")
-    assert seen == [(15, 30)]
+    assert len(session.recorder._buffer) == 1  # recorded after the snapshot, kept for the next checkpoint
+    assert session.row()[1] == 10
 
 
 def test_a_failed_checkpoint_keeps_the_ticks_for_the_next_one(db, monkeypatch):
-    app = _app(db)
-    _ticks(app, 20)
+    session = _Recording(db)
+    session.ticks(20)
     real = db.checkpoint_session
     monkeypatch.setattr(db, "checkpoint_session", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("locked")))
     with pytest.raises(RuntimeError):
-        app._recorder.checkpoint()
-    assert len(app._recorder._buffer) == 20
+        session.recorder.checkpoint()
+    assert len(session.recorder._buffer) == 20
     monkeypatch.setattr(db, "checkpoint_session", real)
-    _ticks(app, 5)
-    app._recorder.checkpoint()
-    assert _row(db, app._recorder.session_id)[1] == 25
-
-
-# ---- review round: a paused session, and a failing checkpoint never blocks the rest ----
+    session.ticks(5)
+    session.recorder.checkpoint()
+    assert session.row()[1] == 25
 
 
 def test_a_paused_session_keeps_its_length_up_to_the_pause():
@@ -221,44 +156,101 @@ def test_a_paused_session_keeps_its_length_up_to_the_pause():
     assert 299 <= sm.compute_statistics()["duration"] <= 301
 
 
-def test_leaving_the_app_while_paused_checkpoints_the_length_before_the_pause(db):
-    app = _app(db)
-    app._live_screen = None
-    app._save_user_settings = MagicMock()
-    app._leaving = False
-    _ticks(app, 600)
-    _run_for(app, 300)
-    app._session_manager.pause()
+# ---- the app: leaving it and a backup checkpoint the running session ----
+
+
+def _session_of(app, ticks: int, seconds: float) -> None:
+    """A mock session of `ticks` hand-run ticks that has been running for `seconds`."""
+    start_ticked_by_hand(app, ticks=ticks)
+    app._session_manager._start_time = time.time() - seconds
+
+
+def _running_row(app) -> tuple:
+    return _row(app._db, app._recorder.session_id)
+
+
+def test_leaving_the_app_mid_session_checkpoints_it(fresh_app):
+    app = fresh_app
+    _session_of(app, 50, 25)  # under a minute: nothing flushed yet
+    assert app._recorder.session_id is None
     app._flush_on_leave()
-    duration, rows = _row(db, app._recorder.session_id)
-    assert 299 <= duration <= 301 and rows == 600
+    assert _running_row(app) == (25, 50)
 
 
-def test_a_failing_checkpoint_on_leave_still_saves_the_settings(db, monkeypatch):
+def test_leaving_the_app_without_a_session_writes_nothing(fresh_app):
+    app = fresh_app
+    app._flush_on_leave()
+    assert app._db.get_all_sessions(app._current_user_id) == []
+
+
+def test_leaving_the_app_while_paused_checkpoints_the_length_before_the_pause(fresh_app):
+    app = fresh_app
+    _session_of(app, 60, 300)
+    app._on_pause()
+    app._flush_on_leave()
+    duration, rows = _running_row(app)
+    assert 299 <= duration <= 301 and rows == 60
+
+
+def _failing_score(_stats):
+    raise KeyError("graph")
+
+
+def test_a_failing_checkpoint_on_leave_still_saves_the_settings(fresh_app, monkeypatch):
     reported = []
     monkeypatch.setattr(am, "report_soft_error", lambda label, detail, **k: reported.append(label))
-    app = _app(db)
-    app._live_screen = None
-    app._save_user_settings = MagicMock()
-    app._leaving = False
-    monkeypatch.setattr(app, "_with_score", lambda stats: (_ for _ in ()).throw(KeyError("graph")))
+    app = fresh_app
+    _session_of(app, 4, 2)
+    app._settings_screen.threshold = 62  # changed, not yet written
+    monkeypatch.setattr(app, "_with_score", _failing_score)
     app._flush_on_leave()
-    app._save_user_settings.assert_called_once()
+    assert app._db.get_user_setting(app._current_user_id, "threshold") == "62"
     assert reported == ["session_checkpoint_failed"]
 
 
-def test_a_failing_checkpoint_does_not_stop_a_backup(db, monkeypatch):
+def _backup_inline(monkeypatch, *, after=lambda cb, *a, **k: None) -> None:
+    """From here the backup's worker runs in the call (as would any thread started meanwhile); what it queues for the
+    main thread goes to `after`."""
+    monkeypatch.setattr(bf.threading, "Thread", lambda target, **k: MagicMock(start=target))
+    monkeypatch.setattr(bf.Clock, "schedule_once", after)
+
+
+def test_a_backup_holds_the_running_session_as_of_the_backup(fresh_app, monkeypatch):
+    app = fresh_app
+    _session_of(app, 40, 20)
+    seen = []
+    monkeypatch.setattr(bf._backup, "make_backup", lambda d, path: seen.append(_running_row(app)))
+    _backup_inline(monkeypatch)
+    app._backup_flow._run_backup_async("/tmp/unused.db")
+    assert seen == [(20, 40)]
+
+
+def test_an_android_backup_holds_the_running_session_as_of_the_backup(fresh_app, monkeypatch):
+    app = fresh_app
+    _session_of(app, 30, 15)
+    seen = []
+
+    def snapshot(d):
+        seen.append(_running_row(app))
+        raise OSError("stop here")  # the copy itself isn't under test
+
+    monkeypatch.setattr(bf._backup, "online_backup_to_tempfile", snapshot)
+    monkeypatch.setattr(bf, "report_soft_error", lambda *a, **k: None)
+    _backup_inline(monkeypatch)
+    app._backup_flow._backup_to_uri_worker("content://unused")
+    assert seen == [(15, 30)]
+
+
+def test_a_failing_checkpoint_does_not_stop_a_backup(fresh_app, monkeypatch):
     reported, copied = [], []
     monkeypatch.setattr(am, "report_soft_error", lambda label, detail, **k: reported.append(label))
     monkeypatch.setattr(bf, "report_soft_error", lambda label, detail, **k: reported.append(label))
     monkeypatch.setattr(bf._backup, "make_backup", lambda d, path: copied.append(path))
-    monkeypatch.setattr(bf.threading, "Thread", lambda target, **k: MagicMock(start=target))
-    monkeypatch.setattr(bf.Clock, "schedule_once", lambda cb, *a, **k: cb(0))
-    app = _app(db)
-    flow = make_flow(db, checkpoint=app._checkpoint_or_report)
-    flow._report_backup_saved = MagicMock()
-    monkeypatch.setattr(app, "_with_score", lambda stats: (_ for _ in ()).throw(KeyError("graph")))
-    flow._run_backup_async("/tmp/unused.db")
+    app = fresh_app
+    _session_of(app, 4, 2)
+    _backup_inline(monkeypatch, after=lambda cb, *a, **k: cb(0))  # once the session's own threads are up
+    monkeypatch.setattr(app, "_with_score", _failing_score)
+    app._backup_flow._run_backup_async("/tmp/unused.db")
     assert copied == ["/tmp/unused.db"]  # the rest of the database is still backed up
     assert reported == ["session_checkpoint_failed"]
-    flow._report_backup_saved.assert_called_once()
+    assert popup_titles() == ["Backup saved"]

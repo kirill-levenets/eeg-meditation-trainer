@@ -11,8 +11,9 @@ import app.ui.power_exemption as pe
 from app.ui.power_exemption import PowerExemption, advice, maker_screen
 from app.ui.settings_screen import SettingsScreen
 from app.ui.theme import StyledButton
+from app.ui.widgets.user_picker import UserPickerForm
+from tests._app import frames, frames_until
 from tests._context import stub_context
-from tests._profiles import make_gate
 
 
 class _Db:
@@ -26,14 +27,18 @@ class _Db:
         self.settings[key] = value
 
 
-@pytest.fixture
-def android(monkeypatch):
-    """An Android phone whose battery state and maker the test sets."""
+def _android(monkeypatch):
     phone = types.SimpleNamespace(exempt=False, maker="huawei")
     monkeypatch.setattr(android_jni, "on_android", lambda: True)
     monkeypatch.setattr(android_jni, "ignores_battery_optimisation", lambda: phone.exempt)
     monkeypatch.setattr(android_jni, "manufacturer", lambda: phone.maker)
     return phone
+
+
+@pytest.fixture
+def android(monkeypatch):
+    """An Android phone whose battery state and maker the test sets."""
+    return _android(monkeypatch)
 
 
 @pytest.fixture
@@ -162,28 +167,50 @@ def test_settings_device_buttons_reach_the_app(android):
     assert sorted(calls) == ["battery", "maker"]
 
 
-def test_the_app_offers_it_at_start_or_once_the_first_run_picks_a_profile(monkeypatch):
+def _scheduled_by_on_start(app, monkeypatch) -> list:
+    """What the app's on_start queues, unrun; its process-wide parts (the render log, the startup errors) left out."""
     import app.ui.app_manager as am
-    app = am.EEGMeditationApp.__new__(am.EEGMeditationApp)
-    app._power = MagicMock()
-    monkeypatch.setattr(am, "flush_pre_app_errors", lambda: None)
-    monkeypatch.setattr(am.render_stats, "start", lambda: None)
     scheduled = []
-    monkeypatch.setattr(am.Clock, "schedule_once", lambda fn, _timeout=0: scheduled.append(fn))
-    gated = [True]
-    app._gate = MagicMock()
-    app._gate.active.side_effect = lambda: gated[0]
-    app.on_start()
-    assert scheduled == []  # the profile popup is up: not over it
-    for attr in ("_db", "_bottom_nav", "_profiles", "_sm", "_headset", "_program_settings"):
-        setattr(app, attr, MagicMock())
-    make_gate(app)._finish_first_run("test")
-    app._power.offer_once.assert_called_once()
-    gated[0] = False
-    app.on_start()
-    scheduled[-1](0)
-    assert app._power.offer_once.call_count == 2
-    assert app._power.refresh.call_count == 2  # the Device row at every start
+    with monkeypatch.context() as m:
+        m.setattr(am, "flush_pre_app_errors", lambda: None)
+        m.setattr(am.render_stats, "start", lambda: None)
+        m.setattr(am.Clock, "schedule_once", lambda fn, _timeout=0: scheduled.append(fn))
+        app.on_start()
+    return scheduled
+
+
+def test_a_first_run_offers_it_once_the_profile_is_picked(build_app, monkeypatch, popups):
+    app = build_app(lambda db: None)  # no profile yet: the gate's popup comes up
+    _android(monkeypatch)
+    assert _scheduled_by_on_start(app, monkeypatch) == [] and popups == []  # not over the profile popup
+    frames_until(app._gate.shown)
+    form = next(w for w in app._gate._gate_popup.walk() if isinstance(w, UserPickerForm))
+    form._name_input.text = "me"
+    form._on_create_pressed()
+    frames()
+    assert app._current_user_id is not None and [p.title for p in popups] == ["Locked-screen sessions"]
+
+
+def test_a_start_with_a_profile_offers_it_and_fills_the_device_row(fresh_app, monkeypatch, popups):
+    app = fresh_app
+    _android(monkeypatch)
+    scheduled = _scheduled_by_on_start(app, monkeypatch)
+    assert "battery optimisation is on" in app._settings_screen.device._power_label.text  # the row at every start
+    assert popups == [] and len(scheduled) == 1  # the alert a moment later, over the built screen
+    scheduled[0](0)
+    assert [p.title for p in popups] == ["Locked-screen sessions"]
+
+
+def test_every_return_to_the_app_refreshes_the_row(fresh_app, monkeypatch):
+    app = fresh_app
+    phone = _android(monkeypatch)
+    label = app._settings_screen.device._power_label
+    app.on_resume()
+    assert "battery optimisation is on" in label.text
+    phone.exempt = True  # changed in the phone's settings meanwhile
+    app.on_resume()
+    frames()
+    assert "battery optimisation is off" in label.text
 
 
 def test_the_rows_buttons_fit_their_row_at_the_largest_text_size(android):
@@ -253,19 +280,6 @@ def test_an_alert_that_fails_to_open_doesnt_take_the_app_down_and_comes_again(an
     power.offer_once()
     assert len(tries) == 2  # the next start tries again
 
-
-
-def test_every_return_to_the_app_refreshes_the_row(monkeypatch):
-    import app.ui.app_manager as am
-    app = am.EEGMeditationApp.__new__(am.EEGMeditationApp)
-    app._power = MagicMock()
-    app._bottom_nav = MagicMock()
-    app._current_user_id = 1
-    scheduled = []
-    monkeypatch.setattr(am.Clock, "schedule_once", lambda fn, _timeout=0: scheduled.append(fn))
-    app.on_resume()
-    app._power.refresh.assert_called_once()  # the user may have changed it in the phone's settings meanwhile
-    assert scheduled  # and after the session's own UI refresh was queued
 
 
 def test_without_the_activity_a_screen_says_it_couldnt_open(monkeypatch):

@@ -11,8 +11,9 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   the user's dialogs (`info`, `toast`, `confirm`), the profile's settings (`setting`, `change_setting`: a held value and its one change path, `save_settings`);
   and `SessionAccess` (whether a session runs or waits for the headset, its row, the refusal while it runs, its discard).
   A flow takes the context and then only what is its own (its screens, the objects it works with); the context's callables read the app when called, so they see the profile and the session as they are then.
-  Tests build it from an app built with `__new__` (`tests/_context.make_context(app)`) or stand-alone (`stub_context()`: no profile, no session, UI calls at once or mocks);
-  either takes any field, a `SessionAccess` field included, and a test helper takes them through `context_fields(deps)`.
+  A test of one flow builds the flow by its constructor on `tests/_context.stub_context()` (no profile, no session, UI calls at once or mocks);
+  it takes any field, a `SessionAccess` field included, and a test helper takes them through `context_fields(deps)`.
+  A test of the app uses the app's own context, on the built app.
 
 ## User gate and profiles
 
@@ -95,13 +96,23 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 ## Tests
 
-- Most app tests build the app with `__new__` and only the parts they need (`tests/_context.py` and a helper per flow).
-  `tests/test_app_build.py` runs the real constructor and `build()` on a temp DB, as `main.py` does:
-  a restored profile with hooks driven through to their flows and a profile switch, a DB with no last profile, where the gate blocks the app until one is made,
-  mock sessions on the real tick thread, each saved once, a line width slider position off by rounding, applied once,
-  and the device mode: a profile switch applies it with no write, the checkbox and a headset pick change it through the store, a change mid-session is refused;
-  it stubs only the BT scan and the crash handler's install (its hooks are process-wide) and restores the theme, text size, line colours, the Window's rotation and key bindings after;
-  it stops the app's tick thread, which a test that failed mid-session would leave running.
+- Every object under test is built by its real constructor: a flow on `stub_context()`, the app by its constructor and `build()` on a temp DB, as `main.py` does (`tests/_app.py`).
+  Two conftest fixtures hand the app out.
+  `fresh_app` is one app for the whole run (`SharedApp`): each test takes it on a new default profile, after the app's own paths have ended what the last test left
+  (a session discarded, a start cancelled, popups closed, the last profile deleted), and the same cleanup runs after the test.
+  `build_app(seed)` builds a private app on a DB the test seeds, for a test that needs the gate, its own stored profiles, or that restores or closes the app.
+  Both stub only the paired-device listing and the crash handler's install (its hooks are process-wide), and put back the theme, text size, line colours and the Window's rotation and key bindings.
+- One shared app, because a built app that is dropped is never fully freed:
+  Kivy 2.3.0's Python 3.12 wheel keeps a traceback for each `ReferenceError` its widgets' teardown catches, about 30,000 objects (3.5 MB) per app, and every later collection walks them.
+  A build per test took the suite from under 3 minutes to over 6; so the tests that use either fixture also run after all the others (`pytest_collection_modifyitems`),
+  where the app's process-wide state (the device mode in `APP.USE_MOCK_DEVICE`) and what the private builds leave behind reach no other test.
+- A session in those tests is the app's own, with the test in place of the tick thread and the headset (`tests/_app.py`):
+  `start_ticked_by_hand` starts a mock session without its tick thread and runs the ticks it is asked for;
+  `FedSession` feeds each tick the headset's sample and the engine's result; `start_connecting` leaves a Start in its BT wait on a reader that starts without Bluetooth;
+  `HeadsetSession` is a real-mode session whose link (connected, seconds since the last packet) the test sets.
+  `tests/test_real_constructors.py` fails on any `__new__(` call in a test.
+  A tick run with the main thread held shows what a locked phone does; `frames()` is the unlock.
+  `tests/test_app_build.py` still runs mock sessions on the real tick thread.
 - `tests/test_silent_failure_guardrail.py` is an AST guardrail run on every `pytest` (issue #29 invariant): it scans `app/` and fails on
   a **silent user-gate return** (`if not self._current_user_id: return/pass`, or through a local alias of it, with no user-feedback call)
   or a **discarded bool-returning DB write** (the result of a public `DatabaseManager` method annotated to return a bool, e.g. `add_saved_program`, ignored).

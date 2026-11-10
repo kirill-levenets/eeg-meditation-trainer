@@ -1,13 +1,11 @@
 """Pause must keep the prepared feedback players: Resume brings back the same below and reward sounds (#37)."""
 
-from unittest.mock import MagicMock
-
 import pytest
 
 import app.audio_feedback.noise as noise_mod
 from app.audio_feedback.noise import AudioEngine
 from app.session.manager import SessionState
-from app.ui.app_manager import EEGMeditationApp
+from tests._app import reload_with
 
 
 class _FakePlayer:
@@ -75,16 +73,14 @@ def test_stop_after_pause_still_tears_the_players_down(engine):
     assert all(p.unloaded for p in players)
 
 
-def test_the_pause_button_twice_brings_the_same_sounds_back(engine):
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._audio = engine
-    app._session_manager = MagicMock()
-    app._session_manager.state = SessionState.RUNNING
-    app._session_manager.pause.side_effect = lambda: setattr(app._session_manager, "state", SessionState.PAUSED)
-    app._session_manager.resume.side_effect = lambda: setattr(app._session_manager, "state", SessionState.RUNNING)
-    app._live_screen = MagicMock()
-    app._ticker = MagicMock()
+def test_the_pause_button_twice_brings_the_same_sounds_back(fresh_app, monkeypatch):
+    app = fresh_app
+    monkeypatch.setattr(noise_mod, "_make_noise_player", _FakePlayer)
+    reload_with(app, feedback_source="tone", reward_source="heartbeat")
+    app._on_start()
+    engine = app._audio
     players = dict(engine._feedback_players)
+    assert len(players) == 2
 
     app._on_pause()  # pause
     assert app._session_manager.state is SessionState.PAUSED
@@ -92,7 +88,7 @@ def test_the_pause_button_twice_brings_the_same_sounds_back(engine):
         p.played = False
     app._on_pause()  # resume
 
-    assert engine._feedback_players == players
+    assert app._session_manager.state is SessionState.RUNNING and engine._feedback_players == players
     assert (engine._active_feedback, engine._reward_feedback) == ("tone", "heartbeat")
     assert all(p.played for p in players.values())
 

@@ -5,14 +5,12 @@ from unittest.mock import MagicMock
 import pytest
 
 import app.ui.history_flow as history_flow
-from app.session.manager import SessionManager
-from app.ui.app_manager import EEGMeditationApp
+from app.metrics.formula_slots import FormulaSlots
+from app.ui.history_flow import HistoryFlow
 from app.ui.history_screen import HistoryScreen
 from app.ui.hooks import wire
-from tests._history_flow import make_history_flow
-from tests._profiles import make_profiles
-from tests._recorder import make_recorder
-from tests._shown_session import make_shown
+from tests._app import open_history, saved_session
+from tests._context import stub_context
 
 
 def _sessions(n: int) -> list[dict]:
@@ -169,20 +167,20 @@ def test_a_reload_for_another_profile_clears_the_day_filter():
     assert h._btn_show_all.parent is None
 
 
+def _history_flow(**ctx_fields) -> HistoryFlow:
+    """A HistoryFlow on its own: its database (the context's), History screen and overlay are stand-ins."""
+    return HistoryFlow(stub_context(**ctx_fields), MagicMock(), FormulaSlots(), MagicMock(), on_sessions_deleted=MagicMock())
+
+
 def test_history_keeps_the_day_filter_only_for_the_same_profile():
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._ticker = MagicMock(running=False)  # no session's tick running
-    app._db = MagicMock()
-    app._history_screen = MagicMock()
-    app._session_manager = SessionManager()  # no session running
-    flow = make_history_flow(app)
+    active = [None]
+    flow = _history_flow(user_id=lambda: active[0])
     keeps = []
     for uid in (1, 1, 2, 2):
-        app._current_user_id = uid
+        active[0] = uid
         flow.refresh(force=True)
-        keeps.append(app._history_screen.load_sessions.call_args.kwargs["keep_filter"])
+        keeps.append(flow._history_screen.load_sessions.call_args.kwargs["keep_filter"])
     assert keeps == [False, True, False, True]
-
 
 
 def test_renaming_updates_the_row_and_the_model_in_place():
@@ -199,41 +197,23 @@ def test_renaming_updates_the_row_and_the_model_in_place():
 
 # --- the app: one delete path, no rebuild of History or the hidden diary list -------------------------------
 
-def _app() -> EEGMeditationApp:
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._ticker = MagicMock(running=False)  # no session's tick running
-    app._db = MagicMock()
-    app._history_screen = MagicMock()
-    app._session_manager = SessionManager()  # idle: nothing running to protect
-    app._live_screen = MagicMock(summary_session_id=None)
-    app._recorder = make_recorder(app)
-    app._audio = MagicMock()
-    app._on_main = lambda fn: fn()
-    app._loading_overlay = MagicMock()
-    app._history = make_history_flow(app)
-    app._history.refresh = MagicMock()
-    app._shown = make_shown(app)
-    return app
-
-
 def test_deleting_sessions_removes_their_rows_and_rebuilds_nothing(monkeypatch):
     monkeypatch.setattr(history_flow.threading, "Thread", lambda target, **k: MagicMock(start=target))  # the worker, inline
-    app = _app()
-    app._history.delete_sessions([7, 9])
-    app._db.delete_sessions.assert_called_once_with([7, 9])  # one transaction
-    app._history_screen.remove_sessions.assert_called_once_with([7, 9])
-    app._history.refresh.assert_not_called()
+    flow = _history_flow()
+    flow.delete_sessions([7, 9])
+    flow._ctx.db.delete_sessions.assert_called_once_with([7, 9])  # one transaction
+    flow._history_screen.remove_sessions.assert_called_once_with([7, 9])
+    flow._history_screen.load_sessions.assert_not_called()  # no reload
     # No spinner: only the delayed overlay, which paints if the delete runs long, and is gone once it ends.
-    assert [c.kwargs.get("delay", 0) > 0 for c in app._loading_overlay.show.call_args_list] == [True]
-    app._loading_overlay.hide.assert_called_once()
+    assert [c.kwargs.get("delay", 0) > 0 for c in flow._loading.show.call_args_list] == [True]
+    flow._loading.hide.assert_called_once()
 
 
 def test_renaming_a_session_rebuilds_nothing():
-    app = _app()
-    app._history.on_rename_session(7, "Evening sit")
-    app._db.rename_session.assert_called_once_with(7, "Evening sit")
-    app._history.refresh.assert_not_called()
-
+    flow = _history_flow()
+    flow.on_rename_session(7, "Evening sit")
+    flow._ctx.db.rename_session.assert_called_once_with(7, "Evening sit")
+    flow._history_screen.load_sessions.assert_not_called()
 
 
 # --- review round: the model always matches the list on screen; reloads keep the user's view ------------------
@@ -281,24 +261,25 @@ def test_a_reload_keeps_the_active_day_filter():
     assert h._date_label.text.startswith("Sun 27 Sep")  # as the totals name the day
 
 
-def test_picking_a_profile_marks_history_for_a_rebuild():
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._db = MagicMock()
-    app._load_user_settings = MagicMock()
-    app._history = MagicMock()
-    app._shown = MagicMock(owner=None)  # no session shown
-    app._activate_user(2)
-    app._history.mark_dirty.assert_called_once()
+def _another_profile(app) -> int:
+    other = app._db.create_user("other")
+    app._db.set_user_setting(other, "use_mock", "True")
+    app._profiles.refresh()
+    return other
 
 
-def test_deleting_another_profile_marks_history_for_a_rebuild():
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._db = MagicMock()
-    app._db.get_all_users.return_value = [{"id": 1}]
-    app._current_user_id = 1
-    app._settings_screen = MagicMock()
-    app._history = MagicMock()
-    app._shown = MagicMock(owner=None)
-    make_profiles(app).on_delete(2)
-    app._db.delete_user.assert_called_once_with(2)
-    app._history.mark_dirty.assert_called_once()
+def test_picking_a_profile_marks_history_for_a_rebuild(fresh_app):
+    app = fresh_app
+    other = _another_profile(app)
+    open_history(app, saved_session(app))
+    assert app._history._history_dirty is False
+    app._activate_user(other)
+    assert app._history._history_dirty is True
+
+
+def test_deleting_another_profile_marks_history_for_a_rebuild(fresh_app):
+    app = fresh_app
+    other = _another_profile(app)
+    open_history(app, saved_session(app))
+    app._profiles.on_delete(other)
+    assert app._db.get_user(other) is None and app._history._history_dirty is True

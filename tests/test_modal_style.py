@@ -301,23 +301,22 @@ def test_the_diagnostic_dialog_is_the_themed_panel_with_readable_text(theme):
         _pump()
 
 
-def _toast_app(monkeypatch):
-    """An app whose native toast is recorded in `app.native`."""
+def _toast_app(app, monkeypatch):
+    """The app, as if on Android, whose native toast is recorded in `app.native`."""
     import app.ui.app_manager as am
-    app = am.EEGMeditationApp.__new__(am.EEGMeditationApp)
     app.native = MagicMock()
     monkeypatch.setattr(am, "android_toast", app.native)
+    monkeypatch.setattr(android_jni, "on_android", lambda: True)
     return app
 
 
 @pytest.mark.parametrize("theme", ["Light Cream", "Dark Blue"])
-def test_a_toast_is_the_themed_panel_above_any_popup(theme, monkeypatch):
-    monkeypatch.setattr(android_jni, "on_android", lambda: True)  # also on Android, while in the app
+def test_a_toast_is_the_themed_panel_above_any_popup(theme, fresh_app, monkeypatch):
+    app = _toast_app(fresh_app, monkeypatch)  # also on Android, while in the app
     C.set_theme(theme)
     popup = _popups()[0]
     popup.open()
     _pump()
-    app = _toast_app(monkeypatch)
     try:
         app._toast("Notes saved")
         toast = Window.children[0]  # the topmost window child: drawn over the open popup
@@ -331,11 +330,10 @@ def test_a_toast_is_the_themed_panel_above_any_popup(theme, monkeypatch):
         _pump()
 
 
-def test_a_toast_raised_while_the_app_is_leaving_is_the_native_one(monkeypatch):
-    monkeypatch.setattr(android_jni, "on_android", lambda: True)
-    app = _toast_app(monkeypatch)
+def test_a_toast_raised_while_the_app_is_leaving_is_the_native_one(fresh_app, monkeypatch):
+    app = _toast_app(fresh_app, monkeypatch)
     before = list(Window.children)
-    app._leaving = True
+    monkeypatch.setattr(app, "_leaving", True)
     app._toast("Notes saved")
     app.native.assert_called_once_with("Notes saved")
     assert list(Window.children) == before

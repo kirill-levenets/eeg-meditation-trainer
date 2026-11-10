@@ -1,18 +1,14 @@
-"""A FormulaSettings wired to an app built with __new__, as build() wires it; any dependency, or a context field, can
-be given instead."""
+"""A FormulaSettings with mock dependencies for the formula tests; any of them, or a context field, can be given."""
 from unittest.mock import MagicMock
 
+from app.metrics.formula_slots import FormulaSlots
 from app.ui.formula_settings import FormulaSettings
-from tests._context import context_fields, make_context
+from tests._context import context_fields, stub_context
 
 
-def make_formula_settings(app, **deps) -> FormulaSettings:
-    """The app's db, Settings formula section, live graph and formula slots (mocks for the ones it lacks), and its user
-    and scoring lock, read when they are needed."""
-    live_screen = getattr(app, "_live_screen", None)
-    settings_screen = getattr(app, "_settings_screen", None)
-    ctx = make_context(app, **context_fields(deps))
-    defaults = {"scoring_locked": lambda key, doing: app._audio_metric.formula_scoring_locked(key, doing)}
-    return FormulaSettings(ctx, MagicMock() if settings_screen is None else settings_screen.formulas,
-                           MagicMock() if live_screen is None else live_screen.graph, app._formulas,
-                           **{**defaults, **deps})
+def make_formula_settings(db=None, uid=None, *, formulas=None, **deps) -> FormulaSettings:
+    """`uid` is the active profile, the one require_user lets through; its formula slots are empty unless given, and
+    no slot is locked by a session's scoring."""
+    ctx = stub_context(db=MagicMock() if db is None else db, user_id=lambda: uid, **context_fields(deps))
+    return FormulaSettings(ctx, MagicMock(), MagicMock(), formulas or FormulaSlots(),
+                           **{"scoring_locked": lambda _key, _doing: False, **deps})

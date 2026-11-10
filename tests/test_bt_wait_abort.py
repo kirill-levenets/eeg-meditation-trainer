@@ -6,16 +6,9 @@ from unittest.mock import MagicMock
 import pytest
 
 import app.ui.app_manager as am
-from app.session.manager import SessionManager
 from app.session.session_run import Phase, SessionRun
-from app.ui.app_manager import EEGMeditationApp
 from app.ui.bt_wait import BtWait
-from tests._bt_wait import make_bt_wait
-from tests._headset import make_headset
-from tests._program_run import make_run
-from tests._program_settings import make_programs
-from tests._session_run import run_in
-from tests._shown_session import make_shown
+from tests._app import HEADSET, frames, popups, start_connecting
 
 
 @pytest.fixture(autouse=True)
@@ -24,115 +17,105 @@ def _reports(monkeypatch):
     monkeypatch.setattr(am, "report_soft_error", MagicMock())
 
 
-def _make_waiting_app() -> tuple[EEGMeditationApp, list]:
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    events: list = []
-    run_in(app, Phase.CONNECTING).signal_start = 123.0
-    app._ticker = MagicMock(running=True)
+class _Waiting:
+    """The app in a start's BT wait, its tick thread stopped so the test runs the wait's ticks; `events` records the
+    order the wait's teardown stops the tick and the stream, `releases` each wake-lock release."""
 
-    def stop_tick():
-        events.append("tick_stopped")
-        app._ticker.running = False
+    def __init__(self, app, monkeypatch) -> None:
+        self.app, self.events, self.releases = app, [], []
+        start_connecting(app, monkeypatch)
+        app._ticker.stop()
+        tick_stop, stream_stop, release = app._ticker.stop, app._real_stream.stop, app._keep_awake.release
 
-    app._ticker.stop.side_effect = stop_tick
-    app._real_stream = MagicMock()
-    app._real_stream.stop.side_effect = lambda: events.append(
-        ("stream_stopped", app._connecting(), app._ticker.running)
-    )
-    app._eeg_stream = app._real_stream
-    app._keep_awake = MagicMock()
-    app._live_screen = MagicMock()
-    app._settings_screen = MagicMock()
-    app._timer_state = MagicMock()
-    app._session_manager = SessionManager()  # idle: the session starts only when data arrives
-    app._program_run = make_run(app)
-    app._program_settings = make_programs()  # idle: an ending re-derives its series
-    app._headset = make_headset(app)
-    app._bt_wait = make_bt_wait(app)
-    app._shown = make_shown(app)
-    return app, events
+        def stop_tick():
+            tick_stop()
+            self.events.append("tick_stopped")
 
+        def stop_stream():
+            self.events.append(("stream_stopped", app._connecting(), app._ticker.running))
+            stream_stop()
 
-def _assert_unwatched_stream_stop(app: EEGMeditationApp, events: list) -> None:
-    assert events == ["tick_stopped", ("stream_stopped", False, False)]
-    assert not app._connecting()
-    # Released by the abort itself (on the tick thread for a wait exit), and again by a cancel's shared teardown.
-    app._keep_awake.release.assert_called()
+        def release_lock():
+            self.releases.append(True)
+            release()
+
+        monkeypatch.setattr(app._ticker, "stop", stop_tick)
+        monkeypatch.setattr(app._real_stream, "stop", stop_stream)
+        monkeypatch.setattr(app._keep_awake, "release", release_lock)
+
+    def assert_unwatched_stream_stop(self) -> None:
+        assert self.events == ["tick_stopped", ("stream_stopped", False, False)]
+        assert not self.app._connecting()
+        # Released by the abort itself (on the tick thread for a wait exit), and again by a cancel's shared teardown.
+        assert self.releases
 
 
-def test_connect_cancel_stops_watcher_before_stream():
-    app, events = _make_waiting_app()
-    app._on_connect_cancel()
-    _assert_unwatched_stream_stop(app, events)
-    assert app._run is None  # the start's run ended with it
+def test_connect_cancel_stops_watcher_before_stream(fresh_app, monkeypatch):
+    waiting = _Waiting(fresh_app, monkeypatch)
+    fresh_app._on_connect_cancel()
+    waiting.assert_unwatched_stream_stop()
+    assert fresh_app._run is None  # the start's run ended with it
 
 
-def test_stop_during_bt_wait_stops_watcher_before_stream():
-    app, events = _make_waiting_app()
-    app._on_stop()
-    _assert_unwatched_stream_stop(app, events)
-    assert app._run is None
-    app._live_screen.hide_overlay.assert_called_once()
+def test_stop_during_bt_wait_stops_watcher_before_stream(fresh_app, monkeypatch):
+    waiting = _Waiting(fresh_app, monkeypatch)
+    assert fresh_app._live_screen._overlay.opacity == 1
+    fresh_app._on_stop()
+    waiting.assert_unwatched_stream_stop()
+    assert fresh_app._run is None and fresh_app._live_screen._overlay.opacity == 0
+    assert popups() == []  # no "Stop session?": nothing started
 
 
-def test_app_init_defines_bt_wait_state(monkeypatch):
+def test_a_cancel_before_any_start_is_harmless(build_app):
     """Cancel before any session (e.g. during the device scan) read an attribute only Start created."""
-    monkeypatch.setattr(am, "DatabaseManager", MagicMock())
-    monkeypatch.setattr(am, "AudioEngine", MagicMock())
-    app = am.EEGMeditationApp()
+    app = build_app()
     assert app._run is None and not app._connecting()
-
-    app._live_screen = MagicMock()  # built by build(), which runs before any UI action
-    app._settings_screen = MagicMock()
-    app._timer_state = MagicMock()
-    app._program_run = make_run(app)
-    app._program_settings = make_programs()  # idle: an ending re-derives its series
     app._on_connect_cancel()  # must not raise
+    assert app._run is None and not app._live_screen._btn_start.disabled
 
 
-def test_failed_connect_exit_releases_wake_lock_and_service():
-    app, events = _make_waiting_app()
-    app._run.connect_start = time.time()
-    app._real_stream.is_connected = False
-    app._real_stream._running = False
-    app._real_stream._device_name = "MindWave"
+def test_failed_connect_exit_releases_wake_lock_and_service(fresh_app, monkeypatch):
+    app = fresh_app
+    waiting = _Waiting(app, monkeypatch)
+    run = app._run
+    app._real_stream._running = False  # the reader gave up
     app._real_stream._last_connect_error = "Headset is asleep or off."
-    app._on_main = MagicMock()
 
-    app._follow_bt_wait(app._run)
+    app._follow_bt_wait(run)  # the wait's tick that sees it
 
-    _assert_unwatched_stream_stop(app, events)
-    assert app._run.phase is Phase.ENDED  # its teardown is queued for the main thread
+    waiting.assert_unwatched_stream_stop()
+    assert run.phase is Phase.ENDED and app._run is run  # its teardown is queued for the main thread
     assert am.report_soft_error.call_args.args[0] == "bt_connect_failed"
+    frames()
+    assert app._run is None and "Headset is asleep or off." in app._live_screen._overlay_status.text
 
 
-def test_refused_start_undoes_setup_without_entering_the_wait():
-    app, _ = _make_waiting_app()
-    app._run.phase = Phase.STARTING  # Start pressed, the wait not begun
-    app._real_stream.start.return_value = False
-    app._real_stream._device_name = "MindWave"
+def test_refused_start_undoes_setup_without_entering_the_wait(fresh_app, monkeypatch):
+    app = fresh_app
+    releases = []
+    monkeypatch.setattr(app._keep_awake, "release", lambda: releases.append(True))
+    monkeypatch.setattr(app._real_stream, "start", lambda: False)  # the reader refuses: its last one is still alive
     app._real_stream._last_connect_error = "Previous connection is still closing."
+    app._change_setting("use_mock", False)
+    app._real_stream.set_device(*HEADSET)
 
-    assert app._begin_bt_wait(app._run) is False
+    app._on_start()
 
-    assert not app._connecting()
-    app._keep_awake.release.assert_called_once()
-    shown = app._live_screen.show_overlay_retry.call_args.args[0]
-    assert "still closing" in shown
+    assert not app._connecting() and app._run is None and not app._ticker.running
+    assert releases == [True]
+    assert "still closing" in app._live_screen._overlay_status.text
+    assert app._live_screen._overlay_retry_btn.parent is not None
     am.report_soft_error.assert_not_called()  # its 60 s cooldown would hide the next real failure
 
 
-def test_started_stream_enters_the_wait():
-    app, _ = _make_waiting_app()
-    app._run.phase = Phase.STARTING  # Start pressed, the wait not begun
-    app._real_stream.start.return_value = True
-    app._real_stream._device_name = "MindWave"
-
-    assert app._begin_bt_wait(app._run) is True
-
-    assert app._connecting()
-    app._live_screen.show_overlay.assert_called_once()
-    app._keep_awake.release.assert_not_called()
+def test_started_stream_enters_the_wait(fresh_app, monkeypatch):
+    app = fresh_app
+    releases = []
+    monkeypatch.setattr(app._keep_awake, "release", lambda: releases.append(True))
+    start_connecting(app, monkeypatch)
+    assert app._connecting() and app._ticker.running
+    assert app._live_screen._overlay.opacity == 1 and app._live_screen._overlay_status.text.startswith("Connecting to")
+    assert releases == []
 
 
 def test_a_failed_connect_is_reported_with_its_headset_and_hint(monkeypatch):

@@ -6,10 +6,12 @@ import types
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from app import android_jni
+from app.config import APP
 from app.keep_awake import KeepAwake
-from app.session.manager import SessionState
-from app.ui.app_manager import EEGMeditationApp
+from app.storage.database import DatabaseManager
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVICE = "org.eeg.eegmeditation.SessionForegroundService"
@@ -50,16 +52,18 @@ def test_the_service_doesnt_stop_when_the_app_is_swiped_away():
     assert "onTaskRemoved" not in java
 
 
-def test_closing_the_app_stops_the_service_with_or_without_a_session():
+@pytest.mark.parametrize("in_session", [False, True])
+def test_closing_the_app_stops_the_service_with_or_without_a_session(build_app, monkeypatch, in_session):
     # A start still waiting for the headset is no running session, so _stop_and_save never runs for it.
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._restoring = False
-    app._flush_on_leave = MagicMock()
-    app._session_manager = MagicMock(state=SessionState.IDLE)
-    app._stop_and_save = MagicMock()
-    app._audio = MagicMock()
-    app._db = MagicMock()
-    app._keep_awake = MagicMock()
+    app = build_app()
+    stopped = []
+    monkeypatch.setattr(app._keep_awake, "stop_service", lambda: stopped.append(True))
+    if in_session:
+        app._on_start()
     app.on_stop()
-    app._stop_and_save.assert_not_called()
-    app._keep_awake.stop_service.assert_called_once_with()
+    assert stopped == [True] * (2 if in_session else 1)  # a session's ending stops it too, before the app's own
+    reopened = DatabaseManager(db_path=APP.DB_PATH)  # the app closed its own
+    try:
+        assert reopened.count_sessions(app._current_user_id) == int(in_session)  # a running session is saved on the way
+    finally:
+        reopened.close()

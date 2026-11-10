@@ -250,7 +250,9 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 · the Android check `android_jni.on_android()`, the app's Activity `android_jni.activity()`
 · legends `LegendBar`
 · file copy `copy_file_atomic`
-· temp removal `discard_file`.
+· temp removal `discard_file`
+· in tests, the app `fresh_app` (the run's one built app, on a new profile) or `build_app(seed)` (a private one), a flow alone on `stub_context()`, a session by `tests/_app.py`'s helpers:
+  never `__new__` → [app-platform](docs/architecture/app-platform.md#tests).
 
 ## Documentation Rules
 

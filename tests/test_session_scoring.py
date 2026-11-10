@@ -3,21 +3,14 @@
 import os
 import sqlite3
 import tempfile
-from unittest.mock import MagicMock
 
 import pytest
 
-from app.metrics.custom_formula import CustomFormulaEvaluator
-from app.metrics.formula_slots import FormulaSlots
+from app.config import APP
 from app.session.manager import NO_SCORE, SessionManager, SessionState
+from app.session.scoring import goal_stats
 from app.storage.database import DatabaseManager
-from app.ui.app_manager import EEGMeditationApp
-from tests._program_run import make_run
-from tests._program_settings import make_programs
-from tests._recorder import make_recorder
-from tests._session_run import run_in
-from tests._settings import audio_store
-from tests.test_resume_mirror import _drive_tick, _make_tick_app, _metrics, _raw_sample
+from tests._app import FedSession, calls_of, frames, program_mode, reload_with
 
 
 def _ticks(**series):
@@ -28,84 +21,81 @@ def _ticks(**series):
 
 # Shamatha and meditation disagree on every tick, so the scored metric decides the stats.
 SHAMATHA_HIGH = _ticks(shamatha_score=[80, 85, 90, 20, 95], meditation_score=[10, 10, 10, 90, 10])
+CALM_RATIO = [{"name": "Calm ratio", "formula": "alpha1"}]  # reads 70 on the sample the sessions below are fed
 
 
-def _app(metric_key: str = "shamatha_score", formulas=()):
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._program_run = make_run()
-    app._program_settings = make_programs()
-    app._formulas = FormulaSlots()
-    if formulas:
-        app._formulas.evaluators = list(formulas)
-    audio_store(app, metric_key)  # after the program run and the slots it reads, as build() makes them
-    app._live_screen = MagicMock()
-    app._live_screen.graph.series_name.side_effect = lambda k: {"shamatha_score": "Shamatha",
-                                                                "meditation_score": "Meditation",
-                                                                "custom_formula": "Calm ratio"}.get(k, k)
-    app._is_paused = False
-    run_in(app)  # a session's run, nothing marked yet
-    sm = SessionManager()
-    sm.start(threshold=50)
-    sm._state = SessionState.RUNNING
-    app._session_manager = sm
-    return app
+def _session(app, monkeypatch, metric: str = "shamatha_score", formulas=()) -> FedSession:
+    """A simple session against a threshold of 50, the sound driven by `metric`; its ticks are the test's."""
+    reload_with(app, {"active_formulas": list(formulas)}, threshold="50", audio_metric=metric)
+    fed = FedSession(app, monkeypatch)
+    fed.raw = {**fed.raw, "alpha1": 70.0}
+    return fed
 
 
-def _run(app, ticks):
+def _run(fed: FedSession, ticks) -> dict:
+    """Run the ticks, each computing to its metrics; the session's stats so far."""
     for m in ticks:
-        app._score_on_drive_key()
-        app._session_manager.add_metric(m)
-    return app._session_manager.compute_statistics()
+        fed.tick(metrics=dict(m))
+    return fed.app._session_manager.compute_statistics()
+
+
+def _saved(app) -> dict:
+    """End the session; its stored row."""
+    app._stop_and_save()
+    frames()
+    return app._db.get_all_sessions(app._current_user_id)[0]
 
 
 # --- the goal follows the feedback metric in a simple session ---------------------------------------------------
 
-def test_the_default_feedback_metric_scores_the_session_on_shamatha():
-    stats = _run(_app("shamatha_score"), SHAMATHA_HIGH)
+def test_the_default_feedback_metric_scores_the_session_on_shamatha(fresh_app, monkeypatch):
+    stats = _run(_session(fresh_app, monkeypatch), SHAMATHA_HIGH)
     assert stats["score_metric_key"] == "shamatha_score"
     assert stats["time_above_threshold"] == 2  # 4 ticks >= 50 on shamatha (0.5 s each); meditation has 1
     assert stats["avg_score"] == pytest.approx((80 + 85 + 90 + 20 + 95) / 5)
 
 
-def test_a_valid_custom_formula_scores_the_session_and_an_invalid_one_falls_back_to_shamatha():
-    valid = CustomFormulaEvaluator()
-    valid.set_formula("100 * s_alpha1")
-    assert valid.is_valid
-    app = _app("custom_formula", formulas=[valid, CustomFormulaEvaluator(), CustomFormulaEvaluator()])
-    stats = _run(app, [{**m, "custom_formula": 70.0} for m in SHAMATHA_HIGH])
+def test_a_valid_custom_formula_scores_the_session(fresh_app, monkeypatch):
+    stats = _run(_session(fresh_app, monkeypatch, "custom_formula", CALM_RATIO), SHAMATHA_HIGH)
     assert stats["score_metric_key"] == "custom_formula" and stats["time_above_threshold"] == 2  # 5 ticks: 2.5 s
 
-    invalid = CustomFormulaEvaluator()  # no formula: not valid
-    stats = _run(_app("custom_formula", formulas=[invalid, CustomFormulaEvaluator(), CustomFormulaEvaluator()]),
-                 SHAMATHA_HIGH)
+
+def test_a_formula_slot_that_cant_run_falls_back_to_shamatha(fresh_app, monkeypatch):
+    stats = _run(_session(fresh_app, monkeypatch, "custom_formula"), SHAMATHA_HIGH)  # the slot is empty
     assert stats["score_metric_key"] == "shamatha_score"
 
 
-def test_changing_the_feedback_metric_mid_session_moves_the_scoring():
-    app = _app("shamatha_score")
-    _run(app, SHAMATHA_HIGH[:3])  # 3 ticks above on shamatha
-    app._settings_store.change("audio_metric", "meditation_score")
-    stats = _run(app, SHAMATHA_HIGH[3:])  # meditation: tick 4 above (90), tick 5 not
+def test_changing_the_feedback_metric_mid_session_moves_the_scoring(fresh_app, monkeypatch):
+    fed = _session(fresh_app, monkeypatch)
+    _run(fed, SHAMATHA_HIGH[:3])  # 3 ticks above on shamatha
+    fresh_app._settings_store.change("audio_metric", "meditation_score")
+    stats = _run(fed, SHAMATHA_HIGH[3:])  # meditation: tick 4 above (90), tick 5 not
     assert stats["score_metric_key"] == "meditation_score"
-    assert app._session_manager._time_above_threshold == 2.0  # 3 + 1 ticks
+    assert fresh_app._session_manager._time_above_threshold == 2.0  # 3 + 1 ticks
 
 
-def test_the_legend_marks_the_scored_series_once_per_change():
-    app = _app("shamatha_score")
-    marks = [app._scored_mark(app._run, app._score_on_drive_key()) for _ in range(3)]
+def test_the_legend_marks_the_scored_series_once_per_change(fresh_app, monkeypatch):
+    fed = _session(fresh_app, monkeypatch)
+    marks = calls_of(monkeypatch, fresh_app._live_screen, "set_training_series")
+    _run(fed, SHAMATHA_HIGH[:3])
+    fresh_app._settings_store.change("audio_metric", "meditation_score")
+    _run(fed, SHAMATHA_HIGH[3:4])
+    assert marks == [("shamatha_score",), ("meditation_score",)]
+
+
+def test_a_change_during_a_screen_lock_is_marked_by_the_first_tick_after_it(fresh_app, monkeypatch):
+    app = fresh_app
+    fed = _session(app, monkeypatch)
+    marks = calls_of(monkeypatch, app._live_screen, "set_training_series")
+    _run(fed, SHAMATHA_HIGH[:1])
     app._settings_store.change("audio_metric", "meditation_score")
-    marks.append(app._scored_mark(app._run, app._score_on_drive_key()))
-    assert marks == ["shamatha_score", None, None, "meditation_score"]
-
-
-def test_a_change_during_a_screen_lock_is_marked_by_the_first_tick_after_it():
-    app = _app("shamatha_score")
-    app._scored_mark(app._run, app._score_on_drive_key())
-    app._settings_store.change("audio_metric", "meditation_score")
-    app._is_paused = True
-    assert app._scored_mark(app._run, app._score_on_drive_key()) is None  # no UI dispatch while locked
-    app._is_paused = False
-    assert app._scored_mark(app._run, app._score_on_drive_key()) == "meditation_score"
+    app.on_pause()
+    _run(fed, SHAMATHA_HIGH[1:2])
+    assert marks == [("shamatha_score",)]  # no UI dispatch while locked
+    app.on_resume()
+    frames()
+    _run(fed, SHAMATHA_HIGH[2:3])
+    assert marks == [("shamatha_score",), ("meditation_score",)]
 
 
 def test_a_program_session_keeps_its_segment_goal():
@@ -167,34 +157,33 @@ def test_the_score_stays_after_the_stop_and_a_new_session_starts_with_none():
 
 # --- the record: key, display name and average, on every save path ---------------------------------------------
 
-def test_the_saved_stats_carry_the_scored_metric_and_its_name():
-    app = _app("custom_formula", formulas=[_valid(), CustomFormulaEvaluator(), CustomFormulaEvaluator()])
-    stats = app._with_score(_run(app, [{**m, "custom_formula": 70.0} for m in SHAMATHA_HIGH]))
-    assert (stats["score_metric_key"], stats["score_metric_name"]) == ("custom_formula", "Calm ratio")
-    assert stats["avg_score"] == pytest.approx(70.0)
+def test_the_saved_stats_carry_the_scored_metric_and_its_name(fresh_app, monkeypatch):
+    fed = _session(fresh_app, monkeypatch, "custom_formula", CALM_RATIO)
+    _run(fed, SHAMATHA_HIGH)
+    row = _saved(fresh_app)
+    assert (row["score_metric_key"], row["score_metric_name"]) == ("custom_formula", "Calm ratio")
+    assert row["avg_score"] == pytest.approx(70.0)
+
+
+def _program_session(app, monkeypatch, name: str) -> FedSession:
+    reload_with(app, threshold="50")
+    program_mode(app, [{"minutes": 5, "target": 50, "formula": "shamatha_score"}])
+    app._program_settings.name = name
+    return FedSession(app, monkeypatch)
 
 
 @pytest.mark.parametrize("name,recorded", [("Evening program", "Evening program"), ("", "Program")])
-def test_a_program_session_records_program_its_name_and_no_average(name, recorded):
-    app = _app()
-    app._program_run.program, app._program_run.name = MagicMock(segments=[{"duration": 60}]), name
-    stats = app._with_score(_run(app, SHAMATHA_HIGH))
-    assert (stats["score_metric_key"], stats["score_metric_name"], stats["avg_score"]) == ("program", recorded, None)
+def test_a_program_session_records_program_its_name_and_no_average(fresh_app, monkeypatch, name, recorded):
+    _run(_program_session(fresh_app, monkeypatch, name), SHAMATHA_HIGH)
+    row = _saved(fresh_app)
+    assert (row["score_metric_key"], row["score_metric_name"], row["avg_score"]) == ("program", recorded, None)
 
 
-def test_a_program_session_keeps_the_name_of_the_program_it_ran():
+def test_a_program_session_keeps_the_name_of_the_program_it_ran(fresh_app, monkeypatch):
     # Settings loads or saves another program during the session: the editor's name changes, not the run's.
-    app = _app()
-    app._program_run.program, app._program_run.name = MagicMock(segments=[{"duration": 60}]), "Evening program"
-    app._program_settings.name = "Morning program"
-    stats = app._with_score(_run(app, SHAMATHA_HIGH))
-    assert stats["score_metric_name"] == "Evening program"
-
-
-def _valid():
-    ev = CustomFormulaEvaluator()
-    ev.set_formula("100 * s_alpha1")
-    return ev
+    _run(_program_session(fresh_app, monkeypatch, "Evening program"), SHAMATHA_HIGH)
+    fresh_app._program_settings.name = "Morning program"
+    assert _saved(fresh_app)["score_metric_name"] == "Evening program"
 
 
 @pytest.fixture
@@ -252,91 +241,79 @@ def test_recorded_score_of_new_legacy_and_program_rows():
                            "avg_score": None}) == ("program", "Evening ladder", None)
 
 
-def test_recomputing_from_the_stored_ticks_reproduces_the_stored_stats():
-    from app.session.scoring import goal_stats
-    app = _app("shamatha_score")
+def test_recomputing_from_the_stored_ticks_reproduces_the_stored_stats(fresh_app, monkeypatch):
     ticks = _ticks(shamatha_score=[60, 70, 10, 55, 56, 57, 20, 99], meditation_score=[0] * 8)
-    stats = _run(app, ticks)
+    stats = _run(_session(fresh_app, monkeypatch), ticks)
     time_above, streak = goal_stats([m[stats["score_metric_key"]] for m in ticks], stats["threshold_used"])
     assert (int(time_above), int(streak)) == (stats["time_above_threshold"], stats["longest_streak"])
 
 
+def test_recomputing_from_ticks_stored_in_the_db_reproduces_the_stored_stats(fresh_app, monkeypatch):
+    app = fresh_app
+    ticks = _ticks(shamatha_score=[60, 70, 10, 55, 56, 57, 20, 99, 51, 52], meditation_score=[90] * 10)
+    _run(_session(app, monkeypatch), ticks)
+    row = _saved(app)
+    stored = [m[row["score_metric_key"]] for m in app._db.get_session_metrics(row["id"])]
+    time_above, streak = goal_stats(stored, row["threshold_used"])
+    assert (int(time_above), int(streak)) == (row["time_above_threshold"], row["longest_streak"])
+    assert row["score_metric_key"] == "shamatha_score"  # meditation (all 90) would give a different answer
+
+
 # --- the real tick ---------------------------------------------------------------------------------------------
 
-def test_a_simple_session_tick_scores_on_the_feedback_metric_and_marks_it():
-    app = _make_tick_app()
-    app._program_settings.mode = "simple"
-    app._settings_store.change("audio_metric", "meditation_score")
-    _drive_tick(app, _raw_sample(), _metrics())
-    app._session_manager.set_active_goal.assert_called_with("meditation_score")
-    ui_update = app._on_main.call_args_list[-1].args[0]
-    ui_update()
-    app._live_screen.set_training_series.assert_called_with("meditation_score")
+def _scored_on(app) -> str | None:
+    return app._session_manager.compute_statistics()["score_metric_key"]
 
 
-def test_a_program_session_tick_leaves_the_goal_to_the_program():
-    app = _make_tick_app()
-    app._program_settings.mode = "program"
-    app._program_run.program = MagicMock()
-    app._program_run.tick = MagicMock()
-    _drive_tick(app, _raw_sample(), _metrics())
-    app._session_manager.set_active_goal.assert_not_called()
+def test_a_simple_session_tick_scores_on_the_feedback_metric_and_marks_it(fresh_app, monkeypatch):
+    fed = _session(fresh_app, monkeypatch, "meditation_score")
+    marks = calls_of(monkeypatch, fresh_app._live_screen, "set_training_series")
+    fed.tick(metrics=dict(SHAMATHA_HIGH[0]))
+    assert _scored_on(fresh_app) == "meditation_score" and marks == [("meditation_score",)]
 
 
-def test_program_mode_with_no_usable_program_is_scored_like_a_simple_session():
-    app = _make_tick_app()
-    app._program_settings.mode = "program"  # the Settings toggle; the session started without a program
-    app._settings_store.change("audio_metric", "shamatha_score")
-    _drive_tick(app, _raw_sample(), _metrics())
-    app._session_manager.set_active_goal.assert_called_with("shamatha_score")
+def test_a_program_session_tick_leaves_the_goal_to_the_program(fresh_app, monkeypatch):
+    app = fresh_app
+    reload_with(app, threshold="50", audio_metric="meditation_score")
+    program_mode(app, [{"minutes": 5, "target": 60, "formula": "shamatha_score"}])
+    FedSession(app, monkeypatch).tick(metrics=dict(SHAMATHA_HIGH[0]))
+    score = app._session_manager.live_score()
+    assert _scored_on(app) == "shamatha_score" and (score.segmented, score.target) == (True, 60)
 
 
-def test_one_tick_scores_and_sounds_the_same_metric():
-    app = _make_tick_app()
-    app._program_settings.mode = "simple"
-    app._audio_metric.drive_key = MagicMock(side_effect=["shamatha_score", "meditation_score"])  # changes mid-tick
-    metrics = {**_metrics(), "shamatha_score": 11.0, "meditation_score": 77.0}
-    _drive_tick(app, _raw_sample(), metrics)
-    app._session_manager.set_active_goal.assert_called_with("shamatha_score")
-    assert app._audio.update.call_args.args[0] == 11.0  # the sound follows the scored metric's value
+def test_program_mode_with_no_usable_program_is_scored_like_a_simple_session(fresh_app, monkeypatch):
+    app = fresh_app
+    reload_with(app, threshold="50")
+    program_mode(app, [])  # the Settings toggle; the session starts without a program
+    FedSession(app, monkeypatch).tick(metrics=dict(SHAMATHA_HIGH[0]))
+    assert _scored_on(app) == "shamatha_score" and not app._session_manager.live_score().segmented
 
 
-def test_the_partial_flush_saves_the_scored_metric():
-    from app.config import APP
-    app = _make_tick_app()
-    app._program_settings.mode = "simple"
-    app._recorder = make_recorder(app)
-    app._recorder._buffer = [{"shamatha_score": 1.0}]
+def test_one_tick_scores_and_sounds_the_same_metric(fresh_app, monkeypatch):
+    app = fresh_app
+    fed = _session(app, monkeypatch)
+    answers = iter(["shamatha_score", "meditation_score"])  # the driving metric changes mid-tick
+    monkeypatch.setattr(app._audio_metric, "drive_key", lambda: next(answers, "meditation_score"))
+    sounded = calls_of(monkeypatch, app._audio, "update")
+    fed.tick(metrics={"shamatha_score": 11.0, "meditation_score": 77.0})
+    assert _scored_on(app) == "shamatha_score"
+    assert sounded[0][0] == 11.0  # the sound follows the scored metric's value
+
+
+def test_the_partial_flush_saves_the_scored_metric(fresh_app, monkeypatch):
+    app = fresh_app
+    fed = _session(app, monkeypatch)
     app._recorder._flush_counter = int(APP.FLUSH_INTERVAL_SECONDS / APP.UPDATE_FREQUENCY) - 1  # this tick flushes
-    app._session_manager.compute_statistics.return_value = {"duration": 60, "score_metric_key": "shamatha_score",
-                                                            "avg_score": 52.5}
-    app._live_screen.graph.series_name.return_value = "Shamatha"
-    _drive_tick(app, _raw_sample(), _metrics())
-    stats = app._db.checkpoint_session.call_args.args[1]
-    assert (stats["score_metric_key"], stats["score_metric_name"], stats["avg_score"]) == (
-        "shamatha_score", "Shamatha", 52.5)
+    fed.tick(metrics={"shamatha_score": 52.5})
+    row = app._db.get_session(app._recorder.session_id)
+    assert (row["score_metric_key"], row["score_metric_name"], row["avg_score"]) == ("shamatha_score", "Shamatha", 52.5)
 
 
-def test_a_session_stopped_before_any_tick_records_the_feedback_metric():
+def test_a_session_stopped_before_any_tick_records_the_feedback_metric(fresh_app, monkeypatch):
     sm = SessionManager()
     sm.start(threshold=50)
     stats = sm.compute_statistics()
     assert stats["score_metric_key"] is None and stats["avg_score"] is None  # nothing was scored
-    app = _app("shamatha_score")
-    recorded = app._with_score(stats)
-    assert (recorded["score_metric_key"], recorded["score_metric_name"], recorded["avg_score"]) == (
-        "shamatha_score", "Shamatha", None)
-
-
-def test_recomputing_from_ticks_stored_in_the_db_reproduces_the_stored_stats(db):
-    from app.session.scoring import goal_stats
-    app = _app("shamatha_score")
-    ticks = _ticks(shamatha_score=[60, 70, 10, 55, 56, 57, 20, 99, 51, 52], meditation_score=[90] * 10)
-    stats = app._with_score(_run(app, ticks))
-    sid = db.save_session(stats, user_id=db.create_user("someone"))
-    db.save_metrics_batch(sid, [{**m, "timestamp": i * 0.5} for i, m in enumerate(ticks)])
-    row = db.get_session(sid)
-    stored = [m[row["score_metric_key"]] for m in db.get_session_metrics(sid)]
-    time_above, streak = goal_stats(stored, row["threshold_used"])
-    assert (int(time_above), int(streak)) == (row["time_above_threshold"], row["longest_streak"])
-    assert row["score_metric_key"] == "shamatha_score"  # meditation (all 90) would give a different answer
+    _session(fresh_app, monkeypatch)
+    row = _saved(fresh_app)
+    assert (row["score_metric_key"], row["score_metric_name"], row["avg_score"]) == ("shamatha_score", "Shamatha", None)

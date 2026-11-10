@@ -1,15 +1,11 @@
 """A saved formula or program keeps a name no other has: saving under one that exists asks, then overwrites it in
 place; a new name is added without asking."""
-from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 
-from app.metrics.formula_slots import FormulaSlots
 from app.storage.database import DatabaseManager
 from tests._formula_settings import make_formula_settings
 from tests._program_settings import make_programs
-from tests._settings import held_store
 
 
 @pytest.fixture
@@ -20,10 +16,7 @@ def db(tmp_path):
 
 
 def _formulas(db, uid, confirm):
-    app = SimpleNamespace(_db=db, _formulas=FormulaSlots(), _current_user_id=uid, _require_user=lambda _a: uid,
-                          _settings_store=held_store(audio_metric="shamatha_score"), _confirm_action=confirm,
-                          _info_popup=MagicMock())
-    settings = make_formula_settings(app)
+    settings = make_formula_settings(db, uid, confirm=confirm)
     return (lambda name, body: settings.on_save(0, name, body)), (lambda: db.get_saved_formulas(uid)), "formula"
 
 
@@ -59,10 +52,7 @@ def test_saving_under_a_name_that_exists_asks_then_overwrites_it_in_place(db, li
 def test_an_overwrite_of_an_entry_gone_meanwhile_writes_nothing_and_claims_nothing(db):
     uid = db.create_user("A")
     asked = []
-    app = SimpleNamespace(_db=db, _formulas=FormulaSlots(), _current_user_id=uid, _require_user=lambda _a: uid,
-                          _settings_store=held_store(audio_metric="shamatha_score"), _info_popup=MagicMock(),
-                          _confirm_action=lambda title, message, ok_text, on_ok, **kw: asked.append(on_ok))
-    settings = make_formula_settings(app)
+    settings = make_formula_settings(db, uid, confirm=lambda title, message, ok_text, on_ok, **kw: asked.append(on_ok))
     settings.on_save(0, "Calm", "alpha1")
     settings.on_save(0, "Calm", "alpha2")
     db.remove_saved_formula(uid, 0)

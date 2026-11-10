@@ -1,38 +1,25 @@
-from unittest.mock import MagicMock
-
 from kivy.metrics import dp
 
-from app.ui.live_session import _compute_graph_height_adaptive
+from app.ui.live_session import LiveSessionScreen, _compute_graph_height_adaptive
+from app.ui.theme import S
+
+
+def _reflowed(viewport_h: float) -> LiveSessionScreen:
+    """The Session screen laid out again for a scroll viewport this tall."""
+    screen = LiveSessionScreen()
+    screen._scroll.height = viewport_h
+    screen._reflow()
+    return screen
 
 
 def test_reflow_assigns_graph_height_from_scroll():
-    from app.ui.live_session import LiveSessionScreen
-
-    screen = LiveSessionScreen.__new__(LiveSessionScreen)
-    screen._scroll = MagicMock(height=900.0)
-    screen._graph_area = MagicMock()
-    screen._stats_card = MagicMock(height=56.0)
-    screen._bottom_bar = MagicMock(height=44.0)
-
-    screen._reflow()
-
-    # viewport=900, stats=56, bottom=44, spacing=S.GAP_SM*2 (≈16 for default theme)
-    # fixed_graph = 900 - 56 - 44 - spacing; >= dp(400) → fixed mode
-    assert screen._graph_area.height > 0
+    screen = _reflowed(900.0)
+    leftover = 900.0 - screen._stats_card.height - screen._bottom_bar.height - S.GAP_SM * 2
+    assert leftover >= dp(400) and screen._graph_area.height == leftover  # tall enough: the graph takes what is left
 
 
 def test_reflow_respects_floor_on_small_scroll():
-    from app.ui.live_session import LiveSessionScreen
-
-    screen = LiveSessionScreen.__new__(LiveSessionScreen)
-    screen._scroll = MagicMock(height=100.0)
-    screen._graph_area = MagicMock()
-    screen._stats_card = MagicMock(height=56.0)
-    screen._bottom_bar = MagicMock(height=44.0)
-
-    screen._reflow()
-
-    assert screen._graph_area.height == dp(240)
+    assert _reflowed(100.0)._graph_area.height == dp(240)
 
 
 # ── Adaptive helper tests ──

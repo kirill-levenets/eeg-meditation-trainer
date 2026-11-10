@@ -13,16 +13,15 @@ from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 
 import app.ui.history_flow as history_flow
-from app.session.manager import SessionManager
+from app.metrics.formula_slots import FormulaSlots
 from app.storage.database import DatabaseManager
-from app.ui.app_manager import EEGMeditationApp
+from app.ui.history_flow import HistoryFlow
 from app.ui.history_screen import HistoryScreen
 from app.ui.hooks import wire
+from app.ui.shown_session import ShownSession
 from app.ui.theme import StyledButton
 from app.ui.widgets.loading_overlay import LoadingOverlay
-from tests._history_flow import make_history_flow
-from tests._recorder import make_recorder
-from tests._shown_session import make_shown
+from tests._context import stub_context
 
 
 @pytest.fixture
@@ -125,51 +124,46 @@ class _Deferred:
                 self.main.pop(0)()
 
 
-def _app(db, monkeypatch) -> tuple[EEGMeditationApp, _Deferred, list]:
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._db = db
-    app._history_screen = MagicMock()
-    app._recorder = make_recorder(app)
-    app._live_screen = MagicMock()
-    app._live_screen.summary_session_id = None
-    app._audio = MagicMock()
-    app._session_manager = SessionManager()
-    app._ticker = MagicMock(running=False)
-    app._recorder = make_recorder(app)
-    app._info_popup = MagicMock()
-    app._loading_overlay = MagicMock()
-    deferred = _Deferred(monkeypatch)
-    app._on_main = deferred.main.append
-    app._history = make_history_flow(app)
-    done = []
-    app._shown = make_shown(app)
-    return app, deferred, done
+class _Flows:
+    """The History flow and the shown session it tells of a delete, built by their constructors on `db`; the worker
+    and the main-thread queue are `deferred`'s, the screens stand-ins unless given."""
+
+    def __init__(self, db, monkeypatch, *, user_id=None, history_screen=None, overlay=None) -> None:
+        self.deferred = _Deferred(monkeypatch)
+        self.running_id: int | None = None  # the running session's row, once a checkpoint wrote it
+        self.info, self.audio = MagicMock(), MagicMock()
+        self.live_screen = MagicMock(summary_session_id=None)
+        self.history_screen = history_screen or MagicMock()
+        self.overlay = overlay or MagicMock()
+        self.done: list = []
+        ctx = stub_context(db=db, user_id=lambda: user_id, on_main=self.deferred.main.append, info=self.info,
+                           running_id=lambda: self.running_id)
+        self.history = HistoryFlow(ctx, self.history_screen, FormulaSlots(), self.overlay,
+                                   on_sessions_deleted=lambda ids: self.shown.on_sessions_deleted(ids))
+        self.shown = ShownSession(ctx, self.live_screen, self.audio, self.history, MagicMock(session_id=None))
+
+    def delete(self, ids: list[int]) -> None:
+        self.history.delete_sessions(ids, self.done.append)
 
 
 def test_the_app_deletes_a_selection_off_the_main_thread_in_one_call(db, monkeypatch):
     me = db.create_user("me")
     ids = [_session(db, me) for _ in range(3)]
-    app, deferred, done = _app(db, monkeypatch)
+    flows = _Flows(db, monkeypatch)
     calls = []
     real = db.delete_sessions
     monkeypatch.setattr(db, "delete_sessions", lambda s: calls.append(list(s)) or real(s))
-    app._history.delete_sessions(ids, done.append)
+    flows.delete(ids)
     assert calls == [] and _counts(db, ids[0]) == (1, 3)  # nothing on the main thread yet
-    app._history_screen.remove_sessions.assert_not_called()
-    deferred.run()
-    assert calls == [ids] and done == [True]
-    app._history_screen.remove_sessions.assert_called_once_with(ids)
+    flows.history_screen.remove_sessions.assert_not_called()
+    flows.deferred.run()
+    assert calls == [ids] and flows.done == [True]
+    flows.history_screen.remove_sessions.assert_called_once_with(ids)
 
 
 class _Touch:
     x, y = 10, 10
     pos = (10, 10)
-
-
-def _with_overlay(app) -> LoadingOverlay:
-    app._loading_overlay = LoadingOverlay()  # the app's own
-    app._history = make_history_flow(app)
-    return app._loading_overlay
 
 
 def _wait(seconds: float) -> None:
@@ -182,76 +176,75 @@ def test_the_screen_is_modal_while_deleting_and_a_quick_delete_never_paints_the_
     # that was about to go, or saving notes to it).
     me = db.create_user("me")
     sid = _session(db, me)
-    app, deferred, done = _app(db, monkeypatch)
-    overlay = _with_overlay(app)
-    app._history.delete_sessions([sid], done.append)
+    overlay = LoadingOverlay()  # the app's own
+    flows = _Flows(db, monkeypatch, overlay=overlay)
+    flows.delete([sid])
     assert overlay.on_touch_down(_Touch()) and not overlay.is_visible  # modal at once, nothing painted yet
-    deferred.run()  # finishes before the overlay's delay
+    flows.deferred.run()  # finishes before the overlay's delay
     _wait(0.25)
     assert not overlay.is_visible and not overlay.on_touch_down(_Touch())
-    assert done == [True]
+    assert flows.done == [True]
 
 
 def test_a_slow_delete_shows_the_overlay_until_it_ends(db, monkeypatch):
     me = db.create_user("me")
     sid = _session(db, me)
-    app, deferred, done = _app(db, monkeypatch)
-    overlay = _with_overlay(app)
-    app._history.delete_sessions([sid], done.append)
+    overlay = LoadingOverlay()
+    flows = _Flows(db, monkeypatch, overlay=overlay)
+    flows.delete([sid])
     _wait(0.25)
     assert overlay.is_visible and overlay._status.text.startswith("Deleting 1 session")
-    deferred.run()
+    flows.deferred.run()
     assert not overlay.is_visible and not overlay.on_touch_down(_Touch())
-    assert done == [True]
+    assert flows.done == [True]
 
 
 def test_a_failed_delete_is_reported_and_history_keeps_the_rows(db, monkeypatch):
     reported = []
     monkeypatch.setattr(history_flow, "report_soft_error", lambda label, detail, **k: reported.append(label))
-    app, deferred, done = _app(db, monkeypatch)
+    flows = _Flows(db, monkeypatch)
     monkeypatch.setattr(db, "delete_sessions", lambda ids: (_ for _ in ()).throw(sqlite3.OperationalError("locked")))
-    app._history.delete_sessions([1, 2], done.append)
-    deferred.run()
-    assert reported == ["session_delete_failed"] and done == [False]
-    app._history_screen.remove_sessions.assert_not_called()
-    app._loading_overlay.hide.assert_called_once()
+    flows.delete([1, 2])
+    flows.deferred.run()
+    assert reported == ["session_delete_failed"] and flows.done == [False]
+    flows.history_screen.remove_sessions.assert_not_called()
+    flows.overlay.hide.assert_called_once()
 
 
 def test_the_running_session_is_not_deleted(db, monkeypatch):
     # Its row is in History after the first checkpoint; deleting it left the next checkpoints writing orphan data.
     me = db.create_user("me")
     running, finished = _session(db, me), _session(db, me)
-    app, deferred, done = _app(db, monkeypatch)
-    app._session_manager.start()
-    app._recorder.session_id = running
-    app._history.delete_sessions([finished, running], done.append)
-    deferred.run()
-    assert done == [False]
+    flows = _Flows(db, monkeypatch)
+    flows.running_id = running
+    flows.delete([finished, running])
+    flows.deferred.run()
+    assert flows.done == [False]
     assert _counts(db, running) == _counts(db, finished) == (1, 3)  # nothing deleted
-    message = app._info_popup.call_args.args[1]
+    message = flows.info.call_args.args[1]
     assert "Stop the session" in message and "Nothing was deleted" in message
-    app._history_screen.remove_sessions.assert_not_called()
+    flows.history_screen.remove_sessions.assert_not_called()
 
 
 def test_deleting_the_end_cards_session_from_history_closes_the_card(db, monkeypatch):
     me = db.create_user("me")
     shown, other = _session(db, me), _session(db, me)
-    app, deferred, done = _app(db, monkeypatch)
-    app._live_screen.summary_session_id = shown  # the session that just ended, its card still open
-    app._history.delete_sessions([shown, other], done.append)
-    deferred.run()
-    app._live_screen.hide_summary.assert_called_once()
-    app._audio.stop_timer_bell.assert_called_once()
+    flows = _Flows(db, monkeypatch)
+    flows.live_screen.summary_session_id = shown  # the session that just ended, its card still open
+    flows.delete([shown, other])
+    flows.deferred.run()
+    flows.live_screen.hide_summary.assert_called_once()
+    flows.audio.stop_timer_bell.assert_called_once()
 
 
 def test_a_failed_delete_leaves_the_end_card_and_its_notes(db, monkeypatch):
     monkeypatch.setattr(history_flow, "report_soft_error", lambda *a, **k: None)
-    app, deferred, done = _app(db, monkeypatch)
-    app._live_screen.summary_session_id = 5
+    flows = _Flows(db, monkeypatch)
+    flows.live_screen.summary_session_id = 5
     monkeypatch.setattr(db, "delete_sessions", lambda ids: (_ for _ in ()).throw(sqlite3.OperationalError("locked")))
-    app._history.delete_sessions([5], done.append)
-    deferred.run()
-    app._live_screen.hide_summary.assert_not_called()
+    flows.delete([5])
+    flows.deferred.run()
+    flows.live_screen.hide_summary.assert_not_called()
 
 
 # ---- History: Delete N in select mode, through the one confirm ----
@@ -388,15 +381,10 @@ def test_history_does_not_list_the_running_session_until_it_ends(db, monkeypatch
     # Its row is in the database from the first checkpoint, with stats as of that checkpoint: not a finished session.
     me = db.create_user("me")
     finished, running = _session(db, me), _session(db, me)
-    app, _deferred, _done = _app(db, monkeypatch)
-    app._current_user_id = me
-    app._history_screen = HistoryScreen()
-    app._history = make_history_flow(app)
-    app._session_manager.start()
-    app._recorder.session_id = running
-    app._history.refresh(force=True)
-    assert [s["id"] for s in app._history_screen._sessions] == [finished]
-    app._session_manager.stop()
-    app._session_manager.reset()  # the session ended (the ending marks History dirty)
-    app._history.refresh(force=True)
-    assert sorted(s["id"] for s in app._history_screen._sessions) == sorted([finished, running])
+    flows = _Flows(db, monkeypatch, user_id=me, history_screen=HistoryScreen())
+    flows.running_id = running
+    flows.history.refresh(force=True)
+    assert [s["id"] for s in flows.history_screen._sessions] == [finished]
+    flows.running_id = None  # the session ended (the ending marks History dirty)
+    flows.history.refresh(force=True)
+    assert sorted(s["id"] for s in flows.history_screen._sessions) == sorted([finished, running])

@@ -10,23 +10,25 @@ slip through into a usable-but-unset state.
 import os
 import shutil
 import tempfile
-from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
+from kivy.core.window import Window
 
-import app.ui.profiles as profiles
-from app import android_jni
+import app.ui.app_manager as am
+from app.session.manager import SessionState
 from app.session.session_run import Phase
 from app.storage.database import DatabaseManager
-from app.ui.app_manager import EEGMeditationApp
 from app.ui.history_flow import sessions_for_view
 from app.ui.settings_screen import SettingsScreen
 from app.ui.startup import resolve_startup_user
-from tests._backup_flow import make_flow
-from tests._profiles import make_gate, make_profiles
-from tests._recorder import make_recorder
-from tests._session_run import run_in
+from app.ui.widgets.user_picker import UserPickerForm
+from tests._app import (
+    frames,
+    frames_until,
+    popup_titles,
+    start_connecting,
+    start_ticked_by_hand,
+)
 
 _TMP_DIRS: list[str] = []
 
@@ -113,250 +115,180 @@ def test_unset_user_shows_nothing_never_leaks_all_profiles():
 
 # --- gate enforcement: an unresolved user disables the app until selection ---
 
-def test_on_pause_skips_settings_flush_during_restore():
-    # #1: flushing in-memory settings during the restore relaunch window would
-    # clobber the freshly-restored DB.
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._restoring = True
-    app._save_user_settings = MagicMock()
-    assert EEGMeditationApp.on_pause(app) is True
-    app._save_user_settings.assert_not_called()
+@pytest.fixture
+def gated(build_app):
+    """The app at its gate: a profile exists, none was last used."""
+    return build_app(lambda db: db.create_user("old"))
 
 
-def test_on_pause_flushes_settings_normally():
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._restoring = False
-    app._save_user_settings = MagicMock()
-    app._recorder = MagicMock()  # no session running
-    EEGMeditationApp.on_pause(app)
-    app._save_user_settings.assert_called_once()
+def _session_rows(app) -> int:
+    return app._db._conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
 
 
-def test_deleting_active_profile_mid_session_discards_it_and_regates():
+def _checkpointed_session(app) -> None:
+    """A mock session with two ticks, already written by a checkpoint (the 60 s flush, a pause)."""
+    start_ticked_by_hand(app, ticks=2)
+    app._checkpoint_or_report()
+    assert _session_rows(app) == 1
+
+
+def test_deleting_active_profile_mid_session_discards_it_and_regates(fresh_app):
     # #2/#3: the running session is discarded (not saved as an orphan), and the
     # app re-enters the gate instead of running with no user.
-    from app.session.manager import SessionState
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._current_user_id = 5
-    app._session_manager = MagicMock()
-    app._session_manager.state = SessionState.RUNNING
-    app._discard_running_session = MagicMock()
-    app._db = MagicMock()
-    app._db.get_all_users.return_value = []       # last profile removed
-    app._settings_screen = MagicMock()
-    app._program_settings = MagicMock()
-    app._gate = MagicMock()
-    app._history = MagicMock()
-    app._shown = MagicMock(owner=None)  # no session shown
-    make_profiles(app).on_delete(5)
-    app._discard_running_session.assert_called_once()  # discarded, not saved-then-orphaned
-    assert app._current_user_id is None
-    app._gate.open.assert_called_once()                 # re-gate
+    app = fresh_app
+    _checkpointed_session(app)
+    app._profiles.on_delete(app._current_user_id)
+    frames_until(app._gate.shown)
+    assert _session_rows(app) == 0 and app._current_user_id is None  # discarded, not saved-then-orphaned
+    assert app._session_manager.state not in (SessionState.RUNNING, SessionState.PAUSED) and app._run is None
+    assert app._gate.shown() and app._bottom_nav.disabled  # re-gated
 
 
-def test_deleting_the_last_profile_while_none_is_active_regates():
+def test_deleting_the_last_profile_while_none_is_active_regates(gated):
     # #4: no profile is active and the last one goes: the app must still gate, never be usable with zero profiles.
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._current_user_id = None
-    app._session_manager = MagicMock()
-    app._db = MagicMock()
-    app._db.get_all_users.return_value = []
-    app._settings_screen = MagicMock()
-    app._program_settings = MagicMock()
-    app._gate = MagicMock()
-    app._history = MagicMock()
-    app._shown = MagicMock(owner=None)  # no session shown
-    make_profiles(app).on_delete(9)
-    app._gate.open.assert_called_once()
+    frames_until(gated._gate.shown)
+    gated._gate._gate_popup.dismiss()  # as if the popup were lost
+    old = gated._db.get_all_users()[0]["id"]
+    gated._profiles.on_delete(old)
+    frames_until(gated._gate.shown)
+    assert gated._gate.shown() and gated._gate.active() and gated._db.get_all_users() == []
 
 
 @pytest.mark.parametrize("current, shown", [(2, "Current: B"), (None, "Current: none"), (9, "Current: none")])
 def test_settings_names_the_active_profile_or_none(current, shown):
     # None while the gate is up; an id the list doesn't hold must not leave the previous profile's name showing.
-    stub = SimpleNamespace(_user_picker_form=MagicMock(), _profile_current_label=SimpleNamespace(text="Current: A"))
-    SettingsScreen.populate_users(stub, [{"id": 1, "name": "A"}, {"id": 2, "name": "B"}], current)
-    assert stub._profile_current_label.text == shown
+    screen = SettingsScreen()
+    screen._profile_current_label.text = "Current: A"
+    screen.populate_users([{"id": 1, "name": "A"}, {"id": 2, "name": "B"}], current)
+    assert screen._profile_current_label.text == shown
 
 
-def test_reopen_gate_when_selection_left_no_user():
+def _gate_form(app) -> UserPickerForm:
+    frames_until(app._gate.shown)
+    return next(w for w in app._gate._gate_popup.walk() if isinstance(w, UserPickerForm))
+
+
+def test_reopen_gate_when_selection_left_no_user(gated):
     # #5: a failed pick/create at the gate must not strand the app (nav disabled, no popup).
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._current_user_id = None
-    app._db = MagicMock()
-    app._profiles = MagicMock()
-    gate = make_gate(app)
-    gate.open = MagicMock()
-    gate._reopen_if_unresolved()
-    gate.open.assert_called_once()
+    form = _gate_form(gated)
+    form._on_create(" ")  # the gate's own handler, given a name it doesn't take
+    assert not gated._gate.shown()
+    frames_until(gated._gate.shown)
+    assert gated._gate.shown() and gated._current_user_id is None and gated._bottom_nav.disabled
 
 
-def test_reopen_gate_noop_when_user_resolved():
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._current_user_id = 3
-    app._db = MagicMock()
-    gate = make_gate(app)
-    gate.open = MagicMock()
-    gate._reopen_if_unresolved()
-    gate.open.assert_not_called()
+def test_reopen_gate_noop_when_user_resolved(gated):
+    form = _gate_form(gated)
+    form._name_input.text = "new"
+    form._on_create_pressed()
+    frames()
+    assert gated._current_user_id is not None and not gated._gate.shown() and not gated._bottom_nav.disabled
+    assert popup_titles() == []
 
 
-def test_discard_running_session_deletes_partial_row_and_resets_ui():
+def test_discard_running_session_deletes_partial_row_and_resets_ui(fresh_app):
     # #1/#5/#12: the 60s flush may already have written a session row under the
     # doomed profile — discard must delete it and reuse the shared UI teardown.
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._ticker = MagicMock(running=False)
-    app._session_manager = MagicMock()
-    app._eeg_stream = MagicMock()
-    app._audio = MagicMock()
-    app._db = MagicMock()
-    app._recorder = make_recorder(app)
-    app._recorder.session_id = 42     # partial flush happened
-    app._recorder._buffer = [{"t": 1}]
-    app._finalize_stop_ui = MagicMock()
-    EEGMeditationApp._discard_running_session(app)
-    app._db.delete_session.assert_called_once_with(42)   # orphan removed
-    assert app._recorder.session_id is None
-    assert app._recorder._buffer == []
-    app._finalize_stop_ui.assert_called_once_with(None, None)  # shared teardown
+    app = fresh_app
+    _checkpointed_session(app)
+    app._discard_running_session()
+    frames()
+    assert _session_rows(app) == 0  # orphan removed
+    assert app._recorder.session_id is None and app._recorder._buffer == []
+    assert app._run is None and not app._ticker.running
+    assert app._live_screen._btn_stop.disabled and not app._live_screen._btn_start.disabled  # the idle controls
+    assert popup_titles() == []  # no end card for a session that is gone
 
 
-def test_restore_refused_while_session_running(monkeypatch):
+def test_restore_refused_while_session_running(fresh_app):
     # #3: a restore closes the DB and relaunches — a running session would be
     # silently dropped. The entry point must refuse with an explanation.
-    from app.session.manager import SessionState
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._session_manager = MagicMock()
-    app._session_manager.state = SessionState.RUNNING
-    app._info_popup = MagicMock()
-    on_android = MagicMock()
-    monkeypatch.setattr(android_jni, "on_android", on_android)
-    make_flow(refused=app._refused_while_session_runs).on_restore_pressed()
-    app._info_popup.assert_called_once()      # explained, not silent
-    on_android.assert_not_called()             # restore flow never started
+    app = fresh_app
+    app._on_start()
+    app._backup_flow.on_restore_pressed()
+    assert popup_titles() == ["Session in progress"]  # explained, not silent; the restore flow never started
 
 
-def test_restore_refused_during_bt_connect_window(monkeypatch):
+def test_restore_refused_during_bt_connect_window(fresh_app, monkeypatch):
     # round-4: state is IDLE while connecting, but the tick thread is live and
     # the session auto-starts on connect — must still refuse.
-    from app.session.manager import SessionState
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._session_manager = MagicMock()
-    app._session_manager.state = SessionState.IDLE
-    run_in(app, Phase.CONNECTING)
-    app._ticker = MagicMock(running=True)
-    app._info_popup = MagicMock()
-    on_android = MagicMock()
-    monkeypatch.setattr(android_jni, "on_android", on_android)
-    make_flow(refused=app._refused_while_session_runs).on_restore_pressed()
-    app._info_popup.assert_called_once()
-    on_android.assert_not_called()
+    app = fresh_app
+    start_connecting(app, monkeypatch)
+    assert app._session_manager.state == SessionState.IDLE and app._run.phase is Phase.CONNECTING
+    app._backup_flow.on_restore_pressed()
+    assert popup_titles() == ["Session in progress"]
 
 
-def test_delete_active_profile_discards_during_bt_connect():
+def test_delete_active_profile_discards_during_bt_connect(fresh_app, monkeypatch):
     # round-4: same connecting-window gap for the profile-delete discard guard.
-    from app.session.manager import SessionState
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._current_user_id = 5
-    app._session_manager = MagicMock()
-    app._session_manager.state = SessionState.IDLE
-    run_in(app, Phase.CONNECTING)
-    app._ticker = MagicMock(running=True)
-    app._discard_running_session = MagicMock()
-    app._db = MagicMock()
-    app._db.get_all_users.return_value = []
-    app._settings_screen = MagicMock()
-    app._program_settings = MagicMock()
-    app._gate = MagicMock()
-    app._history = MagicMock()
-    app._shown = MagicMock(owner=None)  # no session shown
-    make_profiles(app).on_delete(5)
-    app._discard_running_session.assert_called_once()   # connecting session halted
+    app = fresh_app
+    start_connecting(app, monkeypatch)
+    app._profiles.on_delete(app._current_user_id)
+    frames_until(app._gate.shown)
+    assert app._run is None and not app._ticker.running  # connecting session halted
+    assert app._current_user_id is None and app._gate.shown()
 
 
-def test_on_resume_during_restore_reshows_relaunch_popup():
+def test_on_resume_during_restore_reshows_relaunch_popup(build_app):
     # #9: if Android resumed the process post-restore, the DB is shut down —
     # block behind the relaunch popup instead of running on a no-op DB.
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._is_paused = True
-    app._restoring = True
-    app._show_relaunch_popup = MagicMock()
-    app._gate = MagicMock()
-    EEGMeditationApp.on_resume(app)
-    app._show_relaunch_popup.assert_called_once()
-    app._gate.open.assert_not_called()
+    app = build_app()
+    app._on_db_replaced()
+    app.on_pause()
+    app._relaunch_popup.dismiss()  # the process came back without it
+    app._relaunch_popup = None
+    app.on_resume()
+    frames()
+    assert popup_titles() == ["Restore complete"] and not app._gate.shown()
 
 
-def test_a_resume_with_no_profile_reopens_the_gate():
+def test_a_resume_with_no_profile_reopens_the_gate(gated):
     # The process survived in the background with no active profile: the app is never usable without one.
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._is_paused, app._current_user_id = True, None
-    app._gate = MagicMock(**{"shown.return_value": False})
-    EEGMeditationApp.on_resume(app)
-    app._gate.open.assert_called_once_with(0)
+    frames_until(gated._gate.shown)
+    gated._gate._gate_popup.dismiss()  # the popup did not survive with it
+    gated.on_pause()
+    assert not gated._gate.shown()
+    gated.on_resume()
+    frames_until(gated._gate.shown)
+    assert gated._gate.shown() and gated._bottom_nav.disabled
 
 
-def test_gate_active_during_schedule_window_before_popup_exists():
+def test_gate_active_during_schedule_window_before_popup_exists(gated):
     # #5: un-escapable even before the popup is created (nav disabled, no user).
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._bottom_nav = MagicMock()
-    app._bottom_nav.disabled = True
-    app._current_user_id = None
-    app._db = MagicMock()
-    assert make_gate(app).active() is True
+    assert not gated._gate.shown() and gated._gate.active() is True and gated._bottom_nav.disabled
+    frames_until(gated._gate.shown)
+    assert popup_titles() == ["Select Profile"]  # the modal follows
 
 
-def test_gate_not_active_when_user_resolved():
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._bottom_nav = MagicMock()
-    app._bottom_nav.disabled = False
-    app._current_user_id = 3
-    app._db = MagicMock()
-    assert make_gate(app).active() is False
+def test_gate_not_active_when_user_resolved(fresh_app):
+    app = fresh_app
+    assert app._gate.active() is False and not app._bottom_nav.disabled
 
 
-def test_gate_back_first_press_warns_second_exits(monkeypatch):
+def test_gate_back_first_press_warns_second_exits(gated, monkeypatch):
     # #4: a gate with no exit traps a fresh-install user. Double-back must quit.
-    import app.ui.app_manager as am
-    fake_app_cls = MagicMock()
-    monkeypatch.setattr(am, "App", fake_app_cls)
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._last_back_time = 0.0
-    app._toast = MagicMock()
-    assert EEGMeditationApp._handle_gate_back(app) is True   # consumed
-    app._toast.assert_called_once()                           # warned
-    fake_app_cls.get_running_app.return_value.stop.assert_not_called()
-    assert EEGMeditationApp._handle_gate_back(app) is True   # second press < 2s
-    fake_app_cls.get_running_app.return_value.stop.assert_called_once()  # exits
+    toasts, stops = [], []
+    monkeypatch.setattr(am, "show_toast", toasts.append)
+    monkeypatch.setattr(gated, "stop", lambda: stops.append(True))
+    frames_until(gated._gate.shown)  # over the gate's own popup: back must not be left to dismiss it
+    assert gated._on_keyboard(Window, 27, 0, None, []) is True  # consumed
+    assert toasts == ["Press back again to exit"] and stops == [] and gated._gate.active()  # warned, still gated
+    assert gated._on_keyboard(Window, 27, 0, None, []) is True  # second press < 2s
+    assert stops == [True]  # exits
 
 
-def test_open_user_gate_dedupes_but_always_disables_nav(monkeypatch):
+def test_open_user_gate_dedupes_but_always_disables_nav(gated):
     # #7/#8: never stack two gate popups; nav must be disabled even when deduped.
-    fake_clock = MagicMock()
-    monkeypatch.setattr(profiles, "Clock", fake_clock)
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._db = MagicMock()
-    app._bottom_nav = MagicMock()
-    app._bottom_nav.disabled = False
-    gate = make_gate(app)
-    gate._gate_popup = MagicMock()   # a gate popup is already open
-    gate._gate_event = None
-    gate.open(0)
-    assert app._bottom_nav.disabled is True          # enforced despite dedupe
-    fake_clock.schedule_once.assert_not_called()      # no second popup
-    gate._gate_popup = None
-    gate._gate_event = MagicMock()   # one already scheduled (pre-popup window)
-    gate.open(0)
-    fake_clock.schedule_once.assert_not_called()      # still no stacking
-
-
-def test_open_user_gate_disables_bottom_nav_and_opens_modal():
-    app = EEGMeditationApp.__new__(EEGMeditationApp)  # bypass heavy __init__/build
-    app._db = MagicMock()
-    app._bottom_nav = MagicMock()
-    gate = make_gate(app)
-    gate._show = MagicMock()
-    gate.open(0)
-    assert app._bottom_nav.disabled is True  # app not usable until a user is chosen
+    gated._bottom_nav.disabled = False
+    gated._gate.open(0)  # one is already scheduled (pre-popup window)
+    assert gated._bottom_nav.disabled is True  # enforced despite dedupe
+    frames_until(gated._gate.shown)
+    frames()
+    assert popup_titles() == ["Select Profile"]
+    gated._bottom_nav.disabled = False
+    gated._gate.open(0)  # a gate popup is already open
+    frames()
+    assert gated._bottom_nav.disabled is True and popup_titles() == ["Select Profile"]  # no second popup
 
 
 def test_unresolvable_last_user_routes_to_the_gate():

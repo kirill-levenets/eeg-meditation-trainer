@@ -10,18 +10,17 @@ import pytest
 from kivy.clock import Clock
 
 from app.config import APP
-from app.session.manager import SessionManager
-from app.session.session_run import Phase
+from app.session.session_run import SessionRun
 from app.storage.database import DatabaseManager
-from app.ui.app_manager import EEGMeditationApp
+from app.ui.bt_wait import BtWait
 from app.ui.device_labels import MAX_DEVICE_ALIAS, device_label, device_row_text
+from app.ui.headset import Headset
 from app.ui.hooks import wire
 from app.ui.settings_screen import SettingsScreen
 from app.ui.settings_sections.device import DeviceSection
 from app.ui.theme import C, Icons
-from tests._bt_wait import make_bt_wait
-from tests._headset import make_headset
-from tests._session_run import run_in
+from tests._app import HEADSET, popup_message, popups, start_connecting
+from tests._context import stub_context
 from tests._settings_section import settings_section
 
 BLUE = "00:11:22:33:44:01"
@@ -39,23 +38,23 @@ def db_path():
             os.remove(path + suffix)
 
 
-def _app(db: DatabaseManager | None = None) -> EEGMeditationApp:
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._db = db or MagicMock()
-    app._current_user_id = 1
-    app._ticker = MagicMock(running=False)
-    app._real_stream = MagicMock()
-    app._real_stream._device_address = BLUE
-    app._real_stream._device_name = "MindWave Mobile"
-    app._real_stream.is_connected = False
-    app._session_manager = SessionManager()
-    app._live_screen = MagicMock()
-    app._settings_screen = MagicMock()
-    app._info_popup = MagicMock()
-    app._headset = make_headset(app)
+@pytest.fixture(autouse=True)
+def _real_mode(monkeypatch):
+    """A real headset is in use unless a test says otherwise: the module's shared app leaves the mode its last
+    profile loaded."""
+    monkeypatch.setattr(APP, "USE_MOCK_DEVICE", False)
+
+
+def _rig(db: DatabaseManager | None = None, uid: int = 1) -> SimpleNamespace:
+    """A Headset built by its constructor, with BLUE selected and not connected: `headset`, and the stand-ins it works
+    on (`stream`, `device` for Settings › Device, `live_screen`, `db` unless a real one is given)."""
+    stream = MagicMock(_device_address=BLUE, _device_name="MindWave Mobile", is_connected=False)
+    device, live_screen = MagicMock(), MagicMock()
+    ctx = stub_context(db=db or MagicMock(), user_id=lambda: uid)
+    headset = Headset(ctx, stream, device, live_screen, serial_override=lambda: None)
     if db is not None:
-        app._headset.load_aliases()
-    return app
+        headset.load_aliases()
+    return SimpleNamespace(headset=headset, stream=stream, device=device, live_screen=live_screen, db=ctx.db)
 
 
 # ---- one name for a headset, everywhere ----
@@ -72,28 +71,37 @@ def test_an_alias_survives_a_restart_and_names_new_sessions(db_path, monkeypatch
     monkeypatch.setattr(APP, "USE_MOCK_DEVICE", False)
     db = DatabaseManager(db_path=db_path)
     try:
-        _app(db)._headset.on_rename(BLUE, "MindWave Mobile", "  Blue  ")
+        _rig(db).headset.on_rename(BLUE, "MindWave Mobile", "  Blue  ")
     finally:
         db.close()
     db = DatabaseManager(db_path=db_path)  # the next launch
     try:
-        app = _app(db)
-        assert app._headset.name() == "Blue"
-        assert app._make_session_name().endswith(" - Blue")
-        app._real_stream._device_address = GREY
-        assert app._make_session_name().endswith(" - MindWave Mobile")
+        rig = _rig(db)
+        assert rig.headset.name() == "Blue"
+        rig.stream._device_address = GREY
+        assert rig.headset.name() == "MindWave Mobile"
     finally:
         db.close()
+
+
+def test_a_session_on_a_headset_is_named_by_its_alias(fresh_app):
+    app = fresh_app
+    app._change_setting("use_mock", False)
+    app._real_stream.set_device(BLUE, "MindWave Mobile")
+    app._headset.on_rename(BLUE, "MindWave Mobile", "Blue")
+    try:
+        assert app._make_session_name().endswith(" - Blue")
+        app._real_stream.set_device(GREY, "MindWave Mobile")
+        assert app._make_session_name().endswith(" - MindWave Mobile")
+    finally:
+        app._headset.on_rename(BLUE, "MindWave Mobile", "")  # aliases are the phone's, not the profile's
 
 
 def test_an_alias_names_the_headset_for_every_profile(db_path):
     db = DatabaseManager(db_path=db_path)
     try:
-        _app(db)._headset.on_rename(BLUE, "MindWave Mobile", "Blue")
-        other = _app(db)
-        other._current_user_id = 2
-        other._headset.load_aliases()
-        assert other._headset.name() == "Blue"
+        _rig(db).headset.on_rename(BLUE, "MindWave Mobile", "Blue")
+        assert _rig(db, uid=2).headset.name() == "Blue"
     finally:
         db.close()
 
@@ -102,12 +110,12 @@ def test_an_alias_names_the_headset_for_every_profile(db_path):
 def test_clearing_an_alias_or_giving_the_bluetooth_name_goes_back_to_the_bluetooth_name(db_path, text):
     db = DatabaseManager(db_path=db_path)
     try:
-        app = _app(db)
-        app._headset.on_rename(BLUE, "MindWave Mobile", "Blue")
-        app._headset.on_rename(BLUE, "MindWave Mobile", text)
-        assert app._headset.name() == "MindWave Mobile"
+        rig = _rig(db)
+        rig.headset.on_rename(BLUE, "MindWave Mobile", "Blue")
+        rig.headset.on_rename(BLUE, "MindWave Mobile", text)
+        assert rig.headset.name() == "MindWave Mobile"
         assert db.get_json_setting("bt_device_aliases", None) == {}
-        app._settings_screen.device.relabel_bt_device.assert_called_with(BLUE, "")
+        rig.device.relabel_bt_device.assert_called_with(BLUE, "")
     finally:
         db.close()
 
@@ -115,9 +123,9 @@ def test_clearing_an_alias_or_giving_the_bluetooth_name_goes_back_to_the_bluetoo
 def test_a_long_alias_is_cut_to_fit_a_row(db_path):
     db = DatabaseManager(db_path=db_path)
     try:
-        app = _app(db)
-        app._headset.on_rename(BLUE, "MindWave Mobile", "x" * 100)
-        assert app._headset.name() == "x" * MAX_DEVICE_ALIAS == "x" * 24
+        rig = _rig(db)
+        rig.headset.on_rename(BLUE, "MindWave Mobile", "x" * 100)
+        assert rig.headset.name() == "x" * MAX_DEVICE_ALIAS == "x" * 24
     finally:
         db.close()
 
@@ -125,15 +133,15 @@ def test_a_long_alias_is_cut_to_fit_a_row(db_path):
 def test_renaming_the_selected_headset_renames_it_on_screen(db_path):
     db = DatabaseManager(db_path=db_path)
     try:
-        app = _app(db)
-        app._headset.on_rename(BLUE, "MindWave Mobile", "Blue")
-        app._settings_screen.device.relabel_bt_device.assert_called_with(BLUE, "Blue")
-        assert app._live_screen.update_device_status.call_args.kwargs["device_name"] == "Blue"
-        app._settings_screen.device.update_device_status.assert_called_with(False, meta="Selected: Blue")
-        app._real_stream.is_connected = True
-        app._headset.on_rename(BLUE, "MindWave Mobile", "Blue 2")
-        app._live_screen.update_device_status.assert_called_with(True, device_name="Blue 2", connecting=False)
-        app._settings_screen.device.update_device_status.assert_called_with(True, name="Blue 2")
+        rig = _rig(db)
+        rig.headset.on_rename(BLUE, "MindWave Mobile", "Blue")
+        rig.device.relabel_bt_device.assert_called_with(BLUE, "Blue")
+        assert rig.live_screen.update_device_status.call_args.kwargs["device_name"] == "Blue"
+        rig.device.update_device_status.assert_called_with(False, meta="Selected: Blue")
+        rig.stream.is_connected = True
+        rig.headset.on_rename(BLUE, "MindWave Mobile", "Blue 2")
+        rig.live_screen.update_device_status.assert_called_with(True, device_name="Blue 2", connecting=False)
+        rig.device.update_device_status.assert_called_with(True, name="Blue 2")
     finally:
         db.close()
 
@@ -142,13 +150,13 @@ def test_in_mock_mode_no_headset_is_in_use_and_a_rename_leaves_the_mock_labels(d
     monkeypatch.setattr(APP, "USE_MOCK_DEVICE", True)
     db = DatabaseManager(db_path=db_path)
     try:
-        app = _app(db)
-        app._real_stream.is_connected = True  # the link outlives a switch to mock data
-        assert app._headset.state() == (None, None)
-        app._headset.on_rename(BLUE, "MindWave Mobile", "Blue")
-        app._settings_screen.device.relabel_bt_device.assert_called_with(BLUE, "Blue")
-        app._live_screen.update_device_status.assert_not_called()
-        app._settings_screen.device.update_device_status.assert_not_called()
+        rig = _rig(db)
+        rig.stream.is_connected = True  # the link outlives a switch to mock data
+        assert rig.headset.state() == (None, None)
+        rig.headset.on_rename(BLUE, "MindWave Mobile", "Blue")
+        rig.device.relabel_bt_device.assert_called_with(BLUE, "Blue")
+        rig.live_screen.update_device_status.assert_not_called()
+        rig.device.update_device_status.assert_not_called()
     finally:
         db.close()
 
@@ -156,10 +164,10 @@ def test_in_mock_mode_no_headset_is_in_use_and_a_rename_leaves_the_mock_labels(d
 def test_renaming_another_headset_leaves_the_selected_ones_labels(db_path):
     db = DatabaseManager(db_path=db_path)
     try:
-        app = _app(db)
-        app._headset.on_rename(GREY, "MindWave Mobile", "Grey")
-        app._settings_screen.device.relabel_bt_device.assert_called_with(GREY, "Grey")
-        app._live_screen.update_device_status.assert_not_called()
+        rig = _rig(db)
+        rig.headset.on_rename(GREY, "MindWave Mobile", "Grey")
+        rig.device.relabel_bt_device.assert_called_with(GREY, "Grey")
+        rig.live_screen.update_device_status.assert_not_called()
     finally:
         db.close()
 
@@ -167,12 +175,12 @@ def test_renaming_another_headset_leaves_the_selected_ones_labels(db_path):
 def test_the_connecting_overlay_names_the_headset_by_its_alias(db_path):
     db = DatabaseManager(db_path=db_path)
     try:
-        app = _app(db)
-        app._headset.on_rename(BLUE, "MindWave Mobile", "Blue")
-        run_in(app, Phase.STARTING)
-        app._real_stream.start.return_value = True
-        assert make_bt_wait(app).begin(app._run) is None  # the wait began
-        app._live_screen.show_overlay.assert_called_with("Connecting to Blue...")
+        rig = _rig(db)
+        rig.headset.on_rename(BLUE, "MindWave Mobile", "Blue")
+        rig.stream.start.return_value = True
+        wait = BtWait(rig.stream, rig.live_screen, headset_name=rig.headset.name, on_main_for=lambda run, fn: fn())
+        assert wait.begin(SessionRun(1)) is None  # the wait began
+        rig.live_screen.show_overlay.assert_called_with("Connecting to Blue...")
     finally:
         db.close()
 
@@ -180,9 +188,9 @@ def test_the_connecting_overlay_names_the_headset_by_its_alias(db_path):
 def test_scanned_devices_carry_their_aliases(db_path):
     db = DatabaseManager(db_path=db_path)
     try:
-        app = _app(db)
-        app._headset.on_rename(GREY, "MindWave Mobile", "Grey")
-        assert app._headset.with_aliases(PAIRED) == [{**PAIRED[0], "alias": ""}, {**PAIRED[1], "alias": "Grey"}]
+        rig = _rig(db)
+        rig.headset.on_rename(GREY, "MindWave Mobile", "Grey")
+        assert rig.headset.with_aliases(PAIRED) == [{**PAIRED[0], "alias": ""}, {**PAIRED[1], "alias": "Grey"}]
     finally:
         db.close()
 
@@ -191,9 +199,9 @@ def test_a_corrupt_alias_store_reads_as_none(db_path):
     db = DatabaseManager(db_path=db_path)
     try:
         db.set_setting("bt_device_aliases", "[1, 2")
-        assert _app(db)._headset.name() == "MindWave Mobile"
+        assert _rig(db).headset.name() == "MindWave Mobile"
         db.set_setting("bt_device_aliases", '["Blue"]')
-        assert _app(db)._headset.name() == "MindWave Mobile"
+        assert _rig(db).headset.name() == "MindWave Mobile"
     finally:
         db.close()
 
@@ -201,75 +209,77 @@ def test_a_corrupt_alias_store_reads_as_none(db_path):
 # ---- switching headsets ----
 
 
-def test_switching_headsets_while_a_session_runs_is_refused():
-    app = _app()
-    app._session_manager.start()
+def _refusal() -> str:
+    (popup,) = popups()
+    return popup_message(popup)
+
+
+def test_switching_headsets_while_a_session_runs_is_refused(fresh_app):
+    app = fresh_app
+    app._on_start()
     app._headset.on_select(GREY, "MindWave Mobile")
-    app._real_stream.set_device.assert_not_called()
-    app._info_popup.assert_called_once()
-    assert "switching headsets" in app._info_popup.call_args.args[1]
+    assert "switching headsets" in _refusal() and app._real_stream._device_address != GREY
 
 
-def test_switching_headsets_while_connecting_is_refused():
-    app = _app()
-    run_in(app, Phase.CONNECTING)
+def test_switching_headsets_while_connecting_is_refused(fresh_app, monkeypatch):
+    app = fresh_app
+    start_connecting(app, monkeypatch)
     app._headset.on_select(GREY, "MindWave Mobile")
-    app._real_stream.set_device.assert_not_called()
+    assert "switching headsets" in _refusal() and app._real_stream._device_address == HEADSET[0]
 
 
-def test_picking_the_selected_headset_during_a_session_is_not_refused(monkeypatch):
-    monkeypatch.setattr(APP, "USE_MOCK_DEVICE", False)  # in real mode it changes nothing; on the mock it would
-    app = _app()
-    app._session_manager.start()
-    app._headset.on_select(BLUE, "MindWave Mobile")
-    app._info_popup.assert_not_called()
+def test_picking_the_selected_headset_during_a_session_is_not_refused(fresh_app, monkeypatch):
+    app = fresh_app
+    start_connecting(app, monkeypatch)  # in real mode it changes nothing; on the mock it would
+    app._headset.on_select(*HEADSET)
+    assert popups() == [] and app._real_stream._device_address == HEADSET[0]
 
 
 def test_switching_headsets_between_sessions_selects_the_new_one(monkeypatch):
     monkeypatch.setattr(APP, "USE_MOCK_DEVICE", False)
-    app = _app()
-    app._headset.on_select(GREY, "MindWave Mobile")
-    app._real_stream.set_device.assert_called_once_with(GREY, "MindWave Mobile")
-    app._db.set_user_setting.assert_any_call(1, "bt_device_address", GREY)
+    rig = _rig()
+    rig.headset.on_select(GREY, "MindWave Mobile")
+    rig.stream.set_device.assert_called_once_with(GREY, "MindWave Mobile")
+    rig.db.set_user_setting.assert_any_call(1, "bt_device_address", GREY)
 
 
-def _select_for_real(app):
+def _select_for_real(rig):
     """A MagicMock stream doesn't run set_device: do what the real one does (the link to another headset closes)."""
     def set_device(address, name):
-        if address != app._real_stream._device_address:
-            app._real_stream.is_connected = False
-        app._real_stream._device_address, app._real_stream._device_name = address, name
-    app._real_stream.set_device.side_effect = set_device
+        if address != rig.stream._device_address:
+            rig.stream.is_connected = False
+        rig.stream._device_address, rig.stream._device_name = address, name
+    rig.stream.set_device.side_effect = set_device
 
 
 def test_picking_another_headset_shows_it_unconnected_everywhere(db_path):
     db = DatabaseManager(db_path=db_path)
     try:
-        app = _app(db)
-        app._headset.on_rename(GREY, "MindWave Mobile", "Grey")
-        _select_for_real(app)
-        app._real_stream.is_connected = True  # linked to BLUE between sessions
-        app._headset.on_select(GREY, "MindWave Mobile")
-        app._live_screen.update_device_status.assert_called_with(False, device_name="Grey", connecting=False)
-        app._settings_screen.device.update_device_status.assert_called_with(False, meta="Selected: Grey")
+        rig = _rig(db)
+        rig.headset.on_rename(GREY, "MindWave Mobile", "Grey")
+        _select_for_real(rig)
+        rig.stream.is_connected = True  # linked to BLUE between sessions
+        rig.headset.on_select(GREY, "MindWave Mobile")
+        rig.live_screen.update_device_status.assert_called_with(False, device_name="Grey", connecting=False)
+        rig.device.update_device_status.assert_called_with(False, meta="Selected: Grey")
     finally:
         db.close()
 
 
 def test_picking_the_connected_headset_again_keeps_it_shown_connected():
-    app = _app()
-    _select_for_real(app)
-    app._real_stream.is_connected = True
-    app._headset.on_select(BLUE, "MindWave Mobile")
-    app._settings_screen.device.update_device_status.assert_called_with(True, name="MindWave Mobile")
-    app._live_screen.update_device_status.assert_called_with(True, device_name="MindWave Mobile", connecting=False)
+    rig = _rig()
+    _select_for_real(rig)
+    rig.stream.is_connected = True
+    rig.headset.on_select(BLUE, "MindWave Mobile")
+    rig.device.update_device_status.assert_called_with(True, name="MindWave Mobile")
+    rig.live_screen.update_device_status.assert_called_with(True, device_name="MindWave Mobile", connecting=False)
 
 
 def test_the_list_learns_which_headset_is_selected_and_which_connected():
-    app = _app()
-    assert app._headset.state() == (BLUE, None)
-    app._real_stream.is_connected = True
-    assert app._headset.state() == (BLUE, BLUE)
+    rig = _rig()
+    assert rig.headset.state() == (BLUE, None)
+    rig.stream.is_connected = True
+    assert rig.headset.state() == (BLUE, BLUE)
 
 
 # ---- the Settings list ----

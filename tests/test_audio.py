@@ -2,7 +2,6 @@ import os
 import struct
 import threading
 import unittest
-from unittest.mock import MagicMock
 
 from kivy.clock import Clock
 
@@ -15,9 +14,8 @@ from app.audio_feedback.noise import (
     _generate_tone_wav,
 )
 from app.config import APP
-from app.ui.app_manager import EEGMeditationApp
+from tests._app import popup_titles
 from tests._audio_sequence import record_sequences, sequence_sleep
-from tests._sound_sources import make_sounds
 
 
 def _pcm_samples(pcm: bytes) -> tuple[int, ...]:
@@ -485,13 +483,12 @@ def test_a_test_restarted_supersedes_the_one_running(monkeypatch):
     eng.cleanup()
 
 
-def test_the_settings_audio_test_is_refused_while_a_session_runs(monkeypatch):
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    monkeypatch.setattr(EEGMeditationApp, "_session_pipeline_live", lambda self: True)  # running, paused or connecting
-    app._info_popup = MagicMock()
-    app._audio = MagicMock()
-    make_sounds(app).on_test_audio()
-    app._audio.prepare_feedback.assert_not_called()  # it would replace the session's players
-    app._audio.test_audio.assert_not_called()
-    assert app._info_popup.call_args.args[0] == "Session in progress"
-
+def test_the_settings_audio_test_is_refused_while_a_session_runs(fresh_app, monkeypatch):
+    app = fresh_app
+    app._on_start()  # running: paused or connecting are refused the same way (_session_pipeline_live)
+    replaced = []
+    monkeypatch.setattr(app._audio, "prepare_feedback", lambda *a, **k: replaced.append("prepare"))
+    monkeypatch.setattr(app._audio, "test_audio", lambda *a, **k: replaced.append("test"))
+    app._sounds.on_test_audio()
+    assert replaced == []  # it would replace the session's players
+    assert popup_titles() == ["Session in progress"]
