@@ -47,6 +47,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **Exporting sessions to CSV fed their rows into the first custom formula's `avg()`**: a session running meanwhile averaged them in, and each exported session's column began with the previous one's values; an export now computes its column on its own.
 - **A custom formula with `avg()` began each session with the last session's values** in its average, for its first ticks; each session now averages only its own.
 - **Picking the active profile again during a session changed the session**:
   a program never ended when that profile's timer was off in Settings, as the reload switched the program's timer off;

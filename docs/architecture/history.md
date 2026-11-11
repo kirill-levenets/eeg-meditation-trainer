@@ -44,6 +44,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `_selected_ids` and `toggle_session_selection` / `select_all_shown` / `export_selected` are the model (unit-tested).
   `export_selected` calls the `on_export_sessions` hook with sorted ids → `HistoryFlow.on_export_sessions_csv`:
   it loops `export_session_csv` off-thread into `csv_export.build_sessions_zip(path, {sid: csv})` (one `session_<id>.csv` entry each, skips empty) and delivers it through the shared `android_share.copy_to_documents` (desktop and Android).
+  A CSV's `custom_formula` column is formula slot 1's text recomputed from the stored rows on an evaluator of the export's own (`export_session_csv(sid, formula)`):
+  the slot's evaluator holds the running session's `avg()` windows, which an export must neither feed nor read.
 - **The chart's period** (#44).
   Both charts are `_DayChart`s that `_draw` `window(end)` for the one period end `HistoryScreen` owns, read through their `period_source` hook:
   `period_end` is today plus `_period_offset` days (0 for today's page, negative for an earlier one).

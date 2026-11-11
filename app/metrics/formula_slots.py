@@ -55,6 +55,7 @@ class FormulaSlots:
         return next((i for i, ev in enumerate(self.evaluators) if not ev.is_valid), 0)
 
     def reset_windows(self) -> None:
+        """A new session: every slot's avg() windows fill from its own ticks."""
         for ev in self.evaluators:
             ev.reset_windows()
 

@@ -1,5 +1,7 @@
 """History's exports through the flow on a real database: one session's CSV, and a selection as one ZIP off the main
 thread behind the overlay, said where it went; an export with no data says so."""
+import csv
+import io
 import os
 import zipfile
 from types import SimpleNamespace
@@ -43,9 +45,32 @@ def test_a_sessions_csv_is_written_beside_the_database(exporting):
         assert len(f.read().splitlines()) > 4  # a header and the ticks
 
 
+def test_an_export_leaves_the_running_formulas_averages(exporting):
+    # Slot 1's avg() is the running session's: an export computed its column through it, and the session went on
+    # averaging the exported rows (a selection's export does it from its worker thread).
+    flow, db, uid, _reported = exporting
+    ev = flow._formulas.evaluators[0]
+    ev.set_formula("avg(alpha1, 4)")
+    for _ in range(4):
+        ev.push_variables({"alpha1": 100.0})  # the running session's ticks
+    flow.on_export_csv(_session(db, uid, 4, "Quiet sit", 0.0))
+    ev.push_variables({"alpha1": 0.0})
+    assert ev.evaluate({"alpha1": 0.0}) == pytest.approx(75.0)
+
+
+def test_each_exported_session_averages_only_its_own_rows(exporting):
+    flow, db, uid, _reported = exporting
+    flow._formulas.evaluators[0].set_formula("avg(alpha1, 4)")
+    flow.on_export_csv(_session(db, uid, 4, "Loud sit", 100.0))
+    with open(flow.on_export_csv(_session(db, uid, 4, "Quiet sit", 0.0))) as f:
+        first = next(csv.DictReader(f))
+    assert float(first["custom_formula"]) == 0.0
+
+
 def test_a_selection_is_exported_as_one_zip_and_said_where(exporting):
     flow, db, uid, reported = exporting
-    ids = [_session(db, uid, 4, name, 100.0) for name in ("Morning sit", "Evening sit")]
+    flow._formulas.evaluators[0].set_formula("avg(alpha1, 4)")
+    ids = [_session(db, uid, 4, name, power) for name, power in (("Loud sit", 100.0), ("Quiet sit", 0.0))]
     flow.on_export_sessions_csv(ids)
     flow._loading.show.assert_called_once()
     flow._loading.hide.assert_called_once()
@@ -55,11 +80,13 @@ def test_a_selection_is_exported_as_one_zip_and_said_where(exporting):
     assert title == "Export complete" and "2 sessions" in message and not reported
     with zipfile.ZipFile(dest) as z:
         assert len(z.namelist()) == 2
+        firsts = [next(csv.DictReader(io.StringIO(z.read(f"session_{sid}.csv").decode()))) for sid in ids]
+    assert [float(row["custom_formula"]) for row in firsts] == [100.0, 0.0]  # each session averages its own rows
 
 
 def test_a_selection_with_no_data_says_so(exporting, monkeypatch):
     flow, db, _uid, reported = exporting
-    monkeypatch.setattr(db, "export_session_csv", lambda sid, custom_formula=None: "")
+    monkeypatch.setattr(db, "export_session_csv", lambda sid, formula="": "")
     flow.on_export_sessions_csv([7])
     assert reported == ["export_empty"]
     flow._loading.hide.assert_called_once()

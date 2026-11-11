@@ -1,3 +1,5 @@
+import csv
+import io
 import os
 import tempfile
 import unittest
@@ -144,6 +146,17 @@ class TestStorageIntegration(unittest.TestCase):
         self.assertIn("meditation_score", csv_str)
         lines = csv_str.strip().split("\n")
         self.assertEqual(len(lines), 3)  # header + 2 data rows
+
+    def test_export_csv_adds_a_formula_column_only_for_a_formula_that_runs(self):
+        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
+        self.db.save_metrics_batch(sid, [{"timestamp": 0.5, "alpha1": 40, "meditation_score": 55}])
+
+        def first_row(formula):
+            return next(csv.DictReader(io.StringIO(self.db.export_session_csv(sid, formula=formula))))
+
+        self.assertAlmostEqual(float(first_row("alpha1 * 2")["custom_formula"]), 80.0)
+        for formula in ("", "alpha1 +"):  # none, and one that can't run
+            self.assertNotIn("custom_formula", first_row(formula))
 
     def test_export_csv_empty_session(self):
         sid = self.db.save_session({"duration": 60, "threshold_used": 50})
