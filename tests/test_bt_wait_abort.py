@@ -13,6 +13,7 @@ from app.ui.bt_wait import BtWait
 from tests._bt_wait import make_bt_wait
 from tests._headset import make_headset
 from tests._program_run import make_run
+from tests._program_settings import make_programs
 from tests._session_run import run_in
 from tests._shown_session import make_shown
 
@@ -45,6 +46,7 @@ def _make_waiting_app() -> tuple[EEGMeditationApp, list]:
     app._timer_state = MagicMock()
     app._session_manager = SessionManager()  # idle: the session starts only when data arrives
     app._program_run = make_run(app)
+    app._program_settings = make_programs()  # idle: an ending re-derives its series
     app._headset = make_headset(app)
     app._bt_wait = make_bt_wait(app)
     app._shown = make_shown(app)
@@ -84,6 +86,7 @@ def test_app_init_defines_bt_wait_state(monkeypatch):
     app._settings_screen = MagicMock()
     app._timer_state = MagicMock()
     app._program_run = make_run(app)
+    app._program_settings = make_programs()  # idle: an ending re-derives its series
     app._on_connect_cancel()  # must not raise
 
 

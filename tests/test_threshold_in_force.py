@@ -31,6 +31,7 @@ from tests._sound_sources import make_sounds
 from tests.test_bt_wait_reconnect import wait  # noqa: F401  (fixture)
 from tests.test_resume_mirror import _drive_tick, _make_tick_app, _metrics, _raw_sample
 from tests.test_session_detail_open import _frames, app, db  # noqa: F401  (fixtures)
+from tests.test_session_ends_once import _locked_app
 
 
 def _threshold_app(*, program: bool = False, state: SessionState = SessionState.RUNNING) -> EEGMeditationApp:
@@ -44,8 +45,6 @@ def _threshold_app(*, program: bool = False, state: SessionState = SessionState.
     a._ticker = MagicMock(running=False)
     a._recorder = make_recorder(a)
     a._program_run = make_run(a, program=MagicMock() if program else None)
-    a._shamatha_threshold = 70
-    a._metrics_engine.meditation_threshold = 70
     sm = SessionManager()
     sm.start(threshold=70)
     if program:
@@ -62,31 +61,55 @@ def _next_target(a) -> float:
     return a._session_manager.add_metric({"shamatha_score": 60.0})["score_target"]
 
 
+def test_the_shamatha_pill_crosses_at_the_base_in_force(monkeypatch):
+    a, _queued, _reasons = _locked_app(monkeypatch)
+    calm = {**_metrics(), "shamatha_score": 60.0}
+    for _ in range(3):  # three ticks above the base of 50: the pill comes on
+        _drive_tick(a, _raw_sample(), calm)
+    assert a._run.shamatha_active
+    a._apply_threshold(70)  # the slider settled above the score
+    for _ in range(3):
+        _drive_tick(a, _raw_sample(), calm)
+    assert not a._run.shamatha_active
+
+
+def test_the_sound_and_the_engine_read_the_ticks_target_and_the_base(monkeypatch):
+    # A segment's target reaches the sound through the tick it is scored on; the engine's state keeps the base.
+    a, _queued, _reasons = _locked_app(monkeypatch)
+    a._session_manager.set_threshold(70)  # the base moved mid-session (the slider settled)
+    _drive_tick(a, _raw_sample(), _metrics())  # a simple session: the base
+    assert a._audio.update.call_args.args[1] == 70 and a._metrics_engine.process_sample.call_args.args[1] == 70
+    a._program_run = make_run(a, program=MagicMock())  # a program session in a segment with its own target
+    a._program_run.tick = lambda metrics, raw: None
+    a._session_manager.start_segment("shamatha_score", 60)
+    _drive_tick(a, _raw_sample(), _metrics())
+    assert a._audio.update.call_args.args[1] == 60.0 and a._metrics_engine.process_sample.call_args.args[1] == 70
+    between = {**_metrics(), "shamatha_score": 65.0}  # above the segment's 60, below the base's 70
+    for _ in range(3):
+        _drive_tick(a, _raw_sample(), between)
+    assert not a._run.shamatha_active  # the pill keeps the base, not a segment's target
+
+
 # ---- one path applies the threshold ----
 
 
-def test_a_new_threshold_moves_a_simple_sessions_sound_scoring_and_pill_together():
+def test_a_new_threshold_is_the_next_ticks_target_and_the_base():
     a = _threshold_app()
     a._apply_threshold(85)
-    a._audio.set_threshold.assert_called_with(85)
-    assert _next_target(a) == 85
-    assert a._shamatha_threshold == 85 and a._metrics_engine.meditation_threshold == 85
+    assert _next_target(a) == 85 and a._session_manager.threshold == 85  # the one owner every reader reads per tick
 
 
 def test_a_new_threshold_never_reaches_a_running_program():
     # A settle that lands late, or the profile's settings reloaded (re-picking the active profile), mid-program.
     a = _threshold_app(program=True)
     a._apply_threshold(85)
-    a._audio.set_threshold.assert_not_called()  # the sound kept the segment's 70 (it used to switch to 85)
-    assert _next_target(a) == 70
-    assert a._shamatha_threshold == 70 and a._metrics_engine.meditation_threshold == 70
+    assert _next_target(a) == 70 and a._session_manager.threshold == 70  # the segment's 70 stays in force
 
 
 def test_after_a_program_session_the_slider_applies_again():
     a = _threshold_app(program=True, state=SessionState.IDLE)  # _session_program_active stays set after the session
     a._apply_threshold(85)
-    a._audio.set_threshold.assert_called_with(85)
-    assert a._shamatha_threshold == 85
+    assert a._session_manager.threshold == 85
 
 
 class _Trigger:
@@ -115,7 +138,6 @@ def test_a_slider_drag_is_one_change_at_the_value_it_settles_on(monkeypatch):
     for t in triggers:
         if t.armed:
             t.fn(0)
-    a._audio.set_threshold.assert_called_once_with(85)
     assert _next_target(a) == 85
     assert a._session_manager.compute_statistics()["score_targets"] == "[70, 85]"
     a._persist_user_setting_later.assert_called_with("threshold")
@@ -123,7 +145,6 @@ def test_a_slider_drag_is_one_change_at_the_value_it_settles_on(monkeypatch):
 
 def test_a_session_waiting_for_the_headset_starts_with_the_threshold_set_during_the_wait(wait):  # noqa: F811
     a, stream, tick = wait
-    a._shamatha_threshold = 70
     a._settings_screen = MagicMock(threshold=70)
     a._metrics_engine = MagicMock()
     a._audio = MagicMock()
@@ -324,8 +345,7 @@ def test_a_session_start_clears_the_last_sessions_steps(program, first_target, m
     graph = a._live_screen.graph
     assert graph.set_threshold_steps.call_args_list[-1].args == (None,)
     graph.set_threshold.assert_called_with(float(first_target))
-    a._audio.set_threshold.assert_called_with(first_target)
-    assert a._shamatha_threshold == first_target
+    assert a._session_manager.threshold == first_target
     assert a._session_manager.state == SessionState.RUNNING
     assert _next_target(a) == first_target
 
@@ -376,7 +396,7 @@ def test_a_touch_after_the_program_ended_is_not_refused():
 
 def test_a_session_start_applies_its_threshold_whatever_the_last_one_left_running(monkeypatch):
     a = _start(True, monkeypatch, _ticker=MagicMock(running=True))  # the last session's tick hasn't exited yet
-    a._audio.set_threshold.assert_called_with(60)
+    assert a._session_manager.threshold == 60
 
 
 @pytest.mark.parametrize("program", [False, True])

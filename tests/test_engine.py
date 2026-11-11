@@ -1,6 +1,9 @@
 import unittest
 
+from app.config import METRICS
 from app.metrics.engine import MetricsEngine
+
+THRESHOLD = METRICS.MEDITATION_THRESHOLD_DEFAULT
 
 
 class TestSigmoid(unittest.TestCase):
@@ -79,13 +82,13 @@ class TestMetricsEngine(unittest.TestCase):
         self.assertGreaterEqual(score, 0.0)
 
     def test_shamatha_equals_meditation(self):
-        result = self.engine.process_sample(self.sample)
+        result = self.engine.process_sample(self.sample, THRESHOLD)
         self.assertAlmostEqual(
             result["shamatha_score"], result["meditation_score"]
         )
 
     def test_process_sample_returns_all_keys(self):
-        result = self.engine.process_sample(self.sample)
+        result = self.engine.process_sample(self.sample, THRESHOLD)
         expected_keys = [
             "timestamp", "alpha_norm", "beta_norm", "gamma_norm",
             "theta_norm", "delta_norm", "meditation_score", "distraction",
@@ -97,46 +100,42 @@ class TestMetricsEngine(unittest.TestCase):
 
     def test_state_classification_stable(self):
         state = self.engine.classify_state(
-            meditation_score=85, stability=10, sinking=20, distraction=20
+            meditation_score=85, stability=10, sinking=20, distraction=20,
+            threshold=THRESHOLD,
         )
         self.assertEqual(state, "Stable Focus")
 
     def test_state_classification_gross_distraction(self):
         state = self.engine.classify_state(
-            meditation_score=20, stability=10, sinking=20, distraction=80
+            meditation_score=20, stability=10, sinking=20, distraction=80,
+            threshold=THRESHOLD,
         )
         self.assertEqual(state, "Gross Distraction")
 
     def test_state_classification_sinking(self):
         state = self.engine.classify_state(
-            meditation_score=20, stability=10, sinking=80, distraction=20
+            meditation_score=20, stability=10, sinking=80, distraction=20,
+            threshold=THRESHOLD,
         )
         self.assertEqual(state, "Sinking")
 
     def test_state_classification_subtle(self):
         state = self.engine.classify_state(
-            meditation_score=85, stability=500, sinking=20, distraction=20
+            meditation_score=85, stability=500, sinking=20, distraction=20,
+            threshold=THRESHOLD,
         )
         self.assertEqual(state, "Subtle Distraction")
 
-    def test_meditation_threshold_setter(self):
-        self.engine.meditation_threshold = 60
-        self.assertEqual(self.engine.meditation_threshold, 60)
-        self.engine.meditation_threshold = 300
-        self.assertEqual(self.engine.meditation_threshold, 100)
-        self.engine.meditation_threshold = -10
-        self.assertEqual(self.engine.meditation_threshold, 0)
 
     def test_reset_clears_buffers(self):
-        self.engine.process_sample(self.sample)
+        self.engine.process_sample(self.sample, THRESHOLD)
         self.engine.reset()
-        result = self.engine.process_sample(self.sample)
+        result = self.engine.process_sample(self.sample, THRESHOLD)
         self.assertAlmostEqual(result["stability"], 0.0)
 
     def test_subtle_distraction_zero_when_below_threshold(self):
-        self.engine.meditation_threshold = 200
         result = self.engine.compute_subtle_distraction(
-            meditation_score=50
+            meditation_score=50, threshold=100
         )
         self.assertAlmostEqual(result, 0.0)
 
@@ -174,7 +173,7 @@ class TestMetricsEngine(unittest.TestCase):
             "beta1": 2000.0, "beta2": 2000.0,
             "gamma1": 500.0, "gamma2": 500.0,
         }
-        result = self.engine.process_sample(high_alpha)
+        result = self.engine.process_sample(high_alpha, THRESHOLD)
         self.assertGreater(result["meditation_score"], 75.0)
 
     def test_high_beta_gives_low_meditation(self):
@@ -185,7 +184,7 @@ class TestMetricsEngine(unittest.TestCase):
             "beta1": 50000.0, "beta2": 40000.0,
             "gamma1": 10000.0, "gamma2": 5000.0,
         }
-        result = self.engine.process_sample(high_beta)
+        result = self.engine.process_sample(high_beta, THRESHOLD)
         self.assertLess(result["meditation_score"], 50.0)
 
 
@@ -314,7 +313,7 @@ class TestSPrimeExposure(unittest.TestCase):
             "beta1": 4000.0, "beta2": 3000.0,
             "gamma1": 1000.0, "gamma2": 1000.0,
         }
-        result = engine.process_sample(high_alpha)
+        result = engine.process_sample(high_alpha, THRESHOLD)
         self.assertGreater(result["meditation_score"], 0.0)  # unclamped region
         self.assertAlmostEqual(engine.last_s_prime, result["meditation_score"] + 20.0, places=4)
 
@@ -341,7 +340,7 @@ class TestReferenceIntegration(unittest.TestCase):
             "beta1": 8000.0, "beta2": 7000.0,         # raw ratio ~0.5 -> mid-range distraction
             "gamma1": 2000.0, "gamma2": 1000.0,
         }
-        result = engine.process_sample(sample)
+        result = engine.process_sample(sample, THRESHOLD)
 
         pct = MetricsEngine.sqrt_pct_8band(sample)
         s_prime = engine.last_s_prime
@@ -355,6 +354,66 @@ class TestReferenceIntegration(unittest.TestCase):
         self.assertAlmostEqual(result["distraction"], expected_d, places=4)
         self.assertAlmostEqual(result["sinking"], expected_s, places=4)
         self.assertGreater(expected_d, 0.0)  # sample chosen to exercise the active branch
+
+
+def _alpha_sample(alpha: float) -> dict:
+    """A calm sample: alpha 2000 scores about 63, alpha 8000 about 155 (the score isn't capped at 100)."""
+    return {"delta": 1000.0, "theta": 2000.0, "alpha1": alpha, "alpha2": alpha, "beta1": 500.0, "beta2": 500.0,
+            "gamma1": 100.0, "gamma2": 100.0, "attention": 50.0, "meditation": 90.0, "timestamp": 0.0}
+
+
+_TICKS = 40  # enough for the smoothing and stability buffers to settle
+
+
+def _state_after(alpha: float, threshold: float) -> str:
+    engine = MetricsEngine()
+    for _ in range(_TICKS):
+        state = engine.process_sample(_alpha_sample(alpha), threshold)["state"]
+    return state
+
+
+def test_the_state_is_classified_against_the_threshold_passed_with_the_sample():
+    assert _state_after(2000.0, 50) == "Stable Focus"
+    assert _state_after(2000.0, 100) == "Neutral"
+
+
+def test_a_threshold_past_the_meditation_scale_classifies_as_its_ceiling():
+    # The slider reaches 180 while the state compares on the 0-100 meditation scale: a score of 155 is focus at 170.
+    assert _state_after(8000.0, 170) == "Stable Focus"
+
+
+_ABOVE_TICKS = 12  # past the 10 consecutive ticks above the threshold subtle distraction waits for
+
+
+def _subtle_after(threshold: float) -> float:
+    """Subtle distraction for scores alternating between 60 and 140, fed to the metric directly."""
+    engine = MetricsEngine()
+    for i in range(_ABOVE_TICKS):
+        subtle = engine.compute_subtle_distraction(140.0 if i % 2 else 60.0, threshold)
+    return subtle
+
+
+def test_subtle_distraction_counts_the_ticks_above_the_threshold_it_is_given():
+    assert _subtle_after(50) > 0.0  # every tick above the base: an oscillation above it
+    assert _subtle_after(100) == 0.0  # every other tick below it resets the streak
+
+
+def _max_subtle_of_a_sweep(threshold: float) -> float:
+    """The most subtle distraction a triangular alpha sweep (2000 to 8000, 6 ticks each way) gets through the
+    engine's smoothing; alternating samples would be averaged away."""
+    engine, best = MetricsEngine(), 0.0
+    for i in range(120):
+        phase = i % 12
+        alpha = 2000.0 + 1000.0 * (phase if phase <= 6 else 12 - phase)
+        subtle = engine.process_sample(_alpha_sample(alpha), threshold)["subtle_distraction"]
+        if i >= 30:
+            best = max(best, subtle)
+    return best
+
+
+def test_process_sample_measures_subtle_distraction_against_the_threshold_passed():
+    assert _max_subtle_of_a_sweep(50) > 0.0
+    assert _max_subtle_of_a_sweep(100) == 0.0
 
 
 if __name__ == "__main__":

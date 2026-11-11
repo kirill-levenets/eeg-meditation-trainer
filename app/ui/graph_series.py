@@ -1,5 +1,6 @@
 """Which series each graph shows: the on-graph series picker, and each graph's selection as the profile saves it."""
 from collections.abc import Callable
+from types import MappingProxyType
 
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
@@ -16,6 +17,17 @@ from app.ui.theme import (
     make_scroll_popup,
 )
 
+# The live metrics graph's first-run selection, and the fallback of a profile saved before the per-graph selection.
+FIRST_RUN_LIVE_SERIES = MappingProxyType({
+    "shamatha_score": True,
+    "meditation_score": False,
+    "distraction": False,
+    "sinking": False,
+    "subtle_distraction": False,
+    "native_attention": False,
+    "native_meditation": False,
+})
+
 
 def _show_row(btn, graph, key: str) -> None:
     """A picker row's look: the series' current name, filled and bold while it shows."""
@@ -29,20 +41,16 @@ def _show_row(btn, graph, key: str) -> None:
 class GraphSeries:
     """The live metrics graph lists a formula slot only while it is valid, and a program line only while its program
     runs and computes it; a session detail lists a program session's lines while it shows them. A program's own
-    series set is never saved as the profile's selection."""
+    series set is never saved as the profile's selection. Which lines are a program's, each graph says itself
+    (`program_keys`: set by `show_program_series`, cleared by what shows the saved selection again)."""
 
-    def __init__(self, ctx: AppContext, live_graph, formulas: FormulaSlots, program_run, program_settings,
-                 formula_settings, *, graphs: Callable[[], tuple], legacy_defaults: dict[str, bool],
-                 detail_program: Callable[[object], frozenset[str]]) -> None:
+    def __init__(self, ctx: AppContext, live_graph, formulas: FormulaSlots, formula_settings, *,
+                 graphs: Callable[[], tuple]) -> None:
         self._ctx = ctx
         self._live_graph = live_graph
         self._formulas = formulas
-        self._program_run = program_run
-        self._program_settings = program_settings
         self._formula_settings = formula_settings
         self._graphs = graphs
-        self._legacy_defaults = legacy_defaults
-        self._detail_program = detail_program  # the program lines a graph shows for the session detail on screen
 
     def present_picker(self, graph) -> None:
         """Open the shared multi-select series popup for `graph`.
@@ -53,12 +61,12 @@ class GraphSeries:
         that assigns a saved formula to that slot without leaving the picker.
         """
         is_live = graph is self._live_graph
-        detail_lines = self._detail_program(graph)
+        # The live graph's program lines are computed only while its session runs or connects (the idle preview's aren't).
+        listed_program_lines = graph.program_keys if not is_live or self._ctx.session.live() else frozenset()
         rows = []
         for key in graph.series_keys():
-            if key in PROGRAM_FORMULA_KEYS and key not in detail_lines and not (
-                    is_live and self._program_run.computes(key)):
-                continue  # program-controlled: listed only while its program runs, or a detail shows it
+            if key in PROGRAM_FORMULA_KEYS and key not in listed_program_lines:
+                continue  # program-controlled: listed only while its program runs and computes it, or a detail shows it
             btn = StyledButton(height=dp(44))
             _show_row(btn, graph, key)
             btn.bind(on_release=lambda b, k=key: self._toggle(graph, k, b))
@@ -134,15 +142,12 @@ class GraphSeries:
     def persist(self, graph) -> None:
         """Persist `graph`'s visible series under its per-graph key (on picker close).
 
-        Skips the live metrics graph while a program sets its series — a running one, or the idle preview of the one
-        Settings has loaded — and a detail showing a program session's: the program-driven set must not overwrite the
-        user's saved manual selection."""
+        Skips a graph showing a program's set (the live graph under a running program or the idle preview of the one
+        Settings has loaded, a detail showing a program session's): it must not overwrite the user's saved selection."""
         uid = self._ctx.user_id()
         if not (uid and graph.graph_id):
             return
-        if graph is self._live_graph and (self._program_run.active or self._program_settings.governs_live_series()):
-            return
-        if self._detail_program(graph):
+        if graph.program_keys:
             return
         self._ctx.db.set_user_json_setting(
             uid, f"graph_series_{graph.graph_id}",
@@ -165,7 +170,11 @@ class GraphSeries:
     def apply_saved(self, graph, user_id: int) -> None:
         """Apply one graph's persisted series selection (graph_series_<id>). The live
         metrics graph migrates the pre-F2 toggle_<key> rows when it has no JSON yet and
-        gates custom-formula slots on validity; other graphs default to all-visible."""
+        gates custom-formula slots on validity; other graphs default to all-visible. The live graph keeps the series
+        of a session that runs or connects."""
+        if graph is self._live_graph and self._ctx.session.live():
+            return
+        graph.set_program_lines()  # the profile's own selection replaces a program's set
         series = self._ctx.db.get_user_json_setting(user_id, f"graph_series_{graph.graph_id}")
         if series is not None:
             sel = set(series)
@@ -190,7 +199,7 @@ class GraphSeries:
             if key in FORMULA_KEYS:  # custom slots never had pre-F2 toggle_ rows
                 continue
             saved = self._ctx.db.get_user_setting(user_id, f"toggle_{key}")
-            active = (saved == "True") if saved is not None else self._legacy_defaults.get(key, True)
+            active = (saved == "True") if saved is not None else FIRST_RUN_LIVE_SERIES.get(key, True)
             if active:
                 sel.add(key)
         if self._ctx.db.get_user_setting(user_id, "custom_formula_visible") == "True":

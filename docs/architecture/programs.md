@@ -22,7 +22,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 - **Program shows EXACTLY its metric set, the whole session.**
   The live graph catalog (`live_session.METRICS_COLORS`/`METRICS_SCALES`/`SERIES_NAMES`) carries `"meditation_score"` (colour `C.MED_SCORE`, scale 100, label `"Meditation"`), so a "Meditation" segment is plottable;
-  it defaults to **hidden** (the first-run `_graph_toggles`, through `GraphSeries.restore`'s `key in sel`).
+  it defaults to **hidden** (the first-run `FIRST_RUN_LIVE_SERIES`, through `GraphSeries.restore`'s `key in sel`).
   It also carries **three** program-custom lines, `PROGRAM_FORMULA_KEYS = ("program_formula","program_formula_2","program_formula_3")` (colours `C.WARM`/`C.WARM2`/`C.WARM3`, scale 200), one per **distinct** custom formula in a program.
   `program_plan(prog)` (`app/session/session_program.py`, with `PROGRAM_FORMULA_KEYS`) returns `(program_keys, custom_slots, segment_keys)`:
   the set of series to show, the `(slot_key, custom_dict)` for each distinct custom (capped at 3), and the metric key each segment drives (a built-in key or its custom's slot).
@@ -34,18 +34,22 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `ProgramRun.begin` names the plan's `unrunnable` formulas in a popup (`info`, the app's `_info_popup`), a frame later so the start finishes its setup first:
   it stays until read, as a meditator who pressed Start may not be looking.
   `ProgramRun` (`app/ui/program_run.py`, the app's `_program_run`) holds the running program: `active` from the start's `begin(prog, feedback_ids, name)` until `end()`.
-  `begin` snapshots prior visibility, shows EXACTLY the runnable plan's keys (`show_program_series(graph, plan)` hides the rest), arms one persistent evaluator per custom that compiles into `formula_evs[slot]`, and stores each segment's metric key.
+  `begin` shows and marks EXACTLY the runnable plan's keys (`show_program_series(graph, plan)` hides the rest), arms one persistent evaluator per custom that compiles into `formula_evs[slot]`, and stores each segment's metric key.
   Each program line is shown the **whole** program and evaluated every tick (`tick` runs `formula_evs` into `metrics[slot]` through `custom_formula.evaluate_series`, as the Settings formulas are).
   `_enter_segment` repoints audio, goal and marker to the segment's key (a built-in key or a program slot);
   `_segment_ui` only relabels and shows a custom segment's line and moves the `»` marker (a built-in segment touches no visibility).
-  `end` restores the snapshot, resets all program-slot labels, and force-hides all `PROGRAM_FORMULA_KEYS`.
+  `end` resets all program-slot labels, force-hides all `PROGRAM_FORMULA_KEYS` and clears the mark;
+  every ending then derives the live graph's idle series again (`_undo_session_setup` → `ProgramSettings.sync_picker`): the loaded program's preview in program mode, else the saved selection.
+  A program's set on the live graph, and its mark, have two writers, the running program and that idle derivation (`refresh_live_series`, `GraphSeries.apply_saved`, also run at Start before `begin`);
+  the idle one does nothing while a session runs or connects: the session owns the graph, a re-pick of the active profile included.
 - `PROGRAM_FORMULA_KEYS` stay out of persistence, so they never leak into `graph_series_*`:
   `GraphSeries.persist` (which `_save_user_settings` runs through `persist_all`) filters them out, and `GraphSeries.restore`/`apply_saved` force-hide them.
-  `GraphSeries.present_picker` lists one (as `Program: <name>`) on the live graph **only while the running program computes it** (`ProgramRun.computes`).
-  It lists one on the session detail's metrics graph too, while it shows a program session's lines (`detail_program`, [session-detail](session-detail.md)).
-  Idle preview (`ProgramSettings.refresh_live_series`, run by `sync_picker`, not while a session runs): in program mode with a loaded program it shows the program's set via `show_program_series` before Start;
+  `GraphSeries.present_picker` lists one (as `Program: <name>`) on the live graph **only while the running program computes it**: marked, while the session runs or connects.
+  It lists one on the session detail's metrics graph too, while it shows a program session's lines (the graph's `program_keys`, [session-detail](session-detail.md)).
+  Idle preview (`ProgramSettings.refresh_live_series`, run by `sync_picker` on a mode change, a program edit, entering the Session screen, a profile load and every session ending;
+  not while a session runs or connects): in program mode with a runnable program (`governs_live_series`, the program the next Start runs) it shows the program's set via `show_program_series` before Start;
   otherwise `GraphSeries.apply_saved` restores the user's saved selection.
-  A running program (`ProgramRun.active`) or `governs_live_series()` stops `persist` for the live graph, so a program's visible set never overwrites the saved manual selection:
+  A graph marked with a program's lines (`program_keys`: a running program's, the idle preview's) skips `persist`, so a program's visible set never overwrites the saved manual selection:
   Settings → Timer can go back to simple during a program session while the graph still shows the program's set.
   The detail's metrics graph skips `persist` the same way while it shows a program session's lines.
 - Legend "training now" marker: `LegendBar.set_items(items, active_text=None)` bolds the matching item and prefixes it with `"» "` (geometric triangles render as tofu in this Kivy/Roboto build).

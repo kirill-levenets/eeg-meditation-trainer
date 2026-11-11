@@ -63,7 +63,7 @@ def app(db, monkeypatch):
     a._history_screen = MagicMock()
     a._history_screen.session_by_id = lambda sid: db.get_session(sid)  # the row History's list holds
     a._formulas = FormulaSlots()
-    a._graph_series = make_graph_series(a, graphs=a._detail_graphs)  # the diary's program lines, as build() wires them
+    a._graph_series = make_graph_series(a, graphs=a._detail_graphs)
     a._detail = make_detail_flow(a)
     workers = []
     monkeypatch.setattr(session_detail_flow.threading, "Thread",

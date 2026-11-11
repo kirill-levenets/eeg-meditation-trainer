@@ -6,9 +6,21 @@ from typing import NamedTuple
 
 from app.metrics.custom_formula import CustomFormulaEvaluator, compile_formula
 
+_MINUTES_CEILING = 10**6  # far past any real segment (the editor takes any whole number); keeps the timing finite
+
+
+def _stored_minutes(seg: dict) -> int:
+    """A segment's minutes as stored, clamped to the ceiling; 0 (not runnable) for a missing, non-numeric or infinite
+    value."""
+    try:
+        minutes = int(seg.get("minutes", 0))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    return min(minutes, _MINUTES_CEILING)
+
 
 def _minutes(seg: dict) -> int:
-    return max(1, int(seg.get("minutes", 0)))
+    return max(1, _stored_minutes(seg))
 
 
 def segment_target(seg: dict) -> int:
@@ -27,7 +39,7 @@ class SessionProgram:
     def __init__(self, segments) -> None:
         self._segments = [
             s for s in (segments or [])
-            if isinstance(s, dict) and int(s.get("minutes", 0)) > 0
+            if isinstance(s, dict) and _stored_minutes(s) > 0
         ]
 
     def __bool__(self) -> bool:

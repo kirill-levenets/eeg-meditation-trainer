@@ -34,72 +34,58 @@ class TestAudioFeedback(unittest.TestCase):
         self.gen.cleanup()
 
     def test_volume_at_threshold(self):
-        self.gen.set_threshold(50)
-        vol = self.gen.compute_volume(50)
+        vol = self.gen.compute_volume(50, 50)
         self.assertAlmostEqual(vol, 0.0)
 
     def test_volume_above_threshold(self):
-        self.gen.set_threshold(50)
-        vol = self.gen.compute_volume(100)
+        vol = self.gen.compute_volume(100, 50)
         self.assertAlmostEqual(vol, 0.0)
 
     def test_volume_at_zero(self):
-        self.gen.set_threshold(50)
-        vol = self.gen.compute_volume(0)
+        vol = self.gen.compute_volume(0, 50)
         self.assertAlmostEqual(vol, self.gen._max_volume)
 
     def test_volume_proportional(self):
-        self.gen.set_threshold(100)
-        vol = self.gen.compute_volume(50)
+        vol = self.gen.compute_volume(50, 100)
         # Log curve: volume at half-threshold is above half of max
         self.assertGreater(vol, self.gen._max_volume * 0.5)
         self.assertLess(vol, self.gen._max_volume)
 
     def test_volume_curve_monotonically_decreasing(self):
-        self.gen.set_threshold(100)
-        prev_vol = self.gen.compute_volume(0)
+        prev_vol = self.gen.compute_volume(0, 100)
         for score in range(10, 110, 10):
-            vol = self.gen.compute_volume(score)
+            vol = self.gen.compute_volume(score, 100)
             self.assertLessEqual(vol, prev_vol)
             prev_vol = vol
 
     def test_volume_never_negative(self):
-        self.gen.set_threshold(50)
         for score in range(-10, 200, 5):
-            vol = self.gen.compute_volume(score)
+            vol = self.gen.compute_volume(score, 50)
             self.assertGreaterEqual(vol, 0.0)
 
     def test_volume_never_exceeds_max(self):
-        self.gen.set_threshold(50)
         for score in range(-10, 200, 5):
-            vol = self.gen.compute_volume(score)
+            vol = self.gen.compute_volume(score, 50)
             self.assertLessEqual(vol, APP.MAX_VOLUME)
 
-    def test_set_threshold_minimum_clamp(self):
-        self.gen.set_threshold(0)
-        self.assertEqual(self.gen._threshold, 1)
-
-    def test_set_threshold_updates_value(self):
-        self.gen.set_threshold(75)
-        self.assertEqual(self.gen._threshold, 75)
+    def test_a_zero_threshold_is_scored_as_one(self):
+        self.assertAlmostEqual(self.gen.compute_volume(0, 0), self.gen.compute_volume(0, 1))
+        self.assertAlmostEqual(self.gen.compute_reward_volume(5, 0), self.gen.compute_reward_volume(5, 1))
 
     def test_update_sets_internal_volume(self):
-        self.gen.set_threshold(100)
-        self.gen.update(50)
+        self.gen.update(50, 100)
         self.assertGreater(self.gen.volume, self.gen._max_volume * 0.5)
         self.assertLess(self.gen.volume, self.gen._max_volume)
 
     def test_update_at_threshold_zeroes_volume(self):
-        self.gen.set_threshold(50)
-        self.gen.update(50)
+        self.gen.update(50, 50)
         self.assertAlmostEqual(self.gen.volume, 0.0)
 
     def test_initial_state_not_playing(self):
         self.assertFalse(self.gen.is_playing)
 
     def test_stop_resets_volume(self):
-        self.gen.set_threshold(100)
-        self.gen.update(25)
+        self.gen.update(25, 100)
         self.assertGreater(self.gen.volume, 0.0)
         self.gen.stop()
         self.assertAlmostEqual(self.gen.volume, 0.0)
@@ -114,9 +100,8 @@ class TestAudioFeedback(unittest.TestCase):
 
     def test_volume_with_different_thresholds(self):
         for threshold in [30, 50, 80, 100]:
-            self.gen.set_threshold(threshold)
-            vol_zero = self.gen.compute_volume(0)
-            vol_threshold = self.gen.compute_volume(threshold)
+            vol_zero = self.gen.compute_volume(0, threshold)
+            vol_threshold = self.gen.compute_volume(threshold, threshold)
             self.assertAlmostEqual(vol_zero, self.gen._max_volume)
             self.assertAlmostEqual(vol_threshold, 0.0)
 
@@ -129,15 +114,9 @@ class TestAudioFeedback(unittest.TestCase):
         self.assertFalse(os.path.exists(bell_path))
 
     def test_update_only_sets_internal_volume(self):
-        self.gen.set_threshold(100)
-        self.gen.update(50)
+        self.gen.update(50, 100)
         self.assertGreater(self.gen._volume, self.gen._max_volume * 0.5)
         self.assertLess(self.gen._volume, self.gen._max_volume)
-
-    def test_default_threshold_is_100(self):
-        gen = AudioEngine()
-        self.assertEqual(gen._threshold, 100)
-        gen.cleanup()
 
     def test_sinking_alert_enabled_default(self):
         self.assertFalse(self.gen.sinking_alert_enabled)
@@ -207,7 +186,7 @@ class TestAudioFeedback(unittest.TestCase):
 
         def update_volume():
             for i in range(100):
-                self.gen.update(i % 100)
+                self.gen.update(i % 100, 50)
                 results.append(self.gen.volume)
 
         threads = [threading.Thread(target=update_volume) for _ in range(4)]

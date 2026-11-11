@@ -44,7 +44,6 @@ class MetricsEngine:
         self._stability_buffer: VarianceBuffer = VarianceBuffer(
             max_size=METRICS.STABILITY_BUFFER_SIZE
         )
-        self._meditation_threshold: int = METRICS.MEDITATION_THRESHOLD_DEFAULT
         self._med_ratio_buffer: deque = deque(maxlen=self._MED_AVG_WINDOW)
         self._ticks_above_threshold: int = 0
         self._recent_med_buffer: deque = deque(maxlen=10)
@@ -54,14 +53,6 @@ class MetricsEngine:
     def last_s_prime(self) -> float:
         """Shamatha before the final -20 offset and clamp; drives distraction/sinking."""
         return self._last_s_prime
-
-    @property
-    def meditation_threshold(self) -> int:
-        return self._meditation_threshold
-
-    @meditation_threshold.setter
-    def meditation_threshold(self, value: int) -> None:
-        self._meditation_threshold = max(0, min(100, value))
 
     @staticmethod
     def sigmoid(raw: float, k: float, midpoint: float, max_scale: float = 100.0) -> float:
@@ -212,7 +203,7 @@ class MetricsEngine:
         return self._stability_buffer.variance()
 
     def compute_subtle_distraction(
-        self, meditation_score: float
+        self, meditation_score: float, threshold: float
     ) -> float:
         """Subtle distraction: meditation above threshold but oscillating.
 
@@ -222,7 +213,7 @@ class MetricsEngine:
         detect recent oscillations rather than the full 20s buffer.
         """
         self._recent_med_buffer.append(meditation_score)
-        if meditation_score > self._meditation_threshold:
+        if meditation_score > threshold:
             self._ticks_above_threshold += 1
         else:
             self._ticks_above_threshold = 0
@@ -254,17 +245,18 @@ class MetricsEngine:
         stability: float,
         sinking: float,
         distraction: float,
+        threshold: float,
     ) -> str:
         """Classify current meditation state."""
         if (
-            meditation_score >= self._meditation_threshold
+            meditation_score >= threshold
             and stability < METRICS.STABILITY_LIMIT
             and sinking < METRICS.SINKING_LIMIT
             and distraction < METRICS.DISTRACTION_LIMIT
         ):
             return "Stable Focus"
         if (
-            meditation_score >= self._meditation_threshold
+            meditation_score >= threshold
             and stability >= METRICS.STABILITY_LIMIT
         ):
             return "Subtle Distraction"
@@ -277,8 +269,10 @@ class MetricsEngine:
     # Minimum total power to consider data valid (suppresses startup noise)
     MIN_TOTAL_POWER: float = 100.0
 
-    def process_sample(self, raw_sample: dict[str, float]) -> dict[str, float]:
-        """Full pipeline: smooth → derive → normalize → compute all metrics."""
+    def process_sample(self, raw_sample: dict[str, float], threshold: float) -> dict[str, float]:
+        """Full pipeline: smooth → derive → normalize → compute all metrics, the state and subtle distraction against
+        the session's threshold in force (clamped to the 0-100 meditation scale)."""
+        threshold = max(0.0, min(100.0, threshold))
         smoothed = self._rolling_buffer.push_sample(raw_sample)
         bands = self.derive_bands(smoothed)
         norms = self.normalize_bands(bands)
@@ -317,9 +311,9 @@ class MetricsEngine:
             smoothed.get("beta1", 0.0), smoothed.get("beta2", 0.0),
             smoothed.get("alpha1", 0.0), pct8["alpha1"], s_prime,
         )
-        subtle_distraction = self.compute_subtle_distraction(meditation_score)
+        subtle_distraction = self.compute_subtle_distraction(meditation_score, threshold)
         shamatha = self.compute_shamatha(meditation_score)
-        state = self.classify_state(meditation_score, stability, sinking, distraction)
+        state = self.classify_state(meditation_score, stability, sinking, distraction, threshold)
 
         return {
             "timestamp": raw_sample.get("timestamp", 0.0),
@@ -374,5 +368,5 @@ if __name__ == "__main__":
     for s in samples:
         label = s.pop("label")
         engine.reset()
-        result = engine.process_sample(s)
+        result = engine.process_sample(s, METRICS.MEDITATION_THRESHOLD_DEFAULT)
 

@@ -326,7 +326,7 @@ Loading a program switches to Program mode.
 - **Scan Paired Devices** lists the paired Bluetooth devices, each with its name and address: every MindWave has the same Bluetooth name.
 - Tap a device to use it; this also turns Mock Data off.
   The row of the headset in use is filled, and the connected one shows a Bluetooth sign (with Mock Data on, none is marked).
-  You can't switch headsets while a session runs or connects.
+  You can't switch headsets or change Mock Data while a session runs or connects.
 - **Name a headset**: tap the pencil on its row, type a name and tap **Save** (or Enter).
   The name is the same for every profile on the phone and shows in the device status, on the Session screen and in the names of new sessions.
   Leave it blank to go back to the Bluetooth name.

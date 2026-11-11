@@ -59,7 +59,7 @@ from app.ui.bt_wait import BtWait
 from app.ui.diary_screen import DiaryScreen
 from app.ui.formula_settings import FormulaSettings
 from app.ui.graph_fullscreen import GraphFullscreen
-from app.ui.graph_series import GraphSeries
+from app.ui.graph_series import FIRST_RUN_LIVE_SERIES, GraphSeries
 from app.ui.headset import Headset
 from app.ui.history_flow import HistoryFlow
 from app.ui.history_screen import HistoryScreen
@@ -281,7 +281,7 @@ class EEGMeditationApp(App):
                                        formula_vars=self._eval_formula_vars)
         self._audio_metric = AudioMetric(self._ctx, self._formulas, self._program_run, self._settings_screen)
         self._program_settings = ProgramSettings(
-            self._ctx, self._settings_screen.timer, self._live_screen, self._session_manager,
+            self._ctx, self._settings_screen.timer, self._live_screen,
             show_saved_series=lambda uid: self._graph_series.apply_saved(self._live_screen.graph, uid))
         self._formula_settings = FormulaSettings(self._ctx, self._settings_screen.formulas, self._live_screen.graph,
                                                  self._formulas, scoring_locked=self._audio_metric.formula_scoring_locked)
@@ -293,10 +293,8 @@ class EEGMeditationApp(App):
                                on_main_for=self._on_main_for)
         self._watch = SessionWatch(self._real_stream, self._audio, self._live_screen, self._headset,
                                    on_main=self._on_main)
-        self._graph_series = GraphSeries(
-            self._ctx, self._live_screen.graph, self._formulas, self._program_run, self._program_settings,
-            self._formula_settings, graphs=self._all_graphs, detail_program=self._diary_screen.program_lines_of,
-            legacy_defaults=self._settings_screen._graph_toggles)
+        self._graph_series = GraphSeries(self._ctx, self._live_screen.graph, self._formulas, self._formula_settings,
+                                         graphs=self._all_graphs)
         self._history = HistoryFlow(self._ctx, self._history_screen, self._formulas, self._loading_overlay,
                                     on_sessions_deleted=lambda ids: self._shown.on_sessions_deleted(ids))
         self._shown = ShownSession(self._ctx, self._live_screen, self._audio, self._history, self._recorder)
@@ -392,7 +390,7 @@ class EEGMeditationApp(App):
         # with formula segments runs; a new profile starts on Shamatha alone (a profile load applies its own).
         for key in (*FORMULA_KEYS, *PROGRAM_FORMULA_KEYS):
             self._live_screen.graph.set_visible(key, False)
-        for key, active in self._settings_screen._graph_toggles.items():
+        for key, active in FIRST_RUN_LIVE_SERIES.items():
             self._live_screen.graph.set_visible(key, active)
 
     def _wire_settings_screen(self) -> None:
@@ -617,6 +615,7 @@ class EEGMeditationApp(App):
         self._recorder.begin()
         run.connect_start = time.time()
         self._shown.take(self._current_user_id)
+        self._program_settings.refresh_live_series()  # the idle series of the editor as it is now: begin builds on it
         self._program_run.begin(program, self._sounds.prepare_session(program), self._program_settings.name)
         self._live_screen.set_training_series(None)  # set on first segment crossing
         self._live_screen.set_controls_running()
@@ -733,6 +732,7 @@ class EEGMeditationApp(App):
         self._session_manager.reset()
         self._settings_screen.lock_threshold(None)
         self._keep_awake.release()
+        self._program_settings.sync_picker()  # after the reset: while the session still reads live, nothing is derived
 
     def _on_connect_retry(self, *args) -> None:
         """Retry button on connection overlay."""
@@ -945,7 +945,8 @@ class EEGMeditationApp(App):
         raw_sample = self._eeg_stream.read_sample()  # may wait on the reader's lock
         if self._outlived(run):
             return
-        metrics = self._metrics_engine.process_sample(raw_sample)
+        base = self._session_manager.threshold  # read once, so the engine and the pill are given the same value
+        metrics = self._metrics_engine.process_sample(raw_sample, base)
         self._watch.check_sample(run, raw_sample)
         run.tick_count += 1
         self._log_tick(run, raw_sample, metrics)
@@ -963,13 +964,13 @@ class EEGMeditationApp(App):
         tick = self._record_tick(run, raw_sample, metrics)
         if tick is None:
             return
-        self._audio.update(metrics.get(drive_key, 0))
+        self._audio.update(metrics.get(drive_key, 0), tick.score["score_target"])  # the tick's target: a segment's or the base
         if run.tick_count > 10:
             self._audio.update_sinking(metrics.get("sinking", 0))
             self._audio.update_subtle_distraction(metrics.get("subtle_distraction", 0))
 
         self._shown.mirror.record(tick)  # kept even while the screen is locked
-        self._show_tick(run, tick, mark)
+        self._show_tick(run, tick, mark, base)
         if self._timer_state.tick(APP.UPDATE_FREQUENCY):  # a pure counter, no UI
             self._end_by_timer(run)
             return
@@ -1004,8 +1005,9 @@ class EEGMeditationApp(App):
                      f"dist={metrics.get('distraction', 0):.0f} "
                      f"native_med={native_med:.0f}{bat_str}")
 
-    def _show_tick(self, run: SessionRun, tick: RecordedTick, mark: str | None) -> None:
-        """Tick thread: queue the tick's Session screen update for the main thread, unless the screen is locked."""
+    def _show_tick(self, run: SessionRun, tick: RecordedTick, mark: str | None, base: float) -> None:
+        """Tick thread: queue the tick's Session screen update for the main thread, unless the screen is locked; the
+        SHAMATHA pill crosses at the base threshold."""
         metrics, score = tick.metrics, tick.score
         elapsed_fmt = self._session_manager.elapsed_formatted
 
@@ -1014,7 +1016,7 @@ class EEGMeditationApp(App):
         sham_prev = run.shamatha_active
         run.shamatha_active, run.shamatha_streak = self._shamatha_transition(
             sham_prev,
-            metrics.get("shamatha_score", 0.0) >= self._shamatha_threshold,
+            metrics.get("shamatha_score", 0.0) >= base,
             run.shamatha_streak,
         )
         sham_changed = run.shamatha_active != sham_prev
@@ -1184,12 +1186,10 @@ class EEGMeditationApp(App):
             self._put_threshold_in_force(value)
 
     def _put_threshold_in_force(self, value: int) -> None:
-        """The sound, the scoring, the SHAMATHA pill and the engine together; a session start calls it directly."""
-        self._metrics_engine.meditation_threshold = value
-        self._audio.set_threshold(value)
-        self._shamatha_threshold = value
+        """The session manager owns the threshold; the graph draws it until ticks step the line. A session start calls
+        it directly."""
         self._session_manager.set_threshold(value)  # also what a session waiting for the headset starts with
-        self._live_screen.graph.set_threshold(float(value))  # drawn until ticks step the line
+        self._live_screen.graph.set_threshold(float(value))
 
     def _on_line_width_change(self, width: float) -> None:
         self._change_setting("line_width", width)
@@ -1319,13 +1319,13 @@ class EEGMeditationApp(App):
             ss.threshold = v
             self._apply_threshold(v)
 
-        def set_use_mock(v):
-            APP.USE_MOCK_DEVICE = v; ss.device._device_mode_cb.active = v
+        def apply_use_mock(v):
+            APP.USE_MOCK_DEVICE = v; ss.device._device_mode_cb.active = v  # an unchanged value doesn't re-fire its hook
 
         self._settings_store = SettingsStore(self._db, [
             *self._timer_settings(), *self._alert_settings(), *self._fold_settings(),
             kept("threshold", INT, lambda: int(ss.threshold), set_threshold),
-            kept("use_mock", BOOL, lambda: APP.USE_MOCK_DEVICE, set_use_mock),
+            held("use_mock", BOOL, APP.USE_MOCK_DEVICE, apply_use_mock),
             *self._sound_settings(), *self._display_settings()])
 
     def _timer_settings(self) -> list[Setting]:

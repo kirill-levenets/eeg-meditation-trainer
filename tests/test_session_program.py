@@ -56,9 +56,14 @@ def test_empty_and_malformed():
     assert not SessionProgram([])
     assert SessionProgram([]).total_seconds == 0
     assert SessionProgram([]).segment_at(0) == (-1, None)
-    # malformed entries (non-dict / zero minutes) are dropped
-    p = SessionProgram([{"minutes": 0, "target": 1}, "junk", {"minutes": 5, "target": 60}])
-    assert len(p.segments) == 1 and p.total_seconds == 300
+    # malformed entries (non-dict / zero, missing, non-numeric or infinite minutes) are dropped; a huge one clamps
+    p = SessionProgram([{"minutes": 0, "target": 1}, "junk", {"minutes": "abc"}, {"minutes": None}, {"target": 2},
+                        {"minutes": float("inf")}, {"minutes": float("nan")}, {"minutes": 1e308},
+                        {"minutes": 5, "target": 60}])
+    assert len(p.segments) == 2 and p.total_seconds == 300 + 10**6 * 60  # 1e308 clamped to the ceiling, kept
+    assert p.threshold_steps(2.0)  # the timing arithmetic stays finite
+    typed = SessionProgram([{"minutes": 1_000_001, "target": 60}])  # the editor takes any whole number
+    assert len(typed.segments) == 1
 
 
 def test_truthiness():

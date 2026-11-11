@@ -113,7 +113,7 @@ def _make_tick_app(is_paused: bool = False) -> EEGMeditationApp:
     audio_store(app)  # after the program run and the slots it reads, as build() makes them
     app._program_settings = make_programs(app._db, app._current_user_id)
 
-    app._shamatha_threshold = 50
+    app._session_manager.threshold = 50
 
     app._shown = make_shown(app)
     app._watch = make_watch(app)
@@ -242,6 +242,7 @@ def _make_resume_app(running: bool = True) -> EEGMeditationApp:
     app._session_manager.elapsed_formatted = "1:23"
     app._live_screen = MagicMock()
     app._program_run = make_run(app)
+    app._program_settings = make_programs()  # idle: an ending re-derives its series
     app._settings_screen = MagicMock()
     app._shown = make_shown(app)
     return app

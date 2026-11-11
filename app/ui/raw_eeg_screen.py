@@ -1,6 +1,7 @@
 import math
 import time as _time
 from collections import OrderedDict, deque
+from collections.abc import Iterable
 from typing import Optional
 
 from kivy.clock import Clock
@@ -98,6 +99,7 @@ class ScrollableGraphWidget(GraphGestures, GraphGlyphs, Widget):
             key: deque(maxlen=effective_max) for key in colors
         }
         self._visible: dict[str, bool] = dict.fromkeys(colors, True)
+        self._program_keys: frozenset[str] = frozenset()  # a program's set shown: never saved as the selection
         self._appended: dict[str, int] = dict.fromkeys(colors, 0)  # samples ever added: a run's absolute position
         self._run_extremes: dict[str, RunExtremes] = {}
         self._gradient_steps: list[tuple[int, str]] = []  # (first point, series): drawn from there in LINE_COLOURS
@@ -198,6 +200,14 @@ class ScrollableGraphWidget(GraphGestures, GraphGlyphs, Widget):
     def set_line_width(self, width: float) -> None:
         self._line_width = max(0.5, min(width, 5.0))
         self._redraw()
+
+    @property
+    def program_keys(self) -> frozenset[str]:
+        return self._program_keys
+
+    def set_program_lines(self, keys: Iterable[str] = ()) -> None:
+        """Mark the set shown as a program's; none: the profile's own selection."""
+        self._program_keys = frozenset(keys)
 
     def set_visible(self, metric: str, visible: bool) -> None:
         if metric in self._visible and self._visible[metric] != visible:  # each change redraws the graph and legend

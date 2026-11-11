@@ -15,6 +15,7 @@ from app.storage.database import DatabaseManager
 from app.ui.app_manager import EEGMeditationApp
 from tests._history_flow import make_history_flow
 from tests._program_run import make_run
+from tests._program_settings import make_programs
 from tests._recorder import make_recorder
 from tests._shown_session import make_shown
 
@@ -65,18 +66,19 @@ def test_user_stop_confirms_then_takes_the_shared_save_path():
     assert not hasattr(EEGMeditationApp, "_finish_stop")
 
 
-def test_user_stop_restores_program_series_and_clears_the_training_marker():
+def test_user_stop_derives_the_idle_series_and_clears_the_training_marker():
     app = _app()
     app._ticker = MagicMock(running=False)
     app._persist_session_data = MagicMock(return_value={"duration": 30})
     app._recorder.session_id = SID
-    for name in ("_program_run", "_keep_awake"):
+    for name in ("_program_run", "_keep_awake", "_program_settings"):
         setattr(app, name, MagicMock())
     app._timer_state = MagicMock()
     app._session_manager = MagicMock()
     app._stop_and_save(reason="user")
     app._persist_session_data.assert_called_once_with("user")
     app._program_run.end.assert_called_once()
+    app._program_settings.sync_picker.assert_called_once()  # the live graph's idle series derived again
     app._live_screen.set_training_series.assert_called_with(None)
     app._live_screen.show_summary.assert_called_once_with(SID, {"duration": 30}, title="")
 
@@ -109,6 +111,7 @@ def _recorded_session(db) -> EEGMeditationApp:
     app._with_score = lambda stats: stats
     app._session_custom_formulas_json = lambda: ""
     app._program_run = make_run()
+    app._program_settings = make_programs()  # idle: an ending re-derives its series
     app._make_session_name = lambda: "2026-10-05 07:00 - MindWave Mobile"
     app._ticker = MagicMock(running=False)
     app._eeg_stream = MagicMock()

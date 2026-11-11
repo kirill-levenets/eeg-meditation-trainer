@@ -233,7 +233,6 @@ def _make_noise_player(path: str, loop: bool = True):
             logger.warning(f"Falling back to SoundLoader for {path}: {e}")
     return _KivyNoisePlayer(path, loop)
 
-METRICS_THRESHOLD_FALLBACK = 100
 _FADE_SAMPLES = 512
 _NOISE_BUFFER_SECONDS = 10
 _HEARTBEAT_PULSE_SECONDS = 0.1  # short cricket chirp on a ~10s silent bed -> one chirp per loop
@@ -428,7 +427,6 @@ class AudioEngine:
         self._volume: float = 0.0
         self._target_volume: float = 0.0
         self._max_volume: float = APP.MAX_VOLUME
-        self._threshold: int = METRICS_THRESHOLD_FALLBACK
         self._is_playing: bool = False
         self._feedback_players: dict[str, object] = {}  # source_id -> looping player
         self._active_feedback: str = ""                 # below-threshold (noise) player id
@@ -631,28 +629,27 @@ class AudioEngine:
             time.sleep(self._RAMP_INTERVAL)
         self._ramp_running = False
 
-    def set_threshold(self, threshold: int) -> None:
-        self._threshold = max(1, threshold)
-
-    def compute_volume(self, meditation_score: float) -> float:
-        """Compute noise volume based on meditation score and threshold.
+    def compute_volume(self, meditation_score: float, threshold: float) -> float:
+        """Noise volume for a score against the threshold it is scored on (the tick's target).
 
         Uses log scaling so volume rises quickly at first but the rate of
         increase slows as score approaches zero (concave curve).
         Curve: log(1 + t*k) / log(1 + k), k=9.
         """
-        if meditation_score >= self._threshold:
+        threshold = max(1, threshold)
+        if meditation_score >= threshold:
             return 0.0
-        return self._log_rise((self._threshold - meditation_score) / self._threshold)
+        return self._log_rise((threshold - meditation_score) / threshold)
 
-    def compute_reward_volume(self, meditation_score: float) -> float:
+    def compute_reward_volume(self, meditation_score: float, threshold: float) -> float:
         """Above-threshold reward volume: silent at/below threshold, log-rising to
         max over [threshold, threshold + REWARD_SPAN]. Mirror of compute_volume so
         the two zones cross-fade cleanly (both 0 exactly at the threshold)."""
-        if meditation_score <= self._threshold:
+        threshold = max(1, threshold)
+        if meditation_score <= threshold:
             return 0.0
         span = max(1, APP.REWARD_SPAN)
-        return self._log_rise(min(1.0, (meditation_score - self._threshold) / span))
+        return self._log_rise(min(1.0, (meditation_score - threshold) / span))
 
     def _log_rise(self, t: float) -> float:
         """Volume for t in 0..1, log-curved (log(1 + 9t) / log 10): quick at first, slower toward max."""
@@ -660,13 +657,13 @@ class AudioEngine:
         scaled = math.log(1.0 + t * k) / math.log(1.0 + k)
         return min(scaled * self._max_volume, self._max_volume)
 
-    def update(self, meditation_score: float) -> None:
-        """Drive both feedback zones from one score: the below/noise channel falls as
-        you approach threshold, the reward channel (if armed) rises above it. The ramp
-        thread interpolates each player toward its target."""
-        below_vol = self.compute_volume(meditation_score)
+    def update(self, meditation_score: float, threshold: float) -> None:
+        """Drive both feedback zones from one score against the threshold it is scored on: the below/noise channel
+        falls as you approach it, the reward channel (if armed) rises above it. The ramp thread interpolates each
+        player toward its target."""
+        below_vol = self.compute_volume(meditation_score, threshold)
         self._reward_target_volume = (
-            self.compute_reward_volume(meditation_score) if self._reward_feedback else 0.0
+            self.compute_reward_volume(meditation_score, threshold) if self._reward_feedback else 0.0
         )
         if not self._is_playing or self._test_active:
             self._volume = below_vol
@@ -1058,12 +1055,11 @@ class AudioEngine:
 
 if __name__ == "__main__":
     engine = AudioEngine()
-    print(f"Volume at score 0: {engine.compute_volume(0):.2f}")
-    print(f"Volume at score 25: {engine.compute_volume(25):.2f}")
-    print(f"Volume at score 50: {engine.compute_volume(50):.2f}")
-    print(f"Volume at score 100: {engine.compute_volume(100):.2f}")
-    engine.set_threshold(100)
-    engine.update(25)
+    print(f"Volume at score 0: {engine.compute_volume(0, 100):.2f}")
+    print(f"Volume at score 25: {engine.compute_volume(25, 100):.2f}")
+    print(f"Volume at score 50: {engine.compute_volume(50, 100):.2f}")
+    print(f"Volume at score 100: {engine.compute_volume(100, 100):.2f}")
+    engine.update(25, 100)
     print(f"Volume after update(25): {engine.volume:.2f}")
     print(f"Sinking alert enabled: {engine.sinking_alert_enabled}")
     print(f"Disconnect alert enabled: {engine.disconnect_alert_enabled}")

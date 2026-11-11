@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **The threshold has one owner**: the session manager (the base, and a tick's target); the sound, the scoring, the engine's state and the SHAMATHA pill read it per tick instead of each keeping a copy written by two paths.
 - **With several MindWaves paired, Start asks which one** (#99): the app no longer opens Settings › Device at launch or after creating a profile; Settings › Device lists them, and **Start** opens it to pick one, as it did.
   Its "pick one" message now goes once a headset is picked or another profile is chosen, not only once one connects.
   A new profile still starts on Mock Data and leaves it when a MindWave is paired: one is picked for it, and with several **Start** asks which.
@@ -45,6 +46,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **Re-picking the active profile during a program session hid the program's own line** on the Session screen's graph, until the session ended; the graph now keeps a running session's series.
+- **A program's lines could be saved as the profile's series selection**: tapping a fixed duration while the Session screen previewed a program, or ending a program session after switching Settings › Timer to simple.
+- **Unticking Use Mock Data during a mock session saved it as a real-headset session** and left the mock stream running; a mode change is now refused while a session runs, like the scored metric.
+  The mode is a held setting now: a profile switch that changed it used to write it back to the database through the checkbox's handler.
 - **A Start cancelled just as the headset's first data arrived could leave a session running unseen**, so Restore and a profile switch said a session was in progress.
   Every ending now marks its run ended first, and a tick whose run has ended or been replaced (a Cancel, a Stop, a tick-thread ending, a new Start) changes nothing.
 - **Markers vanished from the Session screen's graphs** when a session ended, and when the screen was unlocked during one.

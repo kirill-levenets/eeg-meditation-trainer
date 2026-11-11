@@ -49,8 +49,9 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   and the pure `feedback_plan` / `source_spec` with `SoundSources.global_feedback_id` resolve the global setting and per-segment override (`""` inherits global);
   `ProgramRun._enter_segment` calls `set_active_feedback` at each boundary.
   Persisted per-user: `feedback_source` (`"none"` / `"noise"` / `"tone"` / `"custom"`, default `"noise"`) and `feedback_sound_path`.
-  **Dual-zone feedback** (#12, #9): two metric-keyed channels driven from one `update(score)`.
-  The **below** channel is the selected feedback source (`compute_volume`: log curve, 0 at/above threshold).
+  **Dual-zone feedback** (#12, #9): two metric-keyed channels driven from one `update(score, threshold)`.
+  The **below** channel is the selected feedback source (`compute_volume(score, threshold)`: log curve, 0 at/above threshold);
+  the threshold is the tick's score target, passed with each `update(score, threshold)`: the engine holds no copy of it.
   The **above-threshold reward** channel (`compute_reward_volume`: mirror log curve rising 0→max over `[threshold, threshold + APP.REWARD_SPAN(=30)]`, clamped) is a second prepared player designated by `set_reward(source_id)` (`""`=none).
   Both zones are 0 exactly at the threshold → clean cross-fade.
   The ramp loop drives **every** prepared player toward its role target (below→`_target_volume`, reward→`_reward_target_volume`, others→0); volume-only, tick/lock-safe.
