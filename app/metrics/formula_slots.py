@@ -54,6 +54,10 @@ class FormulaSlots:
         """First slot with no valid formula; slot 0 if all are full."""
         return next((i for i, ev in enumerate(self.evaluators) if not ev.is_valid), 0)
 
+    def reset_windows(self) -> None:
+        for ev in self.evaluators:
+            ev.reset_windows()
+
     def evaluate_into(self, metrics: dict, variables: Callable[[], dict[str, float]]) -> None:
         evaluate_series(dict(zip(FORMULA_KEYS, self.evaluators)), metrics, variables)
 

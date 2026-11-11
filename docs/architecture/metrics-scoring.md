@@ -21,6 +21,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 - Three custom-formula evaluators are keyed by `FORMULA_KEYS = ("custom_formula", "custom_formula_2", "custom_formula_3")`.
   `FormulaSlots` (`app/metrics/formula_slots.py`, the app's `_formulas`) holds them: `evaluators[i]`, the display names `names[i]` (default `"Custom 1/2/3"`), and `for_key(key)`, which maps a series key to its `CustomFormulaEvaluator`.
+  An evaluator's `avg()` windows fill from the session's ticks: each Start empties them (`FormulaSlots.reset_windows`), and `set_formula` with the formula it already runs changes nothing, so a profile's reload or a slot's rename mid-session leaves them.
   Settings → Custom Formula edits them through `FormulaSettings` (`app/ui/formula_settings.py`, the app's `_formula_settings`):
   a slot's apply, the saved formulas' save/load/delete/export, and the profile's load (slots, graph names, Settings inputs) and persist.
   Whether a formula can run is one check, `custom_formula.compile_formula` (an evaluator, or None and why), shared by Save, a slot and a program's plan.

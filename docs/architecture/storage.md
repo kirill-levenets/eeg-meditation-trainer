@@ -54,6 +54,9 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   A setting with one holder elsewhere keeps its `get`, since there is no second copy to keep in step:
   the theme, text size and line colours (their globals, with listeners), the fold states (their widgets), the graph zoom (the live graph);
   the stats view and the marker hotkey (their widgets), the timer's enable and minutes (the Timer section).
+  A profile's load must not change a running session: re-picking the active profile is allowed mid-session and reloads every setting.
+  So the timer's enable and minutes set the Timer section only, and a Start arms the session's timer from them (`_arm_timer`: a timer stored off would disable a running program's, which would then never end);
+  a formula slot reloaded with the formula it runs keeps its `avg()` windows (`CustomFormulaEvaluator.set_formula`); a running program's threshold is guarded (`_apply_threshold`).
   The audio metric and its formula slot are held too (`AudioMetric.settings`: a stored program slot heals to the baseline at load, an out-of-range slot clamps);
   behind controllers that can refuse a change while a session runs and show the one in force again (`AudioMetric.show`).
   The threshold keeps its slider as the one holder of the stored value (the value in force is `_put_threshold_in_force`'s).

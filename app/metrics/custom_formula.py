@@ -93,6 +93,8 @@ class CustomFormulaEvaluator:
         Returns (success, error_message).
         """
         formula = formula.strip()
+        if formula == self._formula and self.is_valid:
+            return True, ""  # the formula it runs: its avg() windows go on (a profile's reload, a rename)
         if not formula:
             self._formula = ""
             self._ast_tree = None
@@ -123,6 +125,10 @@ class CustomFormulaEvaluator:
         self._history.clear()
         self._avg_exprs = self._collect_avg_exprs(tree.body)
         return True, ""
+
+    def reset_windows(self) -> None:
+        """A new session: its avg() windows fill from its own ticks."""
+        self._history.clear()
 
     def push_variables(self, variables: dict[str, float]) -> None:
         """Record current tick's variable values into the history buffer.

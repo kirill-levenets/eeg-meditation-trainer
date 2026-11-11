@@ -6,7 +6,7 @@ from app.metrics.custom_formula import CustomFormulaEvaluator
 from app.metrics.formula_slots import FORMULA_KEYS, FormulaSlots, read_active
 from app.storage.database import DatabaseManager
 from app.ui.audio_metric import sound_metric
-from tests._app import popup_message, popups, tap
+from tests._app import FedSession, frames, popup_message, popups, reload_with, tap
 from tests._audio_metric import audio_metric_alone
 
 # ---- the three formula slots ----
@@ -95,6 +95,33 @@ def test_index_tap_does_not_rebind_when_non_formula_active():
     changes = []
     audio_metric_alone(change_setting=lambda key, value: changes.append((key, value))).on_formula_index(1)
     assert changes == [("audio_formula_index", 1)]
+
+
+_WINDOW = {"active_formulas": [{"name": "W", "formula": "avg(alpha1, 4)"}]}
+
+
+@pytest.mark.parametrize("next_profile", ["same", "another with the same formula"])
+def test_a_new_session_averages_only_its_own_ticks(fresh_app, monkeypatch, next_profile):
+    # The slots outlive sessions and profiles: the last session's ticks filled the next one's first averages.
+    app = fresh_app
+    reload_with(app, _WINDOW, audio_metric="custom_formula")
+    fed = FedSession(app, monkeypatch)
+    fed.raw = {**fed.raw, "alpha1": 100.0}
+    for _ in range(4):
+        fed.tick()
+    app._stop_and_save()
+    frames()
+    app._shown.close(keep_notes=False)
+    if next_profile != "same":
+        other = app._db.create_user("other")
+        app._db.set_user_json_setting(other, "active_formulas", _WINDOW["active_formulas"])
+        app._db.set_user_setting(other, "audio_metric", "custom_formula")
+        app._profiles.on_switch(other)
+        frames()
+    fed = FedSession(app, monkeypatch)
+    fed.raw = {**fed.raw, "alpha1": 0.0}
+    fed.tick()
+    assert app._session.recorder._buffer[-1]["custom_formula"] == 0.0
 
 
 # ---- a session records its formulas; its detail replays them ----

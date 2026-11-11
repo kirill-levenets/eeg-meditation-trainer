@@ -47,6 +47,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **A custom formula with `avg()` began each session with the last session's values** in its average, for its first ticks; each session now averages only its own.
+- **Picking the active profile again during a session changed the session**:
+  a program never ended when that profile's timer was off in Settings, as the reload switched the program's timer off;
+  and a custom formula with `avg()` started its average over, so the next ticks were scored and sounded on fewer values (so did renaming its slot).
+  The reload now sets only Settings › Timer's controls (a session's timer is set at its Start), and a slot given the formula it already runs keeps its averages.
 - **Re-picking the active profile during a program session hid the program's own line** on the Session screen's graph, until the session ended; the graph now keeps a running session's series.
 - **A program's lines could be saved as the profile's series selection**: tapping a fixed duration while the Session screen previewed a program, or ending a program session after switching Settings › Timer to simple.
 - **Unticking Use Mock Data during a mock session saved it as a real-headset session** and left the mock stream running; a mode change is now refused while a session runs, like the scored metric.

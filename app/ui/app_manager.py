@@ -581,6 +581,7 @@ class EEGMeditationApp(App):
         self._put_threshold_in_force(threshold)  # this session's, whatever the last one left running
         run = self._run
         self._session.engine.reset()
+        self._formulas.reset_windows()  # the slots outlive sessions; a program's evaluators are its own
         run.noise_detector = PowerLineDetector() if not APP.USE_MOCK_DEVICE else None
         self._session.recorder.begin()
         run.connect_start = time.time()
@@ -1277,17 +1278,13 @@ class EEGMeditationApp(App):
     def _timer_settings(self) -> list[Setting]:
         timer = self._settings_screen.timer
 
-        def set_timer_enabled(v):
-            self._session.timer.set_enabled(v); timer.timer_enabled = v
-
-        def set_timer_minutes(v):
-            self._session.timer.set_duration(v); timer.timer_minutes = v
-
         def apply_timer_sound(v):
             self._session.timer.set_custom_sound_path(v); timer.timer_sound_path = v
 
-        return [kept("timer_enabled", BOOL, lambda: timer.timer_enabled, set_timer_enabled),
-                kept("timer_minutes", INT, lambda: timer.timer_minutes, set_timer_minutes),
+        # Only Settings' controls: a Start arms the session's timer from them (_arm_timer), and a reload of the active
+        # profile mid-session must leave a running session's timer alone.
+        return [kept("timer_enabled", BOOL, lambda: timer.timer_enabled, lambda v: setattr(timer, "timer_enabled", v)),
+                kept("timer_minutes", INT, lambda: timer.timer_minutes, lambda v: setattr(timer, "timer_minutes", v)),
                 held("timer_sound", STR, timer.timer_sound_path, apply_timer_sound, settle=True)]
 
     def _alert_settings(self) -> list[Setting]:

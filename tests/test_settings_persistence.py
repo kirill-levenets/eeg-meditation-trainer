@@ -1,11 +1,13 @@
 """Change-callbacks persist through the settings registry; a settings save never touches the live timer."""
+import pytest
 from kivy.core.window import Window
 
+from app.config import APP
 from app.metrics.formula_slots import FORMULA_KEYS
 from app.session.session_program import PROGRAM_FORMULA_KEYS
 from app.ui.hooks import wire
 from app.ui.settings_screen import SettingsScreen
-from tests._app import program_mode, reload_with, setting_writes
+from tests._app import FedSession, frames, program_mode, reload_with, setting_writes
 
 # --- change-callback -> store.persist wiring -------------------------------------
 
@@ -53,6 +55,45 @@ def test_saving_settings_mid_program_keeps_the_programs_timer(fresh_app):
     app._save_user_settings()
     assert (app._session.timer.enabled, app._session.timer.duration_minutes) == (True, 45)
     assert app._db.get_user_setting(app._current_user_id, "timer_enabled") == "False"  # the profile's own, as saved
+
+
+def test_re_picking_the_profile_mid_program_keeps_the_programs_end(fresh_app, monkeypatch):
+    # Re-picking the active profile is allowed mid-session and reloads its settings: its timer, stored off, disabled
+    # the program's timer, and the program never ended.
+    app = fresh_app
+    reload_with(app, timer_enabled="False")
+    program_mode(app, [{"minutes": 1, "target": 50, "formula": "shamatha_score"}])
+    fed = FedSession(app, monkeypatch)
+    app._profiles.on_switch(app._current_user_id)
+    for _ in range(int(60 / APP.UPDATE_FREQUENCY)):
+        fed.tick()
+    frames()
+    sessions = app._db.get_all_sessions(app._current_user_id)
+    assert app._run is None and app._live_screen.summary_session_id == sessions[0]["id"]  # ended at 1 min, end card up
+
+
+def test_re_picking_the_profile_keeps_a_timed_session_timed_after_the_timer_was_unticked(fresh_app, monkeypatch):
+    # An untick during the session is for the next one; the re-pick saves it first, then loads it.
+    app = fresh_app
+    reload_with(app, timer_enabled="True", timer_minutes="5")
+    FedSession(app, monkeypatch)
+    app._settings_screen.timer.timer_enabled = False
+    app._profiles.on_switch(app._current_user_id)
+    assert (app._session.timer.enabled, app._session.timer.remaining_seconds) == (True, 300.0)
+
+
+def test_re_picking_the_profile_keeps_a_running_formulas_window(fresh_app, monkeypatch):
+    # Its avg() is the session's: the reload sets the formula the slot runs, and a reset scored the next ticks on less.
+    app = fresh_app
+    reload_with(app, {"active_formulas": [{"name": "W", "formula": "avg(alpha1, 4)"}]}, audio_metric="custom_formula")
+    fed = FedSession(app, monkeypatch)
+    fed.raw = {**fed.raw, "alpha1": 100.0}
+    for _ in range(4):
+        fed.tick()
+    app._profiles.on_switch(app._current_user_id)
+    fed.raw = {**fed.raw, "alpha1": 0.0}
+    fed.tick()
+    assert app._session.recorder._buffer[-1]["custom_formula"] == pytest.approx(75.0)
 
 
 def test_the_formula_slot_switch_tells_the_app_and_shows_a_slot_set_elsewhere():
