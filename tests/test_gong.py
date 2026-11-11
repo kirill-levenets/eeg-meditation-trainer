@@ -15,8 +15,7 @@ from app.audio_feedback.noise import (
     _AndroidMediaNoisePlayer,
     _KivyNoisePlayer,
 )
-from app.ui.app_manager import EEGMeditationApp
-from tests._sound_sources import make_sounds
+from tests._sound_sources import sounds_alone
 
 
 @pytest.fixture
@@ -285,16 +284,9 @@ def test_a_new_gong_is_built_outside_the_one_shot_lock(engine, monkeypatch, tmp_
 
 
 def test_the_settings_test_button_hears_the_gongs_end():
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._timer_state = MagicMock(custom_sound_path="")
-    app._audio = MagicMock()
-    app._settings_screen = MagicMock()
-    sounds = make_sounds(app)
-    sounds.warn_missing = MagicMock()  # its own report, tested apart
-    sounds.on_test_timer_sound()
-    on_end = app._audio.play_timer_sound.call_args.kwargs["on_end"]
-    assert on_end == app._settings_screen.timer.notify_timer_sound_test_ended
-
+    audio, timer_section = MagicMock(), MagicMock()
+    sounds_alone(audio=audio, timer_state=MagicMock(custom_sound_path=""), timer_section=timer_section).on_test_timer_sound()
+    assert audio.play_timer_sound.call_args.kwargs["on_end"] == timer_section.notify_timer_sound_test_ended
 
 
 @pytest.mark.parametrize("custom, exists, played, said", [
@@ -302,21 +294,17 @@ def test_the_settings_test_button_hears_the_gongs_end():
     ("gong.xyz", True, "", "The timer sound can't be played."),  # nothing rang
     ("", False, "", "The timer sound can't be played."),
     ("gong.xyz", True, "custom", None),
-    ("gong.xyz", False, "default", None),  # missing: SoundSources.warn_missing says so
+    ("gong.xyz", False, "default", None),  # missing: SoundSources.warn_missing says so, tested apart
     ("", False, "default", None),
 ])
 def test_the_settings_test_says_what_it_could_not_play(monkeypatch, tmp_path, custom, exists, played, said):
     reported = []
-    monkeypatch.setattr("app.ui.sound_sources.report_soft_error", lambda label, detail, **k: reported.append(detail))
+    monkeypatch.setattr("app.ui.sound_sources.report_soft_error",
+                        lambda label, detail, **k: reported.append(detail) if label == "timer_sound_unplayable" else None)
     path = str(tmp_path / custom) if custom else ""
     if exists:
         (tmp_path / custom).write_bytes(b"x")
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._timer_state = MagicMock(custom_sound_path=path)
-    app._audio = MagicMock()
-    app._audio.play_timer_sound.return_value = {"default": "/tmp/timer_bell.wav", "custom": path, "": ""}[played]
-    app._settings_screen = MagicMock()
-    sounds = make_sounds(app)
-    sounds.warn_missing = MagicMock()  # its own report, tested apart
-    sounds.on_test_timer_sound()
+    audio = MagicMock()
+    audio.play_timer_sound.return_value = {"default": "/tmp/timer_bell.wav", "custom": path, "": ""}[played]
+    sounds_alone(audio=audio, timer_state=MagicMock(custom_sound_path=path)).on_test_timer_sound()
     assert [d.split(":")[0] if ":" in d else d for d in reported] == ([said] if said else [])

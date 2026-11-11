@@ -32,7 +32,7 @@ class Headset:
     def __init__(self, ctx: AppContext, stream, device_section, live_screen, *,
                  serial_override: Callable[[], str | None]) -> None:
         self._ctx = ctx
-        self._stream = stream
+        self.stream = stream  # the link to the selected headset: it outlives sessions
         self._device_section = device_section
         self._live_screen = live_screen
         self._serial_override = serial_override
@@ -48,7 +48,7 @@ class Headset:
 
     def name(self) -> str:
         """The selected headset as its user calls it."""
-        stream = self._stream
+        stream = self.stream
         return device_label(stream._device_address or "", stream._device_name, self.aliases) or "Real EEG"
 
     def with_aliases(self, devices: list[dict]) -> list[dict]:
@@ -59,7 +59,7 @@ class Headset:
 
     def state(self) -> tuple[str | None, str | None]:
         """(selected, connected) headset addresses, none in mock mode: the stream's link is always to the selected one."""
-        stream = self._stream
+        stream = self.stream
         if APP.USE_MOCK_DEVICE:
             return None, None
         return stream._device_address, stream._device_address if stream.is_connected else None
@@ -70,7 +70,7 @@ class Headset:
     def show_selected(self) -> None:
         """The selected headset's name and link, on the Session screen and in Settings; a session's lost link shows as
         connecting, since the reader reconnects."""
-        connected = self._stream.is_connected
+        connected = self.stream.is_connected
         label = self.name()
         self._live_screen.update_device_status(connected, device_name=label,
                                                connecting=self._ctx.session.live() and not connected)
@@ -87,11 +87,11 @@ class Headset:
             return
         if not self._serial_override():
             address = self._ctx.db.get_user_setting(uid, "bt_device_address") or None
-            self._stream.set_device(address, self._ctx.db.get_user_setting(uid, "bt_device_name") or "")
+            self.stream.set_device(address, self._ctx.db.get_user_setting(uid, "bt_device_name") or "")
             self._device_section.update_device_status(False, meta=f"Saved device: {self.name()}" if address else "")
         self._device_section.clear_picker_banner()  # it asked the last profile
         self._live_screen.update_device_status(False, device_name=self._session_label())
-        if not self._stream._device_address and not APP.USE_MOCK_DEVICE:
+        if not self.stream._device_address and not APP.USE_MOCK_DEVICE:
             self.scan()
 
     def on_mode_toggle(self, use_mock: bool) -> None:
@@ -105,7 +105,7 @@ class Headset:
         self._scan_seq += 1
         self._ctx.change_setting("use_mock", use_mock)
         self._device_section.clear_picker_banner()  # Start's question was for the real headset
-        addr = self._stream._device_address or "none"
+        addr = self.stream._device_address or "none"
         self._device_section.update_device_status(False, meta="Mode: Mock Data" if use_mock
                                                   else f"Mode: Real Device ({addr})")
         self._live_screen.update_device_status(False, device_name=self._session_label())
@@ -117,11 +117,11 @@ class Headset:
 
     def on_select(self, address: str, name: str) -> None:
         """A headset picked in the list, or the one a scan found: the profile's, in real mode."""
-        leaves_selection = address != self._stream._device_address or APP.USE_MOCK_DEVICE  # a pick on the mock leaves it
+        leaves_selection = address != self.stream._device_address or APP.USE_MOCK_DEVICE  # a pick on the mock leaves it
         if leaves_selection and self._ctx.session.refused("switching headsets"):
             return
         self._scan_seq += 1
-        self._stream.set_device(address, name)
+        self.stream.set_device(address, name)
         self._use_real_device()
         self._device_section.clear_picker_banner()
         self.show_selected()
@@ -165,7 +165,7 @@ class Headset:
         """A scan's paired devices: a single MindWave becomes the profile's headset unless it has one, and Settings →
         Device lists the MindWaves, or every paired device when none is one. Returns the MindWaves."""
         mindwaves = filter_mindwave(devices)
-        if len(mindwaves) == 1 and not self._stream._device_address:
+        if len(mindwaves) == 1 and not self.stream._device_address:
             self.on_select(mindwaves[0]["address"], mindwaves[0]["name"])
             logger.info(f"Auto-selected BT device: {mindwaves[0]['name']}")
         self.list_devices(mindwaves or devices)
@@ -209,12 +209,12 @@ class Headset:
         except Exception:  # noqa: BLE001 - the report says it couldn't list them
             paired_summary = "  (failed to enumerate)"
 
-        current_addr = self._stream._device_address or "(none)"
-        current_name = self._stream._device_name or "(none)"
-        last_err = self._stream._last_connect_error or "(none)"
-        last_packet = self._stream.seconds_since_last_packet
-        signal = self._stream._latest_signal_quality
-        battery = self._stream._battery_level
+        current_addr = self.stream._device_address or "(none)"
+        current_name = self.stream._device_name or "(none)"
+        last_err = self.stream._last_connect_error or "(none)"
+        last_packet = self.stream.seconds_since_last_packet
+        signal = self.stream._latest_signal_quality
+        battery = self.stream._battery_level
         sample_rate = APP.WHITE_NOISE_SAMPLE_RATE
         max_volume = APP.MAX_VOLUME
         use_mock = APP.USE_MOCK_DEVICE

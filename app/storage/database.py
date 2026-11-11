@@ -6,15 +6,13 @@ import sqlite3
 import threading
 from contextlib import contextmanager
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 from app.config import APP
 from app.eeg.band_spec import BAND_KEYS, group_powers
 from app.logger import logger
+from app.metrics.custom_formula import CustomFormulaEvaluator, compile_formula
 from app.metrics.engine import MetricsEngine
-
-if TYPE_CHECKING:
-    from app.metrics.custom_formula import CustomFormulaEvaluator
 
 
 class _NullCursor:
@@ -714,7 +712,7 @@ class DatabaseManager:
         return fvars
 
     def recompute_formula_series(
-        self, session_id: int, evaluators: "dict[str, CustomFormulaEvaluator]", rows: list[dict] | None = None,
+        self, session_id: int, evaluators: dict[str, CustomFormulaEvaluator], rows: list[dict] | None = None,
     ) -> dict[str, list[float]]:
         """Recompute each {series_key: evaluator} over a session's stored rows (`rows` when already read).
 
@@ -731,22 +729,19 @@ class DatabaseManager:
                 out[key].append(ev.evaluate(fvars))
         return out
 
-    def export_session_csv(self, session_id: int, custom_formula=None) -> str:
-        """Export all metrics for a session as a CSV string.
-
-        If custom_formula (CustomFormulaEvaluator) is provided and has a valid
-        formula, recomputes custom_formula values from stored band powers and
-        appends the column.
-        """
+    def export_session_csv(self, session_id: int, formula: str = "") -> str:
+        """All metrics of a session as a CSV string; a `formula` that runs adds its `custom_formula` column, recomputed
+        from the stored rows."""
         metrics = self.get_session_metrics(session_id)
         if not metrics:
             return ""
 
-        if custom_formula and custom_formula.is_valid:
+        evaluator, _error = compile_formula(formula)  # its own: its avg() windows see this session's rows only
+        if evaluator is not None:
             for row in metrics:
                 fvars = self.formula_vars_from_row(row)
-                custom_formula.push_variables(fvars)
-                row["custom_formula"] = custom_formula.evaluate(fvars)
+                evaluator.push_variables(fvars)
+                row["custom_formula"] = evaluator.evaluate(fvars)
 
         output = io.StringIO()
         writer = csv.DictWriter(output, fieldnames=metrics[0].keys())

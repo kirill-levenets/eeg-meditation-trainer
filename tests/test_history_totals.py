@@ -3,7 +3,6 @@ each period's total time, time on target and best streak; under the chart on a p
 sideways."""
 
 import datetime
-from types import SimpleNamespace
 
 import pytest
 from kivy.base import EventLoop
@@ -11,11 +10,7 @@ from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.tests.common import UnitTestTouch
 
-from app.session.manager import SessionManager
-from app.settings.registry import BOOL, Setting, SettingsStore
-from app.storage.database import DatabaseManager
 from app.ui import history_screen, theme
-from app.ui.app_manager import EEGMeditationApp
 from app.ui.history_screen import HistoryScreen
 from app.ui.hooks import wire
 from app.ui.theme import Icons
@@ -198,25 +193,17 @@ def test_folded_sideways_and_turned_upright_the_table_stays_with_the_chart(histo
     assert h._chart_area.parent is h._root
 
 
-def test_the_folded_chart_is_saved_per_profile(history, tmp_path):
-    db = DatabaseManager(db_path=str(tmp_path / "t.db"))
-    try:
-        me, other = db.create_user("me"), db.create_user("other")
-        a = EEGMeditationApp.__new__(EEGMeditationApp)
-        a._db, a._current_user_id, a._loading_settings = db, me, False
-        a._history_screen = history
-        # As _build_settings_store declares it, and as build() wires the chevron.
-        a._settings_store = SettingsStore(db, [Setting("history_chart_collapsed", False, BOOL[0], BOOL[1],
-                                                       lambda: history.chart_collapsed, history.set_chart_collapsed)])
-        wire(history, on_chart_collapse=lambda _c: a._persist_user_setting("history_chart_collapsed"))
-        history._btn_collapse.dispatch("on_release")  # "me" folds it
-        assert db.get_user_setting(me, "history_chart_collapsed") == "True"
-        a._settings_store.load(other)
-        assert not history.chart_collapsed  # the other profile's own state
-        a._settings_store.load(me)
-        assert history.chart_collapsed
-    finally:
-        db.close()
+def test_the_folded_chart_is_saved_per_profile(fresh_app):
+    app = fresh_app
+    history, me = app._history_screen, app._current_user_id
+    other = app._db.create_user("other")
+    app._db.set_user_setting(other, "use_mock", "True")
+    history._btn_collapse.dispatch("on_release")  # "me" folds it
+    assert history.chart_collapsed and app._db.get_user_setting(me, "history_chart_collapsed") == "True"
+    app._profiles.on_switch(other)
+    assert not history.chart_collapsed  # the other profile's own state
+    app._profiles.on_switch(me)
+    assert history.chart_collapsed
 
 
 def test_without_the_icon_font_the_chevron_says_hide_and_show(monkeypatch):
@@ -228,14 +215,13 @@ def test_without_the_icon_font_the_chevron_says_hide_and_show(monkeypatch):
     assert h._btn_collapse.text == "Show"
 
 
-def test_resuming_onto_history_moves_today_on(history, monkeypatch):
-    a = EEGMeditationApp.__new__(EEGMeditationApp)
-    a._sm = SimpleNamespace(current="history")
-    a._history_screen = history
-    a._session_manager = SessionManager()
+def test_resuming_onto_history_moves_today_on(fresh_app, monkeypatch):
+    app = fresh_app
+    app._switch_screen("history")
+    assert _table(app._history_screen)[0][0] != "Mon 12 Oct"
     monkeypatch.setattr(history_screen, "_today", lambda: datetime.date(2026, 10, 12))
-    a._refresh_ui_after_resume()
-    assert _table(history)[0][0] == "Mon 12 Oct"
+    app._refresh_ui_after_resume()
+    assert _table(app._history_screen)[0][0] == "Mon 12 Oct"
 
 
 def test_the_chevron_sits_right_after_the_title(history):

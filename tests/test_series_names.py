@@ -1,39 +1,31 @@
 """Each graph keeps its own series names: a session opened in History names its own lines, never the Session screen's,
 and a program's labels go when it ends."""
 
-from unittest.mock import MagicMock
-
 import pytest
 
-from app.metrics.formula_slots import FormulaSlots
 from app.session.session_program import SessionProgram, runnable_plan
-from app.ui.app_manager import EEGMeditationApp
 from app.ui.diary_screen import DiaryScreen
 from app.ui.live_session import SERIES_NAMES, LiveSessionScreen
 from app.ui.program_run import show_program_series
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
-from tests._formula_settings import make_formula_settings
-from tests._graph_series import make_graph_series
+from tests._app import frames, program_mode, reload_with, start_connecting
 from tests._picker import picker_rows
-from tests._program_run import make_run
-from tests._program_settings import make_programs
 
 PAST_NAMES = {"custom_formula": "Old beta", "custom_formula_2": "Custom 2", "custom_formula_3": "Custom 3"}
 
 
+DEEP = {"minutes": 5, "target": 60, "formula": {"name": "Deep", "formula": "alpha1"}}
+
+
 @pytest.fixture
-def app() -> EEGMeditationApp:
-    a = EEGMeditationApp.__new__(EEGMeditationApp)
-    a._live_screen = LiveSessionScreen()
-    a._diary_screen = DiaryScreen()
-    a._formulas = FormulaSlots()
-    a._db = MagicMock()
-    a._db.get_user_json_setting.return_value = [{"name": "Calm alpha", "formula": ""}]
-    make_formula_settings(a).load(1)  # the profile's slot names, as loading its settings does
-    a._program_run = make_run(a)
-    a._live = False  # whether a session runs or connects
-    a._graph_series = make_graph_series(a, live=lambda: a._live)
-    return a
+def app(fresh_app):
+    """The app; the profile named its first formula slot "Calm alpha"."""
+    reload_with(fresh_app, {"active_formulas": [{"name": "Calm alpha", "formula": ""}]})
+    return fresh_app
+
+
+def _program_rows(app, monkeypatch) -> list[str]:
+    return [row for row in picker_rows(app, monkeypatch) if row.startswith("Program")]
 
 
 def test_opening_a_past_session_leaves_the_session_screens_names(app):
@@ -43,73 +35,61 @@ def test_opening_a_past_session_leaves_the_session_screens_names(app):
 
 
 def test_the_detail_starts_from_the_defaults_not_the_session_screens_names(app):
-    assert app._diary_screen._metrics_graph.series_name("custom_formula") == "Custom 1"
+    assert app._live_screen.graph.series_name("custom_formula") == "Calm alpha"  # built in the same process
+    assert DiaryScreen()._metrics_graph.series_name("custom_formula") == "Custom 1"
     assert SERIES_NAMES["custom_formula"] == "Custom 1"
 
 
 def test_the_idle_preview_shows_shamatha_for_a_formula_that_cant_run(app):
-    programs = make_programs(MagicMock(), 1, live_screen=app._live_screen)
-    programs.mode = "program"
-    programs.segments = [{"minutes": 5, "target": 60, "formula": {"name": "Broken", "formula": "alpha1 +"}}]
-    programs.refresh_live_series()
-    graph = app._live_screen.graph
-    assert graph.visible_keys() == ["shamatha_score"]  # what the start will drive; no line for "Broken"
+    program_mode(app, [{"minutes": 5, "target": 60, "formula": {"name": "Broken", "formula": "alpha1 +"}}])
+    assert app._live_screen.graph.visible_keys() == ["shamatha_score"]  # what the start will drive; no line for "Broken"
 
 
 def test_a_programs_labels_go_when_it_ends(app):
     graph = app._live_screen.graph
-    show_program_series(graph, runnable_plan(SessionProgram([{"minutes": 5, "target": 60,
-                                                              "formula": {"name": "Deep", "formula": "alpha1"}}])))
+    show_program_series(graph, runnable_plan(SessionProgram([DEEP])))
     assert graph.series_name("program_formula") == "Program: Deep"
-    app._program_run.end()
+    app._session.program_run.end()
     assert graph.series_name("program_formula") == "Program"
 
 
-def _run_program(app, segments) -> None:
-    prog = SessionProgram(segments)
-    app._program_run.begin(prog, [], "")  # as a program session's start does
-    app._live = True
-
-
 def test_a_program_of_built_in_metrics_lists_no_program_lines(app, monkeypatch):
-    _run_program(app, [{"minutes": 5, "target": 50, "formula": "shamatha_score"},
+    program_mode(app, [{"minutes": 5, "target": 50, "formula": "shamatha_score"},
                        {"minutes": 5, "target": 60, "formula": "meditation_score"}])
-    assert not [row for row in picker_rows(app, monkeypatch) if row.startswith("Program")]
+    app._on_start()
+    assert _program_rows(app, monkeypatch) == []
 
 
 def test_a_program_lists_only_the_lines_it_computes(app, monkeypatch):
-    segments = [{"minutes": 5, "target": 60, "formula": {"name": "Deep", "formula": "alpha1"}},
-                {"minutes": 5, "target": 60, "formula": "shamatha_score"}]
+    segments = [DEEP, {"minutes": 5, "target": 60, "formula": "shamatha_score"}]
     assert list(runnable_plan(SessionProgram(segments)).evaluators) == ["program_formula"]
-    _run_program(app, segments)
-    assert [row for row in picker_rows(app, monkeypatch) if row.startswith("Program")] == ["Program: Deep"]
+    program_mode(app, segments)
+    app._on_start()
+    assert _program_rows(app, monkeypatch) == ["Program: Deep"]
 
 
 def test_the_idle_preview_lists_no_program_line(app, monkeypatch):
     # The preview shows a program's set before Start; its custom line computes nothing until the session runs.
-    programs = make_programs(MagicMock(), 1, live_screen=app._live_screen, live=lambda: app._live)
-    programs.mode = "program"
-    programs.segments = [{"minutes": 5, "target": 60, "formula": {"name": "Deep", "formula": "alpha1"}}]
-    programs.refresh_live_series()
+    program_mode(app, [DEEP])
     assert app._live_screen.graph.is_visible("program_formula")
-    assert not [row for row in picker_rows(app, monkeypatch) if row.startswith("Program")]
+    assert _program_rows(app, monkeypatch) == []
 
 
 def test_a_program_waiting_for_the_headset_keeps_its_lines_through_the_idle_refresh(app, monkeypatch):
-    segments = [{"minutes": 5, "target": 60, "formula": {"name": "Deep", "formula": "alpha1"}}]
-    _run_program(app, segments)  # the BT wait: the program has begun, the session connects
-    programs = make_programs(MagicMock(), 1, live_screen=app._live_screen, live=lambda: app._live)
-    programs.mode = "program"
-    programs.segments = [{"minutes": 5, "target": 60, "formula": "meditation_score"}]  # edited during the wait
-    programs.refresh_live_series()  # a Session-tab tap
+    program_mode(app, [DEEP])
+    start_connecting(app, monkeypatch)  # the BT wait: the program has begun, the session connects
+    app._program_settings.segments = [{"minutes": 5, "target": 60, "formula": "meditation_score"}]  # edited meanwhile
+    app._switch_screen("live_session")  # a Session-tab tap: the idle refresh
     assert app._live_screen.graph.is_visible("program_formula")
-    assert [row for row in picker_rows(app, monkeypatch) if row.startswith("Program")] == ["Program: Deep"]
+    assert _program_rows(app, monkeypatch) == ["Program: Deep"]
 
 
 def test_no_program_lines_once_the_program_ends(app, monkeypatch):
-    _run_program(app, [{"minutes": 5, "target": 60, "formula": {"name": "Deep", "formula": "alpha1"}}])
-    app._program_run.end()
-    assert not [row for row in picker_rows(app, monkeypatch) if row.startswith("Program")]
+    program_mode(app, [DEEP])
+    app._on_start()
+    app._stop_and_save()
+    frames()
+    assert _program_rows(app, monkeypatch) == []
 
 
 def test_the_default_names_cant_be_changed_in_place():

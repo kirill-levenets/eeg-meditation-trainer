@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **The session's parts have one owner** (#128): the session manager, its recorder, the metrics engine, a program, the timer, each tick's checks and the wake lock are built and held by `RunningSession`, which also says what a session is scored on and saved as.
 - **The threshold has one owner**: the session manager (the base, and a tick's target); the sound, the scoring, the engine's state and the SHAMATHA pill read it per tick instead of each keeping a copy written by two paths.
 - **With several MindWaves paired, Start asks which one** (#99): the app no longer opens Settings › Device at launch or after creating a profile; Settings › Device lists them, and **Start** opens it to pick one, as it did.
   Its "pick one" message now goes once a headset is picked or another profile is chosen, not only once one connects.
@@ -46,6 +47,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **Exporting sessions to CSV fed their rows into the first custom formula's `avg()`**: a session running meanwhile averaged them in, and each exported session's column began with the previous one's values; an export now computes its column on its own.
+- **A custom formula with `avg()` began each session with the last session's values** in its average, for its first ticks; each session now averages only its own.
+- **Picking the active profile again during a session changed the session**:
+  a program never ended when that profile's timer was off in Settings, as the reload switched the program's timer off;
+  and a custom formula with `avg()` started its average over, so the next ticks were scored and sounded on fewer values (so did renaming its slot).
+  The reload now sets only Settings › Timer's controls (a session's timer is set at its Start), and a slot given the formula it already runs keeps its averages.
 - **Re-picking the active profile during a program session hid the program's own line** on the Session screen's graph, until the session ended; the graph now keeps a running session's series.
 - **A program's lines could be saved as the profile's series selection**: tapping a fixed duration while the Session screen previewed a program, or ending a program session after switching Settings › Timer to simple.
 - **Unticking Use Mock Data during a mock session saved it as a real-headset session** and left the mock stream running; a mode change is now refused while a session runs, like the scored metric.

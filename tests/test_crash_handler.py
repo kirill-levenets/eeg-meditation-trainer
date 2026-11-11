@@ -1,4 +1,9 @@
+from types import SimpleNamespace
 from unittest.mock import MagicMock
+
+from app.config import APP
+from app.crash_handler import _device_name, _session_state
+from tests._app import HEADSET
 
 
 class _FakeRealStream:
@@ -17,7 +22,7 @@ class _FakeSessionManager:
 class _FakeApp:
     """Minimal app stub matching EEGMeditationApp's attribute surface."""
     def __init__(self, session_state: str = "RUNNING", device_name: str = "MindWave Mobile 2") -> None:
-        self._session_manager = _FakeSessionManager(session_state)
+        self._session = SimpleNamespace(manager=_FakeSessionManager(session_state))
         self._real_stream = _FakeRealStream(device_name)
 
 
@@ -262,3 +267,11 @@ def test_flush_pre_app_errors_when_empty_is_noop(monkeypatch):
     crash_handler._PRE_APP_ERRORS.clear()
     crash_handler.flush_pre_app_errors()
     assert captured == []
+
+
+def test_a_report_reads_the_session_state_and_the_headset_off_the_real_app(fresh_app, monkeypatch):
+    # The report looks both up by name: a stub app keeps answering after the app's attributes moved.
+    assert _session_state(fresh_app) == "IDLE"
+    monkeypatch.setattr(APP, "USE_MOCK_DEVICE", False)
+    fresh_app._real_stream.set_device(*HEADSET)
+    assert _device_name(fresh_app) == HEADSET[1]

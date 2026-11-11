@@ -5,7 +5,6 @@ from kivy.base import EventLoop
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 
-from app.ui.app_manager import EEGMeditationApp
 from app.ui.backup_flow import BACKUP_SOUND_NOTE
 from app.ui.hooks import wire
 
@@ -36,7 +35,7 @@ def _laid_out_words(label) -> list[str]:
     return [w.text for line in label._label._cached_lines for w in line.words if w.text.strip()]
 
 
-def _open_profile_delete(_text):
+def _open_profile_delete(_app, _text):
     from app.ui.settings_screen import SettingsScreen
     screen = SettingsScreen()
     wire(screen, session_counter=lambda uid: 12)
@@ -44,18 +43,17 @@ def _open_profile_delete(_text):
 
 
 @pytest.mark.parametrize(("open_dialog", "text"), [
-    (lambda t: EEGMeditationApp.__new__(EEGMeditationApp)._confirm_action(
-        "Restore database", t, "Restore", lambda: None), RESTORE_TEXT),
-    (lambda t: EEGMeditationApp.__new__(EEGMeditationApp)._info_popup("Backup saved", t), BACKUP_SAVED_TEXT),
+    (lambda app, t: app._confirm_action("Restore database", t, "Restore", lambda: None), RESTORE_TEXT),
+    (lambda app, t: app._info_popup("Backup saved", t), BACKUP_SAVED_TEXT),
     (_open_profile_delete, PROFILE_DELETE_TEXT),
 ])
-def test_landscape_dialog_lays_out_every_line(open_dialog, text):
+def test_landscape_dialog_lays_out_every_line(fresh_app, open_dialog, text):
     from kivy.core.window import Window
-    EventLoop.ensure_window()
+    app = fresh_app
     saved = tuple(Window.size)
     Window.size = (732, 360)
     _pump()
-    open_dialog(text)
+    open_dialog(app, text)
     _pump()
     popup = next(w for w in Window.children if isinstance(w, Popup))
     try:

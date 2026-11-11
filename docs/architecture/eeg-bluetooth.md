@@ -22,7 +22,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Desktop Linux falls back to PyBluez when `socket.AF_BLUETOOTH` is missing (common in PyInstaller bundles).
   The link is kept open between sessions (a session stop doesn't close it) to avoid RFCOMM EBUSY and ThinkGear reinit failures.
   On app exit the socket is not closed explicitly (`on_stop`): the kernel closes it while BlueZ may keep the ACL link, for a faster reconnect at the next launch.
-  A session whose headset sends no packets for `STALE_DATA_THRESHOLD` (10 s) is stopped and saved (`SessionWatch.check_stale`, `app/ui/session_watch.py`, the app's `_watch`;
+  A session whose headset sends no packets for `STALE_DATA_THRESHOLD` (10 s) is stopped and saved (`SessionWatch.check_stale`, `app/ui/session_watch.py`, `RunningSession.watch`;
   each tick it also checks the recording limit, follows the headset's link and warns once of a low battery or power-line noise).
   The selected headset's link as it is (a pick or rename, a session's start, a drop or a reconnect mid-session) is drawn by `Headset.show_selected` on the Session screen's label and in Settings › Device:
   a session's lost link shows as connecting, since the reader reconnects; a drop also plays the disconnect alert.

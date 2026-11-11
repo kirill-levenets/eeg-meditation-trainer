@@ -339,6 +339,17 @@ class TestAvgEvaluation(unittest.TestCase):
         # Last 5 pushed: 75, 80, 85, 90, 95 → avg = 85
         self.assertAlmostEqual(result, 85.0, places=2)
 
+    def test_setting_the_formula_it_runs_keeps_its_window_and_another_starts_over(self):
+        self.ev.set_formula("avg(alpha1, 4)")
+        for _ in range(4):
+            self.ev.push_variables({"alpha1": 100.0})
+        self.ev.set_formula(" avg(alpha1, 4) ")  # a profile's reload, a rename
+        self.ev.push_variables({"alpha1": 0.0})
+        self.assertAlmostEqual(self.ev.evaluate({"alpha1": 0.0}), 75.0, places=2)
+        self.ev.set_formula("avg(alpha1, 2)")
+        self.ev.push_variables({"alpha1": 0.0})
+        self.assertAlmostEqual(self.ev.evaluate({"alpha1": 0.0}), 0.0, places=2)
+
     def test_avg_expression_windowed(self):
         self.ev.set_formula("avg(alpha1 + beta1, 4)")
         for i in range(6):
@@ -388,7 +399,7 @@ class TestAvgEvaluation(unittest.TestCase):
         for _i in range(10):
             self.ev.push_variables({"alpha1": 100.0})
         # Set new formula — history should reset
-        self.ev.set_formula("avg(alpha1, 5)")
+        self.ev.set_formula("avg(alpha1, 3)")
         result = self.ev.evaluate({"alpha1": 50.0})
         # No history yet → falls back to current value
         self.assertAlmostEqual(result, 50.0)

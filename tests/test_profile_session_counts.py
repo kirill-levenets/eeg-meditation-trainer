@@ -1,19 +1,15 @@
 """Settings › User Profile's session counts are current whenever Settings shows them, and count what History lists."""
 import sqlite3
-from unittest.mock import MagicMock
 
-from app.session.manager import SessionState
 from app.storage.database import DatabaseManager
-from app.ui.app_manager import EEGMeditationApp
 from app.ui.hooks import wire
 from app.ui.settings_screen import SettingsScreen
-from tests._history_flow import make_history_flow
-from tests._profiles import make_profiles
-from tests._shown_session import make_shown
+from tests._app import frames, start_ticked_by_hand
 
 
 def _rows(screen) -> set[str]:
-    return {w.text for w in screen._user_picker_form._existing_list.walk() if "session" in getattr(w, "text", "")}
+    rows = screen._user_picker_form._existing_list.walk(restrict=True)
+    return {w.text for w in rows if "session" in getattr(w, "text", "")}
 
 
 def test_entering_settings_reads_the_counts_again():
@@ -27,60 +23,56 @@ def test_entering_settings_reads_the_counts_again():
     assert _rows(screen) == {"Mock (6 sessions)"}
 
 
-def _ending_app(shown: str) -> EEGMeditationApp:
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    for name in ("_live_screen", "_session_manager", "_settings_screen", "_undo_session_setup",
-                 "_history"):
-        setattr(app, name, MagicMock())
-    app._sm = MagicMock(current=shown)
-    app._shown = make_shown(app)
-    return app
+def _session_ended_on(app, screen: str) -> None:
+    """A mock session of two ticks, ended (a timer's way: no confirm) while `screen` shows."""
+    start_ticked_by_hand(app, ticks=2)
+    app._switch_screen(screen)
+    app._stop_and_save(reason="timer")
+    frames()
 
 
-def test_the_end_of_a_session_redraws_them_on_settings():
-    app = _ending_app("settings")  # a timer ended it there
-    app._finalize_stop_ui({}, None)
-    app._settings_screen.refresh_profile_counts.assert_called_once_with()
+def test_the_end_of_a_session_redraws_them_on_settings(fresh_app):
+    app = fresh_app
+    app._switch_screen("settings")
+    name = app._profiles.current_name()
+    assert _rows(app._settings_screen) == {f"{name} (0 sessions)"}
+    _session_ended_on(app, "settings")  # a timer ended it there
+    assert _rows(app._settings_screen) == {f"{name} (1 session)"}
 
 
-def test_elsewhere_entering_settings_redraws_them_instead():
-    app = _ending_app("live_session")
-    app._finalize_stop_ui({}, None)
-    app._settings_screen.refresh_profile_counts.assert_not_called()
+def test_elsewhere_entering_settings_redraws_them_instead(fresh_app):
+    app = fresh_app
+    name = app._profiles.current_name()
+    _session_ended_on(app, "live_session")
+    assert _rows(app._settings_screen) == {f"{name} (0 sessions)"}  # not drawn again behind the Session screen
+    app._switch_screen("settings")
+    frames()
+    assert _rows(app._settings_screen) == {f"{name} (1 session)"}
 
 
-def test_a_failed_count_shows_the_profile_without_one_and_the_end_card_still_opens():
-    app = _ending_app("settings")
-    app._db = MagicMock()
-    app._db.count_sessions.side_effect = sqlite3.OperationalError("disk I/O error")
-    app._db.get_session.return_value = {"id": 9, "date_time": "2026-10-03T20:05:46", "session_name": "Mock"}
-    app._recorder, app._ticker = MagicMock(session_id=9), MagicMock(running=False)
-    app._session_manager.state = SessionState.FINISHED
-    screen = SettingsScreen()
-    wire(screen, session_counter=make_profiles(app).count_sessions)
-    app._settings_screen = screen
-    screen.populate_users([{"id": 1, "name": "Mock"}], 1)
-    app._finalize_stop_ui({"duration": 96}, 9)
-    assert {w.text for w in screen._user_picker_form._existing_list.walk() if getattr(w, "text", "") == "Mock"}
-    app._live_screen.show_summary.assert_called_once()
+def test_a_failed_count_shows_the_profile_without_one_and_the_end_card_still_opens(fresh_app, monkeypatch):
+    app = fresh_app
+
+    def failing(*_args):
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(app._db, "count_sessions", failing)
+    _session_ended_on(app, "settings")
+    form = app._settings_screen._user_picker_form
+    assert {w.text for w in form._existing_list.walk(restrict=True) if getattr(w, "text", "") == app._profiles.current_name()}
+    assert app._live_screen.summary_session_id is not None  # the end card
 
 
-def test_a_running_sessions_row_is_counted_once_it_ends(tmp_path):
-    db = DatabaseManager(db_path=str(tmp_path / "t.db"))
-    try:
-        uid = db.create_user("Mock")
-        db.save_session({"duration": 600}, user_id=uid)
-        running = db.save_session({"duration": 60}, user_id=uid)  # its first checkpoint
-        app = EEGMeditationApp.__new__(EEGMeditationApp)
-        app._db, app._ticker = db, MagicMock(running=False)
-        app._session_manager, app._recorder = MagicMock(), MagicMock(session_id=running)
-        app._session_manager.state = SessionState.RUNNING
-        profiles = make_profiles(app)
-        assert profiles.count_sessions(uid) == 1 == len(make_history_flow(app).finished_sessions(uid))
-        app._session_manager.state = SessionState.IDLE
-        assert profiles.count_sessions(uid) == 2
-    finally:
-        db.close()
+def test_a_running_sessions_row_is_counted_once_it_ends(fresh_app):
+    app = fresh_app
+    uid = app._current_user_id
+    app._db.save_session({"duration": 600}, user_id=uid)
+    start_ticked_by_hand(app, ticks=2)
+    app._checkpoint_or_report()  # its first checkpoint: the row exists
+    assert len(app._db.get_all_sessions(uid)) == 2
+    assert app._profiles.count_sessions(uid) == 1 == len(app._history.finished_sessions(uid))
+    app._stop_and_save()
+    assert app._profiles.count_sessions(uid) == 2 == len(app._history.finished_sessions(uid))
 
 
 def test_the_count_is_each_profiles_own_and_zero_once_the_database_is_closing(tmp_path):

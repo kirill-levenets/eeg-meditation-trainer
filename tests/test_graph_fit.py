@@ -1,18 +1,14 @@
 """Fit the whole session (#43): a session detail graph shows all of its session at once and goes back to the window it
 had; the shared zoom (the live graphs, the saved zoom) is left alone. Time labels read as hours past an hour."""
 
-from types import SimpleNamespace
 
 from kivy.base import EventLoop
 from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.tests.common import UnitTestTouch
-from kivy.uix.floatlayout import FloatLayout
 
 from app.session.manager import elapsed_clock
-from app.ui.app_manager import EEGMeditationApp
 from app.ui.diary_screen import DiaryScreen
-from app.ui.graph_fullscreen import GraphFullscreen
 from app.ui.hooks import wire
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 
@@ -213,12 +209,16 @@ def test_a_live_graph_fitted_follows_its_session_as_it_grows():
     assert g.viewport_points == 120 and g._scroll_offset == 0  # the window's width, at this session's end
 
 
-def test_the_zoom_saved_is_the_window_from_before_the_fit():
-    g = _graph()
+def _an_hour_in(graph) -> None:
+    graph.load_static_data({k: [50.0] * HOUR for k in graph._data})
+
+
+def test_the_zoom_saved_is_the_window_from_before_the_fit(build_app):
+    a = build_app()
+    g = a._live_screen.graph
+    _an_hour_in(g)
     g.set_fitted(True)
     assert g.viewport_points == HOUR and g.zoom_points == 120
-    a = EEGMeditationApp.__new__(EEGMeditationApp)
-    a._live_screen = SimpleNamespace(graph=g)
     assert a._saved_zoom_seconds() == 60.0
 
 
@@ -241,15 +241,11 @@ def test_a_hidden_tabs_graph_does_not_draw_until_it_is_shown(monkeypatch):
 # ---- the app's zoom links ----
 
 
-def test_the_detail_zooms_apart_from_the_live_graphs_and_the_saved_zoom():
-    live = [_graph() for _ in range(3)]
-    detail = [_graph() for _ in range(3)]
-    a = EEGMeditationApp.__new__(EEGMeditationApp)
-    a._live_screen = SimpleNamespace(graph=live[0], raw_graph=live[1], band_graph=live[2])
-    a._diary_screen = SimpleNamespace(_metrics_graph=detail[0], _raw_eeg_graph=detail[1], _freq_graph=detail[2])
-    a._link_graph_zoom()
-    a._fullscreen = GraphFullscreen(FloatLayout())
-    a._wire_graph_affordances()
+def test_the_detail_zooms_apart_from_the_live_graphs_and_the_saved_zoom(build_app):
+    a = build_app()
+    live, detail = list(a._live_graphs()), list(a._detail_graphs())
+    for g in live + detail:
+        _an_hour_in(g)
     assert all(g._fit_callback is not None for g in live + detail)  # every graph
     live[1]._fit_callback(live[1])  # a tap on the live raw graph's glyph fits the live graphs, together
     assert all(g.fitted for g in live) and not any(g.fitted for g in detail)
@@ -258,9 +254,9 @@ def test_the_detail_zooms_apart_from_the_live_graphs_and_the_saved_zoom():
     detail[0].set_fitted(True)
     detail[0].zoom_in()  # a fitted session, hours wide, zoomed from there
     assert detail[2].viewport_points == detail[0].viewport_points  # the detail's tabs keep one window
-    assert all(g.viewport_points == 120 for g in live)  # the live graphs (and the zoom saved from them) don't move
+    assert all(g.viewport_points == 120 for g in (live[0], live[2]))  # the live graphs (and the saved zoom) don't move
     live[0].zoom_out()
-    assert live[1].viewport_points == live[0].viewport_points and detail[0].viewport_points != live[0].viewport_points
+    assert live[2].viewport_points == live[0].viewport_points and detail[0].viewport_points != live[0].viewport_points
 
 
 # ---- the review's fixes ----
@@ -467,15 +463,12 @@ def test_a_drag_from_a_glyph_pans_once_it_passes_a_fingertips_drift():
         Window.remove_widget(g)
 
 
-def test_the_saved_zoom_starts_both_groups_and_the_detail_never_saves():
-    live, detail = [_graph() for _ in range(3)], [_graph() for _ in range(3)]
-    a = EEGMeditationApp.__new__(EEGMeditationApp)
-    a._live_screen = SimpleNamespace(graph=live[0], raw_graph=live[1], band_graph=live[2])
-    a._diary_screen = SimpleNamespace(_metrics_graph=detail[0], _raw_eeg_graph=detail[1], _freq_graph=detail[2])
-    a._link_graph_zoom()
+def test_the_saved_zoom_starts_both_groups_and_the_detail_never_saves(build_app):
+    a = build_app()
     a._apply_saved_zoom(300.0)
-    assert all(g.zoom_seconds == 300.0 for g in live + detail)
-    detail[0].zoom_out()
+    live, detail = [g.zoom_seconds for g in a._live_graphs()], [g.zoom_seconds for g in a._detail_graphs()]
+    assert live == detail and live[0] == live[2] == 300.0  # the raw graph's window stops at its own longest
+    a._detail_graphs()[0].zoom_out()
     assert a._saved_zoom_seconds() == 300.0
 
 

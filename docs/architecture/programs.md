@@ -33,7 +33,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The plan keeps `program_plan`'s keys as `planned_keys`: older builds scored such a formula on its own slot, and the what-if replay reads their sessions by them ([session-detail](session-detail.md)).
   `ProgramRun.begin` names the plan's `unrunnable` formulas in a popup (`info`, the app's `_info_popup`), a frame later so the start finishes its setup first:
   it stays until read, as a meditator who pressed Start may not be looking.
-  `ProgramRun` (`app/ui/program_run.py`, the app's `_program_run`) holds the running program: `active` from the start's `begin(prog, feedback_ids, name)` until `end()`.
+  `ProgramRun` (`app/ui/program_run.py`, `RunningSession.program_run`) holds the running program: `active` from the start's `begin(prog, feedback_ids, name)` until `end()`.
   `begin` shows and marks EXACTLY the runnable plan's keys (`show_program_series(graph, plan)` hides the rest), arms one persistent evaluator per custom that compiles into `formula_evs[slot]`, and stores each segment's metric key.
   Each program line is shown the **whole** program and evaluated every tick (`tick` runs `formula_evs` into `metrics[slot]` through `custom_formula.evaluate_series`, as the Settings formulas are).
   `_enter_segment` repoints audio, goal and marker to the segment's key (a built-in key or a program slot);

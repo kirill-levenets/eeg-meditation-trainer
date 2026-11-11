@@ -54,6 +54,9 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   A setting with one holder elsewhere keeps its `get`, since there is no second copy to keep in step:
   the theme, text size and line colours (their globals, with listeners), the fold states (their widgets), the graph zoom (the live graph);
   the stats view and the marker hotkey (their widgets), the timer's enable and minutes (the Timer section).
+  A profile's load must not change a running session: re-picking the active profile is allowed mid-session and reloads every setting.
+  So the timer's enable and minutes set the Timer section only, and a Start arms the session's timer from them (`_arm_timer`: a timer stored off would disable a running program's, which would then never end);
+  a formula slot reloaded with the formula it runs keeps its `avg()` windows (`CustomFormulaEvaluator.set_formula`); a running program's threshold is guarded (`_apply_threshold`).
   The audio metric and its formula slot are held too (`AudioMetric.settings`: a stored program slot heals to the baseline at load, an out-of-range slot clamps);
   behind controllers that can refuse a change while a session runs and show the one in force again (`AudioMetric.show`).
   The threshold keeps its slider as the one holder of the stored value (the value in force is `_put_threshold_in_force`'s).
@@ -119,7 +122,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   **Mid-session backup freshness (#30):** `BackupFlow.on_backup_pressed` calls `_save_user_settings()` (main thread) before dispatching to the SAF/desktop worker, so a backup taken mid-session isn't a stale pause/stop snapshot;
   every scalar per-user setting also persists on change ([Per-user settings](#per-user-settings)), so they survive an Android force-kill too.
   `_save_user_settings` catches `sqlite3.Error` and reports a soft error: it runs from UI callbacks (backup, pause, profile switch), where an escaping error would open the fatal dialog, and a failed flush doesn't abort the backup.
-  It **never touches `_timer_state`**:
+  It **never touches the session's timer** (`RunningSession.timer`):
   a running session — especially a program, which force-enables the timer and seeds its countdown from the program total — OWNS it, and re-applying the Settings timer widgets on a pause/backup flush would kill or shift its auto-stop.
   Session start re-applies enabled/duration, and `SoundSources.on_timer_sound_change` keeps the gong path current, so nothing needs an idle sync.
   Both backup workers checkpoint a running session first (`_checkpoint_or_report` → `SessionRecorder.checkpoint`, see [session](session.md#persistence)), so a mid-session backup holds it as of the backup.

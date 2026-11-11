@@ -66,6 +66,7 @@ Read it before changing that subsystem.
   evaluators, names, their session record), `noise_detector.py`. → [metrics-scoring](docs/architecture/metrics-scoring.md)
 - `app/session/` — `manager.py` `SessionManager` (Start/Pause/Resume/Stop, accrual), `scoring.py` `GoalAccrual`, `session_program.py` (timed segments), `timer_state.py`, `what_if.py` (threshold recompute).
   `session_run.py` `SessionRun` (one Start: its phase and per-run state), `tick_thread.py` `TickThread` (the 2 Hz tick), `recorder.py` `SessionRecorder` (the running session's checkpoints).
+  `app/ui/running_session.py` `RunningSession` (the app's `_session`) — the parts a session runs on (manager, recorder, engine, program run, timer, watch, wake lock) and what it is scored on and saved as.
   `app/ui/program_run.py` `ProgramRun` — the running program: segment stepping on the tick thread, its live-graph lines.
   `app/ui/program_settings.py` `ProgramSettings` — Settings → Timer: mode, the edited program, saved programs.
   `app/ui/formula_settings.py` `FormulaSettings` — Settings → Custom Formula. → [session](docs/architecture/session.md), [programs](docs/architecture/programs.md), [metrics-scoring](docs/architecture/metrics-scoring.md)
@@ -78,7 +79,7 @@ Read it before changing that subsystem.
   `app/ui/app_context.py` — `AppContext`: what every flow reaches the app through (`_make_context`). → [app-platform](docs/architecture/app-platform.md#flows-and-the-app-context)
   `app/ui/profiles.py` — `ProfileGate` (the blocking profile picker), `Profiles` (Settings → Profile). → [app-platform](docs/architecture/app-platform.md#user-gate-and-profiles)
   `app/ui/startup.py` — the startup profile (`resolve_startup_user`), the theme, text size and line colours the UI is built in; `app/ui/toast.py` — the toast.
-  `app/ui/audio_metric.py` `AudioMetric` — which metric drives the sound, its Settings controls, their lock while a session is scored on it. → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
+  `app/ui/audio_metric.py` `AudioMetric` — the profile's choice of the metric that drives the sound, its Settings controls, their lock while a session is scored on it. → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
 - `app/ui/theme.py`, `app/ui/widgets/` — palette `C`/`F`/`S`, themed widgets, modals, legends, overlays.
   `app/ui/hooks.py` — `Hook`/`wire()`: the handlers the app plugs into a widget. → [ui-theme](docs/architecture/ui-theme.md)
 - `app/ui/raw_eeg_screen.py` — `ScrollableGraphWidget`, the one time-series graph class;
@@ -134,7 +135,7 @@ The linked file explains the mechanism.
 
 ### Sessions
 
-- **A session reaches the DB only through `SessionRecorder.checkpoint`** (`app/session/recorder.py`, the app's `_recorder`):
+- **A session reaches the DB only through `SessionRecorder.checkpoint`** (`app/session/recorder.py`, `RunningSession.recorder`):
   the row and the buffered ticks in one transaction, at the 60 s flush, on leaving the app, at backup and at the final save. → [session](docs/architecture/session.md#persistence)
 - **Every ending saves through one path**: `_stop_and_save` → `_persist_session_data` (tick-thread-safe, no Kivy) + `_finalize_stop_ui` (main thread).
   There is no discard path; a confirm that arrives after the session ended writes nothing.
@@ -146,7 +147,7 @@ The linked file explains the mechanism.
 - The Session screen shows one profile's session (`ShownSession`, `app/ui/shown_session.py`, the app's `_shown`; its `owner` set at Start):
   picking another profile drops it through `ShownSession.drop`; re-picking the shown one (allowed mid-session) resets nothing.
   Every end-card close goes through `ShownSession.close`. → [live-session-and-settings](docs/architecture/live-session-and-settings.md#session-screen)
-- **A session is scored on the metric that drives the feedback sound** (`AudioMetric.drive_key()`, `app/ui/audio_metric.py`, the app's `_audio_metric`).
+- **A session is scored on the metric that drives the feedback sound** (`RunningSession.drive_key()`, `app/ui/running_session.py`, the app's `_session`; the rule is `audio_metric.sound_metric`).
   The Settings threshold takes effect only through `_put_threshold_in_force` (the slider and profile load go through `_apply_threshold`);
   the threshold has one owner, `SessionManager` (`threshold`, the base; a tick's `score_target`): the sound, the engine and the SHAMATHA pill read it per tick, never a copy. → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
 - `ProgramRun.audio_key` is transient and never written to the stored `audio_metric`;
@@ -250,7 +251,9 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 · the Android check `android_jni.on_android()`, the app's Activity `android_jni.activity()`
 · legends `LegendBar`
 · file copy `copy_file_atomic`
-· temp removal `discard_file`.
+· temp removal `discard_file`
+· in tests, the app `fresh_app` (the run's one built app, on a new profile) or `build_app(seed)` (a private one), a flow alone on `stub_context()`, a session by `tests/_app.py`'s helpers:
+  never `__new__` → [app-platform](docs/architecture/app-platform.md#tests).
 
 ## Documentation Rules
 

@@ -2,23 +2,14 @@ from unittest.mock import MagicMock
 
 import app.audio_feedback.noise as noise_mod
 from app.audio_feedback.noise import AudioEngine
-from app.session.manager import SessionManager, SessionState
+from app.session.manager import SessionManager
 
 
 def _make_manager():
-    mgr = SessionManager.__new__(SessionManager)
-    mgr._audio = MagicMock()
-    mgr._state = SessionState.RUNNING
-    mgr._start_time = 0.0
-    mgr._elapsed = 0.0
-    mgr._pause_start = 0.0
-    mgr._total_paused = 0.0
-    mgr._metrics_accumulator = []
-    mgr._reset_scoring()
-    mgr._time_shamatha_90 = 0.0
-    mgr._threshold_used = 50
-    mgr._active_metric = "meditation_score"
-    mgr._active_target = None
+    """A running session's manager, its audio a stand-in."""
+    mgr = SessionManager()
+    mgr.set_audio(MagicMock())
+    mgr.start()
     return mgr
 
 

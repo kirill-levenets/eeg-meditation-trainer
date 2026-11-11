@@ -1,47 +1,41 @@
 """Missing custom sound files are reported once, together; two reports raced and the second was dropped."""
-
 from unittest.mock import MagicMock
 
+import pytest
+
 import app.ui.sound_sources as sound_sources
-from app.ui.app_manager import EEGMeditationApp
-from tests._sound_sources import make_sounds
+from tests._sound_sources import sounds_alone
 
 
-def _make_app(monkeypatch):
-    reports: list[tuple] = []
-    monkeypatch.setattr(sound_sources, "report_soft_error", lambda label, detail="", **_: reports.append((label, detail)))
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    return app, reports
+@pytest.fixture
+def reports(monkeypatch) -> list[tuple]:
+    said: list[tuple] = []
+    monkeypatch.setattr(sound_sources, "report_soft_error", lambda label, detail="", **_: said.append((label, detail)))
+    return said
 
 
-def test_missing_feedback_file_and_gong_become_one_report(monkeypatch, tmp_path):
-    app, reports = _make_app(monkeypatch)
-    make_sounds(app).warn_missing(
-        {"custom": ("custom", str(tmp_path / "gone_rain.wav"))}, str(tmp_path / "gone_gong.wav"),
-    )
+def test_missing_feedback_file_and_gong_become_one_report(reports, tmp_path):
+    sounds_alone().warn_missing({"custom": ("custom", str(tmp_path / "gone_rain.wav"))}, str(tmp_path / "gone_gong.wav"))
     assert len(reports) == 1
     label, detail = reports[0]
     assert label == "sound_files_missing"
     assert "gone_rain.wav" in detail and "gone_gong.wav" in detail
 
 
-def test_present_files_report_nothing(monkeypatch, tmp_path):
-    app, reports = _make_app(monkeypatch)
+def test_present_files_report_nothing(reports, tmp_path):
     rain, gong = tmp_path / "rain.wav", tmp_path / "gong.wav"
     rain.write_bytes(b"x")
     gong.write_bytes(b"x")
-    make_sounds(app).warn_missing({"custom": ("custom", str(rain)), "noise": ("noise", "")}, str(gong))
+    sounds_alone().warn_missing({"custom": ("custom", str(rain)), "noise": ("noise", "")}, str(gong))
     assert reports == []
 
 
-def test_testing_a_missing_gong_warns_instead_of_silently_playing_the_default(monkeypatch, tmp_path):
-    app, reports = _make_app(monkeypatch)
-    app._timer_state = MagicMock(custom_sound_path=str(tmp_path / "typo_gong.wav"))
-    app._audio = MagicMock()
-    app._settings_screen = MagicMock()
+def _gong_tester(path: str):
+    return sounds_alone(timer_state=MagicMock(custom_sound_path=path))
 
-    make_sounds(app).on_test_timer_sound()
 
+def test_testing_a_missing_gong_warns_instead_of_silently_playing_the_default(reports, tmp_path):
+    _gong_tester(str(tmp_path / "typo_gong.wav")).on_test_timer_sound()
     assert len(reports) == 1 and "typo_gong.wav" in reports[0][1]
 
 
@@ -59,12 +53,8 @@ def test_a_test_button_report_is_not_swallowed_by_an_earlier_session_start_repor
     monkeypatch.setattr(ch, "_format_soft_report", lambda label, detail, app: detail)
     monkeypatch.setattr(ch, "_SOFT_ERROR_LAST", {})
     monkeypatch.setitem(ch._STATE, "in_dialog", False)
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
 
-    make_sounds(app).warn_missing({"custom": ("custom", str(tmp_path / "gone_rain.wav"))})  # session start
-    app._timer_state = MagicMock(custom_sound_path=str(tmp_path / "typo_gong.wav"))
-    app._audio = MagicMock()
-    app._settings_screen = MagicMock()
-    make_sounds(app).on_test_timer_sound()  # seconds later: the user tests the gong
+    sounds_alone().warn_missing({"custom": ("custom", str(tmp_path / "gone_rain.wav"))})  # session start
+    _gong_tester(str(tmp_path / "typo_gong.wav")).on_test_timer_sound()  # seconds later: the user tests the gong
 
     assert len(shown) == 2 and "typo_gong.wav" in shown[1]

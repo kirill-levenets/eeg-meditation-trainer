@@ -1,125 +1,85 @@
 """UI-callback settings writes: continuous inputs write once they settle; a DB error is never fatal."""
-
 import sqlite3
-from types import SimpleNamespace
-from unittest.mock import MagicMock
+
+import pytest
 
 import app.ui.app_manager as am
-from app.session.manager import SessionManager
-from app.ui.app_manager import EEGMeditationApp
-from tests._program_run import make_run
-from tests._shown_session import make_shown
-from tests._sound_sources import make_sounds
+from tests._app import frames, frames_until, setting_writes
+
+SETTLE_S = 0.05
 
 
-class _FakeTrigger:
-    """Stands in for a Kivy Clock trigger so tests decide when the settle window ends."""
-
-    def __init__(self, fn, timeout):
-        self.fn, self.timeout, self.armed = fn, timeout, False
-
-    def cancel(self):
-        self.armed = False
-
-    def __call__(self):
-        self.armed = True
-
-    def fire(self):
-        if self.armed:
-            self.armed = False
-            self.fn(0)
+@pytest.fixture
+def app(build_app, monkeypatch):
+    """The built app with a short settle window; `app.writes` records its settings writes, `app.reports` its soft
+    errors."""
+    monkeypatch.setattr(am.EEGMeditationApp, "_PERSIST_SETTLE_S", SETTLE_S)  # read when a trigger is first made
+    app = build_app()
+    frames_until(lambda: False, 2 * SETTLE_S)  # what the profile's load queued has run
+    app.writes = setting_writes(app, monkeypatch)
+    app.reports = []
+    monkeypatch.setattr(am, "report_soft_error", lambda label, detail="", **_: app.reports.append((label, detail)))
+    return app
 
 
-def _make_app(monkeypatch):
-    triggers: list[_FakeTrigger] = []
-
-    def create_trigger(fn, timeout):
-        triggers.append(_FakeTrigger(fn, timeout))
-        return triggers[-1]
-
-    monkeypatch.setattr(am, "Clock", SimpleNamespace(create_trigger=create_trigger))
-    reports: list[tuple] = []
-    monkeypatch.setattr(am, "report_soft_error", lambda label, detail="", **_: reports.append((label, detail)))
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._loading_settings = False
-    app._settle_triggers = {}
-    app._current_user_id = 7
-    app._settings_store = MagicMock()
-    app._live_screen = MagicMock()
-    app._timer_state = MagicMock()
-    app._session_manager = SessionManager()
-    app._program_run = make_run(app)
-    app._settings_screen = MagicMock(threshold=180)
-    app._shown = make_shown(app)
-    app._sounds = make_sounds(app)
-    return app, triggers, reports
+def _settled(app, key: str) -> list[str]:
+    """The values written for `key` once the settle window has passed."""
+    frames_until(lambda: any(k == key for k, _ in app.writes), 1.0)
+    frames_until(lambda: False, 2 * SETTLE_S)  # a second write would come by now
+    return [v for k, v in app.writes if k == key]
 
 
-def test_a_threshold_drag_writes_once_after_it_settles(monkeypatch):
-    app, triggers, _ = _make_app(monkeypatch)
+def test_a_threshold_drag_writes_once_after_it_settles(app):
     for v in range(20, 181):  # a full slider sweep
-        app._on_threshold_change(v)
-
-    app._settings_store.persist.assert_not_called()
-    assert len(triggers) == 2  # one puts the settled value in force, one saves it
-    for t in triggers:
-        t.fire()
-    app._settings_store.persist.assert_called_once_with(7, "threshold")
-    assert app._session_manager.threshold == 180
+        app._settings_screen.threshold = v
+    assert app.writes == [] and app._session.manager.threshold != 180
+    assert _settled(app, "threshold") == ["180"]
+    assert app._session.manager.threshold == 180  # put in force once too, at the value it settled on
 
 
-def test_typing_a_gong_path_writes_once_after_it_settles(monkeypatch):
-    app, triggers, _ = _make_app(monkeypatch)
+def test_typing_a_gong_path_writes_once_after_it_settles(app):
     path = "/home/user/sounds/my_custom_gong_sound.wav"
     for i in range(1, len(path) + 1):
         app._sounds.on_timer_sound_change(path[:i])
-
-    app._settings_store.persist.assert_not_called()
-    triggers[0].fire()
-    app._settings_store.persist.assert_called_once_with(7, "timer_sound")
+    assert app.writes == []
+    assert _settled(app, "timer_sound") == [path]
 
 
-def test_a_line_width_drag_writes_once_after_it_settles(monkeypatch):
+def test_a_line_width_drag_writes_once_after_it_settles(app):
     # It was written only by the batch save (leaving the app, a profile switch), so a crash before one lost it.
-    app, triggers, _ = _make_app(monkeypatch)
-    app._settings_store.settles.side_effect = lambda key: key == "line_width"
     for width in (1.3, 1.6, 2.0):
-        app._on_line_width_change(width)
-    assert [c.args for c in app._settings_store.change.call_args_list] == [("line_width", w) for w in (1.3, 1.6, 2.0)]
-    app._settings_store.persist.assert_not_called()
-    triggers[0].fire()
-    app._settings_store.persist.assert_called_once_with(7, "line_width")
+        app._settings_screen.display._line_width_slider.value = width
+    assert app.writes == [] and app._settings_store.value("line_width") == 2.0  # held at once, written later
+    assert _settled(app, "line_width") == ["2.0"]
 
 
-def test_a_toggle_writes_at_once(monkeypatch):
-    app, _triggers, _ = _make_app(monkeypatch)
-    app._settings_store.settles.return_value = False
-    app._on_sinking_alert_toggle(True)
-    app._settings_store.change.assert_called_once_with("sinking_alert", True)
-    app._settings_store.persist.assert_called_once_with(7, "sinking_alert")
+def test_a_toggle_writes_at_once(app):
+    app._settings_screen.audio._sinking_alert_cb.active = True
+    assert app.writes == [("sinking_alert", "True")]
 
 
-def test_no_write_is_scheduled_while_settings_load(monkeypatch):
-    app, triggers, _ = _make_app(monkeypatch)
-    app._loading_settings = True
-    app._on_threshold_change(90)
-    assert "threshold" not in app._settle_triggers  # the load applies the value itself; nothing saves it back
+def test_no_write_is_scheduled_while_settings_load(app):
+    app._db.set_user_setting(app._current_user_id, "threshold", "90")
+    app.writes.clear()
+    app._activate_user(app._current_user_id)  # the load applies the value itself; nothing saves it back
+    frames_until(lambda: False, 4 * SETTLE_S)
+    assert app._settings_screen.threshold == 90 and app.writes == []
 
 
-def test_a_failed_setting_write_is_reported_not_raised(monkeypatch):
-    app, _, reports = _make_app(monkeypatch)
-    app._settings_store.persist.side_effect = sqlite3.OperationalError("database is locked")
-
-    app._persist_user_setting("sinking_alert")  # must not raise into the Kivy callback
-
-    assert reports and reports[0][0] == "settings_save_failed"
-    assert "database is locked" in reports[0][1]
+def _locked(*_args):
+    raise sqlite3.OperationalError("database is locked")
 
 
-def test_a_failed_batch_save_is_reported_not_raised(monkeypatch):
-    app, _, reports = _make_app(monkeypatch)
-    app._settings_store.save.side_effect = sqlite3.OperationalError("disk I/O error")
+def test_a_failed_setting_write_is_reported_not_raised(app, monkeypatch):
+    monkeypatch.setattr(app._db, "set_user_setting", _locked)
+    app._settings_screen.audio._sinking_alert_cb.active = True  # must not raise into the Kivy callback
+    assert app.reports and app.reports[0][0] == "settings_save_failed"
+    assert "database is locked" in app.reports[0][1]
+    assert app._settings_store.value("sinking_alert") is True  # applied in memory: the next batch save retries it
 
+
+def test_a_failed_batch_save_is_reported_not_raised(app, monkeypatch):
+    monkeypatch.setattr(app._db, "set_user_settings", _locked)
     app._save_user_settings()  # the pre-backup flush path; must not crash the app
-
-    assert reports and reports[0][0] == "settings_save_failed"
+    frames()
+    assert app.reports and app.reports[0][0] == "settings_save_failed"

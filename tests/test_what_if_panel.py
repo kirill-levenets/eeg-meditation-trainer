@@ -10,7 +10,6 @@ from kivy.tests.common import UnitTestTouch
 
 import app.ui.session_detail_flow as session_detail_flow
 from app.session.what_if import ScoredTicks, Segment
-from app.settings.registry import BOOL, Setting, SettingsStore
 from app.ui.hooks import wire
 from app.ui.theme import Icons
 from app.ui.widgets.what_if import WhatIfPanel
@@ -418,17 +417,13 @@ def test_a_tap_on_the_chevron_folds_it():
 
 def test_the_folded_panel_is_saved_per_profile(app):  # noqa: F811
     a, _workers = app
-    store, me = a._db, a._current_user_id
-    other = store.create_user("other")
-    panel = a._diary_screen.what_if
-    a._loading_settings = False
-    # As _build_settings_store declares it, and as build() wires the chevron.
-    a._settings_store = SettingsStore(store, [Setting("what_if_collapsed", False, BOOL[0], BOOL[1],
-                                                      lambda: panel.collapsed, panel.set_collapsed)])
-    wire(panel, on_collapse=lambda _c: a._persist_user_setting("what_if_collapsed"))
+    me, panel = a._current_user_id, a._diary_screen.what_if
+    other = a._db.create_user("other")
+    a._db.set_user_setting(other, "use_mock", "True")
+    assert not panel.collapsed
     panel._btn_collapse.dispatch("on_release")  # "me" folds it
-    assert store.get_user_setting(me, "what_if_collapsed") == "True"
-    a._settings_store.load(other)
+    assert panel.collapsed and a._db.get_user_setting(me, "what_if_collapsed") == "True"
+    a._profiles.on_switch(other)
     assert not panel.collapsed  # the other profile's own state
-    a._settings_store.load(me)
+    a._profiles.on_switch(me)
     assert panel.collapsed

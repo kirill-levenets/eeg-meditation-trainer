@@ -34,7 +34,13 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "slow: long checks that run only with --run-slow")
 
 
+_APP_FIXTURES = {"build_app", "fresh_app"}
+
+
 def pytest_collection_modifyitems(config, items):
+    # The tests on a built app run after all the others, in their own order: a built app owns process-wide state
+    # while it lives (the device mode), and each one dropped slows every collection after it (tests/_app.py).
+    items.sort(key=lambda item: bool(_APP_FIXTURES & set(getattr(item, "fixturenames", ()))))
     if config.getoption("--run-slow"):
         return
     skip = pytest.mark.skip(reason="slow: run with --run-slow")
@@ -50,6 +56,27 @@ def _temp_files_in_basetemp(tmp_path_factory):
     tempfile.tempdir = str(tmp_path_factory.mktemp("tmp"))
     yield
     tempfile.tempdir = saved
+
+
+@pytest.fixture
+def build_app(tmp_path, monkeypatch):
+    """build(seed): the real app on a temp DB (tests/_app.py). Imported here: a run that selects no test on a built
+    app (a single file of engine tests) then never loads Kivy's window."""
+    from tests._app import built_apps
+    yield from built_apps(tmp_path, monkeypatch)
+
+
+@pytest.fixture(scope="session")
+def _shared_app(tmp_path_factory):
+    from tests._app import shared_apps
+    yield from shared_apps(tmp_path_factory.mktemp("shared_app"))
+
+
+@pytest.fixture
+def fresh_app(_shared_app):
+    """The run's one built app (tests/_app.py SharedApp), idle on a new default profile."""
+    yield _shared_app.fresh()
+    _shared_app.rest()
 
 
 @pytest.fixture(autouse=True)

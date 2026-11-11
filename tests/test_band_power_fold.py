@@ -5,11 +5,9 @@ from kivy.base import EventLoop
 from kivy.core.window import Window
 from kivy.tests.common import UnitTestTouch
 
-from app.settings.registry import BOOL, Setting, SettingsStore
 from app.ui.diary_screen import DiaryScreen
-from app.ui.hooks import wire
 from app.ui.theme import Icons
-from tests.test_session_detail_open import app, db  # noqa: F401  (fixtures)
+from tests.test_session_detail_open import app  # noqa: F401  (fixture)
 
 TOTALS = {"delta": 4.0, "theta": 2.0, "alpha1": 1.0, "alpha2": 1.0, "beta1": 0.5, "beta2": 0.5, "gamma1": 0.2,
           "gamma2": 0.1}
@@ -64,18 +62,13 @@ def test_a_tap_on_the_chevron_folds_it():
 
 def test_the_folded_table_is_saved_per_profile(app):  # noqa: F811
     a, _workers = app
-    store, me = a._db, a._current_user_id
-    other = store.create_user("other")
-    d = a._diary_screen
-    a._loading_settings = False
-    # As _build_settings_store declares it, and as build() wires the chevron.
-    a._settings_store = SettingsStore(store, [Setting("band_power_collapsed", False, BOOL[0], BOOL[1],
-                                                      lambda: d.band_collapsed, d.set_band_collapsed)])
-    wire(d, on_band_collapse=lambda _c: a._persist_user_setting("band_power_collapsed"))
+    me, d = a._current_user_id, a._diary_screen
+    other = a._db.create_user("other")
+    a._db.set_user_setting(other, "use_mock", "True")
+    assert not d.band_collapsed
     d._btn_band_fold.dispatch("on_release")  # "me" folds it
-    assert store.get_user_setting(me, "band_power_collapsed") == "True"
-    a._settings_store.load(other)
+    assert d.band_collapsed and a._db.get_user_setting(me, "band_power_collapsed") == "True"
+    a._profiles.on_switch(other)
     assert not d.band_collapsed  # the other profile's own state
-    a._settings_store.load(me)
+    a._profiles.on_switch(me)
     assert d.band_collapsed
-

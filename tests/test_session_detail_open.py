@@ -10,16 +10,10 @@ from unittest.mock import MagicMock
 
 import pytest
 from kivy.base import EventLoop
-from kivy.uix.screenmanager import NoTransition, Screen, ScreenManager
 
 import app.ui.session_detail_flow as session_detail_flow
-from app.metrics.formula_slots import FormulaSlots
 from app.storage.database import DatabaseManager
-from app.ui.app_manager import EEGMeditationApp
 from app.ui.diary_screen import DiaryScreen, detail_graph_data
-from app.ui.hooks import wire
-from tests._graph_series import make_graph_series
-from tests._history_flow import make_detail_flow
 
 BANDS = ("delta", "theta", "alpha1", "alpha2", "beta1", "beta2", "gamma1", "gamma2")
 
@@ -47,30 +41,25 @@ def _session(db, uid: int, ticks: int, name: str, power: float, formula_name: st
 
 
 @pytest.fixture
-def app(db, monkeypatch):
-    uid = db.create_user("me")
-    a = EEGMeditationApp.__new__(EEGMeditationApp)
-    a._db = db
-    a._current_user_id = uid
-    a._diary_screen = DiaryScreen()
-    sm = ScreenManager(transition=NoTransition())
-    sm.add_widget(Screen(name="history"))
-    sm.add_widget(a._diary_screen)
-    sm.current = "history"
-    a._sm = sm
-    a._bottom_nav = MagicMock()
-    a._history = MagicMock()  # the History list, which Back returns to
-    a._history_screen = MagicMock()
-    a._history_screen.session_by_id = lambda sid: db.get_session(sid)  # the row History's list holds
-    a._formulas = FormulaSlots()
-    a._graph_series = make_graph_series(a, graphs=a._detail_graphs)
-    a._detail = make_detail_flow(a)
+def app(fresh_app, monkeypatch):
+    """(the app, workers): the app on History with two sessions saved (`a.sessions`); a detail's load waits in
+    `workers` until the test runs it."""
+    a = fresh_app
     workers = []
     monkeypatch.setattr(session_detail_flow.threading, "Thread",
                         lambda target, args=(), **k: MagicMock(start=lambda: workers.append(lambda: target(*args))))
-    a.sessions = {"A": _session(db, uid, 40, "Morning sit", 100.0),
-                  "B": _session(db, uid, 60, "Evening sit", 300.0, formula_name="Drowsy")}
+    uid = a._current_user_id
+    a.sessions = {"A": _session(a._db, uid, 40, "Morning sit", 100.0),
+                  "B": _session(a._db, uid, 60, "Evening sit", 300.0, formula_name="Drowsy")}
+    a._history.mark_dirty()
+    a._switch_screen("history")
     return a, workers
+
+
+def _select(a, sid: int) -> None:
+    """A tap on the session's row, History's list read again first: a test may have changed the row since."""
+    a._history.refresh(force=True)
+    a._detail.on_session_select(sid)
 
 
 def _frames(n: int = 1) -> None:
@@ -79,7 +68,7 @@ def _frames(n: int = 1) -> None:
 
 
 def _open(a, workers, sid) -> None:
-    a._detail.on_session_select(sid)
+    _select(a, sid)
     workers.pop()()
     _frames(6)
 
@@ -106,7 +95,7 @@ def _shown_in_graph_area(d: DiaryScreen):
 def test_the_detail_opens_at_once_with_title_stats_and_notes(app):
     a, workers = app
     a._db.update_session_notes(a.sessions["A"], notes="Calm, then sleepy")
-    a._detail.on_session_select(a.sessions["A"])
+    _select(a, a.sessions["A"])
     d = a._diary_screen
     assert a._sm.current == "diary" and workers  # on screen before the worker has read anything
     assert d._detail_title.text.endswith("Morning sit")
@@ -119,7 +108,7 @@ def test_the_detail_opens_at_once_with_title_stats_and_notes(app):
 
 def test_band_totals_then_one_graph_per_frame(app):
     a, workers = app
-    a._detail.on_session_select(a.sessions["A"])
+    _select(a, a.sessions["A"])
     d = a._diary_screen
     workers.pop()()
     _frames()
@@ -134,7 +123,7 @@ def test_band_totals_then_one_graph_per_frame(app):
 
 def test_the_scored_formula_series_and_its_name_arrive_with_the_metrics_graph(app):
     a, workers = app
-    a._detail.on_session_select(a.sessions["A"])
+    _select(a, a.sessions["A"])
     workers.pop()()
     _frames(3)
     graph = a._diary_screen._metrics_graph
@@ -147,14 +136,14 @@ def test_the_metric_rows_are_read_once_per_open(app, monkeypatch):
     reads = []
     real = a._db.get_session_metrics
     monkeypatch.setattr(a._db, "get_session_metrics", lambda sid: reads.append(sid) or real(sid))
-    a._detail.on_session_select(a.sessions["A"])
+    _select(a, a.sessions["A"])
     workers.pop()()
     assert reads == [a.sessions["A"]]  # the formula replay uses the same rows
 
 
 def test_back_while_loading_drops_the_late_results(app):
     a, workers = app
-    a._detail.on_session_select(a.sessions["A"])
+    _select(a, a.sessions["A"])
     a._detail.on_diary_back()
     assert a._sm.current == "history"
     workers.pop()()
@@ -166,9 +155,9 @@ def test_back_while_loading_drops_the_late_results(app):
 
 def test_opening_another_session_while_one_loads_shows_only_the_new_one(app):
     a, workers = app
-    a._detail.on_session_select(a.sessions["A"])
+    _select(a, a.sessions["A"])
     a._detail.on_diary_back()
-    a._detail.on_session_select(a.sessions["B"])
+    _select(a, a.sessions["B"])
     first, second = workers
     second()
     _frames(4)  # B is fully shown
@@ -185,7 +174,7 @@ def test_a_failed_load_says_so_in_each_section(app, monkeypatch):
     reported = []
     monkeypatch.setattr(session_detail_flow, "report_soft_error", lambda label, detail, **k: reported.append(label))
     monkeypatch.setattr(a._db, "get_session_metrics", MagicMock(side_effect=sqlite3.OperationalError("disk I/O error")))
-    a._detail.on_session_select(a.sessions["A"])
+    _select(a, a.sessions["A"])
     workers.pop()()
     _frames(2)
     d = a._diary_screen
@@ -198,7 +187,7 @@ def test_a_failed_load_says_so_in_each_section(app, monkeypatch):
 
 def test_a_tab_picked_while_loading_shows_its_placeholder_then_its_graph(app):
     a, workers = app
-    a._detail.on_session_select(a.sessions["A"])
+    _select(a, a.sessions["A"])
     d = a._diary_screen
     d._switch_graph_tab("raw")
     assert _shown_in_graph_area(d) is d._graph_placeholder
@@ -213,11 +202,11 @@ def test_a_tab_picked_while_loading_shows_its_placeholder_then_its_graph(app):
 def test_the_legend_names_the_new_sessions_formulas_while_its_graphs_load(app):
     # The names are in the session's row: the legend has them from the first frame, not the last session's.
     a, workers = app
-    a._detail.on_session_select(a.sessions["A"])
+    _select(a, a.sessions["A"])
     workers.pop()()
     _frames(3)
     a._detail.on_diary_back()
-    a._detail.on_session_select(a.sessions["B"])
+    _select(a, a.sessions["B"])
     assert a._diary_screen._metrics_graph.series_name("custom_formula") == "Drowsy"
 
 
@@ -257,15 +246,19 @@ def test_every_simple_session_opens_with_the_profiles_selection(app):
 
 def test_the_band_tables_view_is_kept_per_profile_for_the_next_detail(app):
     a, _workers = app
-    wire(a._diary_screen, on_band_view_change=a._detail.persist_band_view)  # as build() wires it
-    a._detail.on_session_select(a.sessions["A"])
+    _select(a, a.sessions["A"])
     table = a._diary_screen._band_totals
     table._set_mode("grouped")
     table._toggle_sort("power")  # the user's taps: by power, largest first
-    a._detail.on_session_select(a.sessions["B"])
+    _select(a, a.sessions["B"])
     assert (table._mode, table._sort_by, table._descending) == ("grouped", "power", True)
-    a._current_user_id = a._db.create_user("other")
-    a._detail.on_session_select(a.sessions["A"])
+    other = a._db.create_user("other")
+    a._db.set_user_setting(other, "use_mock", "True")
+    theirs = _session(a._db, other, 10, "Their sit", 50.0)
+    a._profiles.on_switch(other)
+    a._switch_screen("history")
+    _select(a, theirs)
+    assert a._diary_screen._selected_session_id == theirs
     assert (table._mode, table._sort_by, table._descending) == ("detailed", "band", False)  # its own: the default
 
 

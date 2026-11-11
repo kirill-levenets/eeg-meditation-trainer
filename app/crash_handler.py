@@ -62,7 +62,7 @@ def _device_name(app) -> str:
 def _session_state(app) -> str:
     """Best-effort session state string from app state."""
     try:
-        mgr = getattr(app, "_session_manager", None)
+        mgr = getattr(getattr(app, "_session", None), "manager", None)
         if mgr is None:
             return "unknown"
         state = getattr(mgr, "state", None)

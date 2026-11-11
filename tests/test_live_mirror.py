@@ -7,18 +7,17 @@ from app.config import APP
 from app.session.recorder import RecordedTick
 from app.ui.live_mirror import LiveMirror
 from app.ui.live_session import LiveSessionScreen
+from tests._app import FedSession, raw_sample, tick_metrics
 from tests._noted_lock import NotedLock
-from tests._shown_session import make_shown
-from tests.test_resume_mirror import _drive_tick, _make_tick_app, _metrics, _raw_sample
 
 
 def _marked_mirror(ticks: int, marked: set, waveform: int = 3) -> LiveMirror:
     mirror = LiveMirror()
     for i in range(ticks):
-        raw = _raw_sample(seed=float(i), with_waveform=False)
+        raw = raw_sample(seed=float(i), with_waveform=False)
         if waveform:
             raw["raw_eeg_waveform"] = [float(i)] * waveform
-        mirror.record(RecordedTick(_metrics(seed=float(i)), raw, {"score_target": 50, "score_key": "shamatha_score"},
+        mirror.record(RecordedTick(tick_metrics(seed=float(i)), raw, {"score_target": 50, "score_key": "shamatha_score"},
                                    i in marked))
     return mirror
 
@@ -43,30 +42,27 @@ def test_a_full_buffer_shifts_the_markers_and_drops_the_ones_it_dropped(monkeypa
 def test_a_cleared_mirror_forgets_its_markers():
     mirror = _marked_mirror(3, {1})
     mirror.clear()
-    mirror.record(RecordedTick(_metrics(), _raw_sample(), {"score_target": 50, "score_key": "shamatha_score"}, False))
+    mirror.record(RecordedTick(tick_metrics(), raw_sample(), {"score_target": 50, "score_key": "shamatha_score"}, False))
     screen = LiveSessionScreen()
     mirror.reload_into(screen)
     assert _markers(screen) == [[], [], []]
 
 
-def test_a_marked_tick_is_mirrored_with_its_marker():
-    app = _make_tick_app()
-    app._run.pending_marker = True
-    _drive_tick(app, _raw_sample(), _metrics())
-    _drive_tick(app, _raw_sample(), _metrics())
-    assert app._shown.mirror.marks == [(0, 2)]  # the first tick, its third raw sample
+def test_a_marked_tick_is_mirrored_with_its_marker(fresh_app, monkeypatch):
+    fed = FedSession(fresh_app, monkeypatch)
+    fresh_app._on_marker()  # the Mark button
+    fed.tick()
+    fed.tick()
+    assert fresh_app._shown.mirror.marks == [(0, 2)]  # the first tick, its third raw sample
 
 
-def test_the_live_graphs_and_a_reload_put_a_marker_in_the_same_places():
-    app = _make_tick_app()
-    app._live_screen = LiveSessionScreen()
-    app._shown = make_shown(app)  # over the real screen, as build() wires it
-    app._live_screen.update_stats = MagicMock()  # the stub session manager has no score to show
-    app._recorder.record = lambda metrics, row: {"score_target": 50, "score_key": "shamatha_score"}
-    app._on_main = lambda fn: fn()  # the tick's UI update runs, as the main thread would run it
+def test_the_live_graphs_and_a_reload_put_a_marker_in_the_same_places(fresh_app, monkeypatch):
+    app = fresh_app
+    fed = FedSession(app, monkeypatch)
     for i in range(3):
-        app._run.pending_marker = i == 1
-        _drive_tick(app, _raw_sample(seed=float(i)), _metrics(seed=float(i)))
+        if i == 1:
+            app._on_marker()
+        fed.tick(raw_sample(seed=float(i)), tick_metrics(seed=float(i)))
     reloaded = LiveSessionScreen()
     app._shown.mirror.reload_into(reloaded)
     assert _markers(app._live_screen) == _markers(reloaded) == [[1], [1], [5]]

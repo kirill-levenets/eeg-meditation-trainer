@@ -126,9 +126,7 @@ class HistoryFlow:
 
     def on_export_csv(self, session_id: int, path: str | None = None) -> str | None:
         """Export session data as CSV file. Returns file path or None."""
-        csv_data = self._ctx.db.export_session_csv(
-            session_id, custom_formula=self._formulas.evaluators[0]
-        )
+        csv_data = self._ctx.db.export_session_csv(session_id, formula=self._formulas.evaluators[0].formula)
         if not csv_data:
             return None
         if not path:
@@ -147,12 +145,13 @@ class HistoryFlow:
         if not session_ids:
             return
         self._loading.show(f"Exporting {format_count(len(session_ids), 'session')}…")
+        formula = self._formulas.evaluators[0].formula  # read here: every session in the ZIP gets the same one
 
         def _worker():
             try:
                 mapping = {}
                 for sid in session_ids:
-                    csv = self._ctx.db.export_session_csv(sid, custom_formula=self._formulas.evaluators[0])
+                    csv = self._ctx.db.export_session_csv(sid, formula=formula)
                     if csv:
                         mapping[sid] = csv
                 ts = _dt.now().strftime("%Y%m%d_%H%M%S")

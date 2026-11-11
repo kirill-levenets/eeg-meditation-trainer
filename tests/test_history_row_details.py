@@ -1,15 +1,11 @@
 """Each History row shows the session's date and time, its score, duration and longest streak, and its notes (#49)."""
 
 import datetime
-import time
-from unittest.mock import MagicMock
 
 import pytest
 from kivy.base import EventLoop
 from kivy.metrics import dp
 
-from app.config import APP
-from app.session.manager import SessionManager
 from app.ui.history_screen import HistoryScreen, _SessionRow
 from app.ui.hooks import wire
 from app.ui.session_labels import (
@@ -19,7 +15,7 @@ from app.ui.session_labels import (
     session_stats_line,
     session_title,
 )
-from tests._shown_session import make_shown
+from tests._app import frames, start_ticked_by_hand
 
 WHEN = "2026-09-26T14:05:12.993002"  # as stored: ISO with a T and microseconds
 
@@ -243,16 +239,18 @@ def test_the_session_detail_is_titled_like_its_row():
     assert diary._detail_title.text == "2026-09-26 14:05 - MindWave Mobile"
 
 
-def test_a_new_session_is_named_with_its_date(monkeypatch):
-    from app.ui.app_manager import EEGMeditationApp
-    monkeypatch.setattr(APP, "USE_MOCK_DEVICE", True)
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._session_manager = SessionManager()
-    app._real_stream = MagicMock()
-    app._session_manager.start()
-    started = time.time() - 3600
-    app._session_manager._start_time = started
-    assert app._make_session_name() == datetime.datetime.fromtimestamp(started).strftime("%Y-%m-%d %H:%M") + " - Mock"
+def _ended_session(app) -> tuple[dict, float]:
+    """A mock session of two ticks, ended and saved: (its row, when it started)."""
+    start_ticked_by_hand(app, ticks=2)
+    started = app._session.manager.started_at
+    app._stop_and_save()
+    frames()
+    return app._db.get_all_sessions(app._current_user_id)[0], started
+
+
+def test_a_new_session_is_named_with_its_date(fresh_app):
+    row, started = _ended_session(fresh_app)
+    assert row["session_name"] == datetime.datetime.fromtimestamp(started).strftime("%Y-%m-%d %H:%M") + " - Mock"
 
 
 def test_a_long_session_title_is_cut_to_the_detail_screen_width():
@@ -266,19 +264,11 @@ def test_a_long_session_title_is_cut_to_the_detail_screen_width():
     assert title.texture_size[0] <= title.width + 1
 
 
-def test_the_default_name_is_recognised_as_the_sessions_own_time(monkeypatch):
+def test_the_default_name_is_recognised_as_the_sessions_own_time(fresh_app):
     # The name and the row's date come from the same start: the title must not show the time twice.
-    from app.ui.app_manager import EEGMeditationApp
-    monkeypatch.setattr(APP, "USE_MOCK_DEVICE", True)
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._session_manager = SessionManager()
-    app._real_stream = MagicMock()
-    app._session_manager.start()
-    started = app._session_manager.started_at
-    session = {"date_time": datetime.datetime.fromtimestamp(started).isoformat(),
-               "session_name": app._make_session_name()}
-    assert session_label(session) == "Mock"
-    assert session_title(session) == datetime.datetime.fromtimestamp(started).strftime("%Y-%m-%d %H:%M") + " - Mock"
+    row, started = _ended_session(fresh_app)
+    assert session_label(row) == "Mock"
+    assert session_title(row) == datetime.datetime.fromtimestamp(started).strftime("%Y-%m-%d %H:%M") + " - Mock"
 
 
 # ---- the session detail and the end card name what the threshold stats were measured on ----
@@ -397,19 +387,11 @@ def test_the_end_card_follows_the_rows_of_each_session_it_shows():
     assert _summary_rows(screen)[3] == ("Threshold", "70")
 
 
-def test_the_end_card_is_titled_with_the_saved_session(monkeypatch):
-    from app.ui.app_manager import EEGMeditationApp
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._live_screen = MagicMock()
-    app._db = MagicMock()
-    app._db.get_session.return_value = {"id": 9, "date_time": "2026-10-03T20:05:46.25",
-                                        "session_name": "2026-10-03 20:05 - MindWave Mobile"}
-    for name in ("_undo_session_setup", "_history", "_settings_screen", "_session_manager"):
-        monkeypatch.setattr(app, name, MagicMock(), raising=False)
-    app._shown = make_shown(app)
-    app._finalize_stop_ui({"duration": 96}, 9)
-    app._live_screen.show_summary.assert_called_once_with(
-        9, {"duration": 96}, title="2026-10-03 20:05 - MindWave Mobile")
+def test_the_end_card_is_titled_with_the_saved_session(fresh_app):
+    app = fresh_app
+    row, _started = _ended_session(app)
+    assert app._live_screen.summary_session_id == row["id"]
+    assert app._live_screen._summary_session_title == session_title(row) != ""
 
 
 # ---- review round: widths at phone size, one name per series, a failed title read ----
@@ -476,16 +458,16 @@ def test_the_detail_legend_names_a_series_as_the_live_graph_does():
     assert "» NS Meditation" in _legend_texts(diary)
 
 
-def test_a_failed_title_read_still_shows_the_end_card(monkeypatch):
+def test_a_failed_title_read_still_shows_the_end_card(fresh_app, monkeypatch):
     import sqlite3
 
-    from app.ui.app_manager import EEGMeditationApp
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._live_screen = MagicMock()
-    app._db = MagicMock()
-    app._db.get_session.side_effect = sqlite3.OperationalError("disk I/O error")
-    for name in ("_undo_session_setup", "_history", "_settings_screen", "_session_manager"):
-        monkeypatch.setattr(app, name, MagicMock(), raising=False)
-    app._shown = make_shown(app)
-    app._finalize_stop_ui({"duration": 96}, 9)  # the session is saved; only its title couldn't be read
-    app._live_screen.show_summary.assert_called_once_with(9, {"duration": 96}, title="")
+    app = fresh_app
+
+    def unreadable(_sid):
+        raise sqlite3.OperationalError("disk I/O error")
+
+    start_ticked_by_hand(app, ticks=2)
+    monkeypatch.setattr(app._db, "get_session", unreadable)
+    app._stop_and_save()  # the session is saved; only its title couldn't be read
+    frames()
+    assert app._live_screen.summary_session_id is not None and app._live_screen._summary_session_title == ""

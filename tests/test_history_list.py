@@ -17,12 +17,12 @@ from kivy.uix.recycleview.views import _cached_views
 from kivy.weakproxy import WeakProxy as KivyWeakProxy
 
 import app.ui.history_flow as history_flow
-from app.session.manager import SessionManager
+from app.metrics.formula_slots import FormulaSlots
 from app.storage.database import DatabaseManager
-from app.ui.app_manager import EEGMeditationApp
+from app.ui.history_flow import HistoryFlow
 from app.ui.history_screen import HistoryScreen, _checkbox_glyph, _SessionRow
 from app.ui.hooks import wire
-from tests._history_flow import make_history_flow
+from tests._context import stub_context
 
 
 def _sessions(n: int) -> list[dict]:
@@ -401,37 +401,33 @@ def test_an_empty_list_shows_the_message_and_no_rows(history):
 # ---- the app ----
 
 
+def _flow(history_screen, **ctx_fields) -> HistoryFlow:
+    return HistoryFlow(stub_context(**ctx_fields), history_screen, FormulaSlots(), MagicMock(), on_sessions_deleted=MagicMock())
+
+
 def test_history_loads_without_the_full_screen_spinner(monkeypatch):
-    app = EEGMeditationApp.__new__(EEGMeditationApp)
-    app._ticker = MagicMock(running=False)  # no session's tick running
-    app._db = MagicMock()
-    app._history_screen = MagicMock()
-    app._current_user_id = 1
-    app._session_manager = SessionManager()  # no session running
-    app._loading_overlay = MagicMock()
+    flow = _flow(MagicMock(), user_id=lambda: 1)
     monkeypatch.setattr(history_flow, "sessions_for_view", lambda db, uid: _sessions(3))
-    make_history_flow(app).refresh(force=True)
-    app._loading_overlay.show.assert_not_called()
-    app._history_screen.load_sessions.assert_called_once()
+    flow.refresh(force=True)
+    flow._loading.show.assert_not_called()
+    flow._history_screen.load_sessions.assert_called_once()
 
 
 def test_the_history_view_tapped_is_stored_for_the_profile(tmp_path):
     db = DatabaseManager(db_path=str(tmp_path / "t.db"))
     try:
-        app = EEGMeditationApp.__new__(EEGMeditationApp)
         uid = db.create_user("me")
-        app._db, app._current_user_id = db, uid
-        app._history_screen = HistoryScreen()
-        wire(app._history_screen, on_view_mode_change=make_history_flow(app).on_view_mode_change)  # as build() does
+        active = [uid]
+        screen = HistoryScreen()
+        wire(screen, on_view_mode_change=_flow(screen, db=db, user_id=lambda: active[0]).on_view_mode_change)  # as build() does
 
         def tap(label: str) -> None:
-            next(b for b in app._history_screen._toggle_col.walk() if getattr(b, "text", None) == label).dispatch(
-                "on_release")
+            next(b for b in screen._toggle_col.walk() if getattr(b, "text", None) == label).dispatch("on_release")
 
         tap("14d")
         assert db.get_user_setting(uid, "history_view_mode") == "bars"
-        app._current_user_id = None  # no profile: the view changes, nothing is stored
+        active[0] = None  # no profile: the view changes, nothing is stored
         tap("Cal")
-        assert app._history_screen._view_mode == "calendar" and db.get_user_setting(uid, "history_view_mode") == "bars"
+        assert screen._view_mode == "calendar" and db.get_user_setting(uid, "history_view_mode") == "bars"
     finally:
         db.close()

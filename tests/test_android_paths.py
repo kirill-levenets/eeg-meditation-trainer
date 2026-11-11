@@ -154,11 +154,10 @@ def test_the_scan_and_the_connect_take_the_android_backend(monkeypatch):
     monkeypatch.setattr(NeuroSkyStream, "_scan_paired_android",
                         staticmethod(lambda: [{"name": "MindWave", "address": "AA"}]))
     assert NeuroSkyStream.scan_paired_devices() == [{"name": "MindWave", "address": "AA"}]
-    stream = NeuroSkyStream.__new__(NeuroSkyStream)
-    stream._device_address = "AA:BB"
+    stream = NeuroSkyStream()
+    stream.set_device("AA:BB", "MindWave")
     picked = []
-    stream._connect_android = lambda: picked.append("android")
-    stream._connect_desktop = lambda: picked.append("desktop")
-    stream._connect_windows = lambda: picked.append("windows")
+    for backend in ("android", "desktop", "windows"):
+        monkeypatch.setattr(stream, f"_connect_{backend}", lambda backend=backend: picked.append(backend))
     stream._connect_bluetooth()
     assert picked == ["android"]

@@ -4,246 +4,221 @@ their targets. The live graph steps its threshold line where the ticks' target c
 detail."""
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 from kivy.base import EventLoop
 from kivy.core.window import Window
 from kivy.tests.common import UnitTestTouch
 
-import app.ui.app_manager as am
-from app.config import APP
 from app.session.manager import SessionManager, SessionState
-from app.session.recorder import RecordedTick
 from app.session.scoring import target_steps
-from app.session.session_program import SessionProgram
-from app.session.session_run import Phase
-from app.ui.app_manager import EEGMeditationApp
 from app.ui.diary_screen import detail_graph_data
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
-from tests._program_run import make_run
-from tests._program_settings import make_programs
-from tests._recorder import make_recorder
-from tests._session_run import run_in
-from tests._shown_session import make_shown
-from tests._sound_sources import make_sounds
+from tests._app import (
+    FedSession,
+    calls_of,
+    frames,
+    frames_until,
+    popup_message,
+    popups,
+    program_mode,
+    reload_with,
+    tick_metrics,
+)
 from tests.test_bt_wait_reconnect import wait  # noqa: F401  (fixture)
-from tests.test_resume_mirror import _drive_tick, _make_tick_app, _metrics, _raw_sample
-from tests.test_session_detail_open import _frames, app, db  # noqa: F401  (fixtures)
-from tests.test_session_ends_once import _locked_app
+from tests.test_session_detail_open import (  # noqa: F401  (fixture)
+    _frames,
+    _select,
+    app,
+)
+
+SETTLE_S = 0.5  # the app's settle window (EEGMeditationApp._PERSIST_SETTLE_S)
+SEGMENTS = [{"minutes": 5, "formula": "shamatha_score", "target": 60},
+            {"minutes": 5, "formula": "meditation_score", "target": 80}]
 
 
-def _threshold_app(*, program: bool = False, state: SessionState = SessionState.RUNNING) -> EEGMeditationApp:
-    a = EEGMeditationApp.__new__(EEGMeditationApp)
-    a._current_user_id = 1
-    a._metrics_engine = MagicMock()
-    a._audio = MagicMock()
-    a._live_screen = MagicMock()
-    a._persist_user_setting_later = MagicMock()
-    a._loading_settings = False
-    a._ticker = MagicMock(running=False)
-    a._recorder = make_recorder(a)
-    a._program_run = make_run(a, program=MagicMock() if program else None)
-    sm = SessionManager()
-    sm.start(threshold=70)
-    if program:
-        sm.start_segment("shamatha_score", 70)
-    else:
-        sm.set_active_goal("shamatha_score")
-    sm._state = state
-    a._session_manager = sm
-    a._shown = make_shown(a)
-    return a
+def _simple(app_, monkeypatch, threshold: int = 70) -> FedSession:
+    """A simple session against the Settings threshold, its ticks the test's."""
+    reload_with(app_, threshold=str(threshold))
+    return FedSession(app_, monkeypatch)
 
 
-def _next_target(a) -> float:
-    return a._session_manager.add_metric({"shamatha_score": 60.0})["score_target"]
+def _program(app_, monkeypatch, segments=SEGMENTS, threshold: int = 70) -> FedSession:
+    """A program session (the Settings threshold beside it), its ticks the test's."""
+    reload_with(app_, threshold=str(threshold))
+    program_mode(app_, segments)
+    return FedSession(app_, monkeypatch)
 
 
-def test_the_shamatha_pill_crosses_at_the_base_in_force(monkeypatch):
-    a, _queued, _reasons = _locked_app(monkeypatch)
-    calm = {**_metrics(), "shamatha_score": 60.0}
+def _next_target(app_) -> float:
+    return app_._session.manager.add_metric({"shamatha_score": 60.0})["score_target"]
+
+
+def _settled(app_) -> None:
+    """Until the slider's settle window has passed."""
+    frames_until(lambda: False, SETTLE_S + 0.2)
+
+
+def test_the_shamatha_pill_crosses_at_the_base_in_force(fresh_app, monkeypatch):
+    fed = _simple(fresh_app, monkeypatch, threshold=50)
+    calm = {**tick_metrics(), "shamatha_score": 60.0}
     for _ in range(3):  # three ticks above the base of 50: the pill comes on
-        _drive_tick(a, _raw_sample(), calm)
-    assert a._run.shamatha_active
-    a._apply_threshold(70)  # the slider settled above the score
+        fed.tick(metrics=calm)
+    assert fresh_app._run.shamatha_active
+    fresh_app._apply_threshold(70)  # the slider settled above the score
     for _ in range(3):
-        _drive_tick(a, _raw_sample(), calm)
-    assert not a._run.shamatha_active
+        fed.tick(metrics=calm)
+    assert not fresh_app._run.shamatha_active
 
 
-def test_the_sound_and_the_engine_read_the_ticks_target_and_the_base(monkeypatch):
+def test_the_sound_and_the_engine_read_the_ticks_target_and_the_base(fresh_app, monkeypatch):
     # A segment's target reaches the sound through the tick it is scored on; the engine's state keeps the base.
-    a, _queued, _reasons = _locked_app(monkeypatch)
-    a._session_manager.set_threshold(70)  # the base moved mid-session (the slider settled)
-    _drive_tick(a, _raw_sample(), _metrics())  # a simple session: the base
-    assert a._audio.update.call_args.args[1] == 70 and a._metrics_engine.process_sample.call_args.args[1] == 70
-    a._program_run = make_run(a, program=MagicMock())  # a program session in a segment with its own target
-    a._program_run.tick = lambda metrics, raw: None
-    a._session_manager.start_segment("shamatha_score", 60)
-    _drive_tick(a, _raw_sample(), _metrics())
-    assert a._audio.update.call_args.args[1] == 60.0 and a._metrics_engine.process_sample.call_args.args[1] == 70
-    between = {**_metrics(), "shamatha_score": 65.0}  # above the segment's 60, below the base's 70
+    app_ = fresh_app
+    fed = _program(app_, monkeypatch, [{"minutes": 1, "formula": "shamatha_score", "target": 70},
+                                       {"minutes": 1, "formula": "shamatha_score", "target": 60}])
+    sounded = calls_of(monkeypatch, app_._audio, "update")
+    fed.tick()  # the first segment: its target is the base the session started with
+    assert sounded[-1][1] == 70 and fed.thresholds[-1] == 70
+    app_._session.manager._start_time -= 61  # the next tick is in the second segment, with its own target
+    fed.tick()
+    assert sounded[-1][1] == 60 and fed.thresholds[-1] == 70
+    between = {**tick_metrics(), "shamatha_score": 65.0}  # above the segment's 60, below the base's 70
     for _ in range(3):
-        _drive_tick(a, _raw_sample(), between)
-    assert not a._run.shamatha_active  # the pill keeps the base, not a segment's target
+        fed.tick(metrics=between)
+    assert not app_._run.shamatha_active  # the pill keeps the base, not a segment's target
 
 
 # ---- one path applies the threshold ----
 
 
-def test_a_new_threshold_is_the_next_ticks_target_and_the_base():
-    a = _threshold_app()
-    a._apply_threshold(85)
-    assert _next_target(a) == 85 and a._session_manager.threshold == 85  # the one owner every reader reads per tick
+def test_a_new_threshold_is_the_next_ticks_target_and_the_base(fresh_app, monkeypatch):
+    _simple(fresh_app, monkeypatch)
+    fresh_app._apply_threshold(85)
+    assert _next_target(fresh_app) == 85 and fresh_app._session.manager.threshold == 85  # the one owner, read per tick
 
 
-def test_a_new_threshold_never_reaches_a_running_program():
+def test_a_new_threshold_never_reaches_a_running_program(fresh_app, monkeypatch):
     # A settle that lands late, or the profile's settings reloaded (re-picking the active profile), mid-program.
-    a = _threshold_app(program=True)
-    a._apply_threshold(85)
-    assert _next_target(a) == 70 and a._session_manager.threshold == 70  # the segment's 70 stays in force
+    fed = _program(fresh_app, monkeypatch)
+    fed.tick()
+    fresh_app._apply_threshold(85)
+    assert _next_target(fresh_app) == 60 and fresh_app._session.manager.threshold == 60  # the segment's stays in force
 
 
-def test_after_a_program_session_the_slider_applies_again():
-    a = _threshold_app(program=True, state=SessionState.IDLE)  # _session_program_active stays set after the session
-    a._apply_threshold(85)
-    assert a._session_manager.threshold == 85
+def test_after_a_program_session_the_slider_applies_again(fresh_app, monkeypatch):
+    app_ = fresh_app
+    _program(app_, monkeypatch).tick()
+    app_._stop_and_save()
+    frames()
+    app_._apply_threshold(85)
+    assert app_._session.manager.threshold == 85
 
 
-class _Trigger:
-    """A Kivy Clock trigger whose settle window the test ends."""
-
-    def __init__(self, fn, timeout):
-        self.fn, self.armed = fn, False
-
-    def cancel(self):
-        self.armed = False
-
-    def __call__(self):
-        self.armed = True
-
-
-def test_a_slider_drag_is_one_change_at_the_value_it_settles_on(monkeypatch):
+def test_a_slider_drag_is_one_change_at_the_value_it_settles_on(fresh_app, monkeypatch):
     # A drag from 70 to 85 used to put every step in force: ticks scored against 72, 76, 81..., each a step of the line.
-    triggers: list[_Trigger] = []
-    monkeypatch.setattr(am, "Clock", SimpleNamespace(create_trigger=lambda fn, t: triggers.append(_Trigger(fn, t))
-                                                     or triggers[-1]))
-    a = _threshold_app()
-    a._settings_screen = MagicMock(threshold=85)
+    app_ = fresh_app
+    _simple(app_, monkeypatch)
     for v in range(71, 86):
-        a._on_threshold_change(v)
-        assert _next_target(a) == 70  # still the value in force while the slider moves
-    for t in triggers:
-        if t.armed:
-            t.fn(0)
-    assert _next_target(a) == 85
-    assert a._session_manager.compute_statistics()["score_targets"] == "[70, 85]"
-    a._persist_user_setting_later.assert_called_with("threshold")
+        app_._settings_screen.threshold = v
+        assert _next_target(app_) == 70  # still the value in force while the slider moves
+    _settled(app_)
+    assert _next_target(app_) == 85
+    assert app_._session.manager.compute_statistics()["score_targets"] == "[70, 85]"
+    assert app_._db.get_user_setting(app_._current_user_id, "threshold") == "85"  # written once it settled too
 
 
 def test_a_session_waiting_for_the_headset_starts_with_the_threshold_set_during_the_wait(wait):  # noqa: F811
     a, stream, tick = wait
-    a._settings_screen = MagicMock(threshold=70)
-    a._metrics_engine = MagicMock()
-    a._audio = MagicMock()
-    a._persist_user_setting_later = MagicMock()
-    a._program_run = make_run(a)
     tick(6.0, connected=True)
     a._apply_threshold(85)
     tick(7.0, connected=True, bands=5.0, packet=True)
-    assert a._session_manager.state == SessionState.RUNNING
+    assert a._session.manager.state == SessionState.RUNNING
     assert _next_target(a) == 85
 
 
 # ---- the tick: stored row, mirror, live graph ----
 
 
-def _tick_app() -> EEGMeditationApp:
-    a = _make_tick_app()
-    sm = SessionManager()
-    sm.start(threshold=70)
-    a._session_manager = sm
-    a._program_run = make_run(a)
-    a._metrics_engine = MagicMock()
-    a._persist_user_setting_later = MagicMock()
-    a._shown = make_shown(a)
-    return a
+def _points_drawn(app_, monkeypatch) -> list[tuple]:
+    """Each point the live graph is given from here on, as (threshold, scored series)."""
+    drawn, add = [], app_._live_screen.graph.add_point
+    monkeypatch.setattr(app_._live_screen.graph, "add_point",
+                        lambda m, **kw: (drawn.append((kw.get("threshold"), kw.get("scored"))), add(m, **kw))[1])
+    return drawn
 
 
-def _ui_updates(a) -> list:
-    """Run the UI updates the ticks queued, as the main thread would."""
-    for call in a._on_main.call_args_list:
-        call.args[0]()
-    return a._live_screen.graph.add_point.call_args_list
-
-
-def test_each_ticks_row_and_mirror_point_record_its_target():
-    a = _tick_app()
+def test_each_ticks_row_and_mirror_point_record_its_target(fresh_app, monkeypatch):
+    app_ = fresh_app
+    fed = _simple(app_, monkeypatch)
+    drawn = _points_drawn(app_, monkeypatch)
     for i in range(3):
         if i == 2:
-            a._apply_threshold(85)
-        _drive_tick(a, _raw_sample(), _metrics(seed=80.0))
-    assert [(r["score_key"], r["score_value"], r["score_target"]) for r in a._recorder._buffer] == [
+            app_._apply_threshold(85)
+        fed.tick(metrics=tick_metrics(seed=80.0))
+    assert [(r["score_key"], r["score_value"], r["score_target"]) for r in app_._session.recorder._buffer] == [
         ("shamatha_score", 80.0, 70), ("shamatha_score", 80.0, 70), ("shamatha_score", 80.0, 85)]
-    assert [(m["score_target"], m["score_key"]) for m in a._shown.mirror.metrics] == [
+    assert [(m["score_target"], m["score_key"]) for m in app_._shown.mirror.metrics] == [
         (70, "shamatha_score"), (70, "shamatha_score"), (85, "shamatha_score")]
-    assert [(c.kwargs["threshold"], c.kwargs["scored"]) for c in _ui_updates(a)] == [
-        (70, "shamatha_score"), (70, "shamatha_score"), (85, "shamatha_score")]
+    assert drawn == [(70, "shamatha_score"), (70, "shamatha_score"), (85, "shamatha_score")]
 
 
-def test_each_ticks_screen_update_shows_the_score_as_of_that_tick():
+def test_each_ticks_screen_update_shows_the_score_as_of_that_tick(fresh_app, monkeypatch):
     """The score is taken with the tick, not when the main thread gets to it (#113)."""
-    a = _tick_app()
+    app_ = fresh_app
+    fed = _simple(app_, monkeypatch)
+    shown = calls_of(monkeypatch, app_._live_screen, "update_stats")
     for _ in range(3):
-        _drive_tick(a, _raw_sample(), _metrics(seed=80.0))
-    _ui_updates(a)
-    assert [c.args[0].time_above for c in a._live_screen.update_stats.call_args_list] == [0.5, 1.0, 1.5]
+        fed.tick(metrics=tick_metrics(seed=80.0), shown=False)  # the main thread held
+    frames()
+    assert [score.time_above for (score,) in shown] == [0.5, 1.0, 1.5]
 
 
-def test_a_programs_ticks_carry_each_segments_scored_series_to_the_graph_and_the_mirror():
+def test_a_programs_ticks_carry_each_segments_scored_series_to_the_graph_and_the_mirror(fresh_app, monkeypatch):
     """The live line's colouring per point (#113): a tick past the boundary is scored, drawn and mirrored on the next
     segment's series."""
-    a = _tick_app()
-    a._program_run = run = make_run(a)
-    run.begin(SessionProgram([{"minutes": 1, "target": 70, "formula": "shamatha_score"},
-                              {"minutes": 1, "target": 60, "formula": "meditation_score"}]), [], "")
-    _drive_tick(a, _raw_sample(), _metrics(seed=80.0))
-    a._session_manager._start_time -= 61  # the next tick is past the first segment's minute
-    _drive_tick(a, _raw_sample(), _metrics(seed=80.0))
+    app_ = fresh_app
+    fed = _program(app_, monkeypatch, [{"minutes": 1, "target": 70, "formula": "shamatha_score"},
+                                       {"minutes": 1, "target": 60, "formula": "meditation_score"}])
+    drawn = _points_drawn(app_, monkeypatch)
+    fed.tick(metrics=tick_metrics(seed=80.0))
+    app_._session.manager._start_time -= 61  # the next tick is past the first segment's minute
+    fed.tick(metrics={**tick_metrics(seed=80.0), "meditation_score": 55.0})
     keys = ["shamatha_score", "meditation_score"]
-    assert [m["score_key"] for m in a._shown.mirror.metrics] == keys
-    assert [c.kwargs["scored"] for c in _ui_updates(a)] == keys
+    assert [m["score_key"] for m in app_._shown.mirror.metrics] == keys
+    assert [scored for _threshold, scored in drawn] == keys
 
 
-def test_a_tick_the_session_paused_under_is_not_recorded():
+def test_a_tick_the_session_paused_under_is_not_recorded(fresh_app, monkeypatch):
     # The pause lands between the tick's RUNNING check and its scoring: the tick isn't part of the session, so it
     # leaves no row and no graph point (it used to be stored, unscored).
-    a = _tick_app()
-    real_add = a._session_manager.add_metric
+    app_ = fresh_app
+    fed = _simple(app_, monkeypatch)
+    real_add = app_._session.manager.add_metric
 
     def pause_first(metric):
-        a._session_manager.pause()
+        app_._session.manager.pause()
         return real_add(metric)
 
-    a._session_manager.add_metric = pause_first
-    a._run.pending_marker = True
-    _drive_tick(a, _raw_sample(), _metrics())
-    assert a._recorder._buffer == [] and len(a._shown.mirror.metrics) == 0
-    a._on_main.assert_not_called()
-    assert a._run.pending_marker  # it goes on the next tick that is recorded
+    monkeypatch.setattr(app_._session.manager, "add_metric", pause_first)
+    app_._on_marker()
+    fed.tick()
+    assert app_._session.recorder._buffer == [] and len(app_._shown.mirror.metrics) == 0
+    assert app_._live_screen.graph.total_points == 0
+    assert app_._run.pending_marker  # it goes on the next tick that is recorded
 
 
-def test_the_live_graph_reloaded_from_the_mirror_steps_its_line():
+def test_the_live_graph_reloaded_from_the_mirror_steps_its_line(fresh_app, monkeypatch):
     # After a screen lock the graph is refilled from the mirror: the steps come back with the data.
-    a = _tick_app()
+    app_ = fresh_app
+    fed = _simple(app_, monkeypatch)
     for i in range(4):
         if i == 2:
-            a._apply_threshold(85)
-        _drive_tick(a, _raw_sample(), _metrics(seed=80.0))
-    a._shown.mirror.reload_into(a._live_screen)
-    a._live_screen.graph.set_threshold_steps.assert_called_with([(0, 70), (2, 85)])
+            app_._apply_threshold(85)
+        fed.tick(metrics=tick_metrics(seed=80.0))
+    app_._live_screen.graph.set_threshold_steps(None)
+    app_._shown.mirror.reload_into(app_._live_screen)
+    assert app_._live_screen.graph._threshold_steps == [(0, 70), (2, 85)]
 
 
 # ---- the graph ----
@@ -287,7 +262,7 @@ def test_the_detail_draws_a_sessions_threshold_steps(app):  # noqa: F811
                                           "score_metric_name": "Shamatha", "avg_score": 60.0,
                                           "score_targets": "[70, 85]"},
                                    _rows([70, 70, 85, 85]), user_id=a._current_user_id, session_name="s")
-    a._detail.on_session_select(sid)
+    _select(a, sid)
     workers.pop()()
     _frames(3)
     graph = a._diary_screen._metrics_graph
@@ -297,116 +272,85 @@ def test_the_detail_draws_a_sessions_threshold_steps(app):  # noqa: F811
 
 def test_a_session_saved_before_the_targets_keeps_its_line(app):  # noqa: F811
     a, workers = app
-    a._detail.on_session_select(a.sessions["A"])  # rows without targets, threshold_used 70
+    _select(a, a.sessions["A"])  # rows without targets, threshold_used 70
     workers.pop()()
     _frames(3)
     graph = a._diary_screen._metrics_graph
     assert graph._threshold_steps is None and graph._threshold_value == 70.0
 
 
-def _start(program: bool, monkeypatch, prepare=None, **before) -> EEGMeditationApp:
-    """Run the real session start (mock headset) with everything around it stubbed."""
-    monkeypatch.setattr(APP, "USE_MOCK_DEVICE", True)
-    a = _threshold_app(state=SessionState.IDLE)
-    a._session_manager.reset()
-    a._settings_screen = MagicMock(threshold=70, **{"timer.timer_enabled": False, "timer.timer_minutes": 20})
-    prog = SessionProgram([{"minutes": 5, "formula": "shamatha_score", "target": 60},
-                           {"minutes": 5, "formula": "meditation_score", "target": 80}])
-    a._program_settings = make_programs()
-    a._program_settings.segments = prog.segments
-    a._program_settings.mode = "program" if program else "simple"
-    a._timer_state = MagicMock(custom_sound_path="")
-    a._keep_awake = MagicMock()
-    a._sounds = make_sounds(a, setting={"feedback_source": "noise", "feedback_sound_path": "", "reward_source": "none",
-                                        "reward_sound_path": ""}.__getitem__)  # over the mock audio
-    a._eeg_stream = MagicMock()
-    a._live_screen.graph.set_threshold_steps([(0, 50)])  # the last session's steps
-    for name, value in before.items():
-        setattr(a, name, value)
-    if prepare is not None:
-        prepare(a)
-    run_in(a, Phase.STARTING)  # as Start makes it
-    a._start_session_common()
-    return a
-
-
-def test_starting_a_program_with_a_formula_that_cant_run_says_so(monkeypatch):
-    def prepare(app_):
-        app_._program_settings.segments = [{"minutes": 5, "target": 60, "formula": {"name": "Broken", "formula": "*"}}]
-        app_._info_popup = MagicMock()
-    a = _start(True, monkeypatch, prepare=prepare)
-    assert [c.args[0] for c in a._info_popup.call_args_list] == ["Formula error in this program"]
+# ---- a session's start and its ending ----
 
 
 @pytest.mark.parametrize("program, first_target", [(False, 70), (True, 60)])
-def test_a_session_start_clears_the_last_sessions_steps(program, first_target, monkeypatch):
-    # Both kinds step their line from the ticks: a program no longer draws its segments upfront.
-    a = _start(program, monkeypatch)
-    graph = a._live_screen.graph
-    assert graph.set_threshold_steps.call_args_list[-1].args == (None,)
-    graph.set_threshold.assert_called_with(float(first_target))
-    assert a._session_manager.threshold == first_target
-    assert a._session_manager.state == SessionState.RUNNING
-    assert _next_target(a) == first_target
+def test_a_session_start_puts_its_threshold_in_force_and_clears_the_last_sessions_steps(program, first_target,
+                                                                                        fresh_app, monkeypatch):
+    # Both kinds step their line from the ticks: a program no longer draws its segments upfront. The start applies its
+    # own threshold, whatever the last session left in force.
+    app_ = fresh_app
+    graph = app_._live_screen.graph
+    reload_with(app_, threshold="70")
+    app_._session.manager.set_threshold(33)  # what the last session left
+    graph.set_threshold_steps([(0, 50)])  # and its steps
+    if program:
+        program_mode(app_, SEGMENTS)
+    FedSession(app_, monkeypatch)
+    assert graph._threshold_steps is None and graph._threshold_value == float(first_target)
+    assert app_._session.manager.threshold == first_target
+    assert app_._session.manager.state == SessionState.RUNNING
+    assert _next_target(app_) == first_target
 
 
 def test_an_old_session_opened_after_a_new_one_does_not_keep_its_steps(app):  # noqa: F811
     a, workers = app
     sid = a._db.checkpoint_session(None, {"duration": 2, "threshold_used": 70, "score_targets": "[70, 85]"},
                                    _rows([70, 85]), user_id=a._current_user_id, session_name="s")
-    a._detail.on_session_select(sid)
+    _select(a, sid)
     workers.pop()()
     _frames(3)
     a._detail.on_diary_back()
-    a._detail.on_session_select(a.sessions["A"])
+    _select(a, a.sessions["A"])
     workers.pop()()
     _frames(3)
     assert a._diary_screen._metrics_graph._threshold_steps is None
 
 
-def test_a_settle_runs_the_latest_function_given_for_its_input(monkeypatch):
-    triggers: list[_Trigger] = []
-    monkeypatch.setattr(am, "Clock", SimpleNamespace(create_trigger=lambda fn, t: triggers.append(_Trigger(fn, t))
-                                                     or triggers[-1]))
-    a = EEGMeditationApp.__new__(EEGMeditationApp)
+def test_a_settle_runs_the_latest_function_given_for_its_input(fresh_app):
     ran = []
-    a._after_settle("x", lambda: ran.append(1))
-    a._after_settle("x", lambda: ran.append(2))
-    assert len(triggers) == 1
-    triggers[0].fn(0)
+    fresh_app._after_settle("x", lambda: ran.append(1))
+    fresh_app._after_settle("x", lambda: ran.append(2))
+    assert ran == []
+    _settled(fresh_app)
     assert ran == [2]
 
 
-def test_a_touch_on_the_locked_controls_says_why_while_the_program_runs():
-    a = _threshold_app(program=True)
-    a._info_popup = MagicMock()
-    assert a._refuse_program_threshold() is True
-    assert a._info_popup.call_args.args == (
+def test_a_touch_on_the_locked_controls_says_why_while_the_program_runs(fresh_app, monkeypatch):
+    _program(fresh_app, monkeypatch)
+    assert fresh_app._refuse_program_threshold() is True
+    (popup,) = popups()
+    assert (popup.title, popup_message(popup)) == (
         "Session in progress", "This program sets its own targets. Stop the current session before changing the "
                                "threshold.")
 
 
-def test_a_touch_after_the_program_ended_is_not_refused():
+def test_a_touch_after_the_program_ended_is_not_refused(fresh_app, monkeypatch):
     # The timer ended it on the tick thread; the unlock is still queued for the main thread.
-    a = _threshold_app(program=True, state=SessionState.FINISHED)
-    a._info_popup = MagicMock()
-    assert a._refuse_program_threshold() is False
-    a._info_popup.assert_not_called()
-
-
-def test_a_session_start_applies_its_threshold_whatever_the_last_one_left_running(monkeypatch):
-    a = _start(True, monkeypatch, _ticker=MagicMock(running=True))  # the last session's tick hasn't exited yet
-    assert a._session_manager.threshold == 60
+    fed = _program(fresh_app, monkeypatch)
+    fed.end_by_timer_on_next_tick()
+    fed.tick(shown=False)
+    assert fresh_app._session.manager.state == SessionState.FINISHED
+    assert fresh_app._refuse_program_threshold() is False and popups() == []
 
 
 @pytest.mark.parametrize("program", [False, True])
-def test_a_program_session_locks_the_threshold_controls_and_its_end_unlocks_them(program, monkeypatch):
-    a = _start(program, monkeypatch)
-    a._settings_screen.lock_threshold.assert_called_with(a._refuse_program_threshold if program else None)
-    a._settings_screen.lock_threshold.reset_mock()
-    a._keep_awake = MagicMock()
-    a._undo_session_setup()  # every ending
-    a._settings_screen.lock_threshold.assert_called_with(None)
+def test_a_program_session_locks_the_threshold_controls_and_its_end_unlocks_them(program, fresh_app, monkeypatch):
+    app_ = fresh_app
+    (_program if program else _simple)(app_, monkeypatch)
+    lock = app_._settings_screen._threshold_lock
+    assert (lock == app_._refuse_program_threshold) if program else (lock is None)
+    app_._stop_and_save()  # every ending
+    frames()
+    assert app_._settings_screen._threshold_lock is None
 
 
 def test_the_locked_controls_take_no_touch_and_each_touch_says_why():
@@ -451,14 +395,16 @@ def test_the_locked_controls_take_no_touch_and_each_touch_says_why():
         Window.remove_widget(screen)
 
 
-def test_a_slider_move_just_before_starting_a_program_is_not_applied_during_it(monkeypatch):
+def test_a_slider_move_just_before_starting_a_program_is_not_applied_during_it(fresh_app, monkeypatch):
     # The settle window ended after Start: the program refused the pending value and said "Saved for your next
     # session" about a change made before it started.
-    triggers: list[_Trigger] = []
-    monkeypatch.setattr(am, "Clock", SimpleNamespace(create_trigger=lambda fn, t: triggers.append(_Trigger(fn, t))
-                                                     or triggers[-1]))
-    a = _start(True, monkeypatch, prepare=lambda app_: app_._on_threshold_change(80))
-    assert len(triggers) == 1 and not triggers[0].armed  # the slider's pending apply, cancelled by Start
+    app_ = fresh_app
+    reload_with(app_, threshold="70")
+    program_mode(app_, SEGMENTS)
+    app_._settings_screen.threshold = 80  # its apply is still pending
+    FedSession(app_, monkeypatch)
+    _settled(app_)
+    assert app_._session.manager.threshold == 60 and popups() == []  # the slider's pending apply, cancelled by Start
 
 
 def test_a_running_session_ignores_another_start():
@@ -468,61 +414,77 @@ def test_a_running_session_ignores_another_start():
     assert sm.add_metric({"shamatha_score": 60.0})["score_target"] == 70
 
 
-def test_a_program_start_that_fails_in_its_setup_leaves_the_controls_unlocked(monkeypatch):
-    started = {}
+def test_a_program_start_that_fails_in_its_setup_leaves_the_controls_unlocked(fresh_app, monkeypatch):
+    app_ = fresh_app
+    program_mode(app_, SEGMENTS)
 
-    def prepare(app_):
-        app_._program_run.begin = MagicMock(side_effect=RuntimeError("bad custom sound file"))
-        started["app"] = app_
+    def failing(*_args):
+        raise RuntimeError("bad custom sound file")
 
+    monkeypatch.setattr(app_._session.program_run, "begin", failing)
     with pytest.raises(RuntimeError):
-        _start(True, monkeypatch, prepare=prepare)
-    started["app"]._settings_screen.lock_threshold.assert_not_called()
+        app_._on_start()
+    assert app_._settings_screen._threshold_lock is None
 
 
-def _idle_app() -> EEGMeditationApp:
-    a = _threshold_app(state=SessionState.FINISHED)  # the last session ended; its graphs are still on screen
-    a._shown.mirror.record(RecordedTick({}, {}, {"score_target": 70, "score_key": "shamatha_score"}, False))
-    a._after_settle = MagicMock()
-    return a
+def test_a_session_start_holds_the_phone_awake(fresh_app, monkeypatch):
+    holds = calls_of(monkeypatch, fresh_app._session.keep_awake, "hold")
+    _simple(fresh_app, monkeypatch)
+    assert len(holds) == 1  # the wake lock, the screen-on flag, the foreground service
 
 
-def test_moving_the_slider_while_idle_clears_the_last_sessions_graphs():
-    a = _idle_app()
-    a._on_threshold_change(85)  # Kivy calls it only when the slider's value changes
-    for graph in (a._live_screen.graph, a._live_screen.raw_graph, a._live_screen.band_graph):
-        graph.clear_data.assert_called_once()
-    a._live_screen.graph.set_threshold_steps.assert_called_with(None)
-    assert not a._shown.mirror.metrics and not a._shown.mirror.bands and not a._shown.mirror.waveform
-    a._apply_threshold(85)  # the settled value
-    a._live_screen.graph.set_threshold.assert_called_with(85.0)
+# ---- the last session's graphs, while idle ----
 
 
-def test_reapplying_the_settings_threshold_keeps_the_graphs():
-    # After a program, the threshold in force is a segment's target (85) while Settings shows 70: re-picking the
+def _ended(app_, monkeypatch, fed_session=_simple) -> None:
+    """A session of three ticks, ended, its card closed: its graphs are still on screen."""
+    fed = fed_session(app_, monkeypatch)
+    for _ in range(3):
+        fed.tick()
+    app_._stop_and_save()
+    frames()
+    app_._shown.on_ok()
+    assert app_._live_screen.graph.total_points == 3
+
+
+def _live_points(app_) -> list[int]:
+    screen = app_._live_screen
+    return [screen.graph.total_points, screen.raw_graph.total_points, screen.band_graph.total_points]
+
+
+def test_moving_the_slider_while_idle_clears_the_last_sessions_graphs(fresh_app, monkeypatch):
+    app_ = fresh_app
+    _ended(app_, monkeypatch)
+    app_._settings_screen.threshold = 85
+    mirror = app_._shown.mirror
+    assert _live_points(app_) == [0, 0, 0] and app_._live_screen.graph._threshold_steps is None
+    assert not mirror.metrics and not mirror.bands and not mirror.waveform
+    _settled(app_)  # the settled value
+    assert app_._live_screen.graph._threshold_value == 85.0 and app_._session.manager.threshold == 85
+
+
+def test_reapplying_the_settings_threshold_keeps_the_graphs(fresh_app, monkeypatch):
+    # After a program, the threshold in force is a segment's target (60) while Settings shows 70: re-picking the
     # profile reloads its settings and applies 70, which is no change of the Settings threshold.
-    a = _idle_app()
-    a._session_manager.set_threshold(85)
-    a._apply_threshold(70)
-    a._live_screen.graph.clear_data.assert_not_called()
+    app_ = fresh_app
+    _ended(app_, monkeypatch, _program)
+    assert app_._session.manager.threshold == 60
+    app_._activate_user(app_._current_user_id)
+    _settled(app_)
+    assert app_._live_screen.graph.total_points == 3 and app_._session.manager.threshold == 70
 
 
-def test_nothing_to_clear_before_any_session():
-    a = _idle_app()
-    a._shown.mirror.metrics.clear()
-    a._on_threshold_change(85)
-    a._live_screen.graph.clear_data.assert_not_called()
+def test_nothing_to_clear_before_any_session(fresh_app, monkeypatch):
+    cleared = calls_of(monkeypatch, fresh_app._live_screen.graph, "clear_data")
+    fresh_app._settings_screen.threshold = 85
+    assert cleared == []
 
 
-def test_moving_the_slider_during_a_simple_session_keeps_its_graphs():
-    a = _threshold_app()
-    a._after_settle = MagicMock()
-    a._shown.mirror.metrics.append({})
-    a._on_threshold_change(85)
-    a._live_screen.graph.clear_data.assert_not_called()
-    a._live_screen.graph.set_threshold_steps.assert_not_called()
-
-
-def test_a_session_start_holds_the_phone_awake(monkeypatch):
-    a = _start(False, monkeypatch)
-    a._keep_awake.hold.assert_called_once_with()  # the wake lock, the screen-on flag, the foreground service
+def test_moving_the_slider_during_a_simple_session_keeps_its_graphs(fresh_app, monkeypatch):
+    app_ = fresh_app
+    fed = _simple(app_, monkeypatch)
+    for _ in range(3):
+        fed.tick()
+    steps = app_._live_screen.graph._threshold_steps
+    app_._settings_screen.threshold = 85
+    assert app_._live_screen.graph.total_points == 3 and app_._live_screen.graph._threshold_steps == steps
