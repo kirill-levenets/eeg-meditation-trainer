@@ -276,6 +276,7 @@ The **Simple | Program** toggle at the top of Settings → Timer / Program picks
 
 **Timer End Sound** (both modes): its button picks **Default bell** or **Custom file...** (a file of your own, picked the same way as a custom feedback sound); the button then shows the file.
 **Test** plays it.
+A sound picked during a session rings from the next session; the running one ends with the sound it started with.
 While it rings, other apps' audio is lowered (a session with a feedback sound has already paused it).
 If the app can't play the file, the timer ends with the default bell, and **Test** says so.
 

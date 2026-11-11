@@ -6,7 +6,15 @@ from app.metrics.custom_formula import CustomFormulaEvaluator
 from app.metrics.formula_slots import FORMULA_KEYS, FormulaSlots, read_active
 from app.storage.database import DatabaseManager
 from app.ui.audio_metric import sound_metric
-from tests._app import FedSession, frames, popup_message, popups, reload_with, tap
+from tests._app import (
+    FedSession,
+    frames,
+    popup_message,
+    popups,
+    reload_with,
+    start_ticked_by_hand,
+    tap,
+)
 from tests._audio_metric import audio_metric_alone
 
 # ---- the three formula slots ----
@@ -128,7 +136,8 @@ def test_a_new_session_averages_only_its_own_ticks(fresh_app, monkeypatch, next_
 
 
 def _saved_with_formulas(app) -> tuple[int, dict]:
-    """A one-tick session saved with the formulas in the slots now: (its id, its row)."""
+    """A one-tick session started with the formulas in the slots now, saved with its record: (its id, its row)."""
+    start_ticked_by_hand(app)
     sid = app._db.save_session({"duration": 1}, user_id=app._current_user_id,
                                custom_formulas=app._session.custom_formulas_json())
     app._db.save_metrics_batch(sid, [{"timestamp": 0.5, "alpha1": 100, "alpha2": 50, "beta1": 10, "beta2": 5}])
@@ -139,8 +148,9 @@ def test_record_includes_visible_and_drove_audio(fresh_app):
     app = fresh_app
     app._formulas.evaluators[0].set_formula("alpha + beta")
     app._formulas.names[0] = "Ratio"
-    app._live_screen.graph.set_visible("custom_formula", True)
     app._settings_store.change("audio_metric", "custom_formula")
+    start_ticked_by_hand(app)
+    app._live_screen.graph.set_visible("custom_formula", True)  # shown during the session: Start derives the series
     rec = json.loads(app._session.custom_formulas_json())
     assert (rec[0]["name"], rec[0]["formula"]) == ("Ratio", "alpha + beta")
     assert rec[0]["visible"] and rec[0]["drove_audio"]

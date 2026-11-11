@@ -1,6 +1,4 @@
 """Missing custom sound files are reported once, together; two reports raced and the second was dropped."""
-from unittest.mock import MagicMock
-
 import pytest
 
 import app.ui.sound_sources as sound_sources
@@ -31,7 +29,7 @@ def test_present_files_report_nothing(reports, tmp_path):
 
 
 def _gong_tester(path: str):
-    return sounds_alone(timer_state=MagicMock(custom_sound_path=path))
+    return sounds_alone({"timer_sound": path})
 
 
 def test_testing_a_missing_gong_warns_instead_of_silently_playing_the_default(reports, tmp_path):

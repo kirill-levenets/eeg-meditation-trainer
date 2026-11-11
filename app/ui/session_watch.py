@@ -20,11 +20,11 @@ class SessionWatch:
         self._headset = headset
         self._on_main = on_main
 
-    def check(self, run: SessionRun, elapsed: float) -> tuple[str, str] | None:
-        """The recording limit, the headset's link and stale data, in that order: the (reason, alert) the session must
-        end with now, or None."""
+    def check(self, run: SessionRun, elapsed: float, *, on_headset: bool) -> tuple[str, str] | None:
+        """The recording limit, then on a headset session its link and stale data: the (reason, alert) the session must
+        end with now, or None. A mock session has no link to follow (the headset's may be up from another session)."""
         ending = self.at_limit(elapsed)
-        if ending:
+        if ending or not on_headset:
             return ending
         self.follow_link(run)
         return self.check_stale(run)
@@ -42,7 +42,7 @@ class SessionWatch:
         """The headset's link coming up and dropping during a session, shown where the headset is shown (a drop as
         reconnecting, with the disconnect alert)."""
         connected = self._stream.is_connected  # read once: the reader thread moves it
-        if APP.USE_MOCK_DEVICE or connected == run.bt_connected_notified:
+        if connected == run.bt_connected_notified:
             return
         run.bt_connected_notified = connected
         self._on_main(self._headset.show_selected)
@@ -54,8 +54,6 @@ class SessionWatch:
 
     def check_stale(self, run: SessionRun) -> tuple[str, str] | None:
         """A session whose real headset stopped sending EEG data ends, once per stall."""
-        if APP.USE_MOCK_DEVICE:
-            return None
         stale_secs = self._stream.seconds_since_last_packet
         if stale_secs <= self.STALE_DATA_THRESHOLD:
             run.stale_data_warned = False

@@ -29,6 +29,7 @@ from app.metrics.formula_slots import (
 from app.metrics.noise_detector import PowerLineDetector
 from app.session.manager import SessionState, elapsed_clock
 from app.session.recorder import RecordedTick
+from app.session.session_config import SessionConfig
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
     segment_target,
@@ -39,6 +40,7 @@ from app.settings.registry import (
     BOOL,
     FLOAT,
     INT,
+    PATH,
     STR,
     Setting,
     SettingsStore,
@@ -251,9 +253,9 @@ class EEGMeditationApp(App):
         self._headset = Headset(self._ctx, self._real_stream, self._settings_screen.device, self._live_screen,
                                 serial_override=lambda: self.serial_device_override)
         self._headset.load_aliases()
-        self._session = RunningSession(self._ctx, self._audio, self._live_screen, self._headset, self._formulas)
+        self._session = RunningSession(self._ctx, self._audio, self._live_screen, self._headset)
         self._eeg_stream = self._session.mock_stream  # the stream of the last Start
-        self._sounds = SoundSources(self._ctx, self._audio, self._session.timer, self._settings_screen.timer)
+        self._sounds = SoundSources(self._ctx, self._audio, self._settings_screen.timer)
         self._audio_metric = AudioMetric(self._ctx, self._session.program_run, self._settings_screen)
         self._program_settings = ProgramSettings(
             self._ctx, self._settings_screen.timer, self._live_screen,
@@ -282,7 +284,8 @@ class EEGMeditationApp(App):
         """What every flow reaches the app through; the callables read the app when called, so they see the profile and
         the session as they are then."""
         session = SessionAccess(live=self._session_pipeline_live, running_id=self._running_session_id,
-                                refused=self._refused_while_session_runs, discard=self._discard_running_session)
+                                refused=self._refused_while_session_runs, discard=self._discard_running_session,
+                                set_formula=lambda idx, name, formula: self._session.set_formula(idx, name, formula))
         return AppContext(db=self._db, user_id=lambda: self._current_user_id, activate_user=self._activate_user,
                           require_user=self._require_user, on_main=self._on_main, switch_screen=self._switch_screen,
                           info=self._info_popup, toast=self._toast, confirm=self._confirm_action,
@@ -577,17 +580,16 @@ class EEGMeditationApp(App):
         self._audio.end_test()
         program = self._program_settings.for_session()
         threshold = self._start_threshold(program)
-        self._arm_timer(program)
+        config = self._session_config(program)
+        self._session.begin(config)
         self._put_threshold_in_force(threshold)  # this session's, whatever the last one left running
         run = self._run
-        self._session.engine.reset()
-        self._formulas.reset_windows()  # the slots outlive sessions; a program's evaluators are its own
-        run.noise_detector = PowerLineDetector() if not APP.USE_MOCK_DEVICE else None
-        self._session.recorder.begin()
+        run.noise_detector = None if config.mock else PowerLineDetector()
         run.connect_start = time.time()
         self._shown.take(self._current_user_id)
         self._program_settings.refresh_live_series()  # the idle series of the editor as it is now: begin builds on it
-        self._session.program_run.begin(program, self._sounds.prepare_session(program), self._program_settings.name)
+        feedback_ids = self._sounds.prepare_session(program, config.gong)
+        self._session.program_run.begin(program, feedback_ids, self._program_settings.name)
         self._live_screen.set_training_series(None)  # set on first segment crossing
         self._live_screen.set_controls_running()
         self._settings_screen.lock_threshold(self._refuse_program_threshold if self._session.program_run.active else None)
@@ -601,22 +603,27 @@ class EEGMeditationApp(App):
         self._cancel_settle("apply_threshold")  # a slider move just before Start: the start applies the slider itself
         return segment_target(program.segments[0]) if program else self._settings_screen.threshold
 
-    def _arm_timer(self, program) -> None:
-        """A program's total drives the timer, so its end reuses the timer-expiry path; a simple session re-syncs the
-        timer from Settings, so a previous program's can't leak into it."""
+    def _session_config(self, program) -> SessionConfig:
+        """What this Start runs the session with, read from Settings once: an edit during the run applies to the next
+        session. A program's total drives the timer, so its end reuses the timer-expiry path."""
+        timer = self._settings_screen.timer
         if program:
-            self._session.timer.set_enabled(True)
-            self._session.timer.set_duration(max(1, int(round(program.total_seconds / 60))))
+            minutes = max(1, int(round(program.total_seconds / 60)))
             logger.info(f"Program session: {format_count(len(program.segments), 'segment')}, "
                         f"{program.total_seconds:.0f}s total drives the end gong")
         else:
-            self._session.timer.set_enabled(self._settings_screen.timer.timer_enabled)
-            self._session.timer.set_duration(self._settings_screen.timer.timer_minutes)
+            minutes = timer.timer_minutes if timer.timer_enabled else None
+        mock = self._eeg_stream is self._session.mock_stream  # the stream this Start chose
+        return SessionConfig(metric=self._settings_store.value("audio_metric"),
+                             formulas=tuple(self._formulas.active()),
+                             timer_minutes=minutes, gong=self._settings_store.value("timer_sound") if minutes else "",
+                             mock=mock,
+                             device="Mock" if mock else self._headset.name())
 
     def _connect_session(self, run: SessionRun, threshold: int) -> bool:
         """Start the session on the mock headset or a link kept from the last session, or enter the BT wait; False if
         the reader refused to start."""
-        if APP.USE_MOCK_DEVICE:
+        if self._session.config.mock:
             self._eeg_stream.start()
             self._session.manager.start(threshold=threshold)
             run.phase = Phase.STARTED
@@ -780,7 +787,7 @@ class EEGMeditationApp(App):
         stats = self._session.with_score(self._session.manager.stop(reason=reason))
         # Keep real BT connection alive between sessions to avoid EBUSY on reconnect.
         # Only the mock stream gets stopped here; real stream stays connected.
-        if APP.USE_MOCK_DEVICE:
+        if self._session.config.mock:
             self._eeg_stream.stop()
 
         if stats:
@@ -841,7 +848,7 @@ class EEGMeditationApp(App):
         self._mark_run_ended()  # also halts a start still in the BT wait
         self._ticker.stop()
         self._session.manager.stop(reason="user")
-        if APP.USE_MOCK_DEVICE:
+        if self._session.config.mock:
             self._eeg_stream.stop()
         self._audio.stop()
         self._session.recorder.discard()
@@ -891,7 +898,8 @@ class EEGMeditationApp(App):
             return
         if self._session.manager.state != SessionState.RUNNING:
             return
-        ending = self._session.watch.check(run, self._session.manager.elapsed_seconds)
+        ending = self._session.watch.check(run, self._session.manager.elapsed_seconds,
+                                           on_headset=not self._session.config.mock)
         if ending:
             self._end_from_tick(run, *ending)
             return
@@ -908,7 +916,7 @@ class EEGMeditationApp(App):
         run.tick_count += 1
         self._log_tick(run, raw_sample, metrics)
 
-        self._formulas.evaluate_into(metrics, lambda: self._session.formula_vars(raw_sample, metrics))
+        self._session.formulas.evaluate_into(metrics, lambda: self._session.formula_vars(raw_sample, metrics))
 
         # Program vs simple is what the session started as, not the Settings toggle (editable mid-session).
         # The drive key is resolved once: the tick scores and sounds the same metric.
@@ -1060,7 +1068,7 @@ class EEGMeditationApp(App):
         # save, mute, and summary dispatch above are all complete, so even
         # if MediaPlayer setup were to block during lock, nothing critical
         # is lost.
-        self._audio.play_timer_sound(self._session.timer.custom_sound_path)
+        self._audio.play_timer_sound(self._session.config.gong)
 
     def _on_key_down(self, window, key, scancode, codepoint, modifiers) -> bool:
         """Handle keyboard hotkey for marker."""
@@ -1278,14 +1286,12 @@ class EEGMeditationApp(App):
     def _timer_settings(self) -> list[Setting]:
         timer = self._settings_screen.timer
 
-        def apply_timer_sound(v):
-            self._session.timer.set_custom_sound_path(v); timer.timer_sound_path = v
-
-        # Only Settings' controls: a Start arms the session's timer from them (_arm_timer), and a reload of the active
-        # profile mid-session must leave a running session's timer alone.
+        # Only Settings' controls: a Start reads them into the session's config (_session_config), and a change during
+        # the run, a profile's reload included, applies to the next session.
         return [kept("timer_enabled", BOOL, lambda: timer.timer_enabled, lambda v: setattr(timer, "timer_enabled", v)),
                 kept("timer_minutes", INT, lambda: timer.timer_minutes, lambda v: setattr(timer, "timer_minutes", v)),
-                held("timer_sound", STR, timer.timer_sound_path, apply_timer_sound, settle=True)]
+                held("timer_sound", PATH, timer.timer_sound_path, lambda v: setattr(timer, "timer_sound_path", v),
+                     settle=True)]
 
     def _alert_settings(self) -> list[Setting]:
         audio = self._settings_screen.audio
@@ -1329,9 +1335,9 @@ class EEGMeditationApp(App):
 
         return [*self._audio_metric.settings(),
                 held("feedback_source", STR, "noise", apply_feedback_source),
-                held("feedback_sound_path", STR, "", apply_feedback_path),
+                held("feedback_sound_path", PATH, "", apply_feedback_path),
                 held("reward_source", STR, "none", apply_reward_source),  # the above-threshold channel: off by default
-                held("reward_sound_path", STR, "", apply_reward_path)]
+                held("reward_sound_path", PATH, "", apply_reward_path)]
 
     def _display_settings(self) -> list[Setting]:
         display, ls = self._settings_screen.display, self._live_screen

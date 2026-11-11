@@ -6,9 +6,17 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 ## State machine and tick
 
 - **The session's parts** (`app/ui/running_session.py`, the app's `_session`): `RunningSession` builds, once, what every Start runs on:
-  `manager` (`SessionManager`), `recorder` (`SessionRecorder`), `engine` (`MetricsEngine`), `program_run` (`ProgramRun`), `timer` (`TimerState`), `watch` (`SessionWatch`), `mock_stream` and `keep_awake`.
+  `manager` (`SessionManager`), `recorder` (`SessionRecorder`), `engine` (`MetricsEngine`), `formulas` (its own `FormulaSlots`), `program_run` (`ProgramRun`), `timer` (`TimerState`), `watch` (`SessionWatch`), `mock_stream` and `keep_awake`.
   It answers what the running session is scored on (`drive_key`) and saved as (`with_score`, `row_fields`, `session_name`, `custom_formulas_json`); the recorder calls `with_score` and `row_fields` at each checkpoint.
-  The profile's `FormulaSlots` stay the app's (Settings, History and the graph series read them) and the real stream stays `Headset.stream` (the link outlives sessions); the session reads both.
+  The real stream stays `Headset.stream` (the link outlives sessions).
+- **A session runs on its config.** Start reads Settings once into a frozen `SessionConfig` (`app/session/session_config.py`, built by the app's `_session_config`):
+  the metric that drives the sound, the Settings formulas' names and texts, the timer's minutes (a program's total, or none), its end sound, mock or headset (from the stream Start chose) and the device's name.
+  `RunningSession.begin(config)` builds the session's own formula lines from it (so their `avg()` windows begin empty), arms its timer and resets the engine and the record.
+  While the session runs, nothing reads a setting (`tests/test_session_config.py` fails a tick or a checkpoint that does), so a Settings edit or a profile's reload (re-picking the active profile is allowed mid-session) applies to the next session.
+  Two changes reach a running session's state, each as an explicit call:
+  the threshold of a simple session (`_put_threshold_in_force`; `SessionManager` owns it),
+  and an edited formula line (`FormulaSettings.on_slot_change` → `SessionAccess.set_formula` → `RunningSession.set_formula`), which Settings allows for a slot the sound isn't set to.
+  The alert toggles (sinking, distraction, disconnect) are the audio engine's own and apply at once.
 - **Session lifecycle** (`app/session/manager.py`): the Start/Pause/Resume/Stop state machine.
   `SessionManager` holds the elapsed time, scores each tick (`add_metric`) and computes the end stats (`compute_statistics`); `RunningSession` wires it to the audio and the recorder.
   `live_score()` is the score so far from running totals (the last tick's value and target, the streaks, the time above, the average since the program's segment began or the session started), for the stats bar every tick.
@@ -22,7 +30,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `TickThread.start` (`app/session/tick_thread.py`, the app's `_ticker`) is a no-op while a tick thread is alive, and each thread gets its **own** stop event (`_loop(stop)`; the ticker holds the current one):
   a shared event cleared on restart would revive a thread whose `TickThread.stop` join (1 s) had timed out.
   `_cancel_stop` (Cancel in the Stop dialog) restarts the tick only for a RUNNING session; a paused one gets it back on Resume.
-- Session names are generated as `"YYYY-MM-DD HH:MM - DeviceName"` (`RunningSession.session_name`: `start_stamp` of `SessionManager.started_at`, then the headset's name or `Mock`); older sessions carry `"HH:MM - DeviceName"`.
+- Session names are generated as `"YYYY-MM-DD HH:MM - DeviceName"` (`RunningSession.session_name`: `start_stamp` of `SessionManager.started_at`, then the config's device: the headset's name at Start, or `Mock`); older sessions carry `"HH:MM - DeviceName"`.
   Neither is shown raw: `app/ui/session_labels.py` (#49) composes what a session is called on screen, for History's rows, the session detail and the end card.
   `start_stamp` is the one `YYYY-MM-DD HH:MM` format: the default name is written with it and the title recognises it.
   `session_title` is `"YYYY-MM-DD HH:MM - <label>"`, the date and time parsed from `date_time` (never sliced); an unnamed session gets just the date and time.
@@ -108,7 +116,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `TickThread.stop()` (safe from the tick thread, which it doesn't join), so no later tick can end the session again:
   the stop left the session FINISHED, so `_session_pipeline_live()` is False and Restore and the profile switch aren't refused after a timed session;
   `_on_main_for(run, _finish_on_main)` to defer `_audio.stop()` + `_finalize_stop_ui` to the main thread;
-  then `play_timer_sound()` **last** (a one-shot `MediaPlayer` gong, which rings through the lock).
+  then `play_timer_sound()` **last** (a one-shot `MediaPlayer` gong, which rings through the lock), with the end sound the session's config holds.
   Persisting first and ringing last means a hung audio call can never cost the session or the summary.
   The gong plays until the file ends or the end card closes (every close goes through `ShownSession.close`), which calls `AudioEngine.stop_timer_bell()` (releases the gong `MediaPlayer` on the main thread);
   `_start_session_common` also calls it, to stop a long custom gong still ringing from the previous session.

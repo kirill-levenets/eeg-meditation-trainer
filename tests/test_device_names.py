@@ -19,7 +19,7 @@ from app.ui.hooks import wire
 from app.ui.settings_screen import SettingsScreen
 from app.ui.settings_sections.device import DeviceSection
 from app.ui.theme import C, Icons
-from tests._app import HEADSET, popup_message, popups, start_connecting
+from tests._app import HEADSET, HeadsetSession, popup_message, popups, start_connecting
 from tests._context import stub_context
 from tests._settings_section import settings_section
 
@@ -84,17 +84,18 @@ def test_an_alias_survives_a_restart_and_names_new_sessions(db_path, monkeypatch
         db.close()
 
 
-def test_a_session_on_a_headset_is_named_by_its_alias(fresh_app):
+def test_a_session_on_a_headset_is_named_by_its_alias_at_its_start(fresh_app, monkeypatch):
+    # A rename during the session names the next one: a session runs on what its Start read.
     app = fresh_app
-    app._change_setting("use_mock", False)
-    app._real_stream.set_device(BLUE, "MindWave Mobile")
-    app._headset.on_rename(BLUE, "MindWave Mobile", "Blue")
+    address, name = HEADSET
+    app._headset.on_rename(address, name, "Blue")
     try:
+        HeadsetSession(app, monkeypatch)
         assert app._session.session_name().endswith(" - Blue")
-        app._real_stream.set_device(GREY, "MindWave Mobile")
-        assert app._session.session_name().endswith(" - MindWave Mobile")
+        app._headset.on_rename(address, name, "Navy")
+        assert app._session.session_name().endswith(" - Blue")
     finally:
-        app._headset.on_rename(BLUE, "MindWave Mobile", "")  # aliases are the phone's, not the profile's
+        app._headset.on_rename(address, name, "")  # aliases are the phone's, not the profile's
 
 
 def test_an_alias_names_the_headset_for_every_profile(db_path):

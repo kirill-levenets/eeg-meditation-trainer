@@ -65,37 +65,32 @@ def test_a_formula_slot_that_cant_run_falls_back_to_shamatha(fresh_app, monkeypa
     assert stats["score_metric_key"] == "shamatha_score"
 
 
-def test_changing_the_feedback_metric_mid_session_moves_the_scoring(fresh_app, monkeypatch):
-    fed = _session(fresh_app, monkeypatch)
-    _run(fed, SHAMATHA_HIGH[:3])  # 3 ticks above on shamatha
-    fresh_app._settings_store.change("audio_metric", "meditation_score")
-    stats = _run(fed, SHAMATHA_HIGH[3:])  # meditation: tick 4 above (90), tick 5 not
-    assert stats["score_metric_key"] == "meditation_score"
-    assert fresh_app._session.manager._time_above_threshold == 2.0  # 3 + 1 ticks
-
-
-def test_the_legend_marks_the_scored_series_once_per_change(fresh_app, monkeypatch):
+def test_a_metric_held_mid_session_scores_the_next_session(fresh_app, monkeypatch):
+    # Settings refuses the change while a simple session runs; the session runs on the metric its Start read anyway.
     fed = _session(fresh_app, monkeypatch)
     marks = calls_of(monkeypatch, fresh_app._live_screen, "set_training_series")
-    _run(fed, SHAMATHA_HIGH[:3])
+    _run(fed, SHAMATHA_HIGH[:3])  # 3 ticks above on shamatha
     fresh_app._settings_store.change("audio_metric", "meditation_score")
-    _run(fed, SHAMATHA_HIGH[3:4])
-    assert marks == [("shamatha_score",), ("meditation_score",)]
+    stats = _run(fed, SHAMATHA_HIGH[3:])  # shamatha: tick 5 above (95), tick 4 not
+    assert stats["score_metric_key"] == "shamatha_score" and stats["time_above_threshold"] == 2
+    assert marks == [("shamatha_score",)]  # the legend marked once, at the first tick
+    fresh_app._stop_and_save()
+    frames()
+    fresh_app._shown.close(keep_notes=False)
+    assert _run(FedSession(fresh_app, monkeypatch), SHAMATHA_HIGH)["score_metric_key"] == "meditation_score"
 
 
-def test_a_change_during_a_screen_lock_is_marked_by_the_first_tick_after_it(fresh_app, monkeypatch):
+def test_a_session_started_during_a_screen_lock_marks_its_series_at_the_first_tick_after_it(fresh_app, monkeypatch):
     app = fresh_app
     fed = _session(app, monkeypatch)
     marks = calls_of(monkeypatch, app._live_screen, "set_training_series")
-    _run(fed, SHAMATHA_HIGH[:1])
-    app._settings_store.change("audio_metric", "meditation_score")
     app.on_pause()
-    _run(fed, SHAMATHA_HIGH[1:2])
-    assert marks == [("shamatha_score",)]  # no UI dispatch while locked
+    _run(fed, SHAMATHA_HIGH[:1])
+    assert marks == []  # no UI dispatch while locked
     app.on_resume()
     frames()
-    _run(fed, SHAMATHA_HIGH[2:3])
-    assert marks == [("shamatha_score",), ("meditation_score",)]
+    _run(fed, SHAMATHA_HIGH[1:2])
+    assert marks == [("shamatha_score",)]
 
 
 def test_a_program_session_keeps_its_segment_goal():

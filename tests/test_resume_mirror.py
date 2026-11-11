@@ -76,9 +76,9 @@ def test_tick_band_record_aggregates_paired_bands(fed):
 def test_tick_writes_three_distinct_custom_formula_series(fed):
     """The live tick evaluates each valid slot into its own metric key, with
     distinct values, and skips invalid slots."""
-    slots = fed.app._formulas.evaluators
-    slots[0].set_formula("alpha + beta")        # 120
-    slots[1].set_formula("alpha / (beta + 1)")  # 100/21
+    session = fed.app._session  # its own lines, edited the way Settings edits them mid-session
+    session.set_formula(0, "Sum", "alpha + beta")          # 120
+    session.set_formula(1, "Ratio", "alpha / (beta + 1)")  # 100/21
     # slot 2 left invalid → must not be written
     metrics = tick_metrics()
     fed.tick({**raw_sample(), "alpha1": 60.0, "alpha2": 40.0, "beta1": 15.0, "beta2": 5.0}, metrics)

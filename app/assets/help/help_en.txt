@@ -120,7 +120,8 @@ the Audio section above:
 The timer's end sound (Settings > Timer / Program) is picked
 the same way: Default bell or Custom file...; Test
 plays it. A file the app can't play rings the
-default bell, and Test says so.
+default bell, and Test says so. A sound picked
+during a session rings from the next session.
 
 ## Themes
 

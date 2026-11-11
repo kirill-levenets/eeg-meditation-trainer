@@ -21,6 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **A session runs on what its Start read** (#128): a Settings edit or a profile's reload during a session applies to the next one; only the threshold of a simple session and an edited formula line reach a running session (the alert toggles still apply at once).
+  So a timer end sound chosen during a session rings from the next session, and a headset renamed during a session names the next one.
 - **The session's parts have one owner** (#128): the session manager, its recorder, the metrics engine, a program, the timer, each tick's checks and the wake lock are built and held by `RunningSession`, which also says what a session is scored on and saved as.
 - **The threshold has one owner**: the session manager (the base, and a tick's target); the sound, the scoring, the engine's state and the SHAMATHA pill read it per tick instead of each keeping a copy written by two paths.
 - **With several MindWaves paired, Start asks which one** (#99): the app no longer opens Settings › Device at launch or after creating a profile; Settings › Device lists them, and **Start** opens it to pick one, as it did.

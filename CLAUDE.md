@@ -64,9 +64,9 @@ Read it before changing that subsystem.
   — `engine.py` `MetricsEngine` (meditation, shamatha, distraction/sinking ported from the original Vernihor app, subtle distraction;
   `ENGINE_VERSION` stamped on sessions), `custom_formula.py` (AST-parsed user formulas, `avg(expr, N)`), `formula_slots.py` (the three Settings formulas:
   evaluators, names, their session record), `noise_detector.py`. → [metrics-scoring](docs/architecture/metrics-scoring.md)
-- `app/session/` — `manager.py` `SessionManager` (Start/Pause/Resume/Stop, accrual), `scoring.py` `GoalAccrual`, `session_program.py` (timed segments), `timer_state.py`, `what_if.py` (threshold recompute).
+- `app/session/` — `manager.py` `SessionManager` (Start/Pause/Resume/Stop, accrual), `scoring.py` `GoalAccrual`, `session_program.py` (timed segments), `timer_state.py`, `what_if.py` (threshold recompute), `session_config.py` `SessionConfig` (what a Start read).
   `session_run.py` `SessionRun` (one Start: its phase and per-run state), `tick_thread.py` `TickThread` (the 2 Hz tick), `recorder.py` `SessionRecorder` (the running session's checkpoints).
-  `app/ui/running_session.py` `RunningSession` (the app's `_session`) — the parts a session runs on (manager, recorder, engine, program run, timer, watch, wake lock) and what it is scored on and saved as.
+  `app/ui/running_session.py` `RunningSession` (the app's `_session`) — the parts a session runs on (manager, recorder, engine, its own formula lines, program run, timer, watch, wake lock) and what it is scored on and saved as.
   `app/ui/program_run.py` `ProgramRun` — the running program: segment stepping on the tick thread, its live-graph lines.
   `app/ui/program_settings.py` `ProgramSettings` — Settings → Timer: mode, the edited program, saved programs.
   `app/ui/formula_settings.py` `FormulaSettings` — Settings → Custom Formula. → [session](docs/architecture/session.md), [programs](docs/architecture/programs.md), [metrics-scoring](docs/architecture/metrics-scoring.md)
@@ -147,6 +147,9 @@ The linked file explains the mechanism.
 - The Session screen shows one profile's session (`ShownSession`, `app/ui/shown_session.py`, the app's `_shown`; its `owner` set at Start):
   picking another profile drops it through `ShownSession.drop`; re-picking the shown one (allowed mid-session) resets nothing.
   Every end-card close goes through `ShownSession.close`. → [live-session-and-settings](docs/architecture/live-session-and-settings.md#session-screen)
+- **A session runs on its config** (`SessionConfig`, `app/session/session_config.py`, taken by `RunningSession.begin` at Start): it reads no setting while it runs (`tests/test_session_config.py`).
+  A change allowed mid-session reaches its state only as an explicit call: the threshold (`_put_threshold_in_force`; the manager owns it) and an edited formula line (`SessionAccess.set_formula`);
+  the alert toggles are the audio engine's and apply at once. → [session](docs/architecture/session.md#state-machine-and-tick)
 - **A session is scored on the metric that drives the feedback sound** (`RunningSession.drive_key()`, `app/ui/running_session.py`, the app's `_session`; the rule is `audio_metric.sound_metric`).
   The Settings threshold takes effect only through `_put_threshold_in_force` (the slider and profile load go through `_apply_threshold`);
   the threshold has one owner, `SessionManager` (`threshold`, the base; a tick's `score_target`): the sound, the engine and the SHAMATHA pill read it per tick, never a copy. → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)

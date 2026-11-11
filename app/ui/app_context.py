@@ -9,12 +9,14 @@ from app.storage.database import DatabaseManager
 
 @dataclass(frozen=True)
 class SessionAccess:
-    """What a flow may know of the running session, and the one thing it may do to it (end it, its profile deleted)."""
+    """What a flow may know of the running session, and what it may change in it: end it (its profile deleted), and an
+    edited formula line, which a session takes mid-run (it runs on what its Start read otherwise)."""
 
     live: Callable[[], bool]  # runs, is paused, or waits for the headset
     running_id: Callable[[], int | None]  # its row, once checkpointed, while it runs
     refused: Callable[..., bool]  # (doing, why=""): True, after telling the user, while it runs
     discard: Callable[[], None]
+    set_formula: Callable[[int, str, str], None]  # (slot index, name, formula): the session's line follows the slot
 
 
 @dataclass(frozen=True)

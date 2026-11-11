@@ -28,8 +28,7 @@ class _Detector:
 
 
 @pytest.fixture
-def watch(monkeypatch):
-    monkeypatch.setattr(APP, "USE_MOCK_DEVICE", False)
+def watch():
     queued = []
     stream, live_screen, device, audio = MagicMock(), MagicMock(), MagicMock(), MagicMock()
     stream.is_connected, stream._device_address, stream._device_name = False, "AA:BB", "MWM2"
@@ -65,12 +64,12 @@ def test_the_link_lost_mid_session_shows_reconnecting_with_the_alert(watch):
     audio.play_disconnect_alert.assert_called_once()
 
 
-def test_the_mock_headset_has_no_link_to_follow(watch, monkeypatch):
-    monkeypatch.setattr(APP, "USE_MOCK_DEVICE", True)
+def test_a_mock_session_follows_no_link_and_never_goes_stale(watch):
+    # The headset's link outlives sessions: it may be up, or long silent, during a mock session.
     w, run, queued, stream, _live, device, audio = watch
-    stream.is_connected = True
-    w.follow_link(run)
-    assert not queued and not run.bt_connected_notified
+    stream.is_connected, stream.seconds_since_last_packet = True, w.STALE_DATA_THRESHOLD + 1
+    assert w.check(run, elapsed=0, on_headset=False) is None
+    assert not queued and not run.bt_connected_notified and not run.stale_data_warned
     audio.play_disconnect_alert.assert_not_called()
 
 
@@ -122,9 +121,9 @@ def test_the_recording_limit_ends_it_before_the_other_checks_run(watch, monkeypa
     w, run, queued, stream, _live, _device, audio = watch
     monkeypatch.setattr(APP, "SESSION_MAX_SECONDS", 60)
     stream.is_connected, stream.seconds_since_last_packet = True, 0.2
-    assert w.check(run, elapsed=59) is None and queued  # under it: the link is followed
+    assert w.check(run, elapsed=59, on_headset=True) is None and queued  # under it: the link is followed
     queued.clear()
-    reason, alert = w.check(run, elapsed=60)
+    reason, alert = w.check(run, elapsed=60, on_headset=True)
     assert reason == "user" and "recording limit" in alert and not queued
     audio.play_disconnect_alert.assert_called_once()
 

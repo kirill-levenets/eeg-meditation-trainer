@@ -1,13 +1,15 @@
-"""The session's machinery, built once and run by every Start: its state and score, its way into the database, the
-metrics engine, a program, the timer, each tick's checks and what keeps the phone awake."""
+"""The session's machinery, built once and run by every Start on the config that Start read: its state and score, its
+way into the database, the metrics engine, its formula lines, a program, the timer, each tick's checks and what keeps
+the phone awake."""
 from datetime import datetime
 
-from app.config import APP
 from app.eeg.mock_stream_v2 import MockEEGStream
 from app.keep_awake import KeepAwake
 from app.metrics.engine import MetricsEngine
+from app.metrics.formula_slots import FormulaSlots
 from app.session.manager import SessionManager
 from app.session.recorder import SessionRecorder
+from app.session.session_config import SessionConfig
 from app.session.timer_state import TimerState
 from app.ui.app_context import AppContext
 from app.ui.audio_metric import sound_metric
@@ -17,14 +19,15 @@ from app.ui.session_watch import SessionWatch
 
 
 class RunningSession:
-    """Owns the parts a session runs on and answers what it is scored on and saved as. Its questions are safe on the
-    tick thread: they read state, and touch no Kivy widget beyond a graph's series names and visibility."""
+    """Owns the parts a session runs on and answers what it is scored on and saved as, from its config, never a live
+    setting. Its questions are safe on the tick thread: they read state, and touch no Kivy widget beyond a graph's
+    series names and visibility."""
 
-    def __init__(self, ctx: AppContext, audio, live_screen, headset, formulas) -> None:
+    def __init__(self, ctx: AppContext, audio, live_screen, headset) -> None:
         self._ctx = ctx
         self._live_screen = live_screen
-        self._headset = headset
-        self._formulas = formulas  # the profile's formula slots: Settings edits them, a tick evaluates them
+        self.config: SessionConfig | None = None  # the last Start's
+        self.formulas = FormulaSlots()  # its own lines, built from the config: their avg() windows are the session's
         self.mock_stream = MockEEGStream()
         self.engine = MetricsEngine()
         self.manager = SessionManager()
@@ -35,10 +38,24 @@ class RunningSession:
         self.watch = SessionWatch(audio, live_screen, headset, on_main=ctx.on_main)
         self.keep_awake = KeepAwake()  # held from a session's setup to its ending
 
+    def begin(self, config: SessionConfig) -> None:
+        """A Start: the session runs on `config` until its next Start, with its lines, timer, engine and record new."""
+        self.config = config
+        self.formulas = FormulaSlots()
+        self.formulas.load(list(config.formulas))
+        self.timer.set_enabled(config.timer_minutes is not None)
+        self.timer.set_duration(config.timer_minutes or 1)
+        self.engine.reset()
+        self.recorder.begin()
+
+    def set_formula(self, idx: int, name: str, formula: str) -> None:
+        """An edited formula line reaches the running session: Settings allows it for a slot the sound isn't set to."""
+        self.formulas.assign(idx, name, formula)
+
     def drive_key(self) -> str:
         """The metric that drives the feedback sound now, which the session is scored on."""
         program_key = self.program_run.audio_key if self.program_run.active else ""
-        return sound_metric(self._ctx.setting("audio_metric"), program_key, self._formulas)
+        return sound_metric(self.config.metric, program_key, self.formulas)
 
     def formula_vars(self, raw_sample: dict, metrics: dict) -> dict:
         """Variable dict for custom-formula evaluation (raw + metrics + derived/sqrt bands)."""
@@ -67,10 +84,9 @@ class RunningSession:
 
     def session_name(self) -> str:
         """The session's default name: when it started and on which device."""
-        device = "Mock" if APP.USE_MOCK_DEVICE else self._headset.name()
         started = self.manager.started_at
-        return f"{start_stamp(datetime.fromtimestamp(started) if started else datetime.now())} - {device}"
+        return f"{start_stamp(datetime.fromtimestamp(started) if started else datetime.now())} - {self.config.device}"
 
     def custom_formulas_json(self) -> str:
-        """The formulas in the slots now, with which of them the live graph shows and which drives the sound."""
-        return self._formulas.session_record(self._live_screen.graph.is_visible, self._ctx.setting("audio_metric"))
+        """Its formula lines, with which of them the live graph shows and which drives the sound."""
+        return self.formulas.session_record(self._live_screen.graph.is_visible, self.config.metric)

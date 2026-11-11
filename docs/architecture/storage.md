@@ -55,8 +55,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   the theme, text size and line colours (their globals, with listeners), the fold states (their widgets), the graph zoom (the live graph);
   the stats view and the marker hotkey (their widgets), the timer's enable and minutes (the Timer section).
   A profile's load must not change a running session: re-picking the active profile is allowed mid-session and reloads every setting.
-  So the timer's enable and minutes set the Timer section only, and a Start arms the session's timer from them (`_arm_timer`: a timer stored off would disable a running program's, which would then never end);
-  a formula slot reloaded with the formula it runs keeps its `avg()` windows (`CustomFormulaEvaluator.set_formula`); a running program's threshold is guarded (`_apply_threshold`).
+  A running session reads none of them: it runs on the `SessionConfig` its Start read ([session](session.md#state-machine-and-tick)), so the timer's enable, minutes and end sound set the Timer section only;
+  a running program's threshold is guarded (`_apply_threshold`).
   The audio metric and its formula slot are held too (`AudioMetric.settings`: a stored program slot heals to the baseline at load, an out-of-range slot clamps);
   behind controllers that can refuse a change while a session runs and show the one in force again (`AudioMetric.show`).
   The threshold keeps its slider as the one holder of the stored value (the value in force is `_put_threshold_in_force`'s).
@@ -124,7 +124,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `_save_user_settings` catches `sqlite3.Error` and reports a soft error: it runs from UI callbacks (backup, pause, profile switch), where an escaping error would open the fatal dialog, and a failed flush doesn't abort the backup.
   It **never touches the session's timer** (`RunningSession.timer`):
   a running session — especially a program, which force-enables the timer and seeds its countdown from the program total — OWNS it, and re-applying the Settings timer widgets on a pause/backup flush would kill or shift its auto-stop.
-  Session start re-applies enabled/duration, and `SoundSources.on_timer_sound_change` keeps the gong path current, so nothing needs an idle sync.
+  A Start reads enabled, duration and the end sound into the session's config, so nothing needs an idle sync.
   Both backup workers checkpoint a running session first (`_checkpoint_or_report` → `SessionRecorder.checkpoint`, see [session](session.md#persistence)), so a mid-session backup holds it as of the backup.
   The restore confirm (`_confirm_action`) states it replaces the **entire DB**, with the profile and session counts from `get_record_counts()`.
   Both backup paths end in `_report_backup_saved(location)`:

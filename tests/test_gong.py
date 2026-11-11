@@ -285,7 +285,7 @@ def test_a_new_gong_is_built_outside_the_one_shot_lock(engine, monkeypatch, tmp_
 
 def test_the_settings_test_button_hears_the_gongs_end():
     audio, timer_section = MagicMock(), MagicMock()
-    sounds_alone(audio=audio, timer_state=MagicMock(custom_sound_path=""), timer_section=timer_section).on_test_timer_sound()
+    sounds_alone({"timer_sound": ""}, audio=audio, timer_section=timer_section).on_test_timer_sound()
     assert audio.play_timer_sound.call_args.kwargs["on_end"] == timer_section.notify_timer_sound_test_ended
 
 
@@ -306,5 +306,5 @@ def test_the_settings_test_says_what_it_could_not_play(monkeypatch, tmp_path, cu
         (tmp_path / custom).write_bytes(b"x")
     audio = MagicMock()
     audio.play_timer_sound.return_value = {"default": "/tmp/timer_bell.wav", "custom": path, "": ""}[played]
-    sounds_alone(audio=audio, timer_state=MagicMock(custom_sound_path=path)).on_test_timer_sound()
+    sounds_alone({"timer_sound": path}, audio=audio).on_test_timer_sound()
     assert [d.split(":")[0] if ":" in d else d for d in reported] == ([said] if said else [])

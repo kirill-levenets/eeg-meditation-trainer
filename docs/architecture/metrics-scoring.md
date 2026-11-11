@@ -21,7 +21,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 - Three custom-formula evaluators are keyed by `FORMULA_KEYS = ("custom_formula", "custom_formula_2", "custom_formula_3")`.
   `FormulaSlots` (`app/metrics/formula_slots.py`, the app's `_formulas`) holds them: `evaluators[i]`, the display names `names[i]` (default `"Custom 1/2/3"`), and `for_key(key)`, which maps a series key to its `CustomFormulaEvaluator`.
-  An evaluator's `avg()` windows fill from the session's ticks: each Start empties them (`FormulaSlots.reset_windows`), and `set_formula` with the formula it already runs changes nothing, so a profile's reload or a slot's rename mid-session leaves them.
+  These are the profile's, which Settings edits; a running session evaluates its own copy (`RunningSession.formulas`), built from its config at Start, so its `avg()` windows fill from its own ticks.
+  An edited line reaches it through `SessionAccess.set_formula`; `set_formula` with the formula an evaluator already runs changes nothing, so a rename leaves the windows.
   Settings → Custom Formula edits them through `FormulaSettings` (`app/ui/formula_settings.py`, the app's `_formula_settings`):
   a slot's apply, the saved formulas' save/load/delete/export, and the profile's load (slots, graph names, Settings inputs) and persist.
   Whether a formula can run is one check, `custom_formula.compile_formula` (an evaluator, or None and why), shared by Save, a slot and a program's plan.
@@ -34,12 +35,13 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Saved formulas and programs keep unique names through `settings_sections.common.save_under_unique_name`: a new name is added, an existing one is overwritten after a confirmation.
   Export writes the library to a private file and delivers it with `copy_to_documents` ([storage](storage.md#exports-to-shared-storage)): `Documents/EEGMeditation/` through MediaStore on Android, `~/Documents/EEGMeditation/` on desktop.
   A popup says where (`info`, the app's `_info_popup`), as the backup's does: slot 1's status line is far from the button and clipped at the larger text sizes.
-  Each tick `evaluate_into` writes every valid slot into `metrics` through `custom_formula.evaluate_series`, the same function a running program's formulas use.
+  Each tick the session's `formulas.evaluate_into` writes every valid line into `metrics` through `custom_formula.evaluate_series`, the same function a running program's formulas use.
   Slot names reach the graph via `graph.set_series_name(key, name)`.
   Active names and expressions persist as `active_formulas` (JSON list of `{name, formula}`, per user), the audio-driving slot index as `audio_formula_index` (flat KV string, per user).
   At load `formula_slots.read_active` seeds slot 1 from the legacy `custom_formula` scalar if no JSON exists yet.
   When "Custom Formula" is the audio metric, the held `audio_metric` is `FORMULA_KEYS[audio_formula_index]` (both in the settings store, `AudioMetric.settings`; the metric's apply reconciles the slot).
-  `RunningSession.drive_key()` (`app/ui/running_session.py`) resolves the live drive key through the pure `audio_metric.sound_metric(stored, program_key, formulas)`: the program's transient `ProgramRun.audio_key` while a program runs, else the user's baseline.
+  `RunningSession.drive_key()` (`app/ui/running_session.py`) resolves the live drive key through the pure `audio_metric.sound_metric(stored, program_key, formulas)`:
+  the program's transient `ProgramRun.audio_key` while a program runs, else the metric the session's config holds, against the session's own formula lines.
   `AudioMetric` (`app/ui/audio_metric.py`, the app's `_audio_metric`) keeps only Settings' choice of it and its lock.
   It falls back to `shamatha_score` for an invalid (empty or unparsable) formula slot **or** a `PROGRAM_FORMULA_KEYS` value outside a program: both are absent from `metrics`, so they would read 0 → constant max noise.
   `baseline_audio_metric(key)` keeps program slots out of the persisted/baseline `audio_metric`, sanitizing on both save and load (load also heals a leaked value).
