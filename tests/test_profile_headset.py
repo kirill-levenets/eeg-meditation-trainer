@@ -89,10 +89,10 @@ def test_picking_the_saved_headset_during_a_mock_session_is_refused_as_a_whole(m
     monkeypatch.setattr(APP, "USE_MOCK_DEVICE", True)
     refused = MagicMock(return_value=True)
     hs, device = _headset_alone(refused=refused)
-    hs._stream._device_address = "00:11"
+    hs.stream._device_address = "00:11"
     hs.on_select("00:11", "MindWave Mobile")  # the same address: a pick that only changes the mode
     refused.assert_called_once_with("switching headsets")
-    hs._stream.set_device.assert_not_called()
+    hs.stream.set_device.assert_not_called()
     device.clear_picker_banner.assert_not_called()
 
 

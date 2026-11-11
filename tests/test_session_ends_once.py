@@ -31,12 +31,12 @@ def locked(fresh_app, monkeypatch):
 
 
 def _goes_stale(locked) -> None:
-    locked.session.since_packet = locked.app._watch.STALE_DATA_THRESHOLD + 1
+    locked.session.since_packet = locked.app._session.watch.STALE_DATA_THRESHOLD + 1
 
 
 def _timer_expires_on_the_next_tick(locked) -> None:
-    locked.app._timer_state.set_enabled(True)
-    locked.app._timer_state.remaining_seconds = APP.UPDATE_FREQUENCY / 2
+    locked.app._session.timer.set_enabled(True)
+    locked.app._session.timer.remaining_seconds = APP.UPDATE_FREQUENCY / 2
 
 
 def _saved(app) -> list[dict]:
@@ -62,7 +62,7 @@ def test_a_stale_stop_freezes_the_session_on_the_tick_thread(locked):
     # Its duration ends when the data stopped, not when the phone is unlocked; its noise goes quiet meanwhile.
     _goes_stale(locked)
     locked.tick()
-    assert locked.app._session_manager.state == SessionState.PAUSED
+    assert locked.app._session.manager.state == SessionState.PAUSED
     assert locked.sounds == ["mute"] and len(locked.tick_stops) == 1
     assert locked.finishes == [] and locked.app._run is locked.run  # its finish waits for the main thread
 
@@ -75,7 +75,7 @@ def test_a_stale_stop_saves_its_ticks_before_the_unlock(locked):
     _goes_stale(locked)
     locked.tick()
     assert locked.finishes == []  # the main thread hasn't run
-    assert len(app._db.get_session_metrics(app._recorder.session_id)) == 2
+    assert len(app._db.get_session_metrics(app._session.recorder.session_id)) == 2
 
 
 def test_the_recording_limit_ends_it_once_however_many_ticks_pass_before_the_unlock(locked, monkeypatch):
@@ -109,7 +109,7 @@ def test_without_a_stale_stop_the_timer_still_ends_it(locked):
 
 def test_the_unfrozen_session_keeps_its_tick(locked):
     locked.tick()
-    assert locked.app._session_manager.state == SessionState.RUNNING
+    assert locked.app._session.manager.state == SessionState.RUNNING
     assert locked.reasons == [] and locked.finishes == [] and locked.tick_stops == []
 
 
@@ -136,7 +136,7 @@ def test_a_session_tick_that_outlived_its_run_records_nothing(locked, monkeypatc
     new = SessionRun(app._current_user_id)
     monkeypatch.setattr(app._real_stream, "read_sample", lambda: (setattr(app, "_run", new), locked.session.raw)[1])
     app._session_tick(old)
-    assert not app._shown.mirror.metrics and app._recorder._buffer == []
+    assert not app._shown.mirror.metrics and app._session.recorder._buffer == []
 
 
 @_TICK_ENDINGS
@@ -144,14 +144,14 @@ def test_a_tick_thread_ending_ends_only_its_own_run(locked, end):
     app, old = locked.app, locked.run
     app._run = SessionRun(app._current_user_id)  # a newer run, which a late ending must not stop
     end(app, old)
-    assert app._session_manager.state == SessionState.RUNNING and locked.reasons == [] and locked.finishes == []
+    assert app._session.manager.state == SessionState.RUNNING and locked.reasons == [] and locked.finishes == []
 
 
 def test_a_session_tick_whose_stop_began_during_its_read_computes_nothing(locked, monkeypatch):
     # The Stop saved the session while the tick waited on the reader's lock; its teardown, which drops the run, is queued.
     # The recorder already refuses the tick; before it come the metrics, the alerts and a program's step and cue.
     app, run = locked.app, locked.run
-    computed = calls_of(monkeypatch, app._metrics_engine, "process_sample")
+    computed = calls_of(monkeypatch, app._session.engine, "process_sample")
     monkeypatch.setattr(app._real_stream, "read_sample",
                         lambda: (app._stop_and_save(reason="user"), locked.session.raw)[1])
     app._session_tick(run)
@@ -166,7 +166,7 @@ def test_a_tick_that_begins_after_an_ending_began_checks_nothing(locked):
     _goes_stale(locked)
     app._mark_run_ended()
     locked.tick()
-    assert locked.reasons == [] and locked.finishes == [] and app._session_manager.state == SessionState.RUNNING
+    assert locked.reasons == [] and locked.finishes == [] and app._session.manager.state == SessionState.RUNNING
     assert "play_disconnect_alert" not in locked.sounds
 
 

@@ -1,6 +1,7 @@
 """A running session is checkpointed whole: its row and its data reach the DB together, so a killed app keeps both (#30)."""
 
 import os
+import sqlite3
 import tempfile
 import threading
 import time
@@ -162,17 +163,17 @@ def test_a_paused_session_keeps_its_length_up_to_the_pause():
 def _session_of(app, ticks: int, seconds: float) -> None:
     """A mock session of `ticks` hand-run ticks that has been running for `seconds`."""
     start_ticked_by_hand(app, ticks=ticks)
-    app._session_manager._start_time = time.time() - seconds
+    app._session.manager._start_time = time.time() - seconds
 
 
 def _running_row(app) -> tuple:
-    return _row(app._db, app._recorder.session_id)
+    return _row(app._db, app._session.recorder.session_id)
 
 
 def test_leaving_the_app_mid_session_checkpoints_it(fresh_app):
     app = fresh_app
     _session_of(app, 50, 25)  # under a minute: nothing flushed yet
-    assert app._recorder.session_id is None
+    assert app._session.recorder.session_id is None
     app._flush_on_leave()
     assert _running_row(app) == (25, 50)
 
@@ -192,8 +193,8 @@ def test_leaving_the_app_while_paused_checkpoints_the_length_before_the_pause(fr
     assert 299 <= duration <= 301 and rows == 60
 
 
-def _failing_score(_stats):
-    raise KeyError("graph")
+def _locked(*_args, **_kwargs):
+    raise sqlite3.OperationalError("database is locked")
 
 
 def test_a_failing_checkpoint_on_leave_still_saves_the_settings(fresh_app, monkeypatch):
@@ -202,7 +203,7 @@ def test_a_failing_checkpoint_on_leave_still_saves_the_settings(fresh_app, monke
     app = fresh_app
     _session_of(app, 4, 2)
     app._settings_screen.threshold = 62  # changed, not yet written
-    monkeypatch.setattr(app, "_with_score", _failing_score)
+    monkeypatch.setattr(app._db, "checkpoint_session", _locked)
     app._flush_on_leave()
     assert app._db.get_user_setting(app._current_user_id, "threshold") == "62"
     assert reported == ["session_checkpoint_failed"]
@@ -249,7 +250,7 @@ def test_a_failing_checkpoint_does_not_stop_a_backup(fresh_app, monkeypatch):
     app = fresh_app
     _session_of(app, 4, 2)
     _backup_inline(monkeypatch, after=lambda cb, *a, **k: cb(0))  # once the session's own threads are up
-    monkeypatch.setattr(app, "_with_score", _failing_score)
+    monkeypatch.setattr(app._db, "checkpoint_session", _locked)
     app._backup_flow._run_backup_async("/tmp/unused.db")
     assert copied == ["/tmp/unused.db"]  # the rest of the database is still backed up
     assert reported == ["session_checkpoint_failed"]

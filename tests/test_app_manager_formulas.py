@@ -5,6 +5,7 @@ import pytest
 from app.metrics.custom_formula import CustomFormulaEvaluator
 from app.metrics.formula_slots import FORMULA_KEYS, FormulaSlots, read_active
 from app.storage.database import DatabaseManager
+from app.ui.audio_metric import sound_metric
 from tests._app import popup_message, popups, tap
 from tests._audio_metric import audio_metric_alone
 
@@ -78,15 +79,14 @@ def test_legacy_single_formula_migrates_to_slot1(tmp_path):
 
 
 def test_audio_falls_back_to_shamatha_when_bound_slot_invalid():
-    slots = FormulaSlots()
-    metric = audio_metric_alone("custom_formula_2", formulas=slots)  # slot 2 bound, but slot 2 has no formula
-    assert metric.drive_key() == "shamatha_score"
+    slots = FormulaSlots()  # slot 2 bound, but slot 2 has no formula
+    assert sound_metric("custom_formula_2", "", slots) == "shamatha_score"
     slots.evaluators[1].set_formula("alpha + beta")  # now valid
-    assert metric.drive_key() == "custom_formula_2"
+    assert sound_metric("custom_formula_2", "", slots) == "custom_formula_2"
 
 
 def test_audio_drive_key_passthrough_for_non_formula():
-    assert audio_metric_alone().drive_key() == "shamatha_score"
+    assert sound_metric("shamatha_score", "", FormulaSlots()) == "shamatha_score"
 
 
 def test_index_tap_does_not_rebind_when_non_formula_active():
@@ -103,7 +103,7 @@ def test_index_tap_does_not_rebind_when_non_formula_active():
 def _saved_with_formulas(app) -> tuple[int, dict]:
     """A one-tick session saved with the formulas in the slots now: (its id, its row)."""
     sid = app._db.save_session({"duration": 1}, user_id=app._current_user_id,
-                               custom_formulas=app._session_custom_formulas_json())
+                               custom_formulas=app._session.custom_formulas_json())
     app._db.save_metrics_batch(sid, [{"timestamp": 0.5, "alpha1": 100, "alpha2": 50, "beta1": 10, "beta2": 5}])
     return sid, app._db.get_session(sid)
 
@@ -114,7 +114,7 @@ def test_record_includes_visible_and_drove_audio(fresh_app):
     app._formulas.names[0] = "Ratio"
     app._live_screen.graph.set_visible("custom_formula", True)
     app._settings_store.change("audio_metric", "custom_formula")
-    rec = json.loads(app._session_custom_formulas_json())
+    rec = json.loads(app._session.custom_formulas_json())
     assert (rec[0]["name"], rec[0]["formula"]) == ("Ratio", "alpha + beta")
     assert rec[0]["visible"] and rec[0]["drove_audio"]
 

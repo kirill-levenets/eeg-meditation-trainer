@@ -22,7 +22,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `drop` takes it off the screen:
   the end card, if open, closes through `close` (notes saved unless the session is gone, bell stopped; the one way every card closes, OK included);
   then `clear` empties the graphs, their mirrors and the readout (`LiveSessionScreen.clear_readout`: what a fresh screen shows).
-  It runs when another profile is picked (`_activate_user`), when that profile is deleted, and when History deletes the shown session (`_recorder.session_id`, kept after the stop).
+  It runs when another profile is picked (`_activate_user`), when that profile is deleted, and when History deletes the shown session (`RunningSession.recorder.session_id`, kept after the stop).
   Re-picking the shown profile resets nothing (`Profiles.on_switch` allows that mid-session, and a reset there would wipe the running session's graph).
   An idle threshold change (#83) clears the display but keeps the owner, so a later switch still closes an open card.
   The stats bar shows the `LiveScore` each tick hands it (`update_stats`), refreshed once more at the session's end and on resume (ticks are skipped while locked), and `set_stats_mode` redraws it when a profile's LIVE/AVG choice loads.

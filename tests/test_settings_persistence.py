@@ -49,9 +49,9 @@ def test_saving_settings_mid_program_keeps_the_programs_timer(fresh_app):
     program_mode(app, [{"minutes": 30, "target": 60, "formula": "shamatha_score"},
                        {"minutes": 15, "target": 60, "formula": "meditation_score"}])
     app._on_start()  # the program force-enables the timer, with the program's total
-    assert (app._timer_state.enabled, app._timer_state.duration_minutes) == (True, 45)
+    assert (app._session.timer.enabled, app._session.timer.duration_minutes) == (True, 45)
     app._save_user_settings()
-    assert (app._timer_state.enabled, app._timer_state.duration_minutes) == (True, 45)
+    assert (app._session.timer.enabled, app._session.timer.duration_minutes) == (True, 45)
     assert app._db.get_user_setting(app._current_user_id, "timer_enabled") == "False"  # the profile's own, as saved
 
 

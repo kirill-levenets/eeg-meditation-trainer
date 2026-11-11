@@ -242,7 +242,7 @@ def test_the_session_detail_is_titled_like_its_row():
 def _ended_session(app) -> tuple[dict, float]:
     """A mock session of two ticks, ended and saved: (its row, when it started)."""
     start_ticked_by_hand(app, ticks=2)
-    started = app._session_manager.started_at
+    started = app._session.manager.started_at
     app._stop_and_save()
     frames()
     return app._db.get_all_sessions(app._current_user_id)[0], started

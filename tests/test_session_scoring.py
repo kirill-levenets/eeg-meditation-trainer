@@ -36,7 +36,7 @@ def _run(fed: FedSession, ticks) -> dict:
     """Run the ticks, each computing to its metrics; the session's stats so far."""
     for m in ticks:
         fed.tick(metrics=dict(m))
-    return fed.app._session_manager.compute_statistics()
+    return fed.app._session.manager.compute_statistics()
 
 
 def _saved(app) -> dict:
@@ -71,7 +71,7 @@ def test_changing_the_feedback_metric_mid_session_moves_the_scoring(fresh_app, m
     fresh_app._settings_store.change("audio_metric", "meditation_score")
     stats = _run(fed, SHAMATHA_HIGH[3:])  # meditation: tick 4 above (90), tick 5 not
     assert stats["score_metric_key"] == "meditation_score"
-    assert fresh_app._session_manager._time_above_threshold == 2.0  # 3 + 1 ticks
+    assert fresh_app._session.manager._time_above_threshold == 2.0  # 3 + 1 ticks
 
 
 def test_the_legend_marks_the_scored_series_once_per_change(fresh_app, monkeypatch):
@@ -262,7 +262,7 @@ def test_recomputing_from_ticks_stored_in_the_db_reproduces_the_stored_stats(fre
 # --- the real tick ---------------------------------------------------------------------------------------------
 
 def _scored_on(app) -> str | None:
-    return app._session_manager.compute_statistics()["score_metric_key"]
+    return app._session.manager.compute_statistics()["score_metric_key"]
 
 
 def test_a_simple_session_tick_scores_on_the_feedback_metric_and_marks_it(fresh_app, monkeypatch):
@@ -277,7 +277,7 @@ def test_a_program_session_tick_leaves_the_goal_to_the_program(fresh_app, monkey
     reload_with(app, threshold="50", audio_metric="meditation_score")
     program_mode(app, [{"minutes": 5, "target": 60, "formula": "shamatha_score"}])
     FedSession(app, monkeypatch).tick(metrics=dict(SHAMATHA_HIGH[0]))
-    score = app._session_manager.live_score()
+    score = app._session.manager.live_score()
     assert _scored_on(app) == "shamatha_score" and (score.segmented, score.target) == (True, 60)
 
 
@@ -286,14 +286,14 @@ def test_program_mode_with_no_usable_program_is_scored_like_a_simple_session(fre
     reload_with(app, threshold="50")
     program_mode(app, [])  # the Settings toggle; the session starts without a program
     FedSession(app, monkeypatch).tick(metrics=dict(SHAMATHA_HIGH[0]))
-    assert _scored_on(app) == "shamatha_score" and not app._session_manager.live_score().segmented
+    assert _scored_on(app) == "shamatha_score" and not app._session.manager.live_score().segmented
 
 
 def test_one_tick_scores_and_sounds_the_same_metric(fresh_app, monkeypatch):
     app = fresh_app
     fed = _session(app, monkeypatch)
     answers = iter(["shamatha_score", "meditation_score"])  # the driving metric changes mid-tick
-    monkeypatch.setattr(app._audio_metric, "drive_key", lambda: next(answers, "meditation_score"))
+    monkeypatch.setattr(app._session, "drive_key", lambda: next(answers, "meditation_score"))
     sounded = calls_of(monkeypatch, app._audio, "update")
     fed.tick(metrics={"shamatha_score": 11.0, "meditation_score": 77.0})
     assert _scored_on(app) == "shamatha_score"
@@ -303,17 +303,21 @@ def test_one_tick_scores_and_sounds_the_same_metric(fresh_app, monkeypatch):
 def test_the_partial_flush_saves_the_scored_metric(fresh_app, monkeypatch):
     app = fresh_app
     fed = _session(app, monkeypatch)
-    app._recorder._flush_counter = int(APP.FLUSH_INTERVAL_SECONDS / APP.UPDATE_FREQUENCY) - 1  # this tick flushes
+    app._session.recorder._flush_counter = int(APP.FLUSH_INTERVAL_SECONDS / APP.UPDATE_FREQUENCY) - 1  # this tick flushes
     fed.tick(metrics={"shamatha_score": 52.5})
-    row = app._db.get_session(app._recorder.session_id)
+    row = app._db.get_session(app._session.recorder.session_id)
     assert (row["score_metric_key"], row["score_metric_name"], row["avg_score"]) == ("shamatha_score", "Shamatha", 52.5)
 
 
-def test_a_session_stopped_before_any_tick_records_the_feedback_metric(fresh_app, monkeypatch):
+@pytest.mark.parametrize("metric, formulas, recorded", [
+    ("shamatha_score", (), ("shamatha_score", "Shamatha")),
+    ("custom_formula", CALM_RATIO, ("custom_formula", "Calm ratio")),
+], ids=["default", "formula"])
+def test_a_session_stopped_before_any_tick_records_the_feedback_metric(fresh_app, monkeypatch, metric, formulas, recorded):
     sm = SessionManager()
     sm.start(threshold=50)
     stats = sm.compute_statistics()
     assert stats["score_metric_key"] is None and stats["avg_score"] is None  # nothing was scored
-    _session(fresh_app, monkeypatch)
+    _session(fresh_app, monkeypatch, metric, formulas)
     row = _saved(fresh_app)
-    assert (row["score_metric_key"], row["score_metric_name"], row["avg_score"]) == ("shamatha_score", "Shamatha", None)
+    assert (row["score_metric_key"], row["score_metric_name"], row["avg_score"]) == (*recorded, None)

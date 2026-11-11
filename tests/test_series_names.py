@@ -49,7 +49,7 @@ def test_a_programs_labels_go_when_it_ends(app):
     graph = app._live_screen.graph
     show_program_series(graph, runnable_plan(SessionProgram([DEEP])))
     assert graph.series_name("program_formula") == "Program: Deep"
-    app._program_run.end()
+    app._session.program_run.end()
     assert graph.series_name("program_formula") == "Program"
 
 

@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **The session's parts have one owner** (#128): the session manager, its recorder, the metrics engine, a program, the timer, each tick's checks and the wake lock are built and held by `RunningSession`, which also says what a session is scored on and saved as.
 - **The threshold has one owner**: the session manager (the base, and a tick's target); the sound, the scoring, the engine's state and the SHAMATHA pill read it per tick instead of each keeping a copy written by two paths.
 - **With several MindWaves paired, Start asks which one** (#99): the app no longer opens Settings › Device at launch or after creating a profile; Settings › Device lists them, and **Start** opens it to pick one, as it did.
   Its "pick one" message now goes once a headset is picked or another profile is chosen, not only once one connects.

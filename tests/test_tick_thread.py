@@ -27,7 +27,7 @@ def test_stop_then_cancel_while_paused_then_resume_runs_one_tick_thread(fresh_ap
     app._on_stop()  # Stop: the confirm dialog opens with the tick stopped
     (confirm,) = popups()
     confirm.dismiss()  # Cancel while still paused
-    assert app._session_manager.state == SessionState.PAUSED
+    assert app._session.manager.state == SessionState.PAUSED
     assert _live_ticks() == base, "a paused session must not get its tick back from Cancel"
     app._on_pause()  # Resume
     assert _live_ticks() == base + 1
@@ -45,7 +45,7 @@ def test_cancel_while_running_restarts_the_tick(fresh_app):
     assert _live_ticks() == base
     (confirm,) = popups()
     confirm.dismiss()  # Cancel
-    assert app._session_manager.state == SessionState.RUNNING and _live_ticks() == base + 1
+    assert app._session.manager.state == SessionState.RUNNING and _live_ticks() == base + 1
 
 
 def test_starting_twice_keeps_one_thread():

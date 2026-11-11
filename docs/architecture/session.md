@@ -5,8 +5,12 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 ## State machine and tick
 
+- **The session's parts** (`app/ui/running_session.py`, the app's `_session`): `RunningSession` builds, once, what every Start runs on:
+  `manager` (`SessionManager`), `recorder` (`SessionRecorder`), `engine` (`MetricsEngine`), `program_run` (`ProgramRun`), `timer` (`TimerState`), `watch` (`SessionWatch`), `mock_stream` and `keep_awake`.
+  It answers what the running session is scored on (`drive_key`) and saved as (`with_score`, `row_fields`, `session_name`, `custom_formulas_json`); the recorder calls `with_score` and `row_fields` at each checkpoint.
+  The profile's `FormulaSlots` stay the app's (Settings, History and the graph series read them) and the real stream stays `Headset.stream` (the link outlives sessions); the session reads both.
 - **Session lifecycle** (`app/session/manager.py`): the Start/Pause/Resume/Stop state machine.
-  `SessionManager` holds the elapsed time, scores each tick (`add_metric`) and computes the end stats (`compute_statistics`); the app wires it to the stream, engine, audio and recorder.
+  `SessionManager` holds the elapsed time, scores each tick (`add_metric`) and computes the end stats (`compute_statistics`); `RunningSession` wires it to the audio and the recorder.
   `live_score()` is the score so far from running totals (the last tick's value and target, the streaks, the time above, the average since the program's segment began or the session started), for the stats bar every tick.
   It tracks `time_shamatha_90` (time with the shamatha score >= 90, independent of the user's threshold).
   `SessionManager.stop(reason)` plays a short warble alert only for **failure** terminations (`stale_data`, `bt_lost`, `error`); `user` and `timer` are planned stops and stay silent (`timer` plays its own gong).
@@ -18,7 +22,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `TickThread.start` (`app/session/tick_thread.py`, the app's `_ticker`) is a no-op while a tick thread is alive, and each thread gets its **own** stop event (`_loop(stop)`; the ticker holds the current one):
   a shared event cleared on restart would revive a thread whose `TickThread.stop` join (1 s) had timed out.
   `_cancel_stop` (Cancel in the Stop dialog) restarts the tick only for a RUNNING session; a paused one gets it back on Resume.
-- Session names are generated as `"YYYY-MM-DD HH:MM - DeviceName"` (`_make_session_name`: `start_stamp` of `SessionManager.started_at`, then the headset's name or `Mock`); older sessions carry `"HH:MM - DeviceName"`.
+- Session names are generated as `"YYYY-MM-DD HH:MM - DeviceName"` (`RunningSession.session_name`: `start_stamp` of `SessionManager.started_at`, then the headset's name or `Mock`); older sessions carry `"HH:MM - DeviceName"`.
   Neither is shown raw: `app/ui/session_labels.py` (#49) composes what a session is called on screen, for History's rows, the session detail and the end card.
   `start_stamp` is the one `YYYY-MM-DD HH:MM` format: the default name is written with it and the title recognises it.
   `session_title` is `"YYYY-MM-DD HH:MM - <label>"`, the date and time parsed from `date_time` (never sliced); an unnamed session gets just the date and time.
@@ -38,7 +42,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 ## Persistence
 
 - **A session reaches the DB only through checkpoints** (#30):
-  `SessionRecorder.checkpoint(stats=None)` (`app/session/recorder.py`, the app's `_recorder`, which owns the buffered ticks and the session's row id) → `DatabaseManager.checkpoint_session(sid, stats, ticks, …)`:
+  `SessionRecorder.checkpoint(stats=None)` (`app/session/recorder.py`, `RunningSession.recorder`, which owns the buffered ticks and the session's row id) → `DatabaseManager.checkpoint_session(sid, stats, ticks, …)`:
   it inserts or updates the session row **and** inserts the buffered tick rows in one transaction, so a process killed at any point leaves the row and the data of one checkpoint, which agree.
   `checkpoint_session` reuses `_insert_session` / `_update_session_row` / `_insert_metrics`, the same SQL `save_session` / `update_session` / `save_metrics_batch` use.
   A checkpoint runs at every snapshot point: the 60 s tick flush (`flush_tick`), the final save (`_persist_session_data`, with the stop's stats), `_flush_on_leave` (on_pause / on_stop, while a session is running or paused) and both backup workers.
@@ -49,7 +53,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   a failed checkpoint puts its ticks back for the next one.
   Leaving the app and both backups go through `_checkpoint_or_report()`, which logs and reports a failure (`session_checkpoint_failed`) and carries on: the settings flush, the stop-and-save of `on_stop` and the rest of the backup still run.
   A pending marker is set on the tick's row before it is recorded.
-  The row is dated and named by the session's start (`SessionManager.started_at`, 0.0 before a start and after `reset()` → `checkpoint_session(started_at=…)` and `_make_session_name`), not by its first save a minute later.
+  The row is dated and named by the session's start (`SessionManager.started_at`, 0.0 before a start and after `reset()` → `checkpoint_session(started_at=…)` and `session_name`), not by its first save a minute later.
   Session persistence is split: `_persist_session_data(reason)` (tick-thread-safe DB write, no Kivy) + `_finalize_stop_ui(stats, id)` (main-thread UI teardown).
   `_stop_and_save` runs both on the main thread; the timer-expiry path runs `_persist_session_data` on the tick thread and defers `_finalize_stop_ui` via `_on_main_for(run, ...)`.
   **Every ending saves through this one path** (#39):
@@ -89,7 +93,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   On success the Session screen drops a deleted session it shows (`ShownSession.on_sessions_deleted` → `drop`: the end card, whose notes would have no session to save to, closes with its gong, and the display clears).
   `HistoryScreen.remove_sessions(ids)` removes those rows and model entries in place (see the session list in [history.md](history.md)): no rebuild, no spinner, wherever the user is.
   History never lists the running session: its row exists from the first checkpoint, with that checkpoint's stats, and a History reload during the session would list it with them, frozen there until the next reload.
-  `_running_session_id()` (`_recorder.session_id` while `_session_pipeline_live()`) is left out of History's list (`HistoryFlow.finished_sessions`) and Settings' profile counts.
+  `_running_session_id()` (`recorder.session_id` while `_session_pipeline_live()`) is left out of History's list (`HistoryFlow.finished_sessions`) and Settings' profile counts.
   `_finalize_stop_ui` marks History dirty, so the session appears once it ends.
   `delete_sessions` also refuses it (`_running_session_id()` among the ids): its next checkpoints would write ticks for no session.
 
@@ -129,7 +133,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `tests/test_service_start_state.py` compiles it with `javac` and runs its transition table (`tests/java/`); without a JDK the test is skipped.
   `START_NOT_STICKY` keeps the system from restarting it alone.
   A maker's power manager can still close the app at this priority ([app-platform](app-platform.md#background-running-android)).
-  `KeepAwake` (`app/keep_awake.py`, the app's `_keep_awake`) calls its static `start`/`stop`, together with the wake lock and the keep-screen-on flag:
+  `KeepAwake` (`app/keep_awake.py`, `RunningSession.keep_awake`) calls its static `start`/`stop`, together with the wake lock and the keep-screen-on flag:
   `hold()` at a session's setup, `release()` at its ending or an abandoned start; `on_stop` stops only the service.
 - While the app is paused (screen locked) the tick skips its per-tick UI update: N minutes locked would queue ~120·N full graph redraws, which froze the screen on resume.
   The tick thread records every tick into the session-lifetime mirror instead (`LiveMirror` in `app/ui/live_mirror.py`, held by the shown session: `_shown.mirror`, no Kivy).

@@ -146,8 +146,8 @@ class FedSession:
 
     def __init__(self, app, monkeypatch, *, start: bool = True) -> None:
         self.app, self.raw, self.metrics, self.thresholds = app, raw_sample(), tick_metrics(), []
-        monkeypatch.setattr(app._mock_stream, "read_sample", lambda: self.raw)
-        monkeypatch.setattr(app._metrics_engine, "process_sample", self._computed)
+        monkeypatch.setattr(app._session.mock_stream, "read_sample", lambda: self.raw)
+        monkeypatch.setattr(app._session.engine, "process_sample", self._computed)
         if start:
             start_ticked_by_hand(app)
 
@@ -164,8 +164,8 @@ class FedSession:
             frames()
 
     def end_by_timer_on_next_tick(self) -> None:
-        self.app._timer_state.set_enabled(True)
-        self.app._timer_state.remaining_seconds = APP.UPDATE_FREQUENCY / 2
+        self.app._session.timer.set_enabled(True)
+        self.app._session.timer.remaining_seconds = APP.UPDATE_FREQUENCY / 2
 
 
 class HeadsetSession:
@@ -180,7 +180,7 @@ class HeadsetSession:
         monkeypatch.setattr(NeuroSkyStream, "is_connected", property(lambda _stream: self.connected))
         monkeypatch.setattr(NeuroSkyStream, "seconds_since_last_packet", property(lambda _stream: self.since_packet))
         monkeypatch.setattr(app._real_stream, "read_sample", lambda: self.raw)
-        monkeypatch.setattr(app._metrics_engine, "process_sample", lambda _raw, _threshold: self.metrics)
+        monkeypatch.setattr(app._session.engine, "process_sample", lambda _raw, _threshold: self.metrics)
         start_connecting(app, monkeypatch)
         app._ticker.stop()  # the ticks are the test's
         if start:
@@ -259,7 +259,7 @@ def _close_modals() -> None:
 
 def _retire(app) -> None:
     app._ticker.stop()  # a session a test left running: no tick thread, mock reader or sound for the next
-    app._mock_stream.stop()
+    app._session.mock_stream.stop()
     app._audio.cleanup()
     frames()  # what the app queued runs while it is whole
     _close_modals()

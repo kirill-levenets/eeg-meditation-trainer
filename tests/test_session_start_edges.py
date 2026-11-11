@@ -44,7 +44,7 @@ class _Waiting:
         self.run = app._run
         self.audio_starts = calls_of(monkeypatch, app._audio, "start")
         self.states = calls_of(monkeypatch, app._live_screen, "update_state")
-        self.countdowns = calls_of(monkeypatch, app._timer_state, "start_countdown")
+        self.countdowns = calls_of(monkeypatch, app._session.timer, "start_countdown")
 
     def first_data(self) -> None:
         """The wait's tick that reads the first data."""
@@ -74,7 +74,7 @@ def waiting(fresh_app, monkeypatch) -> _Waiting:
 
 
 def _idle(app) -> bool:
-    return app._session_manager.state == SessionState.IDLE
+    return app._session.manager.state == SessionState.IDLE
 
 
 def _retry_shown(app) -> bool:
@@ -103,10 +103,10 @@ def test_stop_during_a_running_session_still_asks(fresh_app):
 def test_stop_after_the_timer_ended_the_session_leaves_its_teardown_alone(fresh_app, monkeypatch):
     app = fresh_app
     session = HeadsetSession(app, monkeypatch)
-    app._timer_state.set_enabled(True)
-    app._timer_state.remaining_seconds = 0.1
+    app._session.timer.set_enabled(True)
+    app._session.timer.remaining_seconds = 0.1
     session.tick(shown=False)  # the timer: saved on the tick thread; its UI teardown is queued
-    assert app._session_manager.state == SessionState.FINISHED
+    assert app._session.manager.state == SessionState.FINISHED
     stream_stops = calls_of(monkeypatch, app._real_stream, "stop")
     states = calls_of(monkeypatch, app._live_screen, "update_state")
     app._on_stop()
@@ -119,7 +119,7 @@ def test_stop_after_the_timer_ended_the_session_leaves_its_teardown_alone(fresh_
 def test_a_cancel_in_the_frame_the_session_starts_leaves_no_session_running(waiting):
     app = waiting.app
     waiting.first_data()  # data arrived: the session starts and its "Running" UI + audio are queued
-    assert app._session_manager.state == SessionState.RUNNING
+    assert app._session.manager.state == SessionState.RUNNING
     app._on_connect_cancel()  # the Cancel tap, handled before the queued callback
     frames()
     assert waiting.audio_starts == [] and _idle(app) and not waiting.shown_running()
@@ -206,7 +206,7 @@ def test_a_wait_exit_queued_before_a_cancel_leaves_the_next_start_alone(waiting,
     app._change_setting("use_mock", True)
     start_ticked_by_hand(app)  # the next Start, handled before the queued retry screen
     frames()
-    assert app._session_manager.state == SessionState.RUNNING and not _retry_shown(app)
+    assert app._session.manager.state == SessionState.RUNNING and not _retry_shown(app)
 
 
 def test_deleting_the_profile_in_the_frame_the_session_starts_leaves_no_audio_playing(waiting):
@@ -295,7 +295,7 @@ def program_waiting(fresh_app, monkeypatch) -> _Waiting:
     """A program session's Start in its BT wait: the program has begun and shows its lines."""
     program_mode(fresh_app, DEEP)
     waiting = _Waiting(fresh_app, monkeypatch)
-    assert fresh_app._program_run.active and fresh_app._live_screen.graph.is_visible("program_formula")
+    assert fresh_app._session.program_run.active and fresh_app._live_screen.graph.is_visible("program_formula")
     return waiting
 
 
@@ -304,7 +304,7 @@ def test_an_ending_derives_the_idle_series_once_the_session_no_longer_reads_live
     app = program_waiting.app
     app._program_settings.on_mode_change("simple")  # while it waits: the idle series is derived at its ending
     program_waiting.first_data()
-    assert app._session_manager.state == SessionState.RUNNING and app._live_screen.graph.is_visible("program_formula")
+    assert app._session.manager.state == SessionState.RUNNING and app._live_screen.graph.is_visible("program_formula")
     app._on_connect_cancel()
     graph = app._live_screen.graph
     assert graph.visible_keys() == ["shamatha_score"] and graph.program_keys == frozenset()  # the profile's own
@@ -313,7 +313,7 @@ def test_an_ending_derives_the_idle_series_once_the_session_no_longer_reads_live
 def test_a_cancelled_program_session_derives_the_idle_series_and_leaves_no_program_state(program_waiting):
     app = program_waiting.app
     app._on_connect_cancel()
-    assert not app._program_run.active and app._run is None
+    assert not app._session.program_run.active and app._run is None
     assert app._live_screen.graph.is_visible("program_formula")  # program mode still: its preview, derived again
 
 
@@ -323,7 +323,7 @@ def test_a_wait_that_ends_on_its_own_undoes_the_program_setup(program_waiting, e
     program_waiting.ends(exit_case)
     program_waiting.first_data()
     frames()
-    assert not app._program_run.active and app._run is None and _retry_shown(app)
+    assert not app._session.program_run.active and app._run is None and _retry_shown(app)
 
 
 # ---- a session row is dated and named by its start ----
@@ -333,9 +333,9 @@ def test_a_session_row_is_dated_and_named_at_the_session_start(fresh_app):
     app = fresh_app
     start_ticked_by_hand(app, ticks=1)
     started = time.time() - 3 * 3600  # the first checkpoint lands well after the start
-    app._session_manager._start_time = started
+    app._session.manager._start_time = started
     app._checkpoint_or_report()
-    row = app._db.get_session(app._recorder.session_id)
+    row = app._db.get_session(app._session.recorder.session_id)
     assert row["date_time"][:19] == datetime.datetime.fromtimestamp(started).isoformat()[:19]
     assert row["session_name"] == time.strftime("%Y-%m-%d %H:%M", time.localtime(started)) + " - Mock"
 
@@ -350,7 +350,7 @@ def test_a_reset_session_has_no_start_time():
 
 def test_a_name_made_before_the_start_uses_the_current_time(fresh_app):
     before = time.strftime("%Y-%m-%d %H:%M")
-    name = fresh_app._make_session_name()
+    name = fresh_app._session.session_name()
     assert name in (before + " - Mock", time.strftime("%Y-%m-%d %H:%M") + " - Mock")
 
 
@@ -361,7 +361,7 @@ def test_the_header_start_time_is_when_the_data_arrived(waiting, monkeypatch):
     app = waiting.app
     shown = calls_of(monkeypatch, app._live_screen, "set_start_time")
     waiting.first_data()
-    started = app._session_manager.started_at
+    started = app._session.manager.started_at
     real_time = time.time
     monkeypatch.setattr(am.time, "time", lambda: real_time() + 600)  # the queued UI runs after a 10-min screen lock
     frames()
@@ -381,7 +381,7 @@ def test_a_link_kept_from_the_last_session_starts_the_session_at_once(fresh_app,
         app._on_start()
     finally:
         del app._ticker.start
-    assert app._run.phase is Phase.STARTED and app._session_manager.state == SessionState.RUNNING
+    assert app._run.phase is Phase.STARTED and app._session.manager.state == SessionState.RUNNING
     assert reader_starts == []  # no BT wait
     assert len(resets) == 1  # the last session's sample can't start this one
     assert app._live_screen._device_label.text == f"[{HEADSET[1]}] *" and len(connect_sounds) == 1
@@ -397,7 +397,7 @@ def test_with_no_link_the_start_enters_the_bt_wait(fresh_app, monkeypatch):
 def test_the_tick_drives_the_wait_until_its_first_data_starts_the_session(waiting):
     app = waiting.app
     app._update_tick(0.5)
-    assert waiting.run.phase is Phase.STARTED and app._session_manager.state == SessionState.RUNNING
+    assert waiting.run.phase is Phase.STARTED and app._session.manager.state == SessionState.RUNNING
 
 
 def test_a_marker_is_placed_only_in_a_running_session(fresh_app):

@@ -83,12 +83,12 @@ def test_the_pause_button_twice_brings_the_same_sounds_back(fresh_app, monkeypat
     assert len(players) == 2
 
     app._on_pause()  # pause
-    assert app._session_manager.state is SessionState.PAUSED
+    assert app._session.manager.state is SessionState.PAUSED
     for p in players.values():
         p.played = False
     app._on_pause()  # resume
 
-    assert app._session_manager.state is SessionState.RUNNING and engine._feedback_players == players
+    assert app._session.manager.state is SessionState.RUNNING and engine._feedback_players == players
     assert (engine._active_feedback, engine._reward_feedback) == ("tone", "heartbeat")
     assert all(p.played for p in players.values())
 

@@ -52,7 +52,7 @@ def _program(app_, monkeypatch, segments=SEGMENTS, threshold: int = 70) -> FedSe
 
 
 def _next_target(app_) -> float:
-    return app_._session_manager.add_metric({"shamatha_score": 60.0})["score_target"]
+    return app_._session.manager.add_metric({"shamatha_score": 60.0})["score_target"]
 
 
 def _settled(app_) -> None:
@@ -80,7 +80,7 @@ def test_the_sound_and_the_engine_read_the_ticks_target_and_the_base(fresh_app, 
     sounded = calls_of(monkeypatch, app_._audio, "update")
     fed.tick()  # the first segment: its target is the base the session started with
     assert sounded[-1][1] == 70 and fed.thresholds[-1] == 70
-    app_._session_manager._start_time -= 61  # the next tick is in the second segment, with its own target
+    app_._session.manager._start_time -= 61  # the next tick is in the second segment, with its own target
     fed.tick()
     assert sounded[-1][1] == 60 and fed.thresholds[-1] == 70
     between = {**tick_metrics(), "shamatha_score": 65.0}  # above the segment's 60, below the base's 70
@@ -95,7 +95,7 @@ def test_the_sound_and_the_engine_read_the_ticks_target_and_the_base(fresh_app, 
 def test_a_new_threshold_is_the_next_ticks_target_and_the_base(fresh_app, monkeypatch):
     _simple(fresh_app, monkeypatch)
     fresh_app._apply_threshold(85)
-    assert _next_target(fresh_app) == 85 and fresh_app._session_manager.threshold == 85  # the one owner, read per tick
+    assert _next_target(fresh_app) == 85 and fresh_app._session.manager.threshold == 85  # the one owner, read per tick
 
 
 def test_a_new_threshold_never_reaches_a_running_program(fresh_app, monkeypatch):
@@ -103,7 +103,7 @@ def test_a_new_threshold_never_reaches_a_running_program(fresh_app, monkeypatch)
     fed = _program(fresh_app, monkeypatch)
     fed.tick()
     fresh_app._apply_threshold(85)
-    assert _next_target(fresh_app) == 60 and fresh_app._session_manager.threshold == 60  # the segment's stays in force
+    assert _next_target(fresh_app) == 60 and fresh_app._session.manager.threshold == 60  # the segment's stays in force
 
 
 def test_after_a_program_session_the_slider_applies_again(fresh_app, monkeypatch):
@@ -112,7 +112,7 @@ def test_after_a_program_session_the_slider_applies_again(fresh_app, monkeypatch
     app_._stop_and_save()
     frames()
     app_._apply_threshold(85)
-    assert app_._session_manager.threshold == 85
+    assert app_._session.manager.threshold == 85
 
 
 def test_a_slider_drag_is_one_change_at_the_value_it_settles_on(fresh_app, monkeypatch):
@@ -124,7 +124,7 @@ def test_a_slider_drag_is_one_change_at_the_value_it_settles_on(fresh_app, monke
         assert _next_target(app_) == 70  # still the value in force while the slider moves
     _settled(app_)
     assert _next_target(app_) == 85
-    assert app_._session_manager.compute_statistics()["score_targets"] == "[70, 85]"
+    assert app_._session.manager.compute_statistics()["score_targets"] == "[70, 85]"
     assert app_._db.get_user_setting(app_._current_user_id, "threshold") == "85"  # written once it settled too
 
 
@@ -133,7 +133,7 @@ def test_a_session_waiting_for_the_headset_starts_with_the_threshold_set_during_
     tick(6.0, connected=True)
     a._apply_threshold(85)
     tick(7.0, connected=True, bands=5.0, packet=True)
-    assert a._session_manager.state == SessionState.RUNNING
+    assert a._session.manager.state == SessionState.RUNNING
     assert _next_target(a) == 85
 
 
@@ -156,7 +156,7 @@ def test_each_ticks_row_and_mirror_point_record_its_target(fresh_app, monkeypatc
         if i == 2:
             app_._apply_threshold(85)
         fed.tick(metrics=tick_metrics(seed=80.0))
-    assert [(r["score_key"], r["score_value"], r["score_target"]) for r in app_._recorder._buffer] == [
+    assert [(r["score_key"], r["score_value"], r["score_target"]) for r in app_._session.recorder._buffer] == [
         ("shamatha_score", 80.0, 70), ("shamatha_score", 80.0, 70), ("shamatha_score", 80.0, 85)]
     assert [(m["score_target"], m["score_key"]) for m in app_._shown.mirror.metrics] == [
         (70, "shamatha_score"), (70, "shamatha_score"), (85, "shamatha_score")]
@@ -182,7 +182,7 @@ def test_a_programs_ticks_carry_each_segments_scored_series_to_the_graph_and_the
                                        {"minutes": 1, "target": 60, "formula": "meditation_score"}])
     drawn = _points_drawn(app_, monkeypatch)
     fed.tick(metrics=tick_metrics(seed=80.0))
-    app_._session_manager._start_time -= 61  # the next tick is past the first segment's minute
+    app_._session.manager._start_time -= 61  # the next tick is past the first segment's minute
     fed.tick(metrics={**tick_metrics(seed=80.0), "meditation_score": 55.0})
     keys = ["shamatha_score", "meditation_score"]
     assert [m["score_key"] for m in app_._shown.mirror.metrics] == keys
@@ -194,16 +194,16 @@ def test_a_tick_the_session_paused_under_is_not_recorded(fresh_app, monkeypatch)
     # leaves no row and no graph point (it used to be stored, unscored).
     app_ = fresh_app
     fed = _simple(app_, monkeypatch)
-    real_add = app_._session_manager.add_metric
+    real_add = app_._session.manager.add_metric
 
     def pause_first(metric):
-        app_._session_manager.pause()
+        app_._session.manager.pause()
         return real_add(metric)
 
-    monkeypatch.setattr(app_._session_manager, "add_metric", pause_first)
+    monkeypatch.setattr(app_._session.manager, "add_metric", pause_first)
     app_._on_marker()
     fed.tick()
-    assert app_._recorder._buffer == [] and len(app_._shown.mirror.metrics) == 0
+    assert app_._session.recorder._buffer == [] and len(app_._shown.mirror.metrics) == 0
     assert app_._live_screen.graph.total_points == 0
     assert app_._run.pending_marker  # it goes on the next tick that is recorded
 
@@ -290,14 +290,14 @@ def test_a_session_start_puts_its_threshold_in_force_and_clears_the_last_session
     app_ = fresh_app
     graph = app_._live_screen.graph
     reload_with(app_, threshold="70")
-    app_._session_manager.set_threshold(33)  # what the last session left
+    app_._session.manager.set_threshold(33)  # what the last session left
     graph.set_threshold_steps([(0, 50)])  # and its steps
     if program:
         program_mode(app_, SEGMENTS)
     FedSession(app_, monkeypatch)
     assert graph._threshold_steps is None and graph._threshold_value == float(first_target)
-    assert app_._session_manager.threshold == first_target
-    assert app_._session_manager.state == SessionState.RUNNING
+    assert app_._session.manager.threshold == first_target
+    assert app_._session.manager.state == SessionState.RUNNING
     assert _next_target(app_) == first_target
 
 
@@ -338,7 +338,7 @@ def test_a_touch_after_the_program_ended_is_not_refused(fresh_app, monkeypatch):
     fed = _program(fresh_app, monkeypatch)
     fed.end_by_timer_on_next_tick()
     fed.tick(shown=False)
-    assert fresh_app._session_manager.state == SessionState.FINISHED
+    assert fresh_app._session.manager.state == SessionState.FINISHED
     assert fresh_app._refuse_program_threshold() is False and popups() == []
 
 
@@ -404,7 +404,7 @@ def test_a_slider_move_just_before_starting_a_program_is_not_applied_during_it(f
     app_._settings_screen.threshold = 80  # its apply is still pending
     FedSession(app_, monkeypatch)
     _settled(app_)
-    assert app_._session_manager.threshold == 60 and popups() == []  # the slider's pending apply, cancelled by Start
+    assert app_._session.manager.threshold == 60 and popups() == []  # the slider's pending apply, cancelled by Start
 
 
 def test_a_running_session_ignores_another_start():
@@ -421,14 +421,14 @@ def test_a_program_start_that_fails_in_its_setup_leaves_the_controls_unlocked(fr
     def failing(*_args):
         raise RuntimeError("bad custom sound file")
 
-    monkeypatch.setattr(app_._program_run, "begin", failing)
+    monkeypatch.setattr(app_._session.program_run, "begin", failing)
     with pytest.raises(RuntimeError):
         app_._on_start()
     assert app_._settings_screen._threshold_lock is None
 
 
 def test_a_session_start_holds_the_phone_awake(fresh_app, monkeypatch):
-    holds = calls_of(monkeypatch, fresh_app._keep_awake, "hold")
+    holds = calls_of(monkeypatch, fresh_app._session.keep_awake, "hold")
     _simple(fresh_app, monkeypatch)
     assert len(holds) == 1  # the wake lock, the screen-on flag, the foreground service
 
@@ -460,7 +460,7 @@ def test_moving_the_slider_while_idle_clears_the_last_sessions_graphs(fresh_app,
     assert _live_points(app_) == [0, 0, 0] and app_._live_screen.graph._threshold_steps is None
     assert not mirror.metrics and not mirror.bands and not mirror.waveform
     _settled(app_)  # the settled value
-    assert app_._live_screen.graph._threshold_value == 85.0 and app_._session_manager.threshold == 85
+    assert app_._live_screen.graph._threshold_value == 85.0 and app_._session.manager.threshold == 85
 
 
 def test_reapplying_the_settings_threshold_keeps_the_graphs(fresh_app, monkeypatch):
@@ -468,10 +468,10 @@ def test_reapplying_the_settings_threshold_keeps_the_graphs(fresh_app, monkeypat
     # profile reloads its settings and applies 70, which is no change of the Settings threshold.
     app_ = fresh_app
     _ended(app_, monkeypatch, _program)
-    assert app_._session_manager.threshold == 60
+    assert app_._session.manager.threshold == 60
     app_._activate_user(app_._current_user_id)
     _settled(app_)
-    assert app_._live_screen.graph.total_points == 3 and app_._session_manager.threshold == 70
+    assert app_._live_screen.graph.total_points == 3 and app_._session.manager.threshold == 70
 
 
 def test_nothing_to_clear_before_any_session(fresh_app, monkeypatch):

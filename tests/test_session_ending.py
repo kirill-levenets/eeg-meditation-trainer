@@ -70,7 +70,7 @@ def test_user_stop_confirms_then_takes_the_shared_save_path(fresh_app):
     app._on_stop()
     (confirm,) = popups()
     assert confirm.title == "Stop session?" and _sessions(app) == []
-    assert app._session_manager.state == SessionState.RUNNING  # nothing ends before the answer
+    assert app._session.manager.state == SessionState.RUNNING  # nothing ends before the answer
     tap(confirm.content, "Stop")
     frames()
     (saved,) = _sessions(app)
@@ -83,10 +83,10 @@ def test_user_stop_derives_the_idle_series_and_clears_the_training_marker(fresh_
     start_ticked_by_hand(app, ticks=2)
     program_mode(app, [])  # the editor emptied meanwhile: what the idle graph is derived from after the ending
     marks = calls_of(monkeypatch, app._live_screen, "set_training_series")
-    assert app._program_run.active and app._live_screen.graph.is_visible("program_formula")
+    assert app._session.program_run.active and app._live_screen.graph.is_visible("program_formula")
     app._stop_and_save(reason="user")
     frames()
-    assert not app._program_run.active and marks[-1] == (None,)
+    assert not app._session.program_run.active and marks[-1] == (None,)
     assert not app._live_screen.graph.is_visible("program_formula")  # the live graph's idle series derived again
     assert _card_open(app)
 
@@ -99,9 +99,9 @@ def test_a_stop_confirmed_after_the_session_ended_another_way_keeps_it(fresh_app
     # and its stop had saved it. v1.4.0's confirm then found no stats and took its Discard branch, deleting the session.
     app = fresh_app
     start_ticked_by_hand(app, ticks=240)
-    app._session_manager._start_time -= 120  # two minutes in
+    app._session.manager._start_time -= 120  # two minutes in
     app._checkpoint_or_report()
-    sid = app._recorder.session_id
+    sid = app._session.recorder.session_id
     app._on_stop()  # the user's Stop tap, handled while the session still runs: its dialog opens
     (confirm,) = popups()
     if ended_by == "headset off":  # the stale-data stop queued behind the tap

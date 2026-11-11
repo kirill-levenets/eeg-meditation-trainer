@@ -144,7 +144,7 @@ def test_program_custom_formula_plots_and_marks(fresh_app, monkeypatch):
     fed.tick({**fed.raw, "alpha1": 80.0}, metrics)
     graph = app._live_screen.graph
     assert metrics["program_formula"] == 80.0  # custom formula evaluated + plotted
-    assert app._program_run.audio_key == "program_formula"  # transient program drive
+    assert app._session.program_run.audio_key == "program_formula"  # transient program drive
     assert app._settings_store.value("audio_metric") == "shamatha_score"  # user's baseline left untouched
     assert graph.series_name("program_formula") == "Program: AlphaPwr"  # "Program: <formula>"
     assert graph.is_visible("program_formula")  # shown on graph
@@ -160,9 +160,9 @@ def test_a_segment_whose_formula_cant_run_drives_and_shows_shamatha(fresh_app, m
     marks = calls_of(monkeypatch, app._live_screen, "set_training_series")
     metrics = {"shamatha_score": 50}
     fed.tick({**fed.raw, "alpha1": 80.0}, metrics)
-    graph, score = app._live_screen.graph, app._session_manager.live_score()
-    assert app._program_run.audio_key == "shamatha_score"
-    assert metrics.get(app._audio_metric.drive_key(), 0) == 50  # what the tick sounds: shamatha, not 0
+    graph, score = app._live_screen.graph, app._session.manager.live_score()
+    assert app._session.program_run.audio_key == "shamatha_score"
+    assert metrics.get(app._session.drive_key(), 0) == 50  # what the tick sounds: shamatha, not 0
     assert (score.value, score.target) == (50, 120)  # scored on what it sounds
     assert marks[-1] == ("shamatha_score",)
     assert [p.title for p in popups()] == ["Formula error in this program"]  # the session's start says which

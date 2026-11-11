@@ -195,9 +195,9 @@ def test_resume_refreshes_stats_state_and_timer(fed, monkeypatch):
     states = calls_of(monkeypatch, screen, "update_state")
     timers = calls_of(monkeypatch, screen, "update_timer")
     _unlock(fed)
-    assert stats == [(app._session_manager.live_score(),)]  # the score kept while locked
+    assert stats == [(app._session.manager.live_score(),)]  # the score kept while locked
     assert states == [("Shamatha",)]
-    assert timers == [(app._session_manager.elapsed_formatted,)]
+    assert timers == [(app._session.manager.elapsed_formatted,)]
 
 
 def test_a_reload_keeps_each_points_colouring():
@@ -269,8 +269,8 @@ def test_btwait_arms_countdown_synchronously_on_connect(connected):
     app = connected
     app._follow_bt_wait(app._run)  # the wait's tick that sees the data
     assert app._run.phase is Phase.STARTED
-    assert app._timer_state.remaining_seconds == 15 * 60
-    assert app._session_manager.state == SessionState.RUNNING
+    assert app._session.timer.remaining_seconds == 15 * 60
+    assert app._session.manager.state == SessionState.RUNNING
 
 
 def test_btwait_does_not_start_audio_on_tick_thread(connected, monkeypatch):
@@ -309,7 +309,7 @@ def test_timer_expiry_persists_on_tick_thread(fed, monkeypatch):
     # Persisted synchronously, before the main thread ran anything.
     (saved,) = _sessions(app)
     assert len(app._db.get_session_metrics(saved["id"])) == 2  # the row and the buffered ticks, in one transaction
-    assert app._session_manager.state not in (SessionState.RUNNING, SessionState.PAUSED)
+    assert app._session.manager.state not in (SessionState.RUNNING, SessionState.PAUSED)
     # Noise is silenced with the non-blocking mute() on the tick thread, the gong rings here too (on the tick thread →
     # through the lock), but the blocking _audio.stop()/MediaPlayer.release() teardown is NOT run on the tick thread
     # (it deadlocks against the paused main Looper during lock): it's deferred to the main thread.
@@ -348,7 +348,7 @@ def test_timer_expiry_updates_existing_session_row(fed):
     app = fed.app
     fed.tick()
     app._checkpoint_or_report()  # row already created by a prior flush
-    sid = app._recorder.session_id
+    sid = app._session.recorder.session_id
     assert sid is not None
     fed.end_by_timer_on_next_tick()
     fed.tick()

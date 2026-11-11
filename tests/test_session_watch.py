@@ -34,7 +34,7 @@ def watch(monkeypatch):
     stream, live_screen, device, audio = MagicMock(), MagicMock(), MagicMock(), MagicMock()
     stream.is_connected, stream._device_address, stream._device_name = False, "AA:BB", "MWM2"
     headset = Headset(stub_context(live=lambda: True), stream, device, live_screen, serial_override=lambda: None)
-    w = SessionWatch(stream, audio, live_screen, headset, on_main=queued.append)
+    w = SessionWatch(audio, live_screen, headset, on_main=queued.append)
     run = SessionRun(1)
     run.phase = Phase.STARTED
     return w, run, queued, stream, live_screen, device, audio

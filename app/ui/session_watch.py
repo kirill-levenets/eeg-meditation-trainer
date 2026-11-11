@@ -13,8 +13,8 @@ class SessionWatch:
 
     STALE_DATA_THRESHOLD = 10.0  # seconds with no new packets before warning
 
-    def __init__(self, stream, audio, live_screen, headset, *, on_main: Callable[[Callable], None]) -> None:
-        self._stream = stream
+    def __init__(self, audio, live_screen, headset, *, on_main: Callable[[Callable], None]) -> None:
+        self._stream = headset.stream  # the selected headset's link: the same object for the app's life
         self._audio = audio
         self._live_screen = live_screen
         self._headset = headset

@@ -25,7 +25,7 @@ class _Waiting:
         self.app, self.events, self.releases = app, [], []
         start_connecting(app, monkeypatch)
         app._ticker.stop()
-        tick_stop, stream_stop, release = app._ticker.stop, app._real_stream.stop, app._keep_awake.release
+        tick_stop, stream_stop, release = app._ticker.stop, app._real_stream.stop, app._session.keep_awake.release
 
         def stop_tick():
             tick_stop()
@@ -41,7 +41,7 @@ class _Waiting:
 
         monkeypatch.setattr(app._ticker, "stop", stop_tick)
         monkeypatch.setattr(app._real_stream, "stop", stop_stream)
-        monkeypatch.setattr(app._keep_awake, "release", release_lock)
+        monkeypatch.setattr(app._session.keep_awake, "release", release_lock)
 
     def assert_unwatched_stream_stop(self) -> None:
         assert self.events == ["tick_stopped", ("stream_stopped", False, False)]
@@ -93,7 +93,7 @@ def test_failed_connect_exit_releases_wake_lock_and_service(fresh_app, monkeypat
 def test_refused_start_undoes_setup_without_entering_the_wait(fresh_app, monkeypatch):
     app = fresh_app
     releases = []
-    monkeypatch.setattr(app._keep_awake, "release", lambda: releases.append(True))
+    monkeypatch.setattr(app._session.keep_awake, "release", lambda: releases.append(True))
     monkeypatch.setattr(app._real_stream, "start", lambda: False)  # the reader refuses: its last one is still alive
     app._real_stream._last_connect_error = "Previous connection is still closing."
     app._change_setting("use_mock", False)
@@ -111,7 +111,7 @@ def test_refused_start_undoes_setup_without_entering_the_wait(fresh_app, monkeyp
 def test_started_stream_enters_the_wait(fresh_app, monkeypatch):
     app = fresh_app
     releases = []
-    monkeypatch.setattr(app._keep_awake, "release", lambda: releases.append(True))
+    monkeypatch.setattr(app._session.keep_awake, "release", lambda: releases.append(True))
     start_connecting(app, monkeypatch)
     assert app._connecting() and app._ticker.running
     assert app._live_screen._overlay.opacity == 1 and app._live_screen._overlay_status.text.startswith("Connecting to")

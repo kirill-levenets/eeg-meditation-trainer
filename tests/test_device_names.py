@@ -90,9 +90,9 @@ def test_a_session_on_a_headset_is_named_by_its_alias(fresh_app):
     app._real_stream.set_device(BLUE, "MindWave Mobile")
     app._headset.on_rename(BLUE, "MindWave Mobile", "Blue")
     try:
-        assert app._make_session_name().endswith(" - Blue")
+        assert app._session.session_name().endswith(" - Blue")
         app._real_stream.set_device(GREY, "MindWave Mobile")
-        assert app._make_session_name().endswith(" - MindWave Mobile")
+        assert app._session.session_name().endswith(" - MindWave Mobile")
     finally:
         app._headset.on_rename(BLUE, "MindWave Mobile", "")  # aliases are the phone's, not the profile's
 

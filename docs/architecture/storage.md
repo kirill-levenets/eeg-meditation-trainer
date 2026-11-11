@@ -119,7 +119,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   **Mid-session backup freshness (#30):** `BackupFlow.on_backup_pressed` calls `_save_user_settings()` (main thread) before dispatching to the SAF/desktop worker, so a backup taken mid-session isn't a stale pause/stop snapshot;
   every scalar per-user setting also persists on change ([Per-user settings](#per-user-settings)), so they survive an Android force-kill too.
   `_save_user_settings` catches `sqlite3.Error` and reports a soft error: it runs from UI callbacks (backup, pause, profile switch), where an escaping error would open the fatal dialog, and a failed flush doesn't abort the backup.
-  It **never touches `_timer_state`**:
+  It **never touches the session's timer** (`RunningSession.timer`):
   a running session — especially a program, which force-enables the timer and seeds its countdown from the program total — OWNS it, and re-applying the Settings timer widgets on a pause/backup flush would kill or shift its auto-stop.
   Session start re-applies enabled/duration, and `SoundSources.on_timer_sound_change` keeps the gong path current, so nothing needs an idle sync.
   Both backup workers checkpoint a running session first (`_checkpoint_or_report` → `SessionRecorder.checkpoint`, see [session](session.md#persistence)), so a mid-session backup holds it as of the backup.

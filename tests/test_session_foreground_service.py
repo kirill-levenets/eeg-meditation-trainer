@@ -57,7 +57,7 @@ def test_closing_the_app_stops_the_service_with_or_without_a_session(build_app, 
     # A start still waiting for the headset is no running session, so _stop_and_save never runs for it.
     app = build_app()
     stopped = []
-    monkeypatch.setattr(app._keep_awake, "stop_service", lambda: stopped.append(True))
+    monkeypatch.setattr(app._session.keep_awake, "stop_service", lambda: stopped.append(True))
     if in_session:
         app._on_start()
     app.on_stop()

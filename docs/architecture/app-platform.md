@@ -5,7 +5,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 ## Flows and the app context
 
-- The app builds the screens (`_build_screens`) and the classes that own each concern (`_build_flows`: `HistoryFlow`, `SessionDetailFlow`, `ProfileGate`, `Profiles`, …), wires the screens' hooks to them,
+- The app builds the screens (`_build_screens`) and the classes that own each concern (`_build_flows`: `RunningSession`, `HistoryFlow`, `SessionDetailFlow`, `ProfileGate`, `Profiles`, …), wires the screens' hooks to them,
   and gives each the same `AppContext` (`app/ui/app_context.py`, built once by `_make_context`).
   It holds what a flow reaches the app through: the database, the active profile (`user_id`, `activate_user`, `require_user`), the main thread (`on_main`), navigation (`switch_screen`);
   the user's dialogs (`info`, `toast`, `confirm`), the profile's settings (`setting`, `change_setting`: a held value and its one change path, `save_settings`);

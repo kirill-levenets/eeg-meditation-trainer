@@ -32,9 +32,9 @@ def _settled(app, key: str) -> list[str]:
 def test_a_threshold_drag_writes_once_after_it_settles(app):
     for v in range(20, 181):  # a full slider sweep
         app._settings_screen.threshold = v
-    assert app.writes == [] and app._session_manager.threshold != 180
+    assert app.writes == [] and app._session.manager.threshold != 180
     assert _settled(app, "threshold") == ["180"]
-    assert app._session_manager.threshold == 180  # put in force once too, at the value it settled on
+    assert app._session.manager.threshold == 180  # put in force once too, at the value it settled on
 
 
 def test_typing_a_gong_path_writes_once_after_it_settles(app):

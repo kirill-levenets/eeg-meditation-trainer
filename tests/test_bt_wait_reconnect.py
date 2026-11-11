@@ -95,7 +95,7 @@ def test_a_link_that_drops_and_reconnects_gets_the_full_window_on_the_new_socket
     tick(18.5, connected=True)
     assert not _gave_up(stream)
     tick(19.0, connected=True, bands=5.0, packet=True)
-    assert app._session_manager.state == SessionState.RUNNING
+    assert app._session.manager.state == SessionState.RUNNING
 
 
 def test_the_new_socket_still_times_out_when_it_sends_nothing(wait):
@@ -141,7 +141,7 @@ def test_packets_without_contact_keep_the_wait_open(wait):
         tick(at, connected=True, packet=True)
     assert not _gave_up(stream)
     tick(29.5, connected=True, bands=5.0, packet=True)
-    assert app._session_manager.state == SessionState.RUNNING
+    assert app._session.manager.state == SessionState.RUNNING
 
 
 def _retry_message(app) -> str:
@@ -162,7 +162,7 @@ def test_a_drop_after_the_connect_timeout_still_gets_its_reconnect(wait):
     tick(40.0, connected=True)
     assert not _gave_up(stream)
     tick(41.0, connected=True, bands=5.0, packet=True)
-    assert app._session_manager.state == SessionState.RUNNING
+    assert app._session.manager.state == SessionState.RUNNING
 
 
 def test_a_late_first_connect_that_drops_gets_its_reconnect(wait):
@@ -173,7 +173,7 @@ def test_a_late_first_connect_that_drops_gets_its_reconnect(wait):
     tick(32.0, connected=True)
     assert not _gave_up(stream)
     tick(32.5, connected=True, bands=5.0, packet=True)
-    assert app._session_manager.state == SessionState.RUNNING
+    assert app._session.manager.state == SessionState.RUNNING
 
 
 def test_a_headset_that_keeps_dropping_ends_the_wait(wait):
@@ -195,7 +195,7 @@ def test_two_drops_then_data_start_the_session(wait):
     tick(30.0, connected=True)
     tick(30.5, connected=True, bands=5.0, packet=True)
     assert not _gave_up(stream)
-    assert app._session_manager.state == SessionState.RUNNING
+    assert app._session.manager.state == SessionState.RUNNING
 
 
 def test_the_next_wait_starts_with_no_drops(wait):
@@ -222,9 +222,9 @@ def test_band_values_from_before_a_drop_dont_start_the_session_on_the_new_socket
     tick(6.0, connected=True)
     tick(6.5, connected=False, bands=5.0, packet=True)  # bands and a packet arrived, then the link dropped
     tick(12.0, connected=True, bands=5.0)  # reconnected: the old bands are still there, nothing new yet
-    assert app._session_manager.state != SessionState.RUNNING
+    assert app._session.manager.state != SessionState.RUNNING
     tick(12.5, connected=True, bands=5.0, packet=True)  # the new socket's first data
-    assert app._session_manager.state == SessionState.RUNNING
+    assert app._session.manager.state == SessionState.RUNNING
 
 
 def _connect_failed(stream, tick) -> None:

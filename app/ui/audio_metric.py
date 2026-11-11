@@ -12,28 +12,26 @@ def baseline_audio_metric(key: str) -> str:
     return "shamatha_score" if (not key or key in PROGRAM_FORMULA_KEYS) else key
 
 
+def sound_metric(stored: str, program_key: str, formulas) -> str:
+    """The metric feeding the sound: a running program's segment slot, else the profile's; shamatha when the key would
+    read 0 (a formula slot that doesn't compile, a program slot outside a program)."""
+    key = program_key or baseline_audio_metric(stored)
+    ev = formulas.for_key(key)
+    return "shamatha_score" if ev is not None and not ev.is_valid else key
+
+
 def _parse_slot(raw: str) -> int:
     return max(0, min(int(raw), len(FORMULA_KEYS) - 1))
 
 
 class AudioMetric:
-    """The metric in force and its one change path from Settings, refused while a simple session is scored on it."""
+    """The profile's metric as Settings shows it and its one change path, refused while a simple session is scored on
+    it."""
 
-    def __init__(self, ctx: AppContext, formulas, program_run, settings_screen) -> None:
+    def __init__(self, ctx: AppContext, program_run, settings_screen) -> None:
         self._ctx = ctx
-        self._formulas = formulas
         self._program_run = program_run
         self._settings_screen = settings_screen
-
-    def drive_key(self) -> str:
-        """The metric feeding the sound: a running program's segment slot, else the profile's; shamatha when the key
-        would read 0 (a formula slot that doesn't compile, a program slot outside a program)."""
-        if self._program_run.active and self._program_run.audio_key:
-            key = self._program_run.audio_key
-        else:
-            key = baseline_audio_metric(self._ctx.setting("audio_metric"))
-        ev = self._formulas.for_key(key)
-        return "shamatha_score" if ev is not None and not ev.is_valid else key
 
     def scoring_locked(self, doing: str) -> bool:
         """True (after telling the user) while a simple session runs: it is scored on this metric until it stops. A
