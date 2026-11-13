@@ -29,7 +29,7 @@ class AppContext:
     switch_screen: Callable[[str], None]
     info: Callable[[str, str], None]
     toast: Callable[[str], None]
-    confirm: Callable[..., None]  # (title, message, ok_text, on_ok, ok_color=None, on_cancel=None)
+    confirm: Callable[..., Any]  # (title, message, ok_text, on_ok, ok_color=None, on_cancel=None) -> its popup
     setting: Callable[[str], Any]  # a held setting's value for the active profile
     change_setting: Callable[[str, Any], None]  # a held setting's one change path: hold, apply, persist
     save_settings: Callable[[], None]

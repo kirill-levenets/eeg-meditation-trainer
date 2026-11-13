@@ -8,7 +8,7 @@ from app.ui.diary_screen import DiaryScreen
 from app.ui.live_session import SERIES_NAMES, LiveSessionScreen
 from app.ui.program_run import show_program_series
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
-from tests._app import frames, program_mode, reload_with, start_connecting
+from tests._app import frames_until, program_mode, reload_with, start_connecting
 from tests._picker import picker_rows
 
 PAST_NAMES = {"custom_formula": "Old beta", "custom_formula_2": "Custom 2", "custom_formula_3": "Custom 3"}
@@ -88,7 +88,7 @@ def test_no_program_lines_once_the_program_ends(app, monkeypatch):
     program_mode(app, [DEEP])
     app._on_start()
     app._stop_and_save()
-    frames()
+    frames_until(lambda: app._session.run is None, 2.0)  # the runner saved it; its Ended event tore the screen down
     assert _program_rows(app, monkeypatch) == []
 
 

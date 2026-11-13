@@ -53,7 +53,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   the row's `custom_formulas` comes from `RunningSession.row_fields()` → `custom_formulas_json()` (`FormulaSlots.session_record`), a JSON string of the valid slots (`slot`, `name`, `formula`, `visible`, `drove_audio`).
   `formula_slots.recorded_formulas` reads it back.
   `DatabaseManager.checkpoint_session(..., custom_formulas: str = "")` stores the **already-serialized string** (the contract; callers `json.dumps` at the site).
-  Each slot's `visible` is `graph.is_visible(key)`, a pure dict read, safe on the tick thread.
+  Each slot's `visible` is `graph.is_visible(key)`, a pure dict read, safe on the session's runner.
   A formula's per-tick values are not stored: the diary recomputes them from these definitions and the stored bands (see [session-detail.md](session-detail.md)).
 
 ## Scoring
@@ -61,7 +61,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 - `SessionManager.set_active_goal(metric_key)` accrues `time_above_threshold`/`longest_streak` (and `avg_score`) against that metric and the threshold in force; `start_segment(metric_key, target)` against a program segment's target;
   it scores at the formula's own scale, independent of the engine's 0–100 clamp of the threshold it classifies the state with.
   **A session is scored on the metric that drives the feedback sound (#51).**
-  In a simple session (decided by `ProgramRun.active`, fixed at session start, never the editable `ProgramSettings.mode` toggle) `_session_tick` calls `_score_on_drive_key()` → `set_active_goal(self._session.drive_key())` every tick;
+  In a simple session (decided by `ProgramRun.active`, fixed at session start, never the editable `ProgramSettings.mode` toggle) `RunningSession._session_tick` calls `_score_on_drive_key()` → `set_active_goal(self._session.drive_key())` every tick;
   it feeds the audio from that same resolved key, so scoring and sound can't diverge (an invalid formula's shamatha fallback moves both).
   The legend's `»` marks the scored series through the tick's single `_ui_update` dispatch:
   `_scored_mark(run, key)` leaves the run's `scored_key` untouched while the screen is locked, so the first tick after it marks the change; a program session's segments set the mark instead.
@@ -80,7 +80,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   the others are the profile switch, a headset switch and the device mode, both Restore checks, Settings › Audio's Test and a running program's threshold.
   Every checkpoint passes its stats through `RunningSession.with_score`, which fills the key (the current drive key when none was scored) and adds `score_metric_name` (the live graph's `series_name(key)`, e.g. a formula's name).
   For a program it sets `"program"`, the name the program had when the session started (`ProgramRun.name`, `"Program"` if unsaved; Settings may load or save another during the session) and a NULL `avg_score`.
-  `ProgramRun.tick` (called in `_session_tick`, program mode only) detects a boundary crossing with the pure `ProgramRun.transition` helper;
+  `ProgramRun.tick` (called in `RunningSession._session_tick`, program mode only) detects a boundary crossing with the pure `ProgramRun.transition` helper;
   `_enter_segment` then fires the prior segment's end cue (`AudioEngine.play_transition_cue()` chime, or warble), sets the **transient** `audio_key` to the segment's metric key (precomputed by `begin`);
   it also calls `start_segment` (`set_active_goal`, and the live average starts over: a program's segments differ in metric) and moves the legend marker.
   `audio_key` must not overwrite the user's stored `audio_metric`: a program slot would leak into the baseline, and a later simple session would read that absent key as 0 → constant max noise.
@@ -92,8 +92,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `SessionManager` is the threshold's one owner: the engine (`process_sample(raw, threshold)`: the state, subtle distraction) and the SHAMATHA pill read its base (`threshold`) on each tick;
   the sound reads the tick's target (`AudioEngine.update(score, threshold)` with `score["score_target"]`: a segment's, else the base), so a segment crossing moves the sound through the tick it is scored on and `ProgramRun` writes only `start_segment`.
   `_put_threshold_in_force(value)` is the one place the Settings threshold takes effect: `SessionManager.set_threshold` and the graph's scalar line.
-  `_start_session_common` calls it directly, with a program's first target (a lingering tick thread from the last session must not block it).
-  The slider's settle and the registry's profile load go through `_apply_threshold(value)`, which does nothing while `_program_owns_threshold()` (`program_run.active and _session_pipeline_live()`);
+  `_start_session_common` calls it directly, with a program's first target (a runner still finishing the last session must not block it).
+  The slider's settle and the registry's profile load go through `_apply_threshold(value)`, which does nothing while `_program_owns_threshold()` (`program_run.active and RunningSession.live()`);
   a running program's segments own its targets, and re-picking the active profile mid-program reloads its settings, which must not put the slider's value over a segment's target.
   During a running program the threshold controls are locked:
   `_start_session_common` calls `SettingsScreen.lock_threshold(_refuse_program_threshold)` after the start's setup (so a start that fails in it leaves the controls as they were), and every ending (`_undo_session_setup`) calls `lock_threshold(None)`.
@@ -101,7 +101,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   A guard bound to the slider row's and the preset row's `on_touch_down` (bound handlers run before the widget's own and stop it by returning True) hands every touch on the slider, ±5 and the presets to `_refuse_program_threshold` while locked;
   it takes the touch only when that refused, mouse-wheel events included (Kivy's Slider steps its value on them).
   The refusal is `_refused_while_session_runs("changing the threshold", why=...)`, shown on every touch (a once-only message is missed after several ± clicks).
-  It refuses only while the session pipeline is live, so between a program's end on the tick thread and its queued unlock the controls work rather than go dead.
+  It refuses only while the session pipeline is live, so between a program's end on the runner and its queued teardown the controls work rather than go dead.
   Nothing moves, so nothing is reverted or saved: a slider moved and put back on its settle would jump under a resting finger, and its value could be flushed in between.
   The slider applies the threshold through `_after_settle("apply_threshold", …)`, the per-name Clock trigger `_persist_user_setting_later` is built on (restarted on every change, 0.5 s `_PERSIST_SETTLE_S`);
   so a drag is one change at the value it settles on, not a target per slider step on every tick it spans.

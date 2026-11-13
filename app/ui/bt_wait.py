@@ -22,7 +22,7 @@ STARTED = WaitEnd(started=True)
 
 
 class BtWait:
-    """A run's CONNECTING phase, driven by the tick thread: it gives up on a refused start, a failed connect, the connect
+    """A run's CONNECTING phase, driven by the session's runner: it gives up on a refused start, a failed connect, the connect
     timeout, no data, or a headset that keeps closing the link, and says how it ended for the app to act on. Its
     overlay reaches the main thread for its run only."""
 

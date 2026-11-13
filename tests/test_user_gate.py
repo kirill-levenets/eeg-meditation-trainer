@@ -26,6 +26,7 @@ from tests._app import (
     frames,
     frames_until,
     popup_titles,
+    runner_alive,
     start_connecting,
     start_ticked_by_hand,
 )
@@ -128,7 +129,7 @@ def _session_rows(app) -> int:
 def _checkpointed_session(app) -> None:
     """A mock session with two ticks, already written by a checkpoint (the 60 s flush, a pause)."""
     start_ticked_by_hand(app, ticks=2)
-    app._checkpoint_or_report()
+    app._session.checkpoint_or_report()
     assert _session_rows(app) == 1
 
 
@@ -140,7 +141,7 @@ def test_deleting_active_profile_mid_session_discards_it_and_regates(fresh_app):
     app._profiles.on_delete(app._current_user_id)
     frames_until(app._gate.shown)
     assert _session_rows(app) == 0 and app._current_user_id is None  # discarded, not saved-then-orphaned
-    assert app._session.manager.state not in (SessionState.RUNNING, SessionState.PAUSED) and app._run is None
+    assert app._session.manager.state not in (SessionState.RUNNING, SessionState.PAUSED) and app._session.run is None
     assert app._gate.shown() and app._bottom_nav.disabled  # re-gated
 
 
@@ -195,7 +196,7 @@ def test_discard_running_session_deletes_partial_row_and_resets_ui(fresh_app):
     frames()
     assert _session_rows(app) == 0  # orphan removed
     assert app._session.recorder.session_id is None and app._session.recorder._buffer == []
-    assert app._run is None and not app._ticker.running
+    assert app._session.run is None and not runner_alive(app)
     assert app._live_screen._btn_stop.disabled and not app._live_screen._btn_start.disabled  # the idle controls
     assert popup_titles() == []  # no end card for a session that is gone
 
@@ -214,7 +215,7 @@ def test_restore_refused_during_bt_connect_window(fresh_app, monkeypatch):
     # the session auto-starts on connect — must still refuse.
     app = fresh_app
     start_connecting(app, monkeypatch)
-    assert app._session.manager.state == SessionState.IDLE and app._run.phase is Phase.CONNECTING
+    assert app._session.manager.state == SessionState.IDLE and app._session.run.phase is Phase.CONNECTING
     app._backup_flow.on_restore_pressed()
     assert popup_titles() == ["Session in progress"]
 
@@ -225,7 +226,7 @@ def test_delete_active_profile_discards_during_bt_connect(fresh_app, monkeypatch
     start_connecting(app, monkeypatch)
     app._profiles.on_delete(app._current_user_id)
     frames_until(app._gate.shown)
-    assert app._run is None and not app._ticker.running  # connecting session halted
+    assert app._session.run is None and not runner_alive(app)  # connecting session halted
     assert app._current_user_id is None and app._gate.shown()
 
 

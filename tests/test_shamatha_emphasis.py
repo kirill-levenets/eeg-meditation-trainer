@@ -1,8 +1,8 @@
-from app.ui.app_manager import EEGMeditationApp
+from app.session.scoring import shamatha_transition
 
 
 def test_shamatha_transition_enters_after_sustained_above():
-    fn = EEGMeditationApp._shamatha_transition
+    fn = shamatha_transition
     # Three consecutive above-threshold ticks (1.5s @ 2Hz) flip the zone on.
     a, s = fn(False, True, 0)
     assert (a, s) == (False, 1)
@@ -13,13 +13,13 @@ def test_shamatha_transition_enters_after_sustained_above():
 
 
 def test_shamatha_transition_below_tick_resets_enter_streak():
-    fn = EEGMeditationApp._shamatha_transition
+    fn = shamatha_transition
     # A single below tick zeroes a partial enter streak (no premature flip).
     assert fn(False, False, 2) == (False, 0)
 
 
 def test_shamatha_transition_exits_after_sustained_below():
-    fn = EEGMeditationApp._shamatha_transition
+    fn = shamatha_transition
     a, s = fn(True, False, 0)
     assert (a, s) == (True, 1)
     a, s = fn(a, False, s)
@@ -29,7 +29,7 @@ def test_shamatha_transition_exits_after_sustained_below():
 
 
 def test_shamatha_transition_above_tick_resets_exit_streak():
-    fn = EEGMeditationApp._shamatha_transition
+    fn = shamatha_transition
     # While active, a single above tick cancels a partial exit streak.
     assert fn(True, True, 2) == (True, 0)
 

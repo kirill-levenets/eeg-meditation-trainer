@@ -15,16 +15,16 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `set_user_json_setting`/`get_user_json_setting` wrap a value as JSON in one key (the pattern used by `saved_formulas`, and by per-graph series / active-formula lists).
   Every query goes through the self-healing `_conn` **property** (backing `_conn_obj`), so no read/write path can deref a `None` connection:
   a connection closed while the app still runs is reopened (lock-guarded);
-  once `mark_shutting_down()` is set it returns a **null connection** (`_NULL_CONN`) that swallows writes and returns no rows, so late access from any path (reads, writes, the daemon tick thread) is a **benign no-op**
+  once `mark_shutting_down()` is set it returns a **null connection** (`_NULL_CONN`) that swallows writes and returns no rows, so late access from any path (reads, writes, the session's runner) is a **benign no-op**
   — never a crash, never a reopen that resurrects a closed process or clobbers a freshly-restored DB.
   `on_stop` and `_do_restore_and_restart` both `mark_shutting_down()` before `close()`.
   `delete_user` **purges** the user's metrics, sessions and `user_{id}_*` settings explicitly, in order:
   FKs are declared but not enforced (no `PRAGMA foreign_keys`/cascade), and its sessions, metrics and settings rows would otherwise stay orphaned.
   The settings go by GLOB, not LIKE, so the literal `_` in the key prefix isn't a wildcard.
   The confirm (`SettingsScreen._confirm_user_delete`) states the profile's session count and that they are deleted with it.
-- The DB opens with `check_same_thread=False` so the daemon tick thread can write metric batches — and that shared connection is why **every runtime write goes through `DatabaseManager._write()`**:
+- The DB opens with `check_same_thread=False` so the session's runner can write metric batches — and that shared connection is why **every runtime write goes through `DatabaseManager._write()`**:
   one transaction at a time under `_write_lock` (RLock), commit on success, rollback on error.
-  Without it the UI thread's commit could end the tick thread's `save_metrics_batch` transaction mid-batch, raise "cannot commit - no transaction is active" into a UI callback, or drop a batch.
+  Without it the UI thread's commit could end the runner's `save_metrics_batch` transaction mid-batch, raise "cannot commit - no transaction is active" into a UI callback, or drop a batch.
   The null connection has a no-op `rollback`.
   `tests/test_database_write_lock.py` covers blocking, a two-thread race with exact row counts, and rollback.
 - Android DB path always uses `app_storage_path()` (not `/sdcard`) for a stable path across launches; a DB left in `/sdcard/EEGMeditation/` is copied over when the new path has none yet.
@@ -48,7 +48,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   **The store holds a setting's value** when its descriptor has no `get` (`get=None`): the store's copy is the only one while the profile is active;
   `set` applies it (its consumers and its widget, idempotent), and `SettingsStore.change(key, value)` is its one change path.
   The app's `_change_setting(key, value)` is what a widget's hook calls: the store holds and applies the value, then it is persisted at once or, for a continuous input (`settle=True`: a slider, typing), once it settles.
-  Readers ask the store (`value(key)`), the tick thread included; save and persist write the held value, never a widget's.
+  Readers ask the store (`value(key)`), from any thread; save and persist write the held value, never a widget's.
   The store holds every setting that had two copies kept in step by hand (a consumer and its widget, or an app field and its widget):
   the three alert toggles, the line width (persisted once a drag settles), the rotation, the feedback and reward sources and their paths, the timer sound (once typing settles).
   A setting with one holder elsewhere keeps its `get`, since there is no second copy to keep in step:
@@ -111,7 +111,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   the SAF workers catch broadly (pyjnius boundary); both `report_soft_error`.
   Desktop uses `ThemedFileChooser` (a Kivy `FileChooserListView`) save/open popups.
   Restore **refuses to run while a session is active**
-  — running, paused, OR still in the BT-connect wait (`_session_pipeline_live()`: state RUNNING/PAUSED, or the run CONNECTING; the same window `Profiles.on_delete` discards on active-profile delete).
+  — running, paused, OR still in the BT-connect wait (`RunningSession.live()`: state RUNNING/PAUSED, or the run CONNECTING; the same window `Profiles.on_delete` discards on active-profile delete).
   Checked at `BackupFlow.on_restore_pressed` and again in `_do_restore_and_restart` (the DB shutdown would silently drop the session).
   `_confirm_restore` validates the file before its confirm;
   `_do_restore_and_restart` `mark_shutting_down()`s + closes the live DB, and `restore_backup` copies the file over `APP.DB_PATH`;
@@ -125,7 +125,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   It **never touches the session's timer** (`RunningSession.timer`):
   a running session — especially a program, which force-enables the timer and seeds its countdown from the program total — OWNS it, and re-applying the Settings timer widgets on a pause/backup flush would kill or shift its auto-stop.
   A Start reads enabled, duration and the end sound into the session's config, so nothing needs an idle sync.
-  Both backup workers checkpoint a running session first (`_checkpoint_or_report` → `SessionRecorder.checkpoint`, see [session](session.md#persistence)), so a mid-session backup holds it as of the backup.
+  Both backup workers checkpoint a running session first (`RunningSession.checkpoint_or_report` → `SessionRecorder.checkpoint`, see [session](session.md#persistence)), so a mid-session backup holds it as of the backup.
   The restore confirm (`_confirm_action`) states it replaces the **entire DB**, with the profile and session counts from `get_record_counts()`.
   Both backup paths end in `_report_backup_saved(location)`:
   a **Backup saved** `_info_popup` carrying `BACKUP_SOUND_NOTE` ("Custom sound files are not included in a backup.", in the restore confirm too; the SAF path omits the content:// URI), a short status line, and a log line;

@@ -21,7 +21,7 @@ class RecordedTick:
 
 class SessionRecorder:
     """A session reaches the DB only through checkpoint(): at the 60 s flush, on leaving the app, at a backup, when
-    a tick-thread check ends it, and at the final save. A process killed between checkpoints keeps the row and the data
+    a check ends it, and at the final save. A process killed between checkpoints keeps the row and the data
     of the last one, which agree. Any thread, no Kivy."""
 
     def __init__(self, db, session_manager, *, with_score: Callable[[dict], dict],

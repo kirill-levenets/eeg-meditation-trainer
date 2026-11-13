@@ -44,7 +44,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Start with no headset selected runs `find_paired` and `adopt` itself: a headset then selected (the single MindWave, or one picked in Settings while it scanned) connects;
   several MindWaves route the user to Settings → Device, where `DeviceSection.focus_device_section(message)` expands the section, scrolls it into view and shows a "pick one" banner over a list of only the matching devices;
   none gets a retry screen.
-  Its result does nothing for a Start already ended or replaced (its run is no longer `_run`), and ends the Start (`_cancel_session_start`) when another profile was picked while it scanned.
+  Its result does nothing for a Start already ended or replaced (its run is no longer `RunningSession.run`), and ends the Start (`_cancel_session_start`) when another profile was picked while it scanned.
   A pick, Mock Data or another profile's load answers it (`clear_picker_banner`), as a connection does (`update_device_status(connected=True)`).
 - **The link is always to the selected headset.**
   It stays open between sessions, so `NeuroSkyStream.set_device` to another address, or to none, stops the reader first; otherwise the next Start would reuse the old headset's socket and record its session under the new headset's name.
@@ -68,51 +68,49 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   and the back-off sleeps (`_stop_event.wait`).
   An aborted connect raises instead of falling through to the next method, and the superseded reader returns quietly without writing `_last_connect_error`.
   A headset-off connect chain takes ~3×7.7 s on the phone; without the abort `stop()` would block the main thread for the full join.
-  If the join still times out, `stop()` **keeps** `_thread` so `start()` refuses (nulling it would let a second reader start); it joins a local copy because the tick thread and the main thread can both be in `stop()`.
+  If the join still times out, `stop()` **keeps** `_thread` so `start()` refuses (nulling it would let a second reader start); it joins a local copy because the session's runner and the main thread can both be in `stop()`.
   `_close_socket` runs under `_close_lock` (`stop()` and the exiting reader both call it).
   A late reader (epoch superseded after its connect returned) closes its socket instead of adopting it, and `_last_connect_error` is cleared only after that check.
   The reader clears `_connected` on exit, so a `stop()` landing just after `_connected = True` can't leave `is_connected` stuck True with no reader (the next Start would "reuse" a dead connection).
   Every failed Android connect attempt (secure → insecure → `createRfcommSocket(1)`) closes its socket; the ch=1 fallback is called directly on the device, since through `Class.getMethod` pyjnius can't resolve its varargs overload.
-  The wait is `BtWait` (`app/ui/bt_wait.py`, the app's `_bt_wait`): `begin(run)` checks `start()`'s result **before** entering the wait, and the tick drives `tick(run)` while the run is CONNECTING;
-  it runs the wait and its overlay and returns how the wait ended (`WaitEnd`: started, or the retry screen's message), and the app acts on it (`_begin_bt_wait`, `_follow_bt_wait`):
-  the first data starts the session on the tick thread, its countdown armed there before the next tick reads it, and the "connected" UI runs on main (`_on_session_connected`);
-  a give-up aborts on the tick thread (`_abort_bt_wait`) and queues the undo and the retry screen (`_undo_failed_start`).
+  The wait is `BtWait` (`app/ui/bt_wait.py`, `RunningSession.bt_wait`): `begin(run)` (the app's `_begin_bt_wait`, on the main thread before the runner starts) checks `start()`'s result **before** entering the wait;
+  then the runner's tick drives `tick(run)` while the run is CONNECTING, and `RunningSession._follow_bt_wait` acts on how the wait ended (`WaitEnd`: started, or the retry screen's message):
+  the first data starts the session on the runner, its countdown armed there before the next tick reads it, and the `Connected` event shows it on main (`_on_session_connected`);
+  a give-up ends the run on the runner (its reader down, `KeepAwake.release`) and its `StartFailed` event undoes the start and shows the retry screen (`_undo_failed_start`).
   A refused `start()` undoes the start's setup the same way, with the retry overlay showing `_last_connect_error` and no `bt_connect_failed` soft error (its 60 s cooldown would hide the next real failure).
-  **Every BT-wait exit** (Cancel, Stop, no data, keeps closing, failed connect, timeout) goes through `_abort_bt_wait()`:
-  it marks the run ENDED (no longer connecting, so a wait tick still in progress acts on nothing), then stops the tick watcher **before** `_real_stream.stop()`, then releases the wake lock and keep-alive service (`KeepAwake.release`).
-  The watcher reads `not stream._running` as a failed connect, so stopping the stream first shows a false "Connection failed".
-  **A session start is one run** (#52, `SessionRun` in `app/session/session_run.py`, the app's `_run`):
-  `_on_start` makes it (the device scan belongs to it) and every ending drops it (`_undo_session_setup()`, which every ending goes through); a callback queued for a run does nothing once `_run` is no longer that run.
+  **Every BT-wait exit** (Cancel and Stop through `RunningSession.abort`, the give-ups on the runner) ends its run **before** it stops the stream, then releases the wake lock and keep-alive service (`KeepAwake.release`):
+  a wait step reads `not stream._running` as a failed connect, and with its run ended no step acts on the stop.
+  **A session start is one run** (#52, `SessionRun` in `app/session/session_run.py`, `RunningSession.run`):
+  `_on_start` makes it (the device scan belongs to it) and every ending drops it (`_undo_session_setup()`, which every ending goes through); a callback queued for a run does nothing once it is no longer the current run.
   Its phase is what `SessionManager` doesn't know: STARTING (Start pressed, scanning or setting up), CONNECTING (the BT wait), STARTED (running or paused: `SessionManager.state` says which);
   ENDED (an ending began: a wait abandoned, a session stopped, saved or discarded; its main-thread teardown may still be queued).
-  Every ending marks it first, before it joins the tick: `_mark_run_ended()` (the main thread's endings, and `_abort_bt_wait` wherever it runs), or `_claim_ending(run)` (a session's tick-thread endings),
+  Every ending claims it first (`run.mark_ended()`, on the runner, or where a command runs without one),
   and ENDED is terminal: no later write revives the run, and only the call that marked it claims the ending (`SessionRun.mark_ended`, the only way to end a run, is a locked check-and-set).
   It holds the per-run state (the wait's windows and drops, the tick count, the pending marker, the shamatha pill's streak, the scored mark, the warnings), so a new Start begins from nothing the last one left.
-  That covers the device scan's result in `_on_start` and every main-thread callback the BT wait queues through `_on_main_for(run, fn)`: `_on_session_connected` (the "connected" UI and audio), the exits' retry screens, the overlay text.
+  That covers the device scan's result in `_on_start` and every main-thread callback queued for a run through `RunningSession.on_main_for(run, fn)`: the `Connected` UI and audio, the exits' retry screens, the overlay text.
   Without it, a Cancel during "Scanning for MindWave…" still starts the session;
   a Cancel or active-profile delete in the frame the first data arrives leaves a zombie (noise playing, idle controls, no tick);
   and a wait exit's queued retry screen undoes the next Start.
-  A tick reads `_run` once, at its start, and passes that run on:
-  a Cancel can land mid-tick and its 1 s tick join can time out (`read_sample` waits for the reader's lock), so the tick may queue after the Cancel has finished, for its own, ended run.
-  The late tick acts on nothing shared once its run has ended or been replaced (`_outlived(run)`: at the tick's start, the BT wait's end, the session tick after its read), and a session's tick-thread ending acts only if it claims the run.
-  The check precedes the act: a tick past its check when the ending begins still finishes, before the teardown only if the stop's 1 s join covers it.
+  The runner works on its own run, and every command carries the run it was sent for.
+  A Cancel waits up to 1 s for the runner; a runner stuck in a read (`read_sample` waits for the reader's lock) lets the Cancel end the run where it was sent, and once its read returns it acts on nothing for that ended run
+  (`_outlived(run)`: at the tick's start, the BT wait's end, the session tick after its read).
   `_on_stop` decides by `SessionManager.state`, not the run's phase, because a wait exit ends the wait before its idle UI shows and a Stop in that window must not offer to save a session that never started:
   RUNNING/PAUSED asks to stop and save;
-  FINISHED (the timer ended it on the tick thread and its teardown is queued) is ignored, since cancelling there would stop the kept-alive headset link;
+  FINISHED (the timer ended it on the runner and its teardown is queued) is ignored, since cancelling there would stop the kept-alive headset link;
   anything else cancels the start (`_cancel_session_start`).
-  Every ending (`_finalize_stop_ui`, a cancelled start, a refused connect and the tick-thread wait exits' queued callbacks) undoes the start's setup through the one `_undo_session_setup()`:
+  Every ending (`_finalize_stop_ui`, a cancelled start, a refused connect and a wait's give-up `StartFailed`) undoes the start's setup through the one `_undo_session_setup()`:
   program series and state via `ProgramRun.end`, the training marker, the shamatha pill, timer and session manager reset, wake lock and keep-alive service (the releases are idempotent),
   then the live graph's idle series derived again (`ProgramSettings.sync_picker`: after the reset, so the session no longer reads live).
   A program left behind would have a later simple session persist the program's series over the user's series selection.
   A kept-alive connection's start shows the same `_on_session_connected` as the wait's.
   The header's start time and the graph's wall-clock axis come from `SessionManager.started_at`, not from when the queued UI ran (after a screen lock, the unlock time).
-  `_run` is None until the first Start, so a Cancel before any Start finds no run to end.
+  The run is None until the first Start, so a Cancel before any Start finds no run to end.
   **Each connection gets its own windows**:
   when `BtWait.tick` sees the link drop while the reader reconnects, `_link_dropped` restarts the no-data window (the run's `signal_start`, `SIGNAL_TIMEOUT` 8 s) and the connect window (its `connect_start`, `CONNECT_TIMEOUT` 30 s).
   It also records the run's `dropped_at` (monotonic): only packets after the drop count as streaming, since a streaming headset's wait has no no-data timeout and an older packet would keep a silent socket's wait open.
   The session starts only on band data with a packet on this connection (`total > 0 and has_packets`), since the reader keeps the last band values across a reconnect.
   Restarting the windows unbounds a headset that keeps connecting and closing, so a wait ends at its third drop (`MAX_DROPS` = 2, counted by the run's `drops`: a Retry is a new Start, with none) with "keeps closing the connection";
-  every wait exit that gives up (keeps closing, no data, a failed connect, the connect timeout) returns its message to `_follow_bt_wait`, which aborts the wait and queues `_undo_failed_start`;
+  every wait exit that gives up (keeps closing, no data, a failed connect, the connect timeout) returns its message to `_follow_bt_wait`, which ends the run and queues its `StartFailed` (`_undo_failed_start`);
   `BtWait.show_retry` leaves the headset's name on the Session screen under its retry screen.
   A failed connect's diagnostic travels in the `WaitEnd` and is filed by `_follow_bt_wait` after that check, so a late tick reports nothing.
   `tests/test_bt_wait_reconnect.py` replays drops and reconnects on a fake clock.
@@ -121,7 +119,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The reader thread runs at Android priority −8 (the NeuroSky SDK reader's MAX_PRIORITY), so Kivy's renderer can't starve it.
   `_log_throughput` logs `BT throughput: N B/s, N B/read, backlog high-water N B` every 30 s.
   Healthy is ≈4132 B/s (512 raw packets × 8 B + one 36 B eSense packet per second); a high-water that keeps rising means the reader is losing.
-  A flat high-water tracks main-thread rendering, not the reader: the main thread holds the GIL during graph redraws, and the backlog vanishes for a screen lock while the tick thread and DB keep running.
+  A flat high-water tracks main-thread rendering, not the reader: the main thread holds the GIL during graph redraws, and the backlog vanishes for a screen lock while the session's runner and DB keep running.
   `app/ui/render_stats.py` measures it:
   every `ScrollableGraphWidget._redraw` is timed per `graph_id` (the drawing itself is `_draw`), and a per-frame `Clock` callback (started in `on_start`) tracks the longest gap between frames, ignoring gaps over 5 s (a suspended loop).
   Every 30 s, the cadence of `BT throughput`, a window that had redraws logs `Render: frame gap max N ms | <graph_id> Nx avg N max N ms | …`.

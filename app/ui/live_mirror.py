@@ -1,4 +1,4 @@
-"""What the Session screen's graphs would have been given this session, kept by the tick thread whatever the screen
+"""What the Session screen's graphs would have been given this session, kept by the session's runner whatever the screen
 does."""
 import threading
 from collections import deque
@@ -12,7 +12,7 @@ from app.ui.live_session import METRICS_COLORS, RAW_WAVEFORM_MAX
 
 class LiveMirror:
     """A locked screen skips the per-tick graph updates (N minutes at 2 Hz queued ~120·N Clock callbacks, each a full
-    redraw, which froze the screen on resume); the tick thread records here instead, with no Kivy, and the graphs
+    redraw, which froze the screen on resume); the runner records here instead, with no Kivy, and the graphs
     reload from it in one batch on resume and at the session's end. Bounded by the graphs' capacity."""
 
     def __init__(self) -> None:

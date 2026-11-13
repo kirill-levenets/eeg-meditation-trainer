@@ -155,7 +155,7 @@ class SessionManager:
             self._state = SessionState.FINISHED
             # Only failure terminations warble. "user" and "timer" are planned
             # stops (timer plays its own gong), and timer-end persistence runs
-            # on the daemon tick thread where SoundLoader playback is unsafe.
+            # on the session's runner, where SoundLoader playback is unsafe.
             if reason in ("stale_data", "bt_lost", "error") and self._audio is not None:
                 try:
                     self._audio.play_alert()

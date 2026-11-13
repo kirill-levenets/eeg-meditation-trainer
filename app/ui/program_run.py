@@ -30,7 +30,7 @@ def show_program_series(graph, plan: RunnablePlan) -> None:
 class ProgramRun:
     """The program the running session started with; None for a simple session.
 
-    `tick` runs on the daemon tick thread: only thread-safe state there (audio one-shots, SessionManager, pure
+    `tick` runs on the session's runner: only thread-safe state there (audio one-shots, SessionManager, pure
     evaluators). Kivy widget changes go through `on_main`.
     """
 
@@ -162,5 +162,5 @@ class ProgramRun:
                 self._audio.play_alert()
             else:
                 self._audio.play_transition_cue()
-        except Exception:  # noqa: BLE001 - on the tick thread a failed cue must not end the session
+        except Exception:  # noqa: BLE001 - on the runner a failed cue must not end the session
             logger.exception("Program segment end cue failed")

@@ -255,7 +255,7 @@ class NeuroSkyStream:
         # Close before the join so the reader's blocked connect()/read() aborts (see _close_socket).
         self._connect_epoch += 1
         self._close_socket()
-        # Local copy: the tick thread and the main thread can both be in stop().
+        # Local copy: the session's runner and the main thread can both be in stop().
         t = self._thread
         if t is not None:
             t.join(timeout=self._STOP_JOIN_TIMEOUT)

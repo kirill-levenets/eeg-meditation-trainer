@@ -80,6 +80,7 @@ Markers are saved with the session.
 
 - **Pause** stops recording until **Resume**; paused time doesn't count toward the duration.
 - **Stop** asks **"Stop session?"**: **Stop** saves the session, as the timer's end or a lost signal does; **Cancel** returns to it.
+  The session goes on recording while the question is open, so **Cancel** loses nothing.
 
 ### Session End Summary
 

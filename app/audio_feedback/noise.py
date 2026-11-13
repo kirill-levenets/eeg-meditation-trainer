@@ -91,7 +91,7 @@ class _AndroidMediaNoisePlayer:
         from jnius import autoclass
         MediaPlayer = autoclass("android.media.MediaPlayer")
 
-        self._mp = MediaPlayer()  # a failed setup leaves it to GC: its finalizer releases it, off the tick thread
+        self._mp = MediaPlayer()  # a failed setup leaves it to GC: its finalizer releases it, off the session's runner
         self._mp.setAudioAttributes(_media_attributes())
         self._mp.setDataSource(path)
         self._mp.setLooping(loop)
@@ -819,7 +819,7 @@ class AudioEngine:
         self._ramp_running = False
         self._volume = 0.0
         self._target_volume = 0.0
-        # setVolume-only: stop()/release() deadlock the tick thread vs the paused main Looper under lock
+        # setVolume-only: stop()/release() deadlock the session's runner vs the paused main Looper under lock
         for sid, p in self._feedback_players.items():
             try:
                 p.volume = 0.0
@@ -941,7 +941,7 @@ class AudioEngine:
         self.stop()
 
     def play_timer_sound(self, custom_path: str = "", on_end=None) -> str:
-        """The timer-end gong, replayed like an alert, safe on the tick thread; returns the file it plays, "" if none."""
+        """The timer-end gong, replayed like an alert, safe on the session's runner; returns the file it plays, "" if none."""
         logger.info("Timer gong")
         custom = custom_path if (custom_path and os.path.isfile(custom_path)) else ""
         duck = "AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK"  # other audio dips while it rings, and comes back after

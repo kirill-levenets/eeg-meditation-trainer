@@ -1,7 +1,6 @@
 """The session the Session screen shows: its graphs and readout, the end card over them once it has ended, and the
 profile it belongs to."""
 from app.ui.app_context import AppContext
-from app.ui.live_mirror import LiveMirror
 from app.ui.theme import C
 
 
@@ -10,15 +9,19 @@ class ShownSession:
     The end card only adds notes to its session or deletes it (every ending has saved it); every close goes through
     `close`, and the card's notes are written only when they changed since the last save."""
 
-    def __init__(self, ctx: AppContext, live_screen, audio, history, recorder) -> None:
+    def __init__(self, ctx: AppContext, live_screen, audio, history, session) -> None:
         self._ctx = ctx
         self._live_screen = live_screen
         self._audio = audio
         self._history = history  # the card's notes and delete go through History's one path
-        self._recorder = recorder  # its session_id: the session the display shows, kept after its stop
-        self.mirror = LiveMirror()  # the display's graphs, kept by the tick thread through a screen lock
+        self._session = session  # its record's session_id, kept after its stop, and its mirror of the live graphs
         self.owner: int | None = None  # the profile whose session the Session screen shows: set at Start
         self._saved_notes = ""  # notes last written from the card for the session it shows
+
+    @property
+    def mirror(self):
+        """The display's graphs, kept by the session's runner through a screen lock."""
+        return self._session.mirror
 
     def take(self, uid: int | None) -> None:
         """A Start: the display empties for the new session, which belongs to `uid`."""
@@ -55,7 +58,7 @@ class ShownSession:
 
     def on_sessions_deleted(self, ids: list[int]) -> None:
         """History deleted these sessions: the Session screen lets go of one it shows (the end card, its display)."""
-        if self._recorder.session_id in ids or self._live_screen.summary_session_id in ids:
+        if self._session.recorder.session_id in ids or self._live_screen.summary_session_id in ids:
             self.drop(keep_notes=False)
 
     def drop(self, keep_notes: bool) -> None:

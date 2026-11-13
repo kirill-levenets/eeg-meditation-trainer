@@ -69,7 +69,7 @@ def test_re_picking_the_profile_mid_program_keeps_the_programs_end(fresh_app, mo
         fed.tick()
     frames()
     sessions = app._db.get_all_sessions(app._current_user_id)
-    assert app._run is None and app._live_screen.summary_session_id == sessions[0]["id"]  # ended at 1 min, end card up
+    assert app._session.run is None and app._live_screen.summary_session_id == sessions[0]["id"]  # ended at 1 min, end card up
 
 
 def test_re_picking_the_profile_keeps_a_timed_session_timed_after_the_timer_was_unticked(fresh_app, monkeypatch):

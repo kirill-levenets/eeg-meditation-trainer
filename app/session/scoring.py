@@ -61,3 +61,14 @@ def recorded_score(session: dict) -> tuple[str, str, float | None] | None:
     if not key:
         return None
     return key, session.get("score_metric_name") or key, session.get("avg_score")
+
+
+def shamatha_transition(active: bool, above: bool, streak: int, enter_ticks: int = 3,
+                        exit_ticks: int = 3) -> tuple[bool, int]:
+    """The SHAMATHA pill's debounced crossing -> (active, streak): a partial streak resets the moment the score crosses
+    back, so the pill can't strobe on a single noisy tick at 2 Hz."""
+    if not active:
+        streak = streak + 1 if above else 0
+        return (True, 0) if streak >= enter_ticks else (False, streak)
+    streak = streak + 1 if not above else 0
+    return (False, 0) if streak >= exit_ticks else (True, streak)
