@@ -45,7 +45,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The window's mouse wheel reaches every graph; `_on_window_mouse_down` ignores one not attached to the window (`get_root_window()`), since a graph on a hidden screen or tab keeps its last geometry under the pointer.
 - **Series names.**
   Each graph keeps its own copy of the `names` it is built with, so a rename (`set_series_name`: a formula slot's name, a program's line, a session's recorded formulas in the detail) never reaches another graph.
-  `SERIES_NAMES` (`live_session.py`, read-only) is the defaults every metrics graph starts from, and what `ProgramRun.end` puts back when a program ends; the band graphs start from `band_spec.GROUP_NAMES`.
+  `SERIES_NAMES` (`app/metrics/series_names.py`, read-only) is the defaults every metrics graph starts from, and what `ProgramRun.end` puts back when a program ends; the band graphs start from `band_spec.GROUP_NAMES`.
 - **Series picker.**
   The picker is wired on every graph with more than one series (all but the two raw EEG graphs), since a single-series graph's picker could only blank the line.
   One presenter, `GraphSeries.present_picker(graph)` (`app/ui/graph_series.py`, the app's `_graph_series`, which also saves and restores each graph's selection), reads the graph's own catalog, labels and colours:
@@ -78,7 +78,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   steps take precedence over `set_threshold(value)`'s single line, and `set_threshold_steps(None)` reverts to it.
   The live metrics graph and the session detail's step it from the ticks' targets (#83), simple and program sessions alike.
   Live, `add_point(values, threshold=)` extends the steps with `extend_steps` at each point:
-  the tick's target rides `_ui_update` and the mirror's `score_target`, so `LiveMirror.reload_into` rebuilds the same steps with `target_steps`;
+  the tick's target rides its `Ticked` event and the mirror's `score_target`, so a reload from the mirror (`LiveSessionScreen.load_mirror`) rebuilds the same steps with `target_steps`;
   `_start_session_common` clears them (`ShownSession.take`), and a segment switch doesn't set the line.
   The detail's `detail_graph_data` returns `threshold_steps` (`target_steps` over the rows: None unless every row has a target) and the metrics fill applies them.
   A session from before #83 keeps what the open draws from its row: its program's steps (`sessions.session_program`, mapped through elapsed time) or one line at `threshold_used`.

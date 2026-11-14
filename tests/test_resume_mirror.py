@@ -18,10 +18,10 @@ import pytest
 
 from app.eeg.neurosky_stream import NeuroSkyStream
 from app.metrics.engine import MetricsEngine
+from app.session.live_mirror import LiveMirror
 from app.session.manager import SessionState, elapsed_clock
 from app.session.recorder import RecordedTick
 from app.session.session_run import Phase
-from app.ui.live_mirror import LiveMirror
 from app.ui.live_session import METRICS_COLORS, LiveSessionScreen
 from tests._app import (
     FedSession,
@@ -76,9 +76,9 @@ def test_tick_band_record_aggregates_paired_bands(fed):
 def test_tick_writes_three_distinct_custom_formula_series(fed):
     """The live tick evaluates each valid slot into its own metric key, with
     distinct values, and skips invalid slots."""
-    slots = fed.app._formulas.evaluators
-    slots[0].set_formula("alpha + beta")        # 120
-    slots[1].set_formula("alpha / (beta + 1)")  # 100/21
+    session = fed.app._session  # its own lines, edited the way Settings edits them mid-session
+    session.set_formula(0, "Sum", "alpha + beta")          # 120
+    session.set_formula(1, "Ratio", "alpha / (beta + 1)")  # 100/21
     # slot 2 left invalid → must not be written
     metrics = tick_metrics()
     fed.tick({**raw_sample(), "alpha1": 60.0, "alpha2": 40.0, "beta1": 15.0, "beta2": 5.0}, metrics)
@@ -207,7 +207,7 @@ def test_a_reload_keeps_each_points_colouring():
         mirror.record(RecordedTick(tick_metrics(seed=1.0), raw_sample(seed=1.0),
                                    {"score_target": 50, "score_key": key}, False))
     screen = LiveSessionScreen()
-    mirror.reload_into(screen)
+    screen.load_mirror(mirror.snapshot())
     assert screen.graph.gradient_steps == [(0, "shamatha_score"), (3, "custom_formula")]
 
 
@@ -249,11 +249,10 @@ def test_tick_then_resume_roundtrip_preserves_data(fed):
 
 @pytest.fixture
 def connected(fresh_app, monkeypatch):
-    """The app in a Start's BT wait on a headset that has just connected and sent data; its tick thread stopped."""
+    """The app in a Start's BT wait on a headset that has just connected and sent data; its steps are the test's."""
     app = fresh_app
     reload_with(app, timer_enabled="True", timer_minutes="15")
     start_connecting(app, monkeypatch)
-    app._ticker.stop()
     monkeypatch.setattr(NeuroSkyStream, "is_connected", property(lambda self: True))
     monkeypatch.setattr(NeuroSkyStream, "seconds_since_last_packet", property(lambda self: 1.0))
     monkeypatch.setattr(app._real_stream, "read_sample", lambda: dict.fromkeys(
@@ -267,8 +266,8 @@ def test_btwait_arms_countdown_synchronously_on_connect(connected):
     # deferred to the main thread, remaining stays 0 and the
     # next tick fires the timer immediately → a 0s "timer-ended" session.
     app = connected
-    app._follow_bt_wait(app._run)  # the wait's tick that sees the data
-    assert app._run.phase is Phase.STARTED
+    app._session._follow_bt_wait(app._session.run)  # the wait's tick that sees the data
+    assert app._session.run.phase is Phase.STARTED
     assert app._session.timer.remaining_seconds == 15 * 60
     assert app._session.manager.state == SessionState.RUNNING
 
@@ -281,7 +280,7 @@ def test_btwait_does_not_start_audio_on_tick_thread(connected, monkeypatch):
     sounds: list = []
     calls_of(monkeypatch, app._audio, "start", sounds, "start")
     calls_of(monkeypatch, app._audio, "play_connect_sound", sounds, "connect sound")
-    app._follow_bt_wait(app._run)
+    app._session._follow_bt_wait(app._session.run)
     assert sounds == [] and app._live_screen._overlay.opacity == 1
     frames()  # the main thread's turn
     assert sounds == ["start", "connect sound"] and app._live_screen._overlay.opacity == 0
@@ -303,7 +302,7 @@ def test_timer_expiry_persists_on_tick_thread(fed, monkeypatch):
     audio: list = []
     for name in ("mute", "play_timer_sound", "stop"):
         calls_of(monkeypatch, app._audio, name, audio, name)
-    run = app._run
+    run = app._session.run
     fed.end_by_timer_on_next_tick()
     fed.tick(shown=False)
     # Persisted synchronously, before the main thread ran anything.
@@ -314,40 +313,38 @@ def test_timer_expiry_persists_on_tick_thread(fed, monkeypatch):
     # through the lock), but the blocking _audio.stop()/MediaPlayer.release() teardown is NOT run on the tick thread
     # (it deadlocks against the paused main Looper during lock): it's deferred to the main thread.
     assert audio == ["mute", "play_timer_sound"]
-    assert app._run is run and run.phase is Phase.ENDED  # its UI teardown still waits for the main thread
+    assert app._session.run is run and run.phase is Phase.ENDED  # its UI teardown still waits for the main thread
     frames()
-    assert "stop" in audio and app._run is None
+    assert "stop" in audio and app._session.run is None
 
 
 def test_timer_expiry_leaves_no_live_pipeline_behind(fed):
     """A timer-ended session must not look live while idle: Restore and profile switch key off it."""
     app = fed.app
-    app._ticker.start()  # the running SessionTick thread
     fed.tick()
     fed.end_by_timer_on_next_tick()
     fed.tick(shown=False)
-    assert not app._ticker.running
-    assert app._session_pipeline_live() is False
+    assert app._session.live() is False
 
 
-def test_timer_expiry_persists_before_muting_audio(fed, monkeypatch):
-    # Order matters: the save must complete before any audio call, so a hang
-    # in audio teardown can never cost the session. Assert the checkpoint is
-    # invoked and precedes mute() in call order.
+def test_timer_expiry_silences_saves_then_rings_and_leaves_the_teardown_to_the_main_thread(fed, monkeypatch):
+    # mute() is setVolume: non-blocking, so the noise stops before a save that may wait on the write lock. The players'
+    # teardown (stop) would hang while the main Looper is paused, so the writer never calls it; the gong rings last.
     app = fed.app
     _locked_for(fed, 1)
     calls: list = []
     calls_of(monkeypatch, app._db, "checkpoint_session", calls, "save")
-    calls_of(monkeypatch, app._audio, "mute", calls, "mute")
+    for name, label in (("mute", "mute"), ("play_timer_sound", "gong"), ("stop", "stop")):
+        calls_of(monkeypatch, app._audio, name, calls, label)
     fed.end_by_timer_on_next_tick()
     fed.tick(shown=False)
-    assert calls.index("save") < calls.index("mute"), calls
+    assert calls == ["mute", "save", "gong"], calls
 
 
 def test_timer_expiry_updates_existing_session_row(fed):
     app = fed.app
     fed.tick()
-    app._checkpoint_or_report()  # row already created by a prior flush
+    app._session.checkpoint_or_report()  # row already created by a prior flush
     sid = app._session.recorder.session_id
     assert sid is not None
     fed.end_by_timer_on_next_tick()

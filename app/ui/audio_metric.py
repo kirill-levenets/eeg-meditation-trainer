@@ -1,23 +1,10 @@
 """Which metric drives the feedback sound: the profile's choice (a metric, or one of the formula slots) as Settings shows
 it, a running program's segment over it, and the lock while a simple session is scored on it (#51)."""
 from app.logger import logger
-from app.metrics.formula_slots import FORMULA_KEYS, PROGRAM_FORMULA_KEYS
+from app.metrics.formula_slots import FORMULA_KEYS
+from app.session.scoring import baseline_audio_metric
 from app.settings.registry import INT, Setting
 from app.ui.app_context import AppContext
-
-
-def baseline_audio_metric(key: str) -> str:
-    """The profile's stored metric; a program-formula slot is program-only and never a baseline (outside a program it
-    reads 0, constant maximum noise)."""
-    return "shamatha_score" if (not key or key in PROGRAM_FORMULA_KEYS) else key
-
-
-def sound_metric(stored: str, program_key: str, formulas) -> str:
-    """The metric feeding the sound: a running program's segment slot, else the profile's; shamatha when the key would
-    read 0 (a formula slot that doesn't compile, a program slot outside a program)."""
-    key = program_key or baseline_audio_metric(stored)
-    ev = formulas.for_key(key)
-    return "shamatha_score" if ev is not None and not ev.is_valid else key
 
 
 def _parse_slot(raw: str) -> int:

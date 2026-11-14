@@ -1,6 +1,5 @@
 
 import time
-from types import MappingProxyType
 
 from kivy.app import App
 from kivy.clock import Clock
@@ -15,9 +14,13 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
-from app.eeg.band_spec import BAND_KEYS, GROUP_NAMES, group_powers
+from app.config import APP
+from app.eeg.band_spec import BAND_KEYS, GROUP_KEYS, GROUP_NAMES, group_powers
 from app.logger import logger
+from app.metrics.series_names import SERIES_NAMES
+from app.session.live_mirror import MirrorView
 from app.session.manager import NO_SCORE, LiveScore
+from app.session.scoring import scored_steps, target_steps
 from app.ui.graph_scroll import GraphAwareScrollView
 from app.ui.hooks import Hook, wire
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
@@ -62,7 +65,6 @@ _DURATION_PRESETS = [
 _RAW_SIGNAL_COLORS = {"eeg": C.MEDITATION}
 _RAW_SIGNAL_SCALES = {"eeg": 500.0}
 _RAW_WAVEFORM_RATE = 512.0
-RAW_WAVEFORM_MAX = 512 * 60
 
 METRICS_COLORS = {
     "shamatha_score": C.SHAMATHA,
@@ -97,23 +99,6 @@ METRICS_SCALES = {
     "program_formula_2": 200.0,
     "program_formula_3": 200.0,
 }
-
-# Friendly labels for the on-graph series picker (combobox): the defaults every metrics graph starts from.
-SERIES_NAMES = MappingProxyType({
-    "shamatha_score": "Shamatha",
-    "meditation_score": "Meditation",
-    "distraction": "Distraction",
-    "sinking": "Sinking",
-    "subtle_distraction": "Subtle Distraction",
-    "native_attention": "NS Attention",
-    "native_meditation": "NS Meditation",
-    "custom_formula": "Custom 1",
-    "custom_formula_2": "Custom 2",
-    "custom_formula_3": "Custom 3",
-    "program_formula": "Program",
-    "program_formula_2": "Program 2",
-    "program_formula_3": "Program 3",
-})
 
 
 def _compute_graph_height_adaptive(
@@ -268,6 +253,7 @@ class LiveSessionScreen(Screen):
     """Main session screen with graph, stats, and controls."""
 
     on_program_pick = Hook()  # a saved program picked on the duration picker, by its index
+    on_lines_shown = Hook()  # the metrics graph's shown lines changed: their keys
     on_duration_preset = Hook()  # a duration preset picked: minutes, or None for no timer
 
     def __init__(self, **kwargs) -> None:
@@ -373,7 +359,7 @@ class LiveSessionScreen(Screen):
         # The on-graph series-picker glyph is wired centrally for every graph by
         # AppManager._wire_graph_affordances. The legend tracks the graph's own
         # visible set: any change (picker toggle or restore) rebuilds it.
-        wire(self._graph, on_series_change=lambda: self._rebuild_metric_legend(self._graph.visible_keys()))
+        wire(self._graph, on_series_change=self._metric_lines_changed)
         self._metrics_container.add_widget(self._graph)
 
         self._legend = LegendBar()
@@ -393,7 +379,7 @@ class LiveSessionScreen(Screen):
             show_value_labels=True,
             show_timestamps=True,
             sample_rate=_RAW_WAVEFORM_RATE,
-            max_points=RAW_WAVEFORM_MAX,
+            max_points=APP.RAW_WAVEFORM_MAX,
             bipolar=True,
             size_hint_y=0.5,
             graph_id="live_raw",
@@ -702,6 +688,11 @@ class LiveSessionScreen(Screen):
         self._graph_area.add_widget(self._raw_container if view == "raw" else self._metrics_container)
         self._view_toggle.show(view)
         self._active_view = view
+
+    def _metric_lines_changed(self) -> None:
+        shown = self._graph.visible_keys()
+        self._rebuild_metric_legend(shown)
+        self.on_lines_shown(shown)
 
     def _rebuild_metric_legend(self, enabled_keys: list) -> None:
         """Clear and re-populate the metrics legend with only the enabled metrics.
@@ -1054,6 +1045,20 @@ class LiveSessionScreen(Screen):
         self._alert_label.text = text
         lines = max(1, text.count("\n") + 1)
         self._alert_label.height = dp(18) * lines
+
+    def load_mirror(self, view: MirrorView) -> None:
+        """Batch-reload the 3 live graphs from a session's mirror (one load_static_data per graph), with their markers
+        and the threshold steps."""
+        if view.metrics:
+            self.graph.load_static_data({key: [d.get(key, 0.0) for d in view.metrics] for key in METRICS_COLORS},
+                                        new_session=False, markers=view.tick_marks)
+            self.graph.set_threshold_steps(target_steps(d.get("score_target") for d in view.metrics))
+            self.graph.set_gradient_steps(scored_steps(d.get("score_key") for d in view.metrics))
+        if view.bands:
+            self.band_graph.load_static_data({key: [d.get(key, 0.0) for d in view.bands] for key in GROUP_KEYS},
+                                             new_session=False, markers=view.tick_marks)
+        if view.waveform:
+            self.raw_graph.load_static_data({"eeg": view.waveform}, new_session=False, markers=view.sample_marks)
 
     def hide_alert(self) -> None:
         self._alert_label.text = ""

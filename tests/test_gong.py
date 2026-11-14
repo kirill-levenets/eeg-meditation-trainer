@@ -59,7 +59,7 @@ def test_a_new_gong_file_gets_a_new_player_and_the_old_is_released_on_the_main_t
     custom.write_bytes(b"x")
     engine.play_timer_sound()
     engine.play_timer_sound(str(custom))
-    assert [p.path for p in made] == [engine._timer_bell_path, str(custom)]
+    assert [p.path for p in made] == [engine._kept("timer_bell"), str(custom)]
     made[0].unload.assert_called_once()  # this test runs on the main thread
     made[0].set_on_end.assert_called_with(None)  # the old player's end can't end the new play
 
@@ -122,7 +122,7 @@ def test_a_stop_while_the_gong_is_being_built_calls_it_off(made, engine, monkeyp
     engine.stop_timer_bell()  # the end card's OK, or a new session, meanwhile
     release_build.set()
     tick.join(2)
-    assert played == [engine._timer_bell_path]  # called off, not failed: no fallback
+    assert played == [engine._kept("timer_bell")]  # called off, not failed: no fallback
     assert len(made) == 1 and engine._gong is None
     made[0].play.assert_not_called()
     Clock.tick()
@@ -162,9 +162,9 @@ def test_a_custom_gong_that_cant_play_rings_the_default(made, engine, tmp_path, 
     monkeypatch.setattr(noise_mod, "_make_noise_player", _failing_for(str(bad), made))
     engine.play_timer_sound()
     ended = []
-    assert engine.play_timer_sound(str(bad), on_end=lambda: ended.append(1)) == engine._timer_bell_path
-    assert [p.path for p in made] == [engine._timer_bell_path]  # the kept player stays: nothing rebuilt
-    assert engine._gong is made[0] and engine._one_shot_paths["_gong"] == engine._timer_bell_path
+    assert engine.play_timer_sound(str(bad), on_end=lambda: ended.append(1)) == engine._kept("timer_bell")
+    assert [p.path for p in made] == [engine._kept("timer_bell")]  # the kept player stays: nothing rebuilt
+    assert engine._gong is made[0] and engine._one_shot_paths["_gong"] == engine._kept("timer_bell")
     made[0].unload.assert_not_called()
     assert made[0].play.call_count == 2
     Clock.tick()
@@ -184,7 +184,7 @@ def test_a_gong_that_wont_start_has_not_played(made, engine, tmp_path, monkeypat
             made[-1].play.side_effect = RuntimeError("start() in a bad state")
         return made[-1]
     monkeypatch.setattr(noise_mod, "_make_noise_player", factory)
-    assert engine.play_timer_sound(str(custom)) == engine._timer_bell_path
+    assert engine.play_timer_sound(str(custom)) == engine._kept("timer_bell")
 
 
 def test_an_android_player_whose_start_fails_says_so(monkeypatch):
@@ -204,7 +204,7 @@ def test_releasing_an_android_player_builds_no_listener(monkeypatch):
 
 
 def test_when_no_gong_can_play_the_test_still_ends(made, engine, monkeypatch):
-    monkeypatch.setattr(noise_mod, "_make_noise_player", _failing_for(engine._timer_bell_path, made))
+    monkeypatch.setattr(noise_mod, "_make_noise_player", _failing_for(engine._kept("timer_bell"), made))
     ended = []
     assert engine.play_timer_sound(on_end=lambda: ended.append(1)) == ""
     Clock.tick()
@@ -248,7 +248,7 @@ def test_on_desktop_a_gong_sdl_cannot_decode_rings_the_default(engine, monkeypat
     broken.write_bytes(b"not audio")
     # SDL hands back an empty Sound for a file it can't decode, and logs "Unable to load"
     monkeypatch.setattr(SoundLoader, "load", lambda path: _sdl_sound("SoundSDL2", 0 if path == str(broken) else 4.0))
-    assert engine.play_timer_sound(str(broken)) == engine._timer_bell_path
+    assert engine.play_timer_sound(str(broken)) == engine._kept("timer_bell")
 
 
 def test_on_desktop_a_midi_gong_plays_though_sdl_reports_no_length(monkeypatch):
@@ -285,7 +285,7 @@ def test_a_new_gong_is_built_outside_the_one_shot_lock(engine, monkeypatch, tmp_
 
 def test_the_settings_test_button_hears_the_gongs_end():
     audio, timer_section = MagicMock(), MagicMock()
-    sounds_alone(audio=audio, timer_state=MagicMock(custom_sound_path=""), timer_section=timer_section).on_test_timer_sound()
+    sounds_alone({"timer_sound": ""}, audio=audio, timer_section=timer_section).on_test_timer_sound()
     assert audio.play_timer_sound.call_args.kwargs["on_end"] == timer_section.notify_timer_sound_test_ended
 
 
@@ -306,5 +306,5 @@ def test_the_settings_test_says_what_it_could_not_play(monkeypatch, tmp_path, cu
         (tmp_path / custom).write_bytes(b"x")
     audio = MagicMock()
     audio.play_timer_sound.return_value = {"default": "/tmp/timer_bell.wav", "custom": path, "": ""}[played]
-    sounds_alone(audio=audio, timer_state=MagicMock(custom_sound_path=path)).on_test_timer_sound()
+    sounds_alone({"timer_sound": path}, audio=audio).on_test_timer_sound()
     assert [d.split(":")[0] if ":" in d else d for d in reported] == ([said] if said else [])

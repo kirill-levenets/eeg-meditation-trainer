@@ -21,7 +21,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 ## Live series
 
 - **Program shows EXACTLY its metric set, the whole session.**
-  The live graph catalog (`live_session.METRICS_COLORS`/`METRICS_SCALES`/`SERIES_NAMES`) carries `"meditation_score"` (colour `C.MED_SCORE`, scale 100, label `"Meditation"`), so a "Meditation" segment is plottable;
+  The live graph catalog (`live_session.METRICS_COLORS`/`METRICS_SCALES`, `series_names.SERIES_NAMES`) carries `"meditation_score"` (colour `C.MED_SCORE`, scale 100, label `"Meditation"`), so a "Meditation" segment is plottable;
   it defaults to **hidden** (the first-run `FIRST_RUN_LIVE_SERIES`, through `GraphSeries.restore`'s `key in sel`).
   It also carries **three** program-custom lines, `PROGRAM_FORMULA_KEYS = ("program_formula","program_formula_2","program_formula_3")` (colours `C.WARM`/`C.WARM2`/`C.WARM3`, scale 200), one per **distinct** custom formula in a program.
   `program_plan(prog)` (`app/session/session_program.py`, with `PROGRAM_FORMULA_KEYS`) returns `(program_keys, custom_slots, segment_keys)`:
@@ -33,12 +33,12 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The plan keeps `program_plan`'s keys as `planned_keys`: older builds scored such a formula on its own slot, and the what-if replay reads their sessions by them ([session-detail](session-detail.md)).
   `ProgramRun.begin` names the plan's `unrunnable` formulas in a popup (`info`, the app's `_info_popup`), a frame later so the start finishes its setup first:
   it stays until read, as a meditator who pressed Start may not be looking.
-  `ProgramRun` (`app/ui/program_run.py`, `RunningSession.program_run`) holds the running program: `active` from the start's `begin(prog, feedback_ids, name)` until `end()`.
-  `begin` shows and marks EXACTLY the runnable plan's keys (`show_program_series(graph, plan)` hides the rest), arms one persistent evaluator per custom that compiles into `formula_evs[slot]`, and stores each segment's metric key.
+  `ProgramRun` (`app/session/program_run.py`, `RunningSession.program_run`) holds the running program: `active` from the start's `begin(run, prog, feedback_ids, name)` until `end()`.
+  `begin` shows and marks EXACTLY the runnable plan's keys (its `ProgramShown` event: `ShownSession` runs `show_program_series(graph, plan)`, which hides the rest), arms one persistent evaluator per custom that compiles into `formula_evs[slot]`, and stores each segment's metric key.
   Each program line is shown the **whole** program and evaluated every tick (`tick` runs `formula_evs` into `metrics[slot]` through `custom_formula.evaluate_series`, as the Settings formulas are).
   `_enter_segment` repoints audio, goal and marker to the segment's key (a built-in key or a program slot);
-  `_segment_ui` only relabels and shows a custom segment's line and moves the `»` marker (a built-in segment touches no visibility).
-  `end` resets all program-slot labels, force-hides all `PROGRAM_FORMULA_KEYS` and clears the mark;
+  its `SegmentStarted` event only relabels and shows a custom segment's line and moves the `»` marker (a built-in segment touches no visibility).
+  `end`'s `ProgramDropped` resets all program-slot labels, force-hides all `PROGRAM_FORMULA_KEYS` and clears the mark;
   every ending then derives the live graph's idle series again (`_undo_session_setup` → `ProgramSettings.sync_picker`): the loaded program's preview in program mode, else the saved selection.
   A program's set on the live graph, and its mark, have two writers, the running program and that idle derivation (`refresh_live_series`, `GraphSeries.apply_saved`, also run at Start before `begin`);
   the idle one does nothing while a session runs or connects: the session owns the graph, a re-pick of the active profile included.
@@ -54,7 +54,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The detail's metrics graph skips `persist` the same way while it shows a program session's lines.
 - Legend "training now" marker: `LegendBar.set_items(items, active_text=None)` bolds the matching item and prefixes it with `"» "` (geometric triangles render as tofu in this Kivy/Roboto build).
   `LiveSessionScreen.set_training_series(key)` passes the active key to the legend (the line's colouring comes per point with the tick's scored key, [graphs](graphs.md));
-  `ProgramRun._segment_ui` sets it at each segment boundary crossing, and `_start_session_common` and `_undo_session_setup` clear it (`None`).
+  `ProgramRun`'s `SegmentStarted` sets it at each segment boundary crossing, and `_start_session_common` and `_undo_session_setup` clear it (`None`).
 
 ## Settings and pickers
 

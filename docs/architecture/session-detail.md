@@ -39,7 +39,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The metric is `runnable_plan`'s, Shamatha for a formula that doesn't compile, unless the session is from an older build that scored such a formula on its own line (read as 0):
   then it is `planned_keys`, read when the record shows that line or there is no record, and a session without one then can't be replayed, as its formula has no series.
   A segment starts where the per-tick record shows the live session switching to its metric and target, searched from the last switch found:
-  the live session switches on elapsed time and `TickThread._loop` drops an overrun tick, so the switch drifts off minutes x 2.
+  the live session switches on elapsed time and the session's runner drops an overrun tick, so the switch drifts off minutes x 2.
   A segment like the one before it can't be told apart, so it starts its minutes after it, capped at the next switch found;
   a segment left with no tick is dropped, and the rest keep their program `index`, which numbers their titles.
   Without a record a segment starts by its minutes, as the graph's steps do (`SessionProgram.threshold_steps(2)`), never by the row timestamp, which is the EEG stream's clock.

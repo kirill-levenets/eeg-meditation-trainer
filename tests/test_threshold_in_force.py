@@ -65,11 +65,11 @@ def test_the_shamatha_pill_crosses_at_the_base_in_force(fresh_app, monkeypatch):
     calm = {**tick_metrics(), "shamatha_score": 60.0}
     for _ in range(3):  # three ticks above the base of 50: the pill comes on
         fed.tick(metrics=calm)
-    assert fresh_app._run.shamatha_active
+    assert fresh_app._session.run.shamatha_active
     fresh_app._apply_threshold(70)  # the slider settled above the score
     for _ in range(3):
         fed.tick(metrics=calm)
-    assert not fresh_app._run.shamatha_active
+    assert not fresh_app._session.run.shamatha_active
 
 
 def test_the_sound_and_the_engine_read_the_ticks_target_and_the_base(fresh_app, monkeypatch):
@@ -86,7 +86,7 @@ def test_the_sound_and_the_engine_read_the_ticks_target_and_the_base(fresh_app, 
     between = {**tick_metrics(), "shamatha_score": 65.0}  # above the segment's 60, below the base's 70
     for _ in range(3):
         fed.tick(metrics=between)
-    assert not app_._run.shamatha_active  # the pill keeps the base, not a segment's target
+    assert not app_._session.run.shamatha_active  # the pill keeps the base, not a segment's target
 
 
 # ---- one path applies the threshold ----
@@ -205,7 +205,7 @@ def test_a_tick_the_session_paused_under_is_not_recorded(fresh_app, monkeypatch)
     fed.tick()
     assert app_._session.recorder._buffer == [] and len(app_._shown.mirror.metrics) == 0
     assert app_._live_screen.graph.total_points == 0
-    assert app_._run.pending_marker  # it goes on the next tick that is recorded
+    assert app_._session.run.pending_marker  # it goes on the next tick that is recorded
 
 
 def test_the_live_graph_reloaded_from_the_mirror_steps_its_line(fresh_app, monkeypatch):
@@ -217,7 +217,7 @@ def test_the_live_graph_reloaded_from_the_mirror_steps_its_line(fresh_app, monke
             app_._apply_threshold(85)
         fed.tick(metrics=tick_metrics(seed=80.0))
     app_._live_screen.graph.set_threshold_steps(None)
-    app_._shown.mirror.reload_into(app_._live_screen)
+    app_._live_screen.load_mirror(app_._shown.mirror.snapshot())
     assert app_._live_screen.graph._threshold_steps == [(0, 70), (2, 85)]
 
 

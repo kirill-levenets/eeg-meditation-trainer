@@ -1,6 +1,7 @@
 import json
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 
 from app.logger import logger
@@ -29,6 +30,11 @@ class LiveScore:
 
 
 NO_SCORE = LiveScore()
+
+
+def start_stamp(when: datetime) -> str:
+    """'YYYY-MM-DD HH:MM': a session's start in its default name and in its title, so the title can recognise it."""
+    return when.strftime("%Y-%m-%d %H:%M")
 
 
 def elapsed_clock(seconds: float) -> str:
@@ -155,7 +161,7 @@ class SessionManager:
             self._state = SessionState.FINISHED
             # Only failure terminations warble. "user" and "timer" are planned
             # stops (timer plays its own gong), and timer-end persistence runs
-            # on the daemon tick thread where SoundLoader playback is unsafe.
+            # on the session's runner, where SoundLoader playback is unsafe.
             if reason in ("stale_data", "bt_lost", "error") and self._audio is not None:
                 try:
                     self._audio.play_alert()

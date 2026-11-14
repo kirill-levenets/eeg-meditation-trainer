@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from app.eeg.band_spec import BAND_KEYS
 from app.logger import logger
+from app.session.session_events import Connecting, Waiting
 from app.session.session_run import Phase, SessionRun
 
 
@@ -22,7 +23,7 @@ STARTED = WaitEnd(started=True)
 
 
 class BtWait:
-    """A run's CONNECTING phase, driven by the tick thread: it gives up on a refused start, a failed connect, the connect
+    """A run's CONNECTING phase, driven by the session's runner: it gives up on a refused start, a failed connect, the connect
     timeout, no data, or a headset that keeps closing the link, and says how it ended for the app to act on. Its
     overlay reaches the main thread for its run only."""
 
@@ -30,12 +31,12 @@ class BtWait:
     SIGNAL_TIMEOUT = 8.0  # seconds to wait for EEG packets after connected
     MAX_DROPS = 2  # the third drop of the link in one wait ends it: the headset keeps closing it
 
-    def __init__(self, stream, live_screen, *, headset_name: Callable[[], str],
-                 on_main_for: Callable[[SessionRun, Callable], None]) -> None:
+    def __init__(self, stream, *, headset_name: Callable[[], str], show: Callable[[object], None],
+                 emit: Callable[[SessionRun, object], None]) -> None:
         self._stream = stream
-        self._live_screen = live_screen
         self._headset_name = headset_name
-        self._on_main_for = on_main_for
+        self._show = show  # main thread: the wait's start
+        self._emit = emit  # the runner: its progress, for its run
 
     def begin(self, run: SessionRun) -> WaitEnd | None:
         """Start the reader and show the connect overlay; the reader's refusal ends the wait before it begins."""
@@ -45,15 +46,9 @@ class BtWait:
             logger.info(f"BT start refused: {self._stream._last_connect_error!r}")
             return WaitEnd(False, f"Can't connect to {name} yet.\n{self._stream._last_connect_error}")
         run.phase = Phase.CONNECTING
-        self._live_screen.update_device_status(False, device_name=name, connecting=True)
-        self._live_screen.show_overlay(f"Connecting to {name}...")
+        self._show(Connecting(name))
         logger.info(f"Waiting for BT connection to {name}")
         return None
-
-    def show_retry(self, message: str) -> None:
-        """Main thread: the retry screen of a wait that ended without a session."""
-        self._live_screen.update_device_status(False, device_name=self._headset_name())
-        self._live_screen.show_overlay_retry(message)
 
     def tick(self, run: SessionRun) -> WaitEnd | None:
         """Tick thread: one step of the wait, and how it ended if it did; Kivy UI goes through the main thread."""
@@ -71,8 +66,7 @@ class BtWait:
             logger.error("BT connection timed out")
             return WaitEnd(False, f"Connection to {name} timed out.\nMake sure the device is turned on\nand in range.")
         remaining = int(self.CONNECT_TIMEOUT - elapsed)
-        msg = f"Connecting to {name}...\nTimeout in {remaining}s"
-        self._on_main_for(run, lambda m=msg: self._live_screen.update_overlay(m))
+        self._emit(run, Waiting(f"Connecting to {name}...\nTimeout in {remaining}s"))
         return None
 
     def _link_dropped(self, run: SessionRun, name: str) -> WaitEnd | None:
@@ -117,8 +111,7 @@ class BtWait:
             f"packets={'yes' if has_packets else 'no'} "
             f"elapsed={signal_elapsed:.0f}s"
         )
-        msg = f"Connected to {name}\n{wait_msg}\n{sensor_contact(sq)}"
-        self._on_main_for(run, lambda m=msg: self._live_screen.update_overlay(m))
+        self._emit(run, Waiting(f"Connected to {name}\n{wait_msg}\n{sensor_contact(sq)}"))
         return None
 
     def _connect_failed(self, name: str) -> WaitEnd:

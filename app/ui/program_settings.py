@@ -5,7 +5,7 @@ from collections.abc import Callable
 from app.logger import logger
 from app.session.session_program import SessionProgram, runnable_plan
 from app.ui.app_context import AppContext
-from app.ui.program_run import show_program_series
+from app.ui.graph_series import show_program_series
 from app.ui.settings_sections.common import (
     confirm_saved_delete,
     save_under_unique_name,

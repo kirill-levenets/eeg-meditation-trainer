@@ -2,6 +2,7 @@
 theme switch does."""
 
 import ast
+import gc
 import os
 import re
 import subprocess
@@ -57,6 +58,7 @@ LARGEST = max(scale for scale, _name in TEXT_SIZES)
 
 @pytest.fixture(autouse=True)
 def normal_size():
+    gc.collect()  # a scale change re-sizes every themed widget alive, the earlier tests' uncollected ones included
     yield
     F.set_scale(1.0)
 

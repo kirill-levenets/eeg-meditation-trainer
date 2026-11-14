@@ -3,12 +3,14 @@ and a program's labels go when it ends."""
 
 import pytest
 
+from app.metrics.formula_slots import FormulaSlots
+from app.metrics.series_names import SERIES_NAMES
 from app.session.session_program import SessionProgram, runnable_plan
 from app.ui.diary_screen import DiaryScreen
-from app.ui.live_session import SERIES_NAMES, LiveSessionScreen
-from app.ui.program_run import show_program_series
+from app.ui.graph_series import show_program_series
+from app.ui.live_session import LiveSessionScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
-from tests._app import frames, program_mode, reload_with, start_connecting
+from tests._app import frames_until, program_mode, reload_with, start_connecting
 from tests._picker import picker_rows
 
 PAST_NAMES = {"custom_formula": "Old beta", "custom_formula_2": "Custom 2", "custom_formula_3": "Custom 3"}
@@ -88,7 +90,7 @@ def test_no_program_lines_once_the_program_ends(app, monkeypatch):
     program_mode(app, [DEEP])
     app._on_start()
     app._stop_and_save()
-    frames()
+    frames_until(lambda: app._session.run is None, 2.0)  # the runner saved it; its Ended event tore the screen down
     assert _program_rows(app, monkeypatch) == []
 
 
@@ -109,3 +111,12 @@ def test_the_session_screens_legend_starts_as_its_graph_shows():
     screen = LiveSessionScreen()
     shown = [lbl.text for lbl in reversed(screen._legend.children)]
     assert shown == [screen.graph.series_name(k) for k in screen.graph.series_keys() if screen.graph.is_visible(k)]
+
+
+def test_a_line_is_named_by_its_formula_slot_else_by_its_default():
+    slots = FormulaSlots()
+    slots.load([{"name": "Calm", "formula": "alpha1"}])
+    assert slots.line_name("custom_formula") == "Calm"
+    assert slots.line_name("custom_formula_2") == "Custom 2" == SERIES_NAMES["custom_formula_2"]
+    assert slots.line_name("shamatha_score") == "Shamatha"
+    assert slots.line_name("an_unknown_score") == ScrollableGraphWidget(colors={}, scales={}).series_name("an_unknown_score")

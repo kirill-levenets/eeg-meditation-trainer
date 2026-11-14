@@ -125,7 +125,7 @@ def _shown(app) -> str:
 
 def _connecting(app) -> bool:
     """Whether a Start went through to the headset's connect."""
-    return app._run is not None and app._run.phase is Phase.CONNECTING
+    return app._session.run is not None and app._session.run.phase is Phase.CONNECTING
 
 
 # ---- a profile load ----
@@ -241,7 +241,7 @@ def test_a_scan_result_after_a_session_started_does_nothing(app, paired):
     _load(app, _profile(app, "New"), mock=True)
     app._headset.scan_for_new_profile()  # still running
     app._on_start()  # on the mock: the session runs at once
-    assert app._session_pipeline_live()
+    assert app._session.live()
     paired.arrive()
     assert app._real_stream._device_address is None and APP.USE_MOCK_DEVICE is True
     assert popups() == [] and app._sm.current == "live_session"

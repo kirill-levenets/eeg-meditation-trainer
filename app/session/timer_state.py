@@ -19,7 +19,6 @@ class TimerState:
         self.enabled: bool = APP.TIMER_ENABLED
         self.duration_minutes: int = APP.TIMER_DEFAULT_MINUTES
         self.remaining_seconds: float = 0.0
-        self.custom_sound_path: str = ""
 
     # --- mutators ---------------------------------------------------------
 
@@ -28,9 +27,6 @@ class TimerState:
 
     def set_duration(self, minutes: int) -> None:
         self.duration_minutes = max(1, int(minutes))
-
-    def set_custom_sound_path(self, path: str) -> None:
-        self.custom_sound_path = (path or "").strip()
 
     # --- lifecycle --------------------------------------------------------
 
