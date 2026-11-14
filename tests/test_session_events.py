@@ -10,8 +10,8 @@ import pytest
 import app.session.session_events as session_events
 from app.session.manager import elapsed_clock
 from app.session.session_events import Connected, SegmentStarted
-from app.ui.app_manager import EEGMeditationApp
 from app.ui.live_session import LiveSessionScreen
+from app.ui.session_controls import SessionControls
 from app.ui.shown_session import ShownSession
 from tests._app import (
     FedSession,
@@ -45,7 +45,7 @@ def test_an_ending_tears_the_players_down_on_the_main_thread(fresh_app, monkeypa
     monkeypatch.setattr(app._audio, "stop", lambda: (stops.append(threading.current_thread() is threading.main_thread()),
                                                      stop()))
     FedSession(app, monkeypatch).tick()
-    app._stop_and_save()
+    app._controls.stop_and_save()
     frames()
     assert stops == [True] and app._audio._feedback_players == {}
 
@@ -54,9 +54,9 @@ def test_an_ending_tears_the_players_down_even_when_the_screens_part_fails(fresh
     # Left up, they keep the engine playing: the next session's start would find it so and play no feedback.
     app = fresh_app
     FedSession(app, monkeypatch).tick()
-    finalize = app._finalize_stop_ui
-    monkeypatch.setattr(app, "_finalize_stop_ui", lambda *_a: (_ for _ in ()).throw(RuntimeError("a screen update")))
-    app._stop_and_save()
+    finalize = app._controls._finish_ui
+    monkeypatch.setattr(app._controls, "_finish_ui", lambda *_a: (_ for _ in ()).throw(RuntimeError("a screen update")))
+    app._controls.stop_and_save()
     with pytest.raises(RuntimeError):
         frames()
     assert app._audio._feedback_players == {}
@@ -71,10 +71,10 @@ def test_a_start_whose_screen_part_fails_plays_no_feedback(fresh_app, monkeypatc
                         if isinstance(event, Connected) else show(event))
     monkeypatch.setattr(app._session, "start_running", lambda: None)
     with pytest.raises(RuntimeError):
-        app._on_start()
+        app._controls.start()
     assert started == []
     monkeypatch.undo()
-    app._stop_and_save()  # the start got that far: its ending, for the next test
+    app._controls.stop_and_save()  # the start got that far: its ending, for the next test
     frames()
 
 
@@ -87,11 +87,29 @@ def test_an_ending_leaves_the_screen_finished_and_idle(fresh_app, monkeypatch):
     assert screen._shamatha_active and screen._device_label.text == "[Mock EEG] *"
     app._history._history_dirty = False
     screen.update_timer("59:59")  # the clock as a screen lock froze it
-    app._stop_and_save()
+    app._controls.stop_and_save()
     frames()
     duration = app._db.get_all_sessions(app._current_user_id)[0]["duration"]
     assert screen._last_state == "FINISHED" and screen._timer_label.text.endswith(elapsed_clock(duration))
     assert not screen._shamatha_active and screen._device_label.text == "[Disconnected]" and app._history._history_dirty
+
+
+def test_the_session_screens_buttons_reach_its_controls(fresh_app, monkeypatch):
+    app, screen, pressed = fresh_app, fresh_app._live_screen, []
+    for name in ("start", "toggle_pause", "stop", "mark", "cancel", "retry"):
+        monkeypatch.setattr(app._controls, name, lambda *_a, name=name: pressed.append(name))
+    for button in (screen.btn_start, screen.btn_pause, screen.btn_stop, screen.btn_marker, screen.overlay_cancel_btn,
+                   screen.overlay_retry_btn):
+        button.dispatch("on_release")
+    assert pressed == ["start", "toggle_pause", "stop", "mark", "cancel", "retry"]
+
+
+def test_retry_leaves_the_retry_screen_and_starts_again(fresh_app, monkeypatch):
+    app, starts = fresh_app, []
+    app._live_screen.show_overlay_retry("Connection to MWM2 failed.")
+    monkeypatch.setattr(app._controls, "start", lambda: starts.append(True))
+    app._controls.retry()
+    assert starts == [True] and app._live_screen._overlay.opacity == 0 and not app._live_screen._btn_start.disabled
 
 
 def test_the_shamatha_pill_lights_after_three_ticks_above_the_threshold(fresh_app, monkeypatch):
@@ -139,7 +157,7 @@ def _handled(function) -> set[str]:
 
 
 def test_every_session_event_has_a_handler():
-    # The app hands what it doesn't handle to ShownSession: an event neither names would be dropped.
+    # The controls hand what they don't handle to ShownSession: an event neither names would be dropped.
     events = {name for name, value in vars(session_events).items()
               if inspect.isclass(value) and value.__module__ == session_events.__name__}
-    assert events - (_handled(EEGMeditationApp._on_session_event) | _handled(ShownSession.show)) == set()
+    assert events - (_handled(SessionControls.on_event) | _handled(ShownSession.show)) == set()

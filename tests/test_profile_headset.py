@@ -201,7 +201,7 @@ def test_re_picking_the_running_sessions_profile_keeps_its_headset(app, paired):
     _load(app, b)
     paired.arrive()  # nothing paired
     app._real_stream.set_device(BLUE, "MindWave Mobile")  # its session's headset, its save to the profile lost
-    app._on_start()
+    app._controls.start()
     assert _connecting(app)
     shown = _shown(app)
     _load(app, b)
@@ -240,7 +240,7 @@ def test_a_scan_result_after_a_session_started_does_nothing(app, paired):
     paired.devices.append(_mindwave(BLUE))
     _load(app, _profile(app, "New"), mock=True)
     app._headset.scan_for_new_profile()  # still running
-    app._on_start()  # on the mock: the session runs at once
+    app._controls.start()  # on the mock: the session runs at once
     assert app._session.live()
     paired.arrive()
     assert app._real_stream._device_address is None and APP.USE_MOCK_DEVICE is True
@@ -313,7 +313,7 @@ def test_start_with_several_mindwaves_asks_which_in_settings(app, paired):
     paired.devices.extend([_mindwave(BLUE), _mindwave(GREY)])
     _load(app, _profile(app, "B"))
     paired.arrive()
-    app._on_start()
+    app._controls.start()
     paired.arrive()
     assert not _connecting(app) and app._sm.current == "settings"
     assert app._settings_screen.device._device_picker_banner.text.startswith("Found 2 MindWave devices.")
@@ -325,7 +325,7 @@ def test_starts_pick_one_prompt_goes_once_answered(app, paired, answer):
     paired.devices.extend([_mindwave(BLUE), _mindwave(GREY)])
     _load(app, _profile(app, "B"))
     paired.arrive()
-    app._on_start()
+    app._controls.start()
     paired.arrive()
     banner = app._settings_screen.device._device_picker_banner
     assert banner.text
@@ -343,7 +343,7 @@ def test_start_with_one_mindwave_selects_it_for_the_profile_and_connects(app, pa
     _load(app, b)
     paired.arrive()  # nothing paired yet
     paired.devices.append(_mindwave(BLUE))  # paired before Start
-    app._on_start()
+    app._controls.start()
     paired.arrive()
     assert _connecting(app)
     assert app._real_stream._device_address == BLUE and _saved(app, b) == BLUE
@@ -354,7 +354,7 @@ def test_a_headset_picked_while_start_scans_is_the_one_it_connects_to(app, paire
     _load(app, b)
     paired.arrive()
     paired.devices.append(_mindwave(BLUE))
-    app._on_start()
+    app._controls.start()
     app._headset.on_select(GREY, "MindWave Mobile")  # picked in Settings while Start scanned
     paired.arrive()
     assert _connecting(app)
@@ -377,7 +377,7 @@ def test_start_with_no_mindwave_paired_says_why(app, paired, monkeypatch, device
         monkeypatch.setattr(NeuroSkyStream, "scan_paired_devices", staticmethod(devices))
     else:
         paired.devices.extend(devices)
-    app._on_start()
+    app._controls.start()
     paired.arrive()
     assert not _connecting(app)
     assert app._live_screen._overlay_status.text.startswith(message)

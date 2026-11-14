@@ -27,7 +27,7 @@ def running(fresh_app, monkeypatch):
     app, ticks = fresh_app, []
     tick = app._session.tick
     monkeypatch.setattr(app._session, "tick", lambda run: (ticks.append(threading.current_thread().name), tick(run)))
-    app._on_start()
+    app._controls.start()
     frames_until(lambda: len(ticks) >= 2, 2.0)  # returns on timeout too: each wait's condition is asserted after it
     assert len(ticks) >= 2
     app.ticks = ticks
@@ -50,7 +50,7 @@ def test_a_command_runs_on_the_runner(running, monkeypatch):
     app, threads = running, []
     pause = app._session.manager.pause
     monkeypatch.setattr(app._session.manager, "pause", lambda: (threads.append(threading.current_thread().name), pause()))
-    app._on_pause()
+    app._controls.toggle_pause()
     frames_until(lambda: app._session.manager.state == SessionState.PAUSED, 2.0)
     assert app._session.manager.state == SessionState.PAUSED and threads == ["SessionRunner"]
 
@@ -68,13 +68,13 @@ def test_a_line_shown_or_hidden_mid_session_reaches_the_session_on_the_runner(ru
 
 def test_a_paused_session_records_nothing_until_it_resumes(running):
     app = running
-    app._on_pause()
+    app._controls.toggle_pause()
     frames_until(lambda: app._live_screen._btn_pause.text == "Resume", 2.0)  # its Paused event reached the screen
     assert app._live_screen._btn_pause.text == "Resume" and app._session.manager.state == SessionState.PAUSED
     recorded = len(app._shown.mirror.metrics)
     time.sleep(6 * _INTERVAL)
     assert len(app._shown.mirror.metrics) == recorded
-    app._on_pause()
+    app._controls.toggle_pause()
     frames_until(lambda: len(app._shown.mirror.metrics) > recorded, 2.0)
     assert len(app._shown.mirror.metrics) > recorded and app._session.manager.state == SessionState.RUNNING
 
@@ -82,7 +82,7 @@ def test_a_paused_session_records_nothing_until_it_resumes(running):
 def test_the_session_records_while_the_stop_dialog_is_open(running):
     # Cancel loses nothing; Stop saves up to then.
     app = running
-    app._on_stop()
+    app._controls.stop()
     (confirm,) = popups()
     recorded = len(app._shown.mirror.metrics)
     frames_until(lambda: len(app._shown.mirror.metrics) >= recorded + 3, 2.0)
@@ -94,10 +94,10 @@ def test_the_session_records_while_the_stop_dialog_is_open(running):
 def test_the_runner_ends_with_its_run_and_a_late_command_does_nothing(running):
     app = running
     run = app._session.run
-    app._stop_and_save()
+    app._controls.stop_and_save()
     frames_until(lambda: app._session.run is None and not runner_alive(app), 2.0)
     assert app._session.run is None and not runner_alive(app) and run.phase.name == "ENDED"
-    app._on_pause()  # a tap that came after the end
+    app._controls.toggle_pause()  # a tap that came after the end
     frames()
     assert app._session.manager.state == SessionState.IDLE and app._live_screen._btn_pause.text == "Pause"
 
@@ -138,10 +138,10 @@ def test_a_stop_ends_and_saves_the_session_even_when_its_runner_is_stuck(fresh_a
     monkeypatch.setattr(APP, "UPDATE_FREQUENCY", _INTERVAL)
     app = fresh_app
     in_read, release = _stuck_in_its_first_read(app, monkeypatch)
-    app._on_start()
+    app._controls.start()
     runner = app._session._runner
     assert in_read.wait(2)
-    app._stop_and_save()
+    app._controls.stop_and_save()
     frames()
     assert app._session.run is None and app._db.count_sessions(app._current_user_id) == 1
     release.set()
@@ -154,7 +154,7 @@ def test_a_command_the_runner_took_is_waited_to_its_end(running, monkeypatch):
     app, deleted = running, []
     discard = app._session.recorder.discard
     monkeypatch.setattr(app._session.recorder, "discard", lambda: (time.sleep(_SLOW), discard(), deleted.append(True)))
-    app._discard_running_session()
+    app._controls.discard()
     assert deleted == [True]  # once, on the runner, and done before the call returned
 
 
@@ -172,7 +172,7 @@ def test_an_overrun_tick_is_not_followed_by_a_catch_up_tick(fresh_app, monkeypat
         tick(run)
 
     monkeypatch.setattr(app._session, "tick", timed)
-    app._on_start()
+    app._controls.start()
     frames_until(lambda: len(starts) >= 4, 5.0)
     assert len(starts) >= 4
     assert starts[3] - starts[2] >= 0.5 * interval, starts  # the tick after the overrun's: an interval later, not at once
@@ -185,7 +185,7 @@ def test_a_stop_does_not_hold_the_screen_through_a_slow_save(running, monkeypatc
     save = app._db.checkpoint_session
     monkeypatch.setattr(app._db, "checkpoint_session", lambda *a, **k: (time.sleep(_SLOW), save(*a, **k))[1])
     began = time.monotonic()
-    app._stop_and_save()
+    app._controls.stop_and_save()
     assert time.monotonic() - began < _JOIN  # taken: not held for the save
     frames_until(lambda: app._session.run is None, 4.0)
     assert app._session.run is None and app._db.count_sessions(app._current_user_id) == 1
@@ -206,7 +206,7 @@ def test_closing_the_app_waits_for_the_running_sessions_final_save(build_app, mo
             finished.append(True)
         return result
 
-    app._on_start()
+    app._controls.start()
     frames_until(lambda: len(app._shown.mirror.metrics) >= 2, 3.0)
     assert len(app._shown.mirror.metrics) >= 2
     monkeypatch.setattr(app._db, "checkpoint_session", slow_final_save)
@@ -220,20 +220,20 @@ def test_a_late_runner_of_an_ended_run_leaves_the_next_runs_runner_in_place(fres
     monkeypatch.setattr(APP, "UPDATE_FREQUENCY", _INTERVAL)
     app, threads = fresh_app, []
     in_read, release = _stuck_in_its_first_read(app, monkeypatch)
-    app._on_start()
+    app._controls.start()
     old = app._session._runner
     assert in_read.wait(2)
-    app._stop_and_save()  # the stuck runner doesn't take it: the Stop ends the run here
+    app._controls.stop_and_save()  # the stuck runner doesn't take it: the Stop ends the run here
     frames()
     app._shown.close(keep_notes=False)
-    app._on_start()
+    app._controls.start()
     new = app._session._runner
     release.set()
     old.join(2)
     assert not old.is_alive() and app._session._runner is new and new.is_alive()
     pause = app._session.manager.pause
     monkeypatch.setattr(app._session.manager, "pause", lambda: (threads.append(threading.current_thread().name), pause()))
-    app._on_pause()
+    app._controls.toggle_pause()
     frames_until(lambda: bool(threads), 2.0)
     assert threads == ["SessionRunner"]
 
@@ -244,17 +244,17 @@ def test_a_start_after_a_stuck_runners_run_ended_puts_its_own_threshold_in_force
     monkeypatch.setattr(APP, "UPDATE_FREQUENCY", _INTERVAL)
     app = fresh_app
     in_read, release = _stuck_in_its_first_read(app, monkeypatch)
-    app._on_start()
+    app._controls.start()
     old = app._session._runner
     assert in_read.wait(2)
-    app._stop_and_save()  # the stuck runner doesn't take it: the Stop ends the run here
+    app._controls.stop_and_save()  # the stuck runner doesn't take it: the Stop ends the run here
     frames()
     app._shown.close(keep_notes=False)
     setting = app._settings_screen.threshold
     app._session.manager.set_threshold(setting - 20)  # as a program's last segment leaves it
     start_connecting(app, monkeypatch)
     assert old.is_alive() and app._session.manager.threshold == setting
-    app._cancel_session_start("IDLE")
+    app._controls.cancel("IDLE")
     release.set()
     old.join(2)
     assert not old.is_alive()
@@ -265,14 +265,14 @@ def test_a_late_runner_drops_what_was_queued_for_its_ended_run(fresh_app, monkey
     monkeypatch.setattr(APP, "UPDATE_FREQUENCY", _INTERVAL)
     app = fresh_app
     in_read, release = _stuck_in_its_first_read(app, monkeypatch)
-    app._on_start()
+    app._controls.start()
     old = app._session._runner
     assert in_read.wait(2)
     app._session.set_threshold(40)  # queued behind the stuck read
-    app._stop_and_save()
+    app._controls.stop_and_save()
     frames()
     app._shown.close(keep_notes=False)
-    app._on_start()
+    app._controls.start()
     in_force = app._session.manager.threshold
     assert in_force != 40
     release.set()

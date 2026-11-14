@@ -31,7 +31,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   startup restore, the gate's create (`ProfileGate.complete_first_run`) or pick (`ProfileGate.pick_existing`), and Settings' switch (`Profiles.on_switch`).
   An activation that skipped the load would leave the previous profile's (or the default) values in memory under the new one, for the next flush (e.g. the pre-backup save) to write over its stored settings.
   The headset is loaded the same way: the profile's own or none, never the last profile's (`Headset.load`, [eeg-bluetooth](eeg-bluetooth.md#connection)).
-  `Profiles.on_switch` to another profile is refused through `_refused_while_session_runs` while `RunningSession.live()` ("Session in progress", the picker snapped back via `Profiles.refresh`):
+  `Profiles.on_switch` to another profile is refused through `SessionControls.refused` while `RunningSession.live()` ("Session in progress", the picker snapped back via `Profiles.refresh`):
   the running session owns its loaded timer/threshold/sound settings and saves under the profile it started with.
 - `DatabaseManager.create_user` raises `UserExistsError(user_id, name)` on a duplicate.
   The first-run popup and Settings → User Profile use the shared `UserPickerForm` widget (`app/ui/widgets/user_picker.py`);

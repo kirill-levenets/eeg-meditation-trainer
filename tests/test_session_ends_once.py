@@ -26,7 +26,7 @@ def locked(fresh_app, monkeypatch):
     for name in ("mute", "play_disconnect_alert", "play_timer_sound"):
         calls_of(monkeypatch, app._audio, name, sounds, name)
     return SimpleNamespace(app=app, session=session, reasons=reasons, sounds=sounds, run=app._session.run,
-                           finishes=calls_of(monkeypatch, app, "_finalize_stop_ui"),
+                           finishes=calls_of(monkeypatch, app._controls, "_finish_ui"),
                            tick=lambda: session.tick(shown=False), unlock=frames)
 
 
@@ -94,7 +94,7 @@ def test_a_timer_finish_for_a_run_already_ended_does_nothing(locked):
     _timer_expires_on_the_next_tick(locked)
     locked.tick()
     assert locked.reasons == ["timer"] and locked.finishes == []
-    app._discard_running_session()  # the other ending: it drops the run
+    app._controls.discard()  # the other ending: it drops the run
     assert len(locked.finishes) == 1
     locked.unlock()
     assert len(locked.finishes) == 1 and app._live_screen.summary_session_id is None  # no end card for it
@@ -154,7 +154,7 @@ def test_a_session_tick_whose_stop_began_during_its_read_computes_nothing(locked
     app, run = locked.app, locked.run
     computed = calls_of(monkeypatch, app._session.engine, "process_sample")
     monkeypatch.setattr(app._real_stream, "read_sample",
-                        lambda: (app._stop_and_save(reason="user"), locked.session.raw)[1])
+                        lambda: (app._controls.stop_and_save(reason="user"), locked.session.raw)[1])
     app._session._session_tick(run)
     assert locked.reasons == ["user"] and computed == []
 
@@ -205,7 +205,7 @@ def test_a_failed_final_save_still_ends_the_run_on_screen_and_says_so(fresh_app,
     fed.tick()
     releases = calls_of(monkeypatch, app._session.keep_awake, "release")
     monkeypatch.setattr(app._db, "checkpoint_session", lambda *_a, **_k: (_ for _ in ()).throw(OSError("disk full")))
-    app._stop_and_save()
+    app._controls.stop_and_save()
     frames()
     assert reported == ["session_save_failed"] and app._session.run is None and releases
     assert app._live_screen.summary_session_id is None and not app._live_screen._btn_start.disabled
@@ -215,7 +215,7 @@ def test_an_ending_under_the_stop_dialog_closes_it(fresh_app, monkeypatch):
     # The session goes on while "Stop session?" is open, so its timer can end it there: the question is void.
     app = fresh_app
     fed = FedSession(app, monkeypatch)
-    app._on_stop()
+    app._controls.stop()
     assert popup_titles() == ["Stop session?"]
     fed.end_by_timer_on_next_tick()
     fed.tick()
@@ -228,7 +228,7 @@ def test_a_pause_sent_for_an_ended_run_leaves_the_next_session_running(fresh_app
     app = fresh_app
     FedSession(app, monkeypatch)
     old = app._session.run
-    app._stop_and_save()
+    app._controls.stop_and_save()
     frames()
     app._shown.close(keep_notes=False)
     FedSession(app, monkeypatch)
@@ -240,5 +240,5 @@ def test_a_discarded_sessions_players_are_torn_down(fresh_app, monkeypatch):
     app = fresh_app
     FedSession(app, monkeypatch)
     stops = calls_of(monkeypatch, app._audio, "stop")
-    app._discard_running_session()
+    app._controls.discard()
     assert len(stops) == 1 and app._session.run is None

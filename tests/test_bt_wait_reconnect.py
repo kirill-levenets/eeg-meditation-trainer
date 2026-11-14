@@ -206,7 +206,7 @@ def test_the_next_wait_starts_with_no_drops(wait):
     tick(35.5, connected=False)  # the third drop ends this wait
     assert _gave_up(stream) and "keeps closing" in _retry_message(app)
     stream.stops.clear()
-    app._on_connect_retry()  # a Retry is a new Start: a run with its own drops
+    app._controls.retry()  # a Retry is a new Start: a run with its own drops
     assert app._session.connecting()
     tick(40.0, connected=True)
     tick(45.5, connected=False)  # this wait's first drop, not the fourth

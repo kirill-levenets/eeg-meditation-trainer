@@ -23,7 +23,7 @@ def idle(fresh_app, monkeypatch):
 @pytest.fixture
 def app(idle):
     """The same, in a session."""
-    idle._on_start()
+    idle._controls.start()
     return idle
 
 
@@ -142,7 +142,7 @@ def test_the_other_session_locks_say_the_same(app, call, doing):
 def test_a_program_session_leaves_the_audio_metric_free(idle):
     # A program is scored per segment, on the segments' own metrics: the audio control metric plays no part.
     program_mode(idle, [{"minutes": 5, "target": 60, "formula": "meditation_score"}])
-    idle._on_start()
+    idle._controls.start()
     idle._settings_store.change("audio_metric", FORMULA_KEYS[0])
     idle._audio_metric.on_change("meditation_score")
     _type_into_slot(idle, 1, "Drowsy", "theta / beta1 * 100")

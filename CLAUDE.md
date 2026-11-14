@@ -78,7 +78,8 @@ Read it before changing that subsystem.
 - `app/storage/` — `database.py` (SQLite, migrations, write lock), `backup.py`, `fileops.py`, `android_saf.py`, `android_share.py`, `csv_export.py`.
   `app/settings/registry.py` — per-user scalar settings.
   `app/ui/backup_flow.py` `BackupFlow` — Settings → Data Backup. → [storage](docs/architecture/storage.md)
-- `app/ui/app_manager.py` — `EEGMeditationApp`: wiring, session start/stop, BT wait, the active profile (`_activate_user`), settings load/save.
+- `app/ui/app_manager.py` — `EEGMeditationApp`: the composition root (screens, flows, their wiring), the active profile (`_activate_user`), settings load/save, the app's lifecycle.
+  `app/ui/session_controls.py` `SessionControls` — the Session screen's controls (Start and its headset scan, Cancel, Retry, Pause, Stop, the marker), the threshold in force, the order of the app's part of each session event.
   `app/ui/app_context.py` — `AppContext`: what every flow reaches the app through (`_make_context`). → [app-platform](docs/architecture/app-platform.md#flows-and-the-app-context)
   `app/ui/profiles.py` — `ProfileGate` (the blocking profile picker), `Profiles` (Settings → Profile). → [app-platform](docs/architecture/app-platform.md#user-gate-and-profiles)
   `app/ui/startup.py` — the startup profile (`resolve_startup_user`), the theme, text size and line colours the UI is built in; `app/ui/toast.py` — the toast.
@@ -122,12 +123,12 @@ The linked file explains the mechanism.
   a profile's headset is found by `Headset.scan`, whose result does nothing once the profile, its headset or mode changed or a session started;
   only Start opens Settings → Device to pick. → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md#connection)
 - **One writer: the run's runner** (`RunningSession`, `app/session/running_session.py`): from Start's `start_running()` to the run's ending, only its runner thread writes the session's state.
-  The main thread sends commands (`toggle_pause`, `stop`, `discard`, `abort`, `mark`, `set_threshold`, `set_formula`, `set_shown`); the runner hands what the screen must do back as events (`session_events.py`; `_on_session_event`, the screen's through `ShownSession.show`), for that run only (`on_main_for`).
+  The main thread sends commands (`toggle_pause`, `stop`, `discard`, `abort`, `mark`, `set_threshold`, `set_formula`, `set_shown`); the runner hands what the screen must do back as events (`session_events.py`; `SessionControls.on_event`, the screen's through `ShownSession.show`), for that run only (`on_main_for`).
   Without a runner of its own run (before its start, after its end, a stuck one's run ended) a command runs where it is sent.
   `stop`, `discard` and `abort` wait for the runner to take them (`discard`, `abort` and the exit's `stop` to finish them too), and one it doesn't take within 1 s runs where it was sent, and its run, ended, keeps the late runner from acting (`_outlived`). → [session](docs/architecture/session.md#state-machine-and-tick)
 - **A session start is one run** (`SessionRun`, `app/session/session_run.py`, `RunningSession.run`): its phase and per-run state, from the Start to its ending;
   each command and queued callback carries the run it was for and does nothing for another, and every ending claims its run first (`run.mark_ended()`), so one ending wins.
-  A BT-wait exit ends its run before it stops the stream; every ending undoes the start's setup on the main thread (`_undo_session_setup()`: the session's `undo_setup`, then the screen's). → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md)
+  A BT-wait exit ends its run before it stops the stream; every ending undoes the start's setup on the main thread (`SessionControls._undo()`: the session's `undo_setup`, then the screen's). → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md)
 - **No Kivy on the runner**: UI goes through the main thread.
   **No `AudioEngine.stop()`, `MediaPlayer.release()`/`stop()` on the runner**: they deadlock against the main Looper paused during screen lock.
   Every ending silences with `AudioEngine.mute()` (setVolume only), saves, then hands the players' teardown to the main thread (`RunningSession._deliver`, which plays the session's sound after the app's part of each event); a timer's gong rings last.
@@ -141,21 +142,21 @@ The linked file explains the mechanism.
 
 - **A session reaches the DB only through `SessionRecorder.checkpoint`** (`app/session/recorder.py`, `RunningSession.recorder`):
   the row and the buffered ticks in one transaction, at the 60 s flush, on leaving the app, at backup and at the final save. → [session](docs/architecture/session.md#persistence)
-- **Every ending saves through one path**: `RunningSession._finish` on the writer (mute, `persist`, the `Ended` event) + `_finalize_stop_ui` (main thread).
+- **Every ending saves through one path**: `RunningSession._finish` on the writer (mute, `persist`, the `Ended` event) + `SessionControls._finish_ui` (main thread).
   There is no discard path; a confirm that arrives after the session ended writes nothing.
   A check that ends it (stale data, the recording limit, the timer) saves it on the runner at once, so a locked phone's session is saved before the unlock;
   every queued finish runs only for its own run. → [session](docs/architecture/session.md#persistence)
-- While a session runs or connects (`RunningSession.live()`), anything that would break it is refused through `_refused_while_session_runs(doing)`:
+- While a session runs or connects (`RunningSession.live()`), anything that would break it is refused through `SessionControls.refused(doing)`:
   profile switch, Restore, the scored metric (`AudioMetric.scoring_locked`), a running program's threshold,
   Settings › Audio's Test, the device mode and a headset switch (`Headset`: any pick on Mock Data). → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
 - The Session screen shows one profile's session (`ShownSession`, `app/ui/shown_session.py`, the app's `_shown`; its `owner` set at Start):
   picking another profile drops it through `ShownSession.drop`; re-picking the shown one (allowed mid-session) resets nothing.
   Every end-card close goes through `ShownSession.close`. → [live-session-and-settings](docs/architecture/live-session-and-settings.md#session-screen)
 - **A session runs on its config** (`SessionConfig`, `app/session/session_config.py`, taken by `RunningSession.prepare` at Start): it reads no setting while it runs (`tests/test_session_config.py`).
-  A change allowed mid-session reaches its state only as an explicit call: the threshold (`_put_threshold_in_force`; the manager owns it), an edited formula line (`SessionAccess.set_formula`) and the live graph's shown lines (`set_shown`);
+  A change allowed mid-session reaches its state only as an explicit call: the threshold (`SessionControls.put_threshold_in_force`; the manager owns it), an edited formula line (`SessionAccess.set_formula`) and the live graph's shown lines (`set_shown`);
   the alert toggles are the audio engine's and apply at once. → [session](docs/architecture/session.md#state-machine-and-tick)
 - **A session is scored on the metric that drives the feedback sound** (`RunningSession.drive_key()`, `app/session/running_session.py`, the app's `_session`; the rule is `scoring.sound_metric`).
-  The Settings threshold takes effect only through `_put_threshold_in_force` (the slider and profile load go through `_apply_threshold`);
+  The Settings threshold takes effect only through `SessionControls.put_threshold_in_force` (the slider and profile load go through `SessionControls.apply_threshold`);
   the threshold has one owner, `SessionManager` (`threshold`, the base; a tick's `score_target`): the sound, the engine and the SHAMATHA pill read it per tick, never a copy. → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
 - `ProgramRun.audio_key` is transient and never written to the stored `audio_metric`;
   `PROGRAM_FORMULA_KEYS` are never persisted to `graph_series_*` or the baseline audio metric, nor a program's series set (live or a session detail's) as the profile's selection.

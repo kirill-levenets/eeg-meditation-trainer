@@ -187,7 +187,7 @@ def test_leaving_the_app_without_a_session_writes_nothing(fresh_app):
 def test_leaving_the_app_while_paused_checkpoints_the_length_before_the_pause(fresh_app):
     app = fresh_app
     _session_of(app, 60, 300)
-    app._on_pause()
+    app._controls.toggle_pause()
     app._flush_on_leave()
     duration, rows = _running_row(app)
     assert 299 <= duration <= 301 and rows == 60

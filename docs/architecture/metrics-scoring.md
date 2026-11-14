@@ -76,7 +76,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   they put Settings back (`AudioMetric.show`, `set_formula_slot`).
   The check is `AudioMetric.scoring_locked(doing)`: not `ProgramRun.active`, then the shared refusal; a program is scored on its segments' metrics, so the control stays free.
   The other slots and, in a simple session, the threshold stay editable.
-  Every such refusal is `_refused_while_session_runs(doing, why="")`: "Session in progress" / "<why> Stop the current session before <doing>.";
+  Every such refusal is `SessionControls.refused(doing, why="")`: "Session in progress" / "<why> Stop the current session before <doing>.";
   the others are the profile switch, a headset switch and the device mode, both Restore checks, Settings › Audio's Test and a running program's threshold.
   Every checkpoint passes its stats through `RunningSession.with_score`, which fills the key (the current drive key when none was scored) and adds `score_metric_name` (`FormulaSlots.line_name(key)`: the session's own formula line's name, else the line's default in `SERIES_NAMES`).
   For a program it sets `"program"`, the name the program had when the session started (`ProgramRun.name`, `"Program"` if unsaved; Settings may load or save another during the session) and a NULL `avg_score`.
@@ -91,22 +91,22 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `start()` without one keeps it, which is how a session that waited for the headset starts with a threshold changed during the wait; `threshold_used` stays the Start value (the row's).
   `SessionManager` is the threshold's one owner: the engine (`process_sample(raw, threshold)`: the state, subtle distraction) and the SHAMATHA pill read its base (`threshold`) on each tick;
   the sound reads the tick's target (`AudioEngine.update(score, threshold)` with `score["score_target"]`: a segment's, else the base), so a segment crossing moves the sound through the tick it is scored on and `ProgramRun` writes only `start_segment`.
-  `_put_threshold_in_force(value)` is the one place the Settings threshold takes effect: `SessionManager.set_threshold` and the graph's scalar line.
-  `_start_session_common` calls it directly, with a program's first target (a runner still finishing the last session must not block it).
-  The slider's settle and the registry's profile load go through `_apply_threshold(value)`, which does nothing while `_program_owns_threshold()` (`program_run.active and RunningSession.live()`);
+  `SessionControls.put_threshold_in_force(value)` is the one place the Settings threshold takes effect: `SessionManager.set_threshold` and the graph's scalar line.
+  `SessionControls._start` calls it directly, with a program's first target (a runner still finishing the last session must not block it).
+  The slider's settle and the registry's profile load go through `SessionControls.apply_threshold(value)`, which does nothing while a program runs (`program_run.active and RunningSession.live()`);
   a running program's segments own its targets, and re-picking the active profile mid-program reloads its settings, which must not put the slider's value over a segment's target.
   During a running program the threshold controls are locked:
-  `_start_session_common` locks them through `SessionSettings.started(config, _refuse_program_threshold)` (a program's start only) after the session's setup (so a start that fails in it leaves the controls as they were),
-  and every ending frees them (`_undo_session_setup` → `SessionSettings.teardown`).
+  `SessionControls._start` locks them through `SessionSettings.started(config, SessionControls.refuse_program_threshold)` (a program's start only) after the session's setup (so a start that fails in it leaves the controls as they were),
+  and every ending frees them (`SessionControls._undo` → `SessionSettings.teardown`).
   The rows are dimmed (opacity 0.5).
-  A guard bound to the slider row's and the preset row's `on_touch_down` (bound handlers run before the widget's own and stop it by returning True) hands every touch on the slider, ±5 and the presets to `_refuse_program_threshold` while locked;
+  A guard bound to the slider row's and the preset row's `on_touch_down` (bound handlers run before the widget's own and stop it by returning True) hands every touch on the slider, ±5 and the presets to `SessionControls.refuse_program_threshold` while locked;
   it takes the touch only when that refused, mouse-wheel events included (Kivy's Slider steps its value on them).
-  The refusal is `_refused_while_session_runs("changing the threshold", why=...)`, shown on every touch (a once-only message is missed after several ± clicks).
+  The refusal is `SessionControls.refused("changing the threshold", why=...)`, shown on every touch (a once-only message is missed after several ± clicks).
   It refuses only while the session pipeline is live, so between a program's end on the runner and its queued teardown the controls work rather than go dead.
   Nothing moves, so nothing is reverted or saved: a slider moved and put back on its settle would jump under a resting finger, and its value could be flushed in between.
   The slider applies the threshold through `_after_settle("apply_threshold", …)`, the per-name Clock trigger `_persist_user_setting_later` is built on (restarted on every change, 0.5 s `_PERSIST_SETTLE_S`);
   so a drag is one change at the value it settles on, not a target per slider step on every tick it spans.
-  Start cancels a pending one (`_cancel_settle("apply_threshold")`), since the start reads the slider itself.
+  One still pending at a Start fires after it: it puts the slider's value in force again, the one the start read (harmless), and a running program refuses it (`SessionControls.apply_threshold`).
   A profile load that moves the slider schedules one too, which applies the same value again (harmless).
   With no session pipeline live, a slider change (`_on_threshold_change`, which Kivy calls only when the value changes, a profile switch to another stored threshold included) clears a finished session off the Session screen;
   `ShownSession.clear` does it (graphs, mirrors, threshold steps and readout; also run at Start and on a change of profile), since the finished session's stepped line would otherwise outrank the new scalar line.

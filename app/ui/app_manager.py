@@ -26,18 +26,9 @@ from app.metrics.formula_slots import (
 )
 from app.session.manager import SessionState
 from app.session.running_session import RunningSession
-from app.session.session_events import (
-    Alert,
-    Connected,
-    Ended,
-    LinkChanged,
-    Notice,
-    StartFailed,
-)
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
 )
-from app.session.session_run import Phase, SessionRun
 from app.settings.registry import (
     BOOL,
     FLOAT,
@@ -67,6 +58,7 @@ from app.ui.power_exemption import PowerExemption
 from app.ui.profiles import ProfileGate, Profiles
 from app.ui.program_settings import ProgramSettings
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
+from app.ui.session_controls import SessionControls
 from app.ui.session_detail_flow import SessionDetailFlow
 from app.ui.session_settings import SessionSettings
 from app.ui.settings_screen import (
@@ -118,7 +110,6 @@ class EEGMeditationApp(App):
         self._settle_fns: dict = {}  # input name -> the function its trigger runs (the latest one given)
         self._formulas: FormulaSlots = FormulaSlots()
         self.serial_device_override: str | None = None
-        self._stop_confirm = None  # "Stop session?" while it is open: an ending under it closes it
 
     def _persist_user_setting(self, key: str) -> None:
         """Persist one setting now via the registry (it reads the live value); no-op mid-load or unbuilt."""
@@ -162,11 +153,6 @@ class EEGMeditationApp(App):
             ev = triggers[name] = Clock.create_trigger(lambda _dt: fns[name](), self._PERSIST_SETTLE_S)
         ev.cancel()  # restart the settle window on every change
         ev()
-
-    def _cancel_settle(self, name: str) -> None:
-        ev = getattr(self, "_settle_triggers", {}).get(name)
-        if ev is not None:
-            ev.cancel()
 
     # Map bottom-nav tab keys to screen groups
     _TAB_SCREENS = {
@@ -232,7 +218,7 @@ class EEGMeditationApp(App):
         self._headset = Headset(self._ctx, self._real_stream, self._settings_screen.device, self._live_screen,
                                 serial_override=lambda: self.serial_device_override)
         self._headset.load_aliases()
-        self._session = RunningSession(self._ctx, self._audio, self._headset, on_event=self._on_session_event)
+        self._session = RunningSession(self._ctx, self._audio, self._headset, on_event=lambda event: self._controls.on_event(event))
         self._sounds = SoundSources(self._ctx, self._audio, self._settings_screen.timer)
         self._audio_metric = AudioMetric(self._ctx, self._session.program_run, self._settings_screen)
         self._program_settings = ProgramSettings(
@@ -247,6 +233,8 @@ class EEGMeditationApp(App):
         self._history = HistoryFlow(self._ctx, self._history_screen, self._formulas, self._loading_overlay,
                                     on_sessions_deleted=lambda ids: self._shown.on_sessions_deleted(ids))
         self._shown = ShownSession(self._ctx, self._live_screen, self._audio, self._history, self._session)
+        self._controls = SessionControls(self._ctx, self._session, self._shown, self._session_settings, self._headset,
+                                         self._sounds)
         self._detail = SessionDetailFlow(self._ctx, self._diary_screen, self._history_screen, self._sm,
                                          self._graph_series)
         self._gate = ProfileGate(
@@ -262,7 +250,7 @@ class EEGMeditationApp(App):
         """What every flow reaches the app through; the callables read the app when called, so they see the profile and
         the session as they are then."""
         session = SessionAccess(live=lambda: self._session.live(), running_id=lambda: self._session.running_id(),
-                                refused=self._refused_while_session_runs, discard=self._discard_running_session,
+                                refused=lambda doing, why="": self._controls.refused(doing, why), discard=lambda: self._controls.discard(),
                                 set_formula=lambda idx, name, formula: self._session.set_formula(idx, name, formula))
         return AppContext(db=self._db, user_id=lambda: self._current_user_id, activate_user=self._activate_user,
                           require_user=self._require_user, on_main=self._on_main, switch_screen=self._switch_screen,
@@ -316,24 +304,24 @@ class EEGMeditationApp(App):
 
     def _wire_session_screen(self) -> None:
         """The Session screen's controls, its end card, its graphs' glyphs and the series its graph starts with."""
-        self._live_screen.btn_start.bind(on_release=self._on_start)
-        self._live_screen.btn_pause.bind(on_release=self._on_pause)
-        self._live_screen.btn_stop.bind(on_release=self._on_stop)
-        self._live_screen.btn_marker.bind(on_release=self._on_marker)
+        self._live_screen.btn_start.bind(on_release=lambda _b: self._controls.start())
+        self._live_screen.btn_pause.bind(on_release=lambda _b: self._controls.toggle_pause())
+        self._live_screen.btn_stop.bind(on_release=lambda _b: self._controls.stop())
+        self._live_screen.btn_marker.bind(on_release=lambda _b: self._controls.mark())
         wire(
             self._live_screen,
             on_duration_preset=self._program_settings.on_duration_preset,
             on_program_pick=self._program_settings.on_load,
         )
-        self._live_screen.overlay_cancel_btn.bind(on_release=self._on_connect_cancel)
-        self._live_screen.overlay_retry_btn.bind(on_release=self._on_connect_retry)
+        self._live_screen.overlay_cancel_btn.bind(on_release=lambda _b: self._controls.cancel())
+        self._live_screen.overlay_retry_btn.bind(on_release=lambda _b: self._controls.retry())
         self._live_screen.summary_ok_btn.bind(on_release=self._shown.on_ok)
         self._live_screen.summary_save_notes_btn.bind(on_release=self._shown.on_save_notes)
         self._live_screen.summary_delete_btn.bind(on_release=self._shown.on_delete)
 
         # Tap on graph to set marker (Android — no keyboard available)
         if android_jni.on_android():
-            wire(self._live_screen.graph, on_tap=self._on_marker)
+            wire(self._live_screen.graph, on_tap=lambda *_a: self._controls.mark())
         wire(self._live_screen, on_lines_shown=self._session.set_shown)
 
         # Shared fullscreen-expand + series-picker glyphs on every graph
@@ -498,50 +486,6 @@ class EEGMeditationApp(App):
                 self._bottom_nav.active_tab = tab_key
                 break
 
-    def _on_start(self, *args) -> None:
-        if not self._current_user_id:
-            self._live_screen.update_state("Select a user profile first")
-            logger.warning("Session start blocked: no user selected")
-            return
-
-        run = self._session.open(self._current_user_id)
-        if APP.USE_MOCK_DEVICE or self._real_stream._device_address:  # the profile's headset, or one picked in Settings
-            self._session.stream = self._session.mock_stream if APP.USE_MOCK_DEVICE else self._real_stream
-            self._start_session_common()
-            return
-        # No headset selected: find the profile's among the paired devices, then connect
-        self._live_screen.show_overlay("Scanning for MindWave...")
-        self._live_screen.set_controls_running()
-        logger.info("Auto-scanning for BT device before session start")
-        self._headset.find_paired(lambda devices: self._start_after_scan(run, devices))
-
-    def _start_after_scan(self, run: SessionRun, devices: list[dict]) -> None:
-        """Main thread: the Start's scan of the paired devices ended; start on the profile's headset if it found one,
-        else say what to do."""
-        if run is not self._session.run:
-            return  # cancelled while scanning
-        if run.user_id != self._current_user_id:
-            self._cancel_session_start("IDLE")  # the Start was the profile picked away while it scanned
-            return
-        mindwaves = self._headset.adopt(devices)
-        if self._real_stream._device_address:
-            self._session.stream = self._real_stream
-            self._live_screen.update_overlay(f"Found {self._headset.name()}\nConnecting...")
-            self._start_session_common()
-            return
-        self._live_screen.set_controls_idle()
-        if mindwaves:
-            self._live_screen.hide_overlay()
-            self._switch_screen("settings")
-            self._settings_screen.device.focus_device_section(
-                f"Found {len(mindwaves)} MindWave devices.\nPick the one you want to use, then press Start again.")
-        elif devices:
-            self._live_screen.show_overlay_retry("No MindWave found among paired devices.\n"
-                                                 "Pair it in system Bluetooth settings,\nor select manually in Settings tab.")
-        else:
-            self._live_screen.show_overlay_retry("No paired Bluetooth devices found.\n"
-                                                 "Pair your MindWave in system\nBluetooth settings first.")
-
     def _on_main(self, fn) -> None:
         """Queue callable on Kivy's main thread.
 
@@ -551,54 +495,6 @@ class EEGMeditationApp(App):
         Clock.schedule_once(lambda dt: fn(), 0)
 
     # ------------------------------------------------------------------
-
-    def _start_session_common(self) -> None:
-        """Shared session startup logic after device is resolved: Settings read into the session's config, the screen made
-        ready, then the session's own start."""
-        self._shown.take(self._current_user_id)
-        self._cancel_settle("apply_threshold")  # a slider move just before Start: the start applies the slider itself
-        mock = self._session.stream is self._session.mock_stream  # the stream this Start chose
-        config = self._session_settings.read(mock=mock, device="Mock" if mock else self._headset.name(),
-                                             graph=self._live_screen.graph)
-        self._put_threshold_in_force(config.threshold)  # this session's, whatever the last one left running
-        self._session.prepare(config, self._sounds.prepare_session(config.program, config.gong))
-        self._live_screen.set_training_series(None)  # set on first segment crossing
-        self._live_screen.set_controls_running()
-        self._session_settings.started(config, self._refuse_program_threshold)
-        self._session.connect()  # a refused reader undoes all of the above at once (StartFailed)
-
-    def _undo_failed_start(self, message: str) -> None:
-        """Main thread: a start whose BT wait ended without a session is undone, and Retry offered."""
-        self._undo_session_setup()
-        self._shown.show_retry(message, self._headset.name())
-
-    def _on_connect_cancel(self, *args) -> None:
-        """Cancel button on connection overlay."""
-        self._cancel_session_start("IDLE")
-
-    def _cancel_session_start(self, state: str) -> None:
-        """End a start that hasn't become a session: the device scan, the BT wait, or data that arrived in the same frame
-        as the Cancel."""
-        run = self._session.run
-        if run is not None and run.phase is not Phase.STARTING:  # it reached the BT wait (or its give-up, just now)
-            self._session.abort()
-            self._shown.owner = None  # no session came of the start, which emptied the display
-        self._live_screen.hide_overlay()
-        self._undo_session_setup()  # also resets a session that started in the frame of the Cancel
-        self._live_screen.update_state(state)
-
-    def _undo_session_setup(self) -> None:
-        """Main thread: undo what _start_session_common set up, for a session that ended or never started: the session's
-        part (its run dropped, so what is still queued for it does nothing), then the screen's."""
-        self._session.undo_setup()
-        self._shown.idle()
-        self._session_settings.teardown()
-
-    def _on_connect_retry(self, *args) -> None:
-        """Retry button on connection overlay."""
-        self._live_screen.hide_overlay()
-        self._live_screen.set_controls_idle()
-        self._on_start()
 
     def _flush_on_leave(self) -> None:
         """Persist what the user changed but hasn't saved, before the app pauses or exits."""
@@ -615,80 +511,6 @@ class EEGMeditationApp(App):
         finally:
             self._leaving = False
 
-    def _on_pause(self, *args) -> None:
-        """The Pause / Resume button: the session's runner pauses or resumes it, and its event updates the screen."""
-        self._session.toggle_pause()
-
-    def _on_stop(self, *args) -> None:
-        # Decided by the session, not the run's phase: a wait that has just ended is over before its idle UI shows.
-        if self._session.manager.state == SessionState.FINISHED:
-            logger.info("Stop ignored: the session has already ended and its teardown is queued")
-            return
-        if self._session.manager.state not in (SessionState.RUNNING, SessionState.PAUSED):
-            self._cancel_session_start("Cancelled")
-            logger.info("Session cancelled before it started")
-            return
-
-        # The session goes on recording while the dialog is open: Cancel loses nothing, Stop saves up to then. Every
-        # ending saves (the same path as a timer or lost-signal stop); deleting is a confirmed card action.
-        self._stop_confirm = self._confirm_action(
-            "Stop session?", "The session will be saved. You can delete it on the next screen.",
-            "Stop", lambda: self._stop_and_save(reason="user"))
-
-    def _finalize_stop_ui(self, stats: dict | None, session_id: int | None) -> None:
-        """Main thread, after a session was saved (or discarded): the whole session on the graphs, the session and the
-        screen back to idle, then FINISHED and the end card."""
-        self._shown.reload_whole()  # before the reset: the score is the manager's
-        self._undo_session_setup()
-        self._shown.finished(stats, session_id)
-        self._session_settings.saved()
-
-    def _refused_while_session_runs(self, doing: str, why: str = "") -> bool:
-        """True, after telling the user, while a session runs or connects: until it stops it owns its profile, the
-        database it saves to, the metric it is scored on and a program's targets."""
-        if not self._session.live():
-            return False
-        self._info_popup("Session in progress", f"{why} Stop the current session before {doing}.".lstrip())
-        return True
-
-    def _discard_running_session(self) -> None:
-        """Halt a running session and DELETE its data — used when its owning profile is deleted. A checkpoint (the 60 s
-        flush, leaving the app, a backup) may already have written a session row under the doomed profile; without the
-        delete it survives as an orphan. The screen returns to idle at once, before the profile's delete goes on."""
-        self._session.discard()  # waits for the runner: the row is gone when it returns, the players torn down
-        self._finalize_stop_ui(None, None)
-
-    def _stop_and_save(self, reason: str = "user") -> None:
-        """Stop the session and save it (no dialog): its runner ends and saves it, and its Ended event tears the screen
-        down, as every ending does."""
-        self._session.stop(reason)
-
-    def _on_session_event(self, event) -> None:
-        """Main thread: the session's events, its runner's for the current run, and those its start and a program's end
-        raise here."""
-        match event:
-            case Connected(on_mock=on_mock):
-                if not on_mock:
-                    self._headset.show_selected()
-                self._shown.show(event)
-            case StartFailed(message=message):
-                self._shown.owner = None  # no session came of the start, which emptied the display
-                self._undo_failed_start(message)
-            case Ended(stats=stats, session_id=session_id, alert=alert):
-                if self._stop_confirm is not None:  # the timer or a check ended it under "Stop session?"
-                    self._stop_confirm.dismiss()
-                    self._stop_confirm = None
-                if alert:
-                    self._shown.show(Alert(alert))
-                self._finalize_stop_ui(stats, session_id)
-                logger.info("Session ended and saved" if stats else "Session ended")
-            case LinkChanged():
-                self._headset.show_selected()
-            case Notice(title=title, message=message):
-                self._info_popup(title, message)
-            case _:
-                self._shown.show(event)
-
     def _on_key_down(self, window, key, scancode, codepoint, modifiers) -> bool:
         """Handle keyboard hotkey for marker."""
         # Don't capture keys while settings hotkey picker is active
@@ -699,7 +521,7 @@ class EEGMeditationApp(App):
             return False
         pressed = codepoint if codepoint else str(key)
         if pressed == hotkey:
-            self._on_marker()
+            self._controls.mark()
             return True
         return False
 
@@ -741,36 +563,13 @@ class EEGMeditationApp(App):
         else:
             show_toast(message)
 
-    def _on_marker(self, *args) -> None:
-        """Place a marker on the session's next recorded tick."""
-        self._session.mark()
-
     def _on_threshold_change(self, value: int) -> None:
         if self._shown.mirror.metrics and not self._session.live():
             self._shown.clear()  # the last session's line is not the threshold the next one runs against
         # A drag is one change of the threshold in force, at the value it settles on, not one per slider step.
-        self._after_settle("apply_threshold", lambda: self._apply_threshold(self._settings_screen.threshold))
+        self._after_settle("apply_threshold", lambda: self._controls.apply_threshold(self._settings_screen.threshold))
         self._persist_user_setting_later("threshold")
         logger.debug(f"Threshold changed to {value}")
-
-    def _program_owns_threshold(self) -> bool:
-        """A running program's segments own its targets: the Settings threshold waits for the next session."""
-        return self._session.program_run.active and self._session.live()
-
-    def _refuse_program_threshold(self) -> bool:
-        """A touch on the threshold controls a program locked: True, after saying why, until the session ends."""
-        return self._refused_while_session_runs("changing the threshold", why="This program sets its own targets.")
-
-    def _apply_threshold(self, value: int) -> None:
-        """Put the Settings threshold in force, unless a running program owns it (a profile reload, a late settle)."""
-        if not self._program_owns_threshold():
-            self._put_threshold_in_force(value)
-
-    def _put_threshold_in_force(self, value: int) -> None:
-        """The session manager owns the threshold; the graph draws it until ticks step the line. A session start calls
-        it directly."""
-        self._session.set_threshold(value)  # also what a session waiting for the headset starts with
-        self._live_screen.graph.set_threshold(float(value))
 
     def _on_line_width_change(self, width: float) -> None:
         self._change_setting("line_width", width)
@@ -865,7 +664,7 @@ class EEGMeditationApp(App):
 
         def set_threshold(v):
             ss.threshold = v
-            self._apply_threshold(v)
+            self._controls.apply_threshold(v)
 
         def apply_use_mock(v):
             APP.USE_MOCK_DEVICE = v; ss.device._device_mode_cb.active = v  # an unchanged value doesn't re-fire its hook
@@ -1078,10 +877,10 @@ class EEGMeditationApp(App):
         """Sync UI to current session state after Android resume.
 
         If the session is no longer RUNNING (e.g. timer expired during
-        pause and ``_finish_on_main`` already fired ``_stop_and_save`` →
+        pause and the session's runner already ended it →
         the summary card now covers the live screen), skip the graph
         reload entirely. Combining 3 graph reloads with the heavy work
-        in ``_stop_and_save`` on the first frame after resume previously
+        of the ending on the first frame after resume previously
         blocked the UI thread long enough to trigger an Android ANR
         ('App not responding' / black screen).
 

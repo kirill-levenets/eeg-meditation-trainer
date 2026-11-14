@@ -56,7 +56,7 @@ def test_a_cleared_mirror_forgets_its_markers():
 
 def test_a_marked_tick_is_mirrored_with_its_marker(fresh_app, monkeypatch):
     fed = FedSession(fresh_app, monkeypatch)
-    fresh_app._on_marker()  # the Mark button
+    fresh_app._controls.mark()  # the Mark button
     fed.tick()
     fed.tick()
     assert fresh_app._shown.mirror.marks == [(0, 2)]  # the first tick, its third raw sample
@@ -67,7 +67,7 @@ def test_the_live_graphs_and_a_reload_put_a_marker_in_the_same_places(fresh_app,
     fed = FedSession(app, monkeypatch)
     for i in range(3):
         if i == 1:
-            app._on_marker()
+            app._controls.mark()
         fed.tick(raw_sample(seed=float(i)), tick_metrics(seed=float(i)))
     reloaded = LiveSessionScreen()
     reloaded.load_mirror(app._shown.mirror.snapshot())

@@ -157,7 +157,7 @@ def test_an_ending_stops_the_mock_stream_and_keeps_the_headsets_link(fresh_app, 
     session = HeadsetSession(app, monkeypatch) if on_headset else FedSession(app, monkeypatch)
     real, mock = calls_of(monkeypatch, app._real_stream, "stop"), calls_of(monkeypatch, app._session.mock_stream, "stop")
     session.tick()
-    app._stop_and_save()
+    app._controls.stop_and_save()
     frames()
     assert (real, bool(mock)) == ([], not on_headset)
 

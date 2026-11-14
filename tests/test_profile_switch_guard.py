@@ -22,7 +22,7 @@ def _current(app) -> str:
 
 def test_switch_is_refused_while_a_session_runs(app):
     mine = _current(app)
-    app._on_start()
+    app._controls.start()
     app._settings_screen._profile_current_label.text = "Current: B"  # what the picker's tap showed
     app._profiles.on_switch(app.other)
     frames()

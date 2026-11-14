@@ -41,7 +41,7 @@ def _run(fed: FedSession, ticks) -> dict:
 
 def _saved(app) -> dict:
     """End the session; its stored row."""
-    app._stop_and_save()
+    app._controls.stop_and_save()
     frames()
     return app._db.get_all_sessions(app._current_user_id)[0]
 
@@ -74,7 +74,7 @@ def test_a_metric_held_mid_session_scores_the_next_session(fresh_app, monkeypatc
     stats = _run(fed, SHAMATHA_HIGH[3:])  # shamatha: tick 5 above (95), tick 4 not
     assert stats["score_metric_key"] == "shamatha_score" and stats["time_above_threshold"] == 2
     assert marks == [("shamatha_score",)]  # the legend marked once, at the first tick
-    fresh_app._stop_and_save()
+    fresh_app._controls.stop_and_save()
     frames()
     fresh_app._shown.close(keep_notes=False)
     assert _run(FedSession(fresh_app, monkeypatch), SHAMATHA_HIGH)["score_metric_key"] == "meditation_score"

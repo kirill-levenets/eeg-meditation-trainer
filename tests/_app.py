@@ -87,7 +87,7 @@ def start_ticked_by_hand(app, ticks: int = 0) -> None:
     they are sent), then `ticks` of them."""
     app._session.start_running = lambda: None  # over the method, for this Start only
     try:
-        app._on_start()
+        app._controls.start()
     finally:
         del app._session.start_running
     for _ in range(ticks):
@@ -235,7 +235,7 @@ def start_connecting(app, monkeypatch, *, runner: bool = False) -> None:
         monkeypatch.setattr(app._session, "start_running", lambda: None)
     app._change_setting("use_mock", False)
     app._real_stream.set_device(*HEADSET)
-    app._on_start()
+    app._controls.start()
 
 
 def _environment(monkeypatch, db_path) -> list:
@@ -331,9 +331,9 @@ class SharedApp:
         if app._session.ui_paused:
             app.on_resume()
         if app._session.live():
-            app._discard_running_session()
+            app._controls.discard()
         if app._session.run is not None:  # a Start that never became a session: still scanning, or asked to pick one
-            app._cancel_session_start("IDLE")
+            app._controls.cancel("IDLE")
         _join_runner(app)
         frames()  # what the test queued lands before its popups are closed
         _close_modals()

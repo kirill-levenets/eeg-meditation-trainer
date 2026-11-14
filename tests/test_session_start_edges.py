@@ -92,14 +92,14 @@ def test_stop_after_a_failed_wait_cleans_up_without_offering_to_save(waiting, mo
     app = waiting.app
     waiting.ends("failed")
     waiting.first_data()  # the wait just ended on the writer; the controls still show Stop; nothing was started
-    app._on_stop()
+    app._controls.stop()
     assert popups() == []  # no "Stop session? It will be saved" for a session that never existed
     assert not app._live_screen._btn_start.disabled and app._session.run is None
 
 
 def test_stop_during_a_running_session_still_asks(fresh_app):
     start_ticked_by_hand(fresh_app)
-    fresh_app._on_stop()
+    fresh_app._controls.stop()
     assert [p.title for p in popups()] == ["Stop session?"]
 
 
@@ -112,7 +112,7 @@ def test_stop_after_the_timer_ended_the_session_leaves_its_teardown_alone(fresh_
     assert app._session.manager.state == SessionState.FINISHED
     stream_stops = calls_of(monkeypatch, app._real_stream, "stop")
     states = calls_of(monkeypatch, app._live_screen, "update_state")
-    app._on_stop()
+    app._controls.stop()
     assert stream_stops == [] and popups() == [] and states == []  # the kept-alive headset link stays up
 
 
@@ -123,7 +123,7 @@ def test_a_cancel_in_the_frame_the_session_starts_leaves_no_session_running(wait
     app = waiting.app
     waiting.first_data()  # data arrived: the session starts and its "Running" UI + audio are queued
     assert app._session.manager.state == SessionState.RUNNING
-    app._on_connect_cancel()  # the Cancel tap, handled before the queued callback
+    app._controls.cancel()  # the Cancel tap, handled before the queued callback
     frames()
     assert waiting.audio_starts == [] and _idle(app) and not waiting.shown_running()
 
@@ -158,7 +158,7 @@ def test_a_cancel_while_the_runner_is_stuck_in_its_read_ends_the_start_itself(fr
     app._session._runner, app._session._commands = runner, queue.Queue()  # the run's runner, in its read
     runner.start()
     assert in_read.wait(2)
-    app._on_connect_cancel()  # waits a second for the runner, then aborts here
+    app._controls.cancel()  # waits a second for the runner, then aborts here
     release.set()
     runner.join(2)
     frames()
@@ -169,7 +169,7 @@ def test_a_tick_that_outlives_the_cancel_shows_nothing(waiting, monkeypatch):
     # The Cancel's 1 s join timed out: the tick reads the first data after the Cancel has finished, and acts on nothing.
     app = waiting.app
     tick, release = _tick_held_in_its_read(waiting, monkeypatch)
-    app._on_connect_cancel()  # the tick loop is the test's: its stop returns without this tick, like a timed-out join
+    app._controls.cancel()  # the tick loop is the test's: its stop returns without this tick, like a timed-out join
     release.set()
     tick.join(2)
     frames()
@@ -179,7 +179,7 @@ def test_a_tick_that_outlives_the_cancel_shows_nothing(waiting, monkeypatch):
 
 def test_a_first_data_tick_that_outlived_its_run_starts_nothing(waiting, monkeypatch):
     app, old = waiting.app, waiting.run
-    app._on_connect_cancel()  # a Cancel and a new Start while the tick read the first data
+    app._controls.cancel()  # a Cancel and a new Start while the tick read the first data
     waiting.session.connected = False  # the Cancel closed the link: the new Start waits for its own
     start_connecting(app, monkeypatch)
     new = app._session.run
@@ -205,7 +205,7 @@ def test_a_cancel_in_the_frame_the_wait_gave_up_frees_the_display(waiting):
     app = waiting.app
     waiting.ends("failed")
     waiting.first_data()
-    app._on_connect_cancel()
+    app._controls.cancel()
     frames()
     assert app._shown.owner is None and app._session.run is None
 
@@ -215,7 +215,7 @@ def test_a_wait_exit_queued_before_a_cancel_leaves_the_next_start_alone(waiting,
     app = waiting.app
     waiting.ends(exit_case)
     waiting.first_data()  # the wait ended on the tick thread; its retry screen is queued
-    app._on_connect_cancel()
+    app._controls.cancel()
     app._change_setting("use_mock", True)
     start_ticked_by_hand(app)  # the next Start, handled before the queued retry screen
     frames()
@@ -224,7 +224,7 @@ def test_a_wait_exit_queued_before_a_cancel_leaves_the_next_start_alone(waiting,
 
 def test_deleting_the_profile_in_the_frame_the_session_starts_leaves_no_audio_playing(waiting):
     waiting.first_data()  # data arrived: the "Running" UI + audio are queued
-    waiting.app._discard_running_session()
+    waiting.app._controls.discard()
     frames()
     assert waiting.audio_starts == [] and not waiting.shown_running()
 
@@ -251,15 +251,15 @@ def _connecting(app) -> bool:
 
 def test_cancel_during_the_device_scan_does_not_start_the_session(scanning):
     app, paired = scanning
-    app._on_start()  # "Scanning for MindWave..."; the scan result is queued
-    app._on_connect_cancel()
+    app._controls.start()  # "Scanning for MindWave..."; the scan result is queued
+    app._controls.cancel()
     paired.arrive()
     assert app._session.run is None and not _connecting(app) and app._real_stream._device_address is None
 
 
 def test_a_scan_result_still_starts_the_session_without_a_cancel(scanning):
     app, paired = scanning
-    app._on_start()
+    app._controls.start()
     paired.arrive()
     assert _connecting(app) and app._real_stream._device_address == HEADSET[0]
 
@@ -268,7 +268,7 @@ def test_a_settings_test_played_during_the_scan_ends_when_the_session_starts(sca
     # The run isn't live while it scans, so Settings' Test is allowed then; left playing, the session's start would
     # find the engine playing and never start its feedback.
     app, paired = scanning
-    app._on_start()
+    app._controls.start()
     app._settings_screen.audio.on_test_audio()
     assert app._audio._test_active
     paired.arrive()
@@ -281,7 +281,7 @@ def test_a_scan_result_for_a_profile_picked_away_ends_the_start(scanning):
     app, paired = scanning
     other = app._db.create_user("other")
     app._db.set_user_setting(other, "use_mock", "True")
-    app._on_start()
+    app._controls.start()
     app._profiles.on_switch(other)  # picked in Settings while the scan ran
     paired.arrive()
     assert app._session.run is None and app._real_stream._device_address is None
@@ -292,7 +292,7 @@ def test_a_scan_result_for_a_profile_picked_away_ends_the_start(scanning):
 def test_a_wait_tick_that_outlived_its_run_ends_nothing(waiting, monkeypatch):
     # The tick read its run, then a Cancel and a new Start replaced it: the new run owns the stream now.
     app, old = waiting.app, waiting.run
-    app._on_connect_cancel()
+    app._controls.cancel()
     waiting.session.connected = False
     start_connecting(app, monkeypatch)
     new = app._session.run
@@ -327,14 +327,14 @@ def test_an_ending_derives_the_idle_series_once_the_session_no_longer_reads_live
     app._program_settings.on_mode_change("simple")  # while it waits: the idle series is derived at its ending
     program_waiting.first_data()
     assert app._session.manager.state == SessionState.RUNNING and app._live_screen.graph.is_visible("program_formula")
-    app._on_connect_cancel()
+    app._controls.cancel()
     graph = app._live_screen.graph
     assert graph.visible_keys() == ["shamatha_score"] and graph.program_keys == frozenset()  # the profile's own
 
 
 def test_a_cancelled_program_session_derives_the_idle_series_and_leaves_no_program_state(program_waiting):
     app = program_waiting.app
-    app._on_connect_cancel()
+    app._controls.cancel()
     assert not app._session.program_run.active and app._session.run is None
     assert app._live_screen.graph.is_visible("program_formula")  # program mode still: its preview, derived again
 
@@ -400,7 +400,7 @@ def test_a_link_kept_from_the_last_session_starts_the_session_at_once(fresh_app,
     app._real_stream.set_device(*HEADSET)
     app._session.start_running = lambda: None  # no runner: nothing is read from the stand-in link
     try:
-        app._on_start()
+        app._controls.start()
     finally:
         del app._session.start_running
     assert app._session.run.phase is Phase.STARTED and app._session.manager.state == SessionState.RUNNING
@@ -424,12 +424,12 @@ def test_the_tick_drives_the_wait_until_its_first_data_starts_the_session(waitin
 
 def test_a_marker_is_placed_only_in_a_running_session(fresh_app):
     app = fresh_app
-    app._on_marker()  # no Start yet
+    app._controls.mark()  # no Start yet
     start_ticked_by_hand(app)
     run = app._session.run
-    app._on_pause()
-    app._on_marker()  # paused
+    app._controls.toggle_pause()
+    app._controls.mark()  # paused
     assert not run.pending_marker
-    app._on_pause()  # resumed
-    app._on_marker()
+    app._controls.toggle_pause()  # resumed
+    app._controls.mark()
     assert run.pending_marker  # the next recorded tick carries it

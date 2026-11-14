@@ -66,7 +66,7 @@ def test_the_shamatha_pill_crosses_at_the_base_in_force(fresh_app, monkeypatch):
     for _ in range(3):  # three ticks above the base of 50: the pill comes on
         fed.tick(metrics=calm)
     assert fresh_app._session.run.shamatha_active
-    fresh_app._apply_threshold(70)  # the slider settled above the score
+    fresh_app._controls.apply_threshold(70)  # the slider settled above the score
     for _ in range(3):
         fed.tick(metrics=calm)
     assert not fresh_app._session.run.shamatha_active
@@ -94,7 +94,7 @@ def test_the_sound_and_the_engine_read_the_ticks_target_and_the_base(fresh_app, 
 
 def test_a_new_threshold_is_the_next_ticks_target_and_the_base(fresh_app, monkeypatch):
     _simple(fresh_app, monkeypatch)
-    fresh_app._apply_threshold(85)
+    fresh_app._controls.apply_threshold(85)
     assert _next_target(fresh_app) == 85 and fresh_app._session.manager.threshold == 85  # the one owner, read per tick
 
 
@@ -102,16 +102,16 @@ def test_a_new_threshold_never_reaches_a_running_program(fresh_app, monkeypatch)
     # A settle that lands late, or the profile's settings reloaded (re-picking the active profile), mid-program.
     fed = _program(fresh_app, monkeypatch)
     fed.tick()
-    fresh_app._apply_threshold(85)
+    fresh_app._controls.apply_threshold(85)
     assert _next_target(fresh_app) == 60 and fresh_app._session.manager.threshold == 60  # the segment's stays in force
 
 
 def test_after_a_program_session_the_slider_applies_again(fresh_app, monkeypatch):
     app_ = fresh_app
     _program(app_, monkeypatch).tick()
-    app_._stop_and_save()
+    app_._controls.stop_and_save()
     frames()
-    app_._apply_threshold(85)
+    app_._controls.apply_threshold(85)
     assert app_._session.manager.threshold == 85
 
 
@@ -131,7 +131,7 @@ def test_a_slider_drag_is_one_change_at_the_value_it_settles_on(fresh_app, monke
 def test_a_session_waiting_for_the_headset_starts_with_the_threshold_set_during_the_wait(wait):  # noqa: F811
     a, stream, tick = wait
     tick(6.0, connected=True)
-    a._apply_threshold(85)
+    a._controls.apply_threshold(85)
     tick(7.0, connected=True, bands=5.0, packet=True)
     assert a._session.manager.state == SessionState.RUNNING
     assert _next_target(a) == 85
@@ -154,7 +154,7 @@ def test_each_ticks_row_and_mirror_point_record_its_target(fresh_app, monkeypatc
     drawn = _points_drawn(app_, monkeypatch)
     for i in range(3):
         if i == 2:
-            app_._apply_threshold(85)
+            app_._controls.apply_threshold(85)
         fed.tick(metrics=tick_metrics(seed=80.0))
     assert [(r["score_key"], r["score_value"], r["score_target"]) for r in app_._session.recorder._buffer] == [
         ("shamatha_score", 80.0, 70), ("shamatha_score", 80.0, 70), ("shamatha_score", 80.0, 85)]
@@ -201,7 +201,7 @@ def test_a_tick_the_session_paused_under_is_not_recorded(fresh_app, monkeypatch)
         return real_add(metric)
 
     monkeypatch.setattr(app_._session.manager, "add_metric", pause_first)
-    app_._on_marker()
+    app_._controls.mark()
     fed.tick()
     assert app_._session.recorder._buffer == [] and len(app_._shown.mirror.metrics) == 0
     assert app_._live_screen.graph.total_points == 0
@@ -214,7 +214,7 @@ def test_the_live_graph_reloaded_from_the_mirror_steps_its_line(fresh_app, monke
     fed = _simple(app_, monkeypatch)
     for i in range(4):
         if i == 2:
-            app_._apply_threshold(85)
+            app_._controls.apply_threshold(85)
         fed.tick(metrics=tick_metrics(seed=80.0))
     app_._live_screen.graph.set_threshold_steps(None)
     app_._live_screen.load_mirror(app_._shown.mirror.snapshot())
@@ -326,7 +326,7 @@ def test_a_settle_runs_the_latest_function_given_for_its_input(fresh_app):
 
 def test_a_touch_on_the_locked_controls_says_why_while_the_program_runs(fresh_app, monkeypatch):
     _program(fresh_app, monkeypatch)
-    assert fresh_app._refuse_program_threshold() is True
+    assert fresh_app._controls.refuse_program_threshold() is True
     (popup,) = popups()
     assert (popup.title, popup_message(popup)) == (
         "Session in progress", "This program sets its own targets. Stop the current session before changing the "
@@ -339,7 +339,7 @@ def test_a_touch_after_the_program_ended_is_not_refused(fresh_app, monkeypatch):
     fed.end_by_timer_on_next_tick()
     fed.tick(shown=False)
     assert fresh_app._session.manager.state == SessionState.FINISHED
-    assert fresh_app._refuse_program_threshold() is False and popups() == []
+    assert fresh_app._controls.refuse_program_threshold() is False and popups() == []
 
 
 @pytest.mark.parametrize("program", [False, True])
@@ -347,8 +347,8 @@ def test_a_program_session_locks_the_threshold_controls_and_its_end_unlocks_them
     app_ = fresh_app
     (_program if program else _simple)(app_, monkeypatch)
     lock = app_._settings_screen._threshold_lock
-    assert (lock == app_._refuse_program_threshold) if program else (lock is None)
-    app_._stop_and_save()  # every ending
+    assert (lock == app_._controls.refuse_program_threshold) if program else (lock is None)
+    app_._controls.stop_and_save()  # every ending
     frames()
     assert app_._settings_screen._threshold_lock is None
 
@@ -423,7 +423,7 @@ def test_a_program_start_that_fails_in_its_setup_leaves_the_controls_unlocked(fr
 
     monkeypatch.setattr(app_._session.program_run, "begin", failing)
     with pytest.raises(RuntimeError):
-        app_._on_start()
+        app_._controls.start()
     assert app_._settings_screen._threshold_lock is None
 
 
@@ -441,7 +441,7 @@ def _ended(app_, monkeypatch, fed_session=_simple) -> None:
     fed = fed_session(app_, monkeypatch)
     for _ in range(3):
         fed.tick()
-    app_._stop_and_save()
+    app_._controls.stop_and_save()
     frames()
     app_._shown.on_ok()
     assert app_._live_screen.graph.total_points == 3

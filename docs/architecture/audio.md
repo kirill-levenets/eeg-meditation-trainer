@@ -51,7 +51,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   — so a chirp every ~10 s rides the same looping player + volume ramp with **no** tick-loop scheduling, and the silent loop edges keep it gapless.
   It's **reward-only**: `_REWARD_SOURCE_OPTIONS` offers it as "Crickets", `_FEEDBACK_SOURCE_OPTIONS` doesn't.
   `test_audio(reward_id)` previews the reward source first (players are near loop start so the chirp is caught) before the below-channel sweep.
-  The test prepares its own players over whatever is prepared, so the app refuses it while a session runs, is paused or connects (`_refused_while_session_runs`);
+  The test prepares its own players over whatever is prepared, so the app refuses it while a session runs, is paused or connects (`SessionControls.refused`);
   a session start ends a test still playing (`end_test()`, next to `stop_timer_bell()` in `SoundSources.prepare_session`):
   its sequence stops where it is, by a generation token (`_test_gen`) checked before each step;
   its deferred teardown (`_finish_test`) is called off;

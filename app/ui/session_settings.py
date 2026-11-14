@@ -18,10 +18,10 @@ class SessionSettings:
         self._program_settings = program_settings
         self._formulas = formulas
 
-    def read(self, *, mock: bool, device: str, graph) -> SessionConfig:
+    def read(self, *, mock: bool, device: str, lines: Callable[[], frozenset[str]]) -> SessionConfig:
         """The Start's config; `mock` and `device` are its choice of stream. The program's idle series is derived first,
-        and only then are the lines `graph` shows read (the session saves its formula lines' as shown or hidden). A
-        program's total drives the timer, so its end reuses the timer-expiry path."""
+        and only then the live graph's shown lines read (`lines`: the session saves its formula lines' as shown or hidden).
+        A program's total drives the timer, so its end reuses the timer-expiry path."""
         self._program_settings.refresh_live_series()
         program = self._program_settings.for_session()
         timer = self._settings_screen.timer
@@ -33,7 +33,7 @@ class SessionSettings:
             minutes = timer.timer_minutes if timer.timer_enabled else None
         return SessionConfig(metric=self._ctx.setting("audio_metric"), formulas=tuple(self._formulas.active()),
                              timer_minutes=minutes, gong=self._ctx.setting("timer_sound") if minutes else "",
-                             mock=mock, device=device, shown=frozenset(graph.visible_keys()),
+                             mock=mock, device=device, shown=lines(),
                              threshold=segment_target(program.segments[0]) if program else self._settings_screen.threshold,
                              program=program, program_name=self._program_settings.name)
 

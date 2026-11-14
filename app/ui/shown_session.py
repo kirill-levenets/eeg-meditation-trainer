@@ -107,6 +107,44 @@ class ShownSession:
         self._live_screen.update_device_status(False, device_name=device_name)
         self._live_screen.show_overlay_retry(message)
 
+    def lines(self) -> frozenset[str]:
+        """The lines the live graph shows now."""
+        return frozenset(self._live_screen.graph.visible_keys())
+
+    def update_state(self, state: str) -> None:
+        """The Session screen's state line, outside a session: why a Start didn't go ahead, how a start ended."""
+        self._live_screen.update_state(state)
+
+    def scanning(self) -> None:
+        """A Start looks for the profile's headset among the paired devices."""
+        self._live_screen.show_overlay("Scanning for MindWave...")
+        self._live_screen.set_controls_running()
+
+    def found(self, name: str) -> None:
+        self._live_screen.update_overlay(f"Found {name}\nConnecting...")
+
+    def scan_failed(self, message: str) -> None:
+        """A Start's scan found no headset to start on: the controls idle, and Retry offered with `message`."""
+        self._live_screen.set_controls_idle()
+        self._live_screen.show_overlay_retry(message)
+
+    def ready(self) -> None:
+        """The idle controls, no overlay: before a Retry's new Start, or while Settings › Device asks which headset."""
+        self._live_screen.set_controls_idle()
+        self._live_screen.hide_overlay()
+
+    def starting(self) -> None:
+        """A session's setup: the running controls, no training mark until a program's first segment."""
+        self._live_screen.set_training_series(None)
+        self._live_screen.set_controls_running()
+
+    def show_threshold(self, value: float) -> None:
+        """The threshold in force, drawn until the ticks step the line."""
+        self._live_screen.graph.set_threshold(float(value))
+
+    def hide_overlay(self) -> None:
+        self._live_screen.hide_overlay()
+
     def reload_whole(self) -> None:
         """An ending's: the live graphs reloaded from the mirror with the whole session (a locked stretch never reached them
         tick by tick) and its score, before the session's reset."""

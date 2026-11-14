@@ -5,7 +5,7 @@ from kivy.core.window import Window
 
 from app.config import APP
 from app.ui.widgets.user_picker import UserPickerForm
-from tests._app import frames, frames_until, last_used, runner_alive, tap
+from tests._app import frames, frames_until, last_used, popup_titles, runner_alive, tap
 from tests._picker import picker_rows
 
 
@@ -104,20 +104,18 @@ def test_picking_the_saved_headset_while_idle_leaves_the_mock(build_app):
 
 def test_a_mode_change_during_a_session_is_refused(build_app, monkeypatch):
     app = build_app(last_used("me"))
-    said = []
-    monkeypatch.setattr(app, "_info_popup", lambda title, message: said.append(title))
-    app._on_start()
+    app._controls.start()
     frames_until(lambda: len(app._shown.mirror.metrics) >= 1, 5.0)
     label = app._live_screen._device_label
     shown = (label.text, list(label.color))
     app._settings_screen.device._device_mode_cb.active = False
     assert APP.USE_MOCK_DEVICE is True and app._settings_screen.device._device_mode_cb.active
-    assert said == ["Session in progress"] and app._settings_store.value("use_mock") is True
+    assert popup_titles() == ["Session in progress"] and app._settings_store.value("use_mock") is True
     assert (label.text, list(label.color)) == shown  # the refusal repaints nothing
     _pick_saved(app)
-    assert said == ["Session in progress"] * 2 and APP.USE_MOCK_DEVICE is True
+    assert popup_titles() == ["Session in progress"] * 2 and APP.USE_MOCK_DEVICE is True
     assert (label.text, list(label.color)) == shown
-    app._stop_and_save()
+    app._controls.stop_and_save()
     frames_until(lambda: app._session.run is None, 2.0)  # its runner saved it; its Ended event tore the screen down
     assert app._db.get_all_sessions(app._current_user_id)[0]["session_name"].endswith("Mock")
 
@@ -137,10 +135,10 @@ def test_mock_sessions_on_their_real_runner_are_each_saved_once(build_app):
     app = build_app(last_used("me"))
     uid = app._current_user_id
     for n in (1, 2):  # the second Start: a fresh run, ticking
-        app._on_start()
+        app._controls.start()
         frames_until(lambda: len(app._shown.mirror.metrics) >= 3, 5.0)
         assert runner_alive(app) and len(app._shown.mirror.metrics) >= 3
-        app._stop_and_save()  # a command: the runner ends and saves the run, and its Ended event tears the screen down
+        app._controls.stop_and_save()  # a command: the runner ends and saves the run, and its Ended event tears the screen down
         frames_until(lambda: app._session.run is None and not runner_alive(app), 2.0)
         assert app._session.run is None and not runner_alive(app) and app._db.count_sessions(uid) == n
         app._shown.on_ok()
@@ -164,7 +162,7 @@ def _program_rows(app, monkeypatch) -> list[str]:
 
 
 def _start_and_tick(app) -> None:
-    app._on_start()
+    app._controls.start()
     frames_until(lambda: len(app._shown.mirror.metrics) >= 2, 5.0)
 
 
@@ -181,7 +179,7 @@ def test_a_program_session_owns_the_live_graph_until_its_ending_derives_the_idle
     assert g.is_visible("program_formula") and _program_rows(app, monkeypatch) == ["Program: Deep"]
     app._program_settings.on_mode_change("simple")  # Settings > Timer, mid-session
     assert g.is_visible("program_formula")
-    app._stop_and_save()
+    app._controls.stop_and_save()
     frames_until(lambda: app._session.run is None, 2.0)
     app._shown.on_ok()
     frames()
@@ -192,7 +190,7 @@ def test_a_program_session_owns_the_live_graph_until_its_ending_derives_the_idle
     assert "distraction" in app._db.get_user_json_setting(uid, "graph_series_live_metrics")
     _start_and_tick(app)  # the next, simple, session
     assert _program_rows(app, monkeypatch) == []
-    app._stop_and_save()
+    app._controls.stop_and_save()
     frames_until(lambda: app._session.run is None, 2.0)
 
 
@@ -214,7 +212,7 @@ def test_a_start_derives_the_idle_series_whatever_an_editor_change_left(build_ap
     app._program_settings.segments = []  # a writer that skipped the derivation: the next Start is a simple session
     _start_and_tick(app)
     assert app._live_screen.graph.program_keys == frozenset() and _program_rows(app, monkeypatch) == []
-    app._stop_and_save()
+    app._controls.stop_and_save()
     frames()
 
 

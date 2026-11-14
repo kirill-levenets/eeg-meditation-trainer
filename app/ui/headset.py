@@ -161,6 +161,12 @@ class Headset:
 
         threading.Thread(target=run, daemon=True).start()
 
+    def ask_to_pick(self, mindwaves: list[dict]) -> None:
+        """A Start's scan found several MindWaves and none is the profile's: Settings › Device asks which."""
+        self._ctx.switch_screen("settings")
+        self._device_section.focus_device_section(
+            f"Found {len(mindwaves)} MindWave devices.\nPick the one you want to use, then press Start again.")
+
     def adopt(self, devices: list[dict]) -> list[dict]:
         """A scan's paired devices: a single MindWave becomes the profile's headset unless it has one, and Settings →
         Device lists the MindWaves, or every paired device when none is one. Returns the MindWaves."""
