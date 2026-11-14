@@ -1,6 +1,7 @@
 import json
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 
 from app.logger import logger
@@ -29,6 +30,11 @@ class LiveScore:
 
 
 NO_SCORE = LiveScore()
+
+
+def start_stamp(when: datetime) -> str:
+    """'YYYY-MM-DD HH:MM': a session's start in its default name and in its title, so the title can recognise it."""
+    return when.strftime("%Y-%m-%d %H:%M")
 
 
 def elapsed_clock(seconds: float) -> str:

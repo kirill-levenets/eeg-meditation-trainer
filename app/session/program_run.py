@@ -13,23 +13,12 @@ from app.session.session_events import (
 )
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
-    RunnablePlan,
     SessionProgram,
     program_line_name,
     runnable_plan,
     segment_target,
 )
 from app.session.session_run import SessionRun
-
-
-def show_program_series(graph, plan: RunnablePlan) -> None:
-    """Set the graph to EXACTLY the program's metric set, label each program custom line and mark the set as the
-    program's. Shared by a program session's start, the idle preview and a program session's detail in History."""
-    for slot, custom in plan.customs:
-        graph.set_series_name(slot, program_line_name(custom))
-    for k in graph.series_keys():
-        graph.set_visible(k, k in plan.keys)
-    graph.set_program_lines(plan.keys)
 
 
 class ProgramRun:

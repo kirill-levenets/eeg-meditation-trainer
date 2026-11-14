@@ -4,8 +4,8 @@ import pytest
 
 from app.metrics.custom_formula import CustomFormulaEvaluator
 from app.metrics.formula_slots import FORMULA_KEYS, FormulaSlots, read_active
+from app.session.scoring import sound_metric
 from app.storage.database import DatabaseManager
-from app.ui.audio_metric import sound_metric
 from tests._app import (
     FedSession,
     frames,

@@ -36,7 +36,8 @@ def test_a_profile_with_one_session_says_so():
     assert "Mock (1 session)" in [getattr(w, "text", "") for w in form._existing_list.walk()]
 
 
-APP_UI = Path(__file__).resolve().parents[1] / "app" / "ui"
+_APP = Path(__file__).resolve().parents[1] / "app"
+TEXT_DIRS = (_APP / "ui", _APP / "session")  # the screens', and the session's messages and alerts
 HEDGED = re.compile(r"[A-Za-z]\(s\)")
 PLURAL_AFTER_COUNT = re.compile(r"\s+(sessions|profiles|devices|segments|formulas|files|markers|headsets)\b")
 
@@ -56,6 +57,6 @@ def _hand_made_plurals(tree: ast.AST) -> list[int]:
 
 def test_no_ui_text_counts_with_a_hand_made_plural():
     """'1 session(s)' and '1 sessions' both misread one: a count's noun goes through format_count."""
-    found = [f"{path.name}:{line}" for path in sorted(APP_UI.rglob("*.py"))
+    found = [f"{path.name}:{line}" for folder in TEXT_DIRS for path in sorted(folder.rglob("*.py"))
              for line in _hand_made_plurals(ast.parse(path.read_text()))]
-    assert APP_UI.is_dir() and found == []
+    assert all(folder.is_dir() for folder in TEXT_DIRS) and found == []

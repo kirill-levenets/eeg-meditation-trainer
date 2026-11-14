@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import app.ui.running_session as rs
+import app.session.running_session as rs
 from app.config import APP
 from app.session.manager import SessionState
 from app.session.session_run import Phase, SessionRun

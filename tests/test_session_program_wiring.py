@@ -2,12 +2,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from app.session.program_run import ProgramRun
 from app.session.session_events import Notice, SegmentStarted
 from app.session.session_program import SessionProgram
 from app.session.session_run import SessionRun
 from app.storage.database import DatabaseManager
 from app.ui.live_session import LiveSessionScreen
-from app.ui.program_run import ProgramRun
 from tests._app import (
     FedSession,
     calls_of,

@@ -10,10 +10,10 @@ import pytest
 from kivy.clock import Clock
 
 from app.config import APP
+from app.session.bt_wait import BtWait
 from app.session.session_events import Connecting
 from app.session.session_run import SessionRun
 from app.storage.database import DatabaseManager
-from app.ui.bt_wait import BtWait
 from app.ui.device_labels import MAX_DEVICE_ALIAS, device_label, device_row_text
 from app.ui.headset import Headset
 from app.ui.hooks import wire

@@ -7,8 +7,8 @@ from app.metrics.formula_slots import FormulaSlots
 from app.metrics.series_names import SERIES_NAMES
 from app.session.session_program import SessionProgram, runnable_plan
 from app.ui.diary_screen import DiaryScreen
+from app.ui.graph_series import show_program_series
 from app.ui.live_session import LiveSessionScreen
-from app.ui.program_run import show_program_series
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from tests._app import frames_until, program_mode, reload_with, start_connecting
 from tests._picker import picker_rows

@@ -7,8 +7,8 @@ import pytest
 from app.config import APP
 from app.session.session_events import Alert, LinkChanged
 from app.session.session_run import Phase, SessionRun
+from app.session.session_watch import SessionWatch
 from app.ui.headset import Headset
-from app.ui.session_watch import SessionWatch
 from tests._context import stub_context
 
 

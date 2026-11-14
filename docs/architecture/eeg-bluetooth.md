@@ -22,7 +22,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Desktop Linux falls back to PyBluez when `socket.AF_BLUETOOTH` is missing (common in PyInstaller bundles).
   The link is kept open between sessions (a session stop doesn't close it) to avoid RFCOMM EBUSY and ThinkGear reinit failures.
   On app exit the socket is not closed explicitly (`on_stop`): the kernel closes it while BlueZ may keep the ACL link, for a faster reconnect at the next launch.
-  A session whose headset sends no packets for `STALE_DATA_THRESHOLD` (10 s) is stopped and saved (`SessionWatch.check_stale`, `app/ui/session_watch.py`, `RunningSession.watch`;
+  A session whose headset sends no packets for `STALE_DATA_THRESHOLD` (10 s) is stopped and saved (`SessionWatch.check_stale`, `app/session/session_watch.py`, `RunningSession.watch`;
   each tick it also checks the recording limit, follows the headset's link and warns once of a low battery or power-line noise).
   The selected headset's link as it is (a pick or rename, a session's start, a drop or a reconnect mid-session) is drawn by `Headset.show_selected` on the Session screen's label and in Settings › Device:
   a session's lost link shows as connecting, since the reader reconnects; a drop also plays the disconnect alert.
@@ -73,7 +73,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   A late reader (epoch superseded after its connect returned) closes its socket instead of adopting it, and `_last_connect_error` is cleared only after that check.
   The reader clears `_connected` on exit, so a `stop()` landing just after `_connected = True` can't leave `is_connected` stuck True with no reader (the next Start would "reuse" a dead connection).
   Every failed Android connect attempt (secure → insecure → `createRfcommSocket(1)`) closes its socket; the ch=1 fallback is called directly on the device, since through `Class.getMethod` pyjnius can't resolve its varargs overload.
-  The wait is `BtWait` (`app/ui/bt_wait.py`, `RunningSession.bt_wait`): `begin(run)` (the app's `_begin_bt_wait`, on the main thread before the runner starts) checks `start()`'s result **before** entering the wait;
+  The wait is `BtWait` (`app/session/bt_wait.py`, `RunningSession.bt_wait`): `begin(run)` (the app's `_begin_bt_wait`, on the main thread before the runner starts) checks `start()`'s result **before** entering the wait;
   then the runner's tick drives `tick(run)` while the run is CONNECTING, and `RunningSession._follow_bt_wait` acts on how the wait ended (`WaitEnd`: started, or the retry screen's message):
   the first data starts the session on the runner, its countdown armed there before the next tick reads it, and the `Connected` event shows it on main (`_on_session_connected`);
   a give-up ends the run on the runner (its reader down, `KeepAwake.release`) and its `StartFailed` event undoes the start and shows the retry screen (`_undo_failed_start`).

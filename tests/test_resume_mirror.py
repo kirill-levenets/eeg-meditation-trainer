@@ -18,10 +18,10 @@ import pytest
 
 from app.eeg.neurosky_stream import NeuroSkyStream
 from app.metrics.engine import MetricsEngine
+from app.session.live_mirror import LiveMirror
 from app.session.manager import SessionState, elapsed_clock
 from app.session.recorder import RecordedTick
 from app.session.session_run import Phase
-from app.ui.live_mirror import LiveMirror
 from app.ui.live_session import METRICS_COLORS, LiveSessionScreen
 from tests._app import (
     FedSession,
@@ -207,7 +207,7 @@ def test_a_reload_keeps_each_points_colouring():
         mirror.record(RecordedTick(tick_metrics(seed=1.0), raw_sample(seed=1.0),
                                    {"score_target": 50, "score_key": key}, False))
     screen = LiveSessionScreen()
-    mirror.reload_into(screen)
+    screen.load_mirror(mirror.snapshot())
     assert screen.graph.gradient_steps == [(0, "shamatha_score"), (3, "custom_formula")]
 
 

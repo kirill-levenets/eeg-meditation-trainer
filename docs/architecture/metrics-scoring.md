@@ -40,7 +40,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Active names and expressions persist as `active_formulas` (JSON list of `{name, formula}`, per user), the audio-driving slot index as `audio_formula_index` (flat KV string, per user).
   At load `formula_slots.read_active` seeds slot 1 from the legacy `custom_formula` scalar if no JSON exists yet.
   When "Custom Formula" is the audio metric, the held `audio_metric` is `FORMULA_KEYS[audio_formula_index]` (both in the settings store, `AudioMetric.settings`; the metric's apply reconciles the slot).
-  `RunningSession.drive_key()` (`app/ui/running_session.py`) resolves the live drive key through the pure `audio_metric.sound_metric(stored, program_key, formulas)`:
+  `RunningSession.drive_key()` (`app/session/running_session.py`) resolves the live drive key through the pure `scoring.sound_metric(stored, program_key, formulas)`:
   the program's transient `ProgramRun.audio_key` while a program runs, else the metric the session's config holds, against the session's own formula lines.
   `AudioMetric` (`app/ui/audio_metric.py`, the app's `_audio_metric`) keeps only Settings' choice of it and its lock.
   It falls back to `shamatha_score` for an invalid (empty or unparsable) formula slot **or** a `PROGRAM_FORMULA_KEYS` value outside a program: both are absent from `metrics`, so they would read 0 → constant max noise.

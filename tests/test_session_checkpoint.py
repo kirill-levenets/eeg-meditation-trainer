@@ -9,8 +9,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import app.session.running_session as rs
 import app.ui.backup_flow as bf
-import app.ui.running_session as rs
 from app.config import APP
 from app.session.manager import SessionManager
 from app.session.recorder import SessionRecorder

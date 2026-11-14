@@ -5,10 +5,12 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 ## State machine and tick
 
-- **The session's parts** (`app/ui/running_session.py`, the app's `_session`): `RunningSession` builds, once, what every Start runs on:
+- **The session's parts** (`app/session/running_session.py`, the app's `_session`): `RunningSession` builds, once, what every Start runs on:
   `manager` (`SessionManager`), `recorder` (`SessionRecorder`), `engine` (`MetricsEngine`), `formulas` (its own `FormulaSlots`), `program_run` (`ProgramRun`), `timer` (`TimerState`), `watch` (`SessionWatch`), `mock_stream` and `keep_awake`.
   It answers what the running session is scored on (`drive_key`) and saved as (`with_score`, `row_fields`, `session_name`, `custom_formulas_json`); the recorder calls `with_score` and `row_fields` at each checkpoint.
   The real stream stays `Headset.stream` (the link outlives sessions).
+  It reaches the app only through a `SessionHost` (the database, the active profile, the main thread; the app's `AppContext` is one) and its events, so `app/session/` imports neither Kivy nor `app.ui` at import time (`tests/test_session_package.py` loads every module of it in a fresh interpreter and fails on either);
+  `report_soft_error` (`app/crash_handler.py`), which a failed save or tick calls, still loads them on that path.
 - **A session runs on its config.** Start reads Settings once into a frozen `SessionConfig` (`app/session/session_config.py`, built by the app's `_session_config`):
   the metric that drives the sound, the Settings formulas' names and texts, the timer's minutes (a program's total, or none), its end sound, mock or headset (from the stream Start chose) and the device's name.
   `RunningSession.begin(config)` builds the session's own formula lines from it (so their `avg()` windows begin empty), arms its timer and resets the engine and the record.
@@ -146,8 +148,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `KeepAwake` (`app/keep_awake.py`, `RunningSession.keep_awake`) calls its static `start`/`stop`, together with the wake lock and the keep-screen-on flag:
   `hold()` at a session's setup, `release()` at its ending's teardown or an abandoned start, and at `on_stop`, where a session's ending can't tear down (the main thread is closing the app).
 - While the app is paused (screen locked) the tick skips its per-tick UI update: N minutes locked would queue ~120·N full graph redraws, which froze the screen on resume.
-  The runner records every tick into the session-lifetime mirror instead (`LiveMirror` in `app/ui/live_mirror.py`, `RunningSession.mirror`, which the shown session shows: `_shown.mirror`, no Kivy).
-  `LiveMirror.reload_into` reloads the live graphs from it in one batch on resume (while the session runs) and at the session's end (`_finalize_stop_ui`):
+  The runner records every tick into the session-lifetime mirror instead (`LiveMirror` in `app/session/live_mirror.py`, `RunningSession.mirror`, which the shown session shows: `_shown.mirror`, no Kivy).
+  `LiveSessionScreen.load_mirror(mirror.snapshot())` reloads the live graphs from it in one batch on resume (while the session runs) and at the session's end (`_finalize_stop_ui`):
   without it, after a session that ended during a lock, the graph would show only the pre-lock seconds while History shows the real duration.
   The mirror records each marked tick as (tick, raw sample) counts since the session's start, and the reload hands the markers to each graph's `load_static_data` with its data;
   counts, not indices, because a full buffer drops its oldest: a marker's index shifts with it, and one that fell off is gone.

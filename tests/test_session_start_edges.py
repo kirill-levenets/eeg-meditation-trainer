@@ -9,12 +9,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import app.session.running_session as rs
 import app.ui.app_manager as am
-import app.ui.running_session as rs
 from app.eeg.neurosky_stream import NeuroSkyStream
+from app.session.bt_wait import BtWait
 from app.session.manager import SessionManager, SessionState
 from app.session.session_run import Phase
-from app.ui.bt_wait import BtWait
 from tests._app import (
     HEADSET,
     HeadsetSession,

@@ -13,7 +13,7 @@ from app.session.session_events import (
 )
 from app.session.session_program import PROGRAM_FORMULA_KEYS
 from app.ui.app_context import AppContext
-from app.ui.program_run import show_program_series
+from app.ui.graph_series import show_program_series
 from app.ui.theme import C
 
 

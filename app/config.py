@@ -137,6 +137,7 @@ class AppConfig:
     UPDATE_FREQUENCY: float = 0.5  # 2 Hz = every 0.5 seconds
     GRAPH_WINDOW_SECONDS: int = 10800  # 3 hours
     GRAPH_POINTS_MAX: int = 21600  # 3h * 2Hz — full session in memory
+    RAW_WAVEFORM_MAX: int = 512 * 60  # the raw graph's samples: a minute at the headset's 512 Hz
     SESSION_MAX_SECONDS: int = 10800  # 3h — auto-stop after this
     FLUSH_INTERVAL_SECONDS: int = 60
     SIGNAL_BUFFER_SECONDS: int = 120

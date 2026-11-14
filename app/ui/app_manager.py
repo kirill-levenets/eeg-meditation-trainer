@@ -26,6 +26,7 @@ from app.metrics.formula_slots import (
 )
 from app.metrics.noise_detector import PowerLineDetector
 from app.session.manager import SessionState, elapsed_clock
+from app.session.running_session import RunningSession
 from app.session.session_config import SessionConfig
 from app.session.session_events import (
     Connected,
@@ -70,7 +71,6 @@ from app.ui.power_exemption import PowerExemption
 from app.ui.profiles import ProfileGate, Profiles
 from app.ui.program_settings import ProgramSettings
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
-from app.ui.running_session import RunningSession
 from app.ui.session_detail_flow import SessionDetailFlow
 from app.ui.session_labels import session_title
 from app.ui.settings_screen import (
@@ -720,7 +720,7 @@ class EEGMeditationApp(App):
         # covering only the pre-lock seconds while History shows the real
         # duration.
         try:
-            self._shown.mirror.reload_into(self._live_screen)
+            self._live_screen.load_mirror(self._shown.mirror.snapshot())
         except Exception:
             logger.exception("graph reload on stop failed")
         self._live_screen.update_stats(self._session.manager.live_score())  # the whole session's: no tick ran while locked
@@ -1211,7 +1211,7 @@ class EEGMeditationApp(App):
             logger.info("on_resume: session not RUNNING → skipping graph reload")
             return
         try:
-            self._shown.mirror.reload_into(self._live_screen)
+            self._live_screen.load_mirror(self._shown.mirror.snapshot())
             if self._shown.mirror.last_metrics:
                 self._live_screen.update_stats(self._session.manager.live_score())
                 self._live_screen.update_state(self._shown.mirror.last_state)

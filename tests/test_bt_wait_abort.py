@@ -6,9 +6,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import app.ui.running_session as rs
+import app.session.running_session as rs
+from app.session.bt_wait import BtWait
 from app.session.session_run import Phase, SessionRun
-from app.ui.bt_wait import BtWait
 from tests._app import HEADSET, frames, popups, runner_alive, start_connecting
 
 

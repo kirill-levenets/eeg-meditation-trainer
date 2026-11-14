@@ -6,6 +6,7 @@ import threading
 import time
 from collections.abc import Callable, Iterable
 from datetime import datetime
+from typing import Protocol
 
 from app.config import APP
 from app.crash_handler import report_soft_error
@@ -15,9 +16,12 @@ from app.keep_awake import KeepAwake
 from app.logger import logger
 from app.metrics.engine import MetricsEngine
 from app.metrics.formula_slots import FormulaSlots
-from app.session.manager import SessionManager, SessionState
+from app.session.bt_wait import BtWait
+from app.session.live_mirror import LiveMirror
+from app.session.manager import SessionManager, SessionState, start_stamp
+from app.session.program_run import ProgramRun
 from app.session.recorder import RecordedTick, SessionRecorder
-from app.session.scoring import shamatha_transition
+from app.session.scoring import shamatha_transition, sound_metric
 from app.session.session_config import SessionConfig
 from app.session.session_events import (
     Connected,
@@ -28,17 +32,26 @@ from app.session.session_events import (
     Ticked,
 )
 from app.session.session_run import Phase, SessionRun
+from app.session.session_watch import SessionWatch
 from app.session.timer_state import TimerState
-from app.ui.app_context import AppContext
-from app.ui.audio_metric import sound_metric
-from app.ui.bt_wait import BtWait
-from app.ui.live_mirror import LiveMirror
-from app.ui.program_run import ProgramRun
-from app.ui.session_labels import start_stamp
-from app.ui.session_watch import SessionWatch
+from app.storage.database import DatabaseManager
 
 _JOIN_SECONDS = 1.0  # how long the main thread waits for the runner to take a command before it acts itself
 _TAKEN_SECONDS = 15.0  # how long it waits for a command the runner took: the reader's stop joins for 5 s, a save writes
+
+
+class SessionHost(Protocol):
+    """What a session reaches the app through (the app's context is one): the database, the active profile and the main
+    thread."""
+
+    @property
+    def db(self) -> DatabaseManager: ...
+
+    @property
+    def user_id(self) -> Callable[[], int | None]: ...
+
+    @property
+    def on_main(self) -> Callable[[Callable[[], object]], None]: ...
 
 
 class RunningSession:
@@ -47,7 +60,7 @@ class RunningSession:
     commands, and it hands what the screen must do back as events, on the main thread and for that run only. Without a
     runner of its own run (before its start, after its end, a stuck one's run ended) a command runs where it is sent."""
 
-    def __init__(self, ctx: AppContext, audio, headset, *, on_event: Callable[[object], None]) -> None:
+    def __init__(self, ctx: SessionHost, audio, headset, *, on_event: Callable[[object], None]) -> None:
         self._ctx = ctx
         self._audio = audio
         self._on_event = on_event  # main thread: queued from the runner, or at once from the start and a program's end

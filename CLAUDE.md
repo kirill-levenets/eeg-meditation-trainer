@@ -66,8 +66,10 @@ Read it before changing that subsystem.
   evaluators, names, their session record), `series_names.py` (the metrics lines' default labels), `noise_detector.py`. → [metrics-scoring](docs/architecture/metrics-scoring.md)
 - `app/session/` — `manager.py` `SessionManager` (Start/Pause/Resume/Stop, accrual), `scoring.py` `GoalAccrual`, `session_program.py` (timed segments), `timer_state.py`, `what_if.py` (threshold recompute), `session_config.py` `SessionConfig` (what a Start read), `session_events.py` (what a running session tells the screen).
   `session_run.py` `SessionRun` (one Start: its phase and per-run state), `recorder.py` `SessionRecorder` (the running session's checkpoints).
-  `app/ui/running_session.py` `RunningSession` (the app's `_session`) — the parts a session runs on (manager, recorder, engine, its own formula lines, program run, timer, watch, BT wait, wake lock), what it is scored on and saved as, and its run's runner thread, the one writer of its state.
-  `app/ui/program_run.py` `ProgramRun` — the running program: segment stepping on the session's runner, its live-graph lines.
+  `app/session/running_session.py` `RunningSession` (the app's `_session`) — the parts a session runs on (manager, recorder, engine, its own formula lines, program run, timer, watch, BT wait, wake lock), what it is scored on and saved as, and its run's runner thread, the one writer of its state.
+  `app/session/program_run.py` `ProgramRun` — the running program: segment stepping on the session's runner, its live-graph lines.
+  `live_mirror.py` `LiveMirror` (the live graphs' data, kept by the runner through a screen lock; `LiveSessionScreen.load_mirror` reloads from its snapshot).
+  Nothing in `app/session/` imports Kivy or `app.ui` at import time, directly or through its imports (`tests/test_session_package.py`): a session's screen work goes out as events.
   `app/ui/program_settings.py` `ProgramSettings` — Settings → Timer: mode, the edited program, saved programs.
   `app/ui/formula_settings.py` `FormulaSettings` — Settings → Custom Formula. → [session](docs/architecture/session.md), [programs](docs/architecture/programs.md), [metrics-scoring](docs/architecture/metrics-scoring.md)
 - `app/audio_feedback/noise.py` — `AudioEngine`: below and reward feedback channels, bell/chime/warble, timer gong; `MediaPlayer` on Android.
@@ -85,12 +87,12 @@ Read it before changing that subsystem.
 - `app/ui/raw_eeg_screen.py` — `ScrollableGraphWidget`, the one time-series graph class;
   `graph_series.py` `GraphSeries` (the series picker, each graph's saved selection), `line_colours.py` (the scored line's gradient), `graph_runs.py` (the run fold, Kivy-free);
   `graph_gestures.py` (its touch), `graph_glyphs.py` (its corner buttons), `graph_scroll.py` `GraphAwareScrollView` (a page of graphs), `touch_utils.py`, `render_stats.py`. → [graphs](docs/architecture/graphs.md)
-- `app/ui/bt_wait.py` `BtWait` (the BT wait at a session's start: connect, first data, give up),
+- `app/session/bt_wait.py` `BtWait` (the BT wait at a session's start: connect, first data, give up),
   `session_watch.py` `SessionWatch` (each tick's checks: recording limit, headset link, stale data, battery, line noise)
   · `app/ui/headset.py` `Headset` (which headset: a profile's own, found by its one scan path; its name; Settings → Device)
   · `app/ui/power_exemption.py` `PowerExemption` (what may close a locked session: battery optimisation, the maker's power manager;
   the first-start alert and Settings → Device's row → [app-platform](docs/architecture/app-platform.md#background-running-android))
-  · `app/ui/live_session.py`, `live_mirror.py` (the live graphs' session, kept through a screen lock), `shown_session.py` `ShownSession` (the session the screen shows: its graphs' mirror, its end card, the session's screen events),
+  · `app/ui/live_session.py`, `shown_session.py` `ShownSession` (the session the screen shows: its graphs' mirror, its end card, the session's screen events),
   `settings_screen.py` (its larger sections in `settings_sections/`), `device_labels.py` → [live-session-and-settings](docs/architecture/live-session-and-settings.md);
   `history_screen.py`, `period_totals.py`, `history_flow.py` `HistoryFlow` (what the app does with History's rows) → [history](docs/architecture/history.md);
   `diary_screen.py` (session detail), `session_detail_flow.py` `SessionDetailFlow` (opens and loads it) → [session-detail](docs/architecture/session-detail.md);
@@ -118,7 +120,7 @@ The linked file explains the mechanism.
   The selected headset is the active profile's own or none (`Headset.load`);
   a profile's headset is found by `Headset.scan`, whose result does nothing once the profile, its headset or mode changed or a session started;
   only Start opens Settings → Device to pick. → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md#connection)
-- **One writer: the run's runner** (`RunningSession`, `app/ui/running_session.py`): from Start's `start_running()` to the run's ending, only its runner thread writes the session's state.
+- **One writer: the run's runner** (`RunningSession`, `app/session/running_session.py`): from Start's `start_running()` to the run's ending, only its runner thread writes the session's state.
   The main thread sends commands (`toggle_pause`, `stop`, `discard`, `abort`, `mark`, `set_threshold`, `set_formula`, `set_shown`); the runner hands what the screen must do back as events (`session_events.py`; `_on_session_event`, the screen's through `ShownSession.show`), for that run only (`on_main_for`).
   Without a runner of its own run (before its start, after its end, a stuck one's run ended) a command runs where it is sent.
   `stop`, `discard` and `abort` wait for the runner to take them (`discard`, `abort` and the exit's `stop` to finish them too), and one it doesn't take within 1 s runs where it was sent, and its run, ended, keeps the late runner from acting (`_outlived`). → [session](docs/architecture/session.md#state-machine-and-tick)
@@ -151,7 +153,7 @@ The linked file explains the mechanism.
 - **A session runs on its config** (`SessionConfig`, `app/session/session_config.py`, taken by `RunningSession.begin` at Start): it reads no setting while it runs (`tests/test_session_config.py`).
   A change allowed mid-session reaches its state only as an explicit call: the threshold (`_put_threshold_in_force`; the manager owns it), an edited formula line (`SessionAccess.set_formula`) and the live graph's shown lines (`set_shown`);
   the alert toggles are the audio engine's and apply at once. → [session](docs/architecture/session.md#state-machine-and-tick)
-- **A session is scored on the metric that drives the feedback sound** (`RunningSession.drive_key()`, `app/ui/running_session.py`, the app's `_session`; the rule is `audio_metric.sound_metric`).
+- **A session is scored on the metric that drives the feedback sound** (`RunningSession.drive_key()`, `app/session/running_session.py`, the app's `_session`; the rule is `scoring.sound_metric`).
   The Settings threshold takes effect only through `_put_threshold_in_force` (the slider and profile load go through `_apply_threshold`);
   the threshold has one owner, `SessionManager` (`threshold`, the base; a tick's `score_target`): the sound, the engine and the SHAMATHA pill read it per tick, never a copy. → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
 - `ProgramRun.audio_key` is transient and never written to the stored `audio_metric`;

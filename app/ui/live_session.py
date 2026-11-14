@@ -14,10 +14,13 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
-from app.eeg.band_spec import BAND_KEYS, GROUP_NAMES, group_powers
+from app.config import APP
+from app.eeg.band_spec import BAND_KEYS, GROUP_KEYS, GROUP_NAMES, group_powers
 from app.logger import logger
 from app.metrics.series_names import SERIES_NAMES
+from app.session.live_mirror import MirrorView
 from app.session.manager import NO_SCORE, LiveScore
+from app.session.scoring import scored_steps, target_steps
 from app.ui.graph_scroll import GraphAwareScrollView
 from app.ui.hooks import Hook, wire
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
@@ -62,7 +65,6 @@ _DURATION_PRESETS = [
 _RAW_SIGNAL_COLORS = {"eeg": C.MEDITATION}
 _RAW_SIGNAL_SCALES = {"eeg": 500.0}
 _RAW_WAVEFORM_RATE = 512.0
-RAW_WAVEFORM_MAX = 512 * 60
 
 METRICS_COLORS = {
     "shamatha_score": C.SHAMATHA,
@@ -377,7 +379,7 @@ class LiveSessionScreen(Screen):
             show_value_labels=True,
             show_timestamps=True,
             sample_rate=_RAW_WAVEFORM_RATE,
-            max_points=RAW_WAVEFORM_MAX,
+            max_points=APP.RAW_WAVEFORM_MAX,
             bipolar=True,
             size_hint_y=0.5,
             graph_id="live_raw",
@@ -1043,6 +1045,20 @@ class LiveSessionScreen(Screen):
         self._alert_label.text = text
         lines = max(1, text.count("\n") + 1)
         self._alert_label.height = dp(18) * lines
+
+    def load_mirror(self, view: MirrorView) -> None:
+        """Batch-reload the 3 live graphs from a session's mirror (one load_static_data per graph), with their markers
+        and the threshold steps."""
+        if view.metrics:
+            self.graph.load_static_data({key: [d.get(key, 0.0) for d in view.metrics] for key in METRICS_COLORS},
+                                        new_session=False, markers=view.tick_marks)
+            self.graph.set_threshold_steps(target_steps(d.get("score_target") for d in view.metrics))
+            self.graph.set_gradient_steps(scored_steps(d.get("score_key") for d in view.metrics))
+        if view.bands:
+            self.band_graph.load_static_data({key: [d.get(key, 0.0) for d in view.bands] for key in GROUP_KEYS},
+                                             new_session=False, markers=view.tick_marks)
+        if view.waveform:
+            self.raw_graph.load_static_data({"eeg": view.waveform}, new_session=False, markers=view.sample_marks)
 
     def hide_alert(self) -> None:
         self._alert_label.text = ""

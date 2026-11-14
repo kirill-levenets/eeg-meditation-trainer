@@ -217,7 +217,7 @@ def test_the_live_graph_reloaded_from_the_mirror_steps_its_line(fresh_app, monke
             app_._apply_threshold(85)
         fed.tick(metrics=tick_metrics(seed=80.0))
     app_._live_screen.graph.set_threshold_steps(None)
-    app_._shown.mirror.reload_into(app_._live_screen)
+    app_._live_screen.load_mirror(app_._shown.mirror.snapshot())
     assert app_._live_screen.graph._threshold_steps == [(0, 70), (2, 85)]
 
 

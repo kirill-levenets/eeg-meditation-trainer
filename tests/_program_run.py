@@ -2,7 +2,7 @@
 metrics. Its screen events go to `show` and, from the runner, to `emit` (both at once unless given)."""
 from unittest.mock import MagicMock
 
-from app.ui.program_run import ProgramRun
+from app.session.program_run import ProgramRun
 from app.ui.shown_session import ShownSession
 from tests._context import stub_context
 
