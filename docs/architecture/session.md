@@ -11,7 +11,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The real stream stays `Headset.stream` (the link outlives sessions).
   It reaches the app only through a `SessionHost` (the database, the active profile, the main thread; the app's `AppContext` is one) and its events, so `app/session/` imports neither Kivy nor `app.ui` at import time (`tests/test_session_package.py` loads every module of it in a fresh interpreter and fails on either);
   `report_soft_error` (`app/crash_handler.py`), which a failed save or tick calls, still loads them on that path.
-- **A session runs on its config.** Start reads Settings once into a frozen `SessionConfig` (`app/session/session_config.py`, built by the app's `_session_config`):
+- **A session runs on its config.** Start reads Settings once into a frozen `SessionConfig` (`app/session/session_config.py`, built by `SessionSettings.read`, `app/ui/session_settings.py`: Settings as a Start and an ending use them):
   the metric that drives the sound, the Settings formulas' names and texts, the timer's minutes (a program's total, or none), its end sound, mock or headset (from the stream Start chose), the device's name,
   the live graph's shown lines (read after the Start refreshed the idle series), the threshold it starts with (a program's first target, else the slider) and the program with its name.
 - **A Start has the app's part and the session's.** The app (`_start_session_common`) reads the config, empties the display and makes the screen ready;
@@ -35,7 +35,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The commands are `toggle_pause`, `stop`, `discard`, `abort` (a Cancel), `mark`, `set_threshold`, `set_formula` and `set_shown`; each carries the run it was sent for and does nothing for another or for one that ended.
   What the screen must do comes back as events (`app/session/session_events.py`), queued for the main thread for that run only (`on_main_for`) and delivered by `RunningSession._deliver`:
   first to the app's `_on_session_event`, then the session's own sound for it (`docs/architecture/audio.md`).
-  the app acts on `StartFailed` and `Ended` (the teardown's order), `LinkChanged` and a headset's `Connected` (the headset's row) and `Notice` (a popup), and hands the screen's part of every event to `ShownSession.show`, which applies them to the Session screen:
+  The app acts on `StartFailed` and `Ended` (the teardown's order), `LinkChanged` and a headset's `Connected` (the headset's row) and `Notice` (a popup), and hands the screen's part of every event to `ShownSession.show`, which applies them to the Session screen:
   `Connected` (Running, the start time, the overlay gone, a mock start's device row), `Paused`/`Resumed` (the controls),
   `Ticked` (the graphs and readout), `SegmentStarted`, `ProgramShown`/`ProgramDropped` (a program's lines), `Connecting`/`Waiting` (the BT wait's overlay) and `Alert`.
   An event raised on the main thread (the BT wait's and a program's start, a program's end) is delivered at once, so nothing on screen moves a frame later;

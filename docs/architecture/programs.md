@@ -39,7 +39,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `_enter_segment` repoints audio, goal and marker to the segment's key (a built-in key or a program slot);
   its `SegmentStarted` event only relabels and shows a custom segment's line and moves the `»` marker (a built-in segment touches no visibility).
   `end`'s `ProgramDropped` resets all program-slot labels, force-hides all `PROGRAM_FORMULA_KEYS` and clears the mark;
-  every ending then derives the live graph's idle series again (`_undo_session_setup` → `ProgramSettings.sync_picker`): the loaded program's preview in program mode, else the saved selection.
+  every ending then derives the live graph's idle series again (`_undo_session_setup` → `SessionSettings.teardown` → `ProgramSettings.sync_picker`): the loaded program's preview in program mode, else the saved selection.
   A program's set on the live graph, and its mark, have two writers, the running program and that idle derivation (`refresh_live_series`, `GraphSeries.apply_saved`, also run at Start before `begin`);
   the idle one does nothing while a session runs or connects: the session owns the graph, a re-pick of the active profile included.
 - `PROGRAM_FORMULA_KEYS` stay out of persistence, so they never leak into `graph_series_*`:

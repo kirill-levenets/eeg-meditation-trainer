@@ -71,7 +71,8 @@ Read it before changing that subsystem.
   `live_mirror.py` `LiveMirror` (the live graphs' data, kept by the runner through a screen lock; `LiveSessionScreen.load_mirror` reloads from its snapshot).
   Nothing in `app/session/` imports Kivy or `app.ui` at import time, directly or through its imports (`tests/test_session_package.py`): a session's screen work goes out as events.
   `app/ui/program_settings.py` `ProgramSettings` — Settings → Timer: mode, the edited program, saved programs.
-  `app/ui/formula_settings.py` `FormulaSettings` — Settings → Custom Formula. → [session](docs/architecture/session.md), [programs](docs/architecture/programs.md), [metrics-scoring](docs/architecture/metrics-scoring.md)
+  `app/ui/formula_settings.py` `FormulaSettings` — Settings → Custom Formula.
+  `app/ui/session_settings.py` `SessionSettings` — Settings as a Start reads them (`read`: the config) and an ending frees them. → [session](docs/architecture/session.md), [programs](docs/architecture/programs.md), [metrics-scoring](docs/architecture/metrics-scoring.md)
 - `app/audio_feedback/noise.py` — `AudioEngine`: below and reward feedback channels, bell/chime/warble, timer gong; `MediaPlayer` on Android.
   `app/ui/sound_sources.py` `SoundSources` — which sounds a session and Settings' Tests play, a missing file warned about. → [audio](docs/architecture/audio.md)
 - `app/storage/` — `database.py` (SQLite, migrations, write lock), `backup.py`, `fileops.py`, `android_saf.py`, `android_share.py`, `csv_export.py`.

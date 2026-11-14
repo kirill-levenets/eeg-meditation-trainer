@@ -26,7 +26,6 @@ from app.metrics.formula_slots import (
 )
 from app.session.manager import SessionState
 from app.session.running_session import RunningSession
-from app.session.session_config import SessionConfig
 from app.session.session_events import (
     Alert,
     Connected,
@@ -37,7 +36,6 @@ from app.session.session_events import (
 )
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
-    segment_target,
 )
 from app.session.session_run import Phase, SessionRun
 from app.settings.registry import (
@@ -70,6 +68,7 @@ from app.ui.profiles import ProfileGate, Profiles
 from app.ui.program_settings import ProgramSettings
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.session_detail_flow import SessionDetailFlow
+from app.ui.session_settings import SessionSettings
 from app.ui.settings_screen import (
     SettingsScreen,
 )
@@ -91,7 +90,6 @@ from app.ui.theme import (
     StyledButton,
     confirm_popup,
     fill_background,
-    format_count,
     make_message_popup,
 )
 from app.ui.toast import android_toast, show_toast
@@ -240,6 +238,7 @@ class EEGMeditationApp(App):
         self._program_settings = ProgramSettings(
             self._ctx, self._settings_screen.timer, self._live_screen,
             show_saved_series=lambda uid: self._graph_series.apply_saved(self._live_screen.graph, uid))
+        self._session_settings = SessionSettings(self._ctx, self._settings_screen, self._program_settings, self._formulas)
         self._formula_settings = FormulaSettings(self._ctx, self._settings_screen.formulas, self._live_screen.graph,
                                                  self._formulas, scoring_locked=self._audio_metric.formula_scoring_locked)
         self._power = PowerExemption(self._ctx, self._settings_screen.device)
@@ -554,43 +553,19 @@ class EEGMeditationApp(App):
     # ------------------------------------------------------------------
 
     def _start_session_common(self) -> None:
-        """Shared session startup logic after device is resolved: what Settings holds read into the session's config, the
-        screen made ready, then the session's own start."""
+        """Shared session startup logic after device is resolved: Settings read into the session's config, the screen made
+        ready, then the session's own start."""
         self._shown.take(self._current_user_id)
-        self._program_settings.refresh_live_series()  # the idle series of the editor as it is now: the program's build on it
-        config = self._session_config()  # after the refresh: the lines it shows are the session's to save
+        self._cancel_settle("apply_threshold")  # a slider move just before Start: the start applies the slider itself
+        mock = self._session.stream is self._session.mock_stream  # the stream this Start chose
+        config = self._session_settings.read(mock=mock, device="Mock" if mock else self._headset.name(),
+                                             graph=self._live_screen.graph)
         self._put_threshold_in_force(config.threshold)  # this session's, whatever the last one left running
         self._session.prepare(config, self._sounds.prepare_session(config.program, config.gong))
         self._live_screen.set_training_series(None)  # set on first segment crossing
         self._live_screen.set_controls_running()
-        self._settings_screen.lock_threshold(self._refuse_program_threshold if config.program else None)
+        self._session_settings.started(config, self._refuse_program_threshold)
         self._session.connect()  # a refused reader undoes all of the above at once (StartFailed)
-
-    def _start_threshold(self, program) -> int:
-        """The threshold a session starts with: a program's first segment target, else the Settings slider."""
-        self._cancel_settle("apply_threshold")  # a slider move just before Start: the start applies the slider itself
-        return segment_target(program.segments[0]) if program else self._settings_screen.threshold
-
-    def _session_config(self) -> SessionConfig:
-        """What this Start runs the session with, read from Settings once: an edit during the run applies to the next
-        session. A program's total drives the timer, so its end reuses the timer-expiry path."""
-        program = self._program_settings.for_session()
-        timer = self._settings_screen.timer
-        if program:
-            minutes = max(1, int(round(program.total_seconds / 60)))
-            logger.info(f"Program session: {format_count(len(program.segments), 'segment')}, "
-                        f"{program.total_seconds:.0f}s total drives the end gong")
-        else:
-            minutes = timer.timer_minutes if timer.timer_enabled else None
-        mock = self._session.stream is self._session.mock_stream  # the stream this Start chose
-        return SessionConfig(metric=self._settings_store.value("audio_metric"),
-                             formulas=tuple(self._formulas.active()),
-                             timer_minutes=minutes, gong=self._settings_store.value("timer_sound") if minutes else "",
-                             mock=mock,
-                             device="Mock" if mock else self._headset.name(),
-                             shown=frozenset(self._live_screen.graph.visible_keys()),
-                             threshold=self._start_threshold(program), program=program,
-                             program_name=self._program_settings.name)
 
     def _undo_failed_start(self, message: str) -> None:
         """Main thread: a start whose BT wait ended without a session is undone, and Retry offered."""
@@ -617,8 +592,7 @@ class EEGMeditationApp(App):
         part (its run dropped, so what is still queued for it does nothing), then the screen's."""
         self._session.undo_setup()
         self._shown.idle()
-        self._settings_screen.lock_threshold(None)
-        self._program_settings.sync_picker()  # after the reset: while the session still reads live, nothing is derived
+        self._session_settings.teardown()
 
     def _on_connect_retry(self, *args) -> None:
         """Retry button on connection overlay."""
@@ -666,9 +640,8 @@ class EEGMeditationApp(App):
         screen back to idle, then FINISHED and the end card."""
         self._shown.reload_whole()  # before the reset: the score is the manager's
         self._undo_session_setup()
-        if getattr(getattr(self, "_sm", None), "current", None) == "settings":  # a timer can end it there
-            self._settings_screen.refresh_profile_counts()  # else entering Settings redraws them
         self._shown.finished(stats, session_id)
+        self._session_settings.saved()
 
     def _refused_while_session_runs(self, doing: str, why: str = "") -> bool:
         """True, after telling the user, while a session runs or connects: until it stops it owns its profile, the
@@ -906,7 +879,7 @@ class EEGMeditationApp(App):
     def _timer_settings(self) -> list[Setting]:
         timer = self._settings_screen.timer
 
-        # Only Settings' controls: a Start reads them into the session's config (_session_config), and a change during
+        # Only Settings' controls: a Start reads them into the session's config (SessionSettings.read), and a change during
         # the run, a profile's reload included, applies to the next session.
         return [kept("timer_enabled", BOOL, lambda: timer.timer_enabled, lambda v: setattr(timer, "timer_enabled", v)),
                 kept("timer_minutes", INT, lambda: timer.timer_minutes, lambda v: setattr(timer, "timer_minutes", v)),

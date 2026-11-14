@@ -96,7 +96,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The slider's settle and the registry's profile load go through `_apply_threshold(value)`, which does nothing while `_program_owns_threshold()` (`program_run.active and RunningSession.live()`);
   a running program's segments own its targets, and re-picking the active profile mid-program reloads its settings, which must not put the slider's value over a segment's target.
   During a running program the threshold controls are locked:
-  `_start_session_common` calls `SettingsScreen.lock_threshold(_refuse_program_threshold)` after the start's setup (so a start that fails in it leaves the controls as they were), and every ending (`_undo_session_setup`) calls `lock_threshold(None)`.
+  `_start_session_common` locks them through `SessionSettings.started(config, _refuse_program_threshold)` (a program's start only) after the session's setup (so a start that fails in it leaves the controls as they were),
+  and every ending frees them (`_undo_session_setup` → `SessionSettings.teardown`).
   The rows are dimmed (opacity 0.5).
   A guard bound to the slider row's and the preset row's `on_touch_down` (bound handlers run before the widget's own and stop it by returning True) hands every touch on the slider, ±5 and the presets to `_refuse_program_threshold` while locked;
   it takes the touch only when that refused, mouse-wheel events included (Kivy's Slider steps its value on them).
