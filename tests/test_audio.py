@@ -104,12 +104,7 @@ class TestAudioFeedback(unittest.TestCase):
             self.assertAlmostEqual(vol_threshold, 0.0)
 
     def test_bell_wav_created(self):
-        self.assertTrue(os.path.exists(self.gen._bell_path))
-
-    def test_cleanup_removes_temp_files(self):
-        bell_path = self.gen._bell_path
-        self.gen.cleanup()
-        self.assertFalse(os.path.exists(bell_path))
+        self.assertTrue(os.path.exists(self.gen._kept("bell")))
 
     def test_update_only_sets_internal_volume(self):
         self.gen.update(50, 100)
@@ -197,24 +192,18 @@ class TestAudioFeedback(unittest.TestCase):
             self.assertLessEqual(v, 1.0)
 
     def test_feedback_path_noise_is_rain(self):
-        self.assertEqual(self.gen._feedback_path_for("noise"), self.gen._noise_path)
-
-    def test_feedback_path_tone_lazy_generates(self):
-        self.assertFalse(os.path.exists(self.gen._tone_path))
-        path = self.gen._feedback_path_for("tone")
-        self.assertEqual(path, self.gen._tone_path)
-        self.assertTrue(os.path.exists(self.gen._tone_path))
+        self.assertEqual(self.gen._feedback_path_for("noise"), self.gen._kept("noise"))
 
     def test_feedback_path_custom_existing(self):
         self.assertEqual(
-            self.gen._feedback_path_for("custom", self.gen._noise_path),
-            self.gen._noise_path,
+            self.gen._feedback_path_for("custom", self.gen._kept("bell")),  # any file that isn't the fallback's
+            self.gen._kept("bell"),
         )
 
     def test_feedback_path_custom_missing_falls_back_to_rain(self):
         self.assertEqual(
             self.gen._feedback_path_for("custom", "/no/such/file.wav"),
-            self.gen._noise_path,
+            self.gen._kept("noise"),
         )
 
 
@@ -272,9 +261,9 @@ class TestTimerBellLifecycle(unittest.TestCase):
         # stay short/high (mid-session ping), timer end needs to be
         # deeper and longer (meditation closure). They live in separate
         # WAV files so the synthesis params can diverge.
-        self.assertNotEqual(self.engine._bell_path, self.engine._timer_bell_path)
-        self.assertTrue(os.path.exists(self.engine._timer_bell_path))
-        self.assertTrue(os.path.exists(self.engine._bell_path))
+        self.assertNotEqual(self.engine._kept("bell"), self.engine._kept("timer_bell"))
+        self.assertTrue(os.path.exists(self.engine._kept("timer_bell")))
+        self.assertTrue(os.path.exists(self.engine._kept("bell")))
 
     def test_timer_bell_config_is_deeper_and_longer(self):
         # Pin the human-meaningful intent of the change: the timer bell
@@ -369,22 +358,6 @@ class TestFeedbackChannel(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
-
-
-def test_cleanup_reports_a_sound_file_it_cannot_remove(monkeypatch):
-    import app.storage.fileops as fileops
-    eng = AudioEngine()
-    warned = []
-    monkeypatch.setattr(fileops.logger, "warning", lambda msg: warned.append(msg))
-
-    def refuse(path):
-        raise PermissionError(13, "Permission denied", path)
-
-    monkeypatch.setattr(fileops.os, "remove", refuse)
-    eng.cleanup()
-    assert warned and all("Could not remove" in m for m in warned)
-    monkeypatch.undo()
-    eng.cleanup()  # the sounds it couldn't remove above
 
 
 def test_the_audio_tests_teardown_runs_on_the_main_thread(monkeypatch):

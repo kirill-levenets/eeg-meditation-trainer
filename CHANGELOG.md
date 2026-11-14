@@ -43,6 +43,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   every other switch between views or modes looks the same (Metrics / Raw EEG, Cal / 14d, the session detail's tabs and band breakdown, Settings › Timer's mode, the formula Slot and Theme).
   Distraction, Sinking and the NeuroSky values stay available as graph series.
 
+- **The app starts sooner**: its built-in sounds (rain, bells, chime, the disconnect alert) are generated at the first launch and kept, not at every launch.
+
 ### Removed
 
 - **History's All Users view**: no screen could open it since the Profile screen went (#48).

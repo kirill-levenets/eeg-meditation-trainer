@@ -119,9 +119,9 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   A legitimately-silent site is grandfathered with a standalone `# silent-ok: <reason>` marker (not a ruff noqa code) that must carry a reason.
 - `conftest.py` sets `KCFG_GRAPHICS_MAXFPS=0` before Kivy loads: tests pump frames themselves, and the 60 fps cap only slept between them.
   It adds `--run-slow` (tests marked `slow` are skipped without it; the pre-push run passes it) and `_restore_config`, so a test's change to `APP`/`METRICS`/`SIGMOID` doesn't reach the next file.
-  `_temp_files_in_basetemp` points `tempfile` at pytest's basetemp, which pytest rotates: an `AudioEngine` removes its sound folder only in `cleanup()`, which many tests never call.
-  At import, conftest wraps `noise`'s `_generate_*_wav` synthesizers in `functools.cache` (and fails if the pattern matches none): the app builds one `AudioEngine`, the tests many, and each would synthesize the same sounds again.
-  It has to run at import, before the test modules bind the synthesizers by name (`from app.audio_feedback.noise import _generate_bell_wav`).
+  `_temp_files_in_basetemp` points `tempfile` at pytest's basetemp, which pytest rotates, for the temp files tests leave.
+  `_sounds_kept_in_basetemp` points `APP.BUILT_IN_SOUNDS_DIR` at one folder there for the whole run: the first `AudioEngine` generates the built-in sounds, the others reuse them, and none is written to the app's own folder;
+  a test of the keeping itself takes a folder of its own (`tests/test_kept_sounds.py`).
   It also removes Kivy's Python-2-only `ObservableList`/`ObservableReferenceList.__setslice__`.
   Kivy 2.3.0's Python 3.12 wheel is built with Cython ≤ 3.0.0, which leaks the traceback of every exception caught inside compiled code (fixed in Cython 3.0.3, cython#5724).
   Those methods always raise AttributeError and Kivy calls them on every `pos`/`size` read and change, so over a run the leaked tracebacks grew to millions of objects that every full collection rescanned;

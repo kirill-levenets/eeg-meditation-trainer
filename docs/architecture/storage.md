@@ -91,7 +91,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `restore_backup` validates, `copy_file_atomic`s, then removes the replaced DB's `-wal`/`-shm` so SQLite can't replay them onto the restored file.
   A `backup()` on the shut-down DB raises `sqlite3.OperationalError` (a silent no-op would write an EMPTY backup the user later restores).
   **Every app file copy goes through `app/storage/fileops.copy_file_atomic(src, dst)`**
-  — bytes and mode, no extended attributes, into a temp file beside `dst`, fsync, `os.replace` (so `dst` is untouched or complete) — never `shutil.copy2`:
+  — bytes and mode, no extended attributes, into a temp file beside `dst`, fsync, `os.replace` (so `dst` is untouched or complete) — never `shutil.copy2`
+  (a file the app writes itself, such as a generated sound, takes the same path through `write_file_atomic(dst, write)`):
   in Android app storage copying the SELinux label raises EACCES *after* the data is written, which the phone's Python 3.11 `shutil` doesn't ignore (3.12 does), so a copy that succeeded reports failure (#63).
   The same EACCES is the harmless Kivy `Error when copying logo directory` on the first launch after an install.
   `discard_file(path)` is the shared remove-and-log for temp/leftover files.

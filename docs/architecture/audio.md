@@ -34,8 +34,15 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `resume()` replays the same players (`_play_prepared`), and the ramp restores each role's last target.
   `stop()`, the session-end teardown, tears the prepared set down, which only a session start's `prepare_feedback` + `set_reward` rebuild (`SoundSources.prepare_session`), so both channels would stay silent after Resume.
   The `"tone"` source is a harmonic-pad drone (fundamental + fifth), generated on first use.
+  **The built-in sounds are generated once and kept** in `APP.BUILT_IN_SOUNDS_DIR` (`built_in_sounds/` beside the database, the engine's alone; the custom sounds imported on Android are in `sounds/`):
+  generating them is pure-Python work on the main thread at every launch otherwise.
+  A file's name carries the generators' version (`_SOUNDS_VERSION`) and the arguments that shape it (`_kept_sounds`), and a file under that name is reused as it is:
+  `_write_wav` writes through `fileops.write_file_atomic`, so a name never holds part of a sound, and a launch removes the files of other versions.
+  Every use reads a sound's path through `_kept(name)`, which generates a file that is missing.
+  A change to a generator's samples bumps `_SOUNDS_VERSION`; `tests/test_kept_sounds.py` pins the generators' source and the sounds' arguments (their file names) to the version and fails until it is looked at.
+  The launch generates what a session can't wait for (rain, both bells, chime, warble); the tone and crickets loops on first use (`_kept`).
   The `"heartbeat"` source (#11 — stable internal id; the timbre is **Crickets**) is a looping `_NOISE_BUFFER_SECONDS`-long (10 s) WAV: a silent bed with one `_HEARTBEAT_PULSE_SECONDS` (0.1 s) cricket chirp
-  — a high tonal carrier (~4.8 kHz) + 2nd harmonic gated by a ~40 Hz half-wave amplitude trill, Hann-windowed to zero at both ends (`_generate_heartbeat_wav`, cached at `_heartbeat_path`)
+  — a high tonal carrier (~4.8 kHz) + 2nd harmonic gated by a ~40 Hz half-wave amplitude trill, Hann-windowed to zero at both ends (`_generate_heartbeat_wav`)
   — so a chirp every ~10 s rides the same looping player + volume ramp with **no** tick-loop scheduling, and the silent loop edges keep it gapless.
   It's **reward-only**: `_REWARD_SOURCE_OPTIONS` offers it as "Crickets", `_FEEDBACK_SOURCE_OPTIONS` doesn't.
   `test_audio(reward_id)` previews the reward source first (players are near loop start so the chirp is caught) before the below-channel sweep.
