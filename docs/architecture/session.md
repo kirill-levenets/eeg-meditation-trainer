@@ -35,7 +35,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The commands are `toggle_pause`, `stop`, `discard`, `abort` (a Cancel), `mark`, `set_threshold`, `set_formula` and `set_shown`; each carries the run it was sent for and does nothing for another or for one that ended.
   What the screen must do comes back as events (`app/session/session_events.py`), queued for the main thread for that run only (`on_main_for`) and delivered by `RunningSession._deliver`:
   first to the app's `_on_session_event`, then the session's own sound for it (`docs/architecture/audio.md`).
-  the app acts on `Connected`, `StartFailed`, `Paused`, `Resumed`, `Ended`, `LinkChanged` (the headset's row) and `Notice` (a popup), and hands the rest to `ShownSession.show`, which applies them to the Session screen:
+  the app acts on `StartFailed` and `Ended` (the teardown's order), `LinkChanged` and a headset's `Connected` (the headset's row) and `Notice` (a popup), and hands the screen's part of every event to `ShownSession.show`, which applies them to the Session screen:
+  `Connected` (Running, the start time, the overlay gone, a mock start's device row), `Paused`/`Resumed` (the controls),
   `Ticked` (the graphs and readout), `SegmentStarted`, `ProgramShown`/`ProgramDropped` (a program's lines), `Connecting`/`Waiting` (the BT wait's overlay) and `Alert`.
   An event raised on the main thread (the BT wait's and a program's start, a program's end) is delivered at once, so nothing on screen moves a frame later;
   the session and its parts (`ProgramRun`, `BtWait`, `SessionWatch`) hold no widget.
@@ -82,7 +83,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The row is dated and named by the session's start (`SessionManager.started_at`, 0.0 before a start and after `reset()` → `checkpoint_session(started_at=…)` and `session_name`), not by its first save a minute later.
   **Every ending saves through one path** (#39): `RunningSession._finish(run, reason, alert)` on the writer, then `_finalize_stop_ui(stats, id)` on the main thread (UI teardown).
   `_finish` claims its run (`run.mark_ended()`: one ending wins), silences the noise (`AudioEngine.mute()`, setVolume only, so nothing plays on while the save waits on the write lock), saves (`persist`: the stop's stats and the last ticks, no Kivy) and queues `Ended(stats, session_id, alert)` for its run;
-  the app's handler closes a "Stop session?" still open, shows the alert if a check ended it, tears the players down (`AudioEngine.stop()`, on the main thread) and calls `_finalize_stop_ui`.
+  the app's handler closes a "Stop session?" still open, shows the alert if a check ended it and calls `_finalize_stop_ui`; then the session tears its players down (`AudioEngine.stop()`, on the main thread).
+  `_finalize_stop_ui` orders the screen's part: `ShownSession.reload_whole` (the graphs from the mirror and the whole session's score, before the reset), the teardown (`_undo_session_setup`, with `ShownSession.idle`), then `ShownSession.finished` (FINISHED, the saved duration, History marked dirty, the end card).
   A save that fails is reported (`session_save_failed`, past its cooldown) and the run still ends on screen, with no end card: its setup undone, the wake lock and service released.
   A user Stop asks `_confirm_action("Stop session?", ...)`, whose OK sends `stop("user")`; the session goes on recording while the dialog is open, so Cancel loses nothing and Stop saves up to then.
   There is no discard path; deleting is the end card's confirmed action.
@@ -116,7 +118,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `HistoryScreen.remove_sessions(ids)` removes those rows and model entries in place (see the session list in [history.md](history.md)): no rebuild, no spinner, wherever the user is.
   History never lists the running session: its row exists from the first checkpoint, with that checkpoint's stats, and a History reload during the session would list it with them, frozen there until the next reload.
   `RunningSession.running_id()` (`recorder.session_id` while `live()`) is left out of History's list (`HistoryFlow.finished_sessions`) and Settings' profile counts.
-  `_finalize_stop_ui` marks History dirty, so the session appears once it ends.
+  `ShownSession.finished` marks History dirty, so the session appears once it ends.
   `delete_sessions` also refuses it (`running_id()` among the ids): its next checkpoints would write ticks for no session.
 
 ## Timer

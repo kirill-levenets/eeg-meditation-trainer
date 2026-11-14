@@ -24,16 +24,15 @@ from app.metrics.formula_slots import (
     FORMULA_KEYS,
     FormulaSlots,
 )
-from app.session.manager import SessionState, elapsed_clock
+from app.session.manager import SessionState
 from app.session.running_session import RunningSession
 from app.session.session_config import SessionConfig
 from app.session.session_events import (
+    Alert,
     Connected,
     Ended,
     LinkChanged,
     Notice,
-    Paused,
-    Resumed,
     StartFailed,
 )
 from app.session.session_program import (
@@ -71,7 +70,6 @@ from app.ui.profiles import ProfileGate, Profiles
 from app.ui.program_settings import ProgramSettings
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.session_detail_flow import SessionDetailFlow
-from app.ui.session_labels import session_title
 from app.ui.settings_screen import (
     SettingsScreen,
 )
@@ -618,10 +616,7 @@ class EEGMeditationApp(App):
         """Main thread: undo what _start_session_common set up, for a session that ended or never started: the session's
         part (its run dropped, so what is still queued for it does nothing), then the screen's."""
         self._session.undo_setup()
-        self._live_screen.set_training_series(None)  # clear the program "training now" marker
-        self._live_screen.set_controls_idle()
-        self._live_screen.update_device_status(False)
-        self._live_screen.set_shamatha(False)
+        self._shown.idle()
         self._settings_screen.lock_threshold(None)
         self._program_settings.sync_picker()  # after the reset: while the session still reads live, nothing is derived
 
@@ -666,33 +661,14 @@ class EEGMeditationApp(App):
             "Stop session?", "The session will be saved. You can delete it on the next screen.",
             "Stop", lambda: self._stop_and_save(reason="user"))
 
-    def _finalize_stop_ui(self, stats: dict, session_id: int | None) -> None:
-        """Main-thread UI teardown after a session has been persisted."""
-        # Reload the live graph from the mirror buffers so it shows the FULL
-        # session (the locked portion never reached the live graph via the
-        # per-tick path). Otherwise closing the summary reveals a stale graph
-        # covering only the pre-lock seconds while History shows the real
-        # duration.
-        try:
-            self._live_screen.load_mirror(self._shown.mirror.snapshot())
-        except Exception:
-            logger.exception("graph reload on stop failed")
-        self._live_screen.update_stats(self._session.manager.live_score())  # the whole session's: no tick ran while locked
+    def _finalize_stop_ui(self, stats: dict | None, session_id: int | None) -> None:
+        """Main thread, after a session was saved (or discarded): the whole session on the graphs, the session and the
+        screen back to idle, then FINISHED and the end card."""
+        self._shown.reload_whole()  # before the reset: the score is the manager's
         self._undo_session_setup()
-        self._live_screen.update_state("FINISHED")
-        # Sync the header timer to the final duration (it froze at lock time).
-        if stats:
-            self._live_screen.update_timer(elapsed_clock(stats.get("duration", 0)))
-        self._history.mark_dirty()
         if getattr(getattr(self, "_sm", None), "current", None) == "settings":  # a timer can end it there
             self._settings_screen.refresh_profile_counts()  # else entering Settings redraws them
-        if stats and session_id:
-            try:
-                saved = self._db.get_session(session_id)  # titled like its History row, from what was stored
-            except sqlite3.Error:
-                logger.exception(f"Session {session_id} saved, but its title couldn't be read for the end card")
-                saved = None
-            self._shown.show_end_card(session_id, stats, session_title(saved) if saved else "")
+        self._shown.finished(stats, session_id)
 
     def _refused_while_session_runs(self, doing: str, why: str = "") -> bool:
         """True, after telling the user, while a session runs or connects: until it stops it owns its profile, the
@@ -719,20 +695,18 @@ class EEGMeditationApp(App):
         raise here."""
         match event:
             case Connected(on_mock=on_mock):
-                self._on_session_connected(on_mock)
+                if not on_mock:
+                    self._headset.show_selected()
+                self._shown.show(event)
             case StartFailed(message=message):
                 self._shown.owner = None  # no session came of the start, which emptied the display
                 self._undo_failed_start(message)
-            case Paused():
-                self._live_screen.set_controls_paused()
-            case Resumed():
-                self._live_screen.set_controls_running()
             case Ended(stats=stats, session_id=session_id, alert=alert):
                 if self._stop_confirm is not None:  # the timer or a check ended it under "Stop session?"
                     self._stop_confirm.dismiss()
                     self._stop_confirm = None
                 if alert:
-                    self._live_screen.show_alert(alert)
+                    self._shown.show(Alert(alert))
                 self._finalize_stop_ui(stats, session_id)
                 logger.info("Session ended and saved" if stats else "Session ended")
             case LinkChanged():
@@ -741,17 +715,6 @@ class EEGMeditationApp(App):
                 self._info_popup(title, message)
             case _:
                 self._shown.show(event)
-
-    def _on_session_connected(self, on_mock: bool) -> None:
-        """Main thread: the session has started, at once on the mock data, or on a headset (the BT wait's first data, or
-        a kept-alive connection) with the connect chime."""
-        if on_mock:
-            self._live_screen.update_device_status(True)
-        else:
-            self._headset.show_selected()
-        self._live_screen.update_state("Running")
-        self._live_screen.set_start_time(self._session.manager.started_at)
-        self._live_screen.hide_overlay()  # the session starts its feedback right after (RunningSession._deliver)
 
     def _on_key_down(self, window, key, scancode, codepoint, modifiers) -> bool:
         """Handle keyboard hotkey for marker."""

@@ -8,7 +8,8 @@ import threading
 import pytest
 
 import app.session.session_events as session_events
-from app.session.session_events import SegmentStarted
+from app.session.manager import elapsed_clock
+from app.session.session_events import Connected, SegmentStarted
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.live_session import LiveSessionScreen
 from app.ui.shown_session import ShownSession
@@ -65,7 +66,9 @@ def test_an_ending_tears_the_players_down_even_when_the_screens_part_fails(fresh
 def test_a_start_whose_screen_part_fails_plays_no_feedback(fresh_app, monkeypatch):
     app = fresh_app
     started = calls_of(monkeypatch, app._audio, "start")
-    monkeypatch.setattr(app, "_on_session_connected", lambda _on_mock: (_ for _ in ()).throw(RuntimeError("a screen")))
+    show = app._shown.show
+    monkeypatch.setattr(app._shown, "show", lambda event: (_ for _ in ()).throw(RuntimeError("a screen"))
+                        if isinstance(event, Connected) else show(event))
     monkeypatch.setattr(app._session, "start_running", lambda: None)
     with pytest.raises(RuntimeError):
         app._on_start()
@@ -73,6 +76,22 @@ def test_a_start_whose_screen_part_fails_plays_no_feedback(fresh_app, monkeypatc
     monkeypatch.undo()
     app._stop_and_save()  # the start got that far: its ending, for the next test
     frames()
+
+
+def test_an_ending_leaves_the_screen_finished_and_idle(fresh_app, monkeypatch):
+    app, screen = fresh_app, fresh_app._live_screen
+    reload_with(app, threshold="50")
+    fed = FedSession(app, monkeypatch)
+    for _ in range(3):
+        fed.tick(metrics=tick_metrics(80.0))
+    assert screen._shamatha_active and screen._device_label.text == "[Mock EEG] *"
+    app._history._history_dirty = False
+    screen.update_timer("59:59")  # the clock as a screen lock froze it
+    app._stop_and_save()
+    frames()
+    duration = app._db.get_all_sessions(app._current_user_id)[0]["duration"]
+    assert screen._last_state == "FINISHED" and screen._timer_label.text.endswith(elapsed_clock(duration))
+    assert not screen._shamatha_active and screen._device_label.text == "[Disconnected]" and app._history._history_dirty
 
 
 def test_the_shamatha_pill_lights_after_three_ticks_above_the_threshold(fresh_app, monkeypatch):

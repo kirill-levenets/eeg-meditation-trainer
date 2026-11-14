@@ -75,7 +75,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Every failed Android connect attempt (secure → insecure → `createRfcommSocket(1)`) closes its socket; the ch=1 fallback is called directly on the device, since through `Class.getMethod` pyjnius can't resolve its varargs overload.
   The wait is `BtWait` (`app/session/bt_wait.py`, `RunningSession.bt_wait`): `begin(run)` (from `RunningSession.connect`, on the main thread before the runner starts) checks `start()`'s result **before** entering the wait;
   then the runner's tick drives `tick(run)` while the run is CONNECTING, and `RunningSession._follow_bt_wait` acts on how the wait ended (`WaitEnd`: started, or the retry screen's message):
-  the first data starts the session on the runner, its countdown armed there before the next tick reads it, and the `Connected` event shows it on main (`_on_session_connected`);
+  the first data starts the session on the runner, its countdown armed there before the next tick reads it, and the `Connected` event shows it on main (the headset's row, then `ShownSession.show`);
   a give-up ends the run on the runner (its reader down, `KeepAwake.release`) and its `StartFailed` event undoes the start and shows the retry screen (`_undo_failed_start`).
   A refused `start()` undoes the start's setup the same way, with the retry overlay showing `_last_connect_error` and no `bt_connect_failed` soft error (its 60 s cooldown would hide the next real failure).
   **Every BT-wait exit** (Cancel and Stop through `RunningSession.abort`, the give-ups on the runner) ends its run **before** it stops the stream, then releases the wake lock and keep-alive service (`KeepAwake.release`):
@@ -102,7 +102,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   program series and state via `ProgramRun.end`, the training marker, the shamatha pill, timer and session manager reset, wake lock and keep-alive service (the releases are idempotent),
   then the live graph's idle series derived again (`ProgramSettings.sync_picker`: after the reset, so the session no longer reads live).
   A program left behind would have a later simple session persist the program's series over the user's series selection.
-  A kept-alive connection's start shows the same `_on_session_connected` as the wait's.
+  A kept-alive connection's start raises the same `Connected` as the wait's, at once.
   The header's start time and the graph's wall-clock axis come from `SessionManager.started_at`, not from when the queued UI ran (after a screen lock, the unlock time).
   The run is None until the first Start, so a Cancel before any Start finds no run to end.
   **Each connection gets its own windows**:
