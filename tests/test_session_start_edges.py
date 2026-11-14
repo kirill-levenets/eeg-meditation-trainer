@@ -264,6 +264,17 @@ def test_a_scan_result_still_starts_the_session_without_a_cancel(scanning):
     assert _connecting(app) and app._real_stream._device_address == HEADSET[0]
 
 
+def test_a_settings_test_played_during_the_scan_ends_when_the_session_starts(scanning):
+    # The run isn't live while it scans, so Settings' Test is allowed then; left playing, the session's start would
+    # find the engine playing and never start its feedback.
+    app, paired = scanning
+    app._on_start()
+    app._settings_screen.audio.on_test_audio()
+    assert app._audio._test_active
+    paired.arrive()
+    assert _connecting(app) and not app._audio._test_active and not app._audio.is_playing
+
+
 def test_a_scan_result_for_a_profile_picked_away_ends_the_start(scanning):
     """The Start was the profile's that pressed it: another one picked while it scanned gets neither its headset nor
     its session (#99)."""

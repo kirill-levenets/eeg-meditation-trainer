@@ -77,11 +77,11 @@ class RunningSession:
         self.manager = SessionManager()
         self.manager.set_audio(audio)
         self.timer = TimerState()
-        self.program_run = ProgramRun(self.manager, audio, show=on_event, emit=self._emit, formula_vars=self.formula_vars)
+        self.program_run = ProgramRun(self.manager, audio, show=self._deliver, emit=self._emit, formula_vars=self.formula_vars)
         self.recorder = SessionRecorder(ctx.db, self.manager, with_score=self.with_score, row_fields=self.row_fields)
         self._headset_name = headset.name
         self.watch = SessionWatch(audio, headset.stream, headset_name=headset.name, emit=self._emit)
-        self.bt_wait = BtWait(headset.stream, headset_name=headset.name, show=on_event, emit=self._emit)
+        self.bt_wait = BtWait(headset.stream, headset_name=headset.name, show=self._deliver, emit=self._emit)
         self.keep_awake = KeepAwake()  # held from a session's setup to its ending
         self._runner: threading.Thread | None = None
         self._commands: queue.Queue | None = None
@@ -125,17 +125,17 @@ class RunningSession:
         if self.config.mock:
             self.stream.start()
             self._started(run)
-            self._on_event(Connected(on_mock=True))
+            self._deliver(Connected(on_mock=True))
             return True
         if self.stream.is_connected:
             self.stream.reset_sample_state()
             self._started(run)
-            self._on_event(Connected())
+            self._deliver(Connected())
             logger.info(f"Reusing existing BT connection to {self._headset_name()}")
             return True
         end = self.bt_wait.begin(run)
         if end is not None:
-            self._on_event(StartFailed(end.message))
+            self._deliver(StartFailed(end.message))
         return end is None
 
     def _started(self, run: SessionRun) -> None:
@@ -228,8 +228,9 @@ class RunningSession:
         self._send(self._finish, reason, "", finished=saved)
 
     def discard(self) -> None:
-        """End the run and delete its data (its profile is deleted); returns once it is deleted."""
+        """End the run and delete its data (its profile is deleted); returns once it is deleted, its players torn down."""
         self._send(self._discard, finished=True)
+        self._audio.stop()
 
     def abort(self) -> None:
         """End a start that hasn't become a session (a Cancel); returns once its reader is down."""
@@ -354,7 +355,33 @@ class RunningSession:
         self._ctx.on_main(lambda: fn() if self.run is run else None)
 
     def _emit(self, run: SessionRun, event: object) -> None:
-        self.on_main_for(run, lambda: self._on_event(event))
+        self.on_main_for(run, lambda: self._deliver(event))
+
+    def _deliver(self, event: object) -> None:
+        """Main thread: the event to the app, then the sound that goes with it (the main thread's: the runner may only
+        silence, see `_finish`). A pause or an ending silences the players even if the app's part fails; a start plays
+        only on a screen that shows it."""
+        if isinstance(event, Connected):
+            self._on_event(event)
+            self._sound(event)
+            return
+        try:
+            self._on_event(event)
+        finally:
+            self._sound(event)
+
+    def _sound(self, event: object) -> None:
+        match event:
+            case Connected(on_mock=on_mock):
+                self._audio.start()  # with the overlay's hide: the noise never plays under the connecting loader
+                if not on_mock:
+                    self._audio.play_connect_sound()
+            case Paused():
+                self._audio.pause()  # not stop(): that tears down the session's players, which only a Start rebuilds
+            case Resumed():
+                self._audio.resume()
+            case Ended():
+                self._audio.stop()  # the players' teardown: on this thread, where the Looper runs
 
     # ---- a tick ----
 

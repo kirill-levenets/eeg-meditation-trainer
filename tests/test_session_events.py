@@ -3,6 +3,9 @@ a program segment's line, the BT wait's progress, the warnings over the session 
 import ast
 import inspect
 import textwrap
+import threading
+
+import pytest
 
 import app.session.session_events as session_events
 from app.session.session_events import SegmentStarted
@@ -13,6 +16,7 @@ from tests._app import (
     FedSession,
     HeadsetSession,
     calls_of,
+    frames,
     reload_with,
     start_ticked_by_hand,
     tick_metrics,
@@ -26,6 +30,49 @@ def test_a_start_on_the_mock_data_shows_the_session_running_at_once(fresh_app, m
     start_ticked_by_hand(app)
     assert screen._device_label.text == "[Mock EEG] *" and screen._last_state == "Running" and screen._overlay.opacity == 0
     assert started == [()] and chimes == []  # the feedback plays; the connect chime is a headset's
+
+
+def test_a_start_stops_the_last_gong_and_a_settings_test_still_playing(fresh_app, monkeypatch):
+    gongs, tests = calls_of(monkeypatch, fresh_app._audio, "stop_timer_bell"), calls_of(monkeypatch, fresh_app._audio, "end_test")
+    start_ticked_by_hand(fresh_app)
+    assert gongs == [()] and tests == [()]
+
+
+def test_an_ending_tears_the_players_down_on_the_main_thread(fresh_app, monkeypatch):
+    app, stops = fresh_app, []
+    stop = app._audio.stop
+    monkeypatch.setattr(app._audio, "stop", lambda: (stops.append(threading.current_thread() is threading.main_thread()),
+                                                     stop()))
+    FedSession(app, monkeypatch).tick()
+    app._stop_and_save()
+    frames()
+    assert stops == [True] and app._audio._feedback_players == {}
+
+
+def test_an_ending_tears_the_players_down_even_when_the_screens_part_fails(fresh_app, monkeypatch):
+    # Left up, they keep the engine playing: the next session's start would find it so and play no feedback.
+    app = fresh_app
+    FedSession(app, monkeypatch).tick()
+    finalize = app._finalize_stop_ui
+    monkeypatch.setattr(app, "_finalize_stop_ui", lambda *_a: (_ for _ in ()).throw(RuntimeError("a screen update")))
+    app._stop_and_save()
+    with pytest.raises(RuntimeError):
+        frames()
+    assert app._audio._feedback_players == {}
+    finalize(None, None)  # the teardown the failure skipped, for the next test
+
+
+def test_a_start_whose_screen_part_fails_plays_no_feedback(fresh_app, monkeypatch):
+    app = fresh_app
+    started = calls_of(monkeypatch, app._audio, "start")
+    monkeypatch.setattr(app, "_on_session_connected", lambda _on_mock: (_ for _ in ()).throw(RuntimeError("a screen")))
+    monkeypatch.setattr(app._session, "start_running", lambda: None)
+    with pytest.raises(RuntimeError):
+        app._on_start()
+    assert started == []
+    monkeypatch.undo()
+    app._stop_and_save()  # the start got that far: its ending, for the next test
+    frames()
 
 
 def test_the_shamatha_pill_lights_after_three_ticks_above_the_threshold(fresh_app, monkeypatch):

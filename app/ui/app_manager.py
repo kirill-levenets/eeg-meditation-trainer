@@ -558,9 +558,6 @@ class EEGMeditationApp(App):
     def _start_session_common(self) -> None:
         """Shared session startup logic after device is resolved: what Settings holds read into the session's config, the
         screen made ready, then the session's own start."""
-        # The session takes the audio over: the last session's gong stops, and so does a Settings test still running.
-        self._audio.stop_timer_bell()
-        self._audio.end_test()
         self._shown.take(self._current_user_id)
         self._program_settings.refresh_live_series()  # the idle series of the editor as it is now: the program's build on it
         config = self._session_config()  # after the refresh: the lines it shows are the session's to save
@@ -709,8 +706,7 @@ class EEGMeditationApp(App):
         """Halt a running session and DELETE its data — used when its owning profile is deleted. A checkpoint (the 60 s
         flush, leaving the app, a backup) may already have written a session row under the doomed profile; without the
         delete it survives as an orphan. The screen returns to idle at once, before the profile's delete goes on."""
-        self._session.discard()  # waits for the runner: the row is gone when it returns
-        self._audio.stop()
+        self._session.discard()  # waits for the runner: the row is gone when it returns, the players torn down
         self._finalize_stop_ui(None, None)
 
     def _stop_and_save(self, reason: str = "user") -> None:
@@ -729,17 +725,14 @@ class EEGMeditationApp(App):
                 self._undo_failed_start(message)
             case Paused():
                 self._live_screen.set_controls_paused()
-                self._audio.pause()  # not stop(): that tears down the session's players, which only a Start rebuilds
             case Resumed():
                 self._live_screen.set_controls_running()
-                self._audio.resume()
             case Ended(stats=stats, session_id=session_id, alert=alert):
                 if self._stop_confirm is not None:  # the timer or a check ended it under "Stop session?"
                     self._stop_confirm.dismiss()
                     self._stop_confirm = None
                 if alert:
                     self._live_screen.show_alert(alert)
-                self._audio.stop()  # the players' teardown: on this thread, where the Looper runs
                 self._finalize_stop_ui(stats, session_id)
                 logger.info("Session ended and saved" if stats else "Session ended")
             case LinkChanged():
@@ -758,11 +751,7 @@ class EEGMeditationApp(App):
             self._headset.show_selected()
         self._live_screen.update_state("Running")
         self._live_screen.set_start_time(self._session.manager.started_at)
-        self._live_screen.hide_overlay()
-        # Audio starts with the overlay hide, so the noise never plays while the connecting loader is still visible.
-        self._audio.start()
-        if not on_mock:
-            self._audio.play_connect_sound()
+        self._live_screen.hide_overlay()  # the session starts its feedback right after (RunningSession._deliver)
 
     def _on_key_down(self, window, key, scancode, codepoint, modifiers) -> bool:
         """Handle keyboard hotkey for marker."""

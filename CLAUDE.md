@@ -129,7 +129,7 @@ The linked file explains the mechanism.
   A BT-wait exit ends its run before it stops the stream; every ending undoes the start's setup on the main thread (`_undo_session_setup()`: the session's `undo_setup`, then the screen's). → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md)
 - **No Kivy on the runner**: UI goes through the main thread.
   **No `AudioEngine.stop()`, `MediaPlayer.release()`/`stop()` on the runner**: they deadlock against the main Looper paused during screen lock.
-  Every ending silences with `AudioEngine.mute()` (setVolume only), saves, then hands the players' teardown to the main thread; a timer's gong rings last.
+  Every ending silences with `AudioEngine.mute()` (setVolume only), saves, then hands the players' teardown to the main thread (`RunningSession._deliver`, which plays the session's sound after the app's part of each event); a timer's gong rings last.
   **No SoundLoader off the main thread on Android**: SDL holds its mixer lock while the app is paused and the call keeps the GIL, so a tick's alert froze the app;
   alerts are MediaPlayers (`_play_one_shot`). → [audio](docs/architecture/audio.md)
 - **Every runtime DB write goes through `DatabaseManager._write()`** (one transaction under `_write_lock`): the connection is shared with the runner (`check_same_thread=False`).
