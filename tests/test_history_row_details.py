@@ -450,7 +450,7 @@ def test_the_session_detail_shows_a_long_scored_on_value_whole_on_a_phone(phone_
 
 def test_the_detail_legend_names_a_series_as_the_live_graph_does():
     # Scored on reads the name the live graph gave the metric; the legend under it must say the same.
-    from app.ui.live_session import SERIES_NAMES
+    from app.metrics.series_names import SERIES_NAMES
     diary = _diary_with(dict(_sessions()[0], score_metric_key="native_meditation", score_metric_name="NS Meditation",
                              threshold_used=50))
     assert _detail_row(diary, "Metric").text == "NS Meditation"

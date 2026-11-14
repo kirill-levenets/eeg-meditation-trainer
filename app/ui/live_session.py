@@ -1,6 +1,5 @@
 
 import time
-from types import MappingProxyType
 
 from kivy.app import App
 from kivy.clock import Clock
@@ -17,6 +16,7 @@ from kivy.uix.widget import Widget
 
 from app.eeg.band_spec import BAND_KEYS, GROUP_NAMES, group_powers
 from app.logger import logger
+from app.metrics.series_names import SERIES_NAMES
 from app.session.manager import NO_SCORE, LiveScore
 from app.ui.graph_scroll import GraphAwareScrollView
 from app.ui.hooks import Hook, wire
@@ -97,23 +97,6 @@ METRICS_SCALES = {
     "program_formula_2": 200.0,
     "program_formula_3": 200.0,
 }
-
-# Friendly labels for the on-graph series picker (combobox): the defaults every metrics graph starts from.
-SERIES_NAMES = MappingProxyType({
-    "shamatha_score": "Shamatha",
-    "meditation_score": "Meditation",
-    "distraction": "Distraction",
-    "sinking": "Sinking",
-    "subtle_distraction": "Subtle Distraction",
-    "native_attention": "NS Attention",
-    "native_meditation": "NS Meditation",
-    "custom_formula": "Custom 1",
-    "custom_formula_2": "Custom 2",
-    "custom_formula_3": "Custom 3",
-    "program_formula": "Program",
-    "program_formula_2": "Program 2",
-    "program_formula_3": "Program 3",
-})
 
 
 def _compute_graph_height_adaptive(
@@ -268,6 +251,7 @@ class LiveSessionScreen(Screen):
     """Main session screen with graph, stats, and controls."""
 
     on_program_pick = Hook()  # a saved program picked on the duration picker, by its index
+    on_lines_shown = Hook()  # the metrics graph's shown lines changed: their keys
     on_duration_preset = Hook()  # a duration preset picked: minutes, or None for no timer
 
     def __init__(self, **kwargs) -> None:
@@ -373,7 +357,7 @@ class LiveSessionScreen(Screen):
         # The on-graph series-picker glyph is wired centrally for every graph by
         # AppManager._wire_graph_affordances. The legend tracks the graph's own
         # visible set: any change (picker toggle or restore) rebuilds it.
-        wire(self._graph, on_series_change=lambda: self._rebuild_metric_legend(self._graph.visible_keys()))
+        wire(self._graph, on_series_change=self._metric_lines_changed)
         self._metrics_container.add_widget(self._graph)
 
         self._legend = LegendBar()
@@ -702,6 +686,11 @@ class LiveSessionScreen(Screen):
         self._graph_area.add_widget(self._raw_container if view == "raw" else self._metrics_container)
         self._view_toggle.show(view)
         self._active_view = view
+
+    def _metric_lines_changed(self) -> None:
+        shown = self._graph.visible_keys()
+        self._rebuild_metric_legend(shown)
+        self.on_lines_shown(shown)
 
     def _rebuild_metric_legend(self, enabled_keys: list) -> None:
         """Clear and re-populate the metrics legend with only the enabled metrics.

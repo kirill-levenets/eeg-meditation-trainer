@@ -9,6 +9,7 @@ from app.metrics.custom_formula import (
     compile_formula,
     evaluate_series,
 )
+from app.metrics.series_names import SERIES_NAMES, prettified
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
     program_line_name,
@@ -29,6 +30,12 @@ class FormulaSlots:
     def __init__(self) -> None:
         self.evaluators: list[CustomFormulaEvaluator] = [CustomFormulaEvaluator() for _ in FORMULA_KEYS]
         self.names: list[str] = [default_name(i) for i in range(len(FORMULA_KEYS))]
+
+    def line_name(self, key: str) -> str:
+        """A metrics line's label: a slot's own name, else the line's default."""
+        if key in FORMULA_KEYS:
+            return self.names[FORMULA_KEYS.index(key)]
+        return SERIES_NAMES.get(key) or prettified(key)
 
     def for_key(self, key: str) -> CustomFormulaEvaluator | None:
         """The evaluator plotted as `key`, or None for a series that isn't a slot."""

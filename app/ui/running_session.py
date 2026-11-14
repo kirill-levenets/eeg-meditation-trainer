@@ -4,7 +4,7 @@ and what keeps the phone awake; and the one thread that writes all of it while a
 import queue
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -80,6 +80,7 @@ class RunningSession:
         self.config: SessionConfig | None = None  # the last Start's
         self.run: SessionRun | None = None  # the current Start, until its ending's teardown on the main thread
         self.formulas = FormulaSlots()  # its own lines, built from the config: their avg() windows are the session's
+        self.shown: frozenset[str] = frozenset()  # the live graph's shown lines, from the config and set_shown
         self.mock_stream = MockEEGStream()
         self.stream = self.mock_stream  # the one this Start reads: the mock, or the headset's (the link outlives runs)
         self.mirror = LiveMirror()  # the live graphs' data, kept by the runner through a screen lock
@@ -105,6 +106,7 @@ class RunningSession:
         self.config = config
         self.formulas = FormulaSlots()
         self.formulas.load(list(config.formulas))
+        self.shown = config.shown
         self.timer.set_enabled(config.timer_minutes is not None)
         self.timer.set_duration(config.timer_minutes or 1)
         self.engine.reset()
@@ -131,7 +133,7 @@ class RunningSession:
             return {**stats, "score_metric_key": "program",
                     "score_metric_name": self.program_run.name or "Program", "avg_score": None}
         key = stats.get("score_metric_key") or self.drive_key()  # no scored tick yet: what it would score
-        return {**stats, "score_metric_key": key, "score_metric_name": self._live_screen.graph.series_name(key)}
+        return {**stats, "score_metric_key": key, "score_metric_name": self.formulas.line_name(key)}
 
     def row_fields(self) -> dict:
         """The running session's row, apart from its stats and ticks, as a checkpoint writes it."""
@@ -147,7 +149,7 @@ class RunningSession:
 
     def custom_formulas_json(self) -> str:
         """Its formula lines, with which of them the live graph shows and which drives the sound."""
-        return self.formulas.session_record(self._live_screen.graph.is_visible, self.config.metric)
+        return self.formulas.session_record(self.shown.__contains__, self.config.metric)
 
     # ---- what the main thread may ask ----
 
@@ -201,6 +203,10 @@ class RunningSession:
         """An edited formula line reaches the running session: Settings allows it for a slot the sound isn't set to."""
         self._send(self._set_formula, idx, name, formula, taken=False)
 
+    def set_shown(self, keys: Iterable[str]) -> None:
+        """The live graph's shown lines changed: the session saves its formula lines' as shown or hidden."""
+        self._send(self._set_shown, frozenset(keys), taken=False)
+
     def _send(self, handler: Callable, *args, taken: bool = True, finished: bool = False) -> None:
         """The one way into the session's state: queued to the run's own runner while it lives, else run here. With
         `taken` the call waits until the runner takes the command: one it doesn't take within _JOIN_SECONDS means it is
@@ -245,6 +251,9 @@ class RunningSession:
 
     def _set_formula(self, run: SessionRun | None, idx: int, name: str, formula: str) -> None:
         self.formulas.assign(idx, name, formula)
+
+    def _set_shown(self, run: SessionRun | None, keys: frozenset[str]) -> None:
+        self.shown = keys
 
     # ---- the runner ----
 

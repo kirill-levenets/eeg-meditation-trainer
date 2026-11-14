@@ -63,7 +63,7 @@ Read it before changing that subsystem.
 - `app/metrics/`
   — `engine.py` `MetricsEngine` (meditation, shamatha, distraction/sinking ported from the original Vernihor app, subtle distraction;
   `ENGINE_VERSION` stamped on sessions), `custom_formula.py` (AST-parsed user formulas, `avg(expr, N)`), `formula_slots.py` (the three Settings formulas:
-  evaluators, names, their session record), `noise_detector.py`. → [metrics-scoring](docs/architecture/metrics-scoring.md)
+  evaluators, names, their session record), `series_names.py` (the metrics lines' default labels), `noise_detector.py`. → [metrics-scoring](docs/architecture/metrics-scoring.md)
 - `app/session/` — `manager.py` `SessionManager` (Start/Pause/Resume/Stop, accrual), `scoring.py` `GoalAccrual`, `session_program.py` (timed segments), `timer_state.py`, `what_if.py` (threshold recompute), `session_config.py` `SessionConfig` (what a Start read).
   `session_run.py` `SessionRun` (one Start: its phase and per-run state), `recorder.py` `SessionRecorder` (the running session's checkpoints).
   `app/ui/running_session.py` `RunningSession` (the app's `_session`) — the parts a session runs on (manager, recorder, engine, its own formula lines, program run, timer, watch, BT wait, wake lock), what it is scored on and saved as, and its run's runner thread, the one writer of its state.
@@ -119,7 +119,7 @@ The linked file explains the mechanism.
   a profile's headset is found by `Headset.scan`, whose result does nothing once the profile, its headset or mode changed or a session started;
   only Start opens Settings → Device to pick. → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md#connection)
 - **One writer: the run's runner** (`RunningSession`, `app/ui/running_session.py`): from Start's `start_running()` to the run's ending, only its runner thread writes the session's state.
-  The main thread sends commands (`toggle_pause`, `stop`, `discard`, `abort`, `mark`, `set_threshold`, `set_formula`); the runner hands what the screen must do back as events (`_on_session_event`), for that run only (`on_main_for`).
+  The main thread sends commands (`toggle_pause`, `stop`, `discard`, `abort`, `mark`, `set_threshold`, `set_formula`, `set_shown`); the runner hands what the screen must do back as events (`_on_session_event`), for that run only (`on_main_for`).
   Without a runner of its own run (before its start, after its end, a stuck one's run ended) a command runs where it is sent.
   `stop`, `discard` and `abort` wait for the runner to take them (`discard`, `abort` and the exit's `stop` to finish them too), and one it doesn't take within 1 s runs where it was sent, and its run, ended, keeps the late runner from acting (`_outlived`). → [session](docs/architecture/session.md#state-machine-and-tick)
 - **A session start is one run** (`SessionRun`, `app/session/session_run.py`, `RunningSession.run`): its phase and per-run state, from the Start to its ending;
@@ -149,7 +149,7 @@ The linked file explains the mechanism.
   picking another profile drops it through `ShownSession.drop`; re-picking the shown one (allowed mid-session) resets nothing.
   Every end-card close goes through `ShownSession.close`. → [live-session-and-settings](docs/architecture/live-session-and-settings.md#session-screen)
 - **A session runs on its config** (`SessionConfig`, `app/session/session_config.py`, taken by `RunningSession.begin` at Start): it reads no setting while it runs (`tests/test_session_config.py`).
-  A change allowed mid-session reaches its state only as an explicit call: the threshold (`_put_threshold_in_force`; the manager owns it) and an edited formula line (`SessionAccess.set_formula`);
+  A change allowed mid-session reaches its state only as an explicit call: the threshold (`_put_threshold_in_force`; the manager owns it), an edited formula line (`SessionAccess.set_formula`) and the live graph's shown lines (`set_shown`);
   the alert toggles are the audio engine's and apply at once. → [session](docs/architecture/session.md#state-machine-and-tick)
 - **A session is scored on the metric that drives the feedback sound** (`RunningSession.drive_key()`, `app/ui/running_session.py`, the app's `_session`; the rule is `audio_metric.sound_metric`).
   The Settings threshold takes effect only through `_put_threshold_in_force` (the slider and profile load go through `_apply_threshold`);

@@ -45,7 +45,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The window's mouse wheel reaches every graph; `_on_window_mouse_down` ignores one not attached to the window (`get_root_window()`), since a graph on a hidden screen or tab keeps its last geometry under the pointer.
 - **Series names.**
   Each graph keeps its own copy of the `names` it is built with, so a rename (`set_series_name`: a formula slot's name, a program's line, a session's recorded formulas in the detail) never reaches another graph.
-  `SERIES_NAMES` (`live_session.py`, read-only) is the defaults every metrics graph starts from, and what `ProgramRun.end` puts back when a program ends; the band graphs start from `band_spec.GROUP_NAMES`.
+  `SERIES_NAMES` (`app/metrics/series_names.py`, read-only) is the defaults every metrics graph starts from, and what `ProgramRun.end` puts back when a program ends; the band graphs start from `band_spec.GROUP_NAMES`.
 - **Series picker.**
   The picker is wired on every graph with more than one series (all but the two raw EEG graphs), since a single-series graph's picker could only blank the line.
   One presenter, `GraphSeries.present_picker(graph)` (`app/ui/graph_series.py`, the app's `_graph_series`, which also saves and restores each graph's selection), reads the graph's own catalog, labels and colours:

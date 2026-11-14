@@ -1,5 +1,7 @@
 """A session runs on what its Start read (its SessionConfig): a Settings edit or a profile reload during the run applies
 to the next session, and only an explicit call changes a running one (an edited formula line)."""
+import json
+
 import pytest
 
 from app.eeg.neurosky_stream import NeuroSkyStream
@@ -9,6 +11,7 @@ from tests._app import (
     HeadsetSession,
     calls_of,
     frames,
+    program_mode,
     reload_with,
     tick_metrics,
 )
@@ -54,6 +57,44 @@ def test_a_formula_line_edited_mid_session_reaches_the_running_session(fresh_app
     app._formula_settings.on_slot_change(1, "Double", "")  # cleared: the line stops
     fed.tick(metrics=tick_metrics())  # a fresh result: the fed one keeps the last tick's keys
     assert "custom_formula_2" not in app._session.recorder._buffer[-1]
+
+
+def _saved_visibility(app) -> dict[str, bool]:
+    """Each formula line's shown or hidden, as the running session's checkpoint saves it."""
+    app._session.recorder.checkpoint()
+    record = json.loads(app._db.get_session(app._session.recorder.session_id)["custom_formulas"])
+    return {line["name"]: line["visible"] for line in record}
+
+
+def test_a_session_saves_its_formula_lines_as_the_live_graph_shows_them(fresh_app, monkeypatch):
+    # The shown lines are the session's: taken at the Start, whatever it held before, then changed only through
+    # set_shown, whoever hides a line.
+    app = fresh_app
+    graph = app._live_screen.graph
+    reload_with(app, {"active_formulas": [{"name": "A", "formula": "alpha1"}, {"name": "B", "formula": "beta1"}],
+                      f"graph_series_{graph.graph_id}": ["shamatha_score", "custom_formula"]})
+    app._session.shown = frozenset({"custom_formula_2"})  # held from before: a Start doesn't keep it
+    fed = FedSession(app, monkeypatch)
+    fed.tick()
+    assert _saved_visibility(app) == {"A": True, "B": False}
+    graph.set_visible("custom_formula", False)  # the series picker, mid-session
+    graph.set_visible("custom_formula_2", True)
+    fed.tick()
+    assert _saved_visibility(app) == {"A": False, "B": True}
+
+
+def test_a_program_session_saves_the_formula_lines_its_start_left_shown(fresh_app, monkeypatch):
+    # A program's Start shows its own lines and hides the Settings formula lines after the session took its config:
+    # what it saves is what the graph shows then.
+    app = fresh_app
+    graph = app._live_screen.graph
+    reload_with(app, {"active_formulas": [{"name": "A", "formula": "alpha1"}],
+                      f"graph_series_{graph.graph_id}": ["shamatha_score", "custom_formula"]})
+    program_mode(app, [{"minutes": 1, "target": 120, "formula": {"name": "AlphaPwr", "formula": "alpha1"}}])
+    fed = FedSession(app, monkeypatch)
+    assert app._session.shown == set(graph.visible_keys()) and "program_formula" in app._session.shown  # before a tick
+    fed.tick()
+    assert _saved_visibility(app) == {"A": graph.is_visible("custom_formula")}
 
 
 def test_a_timer_sound_chosen_mid_session_rings_from_the_next_session(fresh_app, monkeypatch, tmp_path):

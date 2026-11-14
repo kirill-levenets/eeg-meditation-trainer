@@ -13,9 +13,11 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   the metric that drives the sound, the Settings formulas' names and texts, the timer's minutes (a program's total, or none), its end sound, mock or headset (from the stream Start chose) and the device's name.
   `RunningSession.begin(config)` builds the session's own formula lines from it (so their `avg()` windows begin empty), arms its timer and resets the engine and the record.
   While the session runs, nothing reads a setting (`tests/test_session_config.py` fails a tick or a checkpoint that does), so a Settings edit or a profile's reload (re-picking the active profile is allowed mid-session) applies to the next session.
-  Two changes reach a running session's state, each as an explicit call:
+  Three changes reach a running session's state, each as an explicit call:
   the threshold of a simple session (`_put_threshold_in_force`; `SessionManager` owns it),
-  and an edited formula line (`FormulaSettings.on_slot_change` → `SessionAccess.set_formula` → `RunningSession.set_formula`), which Settings allows for a slot the sound isn't set to.
+  an edited formula line (`FormulaSettings.on_slot_change` → `SessionAccess.set_formula` → `RunningSession.set_formula`), which Settings allows for a slot the sound isn't set to,
+  and the lines the live graph shows (`SessionConfig.shown` at the Start, then `LiveSessionScreen.on_lines_shown` → `RunningSession.set_shown` on every change, by the picker, a formula edit or a program), which the session saves with its formula lines.
+  The session reads no widget for what it saves: the scored line's name is its own formula line's or the line's default (`FormulaSlots.line_name`).
   The alert toggles (sinking, distraction, disconnect) are the audio engine's own and apply at once.
 - **Session lifecycle** (`app/session/manager.py`): the Start/Pause/Resume/Stop state machine.
   `SessionManager` holds the elapsed time, scores each tick (`add_metric`) and computes the end stats (`compute_statistics`); `RunningSession` wires it to the audio and the recorder.
@@ -24,7 +26,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `SessionManager.stop(reason)` plays a short warble alert only for **failure** terminations (`stale_data`, `bt_lost`, `error`); `user` and `timer` are planned stops and stay silent (`timer` plays its own gong).
 - **One writer: the run's runner.** Start sets the session up and connects on the main thread, then `RunningSession.start_running()` starts the run's runner, a Python daemon thread (`SessionRunner`) instead of a Kivy `Clock`, so EEG compute, audio volume updates and DB writes go on while the Android screen is locked.
   From then until the run ends the runner alone writes the session's state: every `UPDATE_FREQUENCY` (0.5 s) it runs a tick (a BT-wait step, or the session's tick), and in between the commands the main thread sends.
-  The commands are `toggle_pause`, `stop`, `discard`, `abort` (a Cancel), `mark`, `set_threshold` and `set_formula`; each carries the run it was sent for and does nothing for another or for one that ended.
+  The commands are `toggle_pause`, `stop`, `discard`, `abort` (a Cancel), `mark`, `set_threshold`, `set_formula` and `set_shown`; each carries the run it was sent for and does nothing for another or for one that ended.
   What the screen must do comes back as events (`Connected`, `StartFailed`, `Paused`, `Resumed`, `Ended`), queued for the main thread for that run only (`on_main_for`), and handled by the app's `_on_session_event`.
   Before the runner starts and after it ends a command runs where it is sent, which is how a test drives a session by hand (`tests/_app.py`).
   Pause and Resume show when the runner has done them (normally within milliseconds): the screen follows the session's state, never ahead of it.

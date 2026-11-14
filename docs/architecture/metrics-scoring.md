@@ -53,7 +53,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   the row's `custom_formulas` comes from `RunningSession.row_fields()` → `custom_formulas_json()` (`FormulaSlots.session_record`), a JSON string of the valid slots (`slot`, `name`, `formula`, `visible`, `drove_audio`).
   `formula_slots.recorded_formulas` reads it back.
   `DatabaseManager.checkpoint_session(..., custom_formulas: str = "")` stores the **already-serialized string** (the contract; callers `json.dumps` at the site).
-  Each slot's `visible` is `graph.is_visible(key)`, a pure dict read, safe on the session's runner.
+  Each slot's `visible` is whether the live graph shows its line, as the session holds it (`RunningSession.shown`: taken at the Start, kept by `set_shown`).
   A formula's per-tick values are not stored: the diary recomputes them from these definitions and the stored bands (see [session-detail.md](session-detail.md)).
 
 ## Scoring
@@ -78,7 +78,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The other slots and, in a simple session, the threshold stay editable.
   Every such refusal is `_refused_while_session_runs(doing, why="")`: "Session in progress" / "<why> Stop the current session before <doing>.";
   the others are the profile switch, a headset switch and the device mode, both Restore checks, Settings › Audio's Test and a running program's threshold.
-  Every checkpoint passes its stats through `RunningSession.with_score`, which fills the key (the current drive key when none was scored) and adds `score_metric_name` (the live graph's `series_name(key)`, e.g. a formula's name).
+  Every checkpoint passes its stats through `RunningSession.with_score`, which fills the key (the current drive key when none was scored) and adds `score_metric_name` (`FormulaSlots.line_name(key)`: the session's own formula line's name, else the line's default in `SERIES_NAMES`).
   For a program it sets `"program"`, the name the program had when the session started (`ProgramRun.name`, `"Program"` if unsaved; Settings may load or save another during the session) and a NULL `avg_score`.
   `ProgramRun.tick` (called in `RunningSession._session_tick`, program mode only) detects a boundary crossing with the pure `ProgramRun.transition` helper;
   `_enter_segment` then fires the prior segment's end cue (`AudioEngine.play_transition_cue()` chime, or warble), sets the **transient** `audio_key` to the segment's metric key (precomputed by `begin`);

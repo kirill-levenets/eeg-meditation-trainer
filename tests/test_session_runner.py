@@ -47,6 +47,17 @@ def test_a_command_runs_on_the_runner(running, monkeypatch):
     assert app._session.manager.state == SessionState.PAUSED and threads == ["SessionRunner"]
 
 
+def test_a_line_shown_or_hidden_mid_session_reaches_the_session_on_the_runner(running, monkeypatch):
+    app, threads = running, []
+    set_shown = app._session._set_shown
+    monkeypatch.setattr(app._session, "_set_shown",
+                        lambda run, keys: (threads.append(threading.current_thread().name), set_shown(run, keys)))
+    graph = app._live_screen.graph
+    graph.set_visible("custom_formula", not graph.is_visible("custom_formula"))
+    frames_until(lambda: bool(threads), 2.0)
+    assert threads == ["SessionRunner"] and ("custom_formula" in app._session.shown) == graph.is_visible("custom_formula")
+
+
 def test_a_paused_session_records_nothing_until_it_resumes(running):
     app = running
     app._on_pause()

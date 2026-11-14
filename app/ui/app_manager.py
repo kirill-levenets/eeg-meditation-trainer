@@ -337,6 +337,7 @@ class EEGMeditationApp(App):
         # Tap on graph to set marker (Android — no keyboard available)
         if android_jni.on_android():
             wire(self._live_screen.graph, on_tap=self._on_marker)
+        wire(self._live_screen, on_lines_shown=self._session.set_shown)
 
         # Shared fullscreen-expand + series-picker glyphs on every graph
         self._wire_graph_affordances()
@@ -599,7 +600,8 @@ class EEGMeditationApp(App):
                              formulas=tuple(self._formulas.active()),
                              timer_minutes=minutes, gong=self._settings_store.value("timer_sound") if minutes else "",
                              mock=mock,
-                             device="Mock" if mock else self._headset.name())
+                             device="Mock" if mock else self._headset.name(),
+                             shown=frozenset(self._live_screen.graph.visible_keys()))
 
     def _connect_session(self, run: SessionRun, threshold: int) -> bool:
         """Main thread, before the session's runner starts: start the session on the mock headset or a link kept from

@@ -160,6 +160,14 @@ def test_the_saved_stats_carry_the_scored_metric_and_its_name(fresh_app, monkeyp
     assert row["avg_score"] == pytest.approx(70.0)
 
 
+def test_the_saved_name_of_the_scored_line_is_its_name_when_saved(fresh_app, monkeypatch):
+    # Settings lets the scored slot's name change mid-session (not its formula): the session saves the new one.
+    fed = _session(fresh_app, monkeypatch, "custom_formula", CALM_RATIO)
+    _run(fed, SHAMATHA_HIGH)
+    fresh_app._formula_settings.on_slot_change(0, "Evening ratio", CALM_RATIO[0]["formula"])
+    assert _saved(fresh_app)["score_metric_name"] == "Evening ratio"
+
+
 def _program_session(app, monkeypatch, name: str) -> FedSession:
     reload_with(app, threshold="50")
     program_mode(app, [{"minutes": 5, "target": 50, "formula": "shamatha_score"}])

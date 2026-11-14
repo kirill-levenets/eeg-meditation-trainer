@@ -18,6 +18,7 @@ from kivy.metrics import dp
 from kivy.uix.widget import Widget
 
 from app.config import APP
+from app.metrics.series_names import prettified
 from app.session.manager import elapsed_clock
 from app.session.scoring import extend_steps
 from app.ui import render_stats
@@ -231,7 +232,7 @@ class ScrollableGraphWidget(GraphGestures, GraphGlyphs, Widget):
 
     def series_name(self, key: str) -> str:
         """Friendly label for a series — explicit `names` map, else prettified key."""
-        return self._names.get(key) or key.replace("_score", "").replace("_", " ").title()
+        return self._names.get(key) or prettified(key)
 
     def set_series_name(self, key: str, name: str) -> None:
         """Override a series' friendly label at runtime (custom-formula renames)."""

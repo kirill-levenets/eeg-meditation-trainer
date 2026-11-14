@@ -21,7 +21,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 ## Live series
 
 - **Program shows EXACTLY its metric set, the whole session.**
-  The live graph catalog (`live_session.METRICS_COLORS`/`METRICS_SCALES`/`SERIES_NAMES`) carries `"meditation_score"` (colour `C.MED_SCORE`, scale 100, label `"Meditation"`), so a "Meditation" segment is plottable;
+  The live graph catalog (`live_session.METRICS_COLORS`/`METRICS_SCALES`, `series_names.SERIES_NAMES`) carries `"meditation_score"` (colour `C.MED_SCORE`, scale 100, label `"Meditation"`), so a "Meditation" segment is plottable;
   it defaults to **hidden** (the first-run `FIRST_RUN_LIVE_SERIES`, through `GraphSeries.restore`'s `key in sel`).
   It also carries **three** program-custom lines, `PROGRAM_FORMULA_KEYS = ("program_formula","program_formula_2","program_formula_3")` (colours `C.WARM`/`C.WARM2`/`C.WARM3`, scale 200), one per **distinct** custom formula in a program.
   `program_plan(prog)` (`app/session/session_program.py`, with `PROGRAM_FORMULA_KEYS`) returns `(program_keys, custom_slots, segment_keys)`:

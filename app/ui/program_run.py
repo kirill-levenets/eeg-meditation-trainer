@@ -5,6 +5,7 @@ from collections.abc import Callable
 
 from app.logger import logger
 from app.metrics.custom_formula import CustomFormulaEvaluator, evaluate_series
+from app.metrics.series_names import SERIES_NAMES
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
     RunnablePlan,
@@ -14,7 +15,6 @@ from app.session.session_program import (
     segment_target,
 )
 from app.ui.app_context import AppContext
-from app.ui.live_session import SERIES_NAMES
 
 
 def show_program_series(graph, plan: RunnablePlan) -> None:
