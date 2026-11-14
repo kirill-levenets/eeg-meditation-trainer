@@ -27,7 +27,11 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 - **One writer: the run's runner.** Start sets the session up and connects on the main thread, then `RunningSession.start_running()` starts the run's runner, a Python daemon thread (`SessionRunner`) instead of a Kivy `Clock`, so EEG compute, audio volume updates and DB writes go on while the Android screen is locked.
   From then until the run ends the runner alone writes the session's state: every `UPDATE_FREQUENCY` (0.5 s) it runs a tick (a BT-wait step, or the session's tick), and in between the commands the main thread sends.
   The commands are `toggle_pause`, `stop`, `discard`, `abort` (a Cancel), `mark`, `set_threshold`, `set_formula` and `set_shown`; each carries the run it was sent for and does nothing for another or for one that ended.
-  What the screen must do comes back as events (`Connected`, `StartFailed`, `Paused`, `Resumed`, `Ended`), queued for the main thread for that run only (`on_main_for`), and handled by the app's `_on_session_event`.
+  What the screen must do comes back as events (`app/session/session_events.py`), queued for the main thread for that run only (`on_main_for`), and handled by the app's `_on_session_event`:
+  the app acts on `Connected`, `StartFailed`, `Paused`, `Resumed`, `Ended`, `LinkChanged` (the headset's row) and `Notice` (a popup), and hands the rest to `ShownSession.show`, which applies them to the Session screen:
+  `Ticked` (the graphs and readout), `SegmentStarted`, `ProgramShown`/`ProgramDropped` (a program's lines), `Connecting`/`Waiting` (the BT wait's overlay) and `Alert`.
+  An event raised on the main thread (the BT wait's and a program's start, a program's end) goes to `_on_session_event` at once, so nothing on screen moves a frame later;
+  the session and its parts (`ProgramRun`, `BtWait`, `SessionWatch`) hold no widget.
   Before the runner starts and after it ends a command runs where it is sent, which is how a test drives a session by hand (`tests/_app.py`).
   Pause and Resume show when the runner has done them (normally within milliseconds): the screen follows the session's state, never ahead of it.
   `stop`, `discard` and `abort` wait until the runner takes them. `discard`, `abort` and the app's exit also wait until it has finished them (the row deleted, the reader's stop, the save; up to 15 s, then it is logged), so what follows on the main thread (a profile's delete, a Retry, the database's close) finds it done;

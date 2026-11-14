@@ -2,7 +2,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from app.session.session_events import Notice, SegmentStarted
 from app.session.session_program import SessionProgram
+from app.session.session_run import SessionRun
 from app.storage.database import DatabaseManager
 from app.ui.live_session import LiveSessionScreen
 from app.ui.program_run import ProgramRun
@@ -16,7 +18,7 @@ from tests._app import (
     start_connecting,
     start_ticked_by_hand,
 )
-from tests._program_run import make_run
+from tests._program_run import make_run, shown_on
 from tests._program_settings import make_programs
 
 
@@ -178,25 +180,27 @@ def test_a_segment_whose_formula_cant_run_drives_and_shows_shamatha(fresh_app, m
 ])
 def test_a_program_start_names_the_formulas_that_cant_run_in_a_popup(formulas, listed):
     # A toast is gone in two seconds and was clipped at the larger text sizes; a meditator may not be looking.
-    info = MagicMock()
-    run = make_run(info=info)
-    run.begin(SessionProgram([{"minutes": 1, "target": 50, "formula": f} for f in formulas]), [], "P")
+    events = []
+    run = make_run(emit=lambda _run, event: events.append(event))
+    run.begin(SessionRun(1), SessionProgram([{"minutes": 1, "target": 50, "formula": f} for f in formulas]), [], "P")
+    notices = [e for e in events if isinstance(e, Notice)]
     if listed is None:
-        info.assert_not_called()
+        assert notices == []
     else:
-        info.assert_called_once_with("Formula error in this program", f"Can't run {listed}: Shamatha is used instead."
-                                     "\nSettings › Timer / Program edits the program.")
+        assert notices == [Notice("Formula error in this program", f"Can't run {listed}: Shamatha is used instead."
+                                  "\nSettings › Timer / Program edits the program.")]
 
 
-def test_the_start_popup_waits_for_the_next_frame():
-    # The start finishes its setup first, whatever the popup does.
-    queued, info = [], MagicMock()
-    run = make_run(on_main=queued.append, info=info)
-    run.begin(SessionProgram([{"minutes": 1, "target": 50, "formula": {"name": "Broken", "formula": "*"}}]), [], "P")
-    info.assert_not_called()
-    assert len(queued) == 1
-    queued[0]()
-    assert info.call_args.args[0] == "Formula error in this program"
+def test_the_start_popup_waits_for_the_next_frame(fresh_app, monkeypatch):
+    # The start finishes its setup first, whatever the popup does: the notice goes out as its run's event.
+    app = fresh_app
+    infos = calls_of(monkeypatch, app, "_info_popup")
+    program_mode(app, [{"minutes": 1, "target": 50, "formula": {"name": "Broken", "formula": "*"}}])
+    monkeypatch.setattr(app._session, "start_running", lambda: None)  # the test's frames run the session's events
+    app._on_start()
+    assert infos == []
+    frames()
+    assert [args[0] for args in infos] == ["Formula error in this program"]
 
 
 def test_program_shows_exactly_its_metric_set_whole_session():
@@ -204,8 +208,9 @@ def test_program_shows_exactly_its_metric_set_whole_session():
     series + one program-formula line for its custom formula, shown throughout (not
     per-segment). Unrelated user selections are hidden during the program and
     restored on stop; only the legend marker moves as segments cross."""
-    graph = LiveSessionScreen().graph
-    run = make_run(live_screen=MagicMock(graph=graph))
+    screen = LiveSessionScreen()
+    graph, shown = screen.graph, shown_on(screen)
+    run = make_run(show=shown.show)
     # User had a custom slot + shamatha on; an unrelated metric off.
     graph.set_visible("custom_formula", True)
     graph.set_visible("shamatha_score", True)
@@ -215,7 +220,7 @@ def test_program_shows_exactly_its_metric_set_whole_session():
         {"minutes": 1, "target": 50, "formula": "shamatha_score"},
         {"minutes": 1, "target": 80, "formula": {"name": "Alpha", "formula": "alpha1"}},
     ])
-    run.begin(prog, [], "")
+    run.begin(SessionRun(1), prog, [], "")
     # Exactly the program's set, shown the whole program:
     assert graph.is_visible("shamatha_score") is True      # built-in program metric
     assert graph.is_visible("program_formula") is True     # custom line shown all program
@@ -223,10 +228,10 @@ def test_program_shows_exactly_its_metric_set_whole_session():
     assert graph.series_name("program_formula") == "Program: Alpha"
 
     # A built-in segment KEEPS the program line visible — only the marker moves.
-    run._segment_ui("shamatha_score", None)
+    shown.show(SegmentStarted("shamatha_score", None))
     assert graph.is_visible("program_formula") is True
     # The custom segment relabels and keeps it visible.
-    run._segment_ui("program_formula", "Program: Alpha")
+    shown.show(SegmentStarted("program_formula", "Program: Alpha"))
     assert graph.is_visible("program_formula") is True
     assert graph.series_name("program_formula") == "Program: Alpha"
 
@@ -239,15 +244,16 @@ def test_program_with_two_distinct_customs_shows_three_lines():
     """A program with two DIFFERENT custom formulas plots each on its own line
     (program_formula + program_formula_2), so a 3-distinct-metric program shows 3
     lines — not one shared 'Program' line. The per-tick eval fills each line."""
-    g = LiveSessionScreen().graph
-    run = make_run(session_manager=MagicMock(elapsed_seconds=0), live_screen=MagicMock(graph=g))
+    screen = LiveSessionScreen()
+    g = screen.graph
+    run = make_run(session_manager=MagicMock(elapsed_seconds=0), show=shown_on(screen).show)
 
     prog = SessionProgram([
         {"minutes": 1, "target": 50, "formula": "shamatha_score"},
         {"minutes": 1, "target": 75, "formula": {"name": "A", "formula": "alpha1"}},
         {"minutes": 1, "target": 90, "formula": {"name": "B", "formula": "beta1"}},
     ])
-    run.begin(prog, [], "")
+    run.begin(SessionRun(1), prog, [], "")
 
     # Three distinct lines, all visible the whole program.
     assert set(g.visible_keys()) == {"shamatha_score", "program_formula", "program_formula_2"}
@@ -256,7 +262,7 @@ def test_program_with_two_distinct_customs_shows_three_lines():
 
     # Both custom lines are evaluated every tick into their own series.
     metrics = {"shamatha_score": 50}
-    run.tick(metrics, {"alpha1": 11.0, "beta1": 22.0})
+    run.tick(SessionRun(1), metrics, {"alpha1": 11.0, "beta1": 22.0})
     assert metrics["program_formula"] == 11.0
     assert metrics["program_formula_2"] == 22.0
 

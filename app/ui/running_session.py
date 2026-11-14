@@ -5,7 +5,6 @@ import queue
 import threading
 import time
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
 from datetime import datetime
 
 from app.config import APP
@@ -20,6 +19,14 @@ from app.session.manager import SessionManager, SessionState
 from app.session.recorder import RecordedTick, SessionRecorder
 from app.session.scoring import shamatha_transition
 from app.session.session_config import SessionConfig
+from app.session.session_events import (
+    Connected,
+    Ended,
+    Paused,
+    Resumed,
+    StartFailed,
+    Ticked,
+)
 from app.session.session_run import Phase, SessionRun
 from app.session.timer_state import TimerState
 from app.ui.app_context import AppContext
@@ -34,49 +41,16 @@ _JOIN_SECONDS = 1.0  # how long the main thread waits for the runner to take a c
 _TAKEN_SECONDS = 15.0  # how long it waits for a command the runner took: the reader's stop joins for 5 s, a save writes
 
 
-@dataclass(frozen=True)
-class Connected:
-    """The headset's first data started the session."""
-
-
-@dataclass(frozen=True)
-class StartFailed:
-    """The BT wait gave up; `message` is the retry screen's."""
-
-    message: str
-
-
-@dataclass(frozen=True)
-class Ended:
-    """The run ended: saved with `stats` as `session_id` (both None when the save failed), `alert` saying why if a check
-    ended it."""
-
-    stats: dict | None
-    session_id: int | None
-    alert: str = ""
-
-
-@dataclass(frozen=True)
-class Paused:
-    """The session paused."""
-
-
-@dataclass(frozen=True)
-class Resumed:
-    """The paused session goes on."""
-
-
 class RunningSession:
     """Owns the parts a session runs on and answers what it is scored on and saved as, from its config, never a live
     setting. While a run's runner thread lives it is the only writer of the session's state: the main thread sends it
     commands, and it hands what the screen must do back as events, on the main thread and for that run only. Without a
     runner of its own run (before its start, after its end, a stuck one's run ended) a command runs where it is sent."""
 
-    def __init__(self, ctx: AppContext, audio, live_screen, headset, *, on_event: Callable[[object], None]) -> None:
+    def __init__(self, ctx: AppContext, audio, headset, *, on_event: Callable[[object], None]) -> None:
         self._ctx = ctx
         self._audio = audio
-        self._live_screen = live_screen
-        self._on_event = on_event
+        self._on_event = on_event  # main thread: queued from the runner, or at once from the start and a program's end
         self.config: SessionConfig | None = None  # the last Start's
         self.run: SessionRun | None = None  # the current Start, until its ending's teardown on the main thread
         self.formulas = FormulaSlots()  # its own lines, built from the config: their avg() windows are the session's
@@ -89,10 +63,10 @@ class RunningSession:
         self.manager = SessionManager()
         self.manager.set_audio(audio)
         self.timer = TimerState()
-        self.program_run = ProgramRun(ctx, self.manager, audio, live_screen, formula_vars=self.formula_vars)
+        self.program_run = ProgramRun(self.manager, audio, show=on_event, emit=self._emit, formula_vars=self.formula_vars)
         self.recorder = SessionRecorder(ctx.db, self.manager, with_score=self.with_score, row_fields=self.row_fields)
-        self.watch = SessionWatch(audio, live_screen, headset, on_main=ctx.on_main)
-        self.bt_wait = BtWait(headset.stream, live_screen, headset_name=headset.name, on_main_for=self.on_main_for)
+        self.watch = SessionWatch(audio, headset.stream, headset_name=headset.name, emit=self._emit)
+        self.bt_wait = BtWait(headset.stream, headset_name=headset.name, show=on_event, emit=self._emit)
         self.keep_awake = KeepAwake()  # held from a session's setup to its ending
         self._runner: threading.Thread | None = None
         self._commands: queue.Queue | None = None
@@ -366,7 +340,7 @@ class RunningSession:
         # Program vs simple is what the session started as, not the Settings toggle (editable mid-session).
         # The drive key is resolved once: the tick scores and sounds the same metric.
         if self.program_run.active:
-            self.program_run.tick(metrics, raw_sample)
+            self.program_run.tick(run, metrics, raw_sample)
             drive_key, mark = self.drive_key(), None
         else:
             drive_key = mark = self._score_on_drive_key()
@@ -422,30 +396,12 @@ class RunningSession:
         run.shamatha_active, run.shamatha_streak = shamatha_transition(
             sham_prev, metrics.get("shamatha_score", 0.0) >= base, run.shamatha_streak)
         sham_changed = run.shamatha_active != sham_prev
-        screen = self._live_screen
-
-        def _ui_update(
-            m=metrics, rs=tick.raw_sample, ef=elapsed_fmt, mp=tick.marked,
-            sa=run.shamatha_active, sc=sham_changed, sk=self._scored_mark(run, mark), tg=score["score_target"],
-            on=score["score_key"], live=self.manager.live_score(),
-        ) -> None:
-            screen.graph.add_point(m, threshold=tg, scored=on)  # its line coloured from this point
-            screen.update_stats(live)
-            screen.update_state(m.get("state", "Neutral"))
-            if sc:
-                screen.set_shamatha(sa)
-            if sk is not None:
-                screen.set_training_series(sk)
-            screen.update_timer(ef)
-            screen.add_raw_sample(rs)
-            if mp:
-                screen.graph.add_marker()
-                screen.raw_graph.add_marker()
-                screen.band_graph.add_marker()
-
         # N minutes locked at 2 Hz would queue ~120·N full graph redraws, which froze the screen at the unlock.
-        if not self.ui_paused:
-            self._ctx.on_main(_ui_update)
+        if self.ui_paused:
+            return
+        self._emit(run, Ticked(metrics, tick.raw_sample, elapsed_fmt, tick.marked,
+                               run.shamatha_active if sham_changed else None, self._scored_mark(run, mark),
+                               score["score_target"], score["score_key"], self.manager.live_score()))
 
     # ---- endings: each on the writer, each claims its run first ----
 

@@ -1,6 +1,19 @@
-"""The session the Session screen shows: its graphs and readout, the end card over them once it has ended, and the
-profile it belongs to."""
+"""The session the Session screen shows: its graphs and readout, which the running session's events draw, the end card
+over them once it has ended, and the profile it belongs to."""
+from app.logger import logger
+from app.metrics.series_names import SERIES_NAMES
+from app.session.session_events import (
+    Alert,
+    Connecting,
+    ProgramDropped,
+    ProgramShown,
+    SegmentStarted,
+    Ticked,
+    Waiting,
+)
+from app.session.session_program import PROGRAM_FORMULA_KEYS
 from app.ui.app_context import AppContext
+from app.ui.program_run import show_program_series
 from app.ui.theme import C
 
 
@@ -27,6 +40,55 @@ class ShownSession:
         """A Start: the display empties for the new session, which belongs to `uid`."""
         self.clear()
         self.owner = uid
+
+    def show(self, event) -> None:
+        """Main thread: what the running session's event changes on the Session screen."""
+        screen = self._live_screen
+        match event:
+            case Ticked():
+                self._show_tick(event)
+            case SegmentStarted(key=key, line_name=line_name):
+                if line_name is not None:  # a custom segment's line: labelled and shown
+                    screen.graph.set_series_name(key, line_name)
+                    screen.graph.set_visible(key, True)
+                screen.set_training_series(key)  # bold + » on the trained series
+            case ProgramShown(plan=plan):
+                show_program_series(screen.graph, plan)
+            case ProgramDropped():
+                for slot in PROGRAM_FORMULA_KEYS:
+                    screen.graph.set_series_name(slot, SERIES_NAMES.get(slot, "Program"))  # drop stale labels
+                    screen.graph.set_visible(slot, False)  # never linger as a user selection
+                screen.graph.set_program_lines()
+            case Connecting(name=name):
+                screen.update_device_status(False, device_name=name, connecting=True)
+                screen.show_overlay(f"Connecting to {name}...")
+            case Waiting(message=message):
+                screen.update_overlay(message)
+            case Alert(message=message):
+                screen.show_alert(message)
+            case _:
+                logger.error(f"No Session screen handler for {event!r}")
+
+    def _show_tick(self, tick: Ticked) -> None:
+        screen = self._live_screen
+        screen.graph.add_point(tick.metrics, threshold=tick.target, scored=tick.score_key)  # coloured from this point
+        screen.update_stats(tick.live)
+        screen.update_state(tick.metrics.get("state", "Neutral"))
+        if tick.shamatha is not None:
+            screen.set_shamatha(tick.shamatha)
+        if tick.scored is not None:
+            screen.set_training_series(tick.scored)
+        screen.update_timer(tick.elapsed)
+        screen.add_raw_sample(tick.raw_sample)
+        if tick.marked:
+            screen.graph.add_marker()
+            screen.raw_graph.add_marker()
+            screen.band_graph.add_marker()
+
+    def show_retry(self, message: str, device_name: str) -> None:
+        """The retry screen of a start whose BT wait ended without a session."""
+        self._live_screen.update_device_status(False, device_name=device_name)
+        self._live_screen.show_overlay_retry(message)
 
     def show_end_card(self, session_id: int, stats: dict, title: str) -> None:
         self._saved_notes = ""

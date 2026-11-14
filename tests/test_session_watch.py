@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.config import APP
+from app.session.session_events import Alert, LinkChanged
 from app.session.session_run import Phase, SessionRun
 from app.ui.headset import Headset
 from app.ui.session_watch import SessionWatch
@@ -29,19 +30,27 @@ class _Detector:
 
 @pytest.fixture
 def watch():
-    queued = []
+    events = []
     stream, live_screen, device, audio = MagicMock(), MagicMock(), MagicMock(), MagicMock()
     stream.is_connected, stream._device_address, stream._device_name = False, "AA:BB", "MWM2"
     headset = Headset(stub_context(live=lambda: True), stream, device, live_screen, serial_override=lambda: None)
-    w = SessionWatch(audio, live_screen, headset, on_main=queued.append)
+    w = SessionWatch(audio, stream, headset_name=headset.name, emit=lambda run, event: events.append((run, event)))
+    w.headset = headset  # what the app shows on a LinkChanged
     run = SessionRun(1)
     run.phase = Phase.STARTED
-    return w, run, queued, stream, live_screen, device, audio
+    return w, run, events, stream, live_screen, device, audio
 
 
-def _run_queued(queued) -> None:
-    while queued:
-        queued.pop(0)()
+def _shown(watch_, events) -> list[str]:
+    """The alerts the events show, the headset shown again as the app does on each LinkChanged; each for its run."""
+    alerts = []
+    while events:
+        _run, event = events.pop(0)
+        if isinstance(event, LinkChanged):
+            watch_.headset.show_selected()
+        elif isinstance(event, Alert):
+            alerts.append(event.message)
+    return alerts
 
 
 def test_the_link_coming_up_is_shown_in_settings_once(watch):
@@ -49,7 +58,7 @@ def test_the_link_coming_up_is_shown_in_settings_once(watch):
     stream.is_connected = True
     w.follow_link(run)
     w.follow_link(run)
-    _run_queued(queued)
+    _shown(w, queued)
     device.update_device_status.assert_called_once_with(True, name="MWM2")
 
 
@@ -59,7 +68,7 @@ def test_the_link_lost_mid_session_shows_reconnecting_with_the_alert(watch):
     w.follow_link(run)
     stream.is_connected = False
     w.follow_link(run)
-    _run_queued(queued)
+    _shown(w, queued)
     assert live.update_device_status.call_args == ((False,), {"device_name": "MWM2", "connecting": True})
     audio.play_disconnect_alert.assert_called_once()
 
@@ -77,11 +86,9 @@ def test_a_low_battery_is_warned_about_once_per_run(watch):
     w, run, queued, _stream, live, _device, _audio = watch
     for _ in range(3):
         w.check_sample(run, {"battery": 10})
-    _run_queued(queued)
-    assert [c.args[0] for c in live.show_alert.call_args_list] == ["Low headset battery (7%)."]
+    assert [r for r, _e in queued] == [run] and _shown(w, queued) == ["Low headset battery (7%)."]
     w.check_sample(SessionRun(1), {"battery": 10})  # the next run warns again
-    _run_queued(queued)
-    assert live.show_alert.call_count == 2
+    assert _shown(w, queued) == ["Low headset battery (7%)."]
 
 
 def test_no_battery_reading_warns_nothing(watch):
@@ -95,9 +102,9 @@ def test_power_line_noise_found_is_warned_about_once(watch):
     run.noise_detector = _Detector(after=2, found=50)
     for _ in range(4):
         w.check_sample(run, {"raw_eeg_waveform": [1, 2, 3]})
-    _run_queued(queued)
+    alerts = _shown(w, queued)
     assert run.noise_detector.fed == 2  # fed until it has its answer
-    assert len(live.show_alert.call_args_list) == 1 and "50 Hz" in live.show_alert.call_args.args[0]
+    assert len(alerts) == 1 and "50 Hz" in alerts[0]
 
 
 def test_no_noise_found_warns_nothing(watch):
@@ -133,7 +140,7 @@ def test_a_reconnect_mid_session_shows_the_headset_connected_again(watch):
     for connected in (True, False, True):
         stream.is_connected = connected
         w.follow_link(run)
-    _run_queued(queued)
+    _shown(w, queued)
     assert live.update_device_status.call_args.args[0] is True  # not left "reconnecting" to the session's end
     assert device.update_device_status.call_args.args[0] is True
 
@@ -143,5 +150,5 @@ def test_a_drop_mid_session_is_shown_in_settings_too(watch):
     for connected in (True, False):
         stream.is_connected = connected
         w.follow_link(run)
-    _run_queued(queued)
+    _shown(w, queued)
     assert device.update_device_status.call_args.args[0] is False  # not still "connected"

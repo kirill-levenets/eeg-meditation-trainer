@@ -64,7 +64,7 @@ Read it before changing that subsystem.
   — `engine.py` `MetricsEngine` (meditation, shamatha, distraction/sinking ported from the original Vernihor app, subtle distraction;
   `ENGINE_VERSION` stamped on sessions), `custom_formula.py` (AST-parsed user formulas, `avg(expr, N)`), `formula_slots.py` (the three Settings formulas:
   evaluators, names, their session record), `series_names.py` (the metrics lines' default labels), `noise_detector.py`. → [metrics-scoring](docs/architecture/metrics-scoring.md)
-- `app/session/` — `manager.py` `SessionManager` (Start/Pause/Resume/Stop, accrual), `scoring.py` `GoalAccrual`, `session_program.py` (timed segments), `timer_state.py`, `what_if.py` (threshold recompute), `session_config.py` `SessionConfig` (what a Start read).
+- `app/session/` — `manager.py` `SessionManager` (Start/Pause/Resume/Stop, accrual), `scoring.py` `GoalAccrual`, `session_program.py` (timed segments), `timer_state.py`, `what_if.py` (threshold recompute), `session_config.py` `SessionConfig` (what a Start read), `session_events.py` (what a running session tells the screen).
   `session_run.py` `SessionRun` (one Start: its phase and per-run state), `recorder.py` `SessionRecorder` (the running session's checkpoints).
   `app/ui/running_session.py` `RunningSession` (the app's `_session`) — the parts a session runs on (manager, recorder, engine, its own formula lines, program run, timer, watch, BT wait, wake lock), what it is scored on and saved as, and its run's runner thread, the one writer of its state.
   `app/ui/program_run.py` `ProgramRun` — the running program: segment stepping on the session's runner, its live-graph lines.
@@ -90,7 +90,7 @@ Read it before changing that subsystem.
   · `app/ui/headset.py` `Headset` (which headset: a profile's own, found by its one scan path; its name; Settings → Device)
   · `app/ui/power_exemption.py` `PowerExemption` (what may close a locked session: battery optimisation, the maker's power manager;
   the first-start alert and Settings → Device's row → [app-platform](docs/architecture/app-platform.md#background-running-android))
-  · `app/ui/live_session.py`, `live_mirror.py` (the live graphs' session, kept through a screen lock), `shown_session.py` `ShownSession` (the session the screen shows: its graphs' mirror, its end card),
+  · `app/ui/live_session.py`, `live_mirror.py` (the live graphs' session, kept through a screen lock), `shown_session.py` `ShownSession` (the session the screen shows: its graphs' mirror, its end card, the session's screen events),
   `settings_screen.py` (its larger sections in `settings_sections/`), `device_labels.py` → [live-session-and-settings](docs/architecture/live-session-and-settings.md);
   `history_screen.py`, `period_totals.py`, `history_flow.py` `HistoryFlow` (what the app does with History's rows) → [history](docs/architecture/history.md);
   `diary_screen.py` (session detail), `session_detail_flow.py` `SessionDetailFlow` (opens and loads it) → [session-detail](docs/architecture/session-detail.md);
@@ -119,7 +119,7 @@ The linked file explains the mechanism.
   a profile's headset is found by `Headset.scan`, whose result does nothing once the profile, its headset or mode changed or a session started;
   only Start opens Settings → Device to pick. → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md#connection)
 - **One writer: the run's runner** (`RunningSession`, `app/ui/running_session.py`): from Start's `start_running()` to the run's ending, only its runner thread writes the session's state.
-  The main thread sends commands (`toggle_pause`, `stop`, `discard`, `abort`, `mark`, `set_threshold`, `set_formula`, `set_shown`); the runner hands what the screen must do back as events (`_on_session_event`), for that run only (`on_main_for`).
+  The main thread sends commands (`toggle_pause`, `stop`, `discard`, `abort`, `mark`, `set_threshold`, `set_formula`, `set_shown`); the runner hands what the screen must do back as events (`session_events.py`; `_on_session_event`, the screen's through `ShownSession.show`), for that run only (`on_main_for`).
   Without a runner of its own run (before its start, after its end, a stuck one's run ended) a command runs where it is sent.
   `stop`, `discard` and `abort` wait for the runner to take them (`discard`, `abort` and the exit's `stop` to finish them too), and one it doesn't take within 1 s runs where it was sent, and its run, ended, keeps the late runner from acting (`_outlived`). → [session](docs/architecture/session.md#state-machine-and-tick)
 - **A session start is one run** (`SessionRun`, `app/session/session_run.py`, `RunningSession.run`): its phase and per-run state, from the Start to its ending;

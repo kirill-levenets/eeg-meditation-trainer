@@ -63,7 +63,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   **A session is scored on the metric that drives the feedback sound (#51).**
   In a simple session (decided by `ProgramRun.active`, fixed at session start, never the editable `ProgramSettings.mode` toggle) `RunningSession._session_tick` calls `_score_on_drive_key()` → `set_active_goal(self._session.drive_key())` every tick;
   it feeds the audio from that same resolved key, so scoring and sound can't diverge (an invalid formula's shamatha fallback moves both).
-  The legend's `»` marks the scored series through the tick's single `_ui_update` dispatch:
+  The legend's `»` marks the scored series through the tick's one `Ticked` event (`scored`):
   `_scored_mark(run, key)` leaves the run's `scored_key` untouched while the screen is locked, so the first tick after it marks the change; a program session's segments set the mark instead.
   The per-tick accrual is `app/session/scoring.GoalAccrual`, also behind `goal_stats(values, goal)`, the recompute from stored ticks.
   `recorded_score(session)` reads a stored row's `(key, name, avg)`.

@@ -87,7 +87,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Every ending claims it first (`run.mark_ended()`, on the runner, or where a command runs without one),
   and ENDED is terminal: no later write revives the run, and only the call that marked it claims the ending (`SessionRun.mark_ended`, the only way to end a run, is a locked check-and-set).
   It holds the per-run state (the wait's windows and drops, the tick count, the pending marker, the shamatha pill's streak, the scored mark, the warnings), so a new Start begins from nothing the last one left.
-  That covers the device scan's result in `_on_start` and every main-thread callback queued for a run through `RunningSession.on_main_for(run, fn)`: the `Connected` UI and audio, the exits' retry screens, the overlay text.
+  That covers the device scan's result in `_on_start` and every main-thread callback queued for a run through `RunningSession.on_main_for(run, fn)`: the session's events (the `Connected` UI and audio, the exits' retry screens, the overlay text).
   Without it, a Cancel during "Scanning for MindWave…" still starts the session;
   a Cancel or active-profile delete in the frame the first data arrives leaves a zombie (noise playing, idle controls, no tick);
   and a wait exit's queued retry screen undoes the next Start.
@@ -111,7 +111,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The session starts only on band data with a packet on this connection (`total > 0 and has_packets`), since the reader keeps the last band values across a reconnect.
   Restarting the windows unbounds a headset that keeps connecting and closing, so a wait ends at its third drop (`MAX_DROPS` = 2, counted by the run's `drops`: a Retry is a new Start, with none) with "keeps closing the connection";
   every wait exit that gives up (keeps closing, no data, a failed connect, the connect timeout) returns its message to `_follow_bt_wait`, which ends the run and queues its `StartFailed` (`_undo_failed_start`);
-  `BtWait.show_retry` leaves the headset's name on the Session screen under its retry screen.
+  `ShownSession.show_retry` leaves the headset's name on the Session screen under its retry screen.
   A failed connect's diagnostic travels in the `WaitEnd` and is filed by `_follow_bt_wait` after that check, so a late tick reports nothing.
   `tests/test_bt_wait_reconnect.py` replays drops and reconnects on a fake clock.
   Android reads drain what is available in one `InputStream.read(buf, 0, n)` per chunk, the buffer sized to the read (pyjnius copies the whole array both ways, so an oversized buffer is slower);

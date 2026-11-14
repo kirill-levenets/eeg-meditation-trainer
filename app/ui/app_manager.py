@@ -27,6 +27,15 @@ from app.metrics.formula_slots import (
 from app.metrics.noise_detector import PowerLineDetector
 from app.session.manager import SessionState, elapsed_clock
 from app.session.session_config import SessionConfig
+from app.session.session_events import (
+    Connected,
+    Ended,
+    LinkChanged,
+    Notice,
+    Paused,
+    Resumed,
+    StartFailed,
+)
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
     segment_target,
@@ -61,14 +70,7 @@ from app.ui.power_exemption import PowerExemption
 from app.ui.profiles import ProfileGate, Profiles
 from app.ui.program_settings import ProgramSettings
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
-from app.ui.running_session import (
-    Connected,
-    Ended,
-    Paused,
-    Resumed,
-    RunningSession,
-    StartFailed,
-)
+from app.ui.running_session import RunningSession
 from app.ui.session_detail_flow import SessionDetailFlow
 from app.ui.session_labels import session_title
 from app.ui.settings_screen import (
@@ -235,8 +237,7 @@ class EEGMeditationApp(App):
         self._headset = Headset(self._ctx, self._real_stream, self._settings_screen.device, self._live_screen,
                                 serial_override=lambda: self.serial_device_override)
         self._headset.load_aliases()
-        self._session = RunningSession(self._ctx, self._audio, self._live_screen, self._headset,
-                                       on_event=self._on_session_event)
+        self._session = RunningSession(self._ctx, self._audio, self._headset, on_event=self._on_session_event)
         self._sounds = SoundSources(self._ctx, self._audio, self._settings_screen.timer)
         self._audio_metric = AudioMetric(self._ctx, self._session.program_run, self._settings_screen)
         self._program_settings = ProgramSettings(
@@ -571,7 +572,7 @@ class EEGMeditationApp(App):
         self._shown.take(self._current_user_id)
         self._program_settings.refresh_live_series()  # the idle series of the editor as it is now: begin builds on it
         feedback_ids = self._sounds.prepare_session(program, config.gong)
-        self._session.program_run.begin(program, feedback_ids, self._program_settings.name)
+        self._session.program_run.begin(run, program, feedback_ids, self._program_settings.name)
         self._live_screen.set_training_series(None)  # set on first segment crossing
         self._live_screen.set_controls_running()
         self._settings_screen.lock_threshold(self._refuse_program_threshold if self._session.program_run.active else None)
@@ -638,7 +639,7 @@ class EEGMeditationApp(App):
     def _undo_failed_start(self, message: str) -> None:
         """Main thread: a start whose BT wait ended without a session is undone, and Retry offered."""
         self._undo_session_setup()
-        self._session.bt_wait.show_retry(message)
+        self._shown.show_retry(message, self._headset.name())
 
     def _on_connect_cancel(self, *args) -> None:
         """Cancel button on connection overlay."""
@@ -761,7 +762,8 @@ class EEGMeditationApp(App):
         self._session.stop(reason)
 
     def _on_session_event(self, event) -> None:
-        """Main thread: what the screen does for the current run's events from its runner."""
+        """Main thread: the session's events, its runner's for the current run, and those its start and a program's end
+        raise here."""
         match event:
             case Connected():
                 self._on_session_connected()
@@ -783,6 +785,12 @@ class EEGMeditationApp(App):
                 self._audio.stop()  # the players' teardown: on this thread, where the Looper runs
                 self._finalize_stop_ui(stats, session_id)
                 logger.info("Session ended and saved" if stats else "Session ended")
+            case LinkChanged():
+                self._headset.show_selected()
+            case Notice(title=title, message=message):
+                self._info_popup(title, message)
+            case _:
+                self._shown.show(event)
 
     def _on_session_connected(self) -> None:
         """Main thread: a headset session has started (the BT wait's first data, or a kept-alive connection)."""

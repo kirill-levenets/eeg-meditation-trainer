@@ -10,6 +10,7 @@ import pytest
 from kivy.clock import Clock
 
 from app.config import APP
+from app.session.session_events import Connecting
 from app.session.session_run import SessionRun
 from app.storage.database import DatabaseManager
 from app.ui.bt_wait import BtWait
@@ -179,9 +180,10 @@ def test_the_connecting_overlay_names_the_headset_by_its_alias(db_path):
         rig = _rig(db)
         rig.headset.on_rename(BLUE, "MindWave Mobile", "Blue")
         rig.stream.start.return_value = True
-        wait = BtWait(rig.stream, rig.live_screen, headset_name=rig.headset.name, on_main_for=lambda run, fn: fn())
+        shown = []
+        wait = BtWait(rig.stream, headset_name=rig.headset.name, show=shown.append, emit=MagicMock())
         assert wait.begin(SessionRun(1)) is None  # the wait began
-        rig.live_screen.show_overlay.assert_called_with("Connecting to Blue...")
+        assert shown == [Connecting("Blue")]  # the Session screen's overlay says "Connecting to Blue..."
     finally:
         db.close()
 

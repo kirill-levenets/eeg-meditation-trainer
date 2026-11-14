@@ -116,7 +116,7 @@ def test_started_stream_enters_the_wait(fresh_app, monkeypatch):
 def test_a_failed_connect_is_reported_with_its_headset_and_hint(monkeypatch):
     stream = MagicMock(is_connected=False, _running=False, _device_address="AA:BB",
                        _last_connect_error="Headset is asleep or off.")
-    wait = BtWait(stream, MagicMock(), headset_name=lambda: "MWM2", on_main_for=lambda run, fn: None)
+    wait = BtWait(stream, headset_name=lambda: "MWM2", show=MagicMock(), emit=MagicMock())
     run = SessionRun(1)
     run.connect_start = time.time()
     end = wait.tick(run)
