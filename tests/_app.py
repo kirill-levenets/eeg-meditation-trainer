@@ -28,6 +28,7 @@ def frames_until(done, seconds: float = 3.0) -> None:
     end = time.monotonic() + seconds
     while not done() and time.monotonic() < end:
         EventLoop.idle()
+        time.sleep(0.002)  # what is waited for is mostly another thread's work: spinning frames takes its CPU
 
 
 def tap(parent, label: str) -> None:
