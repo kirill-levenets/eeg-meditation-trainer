@@ -5,11 +5,19 @@ import time
 
 import pytest
 
+import app.session.running_session as rs
 from app.config import APP
 from app.session.manager import SessionState
 from tests._app import frames, frames_until, popups, runner_alive, start_connecting
 
 _INTERVAL = 0.05
+_JOIN = 0.5  # the time a command waits for the runner to take it (1 s in the app): a stuck runner's tests wait it out
+_SLOW = 2 * _JOIN  # a save or discard that outlasts that wait
+
+
+@pytest.fixture(autouse=True)
+def _short_join(monkeypatch):
+    monkeypatch.setattr(rs, "_JOIN_SECONDS", _JOIN)
 
 
 @pytest.fixture
@@ -145,7 +153,7 @@ def test_a_command_the_runner_took_is_waited_to_its_end(running, monkeypatch):
     # A profile's delete goes on only once the session's row is gone, however long the runner takes over it.
     app, deleted = running, []
     discard = app._session.recorder.discard
-    monkeypatch.setattr(app._session.recorder, "discard", lambda: (time.sleep(1.5), discard(), deleted.append(True)))
+    monkeypatch.setattr(app._session.recorder, "discard", lambda: (time.sleep(_SLOW), discard(), deleted.append(True)))
     app._discard_running_session()
     assert deleted == [True]  # once, on the runner, and done before the call returned
 
@@ -175,10 +183,10 @@ def test_a_stop_does_not_hold_the_screen_through_a_slow_save(running, monkeypatc
     # freeze the screen, and Android closes an app whose touch handler doesn't return.
     app = running
     save = app._db.checkpoint_session
-    monkeypatch.setattr(app._db, "checkpoint_session", lambda *a, **k: (time.sleep(1.5), save(*a, **k))[1])
+    monkeypatch.setattr(app._db, "checkpoint_session", lambda *a, **k: (time.sleep(_SLOW), save(*a, **k))[1])
     began = time.monotonic()
     app._stop_and_save()
-    assert time.monotonic() - began < 1.0
+    assert time.monotonic() - began < _JOIN  # taken: not held for the save
     frames_until(lambda: app._session.run is None, 4.0)
     assert app._session.run is None and app._db.count_sessions(app._current_user_id) == 1
 
@@ -192,7 +200,7 @@ def test_closing_the_app_waits_for_the_running_sessions_final_save(build_app, mo
     def slow_final_save(*args, **kwargs):
         saves.append(True)
         if len(saves) == 2:  # the first is the leave's checkpoint; the second the stop's
-            time.sleep(1.5)
+            time.sleep(_SLOW)
         result = save(*args, **kwargs)
         if len(saves) == 2:
             finished.append(True)
