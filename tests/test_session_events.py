@@ -9,8 +9,23 @@ from app.session.session_events import SegmentStarted
 from app.ui.app_manager import EEGMeditationApp
 from app.ui.live_session import LiveSessionScreen
 from app.ui.shown_session import ShownSession
-from tests._app import FedSession, HeadsetSession, reload_with, tick_metrics
+from tests._app import (
+    FedSession,
+    HeadsetSession,
+    calls_of,
+    reload_with,
+    start_ticked_by_hand,
+    tick_metrics,
+)
 from tests._program_run import shown_on
+
+
+def test_a_start_on_the_mock_data_shows_the_session_running_at_once(fresh_app, monkeypatch):
+    app, screen = fresh_app, fresh_app._live_screen
+    started, chimes = calls_of(monkeypatch, app._audio, "start"), calls_of(monkeypatch, app._audio, "play_connect_sound")
+    start_ticked_by_hand(app)
+    assert screen._device_label.text == "[Mock EEG] *" and screen._last_state == "Running" and screen._overlay.opacity == 0
+    assert started == [()] and chimes == []  # the feedback plays; the connect chime is a headset's
 
 
 def test_the_shamatha_pill_lights_after_three_ticks_above_the_threshold(fresh_app, monkeypatch):

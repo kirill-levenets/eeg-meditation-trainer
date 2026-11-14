@@ -12,8 +12,12 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   It reaches the app only through a `SessionHost` (the database, the active profile, the main thread; the app's `AppContext` is one) and its events, so `app/session/` imports neither Kivy nor `app.ui` at import time (`tests/test_session_package.py` loads every module of it in a fresh interpreter and fails on either);
   `report_soft_error` (`app/crash_handler.py`), which a failed save or tick calls, still loads them on that path.
 - **A session runs on its config.** Start reads Settings once into a frozen `SessionConfig` (`app/session/session_config.py`, built by the app's `_session_config`):
-  the metric that drives the sound, the Settings formulas' names and texts, the timer's minutes (a program's total, or none), its end sound, mock or headset (from the stream Start chose) and the device's name.
-  `RunningSession.begin(config)` builds the session's own formula lines from it (so their `avg()` windows begin empty), arms its timer and resets the engine and the record.
+  the metric that drives the sound, the Settings formulas' names and texts, the timer's minutes (a program's total, or none), its end sound, mock or headset (from the stream Start chose), the device's name,
+  the live graph's shown lines (read after the Start refreshed the idle series), the threshold it starts with (a program's first target, else the slider) and the program with its name.
+- **A Start has the app's part and the session's.** The app (`_start_session_common`) reads the config, empties the display and makes the screen ready;
+  the session opens the run (`RunningSession.open`), then `prepare(config, feedback_ids)` builds its own formula lines (so their `avg()` windows begin empty), arms its timer, resets the engine and the record, starts its program and holds the phone awake,
+  and, once the app has locked a program's threshold, `connect()` starts it at once on the mock data or a link kept from the last session (`Connected`, raised at once) or enters the BT wait, and starts its runner unless the reader refused (`StartFailed`, raised at once).
+  Every ending undoes both through the app's `_undo_session_setup`: the session's part first (`RunningSession.undo_setup`: its run dropped, the program ended, timer and manager reset, the wake lock released), then the screen's.
   While the session runs, nothing reads a setting (`tests/test_session_config.py` fails a tick or a checkpoint that does), so a Settings edit or a profile's reload (re-picking the active profile is allowed mid-session) applies to the next session.
   Three changes reach a running session's state, each as an explicit call:
   the threshold of a simple session (`_put_threshold_in_force`; `SessionManager` owns it),

@@ -24,7 +24,6 @@ from app.metrics.formula_slots import (
     FORMULA_KEYS,
     FormulaSlots,
 )
-from app.metrics.noise_detector import PowerLineDetector
 from app.session.manager import SessionState, elapsed_clock
 from app.session.running_session import RunningSession
 from app.session.session_config import SessionConfig
@@ -508,7 +507,7 @@ class EEGMeditationApp(App):
             logger.warning("Session start blocked: no user selected")
             return
 
-        run = self._session.run = SessionRun(self._current_user_id)
+        run = self._session.open(self._current_user_id)
         if APP.USE_MOCK_DEVICE or self._real_stream._device_address:  # the profile's headset, or one picked in Settings
             self._session.stream = self._session.mock_stream if APP.USE_MOCK_DEVICE else self._real_stream
             self._start_session_common()
@@ -557,38 +556,30 @@ class EEGMeditationApp(App):
     # ------------------------------------------------------------------
 
     def _start_session_common(self) -> None:
-        """Shared session startup logic after device is resolved."""
+        """Shared session startup logic after device is resolved: what Settings holds read into the session's config, the
+        screen made ready, then the session's own start."""
         # The session takes the audio over: the last session's gong stops, and so does a Settings test still running.
         self._audio.stop_timer_bell()
         self._audio.end_test()
-        program = self._program_settings.for_session()
-        threshold = self._start_threshold(program)
-        config = self._session_config(program)
-        self._session.begin(config)
-        self._put_threshold_in_force(threshold)  # this session's, whatever the last one left running
-        run = self._session.run
-        run.noise_detector = None if config.mock else PowerLineDetector()
-        run.connect_start = time.time()
         self._shown.take(self._current_user_id)
-        self._program_settings.refresh_live_series()  # the idle series of the editor as it is now: begin builds on it
-        feedback_ids = self._sounds.prepare_session(program, config.gong)
-        self._session.program_run.begin(run, program, feedback_ids, self._program_settings.name)
+        self._program_settings.refresh_live_series()  # the idle series of the editor as it is now: the program's build on it
+        config = self._session_config()  # after the refresh: the lines it shows are the session's to save
+        self._put_threshold_in_force(config.threshold)  # this session's, whatever the last one left running
+        self._session.prepare(config, self._sounds.prepare_session(config.program, config.gong))
         self._live_screen.set_training_series(None)  # set on first segment crossing
         self._live_screen.set_controls_running()
-        self._settings_screen.lock_threshold(self._refuse_program_threshold if self._session.program_run.active else None)
-        self._session.keep_awake.hold()
-        if self._connect_session(run, threshold):
-            self._session.start_running()  # from here its runner alone writes the session's state
-            logger.info("Session started via UI")
+        self._settings_screen.lock_threshold(self._refuse_program_threshold if config.program else None)
+        self._session.connect()  # a refused reader undoes all of the above at once (StartFailed)
 
     def _start_threshold(self, program) -> int:
         """The threshold a session starts with: a program's first segment target, else the Settings slider."""
         self._cancel_settle("apply_threshold")  # a slider move just before Start: the start applies the slider itself
         return segment_target(program.segments[0]) if program else self._settings_screen.threshold
 
-    def _session_config(self, program) -> SessionConfig:
+    def _session_config(self) -> SessionConfig:
         """What this Start runs the session with, read from Settings once: an edit during the run applies to the next
         session. A program's total drives the timer, so its end reuses the timer-expiry path."""
+        program = self._program_settings.for_session()
         timer = self._settings_screen.timer
         if program:
             minutes = max(1, int(round(program.total_seconds / 60)))
@@ -602,39 +593,9 @@ class EEGMeditationApp(App):
                              timer_minutes=minutes, gong=self._settings_store.value("timer_sound") if minutes else "",
                              mock=mock,
                              device="Mock" if mock else self._headset.name(),
-                             shown=frozenset(self._live_screen.graph.visible_keys()))
-
-    def _connect_session(self, run: SessionRun, threshold: int) -> bool:
-        """Main thread, before the session's runner starts: start the session on the mock headset or a link kept from
-        the last session, or enter the BT wait; False if the reader refused to start."""
-        if self._session.config.mock:
-            self._session.stream.start()
-            self._session.manager.start(threshold=threshold)
-            run.phase = Phase.STARTED
-            self._audio.start()
-            self._session.timer.start_countdown()
-            self._live_screen.update_device_status(True)
-            self._live_screen.update_state("Running")
-            self._live_screen.set_start_time(self._session.manager.started_at)
-            self._live_screen.hide_overlay()
-            return True
-        if self._real_stream.is_connected:
-            self._real_stream.reset_sample_state()
-            name = self._headset.name()
-            self._session.manager.start(threshold=threshold)
-            run.phase = Phase.STARTED
-            self._session.timer.start_countdown()
-            self._on_session_connected()
-            logger.info(f"Reusing existing BT connection to {name}")
-            return True
-        return self._begin_bt_wait(run)
-
-    def _begin_bt_wait(self, run: SessionRun) -> bool:
-        """Main thread: enter the run's BT wait; False if the reader refused to start (the start undone, Retry offered)."""
-        end = self._session.bt_wait.begin(run)
-        if end is not None:
-            self._undo_failed_start(end.message)
-        return end is None
+                             shown=frozenset(self._live_screen.graph.visible_keys()),
+                             threshold=self._start_threshold(program), program=program,
+                             program_name=self._program_settings.name)
 
     def _undo_failed_start(self, message: str) -> None:
         """Main thread: a start whose BT wait ended without a session is undone, and Retry offered."""
@@ -657,18 +618,14 @@ class EEGMeditationApp(App):
         self._live_screen.update_state(state)
 
     def _undo_session_setup(self) -> None:
-        """Main thread: undo what _start_session_common set up, for a session that ended or never started. Drops its
-        run, so the callbacks still queued for it do nothing; the run's runner has stopped writing (it ended)."""
-        self._session.run = None
+        """Main thread: undo what _start_session_common set up, for a session that ended or never started: the session's
+        part (its run dropped, so what is still queued for it does nothing), then the screen's."""
+        self._session.undo_setup()
         self._live_screen.set_training_series(None)  # clear the program "training now" marker
-        self._session.program_run.end()
         self._live_screen.set_controls_idle()
         self._live_screen.update_device_status(False)
         self._live_screen.set_shamatha(False)
-        self._session.timer.reset()
-        self._session.manager.reset()
         self._settings_screen.lock_threshold(None)
-        self._session.keep_awake.release()
         self._program_settings.sync_picker()  # after the reset: while the session still reads live, nothing is derived
 
     def _on_connect_retry(self, *args) -> None:
@@ -765,8 +722,8 @@ class EEGMeditationApp(App):
         """Main thread: the session's events, its runner's for the current run, and those its start and a program's end
         raise here."""
         match event:
-            case Connected():
-                self._on_session_connected()
+            case Connected(on_mock=on_mock):
+                self._on_session_connected(on_mock)
             case StartFailed(message=message):
                 self._shown.owner = None  # no session came of the start, which emptied the display
                 self._undo_failed_start(message)
@@ -792,15 +749,20 @@ class EEGMeditationApp(App):
             case _:
                 self._shown.show(event)
 
-    def _on_session_connected(self) -> None:
-        """Main thread: a headset session has started (the BT wait's first data, or a kept-alive connection)."""
-        self._headset.show_selected()
+    def _on_session_connected(self, on_mock: bool) -> None:
+        """Main thread: the session has started, at once on the mock data, or on a headset (the BT wait's first data, or
+        a kept-alive connection) with the connect chime."""
+        if on_mock:
+            self._live_screen.update_device_status(True)
+        else:
+            self._headset.show_selected()
         self._live_screen.update_state("Running")
         self._live_screen.set_start_time(self._session.manager.started_at)
         self._live_screen.hide_overlay()
         # Audio starts with the overlay hide, so the noise never plays while the connecting loader is still visible.
         self._audio.start()
-        self._audio.play_connect_sound()
+        if not on_mock:
+            self._audio.play_connect_sound()
 
     def _on_key_down(self, window, key, scancode, codepoint, modifiers) -> bool:
         """Handle keyboard hotkey for marker."""

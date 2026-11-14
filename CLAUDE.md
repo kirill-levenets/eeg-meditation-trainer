@@ -126,7 +126,7 @@ The linked file explains the mechanism.
   `stop`, `discard` and `abort` wait for the runner to take them (`discard`, `abort` and the exit's `stop` to finish them too), and one it doesn't take within 1 s runs where it was sent, and its run, ended, keeps the late runner from acting (`_outlived`). → [session](docs/architecture/session.md#state-machine-and-tick)
 - **A session start is one run** (`SessionRun`, `app/session/session_run.py`, `RunningSession.run`): its phase and per-run state, from the Start to its ending;
   each command and queued callback carries the run it was for and does nothing for another, and every ending claims its run first (`run.mark_ended()`), so one ending wins.
-  A BT-wait exit ends its run before it stops the stream; every ending undoes the start's setup on the main thread (`_undo_session_setup()`). → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md)
+  A BT-wait exit ends its run before it stops the stream; every ending undoes the start's setup on the main thread (`_undo_session_setup()`: the session's `undo_setup`, then the screen's). → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md)
 - **No Kivy on the runner**: UI goes through the main thread.
   **No `AudioEngine.stop()`, `MediaPlayer.release()`/`stop()` on the runner**: they deadlock against the main Looper paused during screen lock.
   Every ending silences with `AudioEngine.mute()` (setVolume only), saves, then hands the players' teardown to the main thread; a timer's gong rings last.
@@ -150,7 +150,7 @@ The linked file explains the mechanism.
 - The Session screen shows one profile's session (`ShownSession`, `app/ui/shown_session.py`, the app's `_shown`; its `owner` set at Start):
   picking another profile drops it through `ShownSession.drop`; re-picking the shown one (allowed mid-session) resets nothing.
   Every end-card close goes through `ShownSession.close`. → [live-session-and-settings](docs/architecture/live-session-and-settings.md#session-screen)
-- **A session runs on its config** (`SessionConfig`, `app/session/session_config.py`, taken by `RunningSession.begin` at Start): it reads no setting while it runs (`tests/test_session_config.py`).
+- **A session runs on its config** (`SessionConfig`, `app/session/session_config.py`, taken by `RunningSession.prepare` at Start): it reads no setting while it runs (`tests/test_session_config.py`).
   A change allowed mid-session reaches its state only as an explicit call: the threshold (`_put_threshold_in_force`; the manager owns it), an edited formula line (`SessionAccess.set_formula`) and the live graph's shown lines (`set_shown`);
   the alert toggles are the audio engine's and apply at once. → [session](docs/architecture/session.md#state-machine-and-tick)
 - **A session is scored on the metric that drives the feedback sound** (`RunningSession.drive_key()`, `app/session/running_session.py`, the app's `_session`; the rule is `scoring.sound_metric`).

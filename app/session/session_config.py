@@ -2,6 +2,8 @@
 next session."""
 from dataclasses import dataclass
 
+from app.session.session_program import SessionProgram
+
 
 @dataclass(frozen=True)
 class SessionConfig:
@@ -16,3 +18,6 @@ class SessionConfig:
     mock: bool  # on mock data, else the profile's headset
     device: str  # what the session is named after: the headset's name at Start, or "Mock"
     shown: frozenset[str]  # the live graph's shown lines: its formula lines' are saved with the session
+    threshold: int  # what it starts scored against: a program's first segment's target, else the Settings slider
+    program: SessionProgram | None  # None: a simple session
+    program_name: str  # the program's name at the Start ("" when unsaved or none)

@@ -9,7 +9,7 @@ import pytest
 import app.session.running_session as rs
 from app.session.bt_wait import BtWait
 from app.session.session_run import Phase, SessionRun
-from tests._app import HEADSET, frames, popups, runner_alive, start_connecting
+from tests._app import HEADSET, calls_of, frames, popups, runner_alive, start_connecting
 
 
 @pytest.fixture(autouse=True)
@@ -93,13 +93,15 @@ def test_refused_start_undoes_setup_without_entering_the_wait(fresh_app, monkeyp
     app._real_stream._last_connect_error = "Previous connection is still closing."
     app._change_setting("use_mock", False)
     app._real_stream.set_device(*HEADSET)
+    runners = calls_of(monkeypatch, app._session, "start_running")
 
     app._on_start()
 
-    assert not app._session.connecting() and app._session.run is None and not runner_alive(app)
+    assert not app._session.connecting() and app._session.run is None and not runner_alive(app) and runners == []
     assert releases == [True]
     assert "still closing" in app._live_screen._overlay_status.text
     assert app._live_screen._overlay_retry_btn.parent is not None
+    assert app._shown.owner is None  # no session came of the start: the emptied display shows none
     rs.report_soft_error.assert_not_called()  # its 60 s cooldown would hide the next real failure
 
 

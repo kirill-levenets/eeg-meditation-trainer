@@ -73,7 +73,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   A late reader (epoch superseded after its connect returned) closes its socket instead of adopting it, and `_last_connect_error` is cleared only after that check.
   The reader clears `_connected` on exit, so a `stop()` landing just after `_connected = True` can't leave `is_connected` stuck True with no reader (the next Start would "reuse" a dead connection).
   Every failed Android connect attempt (secure → insecure → `createRfcommSocket(1)`) closes its socket; the ch=1 fallback is called directly on the device, since through `Class.getMethod` pyjnius can't resolve its varargs overload.
-  The wait is `BtWait` (`app/session/bt_wait.py`, `RunningSession.bt_wait`): `begin(run)` (the app's `_begin_bt_wait`, on the main thread before the runner starts) checks `start()`'s result **before** entering the wait;
+  The wait is `BtWait` (`app/session/bt_wait.py`, `RunningSession.bt_wait`): `begin(run)` (from `RunningSession.connect`, on the main thread before the runner starts) checks `start()`'s result **before** entering the wait;
   then the runner's tick drives `tick(run)` while the run is CONNECTING, and `RunningSession._follow_bt_wait` acts on how the wait ended (`WaitEnd`: started, or the retry screen's message):
   the first data starts the session on the runner, its countdown armed there before the next tick reads it, and the `Connected` event shows it on main (`_on_session_connected`);
   a give-up ends the run on the runner (its reader down, `KeepAwake.release`) and its `StartFailed` event undoes the start and shows the retry screen (`_undo_failed_start`).
@@ -81,7 +81,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   **Every BT-wait exit** (Cancel and Stop through `RunningSession.abort`, the give-ups on the runner) ends its run **before** it stops the stream, then releases the wake lock and keep-alive service (`KeepAwake.release`):
   a wait step reads `not stream._running` as a failed connect, and with its run ended no step acts on the stop.
   **A session start is one run** (#52, `SessionRun` in `app/session/session_run.py`, `RunningSession.run`):
-  `_on_start` makes it (the device scan belongs to it) and every ending drops it (`_undo_session_setup()`, which every ending goes through); a callback queued for a run does nothing once it is no longer the current run.
+  `_on_start` opens it (`RunningSession.open`; the device scan belongs to it) and every ending drops it (`RunningSession.undo_setup`, through the app's `_undo_session_setup()`, which every ending goes through); a callback queued for a run does nothing once it is no longer the current run.
   Its phase is what `SessionManager` doesn't know: STARTING (Start pressed, scanning or setting up), CONNECTING (the BT wait), STARTED (running or paused: `SessionManager.state` says which);
   ENDED (an ending began: a wait abandoned, a session stopped, saved or discarded; its main-thread teardown may still be queued).
   Every ending claims it first (`run.mark_ended()`, on the runner, or where a command runs without one),
@@ -98,7 +98,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   RUNNING/PAUSED asks to stop and save;
   FINISHED (the timer ended it on the runner and its teardown is queued) is ignored, since cancelling there would stop the kept-alive headset link;
   anything else cancels the start (`_cancel_session_start`).
-  Every ending (`_finalize_stop_ui`, a cancelled start, a refused connect and a wait's give-up `StartFailed`) undoes the start's setup through the one `_undo_session_setup()`:
+  Every ending (`_finalize_stop_ui`, a cancelled start, and a refused reader or a wait's give-up, both `StartFailed`) undoes the start's setup through the one `_undo_session_setup()`:
   program series and state via `ProgramRun.end`, the training marker, the shamatha pill, timer and session manager reset, wake lock and keep-alive service (the releases are idempotent),
   then the live graph's idle series derived again (`ProgramSettings.sync_picker`: after the reset, so the session no longer reads live).
   A program left behind would have a later simple session persist the program's series over the user's series selection.
