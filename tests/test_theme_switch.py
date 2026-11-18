@@ -23,6 +23,7 @@ from app.ui.theme import (
     ThemedLabel,
     ThemedTextInput,
 )
+from tests._app import drop_dead_widgets
 from tests._shared_screens import SharedScreens, sections
 
 PAIRS = [("Light Cream", "Dark Blue"), ("Dark Blue", "Light Cream"), ("Dark Green", "Light Green")]
@@ -113,6 +114,12 @@ def _unmount(widget: Widget) -> None:
 def screens():
     """This module's SharedScreens, released with it."""
     return SharedScreens()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _no_dead_widgets():
+    """A switch repaints every themed widget alive, so earlier modules' dead ones are freed first."""
+    drop_dead_widgets()
 
 
 # ---- the mechanism ----
