@@ -5,23 +5,23 @@ import pytest
 
 import app.ui.app_manager as am
 import app.ui.user_settings as us
-from tests._app import frames, frames_until, setting_writes
+from tests._app import drop_settle_triggers, frames, frames_until, setting_writes
 
 SETTLE_S = 0.05
 
 
 @pytest.fixture
-def app(build_app, monkeypatch):
-    """The built app with a short settle window; `app.writes` records its settings writes, `app.reports` its soft
+def app(fresh_app, monkeypatch):
+    """The shared app with a short settle window; `app.writes` records its settings writes, `app.reports` its soft
     errors."""
-    monkeypatch.setattr(us.UserSettings, "SETTLE_S", SETTLE_S)  # read when a trigger is first made
-    app = build_app()
-    frames_until(lambda: False, 2 * SETTLE_S)  # what the profile's load queued has run
+    monkeypatch.setattr(us.UserSettings, "SETTLE_S", SETTLE_S)
+    drop_settle_triggers(fresh_app)  # made at the app's window, the profile's load's included (it applied its value)
+    app = fresh_app
     app.writes = setting_writes(app, monkeypatch)
     app.reports = []
     for module in (am, us):  # the batch save's, a single setting's
         monkeypatch.setattr(module, "report_soft_error", lambda label, detail="", **_: app.reports.append((label, detail)))
-    return app
+    return app  # the shared app's rest drops this test's triggers: the next test's are made at the app's window
 
 
 def _settled(app, key: str) -> list[str]:

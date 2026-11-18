@@ -313,6 +313,13 @@ def built_apps(tmp_path, monkeypatch):
         Window.rotation = rotation
 
 
+def drop_settle_triggers(app) -> None:
+    """The app's settle triggers cancelled and dropped: one is made again on use, with the settle window then."""
+    for trigger in app._user_settings._settle_triggers.values():
+        trigger.cancel()
+    app._user_settings._settle_triggers.clear()
+
+
 class SharedApp:
     """One built app for the whole test run. Each test takes it on a new default profile, after the app's own paths
     have ended what the last test left: a session discarded, popups closed, the last profile deleted. A test that
@@ -338,8 +345,7 @@ class SharedApp:
         frames()  # what the test queued lands before its popups are closed
         _close_modals()
         app._fullscreen.close()
-        for trigger in app._user_settings._settle_triggers.values():  # a slider the test moved: nothing of it lands in the next one
-            trigger.cancel()
+        drop_settle_triggers(app)  # a slider the test moved: nothing of it lands in the next one
         app._nav._last_back = 0.0  # as build() leaves it: this test's back press is not the next one's first
 
     def fresh(self):

@@ -220,7 +220,7 @@ def _saved_zoom(app) -> str:
 
 
 def test_the_zoom_saved_is_the_window_from_before_the_fit(build_app):
-    a = build_app()
+    a = build_app()  # its own: an hour of data on the live graph, which the shared app keeps for the next test
     g = a._live_screen.graph
     _an_hour_in(g)
     g.set_fitted(True)
@@ -248,7 +248,7 @@ def test_a_hidden_tabs_graph_does_not_draw_until_it_is_shown(monkeypatch):
 
 
 def test_the_detail_zooms_apart_from_the_live_graphs_and_the_saved_zoom(build_app):
-    a = build_app()
+    a = build_app()  # its own: an hour of data on every graph, which the shared app keeps for the next test
     live, detail = list(a._graphs.live), list(a._graphs.detail)
     for g in live + detail:
         _an_hour_in(g)
@@ -469,8 +469,8 @@ def test_a_drag_from_a_glyph_pans_once_it_passes_a_fingertips_drift():
         Window.remove_widget(g)
 
 
-def test_the_saved_zoom_starts_both_groups_and_the_detail_never_saves(build_app):
-    a = build_app()
+def test_the_saved_zoom_starts_both_groups_and_the_detail_never_saves(fresh_app):
+    a = fresh_app
     a._db.set_user_setting(a._current_user_id, "graph_zoom_seconds", "300.0")
     a._activate_user(a._current_user_id)  # a profile's load applies its saved zoom
     live, detail = [g.zoom_seconds for g in a._graphs.live], [g.zoom_seconds for g in a._graphs.detail]
