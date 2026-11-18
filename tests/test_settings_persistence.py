@@ -36,7 +36,7 @@ def test_a_theme_text_size_or_line_colours_pick_writes_that_setting(fresh_app, m
 
 def test_the_line_width_reaches_every_graph(fresh_app):
     fresh_app._user_settings.change("line_width", 2.5)
-    assert [graph._line_width for graph in fresh_app._all_graphs()] == [2.5] * 6
+    assert [graph._line_width for graph in fresh_app._graphs.all()] == [2.5] * 6
 
 
 def test_a_new_profile_plays_rain_below_the_threshold_and_no_reward(fresh_app):

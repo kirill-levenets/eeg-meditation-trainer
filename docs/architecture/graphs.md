@@ -16,7 +16,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The Y grid is bounded: a fixed `grid_step` that would draw more than `_MAX_Y_GRID_LINES` lines gives way to `_compute_nice_step`, since each line carries a label (a 200000 scale at the default 20-unit step would draw 10000).
 - **Glyphs** (the `GraphGlyphs` mixin, `app/ui/graph_glyphs.py`: their callbacks, rects and drawing) sit inside the plot's corners (`_corner_rect`):
   the series picker top-left, expand top-right (in fullscreen the close cross, `set_expand_callback(cb, closes=True)`), fit bottom-right, hidden on a plot too short for it under expand.
-  `AppManager._wire_graph_affordances` wires them on every graph (`_all_graphs()`), the one place for cross-graph affordances.
+  `GraphSet.wire_glyphs` (`app/ui/graph_set.py`, the app's `_graphs`: its six graphs) wires them on every graph (`GraphSet.all()`), the one place for cross-graph affordances.
   They are strokes in `TC.TEXT` straight on the graph with no backing (`_draw_icon_backing` only sets the colour), so they contrast on every palette; a fixed backing reads as a grey box on light themes.
 - **Glyph touches.**
   A glyph is a button over the data: `on_touch_down` grabs a touch on it like any other and records the glyph in the finger's record (`_glyph_at`);
@@ -39,9 +39,10 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 - **Zoom groups.**
   `link_zoom` links graphs so a zoom on one zooms all:
   the requested window travels (each graph converts it through its own sample rate and clamps it to its own limits, so raw EEG's one-minute cap never narrows the others), and the group is aligned to the first graph's window as it is linked.
-  There are two groups, the live graphs and the session detail's (`AppManager._link_graph_zoom` over `_live_graphs()` / `_detail_graphs()`):
+  There are two groups, the live graphs and the session detail's (`GraphSet.live` / `GraphSet.detail`, each linked once when the set is built):
   the saved zoom (`graph_zoom_seconds`) is the live metrics graph's `zoom_seconds`, its window before any fit, so a detail zoomed out over a long session must never reach it.
-  Loading it (`AppManager._apply_saved_zoom`) starts both groups at it; only the live group's is ever saved.
+  Loading it (`GraphSet.settings`, whose apply starts both groups at it) sets both; only the live group's is ever saved.
+  The line width is the set's too: one held setting every graph draws at, shown on the Display slider.
   The window's mouse wheel reaches every graph; `_on_window_mouse_down` ignores one not attached to the window (`get_root_window()`), since a graph on a hidden screen or tab keeps its last geometry under the pointer.
 - **Series names.**
   Each graph keeps its own copy of the `names` it is built with, so a rename (`set_series_name`: a formula slot's name, a program's line, a session's recorded formulas in the detail) never reaches another graph.
@@ -154,7 +155,7 @@ A graph's touch handling is the `GraphGestures` mixin (`app/ui/graph_gestures.py
 
 ## Fullscreen
 
-- Fullscreen expand (`GraphFullscreen.present` in `app/ui/graph_fullscreen.py`, the app's `_fullscreen`, wired by `_wire_graph_affordances`) **reparents** the graph, not a clone:
+- Fullscreen expand (`GraphFullscreen.present` in `app/ui/graph_fullscreen.py`, the app's `_fullscreen`, wired by `GraphSet.wire_glyphs`) **reparents** the graph, not a clone:
   into a full-window `FloatLayout` overlay on `self._float_root` with `size_hint=(1,1)` + `pos_hint={"x":0,"y":0}`, so it reaches every edge, where a `Popup` insets its content with chrome.
   Reparenting keeps the single `Window.on_mouse_down` bind and the live `add_point` feed, so a running session's graph updates live in fullscreen.
   While fullscreen the expand glyph is the close cross (`closes=True`); it, Android back and Esc (`Navigation.on_keyboard` → `GraphFullscreen.close`) restore the graph to its original parent and index and give it the expand glyph back.

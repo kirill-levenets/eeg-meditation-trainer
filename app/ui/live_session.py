@@ -356,7 +356,7 @@ class LiveSessionScreen(Screen):
         # max_scale and pushes 100 into the middle of the graph.
         self._graph.set_reference_line(100.0)
         # The on-graph series-picker glyph is wired centrally for every graph by
-        # AppManager._wire_graph_affordances. The legend tracks the graph's own
+        # GraphSet.wire_glyphs. The legend tracks the graph's own
         # visible set: any change (picker toggle or restore) rebuilds it.
         wire(self._graph, on_series_change=self._metric_lines_changed)
         self._metrics_container.add_widget(self._graph)

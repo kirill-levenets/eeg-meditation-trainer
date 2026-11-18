@@ -44,7 +44,7 @@ class SessionDetailFlow:
             d.set_program(session.get("session_program", ""))
             plan = recorded_plan(session.get("session_program") or "")
             if plan is None and uid:  # the profile's own selection, whatever the last session showed
-                self._graph_series.apply_saved(d._metrics_graph, uid)
+                self._graph_series.apply_saved(d.metrics_graph, uid)
             d.show_program_lines(plan)  # the program's mark goes last: lines it still shows are never saved
             bv = {}
             if uid:

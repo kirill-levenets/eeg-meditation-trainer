@@ -5,7 +5,15 @@ from kivy.core.window import Window
 
 from app.config import APP
 from app.ui.widgets.user_picker import UserPickerForm
-from tests._app import frames, frames_until, last_used, popup_titles, runner_alive, tap
+from tests._app import (
+    calls_of,
+    frames,
+    frames_until,
+    last_used,
+    popup_titles,
+    runner_alive,
+    tap,
+)
 from tests._picker import picker_rows
 
 
@@ -123,12 +131,11 @@ def test_a_mode_change_during_a_session_is_refused(build_app, monkeypatch):
 def test_a_slider_value_off_by_rounding_applies_its_width_once(build_app, monkeypatch):
     # The setting holds the rounded value; written back onto the slider, it would fire the slider's hook again.
     app = build_app(last_used("me"))
-    applied = []
-    monkeypatch.setattr(app, "_apply_line_width", applied.append)
+    applied = calls_of(monkeypatch, app._graphs.live[0], "set_line_width")
     app._settings_screen.display._line_width_slider.value = 1.3000000000000003  # a drag's raw value
-    assert applied == [1.3] and app._user_settings.value("line_width") == 1.3
+    assert applied == [(1.3,)] and app._user_settings.value("line_width") == 1.3
     app._user_settings.change("line_width", 2.0)  # set from code (a profile's load): the slider follows
-    assert app._settings_screen.display._line_width_slider.value == 2.0 and applied[-1] == 2.0
+    assert app._settings_screen.display._line_width_slider.value == 2.0 and applied[-1] == (2.0,)
 
 
 def test_mock_sessions_on_their_real_runner_are_each_saved_once(build_app):

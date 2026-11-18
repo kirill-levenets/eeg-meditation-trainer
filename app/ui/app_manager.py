@@ -29,7 +29,6 @@ from app.session.session_program import (
 )
 from app.settings.registry import (
     BOOL,
-    FLOAT,
     INT,
     STR,
     Setting,
@@ -45,6 +44,7 @@ from app.ui.diary_screen import DiaryScreen
 from app.ui.formula_settings import FormulaSettings
 from app.ui.graph_fullscreen import GraphFullscreen
 from app.ui.graph_series import FIRST_RUN_LIVE_SERIES, GraphSeries
+from app.ui.graph_set import GraphSet
 from app.ui.headset import Headset
 from app.ui.history_flow import HistoryFlow
 from app.ui.history_screen import HistoryScreen
@@ -54,7 +54,6 @@ from app.ui.navigation import Navigation, ScreenHooks
 from app.ui.power_exemption import PowerExemption
 from app.ui.profiles import ProfileGate, Profiles
 from app.ui.program_settings import ProgramSettings
-from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.session_controls import SessionControls
 from app.ui.session_detail_flow import SessionDetailFlow
 from app.ui.session_settings import SessionSettings
@@ -123,7 +122,6 @@ class EEGMeditationApp(App):
         float_root = self._build_screens()
         self._build_flows()
         self._bind_callbacks()
-        self._link_graph_zoom()
         # After _bind_callbacks (it sets the fields get() snapshots as defaults), before any user load.
         self._register_settings()
         resolved_user = self._restore_last_user()
@@ -172,8 +170,9 @@ class EEGMeditationApp(App):
         self._formula_settings = FormulaSettings(self._ctx, self._settings_screen.formulas, self._live_screen.graph,
                                                  self._formulas, scoring_locked=self._audio_metric.formula_scoring_locked)
         self._power = PowerExemption(self._ctx, self._settings_screen.device)
+        self._graphs = GraphSet(self._live_screen, self._diary_screen, self._settings_screen.display)
         self._graph_series = GraphSeries(self._ctx, self._live_screen.graph, self._formulas, self._formula_settings,
-                                         graphs=self._all_graphs)
+                                         graphs=self._graphs.all)
         self._history = HistoryFlow(self._ctx, self._history_screen, self._formulas, self._loading_overlay,
                                     on_sessions_deleted=lambda ids: self._shown.on_sessions_deleted(ids))
         self._shown = ShownSession(self._ctx, self._live_screen, self._audio, self._history, self._session)
@@ -212,40 +211,6 @@ class EEGMeditationApp(App):
                           setting_changed=lambda key: self._user_settings.changed(key),
                           save_settings=self._save_user_settings, session=session)
 
-    def _all_graphs(self) -> tuple:
-        """Every mounted graph, for the cross-graph affordances (expand, picker, fit, restore); zoom links per group."""
-        return self._live_graphs() + self._detail_graphs()
-
-    def _live_graphs(self) -> tuple:
-        return self._live_screen.graph, self._live_screen.raw_graph, self._live_screen.band_graph
-
-    def _detail_graphs(self) -> tuple:
-        return self._diary_screen._metrics_graph, self._diary_screen._raw_eeg_graph, self._diary_screen._freq_graph
-
-    def _wire_graph_affordances(self) -> None:
-        """Give every mounted graph the shared fullscreen-expand, series-picker and fit
-        glyphs, driven by one presenter each. The picker is wired only where there
-        is more than one series to choose from — a single-series graph's picker
-        could only blank the line."""
-        for g in self._all_graphs():
-            g.set_expand_callback(self._fullscreen.present)
-            if len(g.series_keys()) > 1:
-                g.set_series_picker_callback(self._graph_series.present_picker)
-            g.set_fit_callback(ScrollableGraphWidget.toggle_fit)  # its zoom group, together
-
-    def _saved_zoom_seconds(self) -> float:
-        return self._live_screen.graph.zoom_seconds
-
-    def _apply_saved_zoom(self, seconds: float) -> None:
-        """The saved zoom starts both groups; only the live one's is saved, so a detail's zoom never comes back."""
-        self._live_screen.graph.set_zoom_seconds(seconds)
-        self._diary_screen._metrics_graph.set_zoom_seconds(seconds)
-
-    def _link_graph_zoom(self) -> None:
-        """Two zoom groups: a detail zoomed out over a long session must not reach the live graphs' saved zoom."""
-        ScrollableGraphWidget.link_zoom(*self._live_graphs())
-        ScrollableGraphWidget.link_zoom(*self._detail_graphs())
-
     def _bind_callbacks(self) -> None:
         """Every screen's handlers, and the keys: the marker hotkey and Android's back button."""
         self._wire_session_screen()
@@ -278,7 +243,7 @@ class EEGMeditationApp(App):
              on_stats_mode=lambda _mode: self._user_settings.changed("stats_view_mode"))
 
         # Shared fullscreen-expand + series-picker glyphs on every graph
-        self._wire_graph_affordances()
+        self._graphs.wire_glyphs(self._fullscreen.present, self._graph_series.present_picker)
         # The formula series stay hidden until a formula is shown through the picker, the program ones while no program
         # with formula segments runs; a new profile starts on Shamatha alone (a profile load applies its own).
         for key in (*FORMULA_KEYS, *PROGRAM_FORMULA_KEYS):
@@ -456,10 +421,6 @@ class EEGMeditationApp(App):
                                          lambda: self._controls.apply_threshold(self._settings_screen.threshold))
         self._user_settings.changed("threshold")
 
-    def _apply_line_width(self, width: float) -> None:
-        for graph in self._all_graphs():
-            graph.set_line_width(width)
-
     def _require_user(self, action: str) -> int | None:
         """Return the active uid, or explain why the action can't run and return
         None. Per-user handlers call this instead of a bare silent `return` — the
@@ -518,7 +479,7 @@ class EEGMeditationApp(App):
             *self._program_settings.settings(), *self._alert_settings(), *self._fold_settings(),
             kept("threshold", INT, lambda: int(ss.threshold), set_threshold, settle=True),
             *self._headset.settings(), *self._audio_metric.settings(), *self._sounds.settings(),
-            *self._history.settings(), *self._display_settings()])
+            *self._history.settings(), *self._graphs.settings(), *self._display_settings()])
 
     def _alert_settings(self) -> list[Setting]:
         audio = self._settings_screen.audio
@@ -546,17 +507,12 @@ class EEGMeditationApp(App):
     def _display_settings(self) -> list[Setting]:
         display, ls = self._settings_screen.display, self._live_screen
 
-        def apply_line_width(v):
-            display.show_line_width(v); self._apply_line_width(v)
-
         def apply_rotation(v):
             display._current_rotation = v
             display._rotate_btn.text = f"Rotate Screen ({v}°)"
             Window.rotation = v
 
-        return [held("line_width", FLOAT, display._line_width_slider.value, apply_line_width, settle=True),
-                held("rotation", INT, display._current_rotation, apply_rotation),
-                kept("graph_zoom_seconds", FLOAT, self._saved_zoom_seconds, self._apply_saved_zoom),
+        return [held("rotation", INT, display._current_rotation, apply_rotation),
                 kept("marker_hotkey", STR, lambda: display.marker_hotkey,
                      lambda v: setattr(self._settings_screen, "marker_hotkey", v)),
                 kept("stats_view_mode", STR, lambda: ls.stats_mode, ls.set_stats_mode),

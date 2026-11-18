@@ -87,7 +87,7 @@ Read it before changing that subsystem.
   `app/ui/audio_metric.py` `AudioMetric` — the profile's choice of the metric that drives the sound, its Settings controls, their lock while a session is scored on it. → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
 - `app/ui/theme.py`, `app/ui/widgets/` — palette `C`/`F`/`S`, themed widgets, modals, legends, overlays.
   `app/ui/hooks.py` — `Hook`/`wire()`: the handlers the app plugs into a widget. → [ui-theme](docs/architecture/ui-theme.md)
-- `app/ui/raw_eeg_screen.py` — `ScrollableGraphWidget`, the one time-series graph class;
+- `app/ui/raw_eeg_screen.py` — `ScrollableGraphWidget`, the one time-series graph class; `graph_set.py` `GraphSet` (the app's six graphs: zoom groups, line width, corner buttons);
   `graph_series.py` `GraphSeries` (the series picker, each graph's saved selection), `line_colours.py` (the scored line's gradient), `graph_runs.py` (the run fold, Kivy-free);
   `graph_gestures.py` (its touch), `graph_glyphs.py` (its corner buttons), `graph_scroll.py` `GraphAwareScrollView` (a page of graphs), `touch_utils.py`, `render_stats.py`. → [graphs](docs/architecture/graphs.md)
 - `app/session/bt_wait.py` `BtWait` (the BT wait at a session's start: connect, first data, give up),
@@ -255,7 +255,7 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 · debounced change `UserSettings.after_settle`
 · session titles and stats lines `app/ui/session_labels.py`
 · scoring `scoring.GoalAccrual`
-· graph glyphs `_wire_graph_affordances`
+· graph glyphs `GraphSet.wire_glyphs`
 · headset names `Headset.name()` / `device_labels.py`
 · a profile's headset `Headset.load` / `Headset.scan`, the paired devices `Headset.find_paired`
 · the Android check `android_jni.on_android()`, the app's Activity `android_jni.activity()`

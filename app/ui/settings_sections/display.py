@@ -140,6 +140,10 @@ class DisplaySection:
         self._marker_hotkey: str = "m"
         self._waiting_for_hotkey: bool = False
 
+    @property
+    def line_width(self) -> float:
+        return self._line_width_slider.value
+
     def show_line_width(self, width: float) -> None:
         """The slider shows `width`; one already showing it (a drag's unrounded value) is left as it is: a write would
         fire its hook again."""
