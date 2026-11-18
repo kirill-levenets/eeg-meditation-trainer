@@ -20,7 +20,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   A session's day is `session_day(session)` (`date_time[:10]`, compared as strings: ISO dates order as strings do), which the calendar's day buckets and the day filter use too;
   the totals run no query, only over History's own session list.
   The table is built once (`_build_totals`) and refilled by `_update_totals` from `_set_day_data` (load, delete), `_set_filter` (tap, Show all) and `on_pre_enter`;
-  `on_pre_enter` (also called from `_refresh_ui_after_resume` when History is the current screen) re-runs `_set_day_data` only when `_today()` differs from the day it last drew for (`_drawn_for`).
+  `on_pre_enter` (also History's `ScreenHooks.resumed`: `Navigation.resumed` runs it when the app comes back onto History) re-runs `_set_day_data` only when `_today()` differs from the day it last drew for (`_drawn_for`).
   The calendar, the bars and the totals all take "today" from `_today()`, and an entry on the same day redraws nothing; a period without sessions shows "–".
   `_place_totals`, bound to the page's width, puts the table under the chart, or beside it (between the chart and the Cal / 14d buttons; `_TOTALS_BESIDE_W` = 290 dp, its widest texts) once the page fits the heatmap at its smallest cells next to it:
   `_TOTALS_BESIDE_FROM`, from the heatmap's margins, weeks and minimum cell, ~670 dp.

@@ -385,7 +385,7 @@ def test_the_header_start_time_is_when_the_data_arrived(waiting, monkeypatch):
     waiting.first_data()
     started = app._session.manager.started_at
     real_time = time.time
-    monkeypatch.setattr(am.time, "time", lambda: real_time() + 600)  # the queued UI runs after a 10-min screen lock
+    monkeypatch.setattr(time, "time", lambda: real_time() + 600)  # the queued UI runs after a 10-min screen lock
     frames()
     assert shown == [(started,)]
 

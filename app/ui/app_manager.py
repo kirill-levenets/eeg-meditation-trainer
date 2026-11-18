@@ -1,6 +1,5 @@
 import os
 import sqlite3
-import time
 
 from kivy.app import App
 from kivy.clock import Clock
@@ -192,7 +191,9 @@ class EEGMeditationApp(App):
                                        on_db_replaced=self._on_db_replaced)
         # Entering History reloads a stale list; the Session screen's duration picker shows a Timer change.
         self._nav = Navigation(self._ctx, self._sm, self._bottom_nav, gate=self._gate, fullscreen=self._fullscreen,
-                               screens={"history": ScreenHooks(entering=self._history.refresh),
+                               screens={"history": ScreenHooks(entering=self._history.refresh,
+                                                                # resumed on another day: the chart and totals move on
+                                                                resumed=self._history_screen.on_pre_enter),
                                         "live_session": ScreenHooks(entering=self._program_settings.sync_picker),
                                         "diary": ScreenHooks(back=self._detail.on_diary_back)})
 
@@ -679,43 +680,9 @@ class EEGMeditationApp(App):
         self._power.refresh()  # after the session's UI: back from the phone's settings, perhaps changed there
 
     def _refresh_ui_after_resume(self) -> None:
-        """Sync UI to current session state after Android resume.
-
-        If the session is no longer RUNNING (e.g. timer expired during
-        pause and the session's runner already ended it →
-        the summary card now covers the live screen), skip the graph
-        reload entirely. Combining 3 graph reloads with the heavy work
-        of the ending on the first frame after resume previously
-        blocked the UI thread long enough to trigger an Android ANR
-        ('App not responding' / black screen).
-
-        While the session is RUNNING, reload all three live graphs in a
-        single batch from the session-lifetime mirror buffers (one
-        ``load_static_data`` call per graph, with its markers; the metrics
-        graph redraws again for its threshold and gradient steps), then
-        refresh the stats/state/timer labels from the latest sample.
-        """
-        t_start = time.monotonic()
-        if getattr(getattr(self, "_sm", None), "current", None) == "history":
-            self._history_screen.on_pre_enter()  # resumed onto it on another day: the chart and the totals move on
-        if self._session.manager.state != SessionState.RUNNING:
-            logger.info("on_resume: session not RUNNING → skipping graph reload")
-            return
-        try:
-            self._live_screen.load_mirror(self._shown.mirror.snapshot())
-            if self._shown.mirror.last_metrics:
-                self._live_screen.update_stats(self._session.manager.live_score())
-                self._live_screen.update_state(self._shown.mirror.last_state)
-                self._live_screen.set_shamatha(self._session.run.shamatha_active)
-        except Exception:
-            logger.exception("graph reload on resume failed")
-        try:
-            self._live_screen.update_timer(self._session.manager.elapsed_formatted)
-        except Exception:
-            logger.exception("update_timer on resume failed")
-        logger.info(
-            f"on_resume: refresh complete in {time.monotonic() - t_start:.3f}s"
-        )
+        """The first frame after a resume: the screen shown, then a running session's graphs and readout."""
+        self._nav.resumed()
+        self._shown.resumed()
 
     def on_stop(self) -> None:
         """Cleanup on app exit.

@@ -14,11 +14,12 @@ from app.ui.app_context import AppContext
 
 @dataclass(frozen=True)
 class ScreenHooks:
-    """A screen's own part in navigation: what it refreshes as it is switched to, and what Android's back does on it
-    (None: back to the Session screen)."""
+    """A screen's own part in navigation: what it refreshes as it is switched to, what Android's back does on it (None:
+    back to the Session screen), and what it redraws when the app comes back to it."""
 
     entering: Callable[[], None] | None = None
     back: Callable[[], None] | None = None
+    resumed: Callable[[], None] | None = None
 
 
 class Navigation:
@@ -56,6 +57,12 @@ class Navigation:
             if screen == name:
                 self._bottom_nav.active_tab = key
                 break
+
+    def resumed(self) -> None:
+        """The app came back (the screen unlocked, or from another app): the screen shown redraws what moved meanwhile."""
+        hooks = self._screens.get(self._sm.current)
+        if hooks is not None and hooks.resumed is not None:
+            hooks.resumed()
 
     def on_keyboard(self, _window, key, *_args) -> bool:
         """Android's back (key 27) or Esc; True consumes it, so Kivy's own exit on escape never fires."""
