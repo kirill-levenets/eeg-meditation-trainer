@@ -390,19 +390,12 @@ class EEGMeditationApp(App):
         finally:
             self._leaving = False
 
-    def _on_key_down(self, window, key, scancode, codepoint, modifiers) -> bool:
-        """Handle keyboard hotkey for marker."""
-        # Don't capture keys while settings hotkey picker is active
-        if self._settings_screen.display._waiting_for_hotkey:
+    def _on_key_down(self, _window, key, _scancode, codepoint, _modifiers) -> bool:
+        """The marker hotkey places a marker; any other key goes on to Kivy."""
+        if not self._settings_screen.display.is_marker_key(key, codepoint):
             return False
-        hotkey = self._settings_screen.display.marker_hotkey
-        if not hotkey:
-            return False
-        pressed = codepoint if codepoint else str(key)
-        if pressed == hotkey:
-            self._controls.mark()
-            return True
-        return False
+        self._controls.mark()
+        return True
 
     _leaving = False  # set while _flush_on_leave runs: nothing the app draws is seen any more
 

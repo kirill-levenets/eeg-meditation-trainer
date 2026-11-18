@@ -55,6 +55,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **A marker hotkey on a key with no character never placed a marker** (desktop): a key such as F5 or an arrow was picked by its name, but a press was compared by its code; both now name the key the same way.
 - **A session whose final save failed stayed "running" on screen**, with the phone kept awake and nothing said (the timer's ending; every later Stop was ignored).
   The failure is now reported, and the session still ends on screen and lets the phone sleep.
 - **Exporting sessions to CSV fed their rows into the first custom formula's `avg()`**: a session running meanwhile averaged them in, and each exported session's column began with the previous one's values; an export now computes its column on its own.

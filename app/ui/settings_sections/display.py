@@ -25,6 +25,16 @@ def _line_width(slider_value: float) -> float:
     return round(slider_value, 1)
 
 
+_KEY_NAMES: dict[int, str] = {}
+for _name, _code in Keyboard.keycodes.items():
+    _KEY_NAMES.setdefault(_code, _name)  # the first name of a code, as Keyboard.keycode_to_string gives it
+
+
+def key_name(key: int, codepoint: str | None) -> str:
+    """A key as the marker hotkey names it: its character, else Kivy's name for it ("f5"), else its code."""
+    return codepoint or _KEY_NAMES.get(key) or str(key)
+
+
 class DisplaySection:
     """Builds the section's content into `section` and reports the user's actions through its callbacks."""
 
@@ -174,14 +184,8 @@ class DisplaySection:
             return False
         Window.unbind(on_key_down=self._on_hotkey_capture)
         self._waiting_for_hotkey = False
-        # Use codepoint (printable char) or Kivy key name
-        key_name = codepoint if codepoint else Keyboard.keycode_to_string(Keyboard(), key)
-        if key_name:
-            self._marker_hotkey = key_name
-            self._marker_hotkey_btn.text = key_name
-        else:
-            self._marker_hotkey_btn.text = f"key {key}"
-            self._marker_hotkey = str(key)
+        self._marker_hotkey = key_name(key, codepoint)
+        self._marker_hotkey_btn.text = self._marker_hotkey if self._marker_hotkey != str(key) else f"key {key}"
         self._marker_hotkey_btn.bg_color = C.BG_CARD
         self._marker_hotkey_btn.text_color = C.PRIMARY
         return True
@@ -195,6 +199,11 @@ class DisplaySection:
         self._marker_hotkey_btn.text = "(none)"
         self._marker_hotkey_btn.bg_color = C.BG_CARD
         self._marker_hotkey_btn.text_color = C.PRIMARY
+
+    def is_marker_key(self, key: int, codepoint: str | None) -> bool:
+        """The key pressed is the marker hotkey, named as its capture named it (no key matches a cleared one: a name is
+        never empty); never while a new one is being picked."""
+        return not self._waiting_for_hotkey and key_name(key, codepoint) == self._marker_hotkey
 
     @property
     def marker_hotkey(self) -> str:
