@@ -131,7 +131,7 @@ def test_card_delete_without_confirmation_deletes_nothing(card):
 
 def test_card_delete_confirmed_removes_the_session_and_stops_the_gong(card, monkeypatch):
     open_history(card, card.sid)
-    card._switch_screen("live_session")
+    card._nav.switch("live_session")
     bells = calls_of(monkeypatch, card._audio, "stop_timer_bell")
     reloads = calls_of(monkeypatch, card._history_screen, "load_sessions")
     card._shown.on_delete()

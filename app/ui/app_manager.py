@@ -7,7 +7,6 @@ from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
-from kivy.uix.modalview import ModalView
 from kivy.uix.screenmanager import ScreenManager, SlideTransition
 
 from app import android_jni
@@ -52,6 +51,7 @@ from app.ui.history_flow import HistoryFlow
 from app.ui.history_screen import HistoryScreen
 from app.ui.hooks import wire
 from app.ui.live_session import LiveSessionScreen
+from app.ui.navigation import Navigation, ScreenHooks
 from app.ui.power_exemption import PowerExemption
 from app.ui.profiles import ProfileGate, Profiles
 from app.ui.program_settings import ProgramSettings
@@ -106,13 +106,6 @@ class EEGMeditationApp(App):
         self._formulas: FormulaSlots = FormulaSlots()
         self.serial_device_override: str | None = None
 
-    # Map bottom-nav tab keys to screen groups
-    _TAB_SCREENS = {
-        "session": "live_session",
-        "history": "history",
-        "settings": "settings",
-    }
-
     def build(self) -> FloatLayout:
         install_crash_handler(self)
         self._ctx = self._make_context()
@@ -154,8 +147,8 @@ class EEGMeditationApp(App):
         for screen in (self._live_screen, self._history_screen, self._settings_screen, self._diary_screen):
             self._sm.add_widget(screen)
         root.add_widget(self._sm)
-        self._bottom_nav = BottomNav(tabs=[("Session", "session"), ("History", "history"), ("Settings", "settings")],
-                                     callback=self._on_nav_tab)
+        self._bottom_nav = BottomNav(tabs=[(label, key) for label, key, _screen in Navigation.TABS],
+                                     callback=lambda key: self._nav.on_tab(key))
         root.add_widget(self._bottom_nav)
         float_root = FloatLayout()
         self._float_root = float_root
@@ -197,6 +190,11 @@ class EEGMeditationApp(App):
         self._backup_flow = BackupFlow(self._ctx, self._settings_screen, user_name=self._profiles.current_name,
                                        checkpoint=self._session.checkpoint_or_report,
                                        on_db_replaced=self._on_db_replaced)
+        # Entering History reloads a stale list; the Session screen's duration picker shows a Timer change.
+        self._nav = Navigation(self._ctx, self._sm, self._bottom_nav, gate=self._gate, fullscreen=self._fullscreen,
+                               screens={"history": ScreenHooks(entering=self._history.refresh),
+                                        "live_session": ScreenHooks(entering=self._program_settings.sync_picker),
+                                        "diary": ScreenHooks(back=self._detail.on_diary_back)})
 
     def _make_context(self) -> AppContext:
         """What every flow reaches the app through; the callables read the app when called, so they see the profile and
@@ -205,7 +203,8 @@ class EEGMeditationApp(App):
                                 refused=lambda doing, why="": self._controls.refused(doing, why), discard=lambda: self._controls.discard(),
                                 set_formula=lambda idx, name, formula: self._session.set_formula(idx, name, formula))
         return AppContext(db=self._db, user_id=lambda: self._current_user_id, activate_user=self._activate_user,
-                          require_user=self._require_user, on_main=self._on_main, switch_screen=self._switch_screen,
+                          require_user=self._require_user, on_main=self._on_main,
+                          switch_screen=lambda name: self._nav.switch(name),
                           info=self._info_popup, toast=self._toast, confirm=self._confirm_action,
                           setting=lambda key: self._user_settings.value(key),
                           change_setting=lambda key, value: self._user_settings.change(key, value),
@@ -252,9 +251,7 @@ class EEGMeditationApp(App):
         self._wire_settings_screen()
         self._wire_history_screens()
         Window.bind(on_key_down=self._on_key_down)
-        # Android's back (key 27) is consumed, so Kivy's exit-on-escape doesn't fire: it navigates, or exits on a double tap.
-        self._last_back_time = 0.0
-        Window.bind(on_keyboard=self._on_keyboard)
+        Window.bind(on_keyboard=self._nav.on_keyboard)
 
     def _wire_session_screen(self) -> None:
         """The Session screen's controls, its end card, its graphs' glyphs and the series its graph starts with."""
@@ -401,46 +398,6 @@ class EEGMeditationApp(App):
         logger.info(f"Restored last user id={uid}")
         return uid
 
-    def _handle_gate_back(self) -> bool:
-        """Back/Esc while gated: never fall through into the app, but the user must
-        still be able to LEAVE — double-press exits the app (a gate with no exit
-        traps a fresh-install user who declines to create a profile)."""
-        return self._exit_on_second_back()
-
-    def _exit_on_second_back(self) -> bool:
-        """A second back press within 2 s exits the app; the first says so."""
-        now = time.time()
-        if now - self._last_back_time < 2.0:
-            App.get_running_app().stop()
-            return True
-        self._last_back_time = now
-        self._toast("Press back again to exit")
-        return True
-
-    def _on_nav_tab(self, tab_key: str) -> None:
-        """Handle bottom nav tab press."""
-        screen_name = self._TAB_SCREENS.get(tab_key, tab_key)
-        self._switch_screen(screen_name)
-
-    def _switch_screen(self, name: str) -> None:
-        if name == "diary" and not self._current_user_id:
-            # silent-ok: unreachable post-gate; any concrete user passes.
-            # Defensive block against a should-not-happen unset.
-            logger.debug("Diary switch blocked: no user selected")
-            return
-        logger.debug(f"Screen switch: {name}")
-        self._sm.current = name
-        if name == "history":
-            self._history.refresh()
-        elif name == "live_session":
-            # Reflect any Settings timer/mode change on the Start duration button.
-            self._program_settings.sync_picker()
-        # Sync bottom nav highlight
-        for tab_key, screen in self._TAB_SCREENS.items():
-            if screen == name:
-                self._bottom_nav.active_tab = tab_key
-                break
-
     def _on_main(self, fn) -> None:
         """Queue callable on Kivy's main thread.
 
@@ -479,34 +436,6 @@ class EEGMeditationApp(App):
             self._controls.mark()
             return True
         return False
-
-    def _on_keyboard(self, window, key, scancode=0, codepoint=None,
-                     modifiers=None) -> bool:
-        """Android hardware back / Esc (key 27): close overlays, navigate back to
-        Session, or double-tap to exit. Returns True to consume the key so Kivy's
-        default exit-on-escape never fires."""
-        if key != 27:
-            return False
-        # The mandatory user-selection gate: back/Esc never falls through INTO the
-        # app (covers the pre-popup schedule window too), but double-press exits —
-        # a fresh-install user who declines to create a profile must be able to leave.
-        if self._gate.active():
-            return self._handle_gate_back()
-        # An open Popup/ModalView dismisses itself on escape — let it.
-        if any(isinstance(c, ModalView) for c in Window.children):
-            return False
-        # Fullscreen graph overlay → close it (it's not a ModalView).
-        if self._fullscreen.close():
-            return True
-        current = self._sm.current
-        if current == "diary":
-            self._detail.on_diary_back()
-            return True
-        if current != "live_session":
-            self._switch_screen("live_session")
-            return True
-        # Root (Session): require two presses within 2s to exit.
-        return self._exit_on_second_back()
 
     _leaving = False  # set while _flush_on_leave runs: nothing the app draws is seen any more
 

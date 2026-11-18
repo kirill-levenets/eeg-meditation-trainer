@@ -52,7 +52,7 @@ def app(fresh_app, monkeypatch):
     a.sessions = {"A": _session(a._db, uid, 40, "Morning sit", 100.0),
                   "B": _session(a._db, uid, 60, "Evening sit", 300.0, formula_name="Drowsy")}
     a._history.mark_dirty()
-    a._switch_screen("history")
+    a._nav.switch("history")
     return a, workers
 
 
@@ -256,7 +256,7 @@ def test_the_band_tables_view_is_kept_per_profile_for_the_next_detail(app):
     a._db.set_user_setting(other, "use_mock", "True")
     theirs = _session(a._db, other, 10, "Their sit", 50.0)
     a._profiles.on_switch(other)
-    a._switch_screen("history")
+    a._nav.switch("history")
     _select(a, theirs)
     assert a._diary_screen._selected_session_id == theirs
     assert (table._mode, table._sort_by, table._descending) == ("detailed", "band", False)  # its own: the default

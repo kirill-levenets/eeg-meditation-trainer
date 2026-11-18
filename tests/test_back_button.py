@@ -21,7 +21,7 @@ def app(fresh_app, monkeypatch):
 
 
 def _back(app, key: int = 27) -> bool:
-    return app._on_keyboard(Window, key, 0, None, [])
+    return app._nav.on_keyboard(Window, key, 0, None, [])
 
 
 def test_non_back_key_ignored(app):
@@ -30,7 +30,7 @@ def test_non_back_key_ignored(app):
 
 
 def test_open_modal_not_intercepted(app):
-    app._switch_screen("history")
+    app._nav.switch("history")
     modal = ModalView()
     modal.open(animation=False)
     try:
@@ -56,7 +56,7 @@ def test_diary_back(app):
 
 @pytest.mark.parametrize("screen", ["history", "settings"])
 def test_a_tab_navigates_to_session(app, screen):
-    app._switch_screen(screen)
+    app._nav.switch(screen)
     assert _back(app) is True
     assert app._sm.current == "live_session" and app.toasts == [] and app.stops == []
 
@@ -64,7 +64,7 @@ def test_a_tab_navigates_to_session(app, screen):
 def test_root_first_press_toasts_no_exit(app):
     assert _back(app) is True
     assert app.toasts == ["Press back again to exit"] and app.stops == []
-    assert app._last_back_time > 0.0
+    assert app._nav._last_back > 0.0
 
 
 def test_root_double_press_exits(app):
@@ -73,6 +73,21 @@ def test_root_double_press_exits(app):
 
 
 def test_root_slow_second_press_does_not_exit(app):
-    app._last_back_time = time.time() - 5.0  # the first press, more than 2 s ago
+    app._nav._last_back = time.time() - 5.0  # the first press, more than 2 s ago
     assert _back(app) is True
     assert app.stops == [] and app.toasts == ["Press back again to exit"]
+
+
+def test_a_switch_from_code_marks_its_screens_tab(app):
+    app._nav.switch("settings")  # as a flow does (Start asking for a headset)
+    assert app._bottom_nav.active_tab == "settings"
+    _back(app)  # off the Session screen: back to it
+    assert (app._sm.current, app._bottom_nav.active_tab) == ("live_session", "session")
+
+
+def test_entering_the_session_screen_shows_a_timer_changed_in_settings(app):
+    app._nav.switch("settings")
+    timer = app._settings_screen.timer
+    timer.timer_enabled, timer.timer_minutes = True, 45
+    app._nav.on_tab("session")
+    assert app._live_screen._btn_duration_expand.text == "45m"

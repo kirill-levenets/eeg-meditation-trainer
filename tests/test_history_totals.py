@@ -217,7 +217,7 @@ def test_without_the_icon_font_the_chevron_says_hide_and_show(monkeypatch):
 
 def test_resuming_onto_history_moves_today_on(fresh_app, monkeypatch):
     app = fresh_app
-    app._switch_screen("history")
+    app._nav.switch("history")
     assert _table(app._history_screen)[0][0] != "Mon 12 Oct"
     monkeypatch.setattr(history_screen, "_today", lambda: datetime.date(2026, 10, 12))
     app._refresh_ui_after_resume()

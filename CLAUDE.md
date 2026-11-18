@@ -83,6 +83,7 @@ Read it before changing that subsystem.
   `app/ui/app_context.py` — `AppContext`: what every flow reaches the app through (`_make_context`). → [app-platform](docs/architecture/app-platform.md#flows-and-the-app-context)
   `app/ui/profiles.py` — `ProfileGate` (the blocking profile picker), `Profiles` (Settings → Profile). → [app-platform](docs/architecture/app-platform.md#user-gate-and-profiles)
   `app/ui/startup.py` — the startup profile (`resolve_startup_user`), the theme, text size and line colours the UI is built in; `app/ui/toast.py` — the toast.
+  `app/ui/navigation.py` `Navigation` — which screen shows (a tab, `ctx.switch_screen`) and the back key's way back. → [app-platform](docs/architecture/app-platform.md#android-back-button)
   `app/ui/audio_metric.py` `AudioMetric` — the profile's choice of the metric that drives the sound, its Settings controls, their lock while a session is scored on it. → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
 - `app/ui/theme.py`, `app/ui/widgets/` — palette `C`/`F`/`S`, themed widgets, modals, legends, overlays.
   `app/ui/hooks.py` — `Hook`/`wire()`: the handlers the app plugs into a widget. → [ui-theme](docs/architecture/ui-theme.md)

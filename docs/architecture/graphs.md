@@ -157,7 +157,7 @@ A graph's touch handling is the `GraphGestures` mixin (`app/ui/graph_gestures.py
 - Fullscreen expand (`GraphFullscreen.present` in `app/ui/graph_fullscreen.py`, the app's `_fullscreen`, wired by `_wire_graph_affordances`) **reparents** the graph, not a clone:
   into a full-window `FloatLayout` overlay on `self._float_root` with `size_hint=(1,1)` + `pos_hint={"x":0,"y":0}`, so it reaches every edge, where a `Popup` insets its content with chrome.
   Reparenting keeps the single `Window.on_mouse_down` bind and the live `add_point` feed, so a running session's graph updates live in fullscreen.
-  While fullscreen the expand glyph is the close cross (`closes=True`); it, Android back and Esc (`_on_keyboard` → `GraphFullscreen.close`) restore the graph to its original parent and index and give it the expand glyph back.
+  While fullscreen the expand glyph is the close cross (`closes=True`); it, Android back and Esc (`Navigation.on_keyboard` → `GraphFullscreen.close`) restore the graph to its original parent and index and give it the expand glyph back.
   While fullscreen, `GraphFullscreen` chains its own legend onto the graph's `on_series_change` (`_series_changed`: the owner's handler if one is wired, then `refresh_legend`) and wires the owner's handler back on close.
   A handler wired to the graph while it is fullscreen would be replaced on close: only the owning screen wires it, once at build.
   **Capture `list(size_hint)`/`list(size)` copies before overriding**: they are live `ReferenceListProperty`s, and a bare reference tracks the `(1,1)` you set and breaks restore.

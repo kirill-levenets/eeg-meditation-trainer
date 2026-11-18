@@ -21,7 +21,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `build()` gates on `resolve_startup_user(db)` (`app/ui/startup.py`: the resolved uid, or `None`; through `_restore_last_user`), not on whether users exist:
   after a reinstall, a restored DB, a deleted active profile or a corrupt `last_user_id`, users exist but none is current.
   The gate is `ProfileGate` (`app/ui/profiles.py`, the app's `_gate`); `ProfileGate.open(delay)` is its one entry (build, `on_resume`, a profile delete, a failed gate pick):
-  it disables the bottom nav synchronously (no cold-start tap window) and opens the blocking picker (`_show`, its `_gate_popup` made un-escapable in `_on_keyboard`).
+  it disables the bottom nav synchronously (no cold-start tap window) and opens the blocking picker (`_show`, its `_gate_popup` kept open by `Navigation.on_keyboard`).
   `on_resume` re-enters the gate if the process resumed unset; deleting the active profile, or the last one, re-enters it too.
   Per-user handlers use `_require_user(action)` (surfaces a message, returns the uid or `None`) instead of a bare silent `return`:
   `ProgramSettings.on_save`/`on_load`/`on_delete`, `FormulaSettings.on_load`/`on_delete`, the series picker's saved-formula Choose;
@@ -44,13 +44,14 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 ## Android back button
 
-- Android hardware back button (`AppManager._on_keyboard`, bound to `Window.on_keyboard`): it consumes key 27 (returns `True`) so Kivy's default exit-on-escape never fires, then routes by precedence.
-  While the user gate is active (`ProfileGate.active`, incl. the pre-popup schedule window), `_handle_gate_back` applies double-press-to-exit: never into the app, but a fresh-install user who declines to create a profile can still leave.
+- Android hardware back button (`Navigation.on_keyboard`, `app/ui/navigation.py`, bound to `Window.on_keyboard`): it consumes key 27 (returns `True`) so Kivy's default exit-on-escape never fires, then routes by precedence.
+  `Navigation` is also which screen shows: a bottom tab (`on_tab`), a flow's `ctx.switch_screen` (`switch`: the screen refreshed as it is entered, by its `ScreenHooks.entering`: History's stale list, the Session screen's duration picker; and its tab marked).
+  While the user gate is active (`ProfileGate.active`, incl. the pre-popup schedule window), a back press goes to the double-press exit: never into the app, but a fresh-install user who declines to create a profile can still leave.
   Else an open `Popup`/`ModalView` is left to dismiss itself (the handler returns `False`);
   else an open fullscreen graph overlay closes (`GraphFullscreen.close()`, which runs its stored `_restore` closure);
-  else the Diary detail goes back (`SessionDetailFlow.on_diary_back`);
-  else any screen but the Session screen switches to it (`_switch_screen("live_session")`, which syncs the bottom-nav highlight);
-  else, on the Session screen, **a second press within 2 s exits** (`_exit_on_second_back`, `_last_back_time`), the first showing the in-app `_toast`.
+  else a screen with a back of its own takes it (`ScreenHooks.back`: the session detail goes back, `SessionDetailFlow.on_diary_back`);
+  else any screen but the Session screen switches to it (`Navigation.switch("live_session")`, which marks its tab);
+  else, on the Session screen, **a second press within 2 s exits** (`Navigation._exit_on_second_back`), the first showing the in-app toast.
   While the app is leaving (`_leaving`), `_toast` shows the native `android_toast` (`app/ui/toast.py`: `run_on_ui_thread` + pyjnius `Toast`) instead.
   Esc on desktop follows the same chain.
 
