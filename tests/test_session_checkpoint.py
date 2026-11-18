@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import app.ui.app_manager as am
+import app.session.running_session as rs
 import app.ui.backup_flow as bf
 from app.config import APP
 from app.session.manager import SessionManager
@@ -199,7 +199,7 @@ def _locked(*_args, **_kwargs):
 
 def test_a_failing_checkpoint_on_leave_still_saves_the_settings(fresh_app, monkeypatch):
     reported = []
-    monkeypatch.setattr(am, "report_soft_error", lambda label, detail, **k: reported.append(label))
+    monkeypatch.setattr(rs, "report_soft_error", lambda label, detail, **k: reported.append(label))
     app = fresh_app
     _session_of(app, 4, 2)
     app._settings_screen.threshold = 62  # changed, not yet written
@@ -244,7 +244,7 @@ def test_an_android_backup_holds_the_running_session_as_of_the_backup(fresh_app,
 
 def test_a_failing_checkpoint_does_not_stop_a_backup(fresh_app, monkeypatch):
     reported, copied = [], []
-    monkeypatch.setattr(am, "report_soft_error", lambda label, detail, **k: reported.append(label))
+    monkeypatch.setattr(rs, "report_soft_error", lambda label, detail, **k: reported.append(label))
     monkeypatch.setattr(bf, "report_soft_error", lambda label, detail, **k: reported.append(label))
     monkeypatch.setattr(bf._backup, "make_backup", lambda d, path: copied.append(path))
     app = fresh_app

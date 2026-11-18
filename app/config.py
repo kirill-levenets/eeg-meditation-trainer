@@ -137,6 +137,7 @@ class AppConfig:
     UPDATE_FREQUENCY: float = 0.5  # 2 Hz = every 0.5 seconds
     GRAPH_WINDOW_SECONDS: int = 10800  # 3 hours
     GRAPH_POINTS_MAX: int = 21600  # 3h * 2Hz — full session in memory
+    RAW_WAVEFORM_MAX: int = 512 * 60  # the raw graph's samples: a minute at the headset's 512 Hz
     SESSION_MAX_SECONDS: int = 10800  # 3h — auto-stop after this
     FLUSH_INTERVAL_SECONDS: int = 60
     SIGNAL_BUFFER_SECONDS: int = 120
@@ -147,6 +148,7 @@ class AppConfig:
         else _resolve_desktop_base_dir_with_migration()
     )
     DB_PATH: str = os.path.join(_BASE_DIR, DB_NAME)
+    BUILT_IN_SOUNDS_DIR: str = os.path.join(_BASE_DIR, "built_in_sounds")  # generated once and kept; no other files
 
     MAX_VOLUME: float = 0.3
     REWARD_SPAN: int = 30  # points above threshold over which the reward sound ramps to full

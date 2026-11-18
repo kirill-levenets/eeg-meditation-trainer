@@ -100,14 +100,14 @@ def test_a_stop_confirmed_after_the_session_ended_another_way_keeps_it(fresh_app
     app = fresh_app
     start_ticked_by_hand(app, ticks=240)
     app._session.manager._start_time -= 120  # two minutes in
-    app._checkpoint_or_report()
+    app._session.checkpoint_or_report()
     sid = app._session.recorder.session_id
     app._on_stop()  # the user's Stop tap, handled while the session still runs: its dialog opens
     (confirm,) = popups()
     if ended_by == "headset off":  # the stale-data stop queued behind the tap
         app._stop_and_save(reason="stale_data")
     else:  # the tick thread saved the timed session; its UI teardown runs on the main thread
-        app._finalize_stop_ui(app._persist_session_data("timer"), sid)
+        app._finalize_stop_ui(app._session.persist("timer"), sid)
     saved = _stored(app, sid)
     assert saved is not None and saved[0] >= 119 and saved[1] == 240
     tap(confirm.content, "Stop")  # the user confirms the Stop

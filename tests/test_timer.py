@@ -63,17 +63,6 @@ class TestTimerState(unittest.TestCase):
         self.timer.set_duration(20)
         self.assertEqual(self.timer.duration_seconds, 1200.0)
 
-    def test_custom_sound_path_default_empty(self):
-        self.assertEqual(self.timer.custom_sound_path, "")
-
-    def test_custom_sound_path_strips_whitespace(self):
-        self.timer.set_custom_sound_path("  /tmp/bell.wav  ")
-        self.assertEqual(self.timer.custom_sound_path, "/tmp/bell.wav")
-
-    def test_custom_sound_path_handles_none(self):
-        self.timer.set_custom_sound_path("")
-        self.assertEqual(self.timer.custom_sound_path, "")
-
 
 if __name__ == "__main__":
     unittest.main()

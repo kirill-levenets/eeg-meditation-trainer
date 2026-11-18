@@ -5,41 +5,36 @@ from collections.abc import Callable
 
 from app.logger import logger
 from app.metrics.custom_formula import CustomFormulaEvaluator, evaluate_series
+from app.session.session_events import (
+    Notice,
+    ProgramDropped,
+    ProgramShown,
+    SegmentStarted,
+)
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
-    RunnablePlan,
     SessionProgram,
     program_line_name,
     runnable_plan,
     segment_target,
 )
-from app.ui.app_context import AppContext
-from app.ui.live_session import SERIES_NAMES
-
-
-def show_program_series(graph, plan: RunnablePlan) -> None:
-    """Set the graph to EXACTLY the program's metric set, label each program custom line and mark the set as the
-    program's. Shared by a program session's start, the idle preview and a program session's detail in History."""
-    for slot, custom in plan.customs:
-        graph.set_series_name(slot, program_line_name(custom))
-    for k in graph.series_keys():
-        graph.set_visible(k, k in plan.keys)
-    graph.set_program_lines(plan.keys)
+from app.session.session_run import SessionRun
 
 
 class ProgramRun:
     """The program the running session started with; None for a simple session.
 
-    `tick` runs on the daemon tick thread: only thread-safe state there (audio one-shots, SessionManager, pure
-    evaluators). Kivy widget changes go through `on_main`.
+    `tick` runs on the session's runner: only thread-safe state there (audio one-shots, SessionManager, pure
+    evaluators). What the screen shows goes out as events: `show` on the main thread (its start and end), `emit` from
+    the runner, for its run.
     """
 
-    def __init__(self, ctx: AppContext, session_manager, audio, live_screen, *,
-                 formula_vars: Callable[[dict, dict], dict]) -> None:
-        self._ctx = ctx  # its messages are popups that stay until read: the meditator may not be looking
+    def __init__(self, session_manager, audio, *, show: Callable[[object], None],
+                 emit: Callable[[SessionRun, object], None], formula_vars: Callable[[dict, dict], dict]) -> None:
         self._session_manager = session_manager
         self._audio = audio
-        self._live_screen = live_screen
+        self._show = show
+        self._emit = emit
         self._formula_vars = formula_vars
         self.program: SessionProgram | None = None
         self.name = ""  # the program's name at the start; Settings may load or save another during the session
@@ -53,7 +48,7 @@ class ProgramRun:
     def active(self) -> bool:
         return self.program is not None
 
-    def begin(self, prog: SessionProgram | None, feedback_ids: list[str], name: str) -> None:
+    def begin(self, run: SessionRun, prog: SessionProgram | None, feedback_ids: list[str], name: str) -> None:
         """Session start: a simple session (None) runs none. A program shows and marks EXACTLY its metric set on the
         live graph for the whole session, and arms one persistent evaluator per distinct custom formula that
         compiles; one that doesn't runs its segments on shamatha, and a popup names it. Each custom line is shown the
@@ -69,30 +64,24 @@ class ProgramRun:
         if prog is None:
             return
         plan = runnable_plan(prog)
-        show_program_series(self._live_screen.graph, plan)
+        self._show(ProgramShown(plan))
         self._segment_keys, self.formula_evs = plan.segment_keys, plan.evaluators
         if plan.unrunnable:
             logger.warning(f"Program formulas that can't run, their segments use shamatha: {plan.unrunnable}")
             listed = ", ".join(f'"{n}"' for n in plan.unrunnable)
             message = f"Can't run {listed}: Shamatha is used instead.\nSettings › Timer / Program edits the program."
-            # Next frame: the start finishes its setup first, whatever the popup does.
-            self._ctx.on_main(lambda: self._ctx.info("Formula error in this program", message))
+            self._emit(run, Notice("Formula error in this program", message))  # the next frame: the start's setup first
 
     def end(self) -> None:
         """Drop the program, its custom-formula lines, labels and evaluators, and its mark on the live graph; the
         ending re-derives the graph's idle series (ProgramSettings.refresh_live_series)."""
-        graph = self._live_screen.graph
-        for slot in PROGRAM_FORMULA_KEYS:
-            graph.set_series_name(slot, SERIES_NAMES.get(slot, "Program"))  # drop stale labels
         self.program = None
         self.name = ""
         self.formula_evs = {}
         self._segment_keys = []
         self._feedback_ids = []
         self.audio_key = ""
-        for slot in PROGRAM_FORMULA_KEYS:
-            graph.set_visible(slot, False)  # never linger as a user selection
-        graph.set_program_lines()
+        self._show(ProgramDropped())
 
     def segments_json(self) -> str:
         """JSON of the program that ran this session (empty for a simple session).
@@ -109,7 +98,7 @@ class ProgramRun:
         idx, seg = program.segment_at(elapsed)
         return (idx, seg, idx != prev_idx)
 
-    def tick(self, metrics: dict, raw_sample: dict) -> None:
+    def tick(self, run: SessionRun, metrics: dict, raw_sample: dict) -> None:
         """Per-tick program stepping: cross segments, fire cues, evaluate the program's custom formulas."""
         prog = self.program
         if not prog:
@@ -119,13 +108,13 @@ class ProgramRun:
         if seg is None:
             return
         if crossed:
-            self._enter_segment(prog, self.seg_idx, idx, seg)
+            self._enter_segment(run, prog, self.seg_idx, idx, seg)
             self.seg_idx = idx
         # Every program custom line is evaluated every tick (persistent, shown the whole
         # program) into its own metrics[slot] — so all stages' lines stay live at once.
         evaluate_series(self.formula_evs, metrics, lambda: self._formula_vars(raw_sample, metrics))
 
-    def _enter_segment(self, prog: SessionProgram, prev_idx: int, idx: int, seg: dict) -> None:
+    def _enter_segment(self, run: SessionRun, prog: SessionProgram, prev_idx: int, idx: int, seg: dict) -> None:
         """On a boundary crossing: end-cue for the prior segment + repoint target/audio/marker
         to this segment's metric (built-in key or its custom's persistent program line)."""
         # End cue for the segment that just ended (skip on initial entry prev_idx == -1).
@@ -141,19 +130,8 @@ class ProgramRun:
         self._session_manager.start_segment(metric_key, target)  # the sound follows the tick's target from here
         if 0 <= idx < len(self._feedback_ids):
             self._audio.set_active_feedback(self._feedback_ids[idx])
-        self._ctx.on_main(lambda k=metric_key, nm=line_name: self._segment_ui(k, nm))
+        self._emit(run, SegmentStarted(metric_key, line_name))
         logger.info(f"Program segment {idx}: metric={metric_key} target={target}")
-
-    def _segment_ui(self, metric_key: str, line_name: str | None) -> None:
-        """Main-thread UI for a segment switch: ensure a custom segment's line is labelled
-        + visible, and move the legend marker (the ticks step the threshold line). Program lines'
-        visibility is owned by `begin` (shown the whole program), so a
-        built-in segment no longer hides anything — only the » marker moves."""
-        graph = self._live_screen.graph
-        if line_name is not None:
-            graph.set_series_name(metric_key, line_name)
-            graph.set_visible(metric_key, True)
-        self._live_screen.set_training_series(metric_key)  # bold + » on the trained series
 
     def _play_end_cue(self, sound_id) -> None:
         """Segment-end cue. v1: chime (default) or 'warble'; richer choices land with #10."""
@@ -162,5 +140,5 @@ class ProgramRun:
                 self._audio.play_alert()
             else:
                 self._audio.play_transition_cue()
-        except Exception:  # noqa: BLE001 - on the tick thread a failed cue must not end the session
+        except Exception:  # noqa: BLE001 - on the runner a failed cue must not end the session
             logger.exception("Program segment end cue failed")

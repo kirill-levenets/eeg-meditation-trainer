@@ -34,7 +34,7 @@ class _NullCursor:
 class _NullConnection:
     """No-op connection used only while the DB is shutting down / mid-restore:
     swallows writes and returns no rows, so late access from any path (reads,
-    writes, the daemon tick thread) is a benign no-op instead of crashing on a
+    writes, the session's runner) is a benign no-op instead of crashing on a
     None connection or reopening-and-clobbering the freshly-restored DB file."""
 
     def execute(self, *_a, **_k):

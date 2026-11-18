@@ -21,6 +21,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **A session goes on recording while "Stop session?" is open**: Cancel loses nothing, and Stop saves up to then; the ticks used to stop while the session's clock ran on, leaving a gap in its data.
+  If the timer or a lost signal ends the session meanwhile, the question closes.
+- **One writer for a running session** (#128): from its Start to its end, only the session's runner thread changes it; Pause, Resume, Stop, the marker and the threshold are commands it carries out, and every ending (Stop, the timer, lost data, the recording limit, a profile's delete) runs there and saves the session at once.
+  Two ticks of one session can no longer run at once, a connect that gives up ends only its own start, and a tick that ran late is no longer followed by an extra one on the same sample.
+- **A session runs on what its Start read** (#128): a Settings edit or a profile's reload during a session applies to the next one; only the threshold of a simple session and an edited formula line reach a running session (the alert toggles still apply at once).
+  So a timer end sound chosen during a session rings from the next session, and a headset renamed during a session names the next one.
 - **The session's parts have one owner** (#128): the session manager, its recorder, the metrics engine, a program, the timer, each tick's checks and the wake lock are built and held by `RunningSession`, which also says what a session is scored on and saved as.
 - **The threshold has one owner**: the session manager (the base, and a tick's target); the sound, the scoring, the engine's state and the SHAMATHA pill read it per tick instead of each keeping a copy written by two paths.
 - **With several MindWaves paired, Start asks which one** (#99): the app no longer opens Settings › Device at launch or after creating a profile; Settings › Device lists them, and **Start** opens it to pick one, as it did.
@@ -37,6 +43,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   every other switch between views or modes looks the same (Metrics / Raw EEG, Cal / 14d, the session detail's tabs and band breakdown, Settings › Timer's mode, the formula Slot and Theme).
   Distraction, Sinking and the NeuroSky values stay available as graph series.
 
+- **The app starts sooner**: its built-in sounds (rain, bells, chime, the disconnect alert) are generated at the first launch and kept, not at every launch.
+
 ### Removed
 
 - **History's All Users view**: no screen could open it since the Profile screen went (#48).
@@ -47,6 +55,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **A session whose final save failed stayed "running" on screen**, with the phone kept awake and nothing said (the timer's ending; every later Stop was ignored).
+  The failure is now reported, and the session still ends on screen and lets the phone sleep.
 - **Exporting sessions to CSV fed their rows into the first custom formula's `avg()`**: a session running meanwhile averaged them in, and each exported session's column began with the previous one's values; an export now computes its column on its own.
 - **A custom formula with `avg()` began each session with the last session's values** in its average, for its first ticks; each session now averages only its own.
 - **Picking the active profile again during a session changed the session**:

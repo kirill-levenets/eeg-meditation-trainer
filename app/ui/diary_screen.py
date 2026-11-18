@@ -14,17 +14,14 @@ from app.config import APP
 from app.eeg.band_spec import BAND_KEYS, GROUP_NAMES, group_powers
 from app.logger import logger, timed
 from app.metrics.formula_slots import COMPUTED_SERIES
+from app.metrics.series_names import SERIES_NAMES
 from app.session.scoring import recorded_score, scored_steps, target_steps
 from app.session.session_program import RunnablePlan, recorded_program
 from app.storage.android_share import copy_to_documents
 from app.ui.graph_scroll import GraphAwareScrollView
+from app.ui.graph_series import show_program_series
 from app.ui.hooks import Hook, is_wired, wire
-from app.ui.live_session import (
-    METRICS_COLORS,
-    METRICS_SCALES,
-    SERIES_NAMES,
-)
-from app.ui.program_run import show_program_series
+from app.ui.live_session import METRICS_COLORS, METRICS_SCALES
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.session_labels import session_score_rows, session_title
 from app.ui.theme import (

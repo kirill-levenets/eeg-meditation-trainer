@@ -1,7 +1,19 @@
-"""The session the Session screen shows: its graphs and readout, the end card over them once it has ended, and the
-profile it belongs to."""
+"""The session the Session screen shows: its graphs and readout, which the running session's events draw, the end card
+over them once it has ended, and the profile it belongs to."""
+from app.logger import logger
+from app.metrics.series_names import SERIES_NAMES
+from app.session.session_events import (
+    Alert,
+    Connecting,
+    ProgramDropped,
+    ProgramShown,
+    SegmentStarted,
+    Ticked,
+    Waiting,
+)
+from app.session.session_program import PROGRAM_FORMULA_KEYS
 from app.ui.app_context import AppContext
-from app.ui.live_mirror import LiveMirror
+from app.ui.graph_series import show_program_series
 from app.ui.theme import C
 
 
@@ -10,20 +22,73 @@ class ShownSession:
     The end card only adds notes to its session or deletes it (every ending has saved it); every close goes through
     `close`, and the card's notes are written only when they changed since the last save."""
 
-    def __init__(self, ctx: AppContext, live_screen, audio, history, recorder) -> None:
+    def __init__(self, ctx: AppContext, live_screen, audio, history, session) -> None:
         self._ctx = ctx
         self._live_screen = live_screen
         self._audio = audio
         self._history = history  # the card's notes and delete go through History's one path
-        self._recorder = recorder  # its session_id: the session the display shows, kept after its stop
-        self.mirror = LiveMirror()  # the display's graphs, kept by the tick thread through a screen lock
+        self._session = session  # its record's session_id, kept after its stop, and its mirror of the live graphs
         self.owner: int | None = None  # the profile whose session the Session screen shows: set at Start
         self._saved_notes = ""  # notes last written from the card for the session it shows
+
+    @property
+    def mirror(self):
+        """The display's graphs, kept by the session's runner through a screen lock."""
+        return self._session.mirror
 
     def take(self, uid: int | None) -> None:
         """A Start: the display empties for the new session, which belongs to `uid`."""
         self.clear()
         self.owner = uid
+
+    def show(self, event) -> None:
+        """Main thread: what the running session's event changes on the Session screen."""
+        screen = self._live_screen
+        match event:
+            case Ticked():
+                self._show_tick(event)
+            case SegmentStarted(key=key, line_name=line_name):
+                if line_name is not None:  # a custom segment's line: labelled and shown
+                    screen.graph.set_series_name(key, line_name)
+                    screen.graph.set_visible(key, True)
+                screen.set_training_series(key)  # bold + » on the trained series
+            case ProgramShown(plan=plan):
+                show_program_series(screen.graph, plan)
+            case ProgramDropped():
+                for slot in PROGRAM_FORMULA_KEYS:
+                    screen.graph.set_series_name(slot, SERIES_NAMES.get(slot, "Program"))  # drop stale labels
+                    screen.graph.set_visible(slot, False)  # never linger as a user selection
+                screen.graph.set_program_lines()
+            case Connecting(name=name):
+                screen.update_device_status(False, device_name=name, connecting=True)
+                screen.show_overlay(f"Connecting to {name}...")
+            case Waiting(message=message):
+                screen.update_overlay(message)
+            case Alert(message=message):
+                screen.show_alert(message)
+            case _:
+                logger.error(f"No Session screen handler for {event!r}")
+
+    def _show_tick(self, tick: Ticked) -> None:
+        screen = self._live_screen
+        screen.graph.add_point(tick.metrics, threshold=tick.target, scored=tick.score_key)  # coloured from this point
+        screen.update_stats(tick.live)
+        screen.update_state(tick.metrics.get("state", "Neutral"))
+        if tick.shamatha is not None:
+            screen.set_shamatha(tick.shamatha)
+        if tick.scored is not None:
+            screen.set_training_series(tick.scored)
+        screen.update_timer(tick.elapsed)
+        screen.add_raw_sample(tick.raw_sample)
+        if tick.marked:
+            screen.graph.add_marker()
+            screen.raw_graph.add_marker()
+            screen.band_graph.add_marker()
+
+    def show_retry(self, message: str, device_name: str) -> None:
+        """The retry screen of a start whose BT wait ended without a session."""
+        self._live_screen.update_device_status(False, device_name=device_name)
+        self._live_screen.show_overlay_retry(message)
 
     def show_end_card(self, session_id: int, stats: dict, title: str) -> None:
         self._saved_notes = ""
@@ -55,7 +120,7 @@ class ShownSession:
 
     def on_sessions_deleted(self, ids: list[int]) -> None:
         """History deleted these sessions: the Session screen lets go of one it shows (the end card, its display)."""
-        if self._recorder.session_id in ids or self._live_screen.summary_session_id in ids:
+        if self._session.recorder.session_id in ids or self._live_screen.summary_session_id in ids:
             self.drop(keep_notes=False)
 
     def drop(self, keep_notes: bool) -> None:

@@ -44,10 +44,9 @@ class SoundSources:
     """The sources as the settings hold them, resolved for a session's start and the Settings tests; a source chosen in
     Settings changes through the app's settings path."""
 
-    def __init__(self, ctx: AppContext, audio, timer_state, timer_section) -> None:
+    def __init__(self, ctx: AppContext, audio, timer_section) -> None:
         self._ctx = ctx
         self._audio = audio
-        self._timer_state = timer_state
         self._timer_section = timer_section
 
     def global_feedback_id(self) -> str:
@@ -68,9 +67,10 @@ class SoundSources:
             return self._ctx.setting("reward_sound_path") or ""
         return src
 
-    def prepare_session(self, program) -> list[str]:
+    def prepare_session(self, program, timer_sound: str) -> list[str]:
         """The session's players: its feedback (a program's per-segment sources) and the reward channel, a missing file
-        warned about; a program's per-segment source ids, for its run."""
+        warned about, the timer's end sound (`timer_sound`, "" for none or the bell) too; a program's per-segment
+        source ids, for its run."""
         gid = self.global_feedback_id()
         if program:
             sources, seg_ids, initial = feedback_plan(program, gid)
@@ -79,8 +79,7 @@ class SoundSources:
         reward = self.reward_id()
         if reward:
             sources[reward] = source_spec(reward)
-        timer = self._timer_state
-        self.warn_missing(sources, timer.custom_sound_path if timer.enabled else "")
+        self.warn_missing(sources, timer_sound)
         self._audio.prepare_feedback(sources, initial)
         self._audio.set_reward(reward)
         return seg_ids
@@ -123,10 +122,10 @@ class SoundSources:
 
     def on_timer_sound_change(self, path: str) -> None:
         """The custom timer-gong path ("" for the default bell), persisted once typing settles."""
-        self._ctx.change_setting("timer_sound", path)
+        self._ctx.change_setting("timer_sound", (path or "").strip())
 
     def on_test_timer_sound(self) -> None:
-        path = self._timer_state.custom_sound_path
+        path = self._ctx.setting("timer_sound")
         logger.debug(f"Test timer sound, path='{path}'")
         self.warn_missing({}, path, force=True)
         # The gong's end flips the Test button back from Stop (the engine calls it on Kivy's thread).

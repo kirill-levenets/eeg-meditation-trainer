@@ -19,7 +19,7 @@ class SessionRun:
     def __init__(self, user_id: int | None) -> None:
         self.user_id = user_id  # the profile it started for: a scan's result for another one does nothing
         self._phase = Phase.STARTING
-        self._phase_lock = threading.Lock()  # the main and the tick thread both end a run
+        self._phase_lock = threading.Lock()  # the runner ends a run, and the main thread when no runner takes its command
         # The BT wait, per connection: a drop restarts the connect and no-data windows.
         self.connect_start = 0.0  # time.time(): when this connection's connect window began
         self.signal_start: float | None = None  # time.time(): the link came up, the no-data window began

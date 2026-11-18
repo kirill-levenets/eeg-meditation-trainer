@@ -36,7 +36,7 @@ class Headset:
         self._device_section = device_section
         self._live_screen = live_screen
         self._serial_override = serial_override
-        # address -> the name its user gave the headset; replaced, never changed in place (the tick thread reads it)
+        # address -> the name its user gave the headset; replaced, never changed in place (the session's runner reads it)
         self.aliases: Mapping[str, str] = MappingProxyType({})
         # Moved by a profile load, a pick, a mode change and each profile scan: a profile scan applies while current.
         self._scan_seq = 0

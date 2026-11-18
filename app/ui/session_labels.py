@@ -3,13 +3,9 @@
 import json
 from datetime import datetime
 
+from app.session.manager import start_stamp
 from app.session.scoring import recorded_score
 from app.ui.theme import format_duration
-
-
-def start_stamp(when: datetime) -> str:
-    """'YYYY-MM-DD HH:MM': a session's start in its default name and in its title, so the title can recognise it."""
-    return when.strftime("%Y-%m-%d %H:%M")
 
 
 def _started(session: dict) -> datetime | None:

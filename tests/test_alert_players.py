@@ -41,7 +41,7 @@ def test_a_cue_on_the_tick_thread_plays_one_shot_through_the_platform_player(mad
     engine = AudioEngine()
     try:
         _on_tick_thread(engine.play_transition_cue)
-        assert [(path, loop) for path, loop, _ in made] == [(engine._chime_path, False)]
+        assert [(path, loop) for path, loop, _ in made] == [(engine._kept("chime"), False)]
         made[0][2].play.assert_called_once()
         soundloader.assert_not_called()
     finally:
@@ -54,7 +54,7 @@ def test_every_alert_replays_its_one_player_and_releases_nothing_on_the_tick(mad
         for _ in range(3):
             for alert in (engine.play_transition_cue, engine._play_bell, engine.play_alert):
                 _on_tick_thread(alert)
-        assert [path for path, _, _ in made] == [engine._chime_path, engine._bell_path, engine._disconnect_path]
+        assert [path for path, _, _ in made] == [engine._kept("chime"), engine._kept("bell"), engine._kept("disconnect")]
         for _, _, player in made:
             assert player.play.call_count == 3
             player.unload.assert_not_called()

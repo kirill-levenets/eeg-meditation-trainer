@@ -61,8 +61,7 @@ def wait(fresh_app, monkeypatch):
     real_stop = stream.stop
     monkeypatch.setattr(stream, "stop", lambda: (stopped.append(True), real_stop())[1])
     monkeypatch.setattr(stream, "stops", stopped, raising=False)
-    start_connecting(app, monkeypatch)  # the wait as Start enters it, at T0
-    app._ticker.stop()  # its ticks are the test's
+    start_connecting(app, monkeypatch)  # the wait as Start enters it, at T0; its ticks are the test's
 
     def tick(at: float, *, connected: bool, bands: float = 0.0, packet: bool = False) -> None:
         clock.now = T0 + at
@@ -70,8 +69,8 @@ def wait(fresh_app, monkeypatch):
         link.bands = bands
         if packet:
             link.last_packet = clock.now - 0.1  # just before the tick reads it (0.0 means none yet)
-        if app._run is not None:
-            app._follow_bt_wait(app._run)  # the tick reads the current run
+        if app._session.run is not None:
+            app._session._follow_bt_wait(app._session.run)  # the tick reads the current run
 
     yield app, stream, tick
     app._db.set_json_setting("bt_device_aliases", {})  # the phone's, not a profile's: gone for the next test
@@ -107,7 +106,7 @@ def test_the_new_socket_still_times_out_when_it_sends_nothing(wait):
     assert not _gave_up(stream)
     tick(26.5, connected=True)  # its own 8 s, from 18 s
     assert _gave_up(stream)
-    assert not app._connecting()
+    assert not app._session.connecting()
     assert _retry_message(app).startswith("No EEG data received.")
 
 
@@ -208,11 +207,10 @@ def test_the_next_wait_starts_with_no_drops(wait):
     assert _gave_up(stream) and "keeps closing" in _retry_message(app)
     stream.stops.clear()
     app._on_connect_retry()  # a Retry is a new Start: a run with its own drops
-    app._ticker.stop()
-    assert app._connecting()
+    assert app._session.connecting()
     tick(40.0, connected=True)
     tick(45.5, connected=False)  # this wait's first drop, not the fourth
-    assert not _gave_up(stream) and app._connecting()
+    assert not _gave_up(stream) and app._session.connecting()
 
 
 def test_band_values_from_before_a_drop_dont_start_the_session_on_the_new_socket(wait):

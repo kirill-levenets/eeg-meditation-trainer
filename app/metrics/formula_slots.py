@@ -9,6 +9,7 @@ from app.metrics.custom_formula import (
     compile_formula,
     evaluate_series,
 )
+from app.metrics.series_names import SERIES_NAMES, prettified
 from app.session.session_program import (
     PROGRAM_FORMULA_KEYS,
     program_line_name,
@@ -30,6 +31,12 @@ class FormulaSlots:
         self.evaluators: list[CustomFormulaEvaluator] = [CustomFormulaEvaluator() for _ in FORMULA_KEYS]
         self.names: list[str] = [default_name(i) for i in range(len(FORMULA_KEYS))]
 
+    def line_name(self, key: str) -> str:
+        """A metrics line's label: a slot's own name, else the line's default."""
+        if key in FORMULA_KEYS:
+            return self.names[FORMULA_KEYS.index(key)]
+        return SERIES_NAMES.get(key) or prettified(key)
+
     def for_key(self, key: str) -> CustomFormulaEvaluator | None:
         """The evaluator plotted as `key`, or None for a series that isn't a slot."""
         return self.evaluators[FORMULA_KEYS.index(key)] if key in FORMULA_KEYS else None
@@ -37,14 +44,17 @@ class FormulaSlots:
     def load(self, active: list[dict] | None) -> None:
         """Load an active_formulas list into the slots (names + formulas)."""
         active = active or []
-        for i, ev in enumerate(self.evaluators):
+        for i in range(len(self.evaluators)):
             entry = active[i] if i < len(active) and isinstance(active[i], dict) else {}
-            self.names[i] = entry.get("name") or default_name(i)
-            formula = entry.get("formula", "") or ""
-            ok, error = ev.set_formula(formula)
-            if not ok:  # a failed set keeps the last profile's formula: this one's slot stays empty
-                logger.warning(f"Formula slot {i} loaded empty, {formula!r} can't run: {error}")
-                ev.set_formula("")
+            self.assign(i, entry.get("name") or "", entry.get("formula", "") or "")
+
+    def assign(self, idx: int, name: str, formula: str) -> None:
+        """Slot idx's name and formula; one that can't run leaves the slot empty."""
+        self.names[idx] = name or default_name(idx)
+        ok, error = self.evaluators[idx].set_formula(formula)
+        if not ok:  # a failed set keeps the slot's last formula: this one's stays empty
+            logger.warning(f"Formula slot {idx} loaded empty, {formula!r} can't run: {error}")
+            self.evaluators[idx].set_formula("")
 
     def active(self) -> list[dict]:
         """Every slot's name and formula, as the active_formulas setting stores them."""
@@ -53,11 +63,6 @@ class FormulaSlots:
     def first_empty(self) -> int:
         """First slot with no valid formula; slot 0 if all are full."""
         return next((i for i, ev in enumerate(self.evaluators) if not ev.is_valid), 0)
-
-    def reset_windows(self) -> None:
-        """A new session: every slot's avg() windows fill from its own ticks."""
-        for ev in self.evaluators:
-            ev.reset_windows()
 
     def evaluate_into(self, metrics: dict, variables: Callable[[], dict[str, float]]) -> None:
         evaluate_series(dict(zip(FORMULA_KEYS, self.evaluators)), metrics, variables)

@@ -23,6 +23,7 @@ BOOL = (lambda s: s == "True", lambda v: str(bool(v)))
 INT = (lambda s: int(s), lambda v: str(int(v)))
 FLOAT = (lambda s: float(s), lambda v: str(float(v)))
 STR = (lambda s: s, lambda v: "" if v is None else str(v))
+PATH = (lambda s: s.strip(), lambda v: "" if v is None else str(v).strip())  # a file's path: no surrounding blanks
 
 
 def kept(key: str, codec: tuple, get: Callable[[], Any], set_: Callable[[Any], None]) -> Setting:

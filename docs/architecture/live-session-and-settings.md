@@ -17,7 +17,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Adaptive landscape layout: `_compute_graph_height_adaptive` uses a fixed graph height when the viewport is tall, or switches to scroll mode when the graph would fall below `dp(400)`.
   The bottom bar lives inside the body ScrollView.
 - **The Session screen shows one profile's session.**
-  `ShownSession` (`app/ui/shown_session.py`, the app's `_shown`) is that session: its `owner` is the profile whose session the screen shows (graphs, readout, end card), set at Start (`take`), cleared by `_abort_bt_wait` when the start never became a session (the Start already emptied the display).
+  `ShownSession` (`app/ui/shown_session.py`, the app's `_shown`) is that session: its `owner` is the profile whose session the screen shows (graphs, readout, end card), set at Start (`take`), cleared when the start never became a session (a Cancel, a wait's give-up) (the Start already emptied the display).
   It holds the graphs' `mirror` (`LiveMirror`, which the tick records into and the graphs reload from), and the end card's notes and delete go through the history flow (`HistoryFlow.save_notes`, `delete_sessions`).
   `drop` takes it off the screen:
   the end card, if open, closes through `close` (notes saved unless the session is gone, bell stopped; the one way every card closes, OK included);
@@ -39,7 +39,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   otherwise it shows the classified state.
   The pill is a `Color`+`RoundedRectangle` in `_state_label.canvas.before` sized to the text (`_position_shamatha_chip`, bound to the label's `texture_size`).
   `set_shamatha(active)` toggles its alpha and the text/`readable_fg(C.SHAMATHA)` colour; `update_state` records `_last_state` but skips restyling while the chip is active, so the tick stream can't overwrite it.
-  Crossing is detected by the pure `AppManager._shamatha_transition(active, above, streak, enter_ticks=3, exit_ticks=3)` on the tick thread (debounced: 3 ticks / 1.5 s each way against 2 Hz noise);
+  Crossing is detected by the pure `scoring.shamatha_transition(active, above, streak, enter_ticks=3, exit_ticks=3)` on the session's runner (debounced: 3 ticks / 1.5 s each way against 2 Hz noise);
   only the *change* is dispatched to `set_shamatha`.
   Gated on the threshold in force, not per-segment program targets: a program's start puts its first segment's target in force (`_put_threshold_in_force`), and that gates the pill for the whole run.
   Reset at session start/stop and re-synced on Android resume.

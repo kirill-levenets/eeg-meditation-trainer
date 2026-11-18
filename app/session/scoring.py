@@ -3,6 +3,8 @@
 from collections.abc import Iterable
 from typing import TypeVar
 
+from app.session.session_program import PROGRAM_FORMULA_KEYS
+
 T = TypeVar("T")  # what a tick is scored against or on: a target, a series key
 
 TICK_SECONDS = 0.5  # the 2 Hz session tick
@@ -61,3 +63,28 @@ def recorded_score(session: dict) -> tuple[str, str, float | None] | None:
     if not key:
         return None
     return key, session.get("score_metric_name") or key, session.get("avg_score")
+
+
+def shamatha_transition(active: bool, above: bool, streak: int, enter_ticks: int = 3,
+                        exit_ticks: int = 3) -> tuple[bool, int]:
+    """The SHAMATHA pill's debounced crossing -> (active, streak): a partial streak resets the moment the score crosses
+    back, so the pill can't strobe on a single noisy tick at 2 Hz."""
+    if not active:
+        streak = streak + 1 if above else 0
+        return (True, 0) if streak >= enter_ticks else (False, streak)
+    streak = streak + 1 if not above else 0
+    return (False, 0) if streak >= exit_ticks else (True, streak)
+
+
+def baseline_audio_metric(key: str) -> str:
+    """The profile's stored metric; a program-formula slot is program-only and never a baseline (outside a program it
+    reads 0, constant maximum noise)."""
+    return "shamatha_score" if (not key or key in PROGRAM_FORMULA_KEYS) else key
+
+
+def sound_metric(stored: str, program_key: str, formulas) -> str:
+    """The metric feeding the sound: a running program's segment slot, else the profile's; shamatha when the key would
+    read 0 (a formula slot that doesn't compile, a program slot outside a program)."""
+    key = program_key or baseline_audio_metric(stored)
+    ev = formulas.for_key(key)
+    return "shamatha_score" if ev is not None and not ev.is_valid else key

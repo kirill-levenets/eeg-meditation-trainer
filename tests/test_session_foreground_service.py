@@ -56,12 +56,15 @@ def test_the_service_doesnt_stop_when_the_app_is_swiped_away():
 def test_closing_the_app_stops_the_service_with_or_without_a_session(build_app, monkeypatch, in_session):
     # A start still waiting for the headset is no running session, so _stop_and_save never runs for it.
     app = build_app()
-    stopped = []
+    stopped, released = [], []
+    release = app._session.keep_awake.release
     monkeypatch.setattr(app._session.keep_awake, "stop_service", lambda: stopped.append(True))
+    monkeypatch.setattr(app._session.keep_awake, "release", lambda: (released.append(True), release()))
     if in_session:
         app._on_start()
     app.on_stop()
-    assert stopped == [True] * (2 if in_session else 1)  # a session's ending stops it too, before the app's own
+    # The close releases what a session held, its wake lock too: its ending's teardown can't run while the app closes.
+    assert (stopped, released) == ([True], [True])
     reopened = DatabaseManager(db_path=APP.DB_PATH)  # the app closed its own
     try:
         assert reopened.count_sessions(app._current_user_id) == int(in_session)  # a running session is saved on the way

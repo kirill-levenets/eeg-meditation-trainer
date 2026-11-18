@@ -119,7 +119,7 @@ def test_heartbeat_resolves_to_a_generated_playable_file():
     e = AudioEngine()
     try:
         path = e._feedback_path_for("heartbeat")
-        assert path.endswith("heartbeat.wav")
+        assert "heartbeat" in os.path.basename(path)
         assert os.path.isfile(path)
     finally:
         e.cleanup()

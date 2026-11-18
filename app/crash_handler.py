@@ -166,8 +166,9 @@ def report_soft_error(
     can't spam dialogs. Returns True if the dialog was scheduled, False if
     suppressed by cooldown or re-entrance.
 
-    Pass `force=True` to bypass the cooldown (use only for user-initiated
-    actions like the "Copy diagnostics" button).
+    Pass `force=True` to bypass the cooldown: for a user-initiated action
+    (the "Copy diagnostics" button), or a failure the user must hear of every
+    time (a session's final save).
     """
     if _STATE["in_dialog"]:
         return False

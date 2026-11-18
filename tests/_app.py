@@ -28,6 +28,7 @@ def frames_until(done, seconds: float = 3.0) -> None:
     end = time.monotonic() + seconds
     while not done() and time.monotonic() < end:
         EventLoop.idle()
+        time.sleep(0.002)  # what is waited for is mostly another thread's work: spinning frames takes its CPU
 
 
 def tap(parent, label: str) -> None:
@@ -76,15 +77,21 @@ def setting_writes(app, monkeypatch) -> list[tuple[str, str]]:
     return writes
 
 
+def tick(app) -> None:
+    """One tick of the current run, here: the test is its writer (no runner thread was started)."""
+    app._session.tick(app._session.run)
+
+
 def start_ticked_by_hand(app, ticks: int = 0) -> None:
-    """A mock session whose ticks the test runs: Start without its tick thread, then `ticks` of them."""
-    app._ticker.start = lambda: None  # over the method, for this Start only
+    """A mock session whose ticks the test runs: Start without its runner, so the test writes it (commands run where
+    they are sent), then `ticks` of them."""
+    app._session.start_running = lambda: None  # over the method, for this Start only
     try:
         app._on_start()
     finally:
-        del app._ticker.start
+        del app._session.start_running
     for _ in range(ticks):
-        app._update_tick(APP.UPDATE_FREQUENCY)
+        tick(app)
     frames()  # what the ticks queued for the main thread
 
 
@@ -159,7 +166,7 @@ class FedSession:
         """One tick; with `shown`, what it queued for the main thread has run when it returns."""
         self.raw = self.raw if raw is None else raw
         self.metrics = self.metrics if metrics is None else metrics
-        self.app._update_tick(APP.UPDATE_FREQUENCY)
+        tick(self.app)
         if shown:
             frames()
 
@@ -182,15 +189,14 @@ class HeadsetSession:
         monkeypatch.setattr(app._real_stream, "read_sample", lambda: self.raw)
         monkeypatch.setattr(app._session.engine, "process_sample", lambda _raw, _threshold: self.metrics)
         start_connecting(app, monkeypatch)
-        app._ticker.stop()  # the ticks are the test's
         if start:
             self.connected, self.since_packet = True, 0.2
-            app._follow_bt_wait(app._run)  # the wait's tick that sees the first data
+            tick(app)  # the wait's tick that sees the first data
             frames()
 
     def tick(self, *, shown: bool = True) -> None:
         """One tick; with `shown`, what it queued for the main thread has run when it returns."""
-        self.app._update_tick(APP.UPDATE_FREQUENCY)
+        tick(self.app)
         if shown:
             frames()
 
@@ -217,14 +223,16 @@ def program_mode(app, segments: list[dict]) -> None:
 HEADSET = ("00:11:22:33:44:55", "MindWave Mobile")
 
 
-def start_connecting(app, monkeypatch) -> None:
+def start_connecting(app, monkeypatch, *, runner: bool = False) -> None:
     """Press Start on a headset that never answers, so the run stays in its BT wait; the reader's start is the
-    Bluetooth boundary."""
+    Bluetooth boundary. Unless `runner`, no runner starts: the test runs the wait's ticks (`tick`)."""
     def reader_started() -> bool:
         app._real_stream._running = True
         return True
 
     monkeypatch.setattr(app._real_stream, "start", reader_started)
+    if not runner:
+        monkeypatch.setattr(app._session, "start_running", lambda: None)
     app._change_setting("use_mock", False)
     app._real_stream.set_device(*HEADSET)
     app._on_start()
@@ -257,8 +265,22 @@ def _close_modals() -> None:
         modal.dismiss(animation=False)
 
 
+def runner_alive(app) -> bool:
+    """The run's runner thread lives: it alone writes the session's state."""
+    runner = app._session._runner
+    return runner is not None and runner.is_alive()
+
+
+def _join_runner(app) -> None:
+    """A runner a test started ends with its run: dropped here, it exits at its next step."""
+    runner = app._session._runner
+    app._session.run = None
+    if runner is not None:
+        runner.join(timeout=2.0)
+
+
 def _retire(app) -> None:
-    app._ticker.stop()  # a session a test left running: no tick thread, mock reader or sound for the next
+    _join_runner(app)  # a session a test left running: no runner, mock reader or sound for the next
     app._session.mock_stream.stop()
     app._audio.cleanup()
     frames()  # what the app queued runs while it is whole
@@ -306,13 +328,13 @@ class SharedApp:
         app, in the same window)."""
         app = self.app
         assert not getattr(app, "_restoring", False), "a test that restores the database needs build_app"
-        if app._is_paused:
+        if app._session.ui_paused:
             app.on_resume()
-        if app._session_pipeline_live():
+        if app._session.live():
             app._discard_running_session()
-        if app._run is not None:  # a Start that never became a session: still scanning, or asked to pick a headset
+        if app._session.run is not None:  # a Start that never became a session: still scanning, or asked to pick one
             app._cancel_session_start("IDLE")
-        app._ticker.stop()
+        _join_runner(app)
         frames()  # what the test queued lands before its popups are closed
         _close_modals()
         app._fullscreen.close()
@@ -337,7 +359,7 @@ class SharedApp:
         app._switch_screen("live_session")
         frames()
         _close_modals()
-        assert app._current_user_id == uid and app._run is None and not app._gate.active(), "the shared app is not idle"
+        assert app._current_user_id == uid and app._session.run is None and not app._gate.active(), "the shared app is not idle"
         return app
 
 

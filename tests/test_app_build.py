@@ -5,7 +5,7 @@ from kivy.core.window import Window
 
 from app.config import APP
 from app.ui.widgets.user_picker import UserPickerForm
-from tests._app import frames, frames_until, last_used, tap
+from tests._app import frames, frames_until, last_used, runner_alive, tap
 from tests._picker import picker_rows
 
 
@@ -118,7 +118,7 @@ def test_a_mode_change_during_a_session_is_refused(build_app, monkeypatch):
     assert said == ["Session in progress"] * 2 and APP.USE_MOCK_DEVICE is True
     assert (label.text, list(label.color)) == shown
     app._stop_and_save()
-    frames()
+    frames_until(lambda: app._session.run is None, 2.0)  # its runner saved it; its Ended event tore the screen down
     assert app._db.get_all_sessions(app._current_user_id)[0]["session_name"].endswith("Mock")
 
 
@@ -133,16 +133,16 @@ def test_a_slider_value_off_by_rounding_applies_its_width_once(build_app, monkey
     assert app._settings_screen.display._line_width_slider.value == 2.0 and applied[-1] == 2.0
 
 
-def test_mock_sessions_on_the_real_tick_thread_are_each_saved_once(build_app):
+def test_mock_sessions_on_their_real_runner_are_each_saved_once(build_app):
     app = build_app(last_used("me"))
     uid = app._current_user_id
     for n in (1, 2):  # the second Start: a fresh run, ticking
         app._on_start()
         frames_until(lambda: len(app._shown.mirror.metrics) >= 3, 5.0)
-        assert app._ticker.running and len(app._shown.mirror.metrics) >= 3
-        app._stop_and_save()
-        frames()
-        assert app._run is None and not app._ticker.running and app._db.count_sessions(uid) == n
+        assert runner_alive(app) and len(app._shown.mirror.metrics) >= 3
+        app._stop_and_save()  # a command: the runner ends and saves the run, and its Ended event tears the screen down
+        frames_until(lambda: app._session.run is None and not runner_alive(app), 2.0)
+        assert app._session.run is None and not runner_alive(app) and app._db.count_sessions(uid) == n
         app._shown.on_ok()
         frames()
     assert all(app._db.get_session_metrics(s["id"]) for s in app._db.get_all_sessions(uid))
@@ -182,7 +182,7 @@ def test_a_program_session_owns_the_live_graph_until_its_ending_derives_the_idle
     app._program_settings.on_mode_change("simple")  # Settings > Timer, mid-session
     assert g.is_visible("program_formula")
     app._stop_and_save()
-    frames()
+    frames_until(lambda: app._session.run is None, 2.0)
     app._shown.on_ok()
     frames()
     assert g.program_keys == frozenset() and not g.is_visible("program_formula")  # simple mode: the saved selection
@@ -193,7 +193,7 @@ def test_a_program_session_owns_the_live_graph_until_its_ending_derives_the_idle
     _start_and_tick(app)  # the next, simple, session
     assert _program_rows(app, monkeypatch) == []
     app._stop_and_save()
-    frames()
+    frames_until(lambda: app._session.run is None, 2.0)
 
 
 def test_a_duration_tap_while_a_program_previews_saves_nothing_of_it(build_app):

@@ -1,20 +1,20 @@
+import functools
 import math
 import os
 import random
 import struct
-import tempfile
 import threading
 import time
 import wave
 from collections.abc import Callable
-from typing import Optional
+from typing import BinaryIO, Optional
 
 from kivy.clock import Clock
 
 from app import android_jni
 from app.config import APP
 from app.logger import logger
-from app.storage.fileops import discard_file
+from app.storage.fileops import discard_file, write_file_atomic
 
 # ---------------------------------------------------------------------------
 # Noise-player abstraction
@@ -91,7 +91,7 @@ class _AndroidMediaNoisePlayer:
         from jnius import autoclass
         MediaPlayer = autoclass("android.media.MediaPlayer")
 
-        self._mp = MediaPlayer()  # a failed setup leaves it to GC: its finalizer releases it, off the tick thread
+        self._mp = MediaPlayer()  # a failed setup leaves it to GC: its finalizer releases it, off the session's runner
         self._mp.setAudioAttributes(_media_attributes())
         self._mp.setDataSource(path)
         self._mp.setLooping(loop)
@@ -236,15 +236,19 @@ def _make_noise_player(path: str, loop: bool = True):
 _FADE_SAMPLES = 512
 _NOISE_BUFFER_SECONDS = 10
 _HEARTBEAT_PULSE_SECONDS = 0.1  # short cricket chirp on a ~10s silent bed -> one chirp per loop
+_SOUNDS_VERSION = 1  # of the generators: a kept sound is reused by its name, so a change to their samples bumps it
 
 
 def _write_wav(path: str, samples: bytes, rate: int) -> None:
-    """Write raw 16-bit mono PCM samples to a WAV file."""
-    with wave.open(path, "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(rate)
-        wf.writeframes(samples)
+    """Write raw 16-bit mono PCM samples as a WAV file that is whole or absent: a kept sound is trusted by its name."""
+    def write(f: BinaryIO) -> None:
+        with wave.open(f, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(rate)
+            wf.writeframes(samples)
+
+    write_file_atomic(path, write)
 
 
 def _generate_noise_wav(volume: float, rate: int, duration: float) -> bytes:
@@ -402,6 +406,32 @@ def _generate_disconnect_wav(
     return struct.pack(f"<{n_samples}h", *samples)
 
 
+def _kept_sounds(rate: int) -> dict[str, tuple[str, Callable[[], bytes]]]:
+    """Each built-in sound's file and its generator; the file's name carries what shapes the samples."""
+    shaped = {
+        "noise": (_generate_noise_wav, 1.0, rate, _NOISE_BUFFER_SECONDS),
+        "bell": (_generate_bell_wav, rate, APP.BELL_FREQUENCY, APP.BELL_DURATION),
+        "timer_bell": (_generate_bell_wav, rate, APP.TIMER_BELL_FREQUENCY, APP.TIMER_BELL_DURATION),
+        "chime": (_generate_chime_wav, rate, APP.CHIME_FREQUENCY, APP.CHIME_DURATION),
+        "disconnect": (_generate_disconnect_wav, rate, APP.DISCONNECT_FREQ_LOW, APP.DISCONNECT_FREQ_HIGH,
+                       APP.DISCONNECT_DURATION, APP.DISCONNECT_CYCLES),
+        "tone": (_generate_tone_wav, rate, APP.TONE_FREQUENCY, _NOISE_BUFFER_SECONDS),
+        "heartbeat": (_generate_heartbeat_wav, rate, _NOISE_BUFFER_SECONDS, _HEARTBEAT_PULSE_SECONDS),
+    }
+    sounds = {}
+    for name, (generate, *args) in shaped.items():
+        file = f"v{_SOUNDS_VERSION}-{name}-{'_'.join(str(arg) for arg in args)}.wav"
+        sounds[name] = (os.path.join(APP.BUILT_IN_SOUNDS_DIR, file), functools.partial(generate, *args))
+    return sounds
+
+
+def _drop_stale_sounds() -> None:
+    """Remove the sounds another version of the generators kept."""
+    for file in os.listdir(APP.BUILT_IN_SOUNDS_DIR):
+        if file.endswith(".wav") and not file.startswith(f"v{_SOUNDS_VERSION}-"):
+            discard_file(os.path.join(APP.BUILT_IN_SOUNDS_DIR, file))
+
+
 class AudioEngine:
     """4-channel audio engine for meditation neurofeedback.
 
@@ -432,8 +462,6 @@ class AudioEngine:
         self._active_feedback: str = ""                 # below-threshold (noise) player id
         self._reward_feedback: str = ""                 # above-threshold reward player id ("" = none)
         self._reward_target_volume: float = 0.0
-        self._noise_path: str = ""
-        self._bell_path: str = ""
         self._alert_until: dict[str, float] = {"sinking": 0.0, "subtle": 0.0}  # each alert's next allowed time
         self._sinking_alert_enabled: bool = False
         self._subtle_alert_enabled: bool = False
@@ -442,14 +470,7 @@ class AudioEngine:
         self._test_gen: int = 0  # bumped by end_test(): a test sequence started under an older one stops
         self._test_owns_playing: bool = False  # the test set _is_playing; end_test() hands it back
         self._rate: int = APP.WHITE_NOISE_SAMPLE_RATE
-        self._tmpdir: str = tempfile.mkdtemp(prefix="eeg_audio_")
-        self._noise_path = os.path.join(self._tmpdir, "noise.wav")
-        self._bell_path = os.path.join(self._tmpdir, "bell.wav")
-        self._timer_bell_path = os.path.join(self._tmpdir, "timer_bell.wav")
-        self._tone_path = os.path.join(self._tmpdir, "tone.wav")
-        self._heartbeat_path = os.path.join(self._tmpdir, "heartbeat.wav")
-        self._chime_path = os.path.join(self._tmpdir, "chime.wav")
-        self._disconnect_path = os.path.join(self._tmpdir, "disconnect.wav")
+        self._sounds = _kept_sounds(self._rate)
         self._sinking_bell_sound: object = None  # each alert's one player, replayed (see _play_one_shot)
         self._chime_sound: object = None
         self._disconnect_sound: object = None
@@ -465,51 +486,24 @@ class AudioEngine:
         self._prepare_sounds()
 
     def _prepare_sounds(self) -> None:
-        """Pre-generate all WAV files (noise at full amplitude, alerts)."""
-        pcm = _generate_noise_wav(1.0, self._rate, _NOISE_BUFFER_SECONDS)
-        _write_wav(self._noise_path, pcm, self._rate)
+        """Have the sounds a session can't wait for on file: only the first launch generates them."""
+        os.makedirs(APP.BUILT_IN_SOUNDS_DIR, exist_ok=True)
+        _drop_stale_sounds()
+        for name in ("noise", "bell", "timer_bell", "chime", "disconnect"):
+            self._kept(name)
 
-        pcm = _generate_bell_wav(
-            self._rate, APP.BELL_FREQUENCY, APP.BELL_DURATION,
-        )
-        _write_wav(self._bell_path, pcm, self._rate)
-
-        pcm = _generate_bell_wav(
-            self._rate, APP.TIMER_BELL_FREQUENCY, APP.TIMER_BELL_DURATION,
-        )
-        _write_wav(self._timer_bell_path, pcm, self._rate)
-
-        pcm = _generate_chime_wav(
-            self._rate, APP.CHIME_FREQUENCY, APP.CHIME_DURATION,
-        )
-        _write_wav(self._chime_path, pcm, self._rate)
-
-        pcm = _generate_disconnect_wav(
-            self._rate,
-            APP.DISCONNECT_FREQ_LOW,
-            APP.DISCONNECT_FREQ_HIGH,
-            APP.DISCONNECT_DURATION,
-            APP.DISCONNECT_CYCLES,
-        )
-        _write_wav(self._disconnect_path, pcm, self._rate)
+    def _kept(self, name: str) -> str:
+        """The built-in sound's file, generated unless it is kept already."""
+        path, generate = self._sounds[name]
+        if not os.path.exists(path):
+            _write_wav(path, generate(), self._rate)
+        return path
 
     def _feedback_path_for(self, kind: str, custom_path: str = "") -> str:
-        """Resolve a feedback source kind to a playable file; tone is generated on first use."""
-        if kind == "noise":
-            return self._noise_path
-        if kind == "tone":
-            if not os.path.exists(self._tone_path):
-                pcm = _generate_tone_wav(self._rate, APP.TONE_FREQUENCY, _NOISE_BUFFER_SECONDS)
-                _write_wav(self._tone_path, pcm, self._rate)
-            return self._tone_path
-        if kind == "heartbeat":
-            if not os.path.exists(self._heartbeat_path):
-                pcm = _generate_heartbeat_wav(self._rate, _NOISE_BUFFER_SECONDS, _HEARTBEAT_PULSE_SECONDS)
-                _write_wav(self._heartbeat_path, pcm, self._rate)
-            return self._heartbeat_path
+        """Resolve a feedback source kind to a playable file; the tone and crickets loops are generated on first use."""
         if kind == "custom" and custom_path and os.path.isfile(custom_path):
             return custom_path
-        return self._noise_path
+        return self._kept(kind if kind in ("tone", "heartbeat") else "noise")
 
     def prepare_feedback(self, sources: dict[str, tuple[str, str]], active_id: str) -> None:
         """Instantiate one looping player per distinct feedback source at volume 0 (main thread)."""
@@ -761,15 +755,15 @@ class AudioEngine:
 
     def _play_bell(self) -> None:
         """Play the sinking bell WAV."""
-        self._play_one_shot("_sinking_bell_sound", self._bell_path, 0.8)
+        self._play_one_shot("_sinking_bell_sound", self._kept("bell"), 0.8)
 
     def _play_chime(self) -> None:
         """Play the gentle chime WAV for subtle distraction."""
-        self._play_one_shot("_chime_sound", self._chime_path, 0.6)
+        self._play_one_shot("_chime_sound", self._kept("chime"), 0.6)
 
     def _play_disconnect(self) -> None:
         """Play the harsh disconnect alert WAV."""
-        self._play_one_shot("_disconnect_sound", self._disconnect_path, 0.9)
+        self._play_one_shot("_disconnect_sound", self._kept("disconnect"), 0.9)
 
     def start(self) -> None:
         """Start noise playback."""
@@ -819,7 +813,7 @@ class AudioEngine:
         self._ramp_running = False
         self._volume = 0.0
         self._target_volume = 0.0
-        # setVolume-only: stop()/release() deadlock the tick thread vs the paused main Looper under lock
+        # setVolume-only: stop()/release() deadlock the session's runner vs the paused main Looper under lock
         for sid, p in self._feedback_players.items():
             try:
                 p.volume = 0.0
@@ -941,15 +935,15 @@ class AudioEngine:
         self.stop()
 
     def play_timer_sound(self, custom_path: str = "", on_end=None) -> str:
-        """The timer-end gong, replayed like an alert, safe on the tick thread; returns the file it plays, "" if none."""
+        """The timer-end gong, replayed like an alert, safe on the session's runner; returns the file it plays, "" if none."""
         logger.info("Timer gong")
         custom = custom_path if (custom_path and os.path.isfile(custom_path)) else ""
         duck = "AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK"  # other audio dips while it rings, and comes back after
         if custom and self._play_one_shot("_gong", custom, 1.0, on_end, duck):
             return custom
         # A custom file the player can't open rings the default gong, as a missing one does.
-        if self._play_one_shot("_gong", self._timer_bell_path, 1.0, on_end, duck):
-            return self._timer_bell_path
+        if self._play_one_shot("_gong", self._kept("timer_bell"), 1.0, on_end, duck):
+            return self._kept("timer_bell")
         if on_end is not None:
             _next_frame(on_end)  # nothing plays: the play is over
         return ""
@@ -1028,29 +1022,11 @@ class AudioEngine:
         self._disconnect_alert_enabled = value
 
     def cleanup(self) -> None:
-        """Stop playback, unload sounds, remove temp files."""
+        """Stop playback and unload the players; the sound files stay for the next launch."""
         self.stop()
         self.stop_timer_bell()
         self._unload_one_shot("_disconnect_sound")
         self._unload_one_shot("_sinking_bell_sound")
-        for path in (
-            self._noise_path,
-            self._bell_path,
-            self._timer_bell_path,
-            self._tone_path,
-            self._heartbeat_path,
-            self._chime_path,
-            self._disconnect_path,
-        ):
-            if path:
-                discard_file(path)
-        if self._tmpdir:
-            try:
-                os.rmdir(self._tmpdir)
-            except FileNotFoundError:
-                pass
-            except OSError as e:
-                logger.warning(f"Could not remove the sound folder {self._tmpdir}: {e}")
 
 
 if __name__ == "__main__":
@@ -1063,9 +1039,7 @@ if __name__ == "__main__":
     print(f"Volume after update(25): {engine.volume:.2f}")
     print(f"Sinking alert enabled: {engine.sinking_alert_enabled}")
     print(f"Disconnect alert enabled: {engine.disconnect_alert_enabled}")
-    print(f"Bell WAV exists: {os.path.exists(engine._bell_path)}")
-    print(f"Chime WAV exists: {os.path.exists(engine._chime_path)}")
-    print(f"Disconnect WAV exists: {os.path.exists(engine._disconnect_path)}")
+    for kept in ("bell", "chime", "disconnect"):
+        print(f"{kept} WAV exists: {os.path.exists(engine._kept(kept))}")
     engine.cleanup()
-    print(f"Temp cleaned: {not os.path.exists(engine._noise_path)}")
     print("Done")

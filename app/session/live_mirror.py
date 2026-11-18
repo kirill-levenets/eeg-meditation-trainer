@@ -1,24 +1,35 @@
-"""What the Session screen's graphs would have been given this session, kept by the tick thread whatever the screen
+"""What the Session screen's graphs would have been given this session, kept by the session's runner whatever the screen
 does."""
 import threading
 from collections import deque
+from typing import NamedTuple
 
 from app.config import APP
-from app.eeg.band_spec import GROUP_KEYS, group_powers
+from app.eeg.band_spec import group_powers
 from app.session.recorder import RecordedTick
-from app.session.scoring import scored_steps, target_steps
-from app.ui.live_session import METRICS_COLORS, RAW_WAVEFORM_MAX
+
+
+class MirrorView(NamedTuple):
+    """A snapshot of the mirror, whole ticks: its buffers, with the markers as indices into them (the metrics and bands
+    keep the same ticks)."""
+
+    metrics: list[dict]
+    bands: list[dict]
+    waveform: list[float]
+    tick_marks: list[int]
+    sample_marks: list[int]
 
 
 class LiveMirror:
     """A locked screen skips the per-tick graph updates (N minutes at 2 Hz queued ~120·N Clock callbacks, each a full
-    redraw, which froze the screen on resume); the tick thread records here instead, with no Kivy, and the graphs
-    reload from it in one batch on resume and at the session's end. Bounded by the graphs' capacity."""
+    redraw, which froze the screen on resume); the runner records here instead, with no Kivy, and the graphs
+    reload from its snapshot in one batch on resume and at the session's end (`LiveSessionScreen.load_mirror`).
+    Bounded by the graphs' capacity."""
 
     def __init__(self) -> None:
         self.metrics: deque[dict] = deque(maxlen=APP.GRAPH_POINTS_MAX)
         self.bands: deque[dict] = deque(maxlen=APP.GRAPH_POINTS_MAX)
-        self.waveform: deque[float] = deque(maxlen=RAW_WAVEFORM_MAX)  # the raw graph's: its marker indices agree
+        self.waveform: deque[float] = deque(maxlen=APP.RAW_WAVEFORM_MAX)  # the raw graph's: its marker indices agree
         self.last_metrics: dict = {}
         self.last_state: str = "Neutral"
         self.marks: list[tuple[int, int]] = []  # (tick, raw sample) counts since the start: buffers drop their oldest
@@ -57,24 +68,14 @@ class LiveMirror:
         self.last_metrics = {}
         self.last_state = "Neutral"
 
-    def reload_into(self, live_screen) -> None:
-        """Main thread: batch-reload the 3 live graphs (one load_static_data per graph) with their markers, the
-        threshold steps with them."""
+    def snapshot(self) -> MirrorView:
+        """What the live graphs reload from (main thread: on resume and at the session's end)."""
         with self._lock:
             metrics, bands, waveform = list(self.metrics), list(self.bands), list(self.waveform)
             marks, ticks, samples = list(self.marks), self._ticks, self._samples
         tick_marks, sample_marks = [t for t, _s in marks], [s for _t, s in marks]
-        if metrics:
-            live_screen.graph.load_static_data({key: [d.get(key, 0.0) for d in metrics] for key in METRICS_COLORS},
-                                               new_session=False, markers=_kept(tick_marks, ticks - len(metrics)))
-            live_screen.graph.set_threshold_steps(target_steps(d.get("score_target") for d in metrics))
-            live_screen.graph.set_gradient_steps(scored_steps(d.get("score_key") for d in metrics))
-        if bands:
-            live_screen.band_graph.load_static_data({key: [d.get(key, 0.0) for d in bands] for key in GROUP_KEYS},
-                                                    new_session=False, markers=_kept(tick_marks, ticks - len(bands)))
-        if waveform:
-            live_screen.raw_graph.load_static_data({"eeg": waveform}, new_session=False,
-                                                   markers=_kept(sample_marks, samples - len(waveform)))
+        return MirrorView(metrics, bands, waveform, _kept(tick_marks, ticks - len(metrics)),
+                          _kept(sample_marks, samples - len(waveform)))
 
 
 def _kept(positions: list[int], dropped: int) -> list[int]:

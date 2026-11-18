@@ -2,17 +2,19 @@
 (#52). A session row is dated and named by the session's start."""
 
 import datetime
+import queue
 import threading
 import time
 from unittest.mock import MagicMock
 
 import pytest
 
+import app.session.running_session as rs
 import app.ui.app_manager as am
 from app.eeg.neurosky_stream import NeuroSkyStream
+from app.session.bt_wait import BtWait
 from app.session.manager import SessionManager, SessionState
 from app.session.session_run import Phase
-from app.ui.bt_wait import BtWait
 from tests._app import (
     HEADSET,
     HeadsetSession,
@@ -28,8 +30,10 @@ from tests._headset import fake_paired
 
 @pytest.fixture(autouse=True)
 def _reports(monkeypatch):
-    """A failed connect files a diagnostic report: here it is recorded (`am.report_soft_error`), not shown."""
-    monkeypatch.setattr(am, "report_soft_error", MagicMock())
+    """A failed connect files a diagnostic report: here it is recorded (`rs.report_soft_error`), not shown."""
+    reports = MagicMock()
+    monkeypatch.setattr(am, "report_soft_error", reports)
+    monkeypatch.setattr(rs, "report_soft_error", reports)
 
 
 class _Waiting:
@@ -41,14 +45,14 @@ class _Waiting:
         self.app = app
         self.session = HeadsetSession(app, monkeypatch, start=False)
         self.session.connected, self.session.since_packet = True, 0.1
-        self.run = app._run
+        self.run = app._session.run
         self.audio_starts = calls_of(monkeypatch, app._audio, "start")
         self.states = calls_of(monkeypatch, app._live_screen, "update_state")
         self.countdowns = calls_of(monkeypatch, app._session.timer, "start_countdown")
 
     def first_data(self) -> None:
         """The wait's tick that reads the first data."""
-        self.app._follow_bt_wait(self.run)
+        self.app._session._follow_bt_wait(self.run)
 
     def ends(self, exit_case: str) -> None:
         """Make the next BT-wait tick end the wait the given way."""
@@ -87,11 +91,10 @@ def _retry_shown(app) -> bool:
 def test_stop_after_a_failed_wait_cleans_up_without_offering_to_save(waiting, monkeypatch):
     app = waiting.app
     waiting.ends("failed")
-    waiting.first_data()  # the wait just ended on the tick thread; the controls still show Stop; nothing was started
-    tick_stops = calls_of(monkeypatch, app._ticker, "stop")
+    waiting.first_data()  # the wait just ended on the writer; the controls still show Stop; nothing was started
     app._on_stop()
     assert popups() == []  # no "Stop session? It will be saved" for a session that never existed
-    assert not app._live_screen._btn_start.disabled and tick_stops == [] and app._run is None
+    assert not app._live_screen._btn_start.disabled and app._session.run is None
 
 
 def test_stop_during_a_running_session_still_asks(fresh_app):
@@ -142,15 +145,24 @@ def _tick_held_in_its_read(waiting, monkeypatch) -> tuple[threading.Thread, thre
     return tick, release
 
 
-def test_a_cancel_while_the_tick_reads_the_first_data_leaves_no_session_running(waiting, monkeypatch):
-    # The Cancel tap is handled while the tick thread is inside the tick that gets the first data.
-    app = waiting.app
-    tick, release = _tick_held_in_its_read(waiting, monkeypatch)
-    monkeypatch.setattr(app._ticker, "stop", lambda: (release.set(), tick.join(2)))  # the real stop joins the tick
-    app._on_connect_cancel()
-    assert not tick.is_alive()
+def test_a_cancel_while_the_runner_is_stuck_in_its_read_ends_the_start_itself(fresh_app, monkeypatch):
+    # The runner doesn't take the Cancel within a second (a read stuck on the link): the Cancel ends the run itself, and
+    # the runner, once its read returns, finds the run over and starts nothing.
+    app = fresh_app
+    in_read, release = threading.Event(), threading.Event()
+    session = HeadsetSession(app, monkeypatch, start=False)
+    session.connected, session.since_packet = True, 0.1
+    monkeypatch.setattr(app._real_stream, "read_sample", lambda: (in_read.set(), release.wait(5), session.raw)[2])
+    audio_starts = calls_of(monkeypatch, app._audio, "start")
+    run, runner = app._session.run, threading.Thread(target=app._session.tick, args=(app._session.run,))
+    app._session._runner, app._session._commands = runner, queue.Queue()  # the run's runner, in its read
+    runner.start()
+    assert in_read.wait(2)
+    app._on_connect_cancel()  # waits a second for the runner, then aborts here
+    release.set()
+    runner.join(2)
     frames()
-    assert waiting.audio_starts == [] and _idle(app) and not waiting.shown_running()
+    assert run.phase is Phase.ENDED and audio_starts == [] and _idle(app)
 
 
 def test_a_tick_that_outlives_the_cancel_shows_nothing(waiting, monkeypatch):
@@ -170,31 +182,32 @@ def test_a_first_data_tick_that_outlived_its_run_starts_nothing(waiting, monkeyp
     app._on_connect_cancel()  # a Cancel and a new Start while the tick read the first data
     waiting.session.connected = False  # the Cancel closed the link: the new Start waits for its own
     start_connecting(app, monkeypatch)
-    app._ticker.stop()
-    new = app._run
+    new = app._session.run
     waiting.countdowns.clear()
     waiting.session.connected = True  # what the old tick read
-    app._follow_bt_wait(old)
+    app._session._follow_bt_wait(old)
     frames()
-    assert _idle(app) and app._run is new and new.phase is Phase.CONNECTING
+    assert _idle(app) and app._session.run is new and new.phase is Phase.CONNECTING
     assert waiting.countdowns == [] and waiting.audio_starts == []
 
 
 def test_a_first_data_tick_after_the_cancel_began_starts_nothing(waiting):
     # The tick runs between the Cancel's abort and its teardown, which drops the run: the run is still current.
     app, run = waiting.app, waiting.run
-    app._abort_bt_wait()
+    app._session.abort()
     waiting.first_data()
     frames()
     assert _idle(app) and run.phase is Phase.ENDED and waiting.countdowns == [] and waiting.audio_starts == []
 
 
-def test_the_wait_abort_marks_its_run_before_it_joins_the_tick(waiting, monkeypatch):
-    app, run, seen = waiting.app, waiting.run, []
-    stop = app._ticker.stop
-    monkeypatch.setattr(app._ticker, "stop", lambda: (seen.append(app._outlived(run)), stop())[1])
-    app._abort_bt_wait()
-    assert seen == [True]
+def test_a_cancel_in_the_frame_the_wait_gave_up_frees_the_display(waiting):
+    # The give-up's own teardown is queued for a run the Cancel is about to drop: the Cancel lets the display go.
+    app = waiting.app
+    waiting.ends("failed")
+    waiting.first_data()
+    app._on_connect_cancel()
+    frames()
+    assert app._shown.owner is None and app._session.run is None
 
 
 @pytest.mark.parametrize("exit_case", ["failed", "no data", "timeout"])
@@ -233,7 +246,7 @@ def scanning(fresh_app, monkeypatch):
 
 
 def _connecting(app) -> bool:
-    return app._run is not None and app._run.phase is Phase.CONNECTING
+    return app._session.run is not None and app._session.run.phase is Phase.CONNECTING
 
 
 def test_cancel_during_the_device_scan_does_not_start_the_session(scanning):
@@ -241,7 +254,7 @@ def test_cancel_during_the_device_scan_does_not_start_the_session(scanning):
     app._on_start()  # "Scanning for MindWave..."; the scan result is queued
     app._on_connect_cancel()
     paired.arrive()
-    assert app._run is None and not _connecting(app) and app._real_stream._device_address is None
+    assert app._session.run is None and not _connecting(app) and app._real_stream._device_address is None
 
 
 def test_a_scan_result_still_starts_the_session_without_a_cancel(scanning):
@@ -260,7 +273,7 @@ def test_a_scan_result_for_a_profile_picked_away_ends_the_start(scanning):
     app._on_start()
     app._profiles.on_switch(other)  # picked in Settings while the scan ran
     paired.arrive()
-    assert app._run is None and app._real_stream._device_address is None
+    assert app._session.run is None and app._real_stream._device_address is None
     assert app._db.get_user_setting(other, "bt_device_address") is None
     assert app._live_screen._overlay.opacity == 0 and not app._live_screen._btn_start.disabled
 
@@ -271,18 +284,16 @@ def test_a_wait_tick_that_outlived_its_run_ends_nothing(waiting, monkeypatch):
     app._on_connect_cancel()
     waiting.session.connected = False
     start_connecting(app, monkeypatch)
-    app._ticker.stop()
-    new = app._run
+    new = app._session.run
     app._real_stream._running = False  # the old wait would give up
     app._real_stream._last_connect_error = "Headset is asleep or off."
-    tick_stops = calls_of(monkeypatch, app._ticker, "stop")
     stream_stops = calls_of(monkeypatch, app._real_stream, "stop")
-    am.report_soft_error.reset_mock()
-    app._follow_bt_wait(old)
+    rs.report_soft_error.reset_mock()
+    app._session._follow_bt_wait(old)
     frames()
-    assert tick_stops == [] and stream_stops == []  # the new run's wait goes on: no abort
-    am.report_soft_error.assert_not_called()  # and no diagnostic for a failure the new run didn't have
-    assert app._run is new and new.phase is Phase.CONNECTING and not _retry_shown(app)
+    assert stream_stops == []  # the new run's wait goes on: no abort
+    rs.report_soft_error.assert_not_called()  # and no diagnostic for a failure the new run didn't have
+    assert app._session.run is new and new.phase is Phase.CONNECTING and not _retry_shown(app)
 
 
 # ---- a run's ending undoes its program setup ----
@@ -313,7 +324,7 @@ def test_an_ending_derives_the_idle_series_once_the_session_no_longer_reads_live
 def test_a_cancelled_program_session_derives_the_idle_series_and_leaves_no_program_state(program_waiting):
     app = program_waiting.app
     app._on_connect_cancel()
-    assert not app._session.program_run.active and app._run is None
+    assert not app._session.program_run.active and app._session.run is None
     assert app._live_screen.graph.is_visible("program_formula")  # program mode still: its preview, derived again
 
 
@@ -323,7 +334,7 @@ def test_a_wait_that_ends_on_its_own_undoes_the_program_setup(program_waiting, e
     program_waiting.ends(exit_case)
     program_waiting.first_data()
     frames()
-    assert not app._session.program_run.active and app._run is None and _retry_shown(app)
+    assert not app._session.program_run.active and app._session.run is None and _retry_shown(app)
 
 
 # ---- a session row is dated and named by its start ----
@@ -334,7 +345,7 @@ def test_a_session_row_is_dated_and_named_at_the_session_start(fresh_app):
     start_ticked_by_hand(app, ticks=1)
     started = time.time() - 3 * 3600  # the first checkpoint lands well after the start
     app._session.manager._start_time = started
-    app._checkpoint_or_report()
+    app._session.checkpoint_or_report()
     row = app._db.get_session(app._session.recorder.session_id)
     assert row["date_time"][:19] == datetime.datetime.fromtimestamp(started).isoformat()[:19]
     assert row["session_name"] == time.strftime("%Y-%m-%d %H:%M", time.localtime(started)) + " - Mock"
@@ -376,12 +387,12 @@ def test_a_link_kept_from_the_last_session_starts_the_session_at_once(fresh_app,
     connect_sounds = calls_of(monkeypatch, app._audio, "play_connect_sound")
     app._change_setting("use_mock", False)
     app._real_stream.set_device(*HEADSET)
-    app._ticker.start = lambda: None  # no tick thread: nothing is read from the stand-in link
+    app._session.start_running = lambda: None  # no runner: nothing is read from the stand-in link
     try:
         app._on_start()
     finally:
-        del app._ticker.start
-    assert app._run.phase is Phase.STARTED and app._session.manager.state == SessionState.RUNNING
+        del app._session.start_running
+    assert app._session.run.phase is Phase.STARTED and app._session.manager.state == SessionState.RUNNING
     assert reader_starts == []  # no BT wait
     assert len(resets) == 1  # the last session's sample can't start this one
     assert app._live_screen._device_label.text == f"[{HEADSET[1]}] *" and len(connect_sounds) == 1
@@ -390,13 +401,13 @@ def test_a_link_kept_from_the_last_session_starts_the_session_at_once(fresh_app,
 def test_with_no_link_the_start_enters_the_bt_wait(fresh_app, monkeypatch):
     app = fresh_app
     start_connecting(app, monkeypatch)
-    assert app._run.phase is Phase.CONNECTING and _idle(app)
+    assert app._session.run.phase is Phase.CONNECTING and _idle(app)
     assert app._live_screen._overlay_status.text == f"Connecting to {HEADSET[1]}..."
 
 
 def test_the_tick_drives_the_wait_until_its_first_data_starts_the_session(waiting):
     app = waiting.app
-    app._update_tick(0.5)
+    app._session.tick(app._session.run)
     assert waiting.run.phase is Phase.STARTED and app._session.manager.state == SessionState.RUNNING
 
 
@@ -404,11 +415,10 @@ def test_a_marker_is_placed_only_in_a_running_session(fresh_app):
     app = fresh_app
     app._on_marker()  # no Start yet
     start_ticked_by_hand(app)
-    run = app._run
+    run = app._session.run
     app._on_pause()
     app._on_marker()  # paused
     assert not run.pending_marker
     app._on_pause()  # resumed
-    app._ticker.stop()
     app._on_marker()
     assert run.pending_marker  # the next recorded tick carries it

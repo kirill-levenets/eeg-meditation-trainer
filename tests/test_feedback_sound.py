@@ -1,8 +1,8 @@
 from unittest.mock import MagicMock
 
 from app.metrics.formula_slots import FormulaSlots
+from app.session.scoring import baseline_audio_metric, sound_metric
 from app.session.session_program import SessionProgram
-from app.ui.audio_metric import baseline_audio_metric, sound_metric
 from app.ui.sound_sources import feedback_plan, source_spec
 from tests._sound_sources import sounds_alone
 

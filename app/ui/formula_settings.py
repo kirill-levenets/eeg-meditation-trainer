@@ -24,8 +24,9 @@ from app.ui.theme import format_count
 
 
 class FormulaSettings:
-    """Edits the profile's FormulaSlots and plots them on the live metrics graph. The slot the sound is set to is what a
-    running simple session is scored on, so `scoring_locked` refuses a change to it until the session ends."""
+    """Edits the profile's FormulaSlots and plots them on the live metrics graph; an edited line also reaches the running
+    session, which runs its own copy. The slot the sound is set to is what a running simple session is scored on, so
+    `scoring_locked` refuses a change to it until the session ends."""
 
     def __init__(self, ctx: AppContext, section, live_graph, formulas: FormulaSlots, *,
                  scoring_locked: Callable[[str, str], bool]) -> None:
@@ -73,6 +74,7 @@ class FormulaSettings:
             self._graph.set_visible(key, True)  # if it was hidden, the graph's visibility callback rebuilds the legend
             self._section.set_formula_slot_status(idx, "Formula active")
             logger.info(f"Custom formula slot {idx} applied: {formula}")
+        self._ctx.session.set_formula(idx, self._formulas.names[idx], formula)
         uid = self._ctx.user_id()
         if uid:
             self.persist(uid)

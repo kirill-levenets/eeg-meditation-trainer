@@ -9,7 +9,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   and gives each the same `AppContext` (`app/ui/app_context.py`, built once by `_make_context`).
   It holds what a flow reaches the app through: the database, the active profile (`user_id`, `activate_user`, `require_user`), the main thread (`on_main`), navigation (`switch_screen`);
   the user's dialogs (`info`, `toast`, `confirm`), the profile's settings (`setting`, `change_setting`: a held value and its one change path, `save_settings`);
-  and `SessionAccess` (whether a session runs or waits for the headset, its row, the refusal while it runs, its discard).
+  and `SessionAccess` (whether a session runs or waits for the headset, its row, the refusal while it runs, its discard, an edited formula line for it).
   A flow takes the context and then only what is its own (its screens, the objects it works with); the context's callables read the app when called, so they see the profile and the session as they are then.
   A test of one flow builds the flow by its constructor on `tests/_context.stub_context()` (no profile, no session, UI calls at once or mocks);
   it takes any field, a `SessionAccess` field included, and a test helper takes them through `context_fields(deps)`.
@@ -31,14 +31,14 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   startup restore, the gate's create (`ProfileGate.complete_first_run`) or pick (`ProfileGate.pick_existing`), and Settings' switch (`Profiles.on_switch`).
   An activation that skipped the load would leave the previous profile's (or the default) values in memory under the new one, for the next flush (e.g. the pre-backup save) to write over its stored settings.
   The headset is loaded the same way: the profile's own or none, never the last profile's (`Headset.load`, [eeg-bluetooth](eeg-bluetooth.md#connection)).
-  `Profiles.on_switch` to another profile is refused through `_refused_while_session_runs` while `_session_pipeline_live()` ("Session in progress", the picker snapped back via `Profiles.refresh`):
+  `Profiles.on_switch` to another profile is refused through `_refused_while_session_runs` while `RunningSession.live()` ("Session in progress", the picker snapped back via `Profiles.refresh`):
   the running session owns its loaded timer/threshold/sound settings and saves under the profile it started with.
 - `DatabaseManager.create_user` raises `UserExistsError(user_id, name)` on a duplicate.
   The first-run popup and Settings → User Profile use the shared `UserPickerForm` widget (`app/ui/widgets/user_picker.py`);
   its "Use existing 'X'" button goes through `ProfileGate.pick_existing(user_id)` at the gate, and in Settings switches profile through `Profiles.on_switch`.
   A profile's delete (`Profiles.on_delete`) leaves its session to the app (`_on_profile_deleted`) and, with no active profile left, clears it (`_deactivate_user`) and opens the gate.
   The picked profile is activated by id as it is (`_activate_user`: its own headset and mock/real mode); typing an existing name at the gate picks it the same way, so first run never overwrites a profile's settings.
-  Each row reads its profile's session count as it is drawn (`session_counter`: `Profiles.count_sessions` → `count_sessions`, one `COUNT(*)` leaving out `_running_session_id()`, so the sessions History lists);
+  Each row reads its profile's session count as it is drawn (`session_counter`: `Profiles.count_sessions` → `count_sessions`, one `COUNT(*)` leaving out `RunningSession.running_id()`, so the sessions History lists);
   a failed read logs and shows the row without its count.
   Settings draws the rows again each time it is entered, and at a session's end when it is the screen shown (a timer can end a session there).
 
@@ -106,22 +106,22 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Kivy 2.3.0's Python 3.12 wheel keeps a traceback for each `ReferenceError` its widgets' teardown catches, about 30,000 objects (3.5 MB) per app, and every later collection walks them.
   A build per test took the suite from under 3 minutes to over 6; so the tests that use either fixture also run after all the others (`pytest_collection_modifyitems`),
   where the app's process-wide state (the device mode in `APP.USE_MOCK_DEVICE`) and what the private builds leave behind reach no other test.
-- A session in those tests is the app's own, with the test in place of the tick thread and the headset (`tests/_app.py`):
-  `start_ticked_by_hand` starts a mock session without its tick thread and runs the ticks it is asked for;
+- A session in those tests is the app's own, with the test in place of its runner and the headset (`tests/_app.py`):
+  `start_ticked_by_hand` starts a mock session without its runner (its commands run where they are sent) and runs the ticks it is asked for;
   `FedSession` feeds each tick the headset's sample and the engine's result; `start_connecting` leaves a Start in its BT wait on a reader that starts without Bluetooth;
   `HeadsetSession` is a real-mode session whose link (connected, seconds since the last packet) the test sets.
   `tests/test_real_constructors.py` fails on any `__new__(` call in a test.
   A tick run with the main thread held shows what a locked phone does; `frames()` is the unlock.
-  `tests/test_app_build.py` still runs mock sessions on the real tick thread.
+  `tests/test_app_build.py` and `tests/test_session_runner.py` run mock sessions on their real runner.
 - `tests/test_silent_failure_guardrail.py` is an AST guardrail run on every `pytest` (issue #29 invariant): it scans `app/` and fails on
   a **silent user-gate return** (`if not self._current_user_id: return/pass`, or through a local alias of it, with no user-feedback call)
   or a **discarded bool-returning DB write** (the result of a public `DatabaseManager` method annotated to return a bool, e.g. `add_saved_program`, ignored).
   A legitimately-silent site is grandfathered with a standalone `# silent-ok: <reason>` marker (not a ruff noqa code) that must carry a reason.
 - `conftest.py` sets `KCFG_GRAPHICS_MAXFPS=0` before Kivy loads: tests pump frames themselves, and the 60 fps cap only slept between them.
   It adds `--run-slow` (tests marked `slow` are skipped without it; the pre-push run passes it) and `_restore_config`, so a test's change to `APP`/`METRICS`/`SIGMOID` doesn't reach the next file.
-  `_temp_files_in_basetemp` points `tempfile` at pytest's basetemp, which pytest rotates: an `AudioEngine` removes its sound folder only in `cleanup()`, which many tests never call.
-  At import, conftest wraps `noise`'s `_generate_*_wav` synthesizers in `functools.cache` (and fails if the pattern matches none): the app builds one `AudioEngine`, the tests many, and each would synthesize the same sounds again.
-  It has to run at import, before the test modules bind the synthesizers by name (`from app.audio_feedback.noise import _generate_bell_wav`).
+  `_temp_files_in_basetemp` points `tempfile` at pytest's basetemp, which pytest rotates, for the temp files tests leave.
+  `_sounds_kept_in_basetemp` points `APP.BUILT_IN_SOUNDS_DIR` at one folder there for the whole run: the first `AudioEngine` generates the built-in sounds, the others reuse them, and none is written to the app's own folder;
+  a test of the keeping itself takes a folder of its own (`tests/test_kept_sounds.py`).
   It also removes Kivy's Python-2-only `ObservableList`/`ObservableReferenceList.__setslice__`.
   Kivy 2.3.0's Python 3.12 wheel is built with Cython ≤ 3.0.0, which leaks the traceback of every exception caught inside compiled code (fixed in Cython 3.0.3, cython#5724).
   Those methods always raise AttributeError and Kivy calls them on every `pos`/`size` read and change, so over a run the leaked tracebacks grew to millions of objects that every full collection rescanned;

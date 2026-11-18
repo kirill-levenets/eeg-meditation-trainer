@@ -6,7 +6,11 @@ from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 
 from app.metrics.formula_slots import FORMULA_KEYS, FormulaSlots
-from app.session.session_program import PROGRAM_FORMULA_KEYS
+from app.session.session_program import (
+    PROGRAM_FORMULA_KEYS,
+    RunnablePlan,
+    program_line_name,
+)
 from app.ui.app_context import AppContext
 from app.ui.theme import (
     C,
@@ -36,6 +40,16 @@ def _show_row(btn, graph, key: str) -> None:
     btn.bg_color = C.ACCENT if visible else C.BG_CARD
     btn.text_color = None if visible else C.TEXT_SECONDARY
     btn.bold = visible
+
+
+def show_program_series(graph, plan: RunnablePlan) -> None:
+    """Set the graph to EXACTLY the program's metric set, label each program custom line and mark the set as the
+    program's. Shared by a program session's start, the idle preview and a program session's detail in History."""
+    for slot, custom in plan.customs:
+        graph.set_series_name(slot, program_line_name(custom))
+    for k in graph.series_keys():
+        graph.set_visible(k, k in plan.keys)
+    graph.set_program_lines(plan.keys)
 
 
 class GraphSeries:
