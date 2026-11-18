@@ -104,11 +104,11 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The refusal is `SessionControls.refused("changing the threshold", why=...)`, shown on every touch (a once-only message is missed after several ± clicks).
   It refuses only while the session pipeline is live, so between a program's end on the runner and its queued teardown the controls work rather than go dead.
   Nothing moves, so nothing is reverted or saved: a slider moved and put back on its settle would jump under a resting finger, and its value could be flushed in between.
-  The slider applies the threshold through `UserSettings.after_settle("apply_threshold", …)`, the per-name Clock trigger its own write waits on too (restarted on every change, 0.5 s `UserSettings.SETTLE_S`);
+  The slider's handler (`SessionControls.on_threshold_slider`) applies the threshold through `ctx.after_settle("apply_threshold", …)` (`UserSettings.after_settle`), the per-name Clock trigger its own write waits on too (restarted on every change, 0.5 s `UserSettings.SETTLE_S`), at the value the slider last reported;
   so a drag is one change at the value it settles on, not a target per slider step on every tick it spans.
   One still pending at a Start fires after it: it puts the slider's value in force again, the one the start read (harmless), and a running program refuses it (`SessionControls.apply_threshold`).
   A profile load that moves the slider schedules one too, which applies the same value again (harmless).
-  With no session pipeline live, a slider change (`_on_threshold_change`, which Kivy calls only when the value changes, a profile switch to another stored threshold included) clears a finished session off the Session screen;
+  With no session pipeline live, a slider change (`SessionControls.on_threshold_slider`, which Kivy calls only when the value changes, a profile switch to another stored threshold included) clears a finished session off the Session screen;
   `ShownSession.clear` does it (graphs, mirrors, threshold steps and readout; also run at Start and on a change of profile), since the finished session's stepped line would otherwise outrank the new scalar line.
   Re-applying an unchanged Settings value clears nothing: after a program the threshold in force is a segment's target, so comparing against it would wipe the graphs on a mere profile reload.
   `add_metric` returns what the tick was scored on (`{score_key, score_value, score_target}`, `{}` when not RUNNING);

@@ -33,5 +33,6 @@ class AppContext:
     setting: Callable[[str], Any]  # a held setting's value for the active profile
     change_setting: Callable[[str, Any], None]  # a held setting's one change path: hold, apply, persist
     setting_changed: Callable[[str], None]  # a setting its widget holds changed there: persist it
+    after_settle: Callable[[str, Callable[[], None]], None]  # (name, fn): run the latest fn once input `name` settles
     save_settings: Callable[[], None]
     session: SessionAccess

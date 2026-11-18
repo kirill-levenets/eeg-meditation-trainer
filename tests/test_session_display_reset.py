@@ -139,6 +139,13 @@ def test_re_picking_the_shown_profile_keeps_its_session_even_mid_session(fresh_a
     assert app._user_settings.value("line_width") == 2.5  # its settings were loaded again
 
 
+def test_a_threshold_moved_during_a_session_keeps_its_graphs(fresh_app):
+    app = fresh_app
+    start_ticked_by_hand(app, ticks=3)
+    app._settings_screen.threshold = app._settings_screen.threshold - 5  # allowed mid-session (no program)
+    assert len(app._shown.mirror.metrics) == 3 and app._live_screen.graph.total_points == 3
+
+
 def test_a_cold_start_shows_nothing_to_drop(fresh_app, monkeypatch):
     app = fresh_app
     assert app._shown.owner is None

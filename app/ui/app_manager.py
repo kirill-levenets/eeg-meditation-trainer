@@ -209,6 +209,7 @@ class EEGMeditationApp(App):
                           setting=lambda key: self._user_settings.value(key),
                           change_setting=lambda key, value: self._user_settings.change(key, value),
                           setting_changed=lambda key: self._user_settings.changed(key),
+                          after_settle=lambda name, fn: self._user_settings.after_settle(name, fn),
                           save_settings=self._save_user_settings, session=session)
 
     def _bind_callbacks(self) -> None:
@@ -254,7 +255,7 @@ class EEGMeditationApp(App):
     def _wire_settings_screen(self) -> None:
         wire(
             self._settings_screen,
-            on_threshold_change=self._on_threshold_change,
+            on_threshold_change=self._controls.on_threshold_slider,
             on_audio_metric_change=self._audio_metric.on_change,
             on_audio_formula_index=self._audio_metric.on_formula_index,
             on_theme_change=lambda _name: self._user_settings.changed("theme"),  # the selector applied it to C
@@ -412,14 +413,6 @@ class EEGMeditationApp(App):
             android_toast(message)
         else:
             show_toast(message)
-
-    def _on_threshold_change(self, _value: int) -> None:
-        if self._shown.mirror.metrics and not self._session.live():
-            self._shown.clear()  # the last session's line is not the threshold the next one runs against
-        # A drag is one change of the threshold in force, at the value it settles on, not one per slider step.
-        self._user_settings.after_settle("apply_threshold",
-                                         lambda: self._controls.apply_threshold(self._settings_screen.threshold))
-        self._user_settings.changed("threshold")
 
     def _require_user(self, action: str) -> int | None:
         """Return the active uid, or explain why the action can't run and return
