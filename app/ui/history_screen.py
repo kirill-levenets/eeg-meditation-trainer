@@ -970,6 +970,10 @@ class HistoryScreen(Screen):
         if self._side_col.parent is not None:
             self._side_col.do_layout()
 
+    @property
+    def view_mode(self) -> str:
+        return self._view_mode
+
     def set_view_mode(self, mode: str) -> None:
         """Switch between 'calendar' and 'bars'.
 

@@ -5,7 +5,15 @@ from kivy.core.window import Window
 
 from app.config import APP
 from app.ui.widgets.user_picker import UserPickerForm
-from tests._app import frames, frames_until, last_used, popup_titles, runner_alive, tap
+from tests._app import (
+    calls_of,
+    frames,
+    frames_until,
+    last_used,
+    popup_titles,
+    runner_alive,
+    tap,
+)
 from tests._picker import picker_rows
 
 
@@ -77,17 +85,17 @@ def test_a_profile_switch_applies_the_device_mode_without_writing_it(build_app):
     app._profiles.on_switch(real)
     frames()
     assert APP.USE_MOCK_DEVICE is False and not app._settings_screen.device._device_mode_cb.active
-    assert app._settings_store.value("use_mock") is False and writes == []
+    assert app._user_settings.value("use_mock") is False and writes == []
 
 
 def test_the_mode_checkbox_and_a_headset_pick_change_the_mode_through_the_store(build_app):
     app = build_app(last_used("me"))
     uid, writes = app._current_user_id, _mode_writes(app)
     app._settings_screen.device._device_mode_cb.active = False  # the user's toggle
-    assert APP.USE_MOCK_DEVICE is False and app._settings_store.value("use_mock") is False
+    assert APP.USE_MOCK_DEVICE is False and app._user_settings.value("use_mock") is False
     app._settings_screen.device._device_mode_cb.active = True
     app._headset._use_real_device()  # a pick or a scan's find: the checkbox, whose hook is the one writer
-    assert APP.USE_MOCK_DEVICE is False and app._settings_store.value("use_mock") is False
+    assert APP.USE_MOCK_DEVICE is False and app._user_settings.value("use_mock") is False
     assert writes == [(uid, "False"), (uid, "True"), (uid, "False")]
     app._settings_screen.device._device_mode_cb.active = True
     app._db.set_user_setting(uid, "use_mock", "False")  # a stale row: the batch save (leaving the app) writes the held value
@@ -98,7 +106,7 @@ def test_the_mode_checkbox_and_a_headset_pick_change_the_mode_through_the_store(
 def test_picking_the_saved_headset_while_idle_leaves_the_mock(build_app):
     app = build_app(last_used("me"))
     _pick_saved(app)  # on Mock Data
-    assert APP.USE_MOCK_DEVICE is False and app._settings_store.value("use_mock") is False
+    assert APP.USE_MOCK_DEVICE is False and app._user_settings.value("use_mock") is False
     assert not app._settings_screen.device._device_mode_cb.active
 
 
@@ -110,7 +118,7 @@ def test_a_mode_change_during_a_session_is_refused(build_app, monkeypatch):
     shown = (label.text, list(label.color))
     app._settings_screen.device._device_mode_cb.active = False
     assert APP.USE_MOCK_DEVICE is True and app._settings_screen.device._device_mode_cb.active
-    assert popup_titles() == ["Session in progress"] and app._settings_store.value("use_mock") is True
+    assert popup_titles() == ["Session in progress"] and app._user_settings.value("use_mock") is True
     assert (label.text, list(label.color)) == shown  # the refusal repaints nothing
     _pick_saved(app)
     assert popup_titles() == ["Session in progress"] * 2 and APP.USE_MOCK_DEVICE is True
@@ -123,12 +131,11 @@ def test_a_mode_change_during_a_session_is_refused(build_app, monkeypatch):
 def test_a_slider_value_off_by_rounding_applies_its_width_once(build_app, monkeypatch):
     # The setting holds the rounded value; written back onto the slider, it would fire the slider's hook again.
     app = build_app(last_used("me"))
-    applied = []
-    monkeypatch.setattr(app, "_apply_line_width", applied.append)
+    applied = calls_of(monkeypatch, app._graphs.live[0], "set_line_width")
     app._settings_screen.display._line_width_slider.value = 1.3000000000000003  # a drag's raw value
-    assert applied == [1.3] and app._settings_store.value("line_width") == 1.3
-    app._change_setting("line_width", 2.0)  # set from code (a profile's load): the slider follows
-    assert app._settings_screen.display._line_width_slider.value == 2.0 and applied[-1] == 2.0
+    assert applied == [(1.3,)] and app._user_settings.value("line_width") == 1.3
+    app._user_settings.change("line_width", 2.0)  # set from code (a profile's load): the slider follows
+    assert app._settings_screen.display._line_width_slider.value == 2.0 and applied[-1] == (2.0,)
 
 
 def test_mock_sessions_on_their_real_runner_are_each_saved_once(build_app):

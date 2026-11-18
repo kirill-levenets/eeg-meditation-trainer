@@ -192,6 +192,14 @@ class SessionControls:
 
     # ---- the threshold ----
 
+    def on_threshold_slider(self, value: int) -> None:
+        """The Settings threshold slider moved: an ended session's line leaves the screen (it is not the threshold the
+        next one runs on), the value goes in force once the drag settles, not once per step, and the profile keeps it."""
+        if self._shown.mirror.metrics and not self._session.live():
+            self._shown.clear()
+        self._ctx.after_settle("apply_threshold", lambda: self.apply_threshold(value))
+        self._ctx.setting_changed("threshold")
+
     def put_threshold_in_force(self, value: int) -> None:
         """The session manager owns the threshold; the graph draws it until ticks step the line."""
         self._session.set_threshold(value)  # also what a session waiting for the headset starts with

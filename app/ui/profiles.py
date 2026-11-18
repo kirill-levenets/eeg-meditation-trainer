@@ -87,8 +87,8 @@ class ProfileGate:
             size_hint=(0.9, None),
             auto_dismiss=False,
         )
-        # Tracked so _on_keyboard can make the gate un-escapable (back/Esc must
-        # not dismiss it or exit the app out from under an unresolved user).
+        # Tracked so Navigation.on_keyboard keeps back/Esc from dismissing it with no
+        # profile picked (a double press still exits the app).
         self._gate_popup = popup
         # A dismissal from ANY path clears the handle, so a stale non-None
         # _gate_popup can never block re-gating forever.

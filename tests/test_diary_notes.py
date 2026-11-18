@@ -129,7 +129,7 @@ def test_a_failed_save_on_leave_is_not_retried_when_the_app_pauses_later(app, mo
     open_detail(app, _noted_session(app))
     monkeypatch.setattr(app._db, "update_session_notes", lambda *a, **k: tries.append(k) or False)
     app._diary_screen._notes_input.text = "edited"
-    app._switch_screen("history")
+    app._nav.switch("history")
     assert len(tries) == 1
     app.on_pause()
     assert len(tries) == 1

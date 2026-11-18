@@ -216,7 +216,7 @@ def test_a_wait_exit_queued_before_a_cancel_leaves_the_next_start_alone(waiting,
     waiting.ends(exit_case)
     waiting.first_data()  # the wait ended on the tick thread; its retry screen is queued
     app._controls.cancel()
-    app._change_setting("use_mock", True)
+    app._user_settings.change("use_mock", True)
     start_ticked_by_hand(app)  # the next Start, handled before the queued retry screen
     frames()
     assert app._session.manager.state == SessionState.RUNNING and not _retry_shown(app)
@@ -240,7 +240,7 @@ def scanning(fresh_app, monkeypatch):
     paired = fake_paired(monkeypatch)
     paired.devices.append({"name": "MindWave Mobile", "address": HEADSET[0]})
     monkeypatch.setattr(app._real_stream, "start", lambda: setattr(app._real_stream, "_running", True) or True)
-    app._change_setting("use_mock", False)
+    app._user_settings.change("use_mock", False)
     paired.queued.clear()  # a scan the mode change began is not this test's
     return app, paired
 
@@ -385,7 +385,7 @@ def test_the_header_start_time_is_when_the_data_arrived(waiting, monkeypatch):
     waiting.first_data()
     started = app._session.manager.started_at
     real_time = time.time
-    monkeypatch.setattr(am.time, "time", lambda: real_time() + 600)  # the queued UI runs after a 10-min screen lock
+    monkeypatch.setattr(time, "time", lambda: real_time() + 600)  # the queued UI runs after a 10-min screen lock
     frames()
     assert shown == [(started,)]
 
@@ -396,7 +396,7 @@ def test_a_link_kept_from_the_last_session_starts_the_session_at_once(fresh_app,
     reader_starts = calls_of(monkeypatch, app._real_stream, "start")
     resets = calls_of(monkeypatch, app._real_stream, "reset_sample_state")
     connect_sounds = calls_of(monkeypatch, app._audio, "play_connect_sound")
-    app._change_setting("use_mock", False)
+    app._user_settings.change("use_mock", False)
     app._real_stream.set_device(*HEADSET)
     app._session.start_running = lambda: None  # no runner: nothing is read from the stand-in link
     try:

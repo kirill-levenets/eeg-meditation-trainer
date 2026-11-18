@@ -6,7 +6,7 @@ The Android screen-lock fix splits live-graph updates into two paths:
   (``LiveMirror``: ``metrics`` / ``bands`` / ``waveform``)
   regardless of pause state — no Kivy graphics ops, so it is safe while
   the screen is locked.
-- ``_refresh_ui_after_resume`` reloads all three graphs from those
+- ``ShownSession.resumed`` reloads all three graphs from those
   mirrors in a single ``load_static_data`` batch per graph, instead of
   replaying N per-tick Clock callbacks (which flooded the main loop and
   caused a post-resume black screen / ANR).
@@ -198,6 +198,17 @@ def test_resume_refreshes_stats_state_and_timer(fed, monkeypatch):
     assert stats == [(app._session.manager.live_score(),)]  # the score kept while locked
     assert states == [("Shamatha",)]
     assert timers == [(app._session.manager.elapsed_formatted,)]
+
+
+def test_resume_shows_the_shamatha_pill_the_locked_ticks_lit(fresh_app, monkeypatch):
+    reload_with(fresh_app, threshold="50")
+    fed = FedSession(fresh_app, monkeypatch)
+    fresh_app.on_pause()
+    for _ in range(3):  # three ticks above the threshold light it, none of them drawn while locked
+        fed.tick(metrics=tick_metrics(80.0))
+    assert not fresh_app._live_screen._shamatha_active
+    _unlock(fed)
+    assert fresh_app._live_screen._shamatha_active
 
 
 def test_a_reload_keeps_each_points_colouring():

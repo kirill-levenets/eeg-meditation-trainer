@@ -1,10 +1,11 @@
 """The session the Session screen shows: its graphs and readout, which the running session's events draw, the end card
 over them once it has ended, and the profile it belongs to."""
 import sqlite3
+import time
 
 from app.logger import logger
 from app.metrics.series_names import SERIES_NAMES
-from app.session.manager import elapsed_clock
+from app.session.manager import SessionState, elapsed_clock
 from app.session.session_events import (
     Alert,
     Connected,
@@ -146,13 +147,33 @@ class ShownSession:
         self._live_screen.hide_overlay()
 
     def reload_whole(self) -> None:
-        """An ending's: the live graphs reloaded from the mirror with the whole session (a locked stretch never reached them
-        tick by tick) and its score, before the session's reset."""
+        """An ending's, before the session's reset: the whole session on the graphs, and its score."""
+        self._reload_graphs()
+        self._live_screen.update_stats(self._session.manager.live_score())
+
+    def _reload_graphs(self) -> None:
+        """The live graphs reloaded from the mirror with the whole session: a locked stretch never reached them tick by
+        tick."""
         try:
             self._live_screen.load_mirror(self.mirror.snapshot())
-        except Exception:  # noqa: BLE001 - logged; a failed redraw must not keep the session from ending on screen
-            logger.exception("graph reload on stop failed")
-        self._live_screen.update_stats(self._session.manager.live_score())
+        except Exception:  # noqa: BLE001 - logged; a failed redraw must not keep the rest of the screen stale
+            logger.exception("graph reload from the mirror failed")
+
+    def resumed(self) -> None:
+        """Back from a pause (the screen unlocked): a running session's graphs, readout and clock, which its runner kept
+        off the screen meanwhile, drawn again in one batch. Not after its ending: the end card covers them, and the
+        ending's teardown is that first frame's work (with the reload too it was long enough for an ANR)."""
+        if self._session.manager.state != SessionState.RUNNING:
+            logger.info("on_resume: session not RUNNING, no graph reload")
+            return
+        started = time.monotonic()
+        self._reload_graphs()
+        if self.mirror.last_metrics:  # no tick yet: the readout still shows the start's
+            self._live_screen.update_stats(self._session.manager.live_score())
+            self._live_screen.update_state(self.mirror.last_state)
+            self._live_screen.set_shamatha(self._session.run.shamatha_active)
+        self._live_screen.update_timer(self._session.manager.elapsed_formatted)
+        logger.info(f"on_resume: refresh complete in {time.monotonic() - started:.3f}s")
 
     def idle(self) -> None:
         """The screen's part of every teardown: idle controls, no device link, no training mark, no shamatha pill."""

@@ -156,7 +156,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `hold()` at a session's setup, `release()` at its ending's teardown or an abandoned start, and at `on_stop`, where a session's ending can't tear down (the main thread is closing the app).
 - While the app is paused (screen locked) the tick skips its per-tick UI update: N minutes locked would queue ~120·N full graph redraws, which froze the screen on resume.
   The runner records every tick into the session-lifetime mirror instead (`LiveMirror` in `app/session/live_mirror.py`, `RunningSession.mirror`, which the shown session shows: `_shown.mirror`, no Kivy).
-  `LiveSessionScreen.load_mirror(mirror.snapshot())` reloads the live graphs from it in one batch on resume (while the session runs) and at the session's end (`SessionControls._finish_ui`):
+  `LiveSessionScreen.load_mirror(mirror.snapshot())` reloads the live graphs from it in one batch (`ShownSession._reload_graphs`): on resume while the session runs (`ShownSession.resumed`) and at the session's end (`ShownSession.reload_whole`, from `SessionControls._finish_ui`):
   without it, after a session that ended during a lock, the graph would show only the pre-lock seconds while History shows the real duration.
   The mirror records each marked tick as (tick, raw sample) counts since the session's start, and the reload hands the markers to each graph's `load_static_data` with its data;
   counts, not indices, because a full buffer drops its oldest: a marker's index shifts with it, and one that fell off is gone.

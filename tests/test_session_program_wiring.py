@@ -148,7 +148,7 @@ def test_program_custom_formula_plots_and_marks(fresh_app, monkeypatch):
     graph = app._live_screen.graph
     assert metrics["program_formula"] == 80.0  # custom formula evaluated + plotted
     assert app._session.program_run.audio_key == "program_formula"  # transient program drive
-    assert app._settings_store.value("audio_metric") == "shamatha_score"  # user's baseline left untouched
+    assert app._user_settings.value("audio_metric") == "shamatha_score"  # user's baseline left untouched
     assert graph.series_name("program_formula") == "Program: AlphaPwr"  # "Program: <formula>"
     assert graph.is_visible("program_formula")  # shown on graph
     assert marks[-1] == ("program_formula",)  # legend-marked
@@ -288,7 +288,7 @@ def test_idle_program_preview_shows_program_set(fresh_app, monkeypatch):
 
     for begun in (False, True):  # a start cancelled while it connects, then a program session that ran
         if begun:
-            app._change_setting("use_mock", True)
+            app._user_settings.change("use_mock", True)
             start_ticked_by_hand(app, ticks=1)
             app._controls.stop_and_save()
             frames()

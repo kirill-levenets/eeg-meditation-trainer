@@ -1,13 +1,11 @@
 import os
 import sqlite3
-import time
 
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
-from kivy.uix.modalview import ModalView
 from kivy.uix.screenmanager import ScreenManager, SlideTransition
 
 from app import android_jni
@@ -31,12 +29,9 @@ from app.session.session_program import (
 )
 from app.settings.registry import (
     BOOL,
-    FLOAT,
     INT,
-    PATH,
     STR,
     Setting,
-    SettingsStore,
     held,
     kept,
 )
@@ -49,15 +44,16 @@ from app.ui.diary_screen import DiaryScreen
 from app.ui.formula_settings import FormulaSettings
 from app.ui.graph_fullscreen import GraphFullscreen
 from app.ui.graph_series import FIRST_RUN_LIVE_SERIES, GraphSeries
+from app.ui.graph_set import GraphSet
 from app.ui.headset import Headset
 from app.ui.history_flow import HistoryFlow
 from app.ui.history_screen import HistoryScreen
 from app.ui.hooks import wire
 from app.ui.live_session import LiveSessionScreen
+from app.ui.navigation import Navigation, ScreenHooks
 from app.ui.power_exemption import PowerExemption
 from app.ui.profiles import ProfileGate, Profiles
 from app.ui.program_settings import ProgramSettings
-from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.session_controls import SessionControls
 from app.ui.session_detail_flow import SessionDetailFlow
 from app.ui.session_settings import SessionSettings
@@ -85,6 +81,7 @@ from app.ui.theme import (
     make_message_popup,
 )
 from app.ui.toast import android_toast, show_toast
+from app.ui.user_settings import UserSettings
 from app.ui.widgets.loading_overlay import LoadingOverlay
 
 
@@ -92,7 +89,6 @@ class EEGMeditationApp(App):
     """Main Kivy application for EEG Meditation Trainer."""
 
     title = APP.APP_NAME
-    _PERSIST_SETTLE_S: float = 0.5  # quiet time before a slider/text change is written
     icon = os.path.join(
         os.path.dirname(os.path.dirname(__file__)),
         "assets", "icons", "icon_128.png",
@@ -104,62 +100,9 @@ class EEGMeditationApp(App):
         self._db: DatabaseManager = DatabaseManager()
         self._audio: AudioEngine = AudioEngine()
         self._current_user_id: int | None = None
-        # True while _load_user_settings applies values, so its change callbacks don't re-persist them.
-        self._loading_settings: bool = False
-        self._settle_triggers: dict = {}  # input name -> its settle trigger (_after_settle)
-        self._settle_fns: dict = {}  # input name -> the function its trigger runs (the latest one given)
+        self._user_settings = UserSettings(self._db, user_id=lambda: self._current_user_id)
         self._formulas: FormulaSlots = FormulaSlots()
         self.serial_device_override: str | None = None
-
-    def _persist_user_setting(self, key: str) -> None:
-        """Persist one setting now via the registry (it reads the live value); no-op mid-load or unbuilt."""
-        if self._loading_settings:
-            return
-        store = getattr(self, "_settings_store", None)
-        if store is None:
-            return
-        try:
-            store.persist(self._current_user_id, key)
-        except sqlite3.Error as e:
-            # The value stays applied in memory; the next batch save retries it.
-            report_soft_error("settings_save_failed", f"Couldn't save setting {key!r}: {e}", app=self)
-
-    def _change_setting(self, key: str, value) -> None:
-        """The one change path of a setting the store holds: it holds and applies the value, persisted now, or once a
-        continuous input settles."""
-        self._settings_store.change(key, value)
-        if self._settings_store.settles(key):
-            self._persist_user_setting_later(key)
-        else:
-            self._persist_user_setting(key)
-
-    def _persist_user_setting_later(self, key: str) -> None:
-        """Persist a continuous input (slider drag, typing) once it settles, not on every step."""
-        if self._loading_settings:
-            return
-        self._after_settle(key, lambda: self._persist_user_setting(key))
-
-    def _after_settle(self, name: str, fn) -> None:
-        """Run the latest `fn` given for input `name` once it has stopped changing for _PERSIST_SETTLE_S."""
-        triggers = getattr(self, "_settle_triggers", None)
-        if triggers is None:
-            triggers = self._settle_triggers = {}
-        fns = getattr(self, "_settle_fns", None)
-        if fns is None:
-            fns = self._settle_fns = {}
-        fns[name] = fn
-        ev = triggers.get(name)
-        if ev is None:
-            ev = triggers[name] = Clock.create_trigger(lambda _dt: fns[name](), self._PERSIST_SETTLE_S)
-        ev.cancel()  # restart the settle window on every change
-        ev()
-
-    # Map bottom-nav tab keys to screen groups
-    _TAB_SCREENS = {
-        "session": "live_session",
-        "history": "history",
-        "settings": "settings",
-    }
 
     def build(self) -> FloatLayout:
         install_crash_handler(self)
@@ -179,9 +122,8 @@ class EEGMeditationApp(App):
         float_root = self._build_screens()
         self._build_flows()
         self._bind_callbacks()
-        self._link_graph_zoom()
         # After _bind_callbacks (it sets the fields get() snapshots as defaults), before any user load.
-        self._build_settings_store()
+        self._register_settings()
         resolved_user = self._restore_last_user()
         self._profiles.refresh()
         # The gate is on a resolved user, not on users existing: a reinstall, a restored DB, a deleted active profile or
@@ -202,8 +144,8 @@ class EEGMeditationApp(App):
         for screen in (self._live_screen, self._history_screen, self._settings_screen, self._diary_screen):
             self._sm.add_widget(screen)
         root.add_widget(self._sm)
-        self._bottom_nav = BottomNav(tabs=[("Session", "session"), ("History", "history"), ("Settings", "settings")],
-                                     callback=self._on_nav_tab)
+        self._bottom_nav = BottomNav(tabs=[(label, key) for label, key, _screen in Navigation.TABS],
+                                     callback=lambda key: self._nav.on_tab(key))
         root.add_widget(self._bottom_nav)
         float_root = FloatLayout()
         self._float_root = float_root
@@ -219,7 +161,7 @@ class EEGMeditationApp(App):
                                 serial_override=lambda: self.serial_device_override)
         self._headset.load_aliases()
         self._session = RunningSession(self._ctx, self._audio, self._headset, on_event=lambda event: self._controls.on_event(event))
-        self._sounds = SoundSources(self._ctx, self._audio, self._settings_screen.timer)
+        self._sounds = SoundSources(self._ctx, self._audio, self._settings_screen.audio, self._settings_screen.timer)
         self._audio_metric = AudioMetric(self._ctx, self._session.program_run, self._settings_screen)
         self._program_settings = ProgramSettings(
             self._ctx, self._settings_screen.timer, self._live_screen,
@@ -228,8 +170,9 @@ class EEGMeditationApp(App):
         self._formula_settings = FormulaSettings(self._ctx, self._settings_screen.formulas, self._live_screen.graph,
                                                  self._formulas, scoring_locked=self._audio_metric.formula_scoring_locked)
         self._power = PowerExemption(self._ctx, self._settings_screen.device)
+        self._graphs = GraphSet(self._live_screen, self._diary_screen, self._settings_screen.display)
         self._graph_series = GraphSeries(self._ctx, self._live_screen.graph, self._formulas, self._formula_settings,
-                                         graphs=self._all_graphs)
+                                         graphs=self._graphs.all)
         self._history = HistoryFlow(self._ctx, self._history_screen, self._formulas, self._loading_overlay,
                                     on_sessions_deleted=lambda ids: self._shown.on_sessions_deleted(ids))
         self._shown = ShownSession(self._ctx, self._live_screen, self._audio, self._history, self._session)
@@ -245,6 +188,13 @@ class EEGMeditationApp(App):
         self._backup_flow = BackupFlow(self._ctx, self._settings_screen, user_name=self._profiles.current_name,
                                        checkpoint=self._session.checkpoint_or_report,
                                        on_db_replaced=self._on_db_replaced)
+        # Entering History reloads a stale list; the Session screen's duration picker shows a Timer change.
+        self._nav = Navigation(self._ctx, self._sm, self._bottom_nav, gate=self._gate, fullscreen=self._fullscreen,
+                               screens={"history": ScreenHooks(entering=self._history.refresh,
+                                                                # resumed on another day: the chart and totals move on
+                                                                resumed=self._history_screen.on_pre_enter),
+                                        "live_session": ScreenHooks(entering=self._program_settings.sync_picker),
+                                        "diary": ScreenHooks(back=self._detail.on_diary_back)})
 
     def _make_context(self) -> AppContext:
         """What every flow reaches the app through; the callables read the app when called, so they see the profile and
@@ -253,44 +203,14 @@ class EEGMeditationApp(App):
                                 refused=lambda doing, why="": self._controls.refused(doing, why), discard=lambda: self._controls.discard(),
                                 set_formula=lambda idx, name, formula: self._session.set_formula(idx, name, formula))
         return AppContext(db=self._db, user_id=lambda: self._current_user_id, activate_user=self._activate_user,
-                          require_user=self._require_user, on_main=self._on_main, switch_screen=self._switch_screen,
+                          require_user=self._require_user, on_main=self._on_main,
+                          switch_screen=lambda name: self._nav.switch(name),
                           info=self._info_popup, toast=self._toast, confirm=self._confirm_action,
-                          setting=lambda key: self._settings_store.value(key), change_setting=self._change_setting,
+                          setting=lambda key: self._user_settings.value(key),
+                          change_setting=lambda key, value: self._user_settings.change(key, value),
+                          setting_changed=lambda key: self._user_settings.changed(key),
+                          after_settle=lambda name, fn: self._user_settings.after_settle(name, fn),
                           save_settings=self._save_user_settings, session=session)
-
-    def _all_graphs(self) -> tuple:
-        """Every mounted graph, for the cross-graph affordances (expand, picker, fit, restore); zoom links per group."""
-        return self._live_graphs() + self._detail_graphs()
-
-    def _live_graphs(self) -> tuple:
-        return self._live_screen.graph, self._live_screen.raw_graph, self._live_screen.band_graph
-
-    def _detail_graphs(self) -> tuple:
-        return self._diary_screen._metrics_graph, self._diary_screen._raw_eeg_graph, self._diary_screen._freq_graph
-
-    def _wire_graph_affordances(self) -> None:
-        """Give every mounted graph the shared fullscreen-expand, series-picker and fit
-        glyphs, driven by one presenter each. The picker is wired only where there
-        is more than one series to choose from — a single-series graph's picker
-        could only blank the line."""
-        for g in self._all_graphs():
-            g.set_expand_callback(self._fullscreen.present)
-            if len(g.series_keys()) > 1:
-                g.set_series_picker_callback(self._graph_series.present_picker)
-            g.set_fit_callback(ScrollableGraphWidget.toggle_fit)  # its zoom group, together
-
-    def _saved_zoom_seconds(self) -> float:
-        return self._live_screen.graph.zoom_seconds
-
-    def _apply_saved_zoom(self, seconds: float) -> None:
-        """The saved zoom starts both groups; only the live one's is saved, so a detail's zoom never comes back."""
-        self._live_screen.graph.set_zoom_seconds(seconds)
-        self._diary_screen._metrics_graph.set_zoom_seconds(seconds)
-
-    def _link_graph_zoom(self) -> None:
-        """Two zoom groups: a detail zoomed out over a long session must not reach the live graphs' saved zoom."""
-        ScrollableGraphWidget.link_zoom(*self._live_graphs())
-        ScrollableGraphWidget.link_zoom(*self._detail_graphs())
 
     def _bind_callbacks(self) -> None:
         """Every screen's handlers, and the keys: the marker hotkey and Android's back button."""
@@ -298,9 +218,7 @@ class EEGMeditationApp(App):
         self._wire_settings_screen()
         self._wire_history_screens()
         Window.bind(on_key_down=self._on_key_down)
-        # Android's back (key 27) is consumed, so Kivy's exit-on-escape doesn't fire: it navigates, or exits on a double tap.
-        self._last_back_time = 0.0
-        Window.bind(on_keyboard=self._on_keyboard)
+        Window.bind(on_keyboard=self._nav.on_keyboard)
 
     def _wire_session_screen(self) -> None:
         """The Session screen's controls, its end card, its graphs' glyphs and the series its graph starts with."""
@@ -322,10 +240,11 @@ class EEGMeditationApp(App):
         # Tap on graph to set marker (Android — no keyboard available)
         if android_jni.on_android():
             wire(self._live_screen.graph, on_tap=lambda *_a: self._controls.mark())
-        wire(self._live_screen, on_lines_shown=self._session.set_shown)
+        wire(self._live_screen, on_lines_shown=self._session.set_shown,
+             on_stats_mode=lambda _mode: self._user_settings.changed("stats_view_mode"))
 
         # Shared fullscreen-expand + series-picker glyphs on every graph
-        self._wire_graph_affordances()
+        self._graphs.wire_glyphs(self._fullscreen.present, self._graph_series.present_picker)
         # The formula series stay hidden until a formula is shown through the picker, the program ones while no program
         # with formula segments runs; a new profile starts on Shamatha alone (a profile load applies its own).
         for key in (*FORMULA_KEYS, *PROGRAM_FORMULA_KEYS):
@@ -336,10 +255,10 @@ class EEGMeditationApp(App):
     def _wire_settings_screen(self) -> None:
         wire(
             self._settings_screen,
-            on_threshold_change=self._on_threshold_change,
+            on_threshold_change=self._controls.on_threshold_slider,
             on_audio_metric_change=self._audio_metric.on_change,
             on_audio_formula_index=self._audio_metric.on_formula_index,
-            on_theme_change=self._on_theme_change,
+            on_theme_change=lambda _name: self._user_settings.changed("theme"),  # the selector applied it to C
             on_profile_switch=self._profiles.on_switch,
             on_profile_create=self._profiles.on_create,
             on_profile_delete=self._profiles.on_delete,
@@ -348,9 +267,9 @@ class EEGMeditationApp(App):
         wire(
             self._settings_screen.audio,
             on_test_audio=self._sounds.on_test_audio,
-            on_sinking_alert_toggle=self._on_sinking_alert_toggle,
-            on_subtle_alert_toggle=self._on_subtle_alert_toggle,
-            on_disconnect_alert_toggle=self._on_disconnect_alert_toggle,
+            on_sinking_alert_toggle=lambda on: self._user_settings.change("sinking_alert", on),
+            on_subtle_alert_toggle=lambda on: self._user_settings.change("subtle_alert", on),
+            on_disconnect_alert_toggle=lambda on: self._user_settings.change("disconnect_alert", on),
             on_feedback_source_change=self._sounds.on_feedback_source_change,
             on_reward_source_change=self._sounds.on_reward_source_change,
         )
@@ -367,10 +286,10 @@ class EEGMeditationApp(App):
         )
         wire(
             self._settings_screen.display,
-            on_text_size=self._on_text_size_change,
-            on_line_colours=self._on_line_colours_change,
-            on_line_width_change=self._on_line_width_change,
-            on_rotate_screen=self._on_rotate_screen,
+            on_text_size=lambda _size: self._user_settings.changed("text_size"),
+            on_line_colours=lambda _name: self._user_settings.changed("line_colours"),
+            on_line_width_change=lambda width: self._user_settings.change("line_width", width),
+            on_rotate_screen=lambda rotation: self._user_settings.change("rotation", rotation),
         )
         wire(
             self._settings_screen.formulas,
@@ -402,7 +321,7 @@ class EEGMeditationApp(App):
             on_export_csv=self._history.on_export_csv,
             on_back=self._detail.on_diary_back,
             on_band_view_change=self._detail.persist_band_view,
-            on_band_collapse=lambda _collapsed: self._persist_user_setting("band_power_collapsed"),
+            on_band_collapse=lambda _collapsed: self._user_settings.changed("band_power_collapsed"),
         )
 
         wire(
@@ -412,9 +331,9 @@ class EEGMeditationApp(App):
             on_rename_session=self._history.on_rename_session,
             on_view_mode_change=self._history.on_view_mode_change,
             on_export_sessions=self._history.on_export_sessions_csv,
-            on_chart_collapse=lambda _collapsed: self._persist_user_setting("history_chart_collapsed"),
+            on_chart_collapse=lambda _collapsed: self._user_settings.changed("history_chart_collapsed"),
         )
-        wire(self._diary_screen.what_if, on_collapse=lambda _collapsed: self._persist_user_setting("what_if_collapsed"))
+        wire(self._diary_screen.what_if, on_collapse=lambda _collapsed: self._user_settings.changed("what_if_collapsed"))
 
     def _activate_user(self, uid: int) -> None:
         """Make `uid` the active profile and load its settings; every path that picks a user goes here."""
@@ -446,46 +365,6 @@ class EEGMeditationApp(App):
         logger.info(f"Restored last user id={uid}")
         return uid
 
-    def _handle_gate_back(self) -> bool:
-        """Back/Esc while gated: never fall through into the app, but the user must
-        still be able to LEAVE — double-press exits the app (a gate with no exit
-        traps a fresh-install user who declines to create a profile)."""
-        return self._exit_on_second_back()
-
-    def _exit_on_second_back(self) -> bool:
-        """A second back press within 2 s exits the app; the first says so."""
-        now = time.time()
-        if now - self._last_back_time < 2.0:
-            App.get_running_app().stop()
-            return True
-        self._last_back_time = now
-        self._toast("Press back again to exit")
-        return True
-
-    def _on_nav_tab(self, tab_key: str) -> None:
-        """Handle bottom nav tab press."""
-        screen_name = self._TAB_SCREENS.get(tab_key, tab_key)
-        self._switch_screen(screen_name)
-
-    def _switch_screen(self, name: str) -> None:
-        if name == "diary" and not self._current_user_id:
-            # silent-ok: unreachable post-gate; any concrete user passes.
-            # Defensive block against a should-not-happen unset.
-            logger.debug("Diary switch blocked: no user selected")
-            return
-        logger.debug(f"Screen switch: {name}")
-        self._sm.current = name
-        if name == "history":
-            self._history.refresh()
-        elif name == "live_session":
-            # Reflect any Settings timer/mode change on the Start duration button.
-            self._program_settings.sync_picker()
-        # Sync bottom nav highlight
-        for tab_key, screen in self._TAB_SCREENS.items():
-            if screen == name:
-                self._bottom_nav.active_tab = tab_key
-                break
-
     def _on_main(self, fn) -> None:
         """Queue callable on Kivy's main thread.
 
@@ -511,47 +390,12 @@ class EEGMeditationApp(App):
         finally:
             self._leaving = False
 
-    def _on_key_down(self, window, key, scancode, codepoint, modifiers) -> bool:
-        """Handle keyboard hotkey for marker."""
-        # Don't capture keys while settings hotkey picker is active
-        if self._settings_screen.display._waiting_for_hotkey:
+    def _on_key_down(self, _window, key, _scancode, codepoint, _modifiers) -> bool:
+        """The marker hotkey places a marker; any other key goes on to Kivy."""
+        if not self._settings_screen.display.is_marker_key(key, codepoint):
             return False
-        hotkey = self._settings_screen.display.marker_hotkey
-        if not hotkey:
-            return False
-        pressed = codepoint if codepoint else str(key)
-        if pressed == hotkey:
-            self._controls.mark()
-            return True
-        return False
-
-    def _on_keyboard(self, window, key, scancode=0, codepoint=None,
-                     modifiers=None) -> bool:
-        """Android hardware back / Esc (key 27): close overlays, navigate back to
-        Session, or double-tap to exit. Returns True to consume the key so Kivy's
-        default exit-on-escape never fires."""
-        if key != 27:
-            return False
-        # The mandatory user-selection gate: back/Esc never falls through INTO the
-        # app (covers the pre-popup schedule window too), but double-press exits —
-        # a fresh-install user who declines to create a profile must be able to leave.
-        if self._gate.active():
-            return self._handle_gate_back()
-        # An open Popup/ModalView dismisses itself on escape — let it.
-        if any(isinstance(c, ModalView) for c in Window.children):
-            return False
-        # Fullscreen graph overlay → close it (it's not a ModalView).
-        if self._fullscreen.close():
-            return True
-        current = self._sm.current
-        if current == "diary":
-            self._detail.on_diary_back()
-            return True
-        if current != "live_session":
-            self._switch_screen("live_session")
-            return True
-        # Root (Session): require two presses within 2s to exit.
-        return self._exit_on_second_back()
+        self._controls.mark()
+        return True
 
     _leaving = False  # set while _flush_on_leave runs: nothing the app draws is seen any more
 
@@ -562,43 +406,6 @@ class EEGMeditationApp(App):
             android_toast(message)
         else:
             show_toast(message)
-
-    def _on_threshold_change(self, value: int) -> None:
-        if self._shown.mirror.metrics and not self._session.live():
-            self._shown.clear()  # the last session's line is not the threshold the next one runs against
-        # A drag is one change of the threshold in force, at the value it settles on, not one per slider step.
-        self._after_settle("apply_threshold", lambda: self._controls.apply_threshold(self._settings_screen.threshold))
-        self._persist_user_setting_later("threshold")
-        logger.debug(f"Threshold changed to {value}")
-
-    def _on_line_width_change(self, width: float) -> None:
-        self._change_setting("line_width", width)
-
-    def _apply_line_width(self, width: float) -> None:
-        self._live_screen.graph.set_line_width(width)
-        self._live_screen.raw_graph.set_line_width(width)
-        self._live_screen.band_graph.set_line_width(width)
-        self._diary_screen._metrics_graph.set_line_width(width)
-        self._diary_screen._raw_eeg_graph.set_line_width(width)
-        self._diary_screen._freq_graph.set_line_width(width)
-        logger.debug(f"Line width changed to {width}")
-
-    def _on_rotate_screen(self, rotation: int) -> None:
-        self._change_setting("rotation", rotation)
-        logger.info(f"Screen rotation set to {rotation}")
-
-    def _on_text_size_change(self, size: float) -> None:
-        self._persist_user_setting("text_size")
-        logger.info(f"Text size set to {size:g}")
-
-    def _on_line_colours_change(self, name: str) -> None:
-        self._persist_user_setting("line_colours")
-        logger.info(f"Scored line colours set to {name}")
-
-    def _on_theme_change(self, theme_name: str) -> None:
-        """Persist the theme per user; the selector already applied it to C."""
-        self._persist_user_setting("theme")
-        logger.info(f"Theme changed to: {theme_name}")
 
     def _require_user(self, action: str) -> int | None:
         """Return the active uid, or explain why the action can't run and return
@@ -618,18 +425,6 @@ class EEGMeditationApp(App):
     def _confirm_action(self, title, message, ok_text, on_ok, ok_color=None, on_cancel=None):
         """on_cancel runs on every close that isn't OK: Cancel, a tap outside, or Android back. Returns the popup."""
         return confirm_popup(title, message, ok_text, on_ok, ok_color=ok_color, on_cancel=on_cancel)
-
-    def _on_sinking_alert_toggle(self, active: bool) -> None:
-        self._change_setting("sinking_alert", active)
-        logger.info(f"Sinking alert {'enabled' if active else 'disabled'}")
-
-    def _on_subtle_alert_toggle(self, active: bool) -> None:
-        self._change_setting("subtle_alert", active)
-        logger.info(f"Distraction chime {'enabled' if active else 'disabled'}")
-
-    def _on_disconnect_alert_toggle(self, active: bool) -> None:
-        self._change_setting("disconnect_alert", active)
-        logger.info(f"Disconnect alert {'enabled' if active else 'disabled'}")
 
     # --- Data Backup (app/ui/backup_flow.py) ---
 
@@ -657,33 +452,20 @@ class EEGMeditationApp(App):
         ok.bind(on_release=_quit)
         popup.open()
 
-    def _build_settings_store(self) -> None:
-        """Build the settings registry; call once in build() before any user load, as a kept setting's default is its
-        holder's value now. A profile load applies them in this order."""
+    def _register_settings(self) -> None:
+        """Every per-user setting, each defined by what holds it; once in build() before any user load, as a kept
+        setting's default is its holder's value now. A profile load applies them in this order."""
         ss = self._settings_screen
 
         def set_threshold(v):
             ss.threshold = v
             self._controls.apply_threshold(v)
 
-        def apply_use_mock(v):
-            APP.USE_MOCK_DEVICE = v; ss.device._device_mode_cb.active = v  # an unchanged value doesn't re-fire its hook
-
-        self._settings_store = SettingsStore(self._db, [
-            *self._timer_settings(), *self._alert_settings(), *self._fold_settings(),
-            kept("threshold", INT, lambda: int(ss.threshold), set_threshold),
-            held("use_mock", BOOL, APP.USE_MOCK_DEVICE, apply_use_mock),
-            *self._sound_settings(), *self._display_settings()])
-
-    def _timer_settings(self) -> list[Setting]:
-        timer = self._settings_screen.timer
-
-        # Only Settings' controls: a Start reads them into the session's config (SessionSettings.read), and a change during
-        # the run, a profile's reload included, applies to the next session.
-        return [kept("timer_enabled", BOOL, lambda: timer.timer_enabled, lambda v: setattr(timer, "timer_enabled", v)),
-                kept("timer_minutes", INT, lambda: timer.timer_minutes, lambda v: setattr(timer, "timer_minutes", v)),
-                held("timer_sound", PATH, timer.timer_sound_path, lambda v: setattr(timer, "timer_sound_path", v),
-                     settle=True)]
+        self._user_settings.register([
+            *self._program_settings.settings(), *self._alert_settings(), *self._fold_settings(),
+            kept("threshold", INT, lambda: int(ss.threshold), set_threshold, settle=True),
+            *self._headset.settings(), *self._audio_metric.settings(), *self._sounds.settings(),
+            *self._history.settings(), *self._graphs.settings(), *self._display_settings()])
 
     def _alert_settings(self) -> list[Setting]:
         audio = self._settings_screen.audio
@@ -708,51 +490,20 @@ class EEGMeditationApp(App):
                 kept("what_if_collapsed", BOOL, lambda: ds.what_if.collapsed, ds.what_if.set_collapsed),
                 kept("band_power_collapsed", BOOL, lambda: ds.band_collapsed, ds.set_band_collapsed)]
 
-    def _sound_settings(self) -> list[Setting]:
-        """The metric that drives the sound, and the below and reward sources; a source's apply reads its path, so
-        each pair applies source first."""
-        audio, store = self._settings_screen.audio, lambda key: self._settings_store.value(key)
-
-        def apply_feedback_source(v):
-            audio.set_feedback_source(v, store("feedback_sound_path"))
-
-        def apply_feedback_path(v):
-            audio.set_feedback_source(store("feedback_source"), v)
-
-        def apply_reward_source(v):
-            audio.set_reward_source(v, store("reward_sound_path"))
-
-        def apply_reward_path(v):
-            audio.set_reward_source(store("reward_source"), v)
-
-        return [*self._audio_metric.settings(),
-                held("feedback_source", STR, "noise", apply_feedback_source),
-                held("feedback_sound_path", PATH, "", apply_feedback_path),
-                held("reward_source", STR, "none", apply_reward_source),  # the above-threshold channel: off by default
-                held("reward_sound_path", PATH, "", apply_reward_path)]
-
     def _display_settings(self) -> list[Setting]:
         display, ls = self._settings_screen.display, self._live_screen
-
-        def apply_line_width(v):
-            display.show_line_width(v); self._apply_line_width(v)
 
         def apply_rotation(v):
             display._current_rotation = v
             display._rotate_btn.text = f"Rotate Screen ({v}°)"
             Window.rotation = v
 
-        return [held("line_width", FLOAT, display._line_width_slider.value, apply_line_width, settle=True),
-                held("rotation", INT, display._current_rotation, apply_rotation),
-                kept("graph_zoom_seconds", FLOAT, self._saved_zoom_seconds, self._apply_saved_zoom),
+        return [held("rotation", INT, display._current_rotation, apply_rotation),
                 kept("marker_hotkey", STR, lambda: display.marker_hotkey,
                      lambda v: setattr(self._settings_screen, "marker_hotkey", v)),
-                kept("stats_view_mode", STR, lambda: getattr(ls, "_stats_mode", "live"), self._apply_stats_mode),
+                kept("stats_view_mode", STR, lambda: ls.stats_mode, ls.set_stats_mode),
                 # Its default is the seed, not the startup profile's theme the UI was built in.
                 theme_setting(self._theme_seed), text_size_setting(), line_colours_setting()]
-
-    def _apply_stats_mode(self, mode: str) -> None:
-        self._live_screen.set_stats_mode(mode)
 
     def _save_user_settings(self) -> None:
         """Persist current UI settings for the active user."""
@@ -760,7 +511,7 @@ class EEGMeditationApp(App):
         if not uid:
             return  # silent-ok: batch persistence; no active user = nothing to save
         try:
-            self._settings_store.save(uid)          # all scalar per-user settings + theme
+            self._user_settings.save(uid)  # all scalar per-user settings + theme
             self._formula_settings.persist(uid)
             self._program_settings.persist(uid)
             self._graph_series.persist_all()  # the on-graph picker is the source of truth
@@ -772,17 +523,12 @@ class EEGMeditationApp(App):
 
     def _load_user_settings(self, user_id: int) -> None:
         """Restore persisted settings for a user."""
-        self._loading_settings = True  # suppress immediate re-persist of values we're applying
-        try:
+        with self._user_settings.loading():  # the values it applies are not persisted back
             self._load_user_settings_inner(user_id)
-        finally:
-            self._loading_settings = False
 
     def _load_user_settings_inner(self, user_id: int) -> None:
-        g = self._db.get_user_setting
-
         # Always applies a value (default if absent), so no user inherits the previous user's settings.
-        self._settings_store.load(user_id)
+        self._user_settings.load(user_id)
 
         # Load formulas BEFORE GraphSeries.restore so the per-slot validity gate
         # sees real is_valid; the picker selection (graph_series_*) decides visibility.
@@ -792,9 +538,6 @@ class EEGMeditationApp(App):
         self._graph_series.restore(user_id)
 
         self._headset.load(user_id)  # after store.load, which applies use_mock
-
-        history_mode = g(user_id, "history_view_mode") or "calendar"
-        self._history_screen.set_view_mode(history_mode)
 
         # Sync live-screen preset highlight (incl. program "P") with loaded state
         self._program_settings.sync_picker()
@@ -874,43 +617,9 @@ class EEGMeditationApp(App):
         self._power.refresh()  # after the session's UI: back from the phone's settings, perhaps changed there
 
     def _refresh_ui_after_resume(self) -> None:
-        """Sync UI to current session state after Android resume.
-
-        If the session is no longer RUNNING (e.g. timer expired during
-        pause and the session's runner already ended it →
-        the summary card now covers the live screen), skip the graph
-        reload entirely. Combining 3 graph reloads with the heavy work
-        of the ending on the first frame after resume previously
-        blocked the UI thread long enough to trigger an Android ANR
-        ('App not responding' / black screen).
-
-        While the session is RUNNING, reload all three live graphs in a
-        single batch from the session-lifetime mirror buffers (one
-        ``load_static_data`` call per graph, with its markers; the metrics
-        graph redraws again for its threshold and gradient steps), then
-        refresh the stats/state/timer labels from the latest sample.
-        """
-        t_start = time.monotonic()
-        if getattr(getattr(self, "_sm", None), "current", None) == "history":
-            self._history_screen.on_pre_enter()  # resumed onto it on another day: the chart and the totals move on
-        if self._session.manager.state != SessionState.RUNNING:
-            logger.info("on_resume: session not RUNNING → skipping graph reload")
-            return
-        try:
-            self._live_screen.load_mirror(self._shown.mirror.snapshot())
-            if self._shown.mirror.last_metrics:
-                self._live_screen.update_stats(self._session.manager.live_score())
-                self._live_screen.update_state(self._shown.mirror.last_state)
-                self._live_screen.set_shamatha(self._session.run.shamatha_active)
-        except Exception:
-            logger.exception("graph reload on resume failed")
-        try:
-            self._live_screen.update_timer(self._session.manager.elapsed_formatted)
-        except Exception:
-            logger.exception("update_timer on resume failed")
-        logger.info(
-            f"on_resume: refresh complete in {time.monotonic() - t_start:.3f}s"
-        )
+        """The first frame after a resume: the screen shown, then a running session's graphs and readout."""
+        self._nav.resumed()
+        self._shown.resumed()
 
     def on_stop(self) -> None:
         """Cleanup on app exit.

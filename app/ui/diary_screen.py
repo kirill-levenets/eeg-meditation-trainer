@@ -447,6 +447,15 @@ class DiaryScreen(Screen):
     def what_if(self) -> WhatIfPanel:
         return self._what_if
 
+    @property
+    def metrics_graph(self) -> ScrollableGraphWidget:
+        return self._metrics_graph
+
+    @property
+    def graphs(self) -> tuple:
+        """The detail's three graphs: metrics, raw EEG, band power."""
+        return self._metrics_graph, self._raw_eeg_graph, self._freq_graph
+
     def set_what_if(self, ticks, session: dict) -> None:
         """Give the what-if panel the session's scored ticks (None: it can't rescore it), once its graphs are in: the
         metrics graph's line is then the recorded one, which Reset puts back."""

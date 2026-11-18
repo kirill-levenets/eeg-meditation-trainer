@@ -26,14 +26,14 @@ def test_entering_settings_reads_the_counts_again():
 def _session_ended_on(app, screen: str) -> None:
     """A mock session of two ticks, ended (a timer's way: no confirm) while `screen` shows."""
     start_ticked_by_hand(app, ticks=2)
-    app._switch_screen(screen)
+    app._nav.switch(screen)
     app._controls.stop_and_save(reason="timer")
     frames()
 
 
 def test_the_end_of_a_session_redraws_them_on_settings(fresh_app):
     app = fresh_app
-    app._switch_screen("settings")
+    app._nav.switch("settings")
     name = app._profiles.current_name()
     assert _rows(app._settings_screen) == {f"{name} (0 sessions)"}
     _session_ended_on(app, "settings")  # a timer ended it there
@@ -45,7 +45,7 @@ def test_elsewhere_entering_settings_redraws_them_instead(fresh_app):
     name = app._profiles.current_name()
     _session_ended_on(app, "live_session")
     assert _rows(app._settings_screen) == {f"{name} (0 sessions)"}  # not drawn again behind the Session screen
-    app._switch_screen("settings")
+    app._nav.switch("settings")
     frames()
     assert _rows(app._settings_screen) == {f"{name} (1 session)"}
 

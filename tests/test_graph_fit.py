@@ -213,13 +213,19 @@ def _an_hour_in(graph) -> None:
     graph.load_static_data({k: [50.0] * HOUR for k in graph._data})
 
 
+def _saved_zoom(app) -> str:
+    """The zoom the profile's save writes."""
+    app._save_user_settings()
+    return app._db.get_user_setting(app._current_user_id, "graph_zoom_seconds")
+
+
 def test_the_zoom_saved_is_the_window_from_before_the_fit(build_app):
     a = build_app()
     g = a._live_screen.graph
     _an_hour_in(g)
     g.set_fitted(True)
     assert g.viewport_points == HOUR and g.zoom_points == 120
-    assert a._saved_zoom_seconds() == 60.0
+    assert _saved_zoom(a) == "60.0"
 
 
 def test_a_hidden_tabs_graph_does_not_draw_until_it_is_shown(monkeypatch):
@@ -243,7 +249,7 @@ def test_a_hidden_tabs_graph_does_not_draw_until_it_is_shown(monkeypatch):
 
 def test_the_detail_zooms_apart_from_the_live_graphs_and_the_saved_zoom(build_app):
     a = build_app()
-    live, detail = list(a._live_graphs()), list(a._detail_graphs())
+    live, detail = list(a._graphs.live), list(a._graphs.detail)
     for g in live + detail:
         _an_hour_in(g)
     assert all(g._fit_callback is not None for g in live + detail)  # every graph
@@ -465,11 +471,12 @@ def test_a_drag_from_a_glyph_pans_once_it_passes_a_fingertips_drift():
 
 def test_the_saved_zoom_starts_both_groups_and_the_detail_never_saves(build_app):
     a = build_app()
-    a._apply_saved_zoom(300.0)
-    live, detail = [g.zoom_seconds for g in a._live_graphs()], [g.zoom_seconds for g in a._detail_graphs()]
+    a._db.set_user_setting(a._current_user_id, "graph_zoom_seconds", "300.0")
+    a._activate_user(a._current_user_id)  # a profile's load applies its saved zoom
+    live, detail = [g.zoom_seconds for g in a._graphs.live], [g.zoom_seconds for g in a._graphs.detail]
     assert live == detail and live[0] == live[2] == 300.0  # the raw graph's window stops at its own longest
-    a._detail_graphs()[0].zoom_out()
-    assert a._saved_zoom_seconds() == 300.0
+    a._graphs.detail[0].zoom_out()
+    assert _saved_zoom(a) == "300.0"
 
 
 def test_without_value_labels_the_last_time_label_stays_inside():
@@ -555,3 +562,10 @@ def test_a_two_finger_tap_fires_neither_a_glyph_nor_a_marker():
         assert fired == [] and marks == []
     finally:
         Window.remove_widget(g)
+
+
+def test_every_graph_has_fullscreen_and_fit_and_a_picker_only_with_lines_to_pick(fresh_app):
+    graphs = fresh_app._graphs.all()
+    assert all(g._expand_callback is not None and g._fit_callback is not None for g in graphs)
+    assert all((g._series_callback is not None) == (len(g.series_keys()) > 1) for g in graphs)
+    assert any(g._series_callback is None for g in graphs)  # a one-line graph has no picker: it could only blank it

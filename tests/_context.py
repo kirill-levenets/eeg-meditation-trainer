@@ -28,5 +28,5 @@ def stub_context(**fields) -> AppContext:
     defaults = {"db": MagicMock(), "user_id": user_id, "activate_user": MagicMock(),
                 "require_user": lambda _action: user_id(), "on_main": lambda fn: fn(), "switch_screen": MagicMock(),
                 "info": MagicMock(), "toast": MagicMock(), "confirm": MagicMock(), "setting": MagicMock(),
-                "change_setting": MagicMock(), "save_settings": MagicMock()}
+                "change_setting": MagicMock(), "setting_changed": MagicMock(), "after_settle": lambda _name, fn: fn(), "save_settings": MagicMock()}
     return _build(defaults, session, fields)

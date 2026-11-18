@@ -4,6 +4,7 @@ import os
 
 from app.crash_handler import report_soft_error
 from app.logger import logger
+from app.settings.registry import PATH, STR, Setting, held
 from app.ui.app_context import AppContext
 from app.ui.theme import format_count
 
@@ -44,10 +45,35 @@ class SoundSources:
     """The sources as the settings hold them, resolved for a session's start and the Settings tests; a source chosen in
     Settings changes through the app's settings path."""
 
-    def __init__(self, ctx: AppContext, audio, timer_section) -> None:
+    def __init__(self, ctx: AppContext, audio, audio_section, timer_section) -> None:
         self._ctx = ctx
         self._audio = audio
+        self._audio_section = audio_section
         self._timer_section = timer_section
+
+    def settings(self) -> list[Setting]:
+        """The below and reward sources and the timer's gong, held by the profile's settings; a source's apply reads its
+        path, so each pair applies source first."""
+        audio, timer, value = self._audio_section, self._timer_section, self._ctx.setting
+
+        def apply_feedback_source(v):
+            audio.set_feedback_source(v, value("feedback_sound_path"))
+
+        def apply_feedback_path(v):
+            audio.set_feedback_source(value("feedback_source"), v)
+
+        def apply_reward_source(v):
+            audio.set_reward_source(v, value("reward_sound_path"))
+
+        def apply_reward_path(v):
+            audio.set_reward_source(value("reward_source"), v)
+
+        return [held("feedback_source", STR, "noise", apply_feedback_source),
+                held("feedback_sound_path", PATH, "", apply_feedback_path),
+                held("reward_source", STR, "none", apply_reward_source),  # the above-threshold channel: off by default
+                held("reward_sound_path", PATH, "", apply_reward_path),
+                held("timer_sound", PATH, timer.timer_sound_path, lambda v: setattr(timer, "timer_sound_path", v),
+                     settle=True)]
 
     def global_feedback_id(self) -> str:
         """The feedback source; a custom one with no file falls back to the rain noise."""

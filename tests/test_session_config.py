@@ -28,7 +28,7 @@ def test_a_session_tick_and_checkpoint_read_no_setting(fresh_app, monkeypatch):
     app = fresh_app
     reload_with(app, {"active_formulas": _WINDOW}, audio_metric="custom_formula")
     fed = FedSession(app, monkeypatch)
-    monkeypatch.setattr(app._settings_store, "value", _no_setting_read)
+    monkeypatch.setattr(app._user_settings._store, "value", _no_setting_read)
     for _ in range(3):
         fed.tick(shown=False)  # the tick thread's part; what it queues for the screen is the screen's
     app._session.recorder.checkpoint()  # the row's score, name and formulas
@@ -171,4 +171,4 @@ def test_a_timer_sound_path_is_used_without_surrounding_blanks(fresh_app, monkey
     FedSession(app, monkeypatch)
     assert app._session.config.gong == str(gong)
     app._sounds.on_timer_sound_change(f" {gong}  ")
-    assert app._settings_store.value("timer_sound") == str(gong)
+    assert app._user_settings.value("timer_sound") == str(gong)

@@ -272,9 +272,9 @@ def test_gate_back_first_press_warns_second_exits(gated, monkeypatch):
     monkeypatch.setattr(am, "show_toast", toasts.append)
     monkeypatch.setattr(gated, "stop", lambda: stops.append(True))
     frames_until(gated._gate.shown)  # over the gate's own popup: back must not be left to dismiss it
-    assert gated._on_keyboard(Window, 27, 0, None, []) is True  # consumed
+    assert gated._nav.on_keyboard(Window, 27, 0, None, []) is True  # consumed
     assert toasts == ["Press back again to exit"] and stops == [] and gated._gate.active()  # warned, still gated
-    assert gated._on_keyboard(Window, 27, 0, None, []) is True  # second press < 2s
+    assert gated._nav.on_keyboard(Window, 27, 0, None, []) is True  # second press < 2s
     assert stops == [True]  # exits
 
 

@@ -33,7 +33,7 @@ from tests.test_session_detail_open import (  # noqa: F401  (fixture)
     app,
 )
 
-SETTLE_S = 0.5  # the app's settle window (EEGMeditationApp._PERSIST_SETTLE_S)
+SETTLE_S = 0.5  # the settle window (UserSettings.SETTLE_S)
 SEGMENTS = [{"minutes": 5, "formula": "shamatha_score", "target": 60},
             {"minutes": 5, "formula": "meditation_score", "target": 80}]
 
@@ -317,8 +317,8 @@ def test_an_old_session_opened_after_a_new_one_does_not_keep_its_steps(app):  # 
 
 def test_a_settle_runs_the_latest_function_given_for_its_input(fresh_app):
     ran = []
-    fresh_app._after_settle("x", lambda: ran.append(1))
-    fresh_app._after_settle("x", lambda: ran.append(2))
+    fresh_app._user_settings.after_settle("x", lambda: ran.append(1))
+    fresh_app._user_settings.after_settle("x", lambda: ran.append(2))
     assert ran == []
     _settled(fresh_app)
     assert ran == [2]

@@ -4,6 +4,7 @@ import sqlite3
 import pytest
 
 import app.ui.app_manager as am
+import app.ui.user_settings as us
 from tests._app import frames, frames_until, setting_writes
 
 SETTLE_S = 0.05
@@ -13,12 +14,13 @@ SETTLE_S = 0.05
 def app(build_app, monkeypatch):
     """The built app with a short settle window; `app.writes` records its settings writes, `app.reports` its soft
     errors."""
-    monkeypatch.setattr(am.EEGMeditationApp, "_PERSIST_SETTLE_S", SETTLE_S)  # read when a trigger is first made
+    monkeypatch.setattr(us.UserSettings, "SETTLE_S", SETTLE_S)  # read when a trigger is first made
     app = build_app()
     frames_until(lambda: False, 2 * SETTLE_S)  # what the profile's load queued has run
     app.writes = setting_writes(app, monkeypatch)
     app.reports = []
-    monkeypatch.setattr(am, "report_soft_error", lambda label, detail="", **_: app.reports.append((label, detail)))
+    for module in (am, us):  # the batch save's, a single setting's
+        monkeypatch.setattr(module, "report_soft_error", lambda label, detail="", **_: app.reports.append((label, detail)))
     return app
 
 
@@ -49,13 +51,25 @@ def test_a_line_width_drag_writes_once_after_it_settles(app):
     # It was written only by the batch save (leaving the app, a profile switch), so a crash before one lost it.
     for width in (1.3, 1.6, 2.0):
         app._settings_screen.display._line_width_slider.value = width
-    assert app.writes == [] and app._settings_store.value("line_width") == 2.0  # held at once, written later
+    assert app.writes == [] and app._user_settings.value("line_width") == 2.0  # held at once, written later
     assert _settled(app, "line_width") == ["2.0"]
 
 
 def test_a_toggle_writes_at_once(app):
     app._settings_screen.audio._sinking_alert_cb.active = True
     assert app.writes == [("sinking_alert", "True")]
+
+
+def test_a_stats_view_pick_writes_that_setting_alone(app):
+    app._live_screen._stats_toggle.buttons["aggregate"].dispatch("on_release")
+    assert app.writes == [("stats_view_mode", "aggregate")]
+
+
+def test_a_duration_tap_writes_the_timers_two_fields_alone(app):
+    app._program_settings.on_duration_preset(20)
+    # The program's mode and name (its segments are JSON, written apart), then the timer: no batch save of every setting.
+    assert app.writes == [("timer_mode", "simple"), ("session_program_name", ""), ("timer_enabled", "True"),
+                          ("timer_minutes", "20")]
 
 
 def test_no_write_is_scheduled_while_settings_load(app):
@@ -75,7 +89,7 @@ def test_a_failed_setting_write_is_reported_not_raised(app, monkeypatch):
     app._settings_screen.audio._sinking_alert_cb.active = True  # must not raise into the Kivy callback
     assert app.reports and app.reports[0][0] == "settings_save_failed"
     assert "database is locked" in app.reports[0][1]
-    assert app._settings_store.value("sinking_alert") is True  # applied in memory: the next batch save retries it
+    assert app._user_settings.value("sinking_alert") is True  # applied in memory: the next batch save retries it
 
 
 def test_a_failed_batch_save_is_reported_not_raised(app, monkeypatch):

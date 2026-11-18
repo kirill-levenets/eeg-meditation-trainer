@@ -81,7 +81,7 @@ def test_a_program_waiting_for_the_headset_keeps_its_lines_through_the_idle_refr
     program_mode(app, [DEEP])
     start_connecting(app, monkeypatch)  # the BT wait: the program has begun, the session connects
     app._program_settings.segments = [{"minutes": 5, "target": 60, "formula": "meditation_score"}]  # edited meanwhile
-    app._switch_screen("live_session")  # a Session-tab tap: the idle refresh
+    app._nav.switch("live_session")  # a Session-tab tap: the idle refresh
     assert app._live_screen.graph.is_visible("program_formula")
     assert _program_rows(app, monkeypatch) == ["Program: Deep"]
 

@@ -70,7 +70,7 @@ class GraphSeries:
         """Open the shared multi-select series popup for `graph`.
 
         Reads the graph's own catalog/labels/colors, so one presenter serves
-        every graph. Wired to all multi-series graphs by _wire_graph_affordances.
+        every graph. Wired to all multi-series graphs by GraphSet.wire_glyphs.
         For the live metrics graph, custom-formula rows also carry a Choose button
         that assigns a saved formula to that slot without leaving the picker.
         """

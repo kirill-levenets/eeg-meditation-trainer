@@ -1,6 +1,7 @@
 """The BT connection wait gives each connection its own no-data window: a link that drops and reconnects gets the full
 window on the new socket, and only packets that arrive on it count."""
 
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -50,8 +51,8 @@ def wait(fresh_app, monkeypatch):
     `tick(at, ...)` runs the wait's tick at T0 + at. `stream` is the app's own, `stream.stops` each time it was
     stopped."""
     clock = _Clock()
-    monkeypatch.setattr(am.time, "time", clock)
-    monkeypatch.setattr(am.time, "monotonic", clock)
+    monkeypatch.setattr(time, "time", clock)
+    monkeypatch.setattr(time, "monotonic", clock)
     app = fresh_app
     stream, link = app._real_stream, _Link(clock)
     monkeypatch.setattr(NeuroSkyStream, "is_connected", property(lambda self: link.connected))

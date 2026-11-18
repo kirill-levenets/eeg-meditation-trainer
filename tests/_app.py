@@ -118,7 +118,7 @@ def saved_session(app, ticks: int = 4, name: str = "a sit", **stats) -> int:
 
 def open_history(app, sid: int) -> None:
     """The History screen, its list loaded with session `sid` in it."""
-    app._switch_screen("history")
+    app._nav.switch("history")
     frames_until(lambda: app._history_screen.session_by_id(sid) is not None)
 
 
@@ -233,7 +233,7 @@ def start_connecting(app, monkeypatch, *, runner: bool = False) -> None:
     monkeypatch.setattr(app._real_stream, "start", reader_started)
     if not runner:
         monkeypatch.setattr(app._session, "start_running", lambda: None)
-    app._change_setting("use_mock", False)
+    app._user_settings.change("use_mock", False)
     app._real_stream.set_device(*HEADSET)
     app._controls.start()
 
@@ -285,7 +285,7 @@ def _retire(app) -> None:
     app._audio.cleanup()
     frames()  # what the app queued runs while it is whole
     _close_modals()
-    Window.unbind(on_key_down=app._on_key_down, on_keyboard=app._on_keyboard)
+    Window.unbind(on_key_down=app._on_key_down, on_keyboard=app._nav.on_keyboard)
     app._db.close()
 
 
@@ -338,9 +338,9 @@ class SharedApp:
         frames()  # what the test queued lands before its popups are closed
         _close_modals()
         app._fullscreen.close()
-        for trigger in app._settle_triggers.values():  # a slider the test moved: nothing of it lands in the next one
+        for trigger in app._user_settings._settle_triggers.values():  # a slider the test moved: nothing of it lands in the next one
             trigger.cancel()
-        app._last_back_time = 0.0  # as build() leaves it: this test's back press is not the next one's first
+        app._nav._last_back = 0.0  # as build() leaves it: this test's back press is not the next one's first
 
     def fresh(self):
         app = self.app
@@ -356,7 +356,7 @@ class SharedApp:
             if user["id"] != uid:
                 app._profiles.on_delete(user["id"])
         app._profiles.refresh()
-        app._switch_screen("live_session")
+        app._nav.switch("live_session")
         frames()
         _close_modals()
         assert app._current_user_id == uid and app._session.run is None and not app._gate.active(), "the shared app is not idle"

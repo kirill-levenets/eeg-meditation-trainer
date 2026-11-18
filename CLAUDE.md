@@ -76,17 +76,18 @@ Read it before changing that subsystem.
 - `app/audio_feedback/noise.py` — `AudioEngine`: below and reward feedback channels, bell/chime/warble, timer gong; `MediaPlayer` on Android.
   `app/ui/sound_sources.py` `SoundSources` — which sounds a session and Settings' Tests play, a missing file warned about. → [audio](docs/architecture/audio.md)
 - `app/storage/` — `database.py` (SQLite, migrations, write lock), `backup.py`, `fileops.py`, `android_saf.py`, `android_share.py`, `csv_export.py`.
-  `app/settings/registry.py` — per-user scalar settings.
+  `app/settings/registry.py` — per-user scalar settings; `app/ui/user_settings.py` `UserSettings` — their one change path, a continuous input's settle, load and save.
   `app/ui/backup_flow.py` `BackupFlow` — Settings → Data Backup. → [storage](docs/architecture/storage.md)
 - `app/ui/app_manager.py` — `EEGMeditationApp`: the composition root (screens, flows, their wiring), the active profile (`_activate_user`), settings load/save, the app's lifecycle.
   `app/ui/session_controls.py` `SessionControls` — the Session screen's controls (Start and its headset scan, Cancel, Retry, Pause, Stop, the marker), the threshold in force, the order of the app's part of each session event.
   `app/ui/app_context.py` — `AppContext`: what every flow reaches the app through (`_make_context`). → [app-platform](docs/architecture/app-platform.md#flows-and-the-app-context)
   `app/ui/profiles.py` — `ProfileGate` (the blocking profile picker), `Profiles` (Settings → Profile). → [app-platform](docs/architecture/app-platform.md#user-gate-and-profiles)
   `app/ui/startup.py` — the startup profile (`resolve_startup_user`), the theme, text size and line colours the UI is built in; `app/ui/toast.py` — the toast.
+  `app/ui/navigation.py` `Navigation` — which screen shows (a tab, `ctx.switch_screen`) and the back key's way back. → [app-platform](docs/architecture/app-platform.md#android-back-button)
   `app/ui/audio_metric.py` `AudioMetric` — the profile's choice of the metric that drives the sound, its Settings controls, their lock while a session is scored on it. → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
 - `app/ui/theme.py`, `app/ui/widgets/` — palette `C`/`F`/`S`, themed widgets, modals, legends, overlays.
   `app/ui/hooks.py` — `Hook`/`wire()`: the handlers the app plugs into a widget. → [ui-theme](docs/architecture/ui-theme.md)
-- `app/ui/raw_eeg_screen.py` — `ScrollableGraphWidget`, the one time-series graph class;
+- `app/ui/raw_eeg_screen.py` — `ScrollableGraphWidget`, the one time-series graph class; `graph_set.py` `GraphSet` (the app's six graphs: zoom groups, line width, corner buttons);
   `graph_series.py` `GraphSeries` (the series picker, each graph's saved selection), `line_colours.py` (the scored line's gradient), `graph_runs.py` (the run fold, Kivy-free);
   `graph_gestures.py` (its touch), `graph_glyphs.py` (its corner buttons), `graph_scroll.py` `GraphAwareScrollView` (a page of graphs), `touch_utils.py`, `render_stats.py`. → [graphs](docs/architecture/graphs.md)
 - `app/session/bt_wait.py` `BtWait` (the BT wait at a session's start: connect, first data, give up),
@@ -94,7 +95,7 @@ Read it before changing that subsystem.
   · `app/ui/headset.py` `Headset` (which headset: a profile's own, found by its one scan path; its name; Settings → Device)
   · `app/ui/power_exemption.py` `PowerExemption` (what may close a locked session: battery optimisation, the maker's power manager;
   the first-start alert and Settings → Device's row → [app-platform](docs/architecture/app-platform.md#background-running-android))
-  · `app/ui/live_session.py`, `shown_session.py` `ShownSession` (the session the screen shows: its graphs' mirror, its end card, the screen's part of every session event),
+  · `app/ui/live_session.py`, `shown_session.py` `ShownSession` (the session the screen shows: its graphs' mirror, its end card, the screen's part of every session event and of a resume),
   `settings_screen.py` (its larger sections in `settings_sections/`), `device_labels.py` → [live-session-and-settings](docs/architecture/live-session-and-settings.md);
   `history_screen.py`, `period_totals.py`, `history_flow.py` `HistoryFlow` (what the app does with History's rows) → [history](docs/architecture/history.md);
   `diary_screen.py` (session detail), `session_detail_flow.py` `SessionDetailFlow` (opens and loads it) → [session-detail](docs/architecture/session-detail.md);
@@ -214,10 +215,11 @@ The linked file explains the mechanism.
 
 - **The app is never usable without an active user**: `build()` gates on `resolve_startup_user(db)`; per-user handlers use `_require_user(action)`; every profile pick goes through `_activate_user(uid)`.
   A silent user-gate return or an ignored bool DB write fails `tests/test_silent_failure_guardrail.py` unless marked `# silent-ok: <reason>`. → [app-platform](docs/architecture/app-platform.md#user-gate-and-profiles)
-- Scalar per-user settings are `Setting` descriptors in `app/settings/registry.py`;
+- Scalar per-user settings are `Setting` descriptors in `app/settings/registry.py`, each defined by what holds or changes it (its `settings()`);
   `SettingsStore.load` always applies a value (stored or default), so no profile inherits another's.
   Add a new scalar setting as a descriptor, not a hand-written save/load.
-  A setting the store holds (`get=None`, the one copy while its profile is active) changes only through `_change_setting(key, value)`: hold, apply, persist. → [storage](docs/architecture/storage.md#per-user-settings)
+  A setting the store holds (`get=None`, the one copy while its profile is active) changes only through `UserSettings.change(key, value)` (`ctx.change_setting`): hold, apply, persist;
+  one its widget holds is persisted through `UserSettings.changed(key)` (`ctx.setting_changed`), never a save of every setting. → [storage](docs/architecture/storage.md#per-user-settings)
 
 ### Shared paths — reuse, don't add a second
 
@@ -250,10 +252,10 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 · count with its noun `theme.format_count`
 · a colour that must read on a surface `theme.with_contrast`
 · inline rename `theme.RenameRow`
-· debounced change `_after_settle`
+· debounced change `UserSettings.after_settle`
 · session titles and stats lines `app/ui/session_labels.py`
 · scoring `scoring.GoalAccrual`
-· graph glyphs `_wire_graph_affordances`
+· graph glyphs `GraphSet.wire_glyphs`
 · headset names `Headset.name()` / `device_labels.py`
 · a profile's headset `Headset.load` / `Headset.scan`, the paired devices `Headset.find_paired`
 · the Android check `android_jni.on_android()`, the app's Activity `android_jni.activity()`

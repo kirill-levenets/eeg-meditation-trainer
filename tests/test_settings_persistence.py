@@ -6,7 +6,9 @@ from app.config import APP
 from app.metrics.formula_slots import FORMULA_KEYS
 from app.session.session_program import PROGRAM_FORMULA_KEYS
 from app.ui.hooks import wire
+from app.ui.line_colours import LINE_COLOURS
 from app.ui.settings_screen import SettingsScreen
+from app.ui.theme import C, F
 from tests._app import FedSession, frames, program_mode, reload_with, setting_writes
 
 # --- change-callback -> store.persist wiring -------------------------------------
@@ -23,11 +25,56 @@ def test_the_alert_toggles_and_the_rotation_are_applied_and_persist_via_the_stor
     assert writes == [("disconnect_alert", "True"), ("subtle_alert", "True"), ("rotation", "90")]
 
 
+def test_a_theme_text_size_or_line_colours_pick_writes_that_setting(fresh_app, monkeypatch):
+    app = fresh_app
+    writes = setting_writes(app, monkeypatch)
+    app._settings_screen.on_theme_change(C.theme_name)  # each picker applies its choice, then tells the app
+    app._settings_screen.display.on_text_size(F.SCALE)
+    app._settings_screen.display.on_line_colours(LINE_COLOURS.name)
+    assert [key for key, _ in writes] == ["theme", "text_size", "line_colours"]
+
+
+def test_the_line_width_reaches_every_graph(fresh_app):
+    fresh_app._user_settings.change("line_width", 2.5)
+    assert [graph._line_width for graph in fresh_app._graphs.all()] == [2.5] * 6
+
+
+def test_a_new_profile_plays_rain_below_the_threshold_and_no_reward(fresh_app):
+    app, audio = fresh_app, fresh_app._settings_screen.audio
+    assert (app._user_settings.value("feedback_source"), app._user_settings.value("reward_source")) == ("noise", "none")
+    assert (audio.feedback_source, audio._reward_source) == ("noise", "none")
+
+
+def test_a_profiles_sound_files_and_stats_view_show_after_its_load(fresh_app):
+    app, uid = fresh_app, fresh_app._current_user_id
+    for key, value in (("feedback_source", "custom"), ("feedback_sound_path", "/sounds/rain.wav"),
+                       ("reward_source", "custom"), ("reward_sound_path", "/sounds/bell.wav"),
+                       ("timer_sound", "/sounds/gong.wav"), ("stats_view_mode", "aggregate")):
+        app._db.set_user_setting(uid, key, value)
+    app._activate_user(uid)
+    audio = app._settings_screen.audio
+    assert (audio._feedback_sound_path, audio._reward_sound_path) == ("/sounds/rain.wav", "/sounds/bell.wav")
+    assert app._settings_screen.timer.timer_sound_path == "/sounds/gong.wav"
+    assert app._live_screen.stats_mode == "aggregate"
+
+
+def test_a_history_view_pick_writes_it_and_a_profile_keeps_its_own(fresh_app, monkeypatch):
+    app, screen, uid = fresh_app, fresh_app._history_screen, fresh_app._current_user_id
+    writes = setting_writes(app, monkeypatch)
+    screen._on_toggle_pressed("bars")
+    assert writes == [("history_view_mode", "bars")]
+    app._activate_user(uid)
+    assert screen.view_mode == "bars"
+    app._db.set_user_setting(uid, "history_view_mode", "weekly")  # no such view: it loads as the calendar
+    app._activate_user(uid)
+    assert screen.view_mode == "calendar"
+
+
 def test_audio_formula_index_switch_copersists_metric(fresh_app, monkeypatch):
     # Switching the driving slot must persist BOTH audio_metric and audio_formula_index,
     # or a reload (which reconciles the index from audio_metric) reverts it.
     app = fresh_app
-    app._settings_store.change("audio_metric", "custom_formula")  # a FORMULA_KEY -> this slot drives audio
+    app._user_settings._store.change("audio_metric", "custom_formula")  # a FORMULA_KEY -> this slot drives audio
     writes = setting_writes(app, monkeypatch)
     app._audio_metric.on_formula_index(1)
     assert dict(writes) == {"audio_formula_index": "1", "audio_metric": "custom_formula_2"}
@@ -36,9 +83,9 @@ def test_audio_formula_index_switch_copersists_metric(fresh_app, monkeypatch):
 def test_a_program_slot_is_never_saved_as_the_audio_metric(fresh_app, monkeypatch):
     # A program slot outside a program reads 0: constant max noise. Healed on save as well as on load.
     app = fresh_app
-    app._settings_store.change("audio_metric", PROGRAM_FORMULA_KEYS[0])  # nothing writes one today; the save keeps it so
+    app._user_settings._store.change("audio_metric", PROGRAM_FORMULA_KEYS[0])  # nothing writes one today; the save keeps it so
     writes = setting_writes(app, monkeypatch)
-    app._settings_store.persist(app._current_user_id, "audio_metric")
+    app._user_settings._store.persist(app._current_user_id, "audio_metric")
     assert writes == [("audio_metric", "shamatha_score")]
 
 
@@ -110,7 +157,7 @@ def test_a_stored_formula_metric_loads_its_slot_and_the_load_writes_nothing(fres
     app = fresh_app
     reload_with(app, {"active_formulas": [{"name": "A", "formula": "alpha1"}, {"name": "B", "formula": "beta1"},
                                           {"name": "Custom 3", "formula": ""}]}, audio_metric=FORMULA_KEYS[1])
-    store = app._settings_store
+    store = app._user_settings._store
     assert (store.value("audio_metric"), store.value("audio_formula_index")) == (FORMULA_KEYS[1], 1)
     assert app._settings_screen.audio_formula_index == 1  # Settings shows the slot that drives the sound
     writes = setting_writes(app, monkeypatch)

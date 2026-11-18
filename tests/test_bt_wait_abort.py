@@ -91,7 +91,7 @@ def test_refused_start_undoes_setup_without_entering_the_wait(fresh_app, monkeyp
     monkeypatch.setattr(app._session.keep_awake, "release", lambda: releases.append(True))
     monkeypatch.setattr(app._real_stream, "start", lambda: False)  # the reader refuses: its last one is still alive
     app._real_stream._last_connect_error = "Previous connection is still closing."
-    app._change_setting("use_mock", False)
+    app._user_settings.change("use_mock", False)
     app._real_stream.set_device(*HEADSET)
     runners = calls_of(monkeypatch, app._session, "start_running")
 
