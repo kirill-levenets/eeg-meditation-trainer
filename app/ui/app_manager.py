@@ -33,10 +33,8 @@ from app.settings.registry import (
     BOOL,
     FLOAT,
     INT,
-    PATH,
     STR,
     Setting,
-    SettingsStore,
     held,
     kept,
 )
@@ -85,6 +83,7 @@ from app.ui.theme import (
     make_message_popup,
 )
 from app.ui.toast import android_toast, show_toast
+from app.ui.user_settings import UserSettings
 from app.ui.widgets.loading_overlay import LoadingOverlay
 
 
@@ -92,7 +91,6 @@ class EEGMeditationApp(App):
     """Main Kivy application for EEG Meditation Trainer."""
 
     title = APP.APP_NAME
-    _PERSIST_SETTLE_S: float = 0.5  # quiet time before a slider/text change is written
     icon = os.path.join(
         os.path.dirname(os.path.dirname(__file__)),
         "assets", "icons", "icon_128.png",
@@ -104,55 +102,9 @@ class EEGMeditationApp(App):
         self._db: DatabaseManager = DatabaseManager()
         self._audio: AudioEngine = AudioEngine()
         self._current_user_id: int | None = None
-        # True while _load_user_settings applies values, so its change callbacks don't re-persist them.
-        self._loading_settings: bool = False
-        self._settle_triggers: dict = {}  # input name -> its settle trigger (_after_settle)
-        self._settle_fns: dict = {}  # input name -> the function its trigger runs (the latest one given)
+        self._user_settings = UserSettings(self._db, user_id=lambda: self._current_user_id)
         self._formulas: FormulaSlots = FormulaSlots()
         self.serial_device_override: str | None = None
-
-    def _persist_user_setting(self, key: str) -> None:
-        """Persist one setting now via the registry (it reads the live value); no-op mid-load or unbuilt."""
-        if self._loading_settings:
-            return
-        store = getattr(self, "_settings_store", None)
-        if store is None:
-            return
-        try:
-            store.persist(self._current_user_id, key)
-        except sqlite3.Error as e:
-            # The value stays applied in memory; the next batch save retries it.
-            report_soft_error("settings_save_failed", f"Couldn't save setting {key!r}: {e}", app=self)
-
-    def _change_setting(self, key: str, value) -> None:
-        """The one change path of a setting the store holds: it holds and applies the value, persisted now, or once a
-        continuous input settles."""
-        self._settings_store.change(key, value)
-        if self._settings_store.settles(key):
-            self._persist_user_setting_later(key)
-        else:
-            self._persist_user_setting(key)
-
-    def _persist_user_setting_later(self, key: str) -> None:
-        """Persist a continuous input (slider drag, typing) once it settles, not on every step."""
-        if self._loading_settings:
-            return
-        self._after_settle(key, lambda: self._persist_user_setting(key))
-
-    def _after_settle(self, name: str, fn) -> None:
-        """Run the latest `fn` given for input `name` once it has stopped changing for _PERSIST_SETTLE_S."""
-        triggers = getattr(self, "_settle_triggers", None)
-        if triggers is None:
-            triggers = self._settle_triggers = {}
-        fns = getattr(self, "_settle_fns", None)
-        if fns is None:
-            fns = self._settle_fns = {}
-        fns[name] = fn
-        ev = triggers.get(name)
-        if ev is None:
-            ev = triggers[name] = Clock.create_trigger(lambda _dt: fns[name](), self._PERSIST_SETTLE_S)
-        ev.cancel()  # restart the settle window on every change
-        ev()
 
     # Map bottom-nav tab keys to screen groups
     _TAB_SCREENS = {
@@ -181,7 +133,7 @@ class EEGMeditationApp(App):
         self._bind_callbacks()
         self._link_graph_zoom()
         # After _bind_callbacks (it sets the fields get() snapshots as defaults), before any user load.
-        self._build_settings_store()
+        self._register_settings()
         resolved_user = self._restore_last_user()
         self._profiles.refresh()
         # The gate is on a resolved user, not on users existing: a reinstall, a restored DB, a deleted active profile or
@@ -219,7 +171,7 @@ class EEGMeditationApp(App):
                                 serial_override=lambda: self.serial_device_override)
         self._headset.load_aliases()
         self._session = RunningSession(self._ctx, self._audio, self._headset, on_event=lambda event: self._controls.on_event(event))
-        self._sounds = SoundSources(self._ctx, self._audio, self._settings_screen.timer)
+        self._sounds = SoundSources(self._ctx, self._audio, self._settings_screen.audio, self._settings_screen.timer)
         self._audio_metric = AudioMetric(self._ctx, self._session.program_run, self._settings_screen)
         self._program_settings = ProgramSettings(
             self._ctx, self._settings_screen.timer, self._live_screen,
@@ -255,7 +207,9 @@ class EEGMeditationApp(App):
         return AppContext(db=self._db, user_id=lambda: self._current_user_id, activate_user=self._activate_user,
                           require_user=self._require_user, on_main=self._on_main, switch_screen=self._switch_screen,
                           info=self._info_popup, toast=self._toast, confirm=self._confirm_action,
-                          setting=lambda key: self._settings_store.value(key), change_setting=self._change_setting,
+                          setting=lambda key: self._user_settings.value(key),
+                          change_setting=lambda key, value: self._user_settings.change(key, value),
+                          setting_changed=lambda key: self._user_settings.changed(key),
                           save_settings=self._save_user_settings, session=session)
 
     def _all_graphs(self) -> tuple:
@@ -322,7 +276,8 @@ class EEGMeditationApp(App):
         # Tap on graph to set marker (Android — no keyboard available)
         if android_jni.on_android():
             wire(self._live_screen.graph, on_tap=lambda *_a: self._controls.mark())
-        wire(self._live_screen, on_lines_shown=self._session.set_shown)
+        wire(self._live_screen, on_lines_shown=self._session.set_shown,
+             on_stats_mode=lambda _mode: self._user_settings.changed("stats_view_mode"))
 
         # Shared fullscreen-expand + series-picker glyphs on every graph
         self._wire_graph_affordances()
@@ -339,7 +294,7 @@ class EEGMeditationApp(App):
             on_threshold_change=self._on_threshold_change,
             on_audio_metric_change=self._audio_metric.on_change,
             on_audio_formula_index=self._audio_metric.on_formula_index,
-            on_theme_change=self._on_theme_change,
+            on_theme_change=lambda _name: self._user_settings.changed("theme"),  # the selector applied it to C
             on_profile_switch=self._profiles.on_switch,
             on_profile_create=self._profiles.on_create,
             on_profile_delete=self._profiles.on_delete,
@@ -348,9 +303,9 @@ class EEGMeditationApp(App):
         wire(
             self._settings_screen.audio,
             on_test_audio=self._sounds.on_test_audio,
-            on_sinking_alert_toggle=self._on_sinking_alert_toggle,
-            on_subtle_alert_toggle=self._on_subtle_alert_toggle,
-            on_disconnect_alert_toggle=self._on_disconnect_alert_toggle,
+            on_sinking_alert_toggle=lambda on: self._user_settings.change("sinking_alert", on),
+            on_subtle_alert_toggle=lambda on: self._user_settings.change("subtle_alert", on),
+            on_disconnect_alert_toggle=lambda on: self._user_settings.change("disconnect_alert", on),
             on_feedback_source_change=self._sounds.on_feedback_source_change,
             on_reward_source_change=self._sounds.on_reward_source_change,
         )
@@ -367,10 +322,10 @@ class EEGMeditationApp(App):
         )
         wire(
             self._settings_screen.display,
-            on_text_size=self._on_text_size_change,
-            on_line_colours=self._on_line_colours_change,
-            on_line_width_change=self._on_line_width_change,
-            on_rotate_screen=self._on_rotate_screen,
+            on_text_size=lambda _size: self._user_settings.changed("text_size"),
+            on_line_colours=lambda _name: self._user_settings.changed("line_colours"),
+            on_line_width_change=lambda width: self._user_settings.change("line_width", width),
+            on_rotate_screen=lambda rotation: self._user_settings.change("rotation", rotation),
         )
         wire(
             self._settings_screen.formulas,
@@ -402,7 +357,7 @@ class EEGMeditationApp(App):
             on_export_csv=self._history.on_export_csv,
             on_back=self._detail.on_diary_back,
             on_band_view_change=self._detail.persist_band_view,
-            on_band_collapse=lambda _collapsed: self._persist_user_setting("band_power_collapsed"),
+            on_band_collapse=lambda _collapsed: self._user_settings.changed("band_power_collapsed"),
         )
 
         wire(
@@ -412,9 +367,9 @@ class EEGMeditationApp(App):
             on_rename_session=self._history.on_rename_session,
             on_view_mode_change=self._history.on_view_mode_change,
             on_export_sessions=self._history.on_export_sessions_csv,
-            on_chart_collapse=lambda _collapsed: self._persist_user_setting("history_chart_collapsed"),
+            on_chart_collapse=lambda _collapsed: self._user_settings.changed("history_chart_collapsed"),
         )
-        wire(self._diary_screen.what_if, on_collapse=lambda _collapsed: self._persist_user_setting("what_if_collapsed"))
+        wire(self._diary_screen.what_if, on_collapse=lambda _collapsed: self._user_settings.changed("what_if_collapsed"))
 
     def _activate_user(self, uid: int) -> None:
         """Make `uid` the active profile and load its settings; every path that picks a user goes here."""
@@ -563,42 +518,17 @@ class EEGMeditationApp(App):
         else:
             show_toast(message)
 
-    def _on_threshold_change(self, value: int) -> None:
+    def _on_threshold_change(self, _value: int) -> None:
         if self._shown.mirror.metrics and not self._session.live():
             self._shown.clear()  # the last session's line is not the threshold the next one runs against
         # A drag is one change of the threshold in force, at the value it settles on, not one per slider step.
-        self._after_settle("apply_threshold", lambda: self._controls.apply_threshold(self._settings_screen.threshold))
-        self._persist_user_setting_later("threshold")
-        logger.debug(f"Threshold changed to {value}")
-
-    def _on_line_width_change(self, width: float) -> None:
-        self._change_setting("line_width", width)
+        self._user_settings.after_settle("apply_threshold",
+                                         lambda: self._controls.apply_threshold(self._settings_screen.threshold))
+        self._user_settings.changed("threshold")
 
     def _apply_line_width(self, width: float) -> None:
-        self._live_screen.graph.set_line_width(width)
-        self._live_screen.raw_graph.set_line_width(width)
-        self._live_screen.band_graph.set_line_width(width)
-        self._diary_screen._metrics_graph.set_line_width(width)
-        self._diary_screen._raw_eeg_graph.set_line_width(width)
-        self._diary_screen._freq_graph.set_line_width(width)
-        logger.debug(f"Line width changed to {width}")
-
-    def _on_rotate_screen(self, rotation: int) -> None:
-        self._change_setting("rotation", rotation)
-        logger.info(f"Screen rotation set to {rotation}")
-
-    def _on_text_size_change(self, size: float) -> None:
-        self._persist_user_setting("text_size")
-        logger.info(f"Text size set to {size:g}")
-
-    def _on_line_colours_change(self, name: str) -> None:
-        self._persist_user_setting("line_colours")
-        logger.info(f"Scored line colours set to {name}")
-
-    def _on_theme_change(self, theme_name: str) -> None:
-        """Persist the theme per user; the selector already applied it to C."""
-        self._persist_user_setting("theme")
-        logger.info(f"Theme changed to: {theme_name}")
+        for graph in self._all_graphs():
+            graph.set_line_width(width)
 
     def _require_user(self, action: str) -> int | None:
         """Return the active uid, or explain why the action can't run and return
@@ -618,18 +548,6 @@ class EEGMeditationApp(App):
     def _confirm_action(self, title, message, ok_text, on_ok, ok_color=None, on_cancel=None):
         """on_cancel runs on every close that isn't OK: Cancel, a tap outside, or Android back. Returns the popup."""
         return confirm_popup(title, message, ok_text, on_ok, ok_color=ok_color, on_cancel=on_cancel)
-
-    def _on_sinking_alert_toggle(self, active: bool) -> None:
-        self._change_setting("sinking_alert", active)
-        logger.info(f"Sinking alert {'enabled' if active else 'disabled'}")
-
-    def _on_subtle_alert_toggle(self, active: bool) -> None:
-        self._change_setting("subtle_alert", active)
-        logger.info(f"Distraction chime {'enabled' if active else 'disabled'}")
-
-    def _on_disconnect_alert_toggle(self, active: bool) -> None:
-        self._change_setting("disconnect_alert", active)
-        logger.info(f"Disconnect alert {'enabled' if active else 'disabled'}")
 
     # --- Data Backup (app/ui/backup_flow.py) ---
 
@@ -657,33 +575,20 @@ class EEGMeditationApp(App):
         ok.bind(on_release=_quit)
         popup.open()
 
-    def _build_settings_store(self) -> None:
-        """Build the settings registry; call once in build() before any user load, as a kept setting's default is its
-        holder's value now. A profile load applies them in this order."""
+    def _register_settings(self) -> None:
+        """Every per-user setting, each defined by what holds it; once in build() before any user load, as a kept
+        setting's default is its holder's value now. A profile load applies them in this order."""
         ss = self._settings_screen
 
         def set_threshold(v):
             ss.threshold = v
             self._controls.apply_threshold(v)
 
-        def apply_use_mock(v):
-            APP.USE_MOCK_DEVICE = v; ss.device._device_mode_cb.active = v  # an unchanged value doesn't re-fire its hook
-
-        self._settings_store = SettingsStore(self._db, [
-            *self._timer_settings(), *self._alert_settings(), *self._fold_settings(),
-            kept("threshold", INT, lambda: int(ss.threshold), set_threshold),
-            held("use_mock", BOOL, APP.USE_MOCK_DEVICE, apply_use_mock),
-            *self._sound_settings(), *self._display_settings()])
-
-    def _timer_settings(self) -> list[Setting]:
-        timer = self._settings_screen.timer
-
-        # Only Settings' controls: a Start reads them into the session's config (SessionSettings.read), and a change during
-        # the run, a profile's reload included, applies to the next session.
-        return [kept("timer_enabled", BOOL, lambda: timer.timer_enabled, lambda v: setattr(timer, "timer_enabled", v)),
-                kept("timer_minutes", INT, lambda: timer.timer_minutes, lambda v: setattr(timer, "timer_minutes", v)),
-                held("timer_sound", PATH, timer.timer_sound_path, lambda v: setattr(timer, "timer_sound_path", v),
-                     settle=True)]
+        self._user_settings.register([
+            *self._program_settings.settings(), *self._alert_settings(), *self._fold_settings(),
+            kept("threshold", INT, lambda: int(ss.threshold), set_threshold, settle=True),
+            *self._headset.settings(), *self._audio_metric.settings(), *self._sounds.settings(),
+            *self._display_settings()])
 
     def _alert_settings(self) -> list[Setting]:
         audio = self._settings_screen.audio
@@ -708,29 +613,6 @@ class EEGMeditationApp(App):
                 kept("what_if_collapsed", BOOL, lambda: ds.what_if.collapsed, ds.what_if.set_collapsed),
                 kept("band_power_collapsed", BOOL, lambda: ds.band_collapsed, ds.set_band_collapsed)]
 
-    def _sound_settings(self) -> list[Setting]:
-        """The metric that drives the sound, and the below and reward sources; a source's apply reads its path, so
-        each pair applies source first."""
-        audio, store = self._settings_screen.audio, lambda key: self._settings_store.value(key)
-
-        def apply_feedback_source(v):
-            audio.set_feedback_source(v, store("feedback_sound_path"))
-
-        def apply_feedback_path(v):
-            audio.set_feedback_source(store("feedback_source"), v)
-
-        def apply_reward_source(v):
-            audio.set_reward_source(v, store("reward_sound_path"))
-
-        def apply_reward_path(v):
-            audio.set_reward_source(store("reward_source"), v)
-
-        return [*self._audio_metric.settings(),
-                held("feedback_source", STR, "noise", apply_feedback_source),
-                held("feedback_sound_path", PATH, "", apply_feedback_path),
-                held("reward_source", STR, "none", apply_reward_source),  # the above-threshold channel: off by default
-                held("reward_sound_path", PATH, "", apply_reward_path)]
-
     def _display_settings(self) -> list[Setting]:
         display, ls = self._settings_screen.display, self._live_screen
 
@@ -747,12 +629,9 @@ class EEGMeditationApp(App):
                 kept("graph_zoom_seconds", FLOAT, self._saved_zoom_seconds, self._apply_saved_zoom),
                 kept("marker_hotkey", STR, lambda: display.marker_hotkey,
                      lambda v: setattr(self._settings_screen, "marker_hotkey", v)),
-                kept("stats_view_mode", STR, lambda: getattr(ls, "_stats_mode", "live"), self._apply_stats_mode),
+                kept("stats_view_mode", STR, lambda: ls.stats_mode, ls.set_stats_mode),
                 # Its default is the seed, not the startup profile's theme the UI was built in.
                 theme_setting(self._theme_seed), text_size_setting(), line_colours_setting()]
-
-    def _apply_stats_mode(self, mode: str) -> None:
-        self._live_screen.set_stats_mode(mode)
 
     def _save_user_settings(self) -> None:
         """Persist current UI settings for the active user."""
@@ -760,7 +639,7 @@ class EEGMeditationApp(App):
         if not uid:
             return  # silent-ok: batch persistence; no active user = nothing to save
         try:
-            self._settings_store.save(uid)          # all scalar per-user settings + theme
+            self._user_settings.save(uid)  # all scalar per-user settings + theme
             self._formula_settings.persist(uid)
             self._program_settings.persist(uid)
             self._graph_series.persist_all()  # the on-graph picker is the source of truth
@@ -772,17 +651,14 @@ class EEGMeditationApp(App):
 
     def _load_user_settings(self, user_id: int) -> None:
         """Restore persisted settings for a user."""
-        self._loading_settings = True  # suppress immediate re-persist of values we're applying
-        try:
+        with self._user_settings.loading():  # the values it applies are not persisted back
             self._load_user_settings_inner(user_id)
-        finally:
-            self._loading_settings = False
 
     def _load_user_settings_inner(self, user_id: int) -> None:
         g = self._db.get_user_setting
 
         # Always applies a value (default if absent), so no user inherits the previous user's settings.
-        self._settings_store.load(user_id)
+        self._user_settings.load(user_id)
 
         # Load formulas BEFORE GraphSeries.restore so the per-slot validity gate
         # sees real is_valid; the picker selection (graph_series_*) decides visibility.

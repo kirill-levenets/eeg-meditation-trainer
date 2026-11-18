@@ -1,5 +1,4 @@
 """A profile pick, a session start or an idle threshold change leaves the Session screen showing no earlier session."""
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -46,21 +45,20 @@ def test_clear_readout_shows_what_a_fresh_screen_shows():
     assert screen._timer_label.text == "00:01"  # no start time of the last session in front of it
 
 
-def _choose_avg(monkeypatch, screen) -> None:
-    monkeypatch.setattr("app.ui.live_session.App.get_running_app", MagicMock)  # the choice is saved with the profile
+def _choose_avg(screen) -> None:
     screen._stats_toggle.buttons["aggregate"].dispatch("on_release")
 
 
-def test_the_avg_switch_shows_the_last_sessions_numbers(monkeypatch):
+def test_the_avg_switch_shows_the_last_sessions_numbers():
     screen = _finished_screen()
-    _choose_avg(monkeypatch, screen)
+    _choose_avg(screen)
     assert "64" in _texts(screen)
 
 
-def test_the_avg_switch_after_a_clear_shows_no_sessions_numbers(monkeypatch):
+def test_the_avg_switch_after_a_clear_shows_no_sessions_numbers():
     screen = _finished_screen()
     screen.clear_readout()
-    _choose_avg(monkeypatch, screen)
+    _choose_avg(screen)
     assert "64" not in _texts(screen)
 
 
@@ -138,7 +136,7 @@ def test_re_picking_the_shown_profile_keeps_its_session_even_mid_session(fresh_a
     seen = _drops(app, monkeypatch)
     app._activate_user(app._current_user_id)
     assert seen == [] and len(app._shown.mirror.metrics) == 3 and app._live_screen.graph.total_points == 3
-    assert app._settings_store.value("line_width") == 2.5  # its settings were loaded again
+    assert app._user_settings.value("line_width") == 2.5  # its settings were loaded again
 
 
 def test_a_cold_start_shows_nothing_to_drop(fresh_app, monkeypatch):

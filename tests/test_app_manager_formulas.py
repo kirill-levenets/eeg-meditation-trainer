@@ -148,7 +148,7 @@ def test_record_includes_visible_and_drove_audio(fresh_app):
     app = fresh_app
     app._formulas.evaluators[0].set_formula("alpha + beta")
     app._formulas.names[0] = "Ratio"
-    app._settings_store.change("audio_metric", "custom_formula")
+    app._user_settings._store.change("audio_metric", "custom_formula")
     start_ticked_by_hand(app)
     app._live_screen.graph.set_visible("custom_formula", True)  # shown during the session: Start derives the series
     rec = json.loads(app._session.custom_formulas_json())

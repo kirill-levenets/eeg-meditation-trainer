@@ -70,7 +70,7 @@ def test_a_metric_held_mid_session_scores_the_next_session(fresh_app, monkeypatc
     fed = _session(fresh_app, monkeypatch)
     marks = calls_of(monkeypatch, fresh_app._live_screen, "set_training_series")
     _run(fed, SHAMATHA_HIGH[:3])  # 3 ticks above on shamatha
-    fresh_app._settings_store.change("audio_metric", "meditation_score")
+    fresh_app._user_settings._store.change("audio_metric", "meditation_score")
     stats = _run(fed, SHAMATHA_HIGH[3:])  # shamatha: tick 5 above (95), tick 4 not
     assert stats["score_metric_key"] == "shamatha_score" and stats["time_above_threshold"] == 2
     assert marks == [("shamatha_score",)]  # the legend marked once, at the first tick

@@ -1,7 +1,6 @@
 
 import time
 
-from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.graphics import Color, RoundedRectangle
@@ -16,7 +15,6 @@ from kivy.uix.widget import Widget
 
 from app.config import APP
 from app.eeg.band_spec import BAND_KEYS, GROUP_KEYS, GROUP_NAMES, group_powers
-from app.logger import logger
 from app.metrics.series_names import SERIES_NAMES
 from app.session.live_mirror import MirrorView
 from app.session.manager import NO_SCORE, LiveScore
@@ -254,6 +252,7 @@ class LiveSessionScreen(Screen):
 
     on_program_pick = Hook()  # a saved program picked on the duration picker, by its index
     on_lines_shown = Hook()  # the metrics graph's shown lines changed: their keys
+    on_stats_mode = Hook()  # the stats strip's view picked: "live" or "aggregate"
     on_duration_preset = Hook()  # a duration preset picked: minutes, or None for no timer
 
     def __init__(self, **kwargs) -> None:
@@ -1172,10 +1171,11 @@ class LiveSessionScreen(Screen):
 
     def _choose_stats_mode(self, mode: str) -> None:
         self.set_stats_mode(mode)
-        try:
-            App.get_running_app()._save_user_settings()
-        except Exception:
-            logger.exception("The stats view could not be saved")
+        self.on_stats_mode(self._stats_mode)
+
+    @property
+    def stats_mode(self) -> str:
+        return self._stats_mode
 
     def set_stats_mode(self, mode: str) -> None:
         """Show the stats strip as live values or session averages, redrawn at once."""

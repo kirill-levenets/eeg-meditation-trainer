@@ -32,5 +32,6 @@ class AppContext:
     confirm: Callable[..., Any]  # (title, message, ok_text, on_ok, ok_color=None, on_cancel=None) -> its popup
     setting: Callable[[str], Any]  # a held setting's value for the active profile
     change_setting: Callable[[str, Any], None]  # a held setting's one change path: hold, apply, persist
+    setting_changed: Callable[[str], None]  # a setting its widget holds changed there: persist it
     save_settings: Callable[[], None]
     session: SessionAccess

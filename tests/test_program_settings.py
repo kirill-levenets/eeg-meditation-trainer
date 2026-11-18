@@ -34,7 +34,8 @@ def test_a_duration_tap_is_a_simple_timer_and_leaves_program_mode(db, uid):
     assert (timer.timer_enabled, timer.timer_minutes, p.mode) == (True, 20, "simple")
     timer.set_program_mode.assert_called_with("simple")
     assert db.get_user_setting(uid, "timer_mode") == "simple"
-    p._ctx.save_settings.assert_called_once()  # the timer's fields
+    assert [c.args for c in p._ctx.setting_changed.call_args_list] == [("timer_enabled",), ("timer_minutes",)]
+    p._ctx.save_settings.assert_not_called()  # the timer's two fields persist, not every setting
     p.on_duration_preset(None)  # no limit
     assert timer.timer_enabled is False
 

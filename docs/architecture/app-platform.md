@@ -8,7 +8,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 - The app builds the screens (`_build_screens`) and the classes that own each concern (`_build_flows`: `RunningSession`, `HistoryFlow`, `SessionDetailFlow`, `ProfileGate`, `Profiles`, …), wires the screens' hooks to them,
   and gives each the same `AppContext` (`app/ui/app_context.py`, built once by `_make_context`).
   It holds what a flow reaches the app through: the database, the active profile (`user_id`, `activate_user`, `require_user`), the main thread (`on_main`), navigation (`switch_screen`);
-  the user's dialogs (`info`, `toast`, `confirm`), the profile's settings (`setting`, `change_setting`: a held value and its one change path, `save_settings`);
+  the user's dialogs (`info`, `toast`, `confirm`), the profile's settings (`setting`, `change_setting`: a held value and its one change path, `setting_changed`: a widget-held one's write, `save_settings`);
   and `SessionAccess` (whether a session runs or waits for the headset, its row, the refusal while it runs, its discard, an edited formula line for it).
   A flow takes the context and then only what is its own (its screens, the objects it works with); the context's callables read the app when called, so they see the profile and the session as they are then.
   A test of one flow builds the flow by its constructor on `tests/_context.stub_context()` (no profile, no session, UI calls at once or mocks);

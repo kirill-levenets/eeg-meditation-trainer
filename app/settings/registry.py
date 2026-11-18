@@ -26,9 +26,9 @@ STR = (lambda s: s, lambda v: "" if v is None else str(v))
 PATH = (lambda s: s.strip(), lambda v: "" if v is None else str(v).strip())  # a file's path: no surrounding blanks
 
 
-def kept(key: str, codec: tuple, get: Callable[[], Any], set_: Callable[[Any], None]) -> Setting:
+def kept(key: str, codec: tuple, get: Callable[[], Any], set_: Callable[[Any], None], settle: bool = False) -> Setting:
     """A setting another object holds (its widget, a screen): its default is that holder's value when registered."""
-    return Setting(key, get(), codec[0], codec[1], get, set_)
+    return Setting(key, get(), codec[0], codec[1], get, set_, settle)
 
 
 def held(key: str, codec: tuple, default: Any, apply: Callable[[Any], None], settle: bool = False) -> Setting:
@@ -89,10 +89,14 @@ class SettingsStore:
         """Persist every setting's current live value for `uid` in one transaction."""
         self._db.set_user_settings(uid, {s.key: s.serialize(self._live(s)) for s in self._settings})
 
-    def persist(self, uid: int, key: str) -> None:
-        """Write one setting now; no-op with no user or while load() applies values it would re-persist."""
+    def persist(self, uid: int, key: str) -> str | None:
+        """Write one setting now, returning what was written; no-op with no user or while load() applies values it
+        would re-persist."""
         if self._loading or not uid:
-            return
+            return None
         s = self._by_key.get(key)
-        if s is not None:
-            self._db.set_user_setting(uid, key, s.serialize(self._live(s)))
+        if s is None:
+            return None
+        written = s.serialize(self._live(s))
+        self._db.set_user_setting(uid, key, written)
+        return written

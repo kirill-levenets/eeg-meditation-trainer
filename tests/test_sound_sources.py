@@ -14,7 +14,7 @@ SETTINGS = {"feedback_source": "tone", "feedback_sound_path": "", "reward_source
 
 def _sounds() -> tuple[SoundSources, MagicMock]:
     audio = MagicMock()
-    sounds = SoundSources(stub_context(setting=SETTINGS.__getitem__), audio, MagicMock())
+    sounds = SoundSources(stub_context(setting=SETTINGS.__getitem__), audio, MagicMock(), MagicMock())
     sounds.warn_missing = MagicMock()
     return sounds, audio
 
@@ -46,7 +46,7 @@ def test_a_source_chosen_in_settings_is_held_with_its_path_first():
     store = held_store(feedback_source="noise", feedback_sound_path="", reward_source="none", reward_sound_path="")
     order = []
     ctx = stub_context(setting=store.value, change_setting=lambda key, value: (order.append(key), store.change(key, value)))
-    sounds = SoundSources(ctx, MagicMock(), MagicMock())
+    sounds = SoundSources(ctx, MagicMock(), MagicMock(), MagicMock())
     sounds.on_feedback_source_change("custom", " /sounds/rain.wav ")
     sounds.on_reward_source_change("heartbeat", "")
     assert order == ["feedback_sound_path", "feedback_source", "reward_sound_path", "reward_source"]

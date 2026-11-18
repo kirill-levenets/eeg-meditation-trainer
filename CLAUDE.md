@@ -76,7 +76,7 @@ Read it before changing that subsystem.
 - `app/audio_feedback/noise.py` — `AudioEngine`: below and reward feedback channels, bell/chime/warble, timer gong; `MediaPlayer` on Android.
   `app/ui/sound_sources.py` `SoundSources` — which sounds a session and Settings' Tests play, a missing file warned about. → [audio](docs/architecture/audio.md)
 - `app/storage/` — `database.py` (SQLite, migrations, write lock), `backup.py`, `fileops.py`, `android_saf.py`, `android_share.py`, `csv_export.py`.
-  `app/settings/registry.py` — per-user scalar settings.
+  `app/settings/registry.py` — per-user scalar settings; `app/ui/user_settings.py` `UserSettings` — their one change path, a continuous input's settle, load and save.
   `app/ui/backup_flow.py` `BackupFlow` — Settings → Data Backup. → [storage](docs/architecture/storage.md)
 - `app/ui/app_manager.py` — `EEGMeditationApp`: the composition root (screens, flows, their wiring), the active profile (`_activate_user`), settings load/save, the app's lifecycle.
   `app/ui/session_controls.py` `SessionControls` — the Session screen's controls (Start and its headset scan, Cancel, Retry, Pause, Stop, the marker), the threshold in force, the order of the app's part of each session event.
@@ -214,10 +214,11 @@ The linked file explains the mechanism.
 
 - **The app is never usable without an active user**: `build()` gates on `resolve_startup_user(db)`; per-user handlers use `_require_user(action)`; every profile pick goes through `_activate_user(uid)`.
   A silent user-gate return or an ignored bool DB write fails `tests/test_silent_failure_guardrail.py` unless marked `# silent-ok: <reason>`. → [app-platform](docs/architecture/app-platform.md#user-gate-and-profiles)
-- Scalar per-user settings are `Setting` descriptors in `app/settings/registry.py`;
+- Scalar per-user settings are `Setting` descriptors in `app/settings/registry.py`, each defined by what holds or changes it (its `settings()`);
   `SettingsStore.load` always applies a value (stored or default), so no profile inherits another's.
   Add a new scalar setting as a descriptor, not a hand-written save/load.
-  A setting the store holds (`get=None`, the one copy while its profile is active) changes only through `_change_setting(key, value)`: hold, apply, persist. → [storage](docs/architecture/storage.md#per-user-settings)
+  A setting the store holds (`get=None`, the one copy while its profile is active) changes only through `UserSettings.change(key, value)` (`ctx.change_setting`): hold, apply, persist;
+  one its widget holds is persisted through `UserSettings.changed(key)` (`ctx.setting_changed`), never a save of every setting. → [storage](docs/architecture/storage.md#per-user-settings)
 
 ### Shared paths — reuse, don't add a second
 
@@ -250,7 +251,7 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 · count with its noun `theme.format_count`
 · a colour that must read on a surface `theme.with_contrast`
 · inline rename `theme.RenameRow`
-· debounced change `_after_settle`
+· debounced change `UserSettings.after_settle`
 · session titles and stats lines `app/ui/session_labels.py`
 · scoring `scoring.GoalAccrual`
 · graph glyphs `_wire_graph_affordances`

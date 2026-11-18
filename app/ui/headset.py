@@ -10,6 +10,7 @@ from app.config import APP
 from app.crash_handler import report_soft_error
 from app.eeg.neurosky_stream import NeuroSkyStream
 from app.logger import logger
+from app.settings.registry import BOOL, Setting, held
 from app.ui.app_context import AppContext
 from app.ui.device_labels import MAX_DEVICE_ALIAS, device_label
 
@@ -40,6 +41,15 @@ class Headset:
         self.aliases: Mapping[str, str] = MappingProxyType({})
         # Moved by a profile load, a pick, a mode change and each profile scan: a profile scan applies while current.
         self._scan_seq = 0
+
+    def settings(self) -> list[Setting]:
+        """The device mode, held by the profile's settings: its apply writes `APP.USE_MOCK_DEVICE` and the checkbox (an
+        unchanged value doesn't re-fire the checkbox's hook)."""
+        def apply_use_mock(v):
+            APP.USE_MOCK_DEVICE = v
+            self._device_section._device_mode_cb.active = v
+
+        return [held("use_mock", BOOL, APP.USE_MOCK_DEVICE, apply_use_mock)]
 
     def load_aliases(self) -> None:
         aliases = self._ctx.db.get_json_setting("bt_device_aliases", {})

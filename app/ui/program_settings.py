@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 from app.logger import logger
 from app.session.session_program import SessionProgram, runnable_plan
+from app.settings.registry import BOOL, INT, Setting, kept
 from app.ui.app_context import AppContext
 from app.ui.graph_series import show_program_series
 from app.ui.settings_sections.common import (
@@ -26,6 +27,13 @@ class ProgramSettings:
         self.mode = "simple"
         self.segments: list[dict] = []
         self.name = ""  # the loaded or saved program's name
+
+    def settings(self) -> list[Setting]:
+        """The simple timer, held by its Settings controls: a Start reads them into the session's config, and a change
+        during the run, a profile's reload included, applies to the next session."""
+        timer = self._timer_section
+        return [kept("timer_enabled", BOOL, lambda: timer.timer_enabled, lambda v: setattr(timer, "timer_enabled", v)),
+                kept("timer_minutes", INT, lambda: timer.timer_minutes, lambda v: setattr(timer, "timer_minutes", v))]
 
     def persist(self, uid: int | None) -> None:
         """Persist the active editable program + its name + timer mode for a user."""
@@ -93,7 +101,8 @@ class ProgramSettings:
         self.mode = "simple"
         self._timer_section.set_program_mode("simple")
         self.persist(self._ctx.user_id())
-        self._ctx.save_settings()
+        self._ctx.setting_changed("timer_enabled")
+        self._ctx.setting_changed("timer_minutes")
         self.sync_picker()
 
     def on_mode_change(self, mode: str) -> None:

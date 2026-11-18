@@ -37,9 +37,11 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 ## Per-user settings
 
 - **Per-user settings registry** (`app/settings/registry.py`):
-  each scalar per-user setting is declared once as a `Setting(key, default, parse, serialize, get, set, settle=False)` descriptor,
-  built in `_build_settings_store()` (in `build()`, after the screens exist and BEFORE any user load, so each default is snapshotted from the app's constructed initial state).
-  It joins one list per Settings section (`_timer_settings`, `_alert_settings`, `_fold_settings`, `_sound_settings`, `_display_settings`), made with `kept` (another object holds the value) or `held` (the store holds it);
+  each scalar per-user setting is declared once as a `Setting(key, default, parse, serialize, get, set, settle=False)` descriptor, made with `kept` (another object holds the value) or `held` (the store holds it).
+  **Each is defined by what holds or changes it**, in its `settings()`:
+  `SoundSources` (the feedback and reward sources and their paths, the timer sound), `Headset` (the device mode), `ProgramSettings` (the timer's enable and minutes), `AudioMetric` (the audio metric and its formula slot);
+  the settings no other owner reads or changes are the app's: the threshold, declared in `_register_settings` itself, and the alert toggles, fold states and display settings (`_alert_settings`, `_fold_settings`, `_display_settings`).
+  `EEGMeditationApp._register_settings()` hands them all to `UserSettings.register` (`app/ui/user_settings.py`) once, in `build()`, after the screens exist and BEFORE any user load, so each kept default is snapshotted from the app's constructed initial state;
   a load applies them in that order, which matters only within a pair that reads each other (a sound source and its path, the formula slot and the audio metric).
   They are the threshold, audio metric/index, feedback+reward source/path, alert toggles, timer enable/minutes/sound, line width and colours, rotation, graph zoom, marker hotkey, stats mode, device mock, the fold states (History chart, What-if, band power), **theme** and text size.
   `SettingsStore.load(uid)` applies each setting as its parsed stored value **or its default when absent/invalid**
@@ -47,7 +49,9 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `save(uid)` serializes all in **one transaction** (`DatabaseManager.set_user_settings`, one `executemany` + commit, not one commit per key); `persist(uid, key)` writes one key immediately (change-callback path), suppressed while loading.
   **The store holds a setting's value** when its descriptor has no `get` (`get=None`): the store's copy is the only one while the profile is active;
   `set` applies it (its consumers and its widget, idempotent), and `SettingsStore.change(key, value)` is its one change path.
-  The app's `_change_setting(key, value)` is what a widget's hook calls: the store holds and applies the value, then it is persisted at once or, for a continuous input (`settle=True`: a slider, typing), once it settles.
+  `UserSettings.change(key, value)` is what a widget's hook calls (a flow: `ctx.change_setting`): the store holds and applies the value, then it is persisted at once or, for a continuous input (`settle=True`: a slider, typing), once it settles.
+  A setting its widget holds is persisted after the widget changed it, through `UserSettings.changed(key)` (a flow: `ctx.setting_changed`; the stats view: its `on_stats_mode` hook), at once or, with `settle=True` (the threshold slider), once it settles;
+  never by saving every setting.
   Readers ask the store (`value(key)`), from any thread; save and persist write the held value, never a widget's.
   The store holds every setting that had two copies kept in step by hand (a consumer and its widget, or an app field and its widget):
   the three alert toggles, the line width (persisted once a drag settles), the rotation, the feedback and reward sources and their paths, the timer sound (once typing settles).
@@ -63,11 +67,12 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The device mode is held: its apply writes `APP.USE_MOCK_DEVICE` and the checkbox, and the checkbox's hook (`Headset.on_mode_toggle`) changes it through `change_setting`; a headset pick flips the checkbox.
   A write to the checkbox that applies the mode in force (a profile load's, a refusal's put-back) fires the hook with the value the store already holds (`ctx.setting("use_mock")`), and the hook does nothing.
   The hook refuses a change while a session runs (`ctx.session.refused`), as the scored metric is: the session is saved under its device and its stream stopped by it.
-  `_persist_user_setting(key)` (key only — the store reads the live value) catches `sqlite3.Error` → soft error;
-  the threshold slider, the timer sound and the held settings with `settle=True` go through `_persist_user_setting_later(key)`:
-  a per-key Kivy `Clock` trigger (`_after_settle`) restarted on every change (`_PERSIST_SETTLE_S` = 0.5 s), so a drag is one write, not one fsync per step on the UI thread.
-  `_load_user_settings`/`_save_user_settings`/`_persist_user_setting` are thin calls into the store;
-  the **aggregates** (custom formulas, saved programs/formulas, the edited program, per-graph series) keep their own handling (`FormulaSettings`, `ProgramSettings`, `GraphSeries`).
+  `UserSettings` writes one key (the store reads the live value), logs it, and turns a `sqlite3.Error` into a soft error (the value stays applied; the next batch save retries it);
+  a setting with `settle=True` waits on `UserSettings.after_settle(key, …)`:
+  a per-name Kivy `Clock` trigger restarted on every change (`UserSettings.SETTLE_S` = 0.5 s), so a drag is one write, not one fsync per step on the UI thread.
+  Nothing is written while a profile's settings load (`UserSettings.loading()`, around the store's load and the aggregates'), so the values a load applies are not written back.
+  The app's `_load_user_settings`/`_save_user_settings` order a profile's load and save: the store's (`UserSettings.load`/`save`), then
+  the **aggregates** (custom formulas, saved programs/formulas, the edited program, per-graph series) with their own handling (`FormulaSettings`, `ProgramSettings`, `GraphSeries`).
   **Theme is per-user** (its descriptor, `get=C.theme_name`/`set=C.set_theme`);
   the global `theme` key (`theme_seed(db)`), left from before themes were per-user and no longer written, is only the default for a profile with no theme of its own;
   `build()` builds the UI in `startup_theme(db)` (`app/ui/startup.py`) — the startup profile's theme, else that seed — so the profile load applies the theme already showing (a no-op);

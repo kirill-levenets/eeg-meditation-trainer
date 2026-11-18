@@ -233,7 +233,7 @@ def start_connecting(app, monkeypatch, *, runner: bool = False) -> None:
     monkeypatch.setattr(app._real_stream, "start", reader_started)
     if not runner:
         monkeypatch.setattr(app._session, "start_running", lambda: None)
-    app._change_setting("use_mock", False)
+    app._user_settings.change("use_mock", False)
     app._real_stream.set_device(*HEADSET)
     app._controls.start()
 
@@ -338,7 +338,7 @@ class SharedApp:
         frames()  # what the test queued lands before its popups are closed
         _close_modals()
         app._fullscreen.close()
-        for trigger in app._settle_triggers.values():  # a slider the test moved: nothing of it lands in the next one
+        for trigger in app._user_settings._settle_triggers.values():  # a slider the test moved: nothing of it lands in the next one
             trigger.cancel()
         app._last_back_time = 0.0  # as build() leaves it: this test's back press is not the next one's first
 
