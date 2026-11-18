@@ -46,6 +46,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 - Android hardware back button (`Navigation.on_keyboard`, `app/ui/navigation.py`, bound to `Window.on_keyboard`): it consumes key 27 (returns `True`) so Kivy's default exit-on-escape never fires, then routes by precedence.
   `Navigation` is also which screen shows: a bottom tab (`on_tab`), a flow's `ctx.switch_screen` (`switch`: the screen refreshed as it is entered, by its `ScreenHooks.entering`: History's stale list, the Session screen's duration picker; and its tab marked).
+  When the app comes back (`on_resume`, then `_refresh_ui_after_resume`), `Navigation.resumed` runs the shown screen's `ScreenHooks.resumed` (History: `on_pre_enter`, which redraws the chart and totals on another day), then `ShownSession.resumed` redraws a running session.
   While the user gate is active (`ProfileGate.active`, incl. the pre-popup schedule window), a back press goes to the double-press exit: never into the app, but a fresh-install user who declines to create a profile can still leave.
   Else an open `Popup`/`ModalView` is left to dismiss itself (the handler returns `False`);
   else an open fullscreen graph overlay closes (`GraphFullscreen.close()`, which runs its stored `_restore` closure);

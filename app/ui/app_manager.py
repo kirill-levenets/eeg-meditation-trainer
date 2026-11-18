@@ -518,7 +518,7 @@ class EEGMeditationApp(App):
             *self._program_settings.settings(), *self._alert_settings(), *self._fold_settings(),
             kept("threshold", INT, lambda: int(ss.threshold), set_threshold, settle=True),
             *self._headset.settings(), *self._audio_metric.settings(), *self._sounds.settings(),
-            *self._display_settings()])
+            *self._history.settings(), *self._display_settings()])
 
     def _alert_settings(self) -> list[Setting]:
         audio = self._settings_screen.audio
@@ -585,8 +585,6 @@ class EEGMeditationApp(App):
             self._load_user_settings_inner(user_id)
 
     def _load_user_settings_inner(self, user_id: int) -> None:
-        g = self._db.get_user_setting
-
         # Always applies a value (default if absent), so no user inherits the previous user's settings.
         self._user_settings.load(user_id)
 
@@ -598,9 +596,6 @@ class EEGMeditationApp(App):
         self._graph_series.restore(user_id)
 
         self._headset.load(user_id)  # after store.load, which applies use_mock
-
-        history_mode = g(user_id, "history_view_mode") or "calendar"
-        self._history_screen.set_view_mode(history_mode)
 
         # Sync live-screen preset highlight (incl. program "P") with loaded state
         self._program_settings.sync_picker()

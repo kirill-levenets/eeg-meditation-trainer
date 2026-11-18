@@ -39,11 +39,11 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 - **Per-user settings registry** (`app/settings/registry.py`):
   each scalar per-user setting is declared once as a `Setting(key, default, parse, serialize, get, set, settle=False)` descriptor, made with `kept` (another object holds the value) or `held` (the store holds it).
   **Each is defined by what holds or changes it**, in its `settings()`:
-  `SoundSources` (the feedback and reward sources and their paths, the timer sound), `Headset` (the device mode), `ProgramSettings` (the timer's enable and minutes), `AudioMetric` (the audio metric and its formula slot);
+  `SoundSources` (the feedback and reward sources and their paths, the timer sound), `Headset` (the device mode), `ProgramSettings` (the timer's enable and minutes), `AudioMetric` (the audio metric and its formula slot), `HistoryFlow` (the History view, calendar or bars);
   the settings no other owner reads or changes are the app's: the threshold, declared in `_register_settings` itself, and the alert toggles, fold states and display settings (`_alert_settings`, `_fold_settings`, `_display_settings`).
   `EEGMeditationApp._register_settings()` hands them all to `UserSettings.register` (`app/ui/user_settings.py`) once, in `build()`, after the screens exist and BEFORE any user load, so each kept default is snapshotted from the app's constructed initial state;
   a load applies them in that order, which matters only within a pair that reads each other (a sound source and its path, the formula slot and the audio metric).
-  They are the threshold, audio metric/index, feedback+reward source/path, alert toggles, timer enable/minutes/sound, line width and colours, rotation, graph zoom, marker hotkey, stats mode, device mock, the fold states (History chart, What-if, band power), **theme** and text size.
+  They are the threshold, audio metric/index, feedback+reward source/path, alert toggles, timer enable/minutes/sound, line width and colours, rotation, graph zoom, marker hotkey, stats mode, device mock, the History view, the fold states (History chart, What-if, band power), **theme** and text size.
   `SettingsStore.load(uid)` applies each setting as its parsed stored value **or its default when absent/invalid**
   — it ALWAYS applies a value, so a fresh/partial user can never inherit the previously-active user's in-memory value.
   `save(uid)` serializes all in **one transaction** (`DatabaseManager.set_user_settings`, one `executemany` + commit, not one commit per key); `persist(uid, key)` writes one key immediately (change-callback path), suppressed while loading.

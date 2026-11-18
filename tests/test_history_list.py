@@ -18,7 +18,6 @@ from kivy.weakproxy import WeakProxy as KivyWeakProxy
 
 import app.ui.history_flow as history_flow
 from app.metrics.formula_slots import FormulaSlots
-from app.storage.database import DatabaseManager
 from app.ui.history_flow import HistoryFlow
 from app.ui.history_screen import HistoryScreen, _checkbox_glyph, _SessionRow
 from app.ui.hooks import wire
@@ -413,21 +412,10 @@ def test_history_loads_without_the_full_screen_spinner(monkeypatch):
     flow._history_screen.load_sessions.assert_called_once()
 
 
-def test_the_history_view_tapped_is_stored_for_the_profile(tmp_path):
-    db = DatabaseManager(db_path=str(tmp_path / "t.db"))
-    try:
-        uid = db.create_user("me")
-        active = [uid]
-        screen = HistoryScreen()
-        wire(screen, on_view_mode_change=_flow(screen, db=db, user_id=lambda: active[0]).on_view_mode_change)  # as build() does
-
-        def tap(label: str) -> None:
-            next(b for b in screen._toggle_col.walk() if getattr(b, "text", None) == label).dispatch("on_release")
-
-        tap("14d")
-        assert db.get_user_setting(uid, "history_view_mode") == "bars"
-        active[0] = None  # no profile: the view changes, nothing is stored
-        tap("Cal")
-        assert screen._view_mode == "calendar" and db.get_user_setting(uid, "history_view_mode") == "bars"
-    finally:
-        db.close()
+def test_a_history_view_tapped_goes_to_the_profiles_settings():
+    screen = HistoryScreen()
+    flow = _flow(screen)
+    wire(screen, on_view_mode_change=flow.on_view_mode_change)  # as build() does
+    next(b for b in screen._toggle_col.walk() if getattr(b, "text", None) == "14d").dispatch("on_release")
+    assert screen.view_mode == "bars"
+    flow._ctx.setting_changed.assert_called_once_with("history_view_mode")  # written by the settings, held by the screen

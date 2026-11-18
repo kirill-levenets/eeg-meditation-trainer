@@ -58,6 +58,18 @@ def test_a_profiles_sound_files_and_stats_view_show_after_its_load(fresh_app):
     assert app._live_screen.stats_mode == "aggregate"
 
 
+def test_a_history_view_pick_writes_it_and_a_profile_keeps_its_own(fresh_app, monkeypatch):
+    app, screen, uid = fresh_app, fresh_app._history_screen, fresh_app._current_user_id
+    writes = setting_writes(app, monkeypatch)
+    screen._on_toggle_pressed("bars")
+    assert writes == [("history_view_mode", "bars")]
+    app._activate_user(uid)
+    assert screen.view_mode == "bars"
+    app._db.set_user_setting(uid, "history_view_mode", "weekly")  # no such view: it loads as the calendar
+    app._activate_user(uid)
+    assert screen.view_mode == "calendar"
+
+
 def test_audio_formula_index_switch_copersists_metric(fresh_app, monkeypatch):
     # Switching the driving slot must persist BOTH audio_metric and audio_formula_index,
     # or a reload (which reconciles the index from audio_metric) reverts it.

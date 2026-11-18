@@ -8,6 +8,7 @@ from datetime import datetime as _dt
 
 from app.crash_handler import report_soft_error
 from app.logger import logger, timed
+from app.settings.registry import STR, Setting, kept
 from app.storage.android_share import copy_to_documents
 from app.storage.csv_export import build_sessions_zip
 from app.ui.app_context import AppContext
@@ -17,6 +18,10 @@ from app.ui.theme import format_count
 def sessions_for_view(db, current_uid: int | None) -> list:
     """The active profile's sessions; none while no profile is active."""
     return db.get_all_sessions(user_id=current_uid) if current_uid else []
+
+
+def _view_mode(stored: str) -> str:
+    return stored if stored in ("calendar", "bars") else "calendar"
 
 
 class HistoryFlow:
@@ -52,12 +57,15 @@ class HistoryFlow:
         running = self._ctx.session.running_id()
         return [s for s in sessions_for_view(self._ctx.db, uid) if running is None or s.get("id") != running]
 
-    def on_view_mode_change(self, mode: str) -> None:
-        """Persist the user's preferred History view layout."""
-        uid = self._ctx.user_id()
-        if not uid:
-            return  # silent-ok: pref persistence; view already changed, no user to save to
-        self._ctx.db.set_user_setting(uid, "history_view_mode", mode)
+    def settings(self) -> list[Setting]:
+        """The History view a profile keeps, its chart as a calendar or bars, held by the screen: a value the screen
+        doesn't know loads as the calendar, so no profile keeps another's."""
+        screen = self._history_screen
+        return [kept("history_view_mode", (_view_mode, STR[1]), lambda: screen.view_mode, screen.set_view_mode)]
+
+    def on_view_mode_change(self, _mode: str) -> None:
+        """The History view picked on its screen: the profile keeps it."""
+        self._ctx.setting_changed("history_view_mode")
 
     # ---- a session's row ----
 
