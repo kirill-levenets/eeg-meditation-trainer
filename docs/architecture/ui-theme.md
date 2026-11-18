@@ -61,6 +61,8 @@ With no active user the first-run popup (the user gate) is shown.
   `tests/test_theme_switch.py` shows each screen in one palette from its default view (each screen is built once per module and handed back reset to that view, `tests/_shared_screens.py`);
   it switches and checks every widget colour property and canvas `Color` for a colour from the old palette:
   after the switch and after each state reachable later (every Settings section opened, the summary card, select mode, both History views, every session-detail tab).
+  A switch repaints every themed widget alive, dead ones not yet collected included, so the module starts by freeing what earlier modules left:
+  `tests/_app.py` `drop_dead_widgets` runs their pending Clock events, which hold some of them strongly, then a collection.
 
 - **Text size** (`F`, #76) follows a runtime change the way colours follow a theme switch.
   Every font size comes from `F`:

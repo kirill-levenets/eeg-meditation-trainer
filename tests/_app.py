@@ -1,5 +1,6 @@
 """The app made by its real constructor and build(), as main.py makes it, on a temp DB: what conftest's `build_app`
 fixture hands the app-level tests. A flow on its own is built by its constructor with tests/_context.stub_context."""
+import gc
 import time
 
 import pytest
@@ -22,6 +23,13 @@ from app.ui.theme import C, F
 def frames(n: int = 10) -> None:
     for _ in range(n):
         EventLoop.idle()
+
+
+def drop_dead_widgets() -> None:
+    """What earlier tests left: their pending Clock events run (one holds a TextInput, and through its parents a whole
+    screen, strongly), then the garbage is collected, so a theme switch repaints no dead widget."""
+    frames()
+    gc.collect()
 
 
 def frames_until(done, seconds: float = 3.0) -> None:
