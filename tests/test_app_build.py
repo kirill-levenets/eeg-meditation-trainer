@@ -69,28 +69,28 @@ def _pick_saved(app) -> None:
     app._headset.on_select(*SAVED)
 
 
-def _mode_writes(app) -> list:
+def _mode_writes(app, monkeypatch) -> list:
     """Every DB write of `use_mock` from now on, as (uid, value)."""
     writes, put = [], app._db.set_user_setting
-    app._db.set_user_setting = lambda uid, key, value: (writes.append((uid, value)) if key == "use_mock" else None,
-                                                        put(uid, key, value))[1]
+    monkeypatch.setattr(app._db, "set_user_setting", lambda uid, key, value: (
+        writes.append((uid, value)) if key == "use_mock" else None, put(uid, key, value))[1])
     return writes
 
 
-def test_a_profile_switch_applies_the_device_mode_without_writing_it(build_app):
-    app = build_app(last_used("me"))
+def test_a_profile_switch_applies_the_device_mode_without_writing_it(fresh_app, monkeypatch):
+    app = fresh_app
     real = app._db.create_user("real")
     app._db.set_user_setting(real, "use_mock", "False")
-    writes = _mode_writes(app)
+    writes = _mode_writes(app, monkeypatch)
     app._profiles.on_switch(real)
     frames()
     assert APP.USE_MOCK_DEVICE is False and not app._settings_screen.device._device_mode_cb.active
     assert app._user_settings.value("use_mock") is False and writes == []
 
 
-def test_the_mode_checkbox_and_a_headset_pick_change_the_mode_through_the_store(build_app):
-    app = build_app(last_used("me"))
-    uid, writes = app._current_user_id, _mode_writes(app)
+def test_the_mode_checkbox_and_a_headset_pick_change_the_mode_through_the_store(fresh_app, monkeypatch):
+    app = fresh_app
+    uid, writes = app._current_user_id, _mode_writes(app, monkeypatch)
     app._settings_screen.device._device_mode_cb.active = False  # the user's toggle
     assert APP.USE_MOCK_DEVICE is False and app._user_settings.value("use_mock") is False
     app._settings_screen.device._device_mode_cb.active = True
@@ -103,15 +103,15 @@ def test_the_mode_checkbox_and_a_headset_pick_change_the_mode_through_the_store(
     assert app._db.get_user_setting(uid, "use_mock") == "True"
 
 
-def test_picking_the_saved_headset_while_idle_leaves_the_mock(build_app):
-    app = build_app(last_used("me"))
+def test_picking_the_saved_headset_while_idle_leaves_the_mock(fresh_app):
+    app = fresh_app
     _pick_saved(app)  # on Mock Data
     assert APP.USE_MOCK_DEVICE is False and app._user_settings.value("use_mock") is False
     assert not app._settings_screen.device._device_mode_cb.active
 
 
-def test_a_mode_change_during_a_session_is_refused(build_app, monkeypatch):
-    app = build_app(last_used("me"))
+def test_a_mode_change_during_a_session_is_refused(fresh_app, monkeypatch):
+    app = fresh_app
     app._controls.start()
     frames_until(lambda: len(app._shown.mirror.metrics) >= 1, 5.0)
     label = app._live_screen._device_label
@@ -128,9 +128,9 @@ def test_a_mode_change_during_a_session_is_refused(build_app, monkeypatch):
     assert app._db.get_all_sessions(app._current_user_id)[0]["session_name"].endswith("Mock")
 
 
-def test_a_slider_value_off_by_rounding_applies_its_width_once(build_app, monkeypatch):
+def test_a_slider_value_off_by_rounding_applies_its_width_once(fresh_app, monkeypatch):
     # The setting holds the rounded value; written back onto the slider, it would fire the slider's hook again.
-    app = build_app(last_used("me"))
+    app = fresh_app
     applied = calls_of(monkeypatch, app._graphs.live[0], "set_line_width")
     app._settings_screen.display._line_width_slider.value = 1.3000000000000003  # a drag's raw value
     assert applied == [(1.3,)] and app._user_settings.value("line_width") == 1.3
@@ -138,8 +138,8 @@ def test_a_slider_value_off_by_rounding_applies_its_width_once(build_app, monkey
     assert app._settings_screen.display._line_width_slider.value == 2.0 and applied[-1] == (2.0,)
 
 
-def test_mock_sessions_on_their_real_runner_are_each_saved_once(build_app):
-    app = build_app(last_used("me"))
+def test_mock_sessions_on_their_real_runner_are_each_saved_once(fresh_app):
+    app = fresh_app
     uid = app._current_user_id
     for n in (1, 2):  # the second Start: a fresh run, ticking
         app._controls.start()
@@ -173,8 +173,8 @@ def _start_and_tick(app) -> None:
     frames_until(lambda: len(app._shown.mirror.metrics) >= 2, 5.0)
 
 
-def test_a_program_session_owns_the_live_graph_until_its_ending_derives_the_idle_series(build_app, monkeypatch):
-    app = build_app(last_used("me"))
+def test_a_program_session_owns_the_live_graph_until_its_ending_derives_the_idle_series(fresh_app, monkeypatch):
+    app = fresh_app
     uid, g = app._current_user_id, app._live_screen.graph
     app._program_settings.segments = [dict(s) for s in _DEEP]
     app._program_settings.on_mode_change("program")  # the idle preview: shown, not listed
@@ -201,8 +201,8 @@ def test_a_program_session_owns_the_live_graph_until_its_ending_derives_the_idle
     frames_until(lambda: app._session.run is None, 2.0)
 
 
-def test_a_duration_tap_while_a_program_previews_saves_nothing_of_it(build_app):
-    app = build_app(last_used("me"))
+def test_a_duration_tap_while_a_program_previews_saves_nothing_of_it(fresh_app):
+    app = fresh_app
     uid = app._current_user_id
     saved = _saved_selection(app, ["shamatha_score", "distraction"])
     app._program_settings.segments = [dict(s) for s in _DEEP]
@@ -212,8 +212,8 @@ def test_a_duration_tap_while_a_program_previews_saves_nothing_of_it(build_app):
     assert not app._live_screen.graph.is_visible("program_formula")
 
 
-def test_a_start_derives_the_idle_series_whatever_an_editor_change_left(build_app, monkeypatch):
-    app = build_app(last_used("me"))
+def test_a_start_derives_the_idle_series_whatever_an_editor_change_left(fresh_app, monkeypatch):
+    app = fresh_app
     app._program_settings.segments = [dict(s) for s in _DEEP]
     app._program_settings.on_mode_change("program")  # the preview, marked
     app._program_settings.segments = []  # a writer that skipped the derivation: the next Start is a simple session
@@ -223,8 +223,8 @@ def test_a_start_derives_the_idle_series_whatever_an_editor_change_left(build_ap
     frames()
 
 
-def test_an_unrunnable_program_previews_the_saved_selection_and_saves_nothing(build_app):
-    app = build_app(last_used("me"))
+def test_an_unrunnable_program_previews_the_saved_selection_and_saves_nothing(fresh_app):
+    app = fresh_app
     uid = app._current_user_id
     saved = _saved_selection(app, ["shamatha_score", "distraction"])
     app._program_settings.segments = [{"minutes": 0, "target": 60, "formula": "meditation_score"}]  # a hand-edited record
