@@ -180,7 +180,7 @@ def test_an_ending_reloads_the_full_graph_and_sets_the_duration(fed):
     fed.tick()  # one tick shown before the lock
     _locked_for(fed, 9)
     assert _points(screen.graph) == 1
-    app._stop_and_save(reason="timer")
+    app._controls.stop_and_save(reason="timer")
     frames()
     duration = app._db.get_all_sessions(app._current_user_id)[0]["duration"]
     assert _points(screen.graph) == 10  # full session, not partial
@@ -214,7 +214,7 @@ def test_a_reload_keeps_each_points_colouring():
 def test_resume_skips_entirely_when_not_running(fed, monkeypatch):
     app, screen = fed.app, fed.app._live_screen
     _locked_for(fed, 5)
-    app._stop_and_save(reason="timer")  # the timer expired during the pause: its summary card covers the live screen
+    app._controls.stop_and_save(reason="timer")  # the timer expired during the pause: its summary card covers the live screen
     frames()
     loads = _reloads(fed, monkeypatch)
     stats = calls_of(monkeypatch, screen, "update_stats")

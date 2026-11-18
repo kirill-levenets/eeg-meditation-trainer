@@ -70,7 +70,10 @@ class SoundSources:
     def prepare_session(self, program, timer_sound: str) -> list[str]:
         """The session's players: its feedback (a program's per-segment sources) and the reward channel, a missing file
         warned about, the timer's end sound (`timer_sound`, "" for none or the bell) too; a program's per-segment
-        source ids, for its run."""
+        source ids, for its run. The session takes the engine over first: the last session's gong stops, and so does a
+        Settings Test still playing (allowed while a Start scans for its headset)."""
+        self._audio.stop_timer_bell()
+        self._audio.end_test()
         gid = self.global_feedback_id()
         if program:
             sources, seg_ids, initial = feedback_plan(program, gid)

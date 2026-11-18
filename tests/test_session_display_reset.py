@@ -70,7 +70,7 @@ def shown(fresh_app, monkeypatch):
     `app.notes_writes` each notes text written, `app.bells` each stop of the end gong."""
     app = fresh_app
     start_ticked_by_hand(app, ticks=3)
-    app._stop_and_save(reason="timer")
+    app._controls.stop_and_save(reason="timer")
     frames()
     app.me, app.sid = app._current_user_id, app._live_screen.summary_session_id
     assert app.sid is not None and app._shown.owner == app.me
@@ -212,7 +212,7 @@ def test_the_end_of_a_session_shows_its_numbers_before_its_scoring_is_reset(fres
     fed = _scored_session(app, monkeypatch)
     for value in (60, 70, 40):
         fed.tick(metrics={"shamatha_score": value})
-    app._stop_and_save()
+    app._controls.stop_and_save()
     frames()
     app._live_screen.set_stats_mode("aggregate")
     assert _texts(app._live_screen) == ["57", "1s", "1s"]
@@ -233,7 +233,7 @@ def test_the_end_of_a_session_locked_since_its_first_minute_shows_its_whole_numb
     app.on_pause()
     for _ in range(3):
         fed.tick(metrics={"shamatha_score": 80})
-    app._stop_and_save(reason="timer")  # the timer ran out while locked
+    app._controls.stop_and_save(reason="timer")  # the timer ran out while locked
     frames()
     assert _texts(app._live_screen)[0] == "75"
 
@@ -242,7 +242,7 @@ def test_a_start_that_never_connected_leaves_no_owner(fresh_app, monkeypatch):
     app = fresh_app
     start_connecting(app, monkeypatch)
     assert app._shown.owner == app._current_user_id
-    app._on_connect_cancel()
+    app._controls.cancel()
     assert app._shown.owner is None
 
 

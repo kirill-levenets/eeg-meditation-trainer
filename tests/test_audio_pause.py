@@ -82,12 +82,12 @@ def test_the_pause_button_twice_brings_the_same_sounds_back(fresh_app, monkeypat
     players = dict(engine._feedback_players)
     assert len(players) == 2
 
-    app._on_pause()  # pause
+    app._controls.toggle_pause()  # pause
     frames()
     assert app._session.manager.state is SessionState.PAUSED
     for p in players.values():
         p.played = False
-    app._on_pause()  # resume
+    app._controls.toggle_pause()  # resume
     frames()
 
     assert app._session.manager.state is SessionState.RUNNING and engine._feedback_players == players

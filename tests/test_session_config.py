@@ -83,6 +83,19 @@ def test_a_session_saves_its_formula_lines_as_the_live_graph_shows_them(fresh_ap
     assert _saved_visibility(app) == {"A": False, "B": True}
 
 
+def test_a_line_the_starts_refresh_hides_is_saved_hidden(fresh_app, monkeypatch):
+    # Typing a formula shows its line; the Start's refresh puts the saved selection back, which hides it: the config is
+    # read after that refresh, so the session saves the line as the graph shows it.
+    app = fresh_app
+    graph = app._live_screen.graph
+    reload_with(app, {"active_formulas": [], f"graph_series_{graph.graph_id}": ["shamatha_score"]})
+    app._formula_settings.on_slot_change(0, "Typed", "alpha1")
+    assert graph.is_visible("custom_formula")
+    fed = FedSession(app, monkeypatch)
+    fed.tick()
+    assert graph.is_visible("custom_formula") is False and _saved_visibility(app) == {"Typed": False}
+
+
 def test_a_program_session_saves_the_formula_lines_its_start_left_shown(fresh_app, monkeypatch):
     # A program's Start shows its own lines and hides the Settings formula lines after the session took its config:
     # what it saves is what the graph shows then.
@@ -144,7 +157,7 @@ def test_an_ending_stops_the_mock_stream_and_keeps_the_headsets_link(fresh_app, 
     session = HeadsetSession(app, monkeypatch) if on_headset else FedSession(app, monkeypatch)
     real, mock = calls_of(monkeypatch, app._real_stream, "stop"), calls_of(monkeypatch, app._session.mock_stream, "stop")
     session.tick()
-    app._stop_and_save()
+    app._controls.stop_and_save()
     frames()
     assert (real, bool(mock)) == ([], not on_headset)
 

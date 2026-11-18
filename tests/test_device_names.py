@@ -219,7 +219,7 @@ def _refusal() -> str:
 
 def test_switching_headsets_while_a_session_runs_is_refused(fresh_app):
     app = fresh_app
-    app._on_start()
+    app._controls.start()
     app._headset.on_select(GREY, "MindWave Mobile")
     assert "switching headsets" in _refusal() and app._real_stream._device_address != GREY
 

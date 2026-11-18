@@ -61,7 +61,7 @@ def test_closing_the_app_stops_the_service_with_or_without_a_session(build_app, 
     monkeypatch.setattr(app._session.keep_awake, "stop_service", lambda: stopped.append(True))
     monkeypatch.setattr(app._session.keep_awake, "release", lambda: (released.append(True), release()))
     if in_session:
-        app._on_start()
+        app._controls.start()
     app.on_stop()
     # The close releases what a session held, its wake lock too: its ending's teardown can't run while the app closes.
     assert (stopped, released) == ([True], [True])

@@ -8,7 +8,10 @@ from app.session.session_program import RunnablePlan
 
 @dataclass(frozen=True)
 class Connected:
-    """The headset's first data started the session."""
+    """The session started: on the headset's first data, a link kept from the last session, or (`on_mock`) at once on
+    the mock data."""
+
+    on_mock: bool = False
 
 
 @dataclass(frozen=True)

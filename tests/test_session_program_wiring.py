@@ -12,6 +12,7 @@ from tests._app import (
     FedSession,
     calls_of,
     frames,
+    popup_titles,
     popups,
     program_mode,
     reload_with,
@@ -194,13 +195,12 @@ def test_a_program_start_names_the_formulas_that_cant_run_in_a_popup(formulas, l
 def test_the_start_popup_waits_for_the_next_frame(fresh_app, monkeypatch):
     # The start finishes its setup first, whatever the popup does: the notice goes out as its run's event.
     app = fresh_app
-    infos = calls_of(monkeypatch, app, "_info_popup")
     program_mode(app, [{"minutes": 1, "target": 50, "formula": {"name": "Broken", "formula": "*"}}])
     monkeypatch.setattr(app._session, "start_running", lambda: None)  # the test's frames run the session's events
-    app._on_start()
-    assert infos == []
+    app._controls.start()
+    assert "Formula error in this program" not in popup_titles()
     frames()
-    assert [args[0] for args in infos] == ["Formula error in this program"]
+    assert popup_titles() == ["Formula error in this program"]
 
 
 def test_program_shows_exactly_its_metric_set_whole_session():
@@ -290,12 +290,12 @@ def test_idle_program_preview_shows_program_set(fresh_app, monkeypatch):
         if begun:
             app._change_setting("use_mock", True)
             start_ticked_by_hand(app, ticks=1)
-            app._stop_and_save()
+            app._controls.stop_and_save()
             frames()
             app._shown.on_ok()
         else:
             start_connecting(app, monkeypatch)
-            app._on_connect_cancel()
+            app._controls.cancel()
         assert g.program_keys == preview and g.is_visible("meditation_score")  # the idle series derived again
         app._graph_series.persist(g)
         assert _saved_live_series(app) == ["shamatha_score"]

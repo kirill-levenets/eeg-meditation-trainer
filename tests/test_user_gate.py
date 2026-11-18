@@ -192,7 +192,7 @@ def test_discard_running_session_deletes_partial_row_and_resets_ui(fresh_app):
     # doomed profile — discard must delete it and reuse the shared UI teardown.
     app = fresh_app
     _checkpointed_session(app)
-    app._discard_running_session()
+    app._controls.discard()
     frames()
     assert _session_rows(app) == 0  # orphan removed
     assert app._session.recorder.session_id is None and app._session.recorder._buffer == []
@@ -205,7 +205,7 @@ def test_restore_refused_while_session_running(fresh_app):
     # #3: a restore closes the DB and relaunches — a running session would be
     # silently dropped. The entry point must refuse with an explanation.
     app = fresh_app
-    app._on_start()
+    app._controls.start()
     app._backup_flow.on_restore_pressed()
     assert popup_titles() == ["Session in progress"]  # explained, not silent; the restore flow never started
 

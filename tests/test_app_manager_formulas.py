@@ -117,7 +117,7 @@ def test_a_new_session_averages_only_its_own_ticks(fresh_app, monkeypatch, next_
     fed.raw = {**fed.raw, "alpha1": 100.0}
     for _ in range(4):
         fed.tick()
-    app._stop_and_save()
+    app._controls.stop_and_save()
     frames()
     app._shown.close(keep_notes=False)
     if next_profile != "same":

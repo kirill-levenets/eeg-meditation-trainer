@@ -11,12 +11,16 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The real stream stays `Headset.stream` (the link outlives sessions).
   It reaches the app only through a `SessionHost` (the database, the active profile, the main thread; the app's `AppContext` is one) and its events, so `app/session/` imports neither Kivy nor `app.ui` at import time (`tests/test_session_package.py` loads every module of it in a fresh interpreter and fails on either);
   `report_soft_error` (`app/crash_handler.py`), which a failed save or tick calls, still loads them on that path.
-- **A session runs on its config.** Start reads Settings once into a frozen `SessionConfig` (`app/session/session_config.py`, built by the app's `_session_config`):
-  the metric that drives the sound, the Settings formulas' names and texts, the timer's minutes (a program's total, or none), its end sound, mock or headset (from the stream Start chose) and the device's name.
-  `RunningSession.begin(config)` builds the session's own formula lines from it (so their `avg()` windows begin empty), arms its timer and resets the engine and the record.
+- **A session runs on its config.** Start reads Settings once into a frozen `SessionConfig` (`app/session/session_config.py`, built by `SessionSettings.read`, `app/ui/session_settings.py`: Settings as a Start and an ending use them):
+  the metric that drives the sound, the Settings formulas' names and texts, the timer's minutes (a program's total, or none), its end sound, mock or headset (from the stream Start chose), the device's name,
+  the live graph's shown lines (read after the Start refreshed the idle series), the threshold it starts with (a program's first target, else the slider) and the program with its name.
+- **A Start has the app's part and the session's.** The app (`SessionControls._start`) reads the config, empties the display and makes the screen ready;
+  the session opens the run (`RunningSession.open`), then `prepare(config, feedback_ids)` builds its own formula lines (so their `avg()` windows begin empty), arms its timer, resets the engine and the record, starts its program and holds the phone awake,
+  and, once the app has locked a program's threshold, `connect()` starts it at once on the mock data or a link kept from the last session (`Connected`, raised at once) or enters the BT wait, and starts its runner unless the reader refused (`StartFailed`, raised at once).
+  Every ending undoes both through `SessionControls._undo`: the session's part first (`RunningSession.undo_setup`: its run dropped, the program ended, timer and manager reset, the wake lock released), then the screen's.
   While the session runs, nothing reads a setting (`tests/test_session_config.py` fails a tick or a checkpoint that does), so a Settings edit or a profile's reload (re-picking the active profile is allowed mid-session) applies to the next session.
   Three changes reach a running session's state, each as an explicit call:
-  the threshold of a simple session (`_put_threshold_in_force`; `SessionManager` owns it),
+  the threshold of a simple session (`SessionControls.put_threshold_in_force`; `SessionManager` owns it),
   an edited formula line (`FormulaSettings.on_slot_change` → `SessionAccess.set_formula` → `RunningSession.set_formula`), which Settings allows for a slot the sound isn't set to,
   and the lines the live graph shows (`SessionConfig.shown` at the Start, then `LiveSessionScreen.on_lines_shown` → `RunningSession.set_shown` on every change, by the picker, a formula edit or a program), which the session saves with its formula lines.
   The session reads no widget for what it saves: the scored line's name is its own formula line's or the line's default (`FormulaSlots.line_name`).
@@ -29,10 +33,12 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 - **One writer: the run's runner.** Start sets the session up and connects on the main thread, then `RunningSession.start_running()` starts the run's runner, a Python daemon thread (`SessionRunner`) instead of a Kivy `Clock`, so EEG compute, audio volume updates and DB writes go on while the Android screen is locked.
   From then until the run ends the runner alone writes the session's state: every `UPDATE_FREQUENCY` (0.5 s) it runs a tick (a BT-wait step, or the session's tick), and in between the commands the main thread sends.
   The commands are `toggle_pause`, `stop`, `discard`, `abort` (a Cancel), `mark`, `set_threshold`, `set_formula` and `set_shown`; each carries the run it was sent for and does nothing for another or for one that ended.
-  What the screen must do comes back as events (`app/session/session_events.py`), queued for the main thread for that run only (`on_main_for`), and handled by the app's `_on_session_event`:
-  the app acts on `Connected`, `StartFailed`, `Paused`, `Resumed`, `Ended`, `LinkChanged` (the headset's row) and `Notice` (a popup), and hands the rest to `ShownSession.show`, which applies them to the Session screen:
+  What the screen must do comes back as events (`app/session/session_events.py`), queued for the main thread for that run only (`on_main_for`) and delivered by `RunningSession._deliver`:
+  first to `SessionControls.on_event`, then the session's own sound for it (`docs/architecture/audio.md`).
+  The app acts on `StartFailed` and `Ended` (the teardown's order), `LinkChanged` and a headset's `Connected` (the headset's row) and `Notice` (a popup), and hands the screen's part of every event to `ShownSession.show`, which applies them to the Session screen:
+  `Connected` (Running, the start time, the overlay gone, a mock start's device row), `Paused`/`Resumed` (the controls),
   `Ticked` (the graphs and readout), `SegmentStarted`, `ProgramShown`/`ProgramDropped` (a program's lines), `Connecting`/`Waiting` (the BT wait's overlay) and `Alert`.
-  An event raised on the main thread (the BT wait's and a program's start, a program's end) goes to `_on_session_event` at once, so nothing on screen moves a frame later;
+  An event raised on the main thread (the BT wait's and a program's start, a program's end) is delivered at once, so nothing on screen moves a frame later;
   the session and its parts (`ProgramRun`, `BtWait`, `SessionWatch`) hold no widget.
   Before the runner starts and after it ends a command runs where it is sent, which is how a test drives a session by hand (`tests/_app.py`).
   Pause and Resume show when the runner has done them (normally within milliseconds): the screen follows the session's state, never ahead of it.
@@ -75,9 +81,10 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Leaving the app and both backups go through `RunningSession.checkpoint_or_report()`, which logs and reports a failure (`session_checkpoint_failed`) and carries on: the settings flush, the stop-and-save of `on_stop` and the rest of the backup still run.
   A pending marker is set on the tick's row before it is recorded.
   The row is dated and named by the session's start (`SessionManager.started_at`, 0.0 before a start and after `reset()` → `checkpoint_session(started_at=…)` and `session_name`), not by its first save a minute later.
-  **Every ending saves through one path** (#39): `RunningSession._finish(run, reason, alert)` on the writer, then `_finalize_stop_ui(stats, id)` on the main thread (UI teardown).
+  **Every ending saves through one path** (#39): `RunningSession._finish(run, reason, alert)` on the writer, then `SessionControls._finish_ui(stats, id)` on the main thread (UI teardown).
   `_finish` claims its run (`run.mark_ended()`: one ending wins), silences the noise (`AudioEngine.mute()`, setVolume only, so nothing plays on while the save waits on the write lock), saves (`persist`: the stop's stats and the last ticks, no Kivy) and queues `Ended(stats, session_id, alert)` for its run;
-  the app's handler closes a "Stop session?" still open, shows the alert if a check ended it, tears the players down (`AudioEngine.stop()`, on the main thread) and calls `_finalize_stop_ui`.
+  the app's handler closes a "Stop session?" still open, shows the alert if a check ended it and calls `SessionControls._finish_ui`; then the session tears its players down (`AudioEngine.stop()`, on the main thread).
+  `SessionControls._finish_ui` orders the screen's part: `ShownSession.reload_whole` (the graphs from the mirror and the whole session's score, before the reset), the teardown (`SessionControls._undo`, with `ShownSession.idle`), then `ShownSession.finished` (FINISHED, the saved duration, History marked dirty, the end card).
   A save that fails is reported (`session_save_failed`, past its cooldown) and the run still ends on screen, with no end card: its setup undone, the wake lock and service released.
   A user Stop asks `_confirm_action("Stop session?", ...)`, whose OK sends `stop("user")`; the session goes on recording while the dialog is open, so Cancel loses nothing and Stop saves up to then.
   There is no discard path; deleting is the end card's confirmed action.
@@ -111,7 +118,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `HistoryScreen.remove_sessions(ids)` removes those rows and model entries in place (see the session list in [history.md](history.md)): no rebuild, no spinner, wherever the user is.
   History never lists the running session: its row exists from the first checkpoint, with that checkpoint's stats, and a History reload during the session would list it with them, frozen there until the next reload.
   `RunningSession.running_id()` (`recorder.session_id` while `live()`) is left out of History's list (`HistoryFlow.finished_sessions`) and Settings' profile counts.
-  `_finalize_stop_ui` marks History dirty, so the session appears once it ends.
+  `ShownSession.finished` marks History dirty, so the session appears once it ends.
   `delete_sessions` also refuses it (`running_id()` among the ids): its next checkpoints would write ticks for no session.
 
 ## Timer
@@ -123,7 +130,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   then `play_timer_sound()` **last** (a one-shot `MediaPlayer` gong, which rings through the lock), with the end sound the session's config holds.
   Saving before the gong, and the players' teardown on the main thread, mean a hung audio call can never cost the session or the summary.
   The gong plays until the file ends or the end card closes (every close goes through `ShownSession.close`), which calls `AudioEngine.stop_timer_bell()` (releases the gong `MediaPlayer` on the main thread);
-  `_start_session_common` also calls it, to stop a long custom gong still ringing from the previous session.
+  `SoundSources.prepare_session` (a Start's) also calls it, to stop a long custom gong still ringing from the previous session.
 
 ## Screen lock and Android
 
@@ -149,7 +156,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `hold()` at a session's setup, `release()` at its ending's teardown or an abandoned start, and at `on_stop`, where a session's ending can't tear down (the main thread is closing the app).
 - While the app is paused (screen locked) the tick skips its per-tick UI update: N minutes locked would queue ~120·N full graph redraws, which froze the screen on resume.
   The runner records every tick into the session-lifetime mirror instead (`LiveMirror` in `app/session/live_mirror.py`, `RunningSession.mirror`, which the shown session shows: `_shown.mirror`, no Kivy).
-  `LiveSessionScreen.load_mirror(mirror.snapshot())` reloads the live graphs from it in one batch on resume (while the session runs) and at the session's end (`_finalize_stop_ui`):
+  `LiveSessionScreen.load_mirror(mirror.snapshot())` reloads the live graphs from it in one batch on resume (while the session runs) and at the session's end (`SessionControls._finish_ui`):
   without it, after a session that ended during a lock, the graph would show only the pre-lock seconds while History shows the real duration.
   The mirror records each marked tick as (tick, raw sample) counts since the session's start, and the reload hands the markers to each graph's `load_static_data` with its data;
   counts, not indices, because a full buffer drops its oldest: a marker's index shifts with it, and one that fell off is gone.

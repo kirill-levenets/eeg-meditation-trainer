@@ -56,10 +56,10 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   the stats view and the marker hotkey (their widgets), the timer's enable and minutes (the Timer section).
   A profile's load must not change a running session: re-picking the active profile is allowed mid-session and reloads every setting.
   A running session reads none of them: it runs on the `SessionConfig` its Start read ([session](session.md#state-machine-and-tick)), so the timer's enable, minutes and end sound set the Timer section only;
-  a running program's threshold is guarded (`_apply_threshold`).
+  a running program's threshold is guarded (`SessionControls.apply_threshold`).
   The audio metric and its formula slot are held too (`AudioMetric.settings`: a stored program slot heals to the baseline at load, an out-of-range slot clamps);
   behind controllers that can refuse a change while a session runs and show the one in force again (`AudioMetric.show`).
-  The threshold keeps its slider as the one holder of the stored value (the value in force is `_put_threshold_in_force`'s).
+  The threshold keeps its slider as the one holder of the stored value (the value in force is `SessionControls.put_threshold_in_force`'s).
   The device mode is held: its apply writes `APP.USE_MOCK_DEVICE` and the checkbox, and the checkbox's hook (`Headset.on_mode_toggle`) changes it through `change_setting`; a headset pick flips the checkbox.
   A write to the checkbox that applies the mode in force (a profile load's, a refusal's put-back) fires the hook with the value the store already holds (`ctx.setting("use_mock")`), and the hook does nothing.
   The hook refuses a change while a session runs (`ctx.session.refused`), as the scored metric is: the session is saved under its device and its stream stopped by it.

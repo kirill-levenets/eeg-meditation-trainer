@@ -27,7 +27,7 @@ def _session_ended_on(app, screen: str) -> None:
     """A mock session of two ticks, ended (a timer's way: no confirm) while `screen` shows."""
     start_ticked_by_hand(app, ticks=2)
     app._switch_screen(screen)
-    app._stop_and_save(reason="timer")
+    app._controls.stop_and_save(reason="timer")
     frames()
 
 
@@ -71,7 +71,7 @@ def test_a_running_sessions_row_is_counted_once_it_ends(fresh_app):
     app._session.checkpoint_or_report()  # its first checkpoint: the row exists
     assert len(app._db.get_all_sessions(uid)) == 2
     assert app._profiles.count_sessions(uid) == 1 == len(app._history.finished_sessions(uid))
-    app._stop_and_save()
+    app._controls.stop_and_save()
     assert app._profiles.count_sessions(uid) == 2 == len(app._history.finished_sessions(uid))
 
 

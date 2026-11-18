@@ -39,7 +39,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `_enter_segment` repoints audio, goal and marker to the segment's key (a built-in key or a program slot);
   its `SegmentStarted` event only relabels and shows a custom segment's line and moves the `»` marker (a built-in segment touches no visibility).
   `end`'s `ProgramDropped` resets all program-slot labels, force-hides all `PROGRAM_FORMULA_KEYS` and clears the mark;
-  every ending then derives the live graph's idle series again (`_undo_session_setup` → `ProgramSettings.sync_picker`): the loaded program's preview in program mode, else the saved selection.
+  every ending then derives the live graph's idle series again (`SessionControls._undo` → `SessionSettings.teardown` → `ProgramSettings.sync_picker`): the loaded program's preview in program mode, else the saved selection.
   A program's set on the live graph, and its mark, have two writers, the running program and that idle derivation (`refresh_live_series`, `GraphSeries.apply_saved`, also run at Start before `begin`);
   the idle one does nothing while a session runs or connects: the session owns the graph, a re-pick of the active profile included.
 - `PROGRAM_FORMULA_KEYS` stay out of persistence, so they never leak into `graph_series_*`:
@@ -54,7 +54,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The detail's metrics graph skips `persist` the same way while it shows a program session's lines.
 - Legend "training now" marker: `LegendBar.set_items(items, active_text=None)` bolds the matching item and prefixes it with `"» "` (geometric triangles render as tofu in this Kivy/Roboto build).
   `LiveSessionScreen.set_training_series(key)` passes the active key to the legend (the line's colouring comes per point with the tick's scored key, [graphs](graphs.md));
-  `ProgramRun`'s `SegmentStarted` sets it at each segment boundary crossing, and `_start_session_common` and `_undo_session_setup` clear it (`None`).
+  `ProgramRun`'s `SegmentStarted` sets it at each segment boundary crossing, and `SessionControls._start` and `SessionControls._undo` clear it (`None`).
 
 ## Settings and pickers
 

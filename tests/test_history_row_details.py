@@ -243,7 +243,7 @@ def _ended_session(app) -> tuple[dict, float]:
     """A mock session of two ticks, ended and saved: (its row, when it started)."""
     start_ticked_by_hand(app, ticks=2)
     started = app._session.manager.started_at
-    app._stop_and_save()
+    app._controls.stop_and_save()
     frames()
     return app._db.get_all_sessions(app._current_user_id)[0], started
 
@@ -468,6 +468,6 @@ def test_a_failed_title_read_still_shows_the_end_card(fresh_app, monkeypatch):
 
     start_ticked_by_hand(app, ticks=2)
     monkeypatch.setattr(app._db, "get_session", unreadable)
-    app._stop_and_save()  # the session is saved; only its title couldn't be read
+    app._controls.stop_and_save()  # the session is saved; only its title couldn't be read
     frames()
     assert app._live_screen.summary_session_id is not None and app._live_screen._summary_session_title == ""

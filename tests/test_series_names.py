@@ -58,7 +58,7 @@ def test_a_programs_labels_go_when_it_ends(app):
 def test_a_program_of_built_in_metrics_lists_no_program_lines(app, monkeypatch):
     program_mode(app, [{"minutes": 5, "target": 50, "formula": "shamatha_score"},
                        {"minutes": 5, "target": 60, "formula": "meditation_score"}])
-    app._on_start()
+    app._controls.start()
     assert _program_rows(app, monkeypatch) == []
 
 
@@ -66,7 +66,7 @@ def test_a_program_lists_only_the_lines_it_computes(app, monkeypatch):
     segments = [DEEP, {"minutes": 5, "target": 60, "formula": "shamatha_score"}]
     assert list(runnable_plan(SessionProgram(segments)).evaluators) == ["program_formula"]
     program_mode(app, segments)
-    app._on_start()
+    app._controls.start()
     assert _program_rows(app, monkeypatch) == ["Program: Deep"]
 
 
@@ -88,8 +88,8 @@ def test_a_program_waiting_for_the_headset_keeps_its_lines_through_the_idle_refr
 
 def test_no_program_lines_once_the_program_ends(app, monkeypatch):
     program_mode(app, [DEEP])
-    app._on_start()
-    app._stop_and_save()
+    app._controls.start()
+    app._controls.stop_and_save()
     frames_until(lambda: app._session.run is None, 2.0)  # the runner saved it; its Ended event tore the screen down
     assert _program_rows(app, monkeypatch) == []
 

@@ -458,7 +458,7 @@ def test_a_test_restarted_supersedes_the_one_running(monkeypatch):
 
 def test_the_settings_audio_test_is_refused_while_a_session_runs(fresh_app, monkeypatch):
     app = fresh_app
-    app._on_start()  # running: paused or connecting are refused the same way (_session_pipeline_live)
+    app._controls.start()  # running: paused or connecting are refused the same way (_session_pipeline_live)
     replaced = []
     monkeypatch.setattr(app._audio, "prepare_feedback", lambda *a, **k: replaced.append("prepare"))
     monkeypatch.setattr(app._audio, "test_audio", lambda *a, **k: replaced.append("test"))

@@ -1,12 +1,18 @@
 """The session the Session screen shows: its graphs and readout, which the running session's events draw, the end card
 over them once it has ended, and the profile it belongs to."""
+import sqlite3
+
 from app.logger import logger
 from app.metrics.series_names import SERIES_NAMES
+from app.session.manager import elapsed_clock
 from app.session.session_events import (
     Alert,
+    Connected,
     Connecting,
+    Paused,
     ProgramDropped,
     ProgramShown,
+    Resumed,
     SegmentStarted,
     Ticked,
     Waiting,
@@ -14,6 +20,7 @@ from app.session.session_events import (
 from app.session.session_program import PROGRAM_FORMULA_KEYS
 from app.ui.app_context import AppContext
 from app.ui.graph_series import show_program_series
+from app.ui.session_labels import session_title
 from app.ui.theme import C
 
 
@@ -47,6 +54,16 @@ class ShownSession:
         match event:
             case Ticked():
                 self._show_tick(event)
+            case Connected(on_mock=on_mock):
+                if on_mock:
+                    screen.update_device_status(True)  # a headset's row is the headset's (Headset.show_selected)
+                screen.update_state("Running")
+                screen.set_start_time(self._session.manager.started_at)
+                screen.hide_overlay()  # the session starts its feedback right after (RunningSession._deliver)
+            case Paused():
+                screen.set_controls_paused()
+            case Resumed():
+                screen.set_controls_running()
             case SegmentStarted(key=key, line_name=line_name):
                 if line_name is not None:  # a custom segment's line: labelled and shown
                     screen.graph.set_series_name(key, line_name)
@@ -90,9 +107,76 @@ class ShownSession:
         self._live_screen.update_device_status(False, device_name=device_name)
         self._live_screen.show_overlay_retry(message)
 
-    def show_end_card(self, session_id: int, stats: dict, title: str) -> None:
+    def lines(self) -> frozenset[str]:
+        """The lines the live graph shows now."""
+        return frozenset(self._live_screen.graph.visible_keys())
+
+    def update_state(self, state: str) -> None:
+        """The Session screen's state line, outside a session: why a Start didn't go ahead, how a start ended."""
+        self._live_screen.update_state(state)
+
+    def scanning(self) -> None:
+        """A Start looks for the profile's headset among the paired devices."""
+        self._live_screen.show_overlay("Scanning for MindWave...")
+        self._live_screen.set_controls_running()
+
+    def found(self, name: str) -> None:
+        self._live_screen.update_overlay(f"Found {name}\nConnecting...")
+
+    def scan_failed(self, message: str) -> None:
+        """A Start's scan found no headset to start on: the controls idle, and Retry offered with `message`."""
+        self._live_screen.set_controls_idle()
+        self._live_screen.show_overlay_retry(message)
+
+    def ready(self) -> None:
+        """The idle controls, no overlay: before a Retry's new Start, or while Settings › Device asks which headset."""
+        self._live_screen.set_controls_idle()
+        self._live_screen.hide_overlay()
+
+    def starting(self) -> None:
+        """A session's setup: the running controls, no training mark until a program's first segment."""
+        self._live_screen.set_training_series(None)
+        self._live_screen.set_controls_running()
+
+    def show_threshold(self, value: float) -> None:
+        """The threshold in force, drawn until the ticks step the line."""
+        self._live_screen.graph.set_threshold(float(value))
+
+    def hide_overlay(self) -> None:
+        self._live_screen.hide_overlay()
+
+    def reload_whole(self) -> None:
+        """An ending's: the live graphs reloaded from the mirror with the whole session (a locked stretch never reached them
+        tick by tick) and its score, before the session's reset."""
+        try:
+            self._live_screen.load_mirror(self.mirror.snapshot())
+        except Exception:  # noqa: BLE001 - logged; a failed redraw must not keep the session from ending on screen
+            logger.exception("graph reload on stop failed")
+        self._live_screen.update_stats(self._session.manager.live_score())
+
+    def idle(self) -> None:
+        """The screen's part of every teardown: idle controls, no device link, no training mark, no shamatha pill."""
+        self._live_screen.set_training_series(None)
+        self._live_screen.set_controls_idle()
+        self._live_screen.update_device_status(False)
+        self._live_screen.set_shamatha(False)
+
+    def finished(self, stats: dict | None, session_id: int | None) -> None:
+        """An ending's last: FINISHED with the saved duration (the clock froze at a lock), History told, and the end card
+        of a saved session, titled as its History row."""
+        self._live_screen.update_state("FINISHED")
+        if stats:
+            self._live_screen.update_timer(elapsed_clock(stats.get("duration", 0)))
+        self._history.mark_dirty()
+        if not (stats and session_id):
+            return
+        try:
+            saved = self._ctx.db.get_session(session_id)
+        except sqlite3.Error:
+            logger.exception(f"Session {session_id} saved, but its title couldn't be read for the end card")
+            saved = None
         self._saved_notes = ""
-        self._live_screen.show_summary(session_id, stats, title=title)
+        self._live_screen.show_summary(session_id, stats, title=session_title(saved) if saved else "")
 
     def on_save_notes(self, *args) -> None:
         if self._live_screen.summary_notes == self._saved_notes:

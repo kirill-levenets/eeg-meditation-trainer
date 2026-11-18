@@ -42,7 +42,7 @@ def card(fresh_app, monkeypatch):
     acknowledged, `app.notes_writes` each notes text written."""
     app = fresh_app
     start_ticked_by_hand(app, ticks=4)
-    app._stop_and_save(reason="timer")
+    app._controls.stop_and_save(reason="timer")
     frames()
     app.sid = app._live_screen.summary_session_id
     assert app.sid is not None
@@ -67,7 +67,7 @@ def _card_open(app) -> bool:
 def test_user_stop_confirms_then_takes_the_shared_save_path(fresh_app):
     app = fresh_app
     start_ticked_by_hand(app, ticks=4)
-    app._on_stop()
+    app._controls.stop()
     (confirm,) = popups()
     assert confirm.title == "Stop session?" and _sessions(app) == []
     assert app._session.manager.state == SessionState.RUNNING  # nothing ends before the answer
@@ -84,7 +84,7 @@ def test_user_stop_derives_the_idle_series_and_clears_the_training_marker(fresh_
     program_mode(app, [])  # the editor emptied meanwhile: what the idle graph is derived from after the ending
     marks = calls_of(monkeypatch, app._live_screen, "set_training_series")
     assert app._session.program_run.active and app._live_screen.graph.is_visible("program_formula")
-    app._stop_and_save(reason="user")
+    app._controls.stop_and_save(reason="user")
     frames()
     assert not app._session.program_run.active and marks[-1] == (None,)
     assert not app._live_screen.graph.is_visible("program_formula")  # the live graph's idle series derived again
@@ -102,12 +102,12 @@ def test_a_stop_confirmed_after_the_session_ended_another_way_keeps_it(fresh_app
     app._session.manager._start_time -= 120  # two minutes in
     app._session.checkpoint_or_report()
     sid = app._session.recorder.session_id
-    app._on_stop()  # the user's Stop tap, handled while the session still runs: its dialog opens
+    app._controls.stop()  # the user's Stop tap, handled while the session still runs: its dialog opens
     (confirm,) = popups()
     if ended_by == "headset off":  # the stale-data stop queued behind the tap
-        app._stop_and_save(reason="stale_data")
+        app._controls.stop_and_save(reason="stale_data")
     else:  # the tick thread saved the timed session; its UI teardown runs on the main thread
-        app._finalize_stop_ui(app._session.persist("timer"), sid)
+        app._controls._finish_ui(app._session.persist("timer"), sid)
     saved = _stored(app, sid)
     assert saved is not None and saved[0] >= 119 and saved[1] == 240
     tap(confirm.content, "Stop")  # the user confirms the Stop
@@ -208,7 +208,7 @@ def _ended_in_its_own_app(build_app):
     """A private app (the test closes or restores it) with a session just ended, its end card open: (app, sid)."""
     app = build_app()
     start_ticked_by_hand(app, ticks=4)
-    app._stop_and_save(reason="timer")
+    app._controls.stop_and_save(reason="timer")
     frames()
     return app, app._live_screen.summary_session_id
 

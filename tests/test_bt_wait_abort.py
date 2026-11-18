@@ -9,7 +9,7 @@ import pytest
 import app.session.running_session as rs
 from app.session.bt_wait import BtWait
 from app.session.session_run import Phase, SessionRun
-from tests._app import HEADSET, frames, popups, runner_alive, start_connecting
+from tests._app import HEADSET, calls_of, frames, popups, runner_alive, start_connecting
 
 
 @pytest.fixture(autouse=True)
@@ -47,7 +47,7 @@ class _Waiting:
 
 def test_connect_cancel_stops_watcher_before_stream(fresh_app, monkeypatch):
     waiting = _Waiting(fresh_app, monkeypatch)
-    fresh_app._on_connect_cancel()
+    fresh_app._controls.cancel()
     waiting.assert_unwatched_stream_stop()
     assert fresh_app._session.run is None  # the start's run ended with it
 
@@ -55,7 +55,7 @@ def test_connect_cancel_stops_watcher_before_stream(fresh_app, monkeypatch):
 def test_stop_during_bt_wait_stops_watcher_before_stream(fresh_app, monkeypatch):
     waiting = _Waiting(fresh_app, monkeypatch)
     assert fresh_app._live_screen._overlay.opacity == 1
-    fresh_app._on_stop()
+    fresh_app._controls.stop()
     waiting.assert_unwatched_stream_stop()
     assert fresh_app._session.run is None and fresh_app._live_screen._overlay.opacity == 0
     assert popups() == []  # no "Stop session?": nothing started
@@ -65,7 +65,7 @@ def test_a_cancel_before_any_start_is_harmless(build_app):
     """Cancel before any session (e.g. during the device scan) read an attribute only Start created."""
     app = build_app()
     assert app._session.run is None and not app._session.connecting()
-    app._on_connect_cancel()  # must not raise
+    app._controls.cancel()  # must not raise
     assert app._session.run is None and not app._live_screen._btn_start.disabled
 
 
@@ -93,13 +93,15 @@ def test_refused_start_undoes_setup_without_entering_the_wait(fresh_app, monkeyp
     app._real_stream._last_connect_error = "Previous connection is still closing."
     app._change_setting("use_mock", False)
     app._real_stream.set_device(*HEADSET)
+    runners = calls_of(monkeypatch, app._session, "start_running")
 
-    app._on_start()
+    app._controls.start()
 
-    assert not app._session.connecting() and app._session.run is None and not runner_alive(app)
+    assert not app._session.connecting() and app._session.run is None and not runner_alive(app) and runners == []
     assert releases == [True]
     assert "still closing" in app._live_screen._overlay_status.text
     assert app._live_screen._overlay_retry_btn.parent is not None
+    assert app._shown.owner is None  # no session came of the start: the emptied display shows none
     rs.report_soft_error.assert_not_called()  # its 60 s cooldown would hide the next real failure
 
 

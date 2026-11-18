@@ -41,7 +41,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `set_shamatha(active)` toggles its alpha and the text/`readable_fg(C.SHAMATHA)` colour; `update_state` records `_last_state` but skips restyling while the chip is active, so the tick stream can't overwrite it.
   Crossing is detected by the pure `scoring.shamatha_transition(active, above, streak, enter_ticks=3, exit_ticks=3)` on the session's runner (debounced: 3 ticks / 1.5 s each way against 2 Hz noise);
   only the *change* is dispatched to `set_shamatha`.
-  Gated on the threshold in force, not per-segment program targets: a program's start puts its first segment's target in force (`_put_threshold_in_force`), and that gates the pill for the whole run.
+  Gated on the threshold in force, not per-segment program targets: a program's start puts its first segment's target in force (`SessionControls.put_threshold_in_force`), and that gates the pill for the whole run.
   Reset at session start/stop and re-synced on Android resume.
   The pill's `Color` stays a plain instruction (its alpha is the on/off toggle; a `ThemedColor` would reset it on a switch): `C.SHAMATHA` is the same in every palette, so it needs no repaint.
 

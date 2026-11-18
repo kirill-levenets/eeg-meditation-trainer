@@ -19,10 +19,11 @@ def _sounds() -> tuple[SoundSources, MagicMock]:
     return sounds, audio
 
 
-def test_the_reward_is_set_after_the_players_are_prepared():
+def test_the_session_takes_the_engine_over_then_sets_the_reward_after_its_players():
     sounds, audio = _sounds()
     sounds.prepare_session(None, "")
-    assert audio.mock_calls == [call.prepare_feedback({"tone": ("tone", ""), "heartbeat": ("heartbeat", "")}, "tone"),
+    assert audio.mock_calls == [call.stop_timer_bell(), call.end_test(),
+                                call.prepare_feedback({"tone": ("tone", ""), "heartbeat": ("heartbeat", "")}, "tone"),
                                 call.set_reward("heartbeat")]
 
 

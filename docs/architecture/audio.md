@@ -29,7 +29,12 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   **Selectable feedback source** (#10): `AudioEngine.prepare_feedback(sources, active_id)` (main thread) pre-instantiates one looping player per distinct source id (`"noise"`, `"tone"`, `"heartbeat"`, or a custom file path);
   `set_active_feedback(source_id)` is setVolume-only — the active player goes to the modulated volume, all others go to 0.
   No player is created or released mid-session, so switching is tick- and lock-safe, like `mute()`.
-  **Pause keeps the player set** (#37): the session's `Paused` and `Resumed` events (`_on_session_event`) call `AudioEngine.pause()` and `resume()`, never `stop()`/`start()`.
+  **The session drives its own sound** on the main thread (`RunningSession._deliver`, right after the app's part of each event):
+  `Connected` starts the feedback (a headset's start also plays the connect chime), `Paused`/`Resumed` call `pause()`/`resume()`, `Ended` and a discard `stop()` the players;
+  a pause or an ending silences them even when the app's part fails (a `finally`), and a start plays only after the app's part succeeded, on a screen that shows the session.
+  A Start's session players are prepared by `SoundSources.prepare_session`, which first stops the last session's gong and ends a Settings test still playing
+  (the Test is allowed while a Start scans for its headset: the run isn't live then, and a Test left playing would keep the session's feedback from starting).
+  **Pause keeps the player set** (#37): `pause()` and `resume()`, never `stop()`/`start()`.
   `pause()` sets every prepared player to volume 0 and stops it, stops the ramp and clears `_is_playing`, so the bell/chime alert gates and `update()` go quiet;
   `resume()` replays the same players (`_play_prepared`), and the ramp restores each role's last target.
   `stop()`, the session-end teardown, tears the prepared set down, which only a session start's `prepare_feedback` + `set_reward` rebuild (`SoundSources.prepare_session`), so both channels would stay silent after Resume.
@@ -46,8 +51,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   — so a chirp every ~10 s rides the same looping player + volume ramp with **no** tick-loop scheduling, and the silent loop edges keep it gapless.
   It's **reward-only**: `_REWARD_SOURCE_OPTIONS` offers it as "Crickets", `_FEEDBACK_SOURCE_OPTIONS` doesn't.
   `test_audio(reward_id)` previews the reward source first (players are near loop start so the chirp is caught) before the below-channel sweep.
-  The test prepares its own players over whatever is prepared, so the app refuses it while a session runs, is paused or connects (`_refused_while_session_runs`);
-  a session start ends a test still playing (`end_test()`, next to `stop_timer_bell()` in `_start_session_common`):
+  The test prepares its own players over whatever is prepared, so the app refuses it while a session runs, is paused or connects (`SessionControls.refused`);
+  a session start ends a test still playing (`end_test()`, next to `stop_timer_bell()` in `SoundSources.prepare_session`):
   its sequence stops where it is, by a generation token (`_test_gen`) checked before each step;
   its deferred teardown (`_finish_test`) is called off;
   and `_is_playing`, which the test set, goes back, so the session's `start()` isn't skipped.
