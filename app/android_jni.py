@@ -7,7 +7,7 @@ from app.logger import logger
 
 def java_string(text: str):
     """A real java.lang.String: pyjnius resolves a Python str to a char[] overload, and never to CharSequence."""
-    from jnius import autoclass
+    from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
 
     return autoclass("java.lang.String")(text)
 
@@ -20,7 +20,7 @@ def on_android() -> bool:
 
 def activity():
     """The app's Activity, the one lookup of it."""
-    from jnius import autoclass
+    from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
     return autoclass("org.kivy.android.PythonActivity").mActivity
 
 
@@ -30,12 +30,12 @@ def content_resolver():
 
 def language() -> str:
     """The device's language as an ISO 639 code ("uk", "en", ...)."""
-    from jnius import autoclass
+    from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
     return str(autoclass("java.util.Locale").getDefault().getLanguage() or "")
 
 
 def manufacturer() -> str:
-    from jnius import autoclass
+    from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
     return str(autoclass("android.os.Build").MANUFACTURER or "").lower()
 
 
@@ -43,7 +43,7 @@ def ignores_battery_optimisation() -> bool:
     """Android's answer for this app; below Android 6 there is no battery optimisation to be in."""
     if sys.getandroidapilevel() < 23:
         return True
-    from jnius import autoclass, cast
+    from jnius import autoclass, cast  # noqa: PLC0415 - Android only (pyjnius)
     app = activity()
     service = app.getSystemService(autoclass("android.content.Context").POWER_SERVICE)
     return bool(cast("android.os.PowerManager", service).isIgnoringBatteryOptimizations(app.getPackageName()))
@@ -51,7 +51,7 @@ def ignores_battery_optimisation() -> bool:
 
 def settings_intent(action: str, package: bool = True):
     """An Intent for a Settings screen, about this app when `package`."""
-    from jnius import autoclass
+    from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
     Intent = autoclass("android.content.Intent")
     if not package:
         return Intent(java_string(action))
@@ -60,7 +60,7 @@ def settings_intent(action: str, package: bool = True):
 
 
 def component_intent(package: str, cls: str):
-    from jnius import autoclass
+    from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
     intent = autoclass("android.content.Intent")()
     intent.setComponent(autoclass("android.content.ComponentName")(java_string(package), java_string(cls)))
     return intent
@@ -68,7 +68,7 @@ def component_intent(package: str, cls: str):
 
 def open_first(intents: list, done: Callable[[bool], None]) -> None:
     """Open the first of `intents` that opens, on Android's UI thread; no resolveActivity, which Android 11 blinds."""
-    from android.runnable import run_on_ui_thread
+    from android.runnable import run_on_ui_thread  # noqa: PLC0415 - Android only
 
     @run_on_ui_thread
     def _run():

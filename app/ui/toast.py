@@ -29,11 +29,11 @@ def android_toast(message: str) -> None:
         logger.debug(f"toast: {message}")
         return
     try:
-        from android.runnable import run_on_ui_thread
+        from android.runnable import run_on_ui_thread  # noqa: PLC0415 - Android only
 
         @run_on_ui_thread
         def _show():
-            from jnius import autoclass
+            from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
             Toast = autoclass("android.widget.Toast")
             Toast.makeText(android_jni.activity(), android_jni.java_string(message), Toast.LENGTH_SHORT).show()
         _show()

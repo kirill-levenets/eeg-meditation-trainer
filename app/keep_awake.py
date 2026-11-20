@@ -25,18 +25,18 @@ class KeepAwake:
         if not android_jni.on_android():
             return
         try:
-            from android.runnable import run_on_ui_thread
+            from android.runnable import run_on_ui_thread  # noqa: PLC0415 - Android only
 
             @run_on_ui_thread
             def _set_flag():
-                from jnius import autoclass
+                from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
                 activity = android_jni.activity()
                 WindowManager = autoclass("android.view.WindowManager$LayoutParams")
                 activity.getWindow().addFlags(WindowManager.FLAG_KEEP_SCREEN_ON)
             _set_flag()
 
             # Partial wake lock keeps CPU alive when screen is off.
-            from jnius import autoclass
+            from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
             Context = autoclass("android.content.Context")
             PowerManager = autoclass("android.os.PowerManager")
             pm = android_jni.activity().getSystemService(Context.POWER_SERVICE)
@@ -59,11 +59,11 @@ class KeepAwake:
                 except Exception as e:  # already released by Android; the flag still clears below
                     logger.warning(f"Wake lock release failed: {e}")
                 self._wake_lock = None
-            from android.runnable import run_on_ui_thread
+            from android.runnable import run_on_ui_thread  # noqa: PLC0415 - Android only
 
             @run_on_ui_thread
             def _clear_flag():
-                from jnius import autoclass
+                from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
                 activity = android_jni.activity()
                 WindowManager = autoclass("android.view.WindowManager$LayoutParams")
                 activity.getWindow().clearFlags(WindowManager.FLAG_KEEP_SCREEN_ON)
@@ -77,7 +77,7 @@ class KeepAwake:
         if not android_jni.on_android():
             return
         try:
-            from jnius import autoclass
+            from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
             autoclass(_SERVICE).start(android_jni.activity(), "EEG Meditation", "Meditation session in progress")
             logger.info("Session foreground service started.")
         except Exception as e:
@@ -87,7 +87,7 @@ class KeepAwake:
         if not android_jni.on_android():
             return
         try:
-            from jnius import autoclass
+            from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
             autoclass(_SERVICE).stop(android_jni.activity())
             logger.info("Session foreground service stopped.")
         except Exception as e:

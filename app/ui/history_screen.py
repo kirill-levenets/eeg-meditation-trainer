@@ -8,7 +8,6 @@ to see sessions for that date; tap a session to see full detail.
 import datetime
 import math
 import weakref
-from typing import Optional
 
 from kivy.clock import Clock
 from kivy.graphics import Color, Line, Rectangle, RoundedRectangle
@@ -615,7 +614,7 @@ class HistoryScreen(Screen):
         super().__init__(**kwargs)
         self.name = "history"
         self._sessions: list[dict] = []
-        self._filtered_date: Optional[str] = None
+        self._filtered_date: str | None = None
         self._view_mode: str = "calendar"
         self._shown: list[dict] = []  # the sessions the list shows: all of them, or the filtered day's
         self._renaming_sid: int | None = None
@@ -1073,7 +1072,7 @@ class HistoryScreen(Screen):
         self._set_filter(date_str)
         self._show_day(date_str)
 
-    def _set_filter(self, date_str: Optional[str]) -> None:
+    def _set_filter(self, date_str: str | None) -> None:
         """The one owner of the day filter: the filtered day, its highlight in both views and the Show-all button."""
         self._filtered_date = date_str
         for view in (self._heatmap, self._bars):

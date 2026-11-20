@@ -16,7 +16,7 @@ def _resolve_android_base_dir() -> str:
     Now we always use app_storage_path() and migrate the old DB if found.
     """
     try:
-        from android.storage import app_storage_path  # type: ignore
+        from android.storage import app_storage_path  # noqa: PLC0415 - Android only
         p = os.path.join(app_storage_path(), "EEGMeditation")
     except ImportError:
         p = os.path.join(os.path.expanduser("~"), "EEGMeditation")
@@ -29,7 +29,7 @@ def _resolve_android_base_dir() -> str:
         try:
             copy_file_atomic(old_db, new_db)
         except (PermissionError, OSError) as e:
-            from app.crash_handler import queue_pre_app_error
+            from app.crash_handler import queue_pre_app_error  # noqa: PLC0415 - circular: crash_handler imports config
             queue_pre_app_error(
                 "db_migration_android",
                 f"Could not migrate DB from {old_db} to {new_db}: {e}",
@@ -50,7 +50,7 @@ def _maybe_migrate_desktop_db(new_dir: str, legacy_dirs: list) -> None:
     new_db = os.path.join(new_dir, "meditation.db")
     if os.path.isfile(new_db):
         return
-    from app.crash_handler import queue_pre_app_error
+    from app.crash_handler import queue_pre_app_error  # noqa: PLC0415 - circular: crash_handler imports config
 
     for old_dir in legacy_dirs:
         old_db = os.path.join(old_dir, "meditation.db")

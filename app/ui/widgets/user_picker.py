@@ -1,7 +1,6 @@
 """Shared user-picker form: existing-profiles panel + name input + duplicate-error UI."""
 
 from collections.abc import Callable
-from typing import Optional
 
 from kivy.clock import Clock
 from kivy.metrics import dp
@@ -36,8 +35,8 @@ class UserPickerForm(BoxLayout):
         self,
         on_create: Callable[[str], None],
         on_pick_existing: Callable[[int], None],
-        on_count: Optional[Callable[[int], int | None]] = None,  # None: shown without a count
-        on_delete: Optional[Callable[[int], None]] = None,
+        on_count: Callable[[int], int | None] | None = None,  # None: shown without a count
+        on_delete: Callable[[int], None] | None = None,
         **kwargs,
     ) -> None:
         # size_hint_y=None + minimum_height is required so the form sizes
@@ -57,7 +56,7 @@ class UserPickerForm(BoxLayout):
         self._on_count = on_count
         self._on_delete = on_delete
         self._users: list[dict] = []
-        self._duplicate_user_id: Optional[int] = None
+        self._duplicate_user_id: int | None = None
         self._build_ui()
 
     def _build_ui(self) -> None:

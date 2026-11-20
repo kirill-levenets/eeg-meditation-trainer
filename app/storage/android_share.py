@@ -59,7 +59,7 @@ def _copy_android_mediastore(private_path: str, subfolder: str,
     File becomes visible in system file browser under Documents/subfolder/.
     """
     try:
-        from jnius import autoclass
+        from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
 
         activity = android_jni.activity()
         ContentValues = autoclass("android.content.ContentValues")

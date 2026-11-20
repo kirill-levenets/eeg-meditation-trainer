@@ -1,7 +1,6 @@
 """Detect 50/60 Hz power line noise in raw EEG signal using FFT."""
 
 import math
-from typing import Optional
 
 from app.logger import logger
 
@@ -20,7 +19,7 @@ class PowerLineDetector:
 
     def __init__(self) -> None:
         self._samples: list[float] = []
-        self._result: Optional[tuple[bool, Optional[int]]] = None
+        self._result: tuple[bool, int | None] | None = None
 
     def feed(self, raw_waveform: list[int]) -> None:
         """Add raw 512Hz samples. No-op after detection is done."""
@@ -33,7 +32,7 @@ class PowerLineDetector:
     def ready(self) -> bool:
         return self._result is not None
 
-    def result(self) -> Optional[tuple[bool, Optional[int]]]:
+    def result(self) -> tuple[bool, int | None] | None:
         """Return (detected, freq_hz) or None if not ready.
 
         detected=True, freq_hz=50 means 50Hz noise found.
