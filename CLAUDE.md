@@ -95,7 +95,8 @@ Read it before changing that subsystem.
   · `app/ui/headset.py` `Headset` (which headset: a profile's own, found by its one scan path; its name; Settings → Device)
   · `app/ui/power_exemption.py` `PowerExemption` (what may close a locked session: battery optimisation, the maker's power manager;
   the first-start alert and Settings → Device's row → [app-platform](docs/architecture/app-platform.md#background-running-android))
-  · `app/ui/live_session.py`, `shown_session.py` `ShownSession` (the session the screen shows: its graphs' mirror, its end card, the screen's part of every session event and of a resume),
+  · `app/ui/live_session.py` (its graphs and controls; the parts around them in `session_sections/`: header, stats strip, duration picker, end card, connection overlay),
+  `shown_session.py` `ShownSession` (the session the screen shows: its graphs' mirror, its end card, the screen's part of every session event and of a resume),
   `settings_screen.py` (its larger sections in `settings_sections/`), `device_labels.py` → [live-session-and-settings](docs/architecture/live-session-and-settings.md);
   `history_screen.py`, `period_totals.py`, `history_flow.py` `HistoryFlow` (what the app does with History's rows) → [history](docs/architecture/history.md);
   `diary_screen.py` (session detail), `session_detail_flow.py` `SessionDetailFlow` (opens and loads it) → [session-detail](docs/architecture/session-detail.md);

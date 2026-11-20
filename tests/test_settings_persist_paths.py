@@ -61,7 +61,7 @@ def test_a_toggle_writes_at_once(app):
 
 
 def test_a_stats_view_pick_writes_that_setting_alone(app):
-    app._live_screen._stats_toggle.buttons["aggregate"].dispatch("on_release")
+    app._live_screen.stats._toggle.buttons["aggregate"].dispatch("on_release")
     assert app.writes == [("stats_view_mode", "aggregate")]
 
 

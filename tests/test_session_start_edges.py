@@ -47,7 +47,7 @@ class _Waiting:
         self.session.connected, self.session.since_packet = True, 0.1
         self.run = app._session.run
         self.audio_starts = calls_of(monkeypatch, app._audio, "start")
-        self.states = calls_of(monkeypatch, app._live_screen, "update_state")
+        self.states = calls_of(monkeypatch, app._live_screen.header, "update_state")
         self.countdowns = calls_of(monkeypatch, app._session.timer, "start_countdown")
 
     def first_data(self) -> None:
@@ -82,7 +82,7 @@ def _idle(app) -> bool:
 
 
 def _retry_shown(app) -> bool:
-    return app._live_screen._overlay_retry_btn.parent is not None and app._live_screen._overlay.opacity == 1
+    return app._live_screen.connect_overlay.retry_btn.parent is not None and app._live_screen.connect_overlay.opacity == 1
 
 
 # ---- Stop decides by the session, not by the wait flag ----
@@ -111,7 +111,7 @@ def test_stop_after_the_timer_ended_the_session_leaves_its_teardown_alone(fresh_
     session.tick(shown=False)  # the timer: saved on the tick thread; its UI teardown is queued
     assert app._session.manager.state == SessionState.FINISHED
     stream_stops = calls_of(monkeypatch, app._real_stream, "stop")
-    states = calls_of(monkeypatch, app._live_screen, "update_state")
+    states = calls_of(monkeypatch, app._live_screen.header, "update_state")
     app._controls.stop()
     assert stream_stops == [] and popups() == [] and states == []  # the kept-alive headset link stays up
 
@@ -286,7 +286,7 @@ def test_a_scan_result_for_a_profile_picked_away_ends_the_start(scanning):
     paired.arrive()
     assert app._session.run is None and app._real_stream._device_address is None
     assert app._db.get_user_setting(other, "bt_device_address") is None
-    assert app._live_screen._overlay.opacity == 0 and not app._live_screen._btn_start.disabled
+    assert app._live_screen.connect_overlay.opacity == 0 and not app._live_screen._btn_start.disabled
 
 
 def test_a_wait_tick_that_outlived_its_run_ends_nothing(waiting, monkeypatch):
@@ -406,14 +406,14 @@ def test_a_link_kept_from_the_last_session_starts_the_session_at_once(fresh_app,
     assert app._session.run.phase is Phase.STARTED and app._session.manager.state == SessionState.RUNNING
     assert reader_starts == []  # no BT wait
     assert len(resets) == 1  # the last session's sample can't start this one
-    assert app._live_screen._device_label.text == f"[{HEADSET[1]}] *" and len(connect_sounds) == 1
+    assert app._live_screen.header._device_label.text == f"[{HEADSET[1]}] *" and len(connect_sounds) == 1
 
 
 def test_with_no_link_the_start_enters_the_bt_wait(fresh_app, monkeypatch):
     app = fresh_app
     start_connecting(app, monkeypatch)
     assert app._session.run.phase is Phase.CONNECTING and _idle(app)
-    assert app._live_screen._overlay_status.text == f"Connecting to {HEADSET[1]}..."
+    assert app._live_screen.connect_overlay._status.text == f"Connecting to {HEADSET[1]}..."
 
 
 def test_the_tick_drives_the_wait_until_its_first_data_starts_the_session(waiting):

@@ -2,7 +2,7 @@
 from dataclasses import replace
 
 from app.session.manager import NO_SCORE, LiveScore
-from app.ui.live_session import _format_stats_slots
+from app.ui.session_sections.stats_strip import _format_stats_slots
 
 SCORE = LiveScore(value=72.4, target=60, streak=95, average=63.44, segmented=False, time_above=420, longest_streak=60)
 

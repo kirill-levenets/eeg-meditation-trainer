@@ -140,9 +140,9 @@ def test_hidden_session_end_card_leaves_no_invisible_buttons_and_start_stop_take
     _mount(screen)
     try:
         assert find_invisible_interactive(screen) == []
-        screen.show_summary(1, {"duration": 60})
+        screen.end_card.show(1, {"duration": 60})
         _pump()
-        screen.hide_summary()
+        screen.end_card.hide()
         _pump()
         assert find_invisible_interactive(screen) == []
         for btn in (screen._btn_start, screen._btn_stop):

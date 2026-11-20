@@ -14,7 +14,7 @@ def _reflowed(viewport_h: float) -> LiveSessionScreen:
 
 def test_reflow_assigns_graph_height_from_scroll():
     screen = _reflowed(900.0)
-    leftover = 900.0 - screen._stats_card.height - screen._bottom_bar.height - S.GAP_SM * 2
+    leftover = 900.0 - screen.stats.height - screen._bottom_bar.height - S.GAP_SM * 2
     assert leftover >= dp(400) and screen._graph_area.height == leftover  # tall enough: the graph takes what is left
 
 

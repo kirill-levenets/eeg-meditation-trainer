@@ -167,7 +167,7 @@ def test_each_ticks_screen_update_shows_the_score_as_of_that_tick(fresh_app, mon
     """The score is taken with the tick, not when the main thread gets to it (#113)."""
     app_ = fresh_app
     fed = _simple(app_, monkeypatch)
-    shown = calls_of(monkeypatch, app_._live_screen, "update_stats")
+    shown = calls_of(monkeypatch, app_._live_screen.stats, "update")
     for _ in range(3):
         fed.tick(metrics=tick_metrics(seed=80.0), shown=False)  # the main thread held
     frames()

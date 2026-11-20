@@ -204,9 +204,9 @@ def test_the_timer_pill_holds_every_timer_on_one_line(scale):
     """Every length the slider sets (1 to 120 min), no timer and a program's P: the pill is as wide as its text."""
     F.set_scale(scale)
     screen = LiveSessionScreen()
-    pill, label = screen._btn_duration_expand, screen._btn_duration_expand._text_label
+    pill, label = screen.duration.button, screen.duration.button._text_label
     for timer in [(False, 20, False), (True, 20, True), *((True, minutes, False) for minutes in range(1, 121))]:
-        screen.refresh_duration_preset(*timer)
+        screen.duration.refresh(*timer)
         assert text_width(label.text, label.font_size, label.bold, label.font_name) <= pill.width - dp(1), label.text
 
 
@@ -386,11 +386,11 @@ WIDE_SCORE = LiveScore(value=188, target=120, streak=3599, average=187.55, segme
 
 def _session_states(screen):
     yield "", None
-    yield " a 105 min timer", lambda: screen.refresh_duration_preset(True, 105)
+    yield " a 105 min timer", lambda: screen.duration.refresh(True, 105)
     yield " a filled stats bar", lambda: (screen.graph.set_series_name("custom_formula", "Alpha calm, evening"),
-                                          screen.set_training_series("custom_formula"), screen.update_stats(WIDE_SCORE))
-    yield " its AVG side", lambda: screen.set_stats_mode("aggregate")
-    yield " saved card", lambda: screen.show_summary(
+                                          screen.set_training_series("custom_formula"), screen.stats.update(WIDE_SCORE))
+    yield " its AVG side", lambda: screen.stats.set_mode("aggregate")
+    yield " saved card", lambda: screen.end_card.show(
         1, {"duration": 1500, "threshold_used": 60, "avg_shamatha": 72, "time_above_threshold": 610,
             "longest_streak": 270}, title="2026-10-10 07:30 - Mock with a name too long for one line")
 
@@ -549,11 +549,11 @@ def test_the_stats_bars_titles_and_values_keep_to_their_thirds(phone):
     screen = LiveSessionScreen()
     phone.clear_widgets()
     phone.add_widget(screen)
-    screen.update_stats(WIDE_SCORE)
+    screen.stats.update(WIDE_SCORE)
     for mode in ("live", "aggregate"):
-        screen.set_stats_mode(mode)
+        screen.stats.set_mode(mode)
         _frames()
-        for label in screen._stat_title_labels[1:] + screen._stat_labels:
+        for label in screen.stats._titles[1:] + screen.stats._values:
             assert _text_size_needed(label)[0] <= label.width + 1.5, (mode, label.text, label.width)
 
 def _layout(root, where: str) -> list[tuple]:

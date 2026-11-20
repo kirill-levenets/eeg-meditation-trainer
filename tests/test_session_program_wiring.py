@@ -94,13 +94,7 @@ class _StubLive:
         self.graph = MagicMock()
         self.graph.series_keys.return_value = []  # empty catalog -> preview is a no-op
         self.graph.is_visible.return_value = False
-
-    def set_session_programs(self, progs, current_name=""):
-        self.programs = progs
-        self.current_name = current_name
-
-    def refresh_duration_preset(self, enabled, minutes, program_active=False):
-        self.preset = (enabled, minutes, program_active)
+        self.duration = MagicMock()
 
     def set_training_series(self, key):
         self.training = key

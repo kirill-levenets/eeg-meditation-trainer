@@ -54,10 +54,10 @@ def test_connect_cancel_stops_watcher_before_stream(fresh_app, monkeypatch):
 
 def test_stop_during_bt_wait_stops_watcher_before_stream(fresh_app, monkeypatch):
     waiting = _Waiting(fresh_app, monkeypatch)
-    assert fresh_app._live_screen._overlay.opacity == 1
+    assert fresh_app._live_screen.connect_overlay.opacity == 1
     fresh_app._controls.stop()
     waiting.assert_unwatched_stream_stop()
-    assert fresh_app._session.run is None and fresh_app._live_screen._overlay.opacity == 0
+    assert fresh_app._session.run is None and fresh_app._live_screen.connect_overlay.opacity == 0
     assert popups() == []  # no "Stop session?": nothing started
 
 
@@ -82,7 +82,7 @@ def test_failed_connect_exit_releases_wake_lock_and_service(fresh_app, monkeypat
     assert run.phase is Phase.ENDED and app._session.run is run  # its teardown is queued for the main thread
     assert rs.report_soft_error.call_args.args[0] == "bt_connect_failed"
     frames()
-    assert app._session.run is None and "Headset is asleep or off." in app._live_screen._overlay_status.text
+    assert app._session.run is None and "Headset is asleep or off." in app._live_screen.connect_overlay._status.text
 
 
 def test_refused_start_undoes_setup_without_entering_the_wait(fresh_app, monkeypatch):
@@ -99,8 +99,8 @@ def test_refused_start_undoes_setup_without_entering_the_wait(fresh_app, monkeyp
 
     assert not app._session.connecting() and app._session.run is None and not runner_alive(app) and runners == []
     assert releases == [True]
-    assert "still closing" in app._live_screen._overlay_status.text
-    assert app._live_screen._overlay_retry_btn.parent is not None
+    assert "still closing" in app._live_screen.connect_overlay._status.text
+    assert app._live_screen.connect_overlay.retry_btn.parent is not None
     assert app._shown.owner is None  # no session came of the start: the emptied display shows none
     rs.report_soft_error.assert_not_called()  # its 60 s cooldown would hide the next real failure
 
@@ -111,7 +111,7 @@ def test_started_stream_enters_the_wait(fresh_app, monkeypatch):
     monkeypatch.setattr(app._session.keep_awake, "release", lambda: releases.append(True))
     start_connecting(app, monkeypatch, runner=True)
     assert app._session.connecting() and runner_alive(app)
-    assert app._live_screen._overlay.opacity == 1 and app._live_screen._overlay_status.text.startswith("Connecting to")
+    assert app._live_screen.connect_overlay.opacity == 1 and app._live_screen.connect_overlay._status.text.startswith("Connecting to")
     assert releases == []
 
 

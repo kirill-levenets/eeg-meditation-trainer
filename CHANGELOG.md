@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **The Session screen's connecting card is laid out as the loading card is** (#140): its message sits right above the dots and Cancel, so the card is shorter.
 - **A session goes on recording while "Stop session?" is open**: Cancel loses nothing, and Stop saves up to then; the ticks used to stop while the session's clock ran on, leaving a gap in its data.
   If the timer or a lost signal ends the session meanwhile, the question closes.
 - **One writer for a running session** (#128): from its Start to its end, only the session's runner thread changes it; Pause, Resume, Stop, the marker and the threshold are commands it carries out, and every ending (Stop, the timer, lost data, the recording limit, a profile's delete) runs there and saves the session at once.

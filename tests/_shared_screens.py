@@ -11,9 +11,9 @@ def sections(screen) -> list:
 
 
 def _restore_live(s: LiveSessionScreen, state: tuple) -> None:
-    s.hide_summary()
-    s.hide_overlay()
-    s.set_stats_mode(state[1])
+    s.end_card.hide()
+    s.connect_overlay.hide()
+    s.stats.set_mode(state[1])
     s._set_view(state[0])
 
 
@@ -30,7 +30,7 @@ def _restore_settings(s: SettingsScreen, state: tuple) -> None:
 
 # Per class: the view state a test may change, and how to put it back.
 _VIEW = {
-    LiveSessionScreen: (lambda s: (s._active_view, s._stats_mode, s._summary.parent is not None, s._overlay.opacity),
+    LiveSessionScreen: (lambda s: (s._active_view, s.stats._mode, s.end_card.parent is not None, s.connect_overlay.opacity),
                         _restore_live),
     HistoryScreen: (lambda h: (h._view_mode, h._select_mode), _restore_history),
     DiaryScreen: (lambda d: (d._active_graph_tab,), lambda d, state: d._switch_graph_tab(state[0])),

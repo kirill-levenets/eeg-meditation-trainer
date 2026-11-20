@@ -148,21 +148,21 @@ def test_the_in_screen_modals_are_the_same_panel_with_readable_text(theme, scree
     Window.add_widget(screen)
     Window.add_widget(loading)
     try:
-        screen.show_summary(1, {"duration": 600, "avg_shamatha": 55, "avg_meditation": 45})
-        screen.show_overlay("Connecting to MindWave…")
+        screen.end_card.show(1, {"duration": 600, "avg_shamatha": 55, "avg_meditation": 45})
+        screen.connect_overlay.show("Connecting to MindWave…")
         loading.show("Loading history…")
         _pump()
-        for overlay in (screen._summary, screen._overlay, loading):
+        for overlay in (screen.end_card, screen.connect_overlay, loading):
             panels = [w for w in overlay.walk(restrict=True) if isinstance(w, ModalPanel)]
             assert len(panels) == 1, type(overlay).__name__
             assert _panel_roles(panels[0]) == ["BG", "BORDER"]
             assert not unreadable_text(panels[0], set(panels)), unreadable_text(panels[0], set(panels))
-        assert screen._summary_title.text == "Session saved"
-        assert screen._summary_title.font_size == _frame(_popups()[0]).children[-1].font_size  # the popup title's
+        assert screen.end_card._title.text == "Session saved"
+        assert screen.end_card._title.font_size == _frame(_popups()[0]).children[-1].font_size  # the popup title's
     finally:
         loading.hide()
-        screen.hide_overlay()
-        screen.hide_summary()
+        screen.connect_overlay.hide()
+        screen.end_card.hide()
         Window.remove_widget(loading)
         Window.remove_widget(screen)
 
@@ -182,12 +182,12 @@ def end_card():
     def show(size, stats=_SCORED, title=_NAME):
         Window.size = size
         _pump()
-        screen.show_summary(1, stats, title=title)
+        screen.end_card.show(1, stats, title=title)
         _pump()
         return screen
 
     yield show
-    screen.hide_summary()
+    screen.end_card.hide()
     Window.remove_widget(screen)
     Window.size = old
     _pump()
@@ -198,9 +198,9 @@ def test_the_session_end_card_fits_a_landscape_phone_above_the_bottom_bar(end_ca
     # a landscape phone has 360 dp less the bar: OK and Save notes show without scrolling.
     from app.ui.theme import S
     screen = end_card(_LANDSCAPE)
-    assert len(screen._summary_rows) == 6
-    panel = next(w for w in screen._summary.walk(restrict=True) if isinstance(w, ModalPanel))
-    pad = screen._summary.padding
+    assert len(screen.end_card._rows) == 6
+    panel = next(w for w in screen.end_card.walk(restrict=True) if isinstance(w, ModalPanel))
+    pad = screen.end_card.padding
     assert panel.height + pad[1] + pad[3] <= dp(360) - S.NAV_H, panel.height
 
 
@@ -224,14 +224,14 @@ def _text_width(text: str, label) -> float:
 ])
 def test_the_end_cards_title_names_the_session(end_card, size, name, title):
     screen = end_card(size, title=name)
-    assert screen._summary_title.text == title
-    assert screen._summary_stats_card.children == [box for box, _l, _v in screen._summary_row_pool[:6]][::-1]
+    assert screen.end_card._title.text == title
+    assert screen.end_card._stats_card.children == [box for box, _l, _v in screen.end_card._row_pool[:6]][::-1]
 
 
 @pytest.mark.parametrize("size, lines", [(_LANDSCAPE, 1), (_PORTRAIT, 2)])
 def test_a_long_name_is_cut_to_its_line(end_card, size, lines):
     screen = end_card(size, title="2026-10-05 07:15 - " + "Evening sit by the lake after a long day at work, " * 3)
-    title = screen._summary_title
+    title = screen.end_card._title
     shown = title.text.split("\n")
     assert len(shown) == lines and shown[-1].endswith("\u2026")
     assert all(_text_width(line, title) <= title.width for line in shown)
@@ -241,18 +241,18 @@ def test_the_end_cards_title_follows_the_width_and_the_session(end_card):
     screen = end_card(_LANDSCAPE)
     Window.size = _PORTRAIT
     _pump()
-    assert screen._summary_title.text == "Session saved\n" + _NAME
-    screen.show_summary(2, _SCORED, title="")
+    assert screen.end_card._title.text == "Session saved\n" + _NAME
+    screen.end_card.show(2, _SCORED, title="")
     _pump()
-    assert screen._summary_title.text == "Session saved"
+    assert screen.end_card._title.text == "Session saved"
 
 
 def test_a_landscape_phone_shows_the_stats_beside_the_notes(end_card):
     from app.ui.theme import S
     screen = end_card(_LANDSCAPE)
-    card, notes, save = screen._summary_stats_card, screen._summary_notes, screen._summary_save_notes_btn
+    card, notes, save = screen.end_card._stats_card, screen.end_card._notes, screen.end_card.save_notes_btn
     c, n, s = _win(card), _win(notes), _win(save)
-    d, o = _win(screen._summary_delete_btn), _win(screen._summary_ok_btn)
+    d, o = _win(screen.end_card.delete_btn), _win(screen.end_card.ok_btn)
     assert c[2] <= n[0]  # the stats on the left, the notes on the right
     assert c[3] == pytest.approx(n[3])  # both columns start under the title
     assert n[1] >= s[3] and s[2] == pytest.approx(n[2])  # Save notes under the field, at its right edge
@@ -263,7 +263,7 @@ def test_a_landscape_phone_shows_the_stats_beside_the_notes(end_card):
 
 def test_a_portrait_phone_keeps_one_column(end_card):
     screen = end_card(_PORTRAIT)
-    card, notes, save = screen._summary_stats_card, screen._summary_notes, screen._summary_save_notes_btn
+    card, notes, save = screen.end_card._stats_card, screen.end_card._notes, screen.end_card.save_notes_btn
     c, n, s = _win(card), _win(notes), _win(save)
     assert n[3] <= c[1]  # the notes under the stats
     assert n[2] <= s[0] and n[1] == pytest.approx(s[1])  # Save notes beside the field
@@ -272,18 +272,18 @@ def test_a_portrait_phone_keeps_one_column(end_card):
 
 def test_turning_the_phone_rearranges_the_open_card_and_keeps_the_notes(end_card):
     screen = end_card(_PORTRAIT)
-    screen._summary_notes.text = "calm after ten minutes"
+    screen.end_card._notes.text = "calm after ten minutes"
     for size, beside in [(_LANDSCAPE, True), (_PORTRAIT, False), (_LANDSCAPE, True)]:
         Window.size = size
         _pump()
-        assert (_win(screen._summary_stats_card)[2] <= _win(screen._summary_notes)[0]) is beside, size
-        assert ("\n" not in screen._summary_title.text) is beside
-        assert screen._summary_notes.text == "calm after ten minutes"
+        assert (_win(screen.end_card._stats_card)[2] <= _win(screen.end_card._notes)[0]) is beside, size
+        assert ("\n" not in screen.end_card._title.text) is beside
+        assert screen.end_card._notes.text == "calm after ten minutes"
 
 
 def test_the_notes_field_is_as_tall_as_save_notes_next_to_it(end_card):
     screen = end_card(_PORTRAIT)
-    assert screen._summary_notes.height == screen._summary_save_notes_btn.height
+    assert screen.end_card._notes.height == screen.end_card.save_notes_btn.height
 
 
 @pytest.mark.parametrize("theme", ["Light Cream", "Dark Blue"])
@@ -378,7 +378,7 @@ def test_starts_timer_part_draws_its_text_as_start_does(theme, screens):
     """The timer length or "P" beside Start, and its chevron: the glyph Start's own text takes, enabled or not."""
     C.set_theme(theme)
     live = screens(LiveSessionScreen)
-    pill, start = live._btn_duration_expand, live.btn_start
+    pill, start = live.duration.button, live.btn_start
     try:
         for disabled in (False, True):
             pill.disabled = start.disabled = disabled
@@ -510,20 +510,20 @@ def test_the_session_end_card_scrolls_rather_than_clipping_on_a_short_screen():
     screen = LiveSessionScreen()
     Window.add_widget(screen)
     try:
-        screen.show_summary(1, {"duration": 600})
-        screen._summary.size_hint_y = None
-        screen._summary.height = dp(280)  # a landscape phone minus the bottom nav, and less
+        screen.end_card.show(1, {"duration": 600})
+        screen.end_card.size_hint_y = None
+        screen.end_card.height = dp(280)  # a landscape phone minus the bottom nav, and less
         _pump()
-        scroll = next(w for w in screen._summary.walk(restrict=True) if isinstance(w, ScrollView))
-        pad = screen._summary.padding
+        scroll = next(w for w in screen.end_card.walk(restrict=True) if isinstance(w, ScrollView))
+        pad = screen.end_card.padding
         assert scroll.height <= dp(280) - pad[1] - pad[3] + 0.5
         panel = next(w for w in scroll.walk(restrict=True) if isinstance(w, ModalPanel))
-        assert screen.summary_ok_btn in list(panel.walk(restrict=True))  # reachable by scrolling, not cut off
-        screen._summary.height = Window.height
+        assert screen.end_card.ok_btn in list(panel.walk(restrict=True))  # reachable by scrolling, not cut off
+        screen.end_card.height = Window.height
         _pump()
         assert scroll.height == pytest.approx(panel.height)  # room enough: no scrolling, the whole card
     finally:
-        screen.hide_summary()
+        screen.end_card.hide()
         Window.remove_widget(screen)
 
 
@@ -531,17 +531,17 @@ def test_the_connection_card_has_no_blank_slot_for_a_hidden_retry():
     screen = LiveSessionScreen()
     Window.add_widget(screen)
     try:
-        screen.show_overlay("Connecting…")
+        screen.connect_overlay.show("Connecting…")
         _pump()
-        assert screen._overlay_retry_btn.parent is None  # detached, not an invisible 44 dp slot
-        screen.show_overlay_retry("Connection failed")
+        assert screen.connect_overlay.retry_btn.parent is None  # detached, not an invisible 44 dp slot
+        screen.connect_overlay.show_retry("Connection failed")
         _pump()
-        assert screen._overlay_retry_btn.get_root_window() is not None
-        screen.show_overlay("Connecting…")
+        assert screen.connect_overlay.retry_btn.get_root_window() is not None
+        screen.connect_overlay.show("Connecting…")
         _pump()
-        assert screen._overlay_retry_btn.parent is None
+        assert screen.connect_overlay.retry_btn.parent is None
     finally:
-        screen.hide_overlay()
+        screen.connect_overlay.hide()
         Window.remove_widget(screen)
 
 
@@ -553,8 +553,8 @@ def test_the_in_screen_modals_block_taps_on_the_screen_behind():
     hits = []
     screen._btn_start.bind(on_release=lambda *_a: hits.append("start"))
     try:
-        for show, hide in ((lambda: screen.show_summary(1, {"duration": 60}), screen.hide_summary),
-                           (lambda: screen.show_overlay("Connecting…"), screen.hide_overlay)):
+        for show, hide in ((lambda: screen.end_card.show(1, {"duration": 60}), screen.end_card.hide),
+                           (lambda: screen.connect_overlay.show("Connecting…"), screen.connect_overlay.hide)):
             show()
             _pump()
             x, y = screen._btn_start.to_window(*screen._btn_start.center)
@@ -566,6 +566,41 @@ def test_the_in_screen_modals_block_taps_on_the_screen_behind():
             hide()
             _pump()
     finally:
+        Window.remove_widget(screen)
+
+
+def test_the_connection_cards_buttons_take_taps_while_it_shows_and_none_once_hidden():
+    from kivy.tests.common import UnitTestTouch
+
+    screen = LiveSessionScreen()
+    Window.add_widget(screen)
+    card, hits = screen.connect_overlay, []
+    card.cancel_btn.bind(on_release=lambda *_a: hits.append("cancel"))
+    card.retry_btn.bind(on_release=lambda *_a: hits.append("retry"))
+
+    def tap(at: tuple[float, float]) -> None:
+        t = UnitTestTouch(*at)
+        t.touch_down()
+        t.touch_up()
+        _pump()
+
+    try:
+        card.show("Connecting…")
+        _pump()
+        tap(card.cancel_btn.to_window(*card.cancel_btn.center))
+        card.show_retry("Connection failed")
+        _pump()
+        cancel_at = card.cancel_btn.to_window(*card.cancel_btn.center)
+        retry_at = card.retry_btn.to_window(*card.retry_btn.center)
+        tap(retry_at)
+        assert hits == ["cancel", "retry"]
+        card.hide()
+        _pump()
+        tap(cancel_at)
+        tap(retry_at)
+        assert hits == ["cancel", "retry"]
+    finally:
+        card.hide()
         Window.remove_widget(screen)
 
 
@@ -608,17 +643,17 @@ def test_the_session_end_card_opens_at_its_top():
     screen = LiveSessionScreen()
     Window.add_widget(screen)
     try:
-        screen.show_summary(1, {"duration": 600})
-        screen._summary.size_hint_y = None
-        screen._summary.height = dp(280)
+        screen.end_card.show(1, {"duration": 600})
+        screen.end_card.size_hint_y = None
+        screen.end_card.height = dp(280)
         _pump()
-        screen._summary_scroll.scroll_y = 0  # the user scrolled down to OK
-        screen.hide_summary()
-        screen.show_summary(2, {"duration": 60})
+        screen.end_card._scroll.scroll_y = 0  # the user scrolled down to OK
+        screen.end_card.hide()
+        screen.end_card.show(2, {"duration": 60})
         _pump()
-        assert screen._summary_scroll.scroll_y == 1
+        assert screen.end_card._scroll.scroll_y == 1
     finally:
-        screen.hide_summary()
+        screen.end_card.hide()
         Window.remove_widget(screen)
 
 

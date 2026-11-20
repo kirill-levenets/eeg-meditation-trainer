@@ -184,16 +184,16 @@ def test_an_ending_reloads_the_full_graph_and_sets_the_duration(fed):
     frames()
     duration = app._db.get_all_sessions(app._current_user_id)[0]["duration"]
     assert _points(screen.graph) == 10  # full session, not partial
-    assert screen._timer_label.text.endswith(elapsed_clock(duration))  # real duration, not frozen
-    assert screen.summary_session_id is not None
+    assert screen.header._timer_label.text.endswith(elapsed_clock(duration))  # real duration, not frozen
+    assert screen.end_card.session_id is not None
 
 
 def test_resume_refreshes_stats_state_and_timer(fed, monkeypatch):
     app, screen = fed.app, fed.app._live_screen
     _locked_for(fed, 3)
-    stats = calls_of(monkeypatch, screen, "update_stats")
-    states = calls_of(monkeypatch, screen, "update_state")
-    timers = calls_of(monkeypatch, screen, "update_timer")
+    stats = calls_of(monkeypatch, screen.stats, "update")
+    states = calls_of(monkeypatch, screen.header, "update_state")
+    timers = calls_of(monkeypatch, screen.header, "update_timer")
     _unlock(fed)
     assert stats == [(app._session.manager.live_score(),)]  # the score kept while locked
     assert states == [("Shamatha",)]
@@ -206,9 +206,9 @@ def test_resume_shows_the_shamatha_pill_the_locked_ticks_lit(fresh_app, monkeypa
     fresh_app.on_pause()
     for _ in range(3):  # three ticks above the threshold light it, none of them drawn while locked
         fed.tick(metrics=tick_metrics(80.0))
-    assert not fresh_app._live_screen._shamatha_active
+    assert not fresh_app._live_screen.header._shamatha_active
     _unlock(fed)
-    assert fresh_app._live_screen._shamatha_active
+    assert fresh_app._live_screen.header._shamatha_active
 
 
 def test_a_reload_keeps_each_points_colouring():
@@ -228,8 +228,8 @@ def test_resume_skips_entirely_when_not_running(fed, monkeypatch):
     app._controls.stop_and_save(reason="timer")  # the timer expired during the pause: its summary card covers the live screen
     frames()
     loads = _reloads(fed, monkeypatch)
-    stats = calls_of(monkeypatch, screen, "update_stats")
-    timers = calls_of(monkeypatch, screen, "update_timer")
+    stats = calls_of(monkeypatch, screen.stats, "update")
+    timers = calls_of(monkeypatch, screen.header, "update_timer")
     _unlock(fed)
     # Combining graph reloads with _stop_and_save here was the ANR cause.
     assert [len(calls) for calls in loads.values()] == [0, 0, 0] and stats == [] and timers == []
@@ -239,8 +239,8 @@ def test_resume_with_empty_buffers_is_safe(fed, monkeypatch):
     app, screen = fed.app, fed.app._live_screen
     app.on_pause()  # RUNNING but no ticks recorded yet
     loads = _reloads(fed, monkeypatch)
-    stats = calls_of(monkeypatch, screen, "update_stats")
-    timers = calls_of(monkeypatch, screen, "update_timer")
+    stats = calls_of(monkeypatch, screen.stats, "update")
+    timers = calls_of(monkeypatch, screen.header, "update_timer")
     _unlock(fed)
     assert [len(calls) for calls in loads.values()] == [0, 0, 0] and stats == []
     assert len(timers) == 1  # always refreshed when RUNNING
@@ -292,9 +292,9 @@ def test_btwait_does_not_start_audio_on_tick_thread(connected, monkeypatch):
     calls_of(monkeypatch, app._audio, "start", sounds, "start")
     calls_of(monkeypatch, app._audio, "play_connect_sound", sounds, "connect sound")
     app._session._follow_bt_wait(app._session.run)
-    assert sounds == [] and app._live_screen._overlay.opacity == 1
+    assert sounds == [] and app._live_screen.connect_overlay.opacity == 1
     frames()  # the main thread's turn
-    assert sounds == ["start", "connect sound"] and app._live_screen._overlay.opacity == 0
+    assert sounds == ["start", "connect sound"] and app._live_screen.connect_overlay.opacity == 0
 
 
 # --- timer-expiry persistence runs on the tick thread ---------------------

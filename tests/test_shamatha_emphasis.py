@@ -37,21 +37,21 @@ def test_shamatha_transition_above_tick_resets_exit_streak():
 def test_set_shamatha_overrides_status_text_and_chip():
     from app.ui.live_session import LiveSessionScreen
     screen = LiveSessionScreen()
-    screen.update_state("Stable Focus")
-    assert screen._state_label.text == "Stable Focus"
-    assert screen._shamatha_active is False
-    assert screen._shamatha_bg.a == 0
+    screen.header.update_state("Stable Focus")
+    assert screen.header._state_label.text == "Stable Focus"
+    assert screen.header._shamatha_active is False
+    assert screen.header._shamatha_bg.a == 0
 
-    screen.set_shamatha(True)
-    assert screen._state_label.text == "SHAMATHA"
-    assert screen._shamatha_active is True
-    assert screen._shamatha_bg.a > 0
+    screen.header.set_shamatha(True)
+    assert screen.header._state_label.text == "SHAMATHA"
+    assert screen.header._shamatha_active is True
+    assert screen.header._shamatha_bg.a > 0
 
     # While active, classified-state ticks must NOT overwrite the chip.
-    screen.update_state("Sinking")
-    assert screen._state_label.text == "SHAMATHA"
+    screen.header.update_state("Sinking")
+    assert screen.header._state_label.text == "SHAMATHA"
 
-    screen.set_shamatha(False)
-    assert screen._state_label.text == "Sinking"
-    assert screen._shamatha_active is False
-    assert screen._shamatha_bg.a == 0
+    screen.header.set_shamatha(False)
+    assert screen.header._state_label.text == "Sinking"
+    assert screen.header._shamatha_active is False
+    assert screen.header._shamatha_bg.a == 0

@@ -44,7 +44,7 @@ def card(fresh_app, monkeypatch):
     start_ticked_by_hand(app, ticks=4)
     app._controls.stop_and_save(reason="timer")
     frames()
-    app.sid = app._live_screen.summary_session_id
+    app.sid = app._live_screen.end_card.session_id
     assert app.sid is not None
     app.toasts, app.notes_writes = [], []
     monkeypatch.setattr(am, "show_toast", app.toasts.append)
@@ -55,11 +55,11 @@ def card(fresh_app, monkeypatch):
 
 
 def _type(app, notes: str) -> None:
-    app._live_screen._summary_notes.text = notes
+    app._live_screen.end_card._notes.text = notes
 
 
 def _card_open(app) -> bool:
-    return app._live_screen.summary_session_id is not None
+    return app._live_screen.end_card.session_id is not None
 
 
 # --- Stop: one confirmed path, the same save as every other ending ---------------------------------------------
@@ -210,7 +210,7 @@ def _ended_in_its_own_app(build_app):
     start_ticked_by_hand(app, ticks=4)
     app._controls.stop_and_save(reason="timer")
     frames()
-    return app, app._live_screen.summary_session_id
+    return app, app._live_screen.end_card.session_id
 
 
 def _notes_on_disk(sid) -> str | None:
