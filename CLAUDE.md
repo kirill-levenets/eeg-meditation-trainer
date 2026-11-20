@@ -290,6 +290,7 @@ When modifying features, UI, commands, architecture, or build process, update th
   Mark items as completed when implemented; add new ideas as they emerge.
 - `pyproject.toml` — Ruff config.
   Run `ruff check app/ tests/ main.py` before every commit; all checks must pass.
+  An import kept inside a function in `app/` (Android-only, platform-only, a cycle) says why on its line, `# noqa: PLC0415 - reason`, never through a file-wide ignore.
 
 **Tracked `.md` files are one sentence per line**, so an edit diffs as the sentences it changed: a sentence over ~240 characters breaks at its clauses (`;`, `:`, an em dash), never in a table or code block.
 `tests/test_docs_format.py` fails on a prose line over 400 characters → [app-platform](docs/architecture/app-platform.md#tests).

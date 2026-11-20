@@ -1,6 +1,5 @@
 """Settings → Audio: the feedback sound below the threshold and the reward above it, the alert bells and the sound
 test."""
-from typing import Optional
 
 from kivy.metrics import dp
 
@@ -38,10 +37,10 @@ class AudioSection:
     def __init__(self, section) -> None:
         self._feedback_source: str = "noise"
         self._feedback_sound_path: str = ""
-        self._feedback_source_btn: Optional[StyledButton] = None
+        self._feedback_source_btn: StyledButton | None = None
         self._reward_source: str = "none"   # above-threshold reward (off by default)
         self._reward_sound_path: str = ""
-        self._reward_source_btn: Optional[StyledButton] = None
+        self._reward_source_btn: StyledButton | None = None
         self._build(section)
 
     def _build(self, section) -> None:

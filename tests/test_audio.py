@@ -465,3 +465,38 @@ def test_the_settings_audio_test_is_refused_while_a_session_runs(fresh_app, monk
     app._sounds.on_test_audio()
     assert replaced == []  # it would replace the session's players
     assert popup_titles() == ["Session in progress"]
+
+
+class _ResetFailsPlayer(_FakePlayer):
+    """A reward player that takes its volume up but fails to go back down."""
+
+    @property
+    def volume(self) -> float:
+        return self._volume
+
+    @volume.setter
+    def volume(self, v: float) -> None:
+        if v == 0.0 and getattr(self, "_up", False):
+            raise RuntimeError("no going down")
+        self._up = getattr(self, "_up", False) or v > 0.0
+        self._volume = v
+
+
+def test_a_reward_test_whose_volume_fails_to_reset_says_so_in_the_log(monkeypatch):
+    monkeypatch.setattr(noise_mod, "_make_noise_player",
+                        lambda path, loop=True: _ResetFailsPlayer(path) if "tone" in path else _FakePlayer(path))
+    sequence_sleep(monkeypatch, record_sequences(monkeypatch), lambda _s: None)
+    logged = []
+    monkeypatch.setattr(noise_mod.logger, "debug", lambda message, *_a, **_k: logged.append(message))
+    eng = AudioEngine()
+    eng.prepare_feedback({"noise": ("noise", ""), "tone": ("tone", "")}, "noise")
+    eng.test_audio("tone")  # the reward sample first, then its volume back to 0
+    for _ in range(200):
+        if not eng._test_active:
+            break
+        threading.Event().wait(0.01)
+    assert "Reward volume not reset after its test: no going down" in logged
+    Clock.tick()
+    monkeypatch.undo()
+    eng.cleanup()
+

@@ -666,10 +666,7 @@ class LiveSessionScreen(Screen):
             min_graph_floor=dp(240),
         )
     def on_leave(self, *args) -> None:
-        try:
-            Window.unbind(on_resize=self._reflow, on_rotate=self._reflow)
-        except Exception:
-            pass
+        Window.unbind(on_resize=self._reflow, on_rotate=self._reflow)
 
     def _view_graphs(self, view: str) -> tuple:
         return (self._raw_graph, self._band_graph) if view == "raw" else (self._graph,)

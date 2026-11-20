@@ -2,7 +2,6 @@
 sound."""
 import os
 from collections.abc import Callable
-from typing import Optional
 
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
@@ -348,7 +347,7 @@ class TimerSection:
         fill_saved_list(self._saved_programs_box, programs, saved_program_label,
                         self._on_program_load_pressed, self._on_program_delete_pressed)
 
-    def _add_segment_row(self, segment: Optional[dict] = None) -> None:
+    def _add_segment_row(self, segment: dict | None = None) -> None:
         """Append one editor row (used by Add button and load_program)."""
         segment = segment or {}
         minutes = segment.get("minutes", 10)

@@ -196,6 +196,36 @@ def test_an_android_player_whose_start_fails_says_so(monkeypatch):
     assert not player._playing
 
 
+def _android_player(monkeypatch, path: str = "rain.wav") -> _AndroidMediaNoisePlayer:
+    monkeypatch.setitem(sys.modules, "jnius", SimpleNamespace(autoclass=lambda _name: MagicMock()))
+    return _AndroidMediaNoisePlayer(path)
+
+
+def _debug_lines(monkeypatch) -> list:
+    logged = []
+    monkeypatch.setattr(noise_mod.logger, "debug", lambda message, *_a, **_k: logged.append(message))
+    return logged
+
+
+def test_an_android_players_volume_error_is_logged_once_while_it_repeats(monkeypatch):
+    player = _android_player(monkeypatch)
+    player._mp.setVolume.side_effect = [RuntimeError("released"), RuntimeError("released"), None, RuntimeError("released")]
+    logged = _debug_lines(monkeypatch)
+    for v in (0.2, 0.3, 0.4, 0.5):  # a ramp's steps: two failures, one that works, then the same failure again
+        player.volume = v
+    assert logged == ["Player volume not set (a released player keeps none): released"] * 2
+    assert player.volume == 0.5  # held for the player's next play
+
+
+def test_an_android_player_that_cannot_stop_says_so_in_the_log(monkeypatch):
+    player = _android_player(monkeypatch)
+    player._playing = True
+    player._mp.pause.side_effect = RuntimeError("released")
+    logged = _debug_lines(monkeypatch)
+    player.stop()  # must not raise into the ending's teardown
+    assert logged == ["Player not stopped (a released player has nothing to stop): released"]
+
+
 def test_releasing_an_android_player_builds_no_listener(monkeypatch):
     monkeypatch.setitem(sys.modules, "jnius", SimpleNamespace(autoclass=lambda _name: MagicMock()))
     player = _AndroidMediaNoisePlayer("chime.wav", loop=False)

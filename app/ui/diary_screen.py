@@ -1,6 +1,5 @@
 import math
 import os
-from typing import Optional
 
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
@@ -158,8 +157,8 @@ class DiaryScreen(Screen):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.name = "diary"
-        self._selected_session_id: Optional[int] = None
-        self._scored_key: Optional[str] = None  # the series the shown session was scored on, marked in its legend
+        self._selected_session_id: int | None = None
+        self._scored_key: str | None = None  # the series the shown session was scored on, marked in its legend
         self._saved_notes_state: tuple[str, str, int] | None = None  # the fields as loaded or last saved
         self._session_formula_series: dict[str, list[float]] = {}
         self._build_ui()

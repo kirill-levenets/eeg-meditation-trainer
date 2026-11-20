@@ -45,7 +45,7 @@ def open_document(on_result, mime_types: tuple[str, ...] = ("*/*",)) -> None:
 
 def write_file_to_uri(uri_str: str, src_path: str) -> bool:
     """Stream `src_path` into the content:// URI via ContentResolver."""
-    from jnius import autoclass
+    from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
 
     Uri = autoclass("android.net.Uri")
     resolver = android_jni.content_resolver()
@@ -68,7 +68,7 @@ def write_file_to_uri(uri_str: str, src_path: str) -> bool:
 
 def read_uri_to_file(uri_str: str, dst_path: str) -> bool:
     """Stream the content:// URI into `dst_path` via ContentResolver."""
-    from jnius import autoclass
+    from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
 
     Uri = autoclass("android.net.Uri")
     FileOutputStream = autoclass("java.io.FileOutputStream")
@@ -100,7 +100,7 @@ def read_uri_to_file(uri_str: str, dst_path: str) -> bool:
 
 def query_display_name(uri_str: str) -> str | None:
     """The document's file name as its provider shows it."""
-    from jnius import autoclass
+    from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
 
     Uri = autoclass("android.net.Uri")
     OpenableColumns = autoclass("android.provider.OpenableColumns")
@@ -116,7 +116,7 @@ def query_display_name(uri_str: str) -> str | None:
 
 def query_extension(uri_str: str) -> str | None:
     """The usual file extension for the document's type, as its provider reports it."""
-    from jnius import autoclass
+    from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
 
     Uri = autoclass("android.net.Uri")
     MimeTypeMap = autoclass("android.webkit.MimeTypeMap")
@@ -186,7 +186,7 @@ def _ensure_bound() -> None:
     global _bound
     if _bound:
         return
-    from android import activity
+    from android import activity  # noqa: PLC0415 - Android only
     activity.bind(on_activity_result=_on_activity_result)
     _bound = True
 
@@ -196,7 +196,7 @@ def _on_activity_result(request_code, result_code, intent):
     if cb is None:
         return
     try:
-        from jnius import autoclass
+        from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
         Activity = autoclass("android.app.Activity")
         if result_code != Activity.RESULT_OK or intent is None:
             cb(None)
@@ -209,11 +209,11 @@ def _on_activity_result(request_code, result_code, intent):
 
 
 def _launch(request_code: int, mime_types: tuple[str, ...], title: str | None) -> None:
-    from android.runnable import run_on_ui_thread
+    from android.runnable import run_on_ui_thread  # noqa: PLC0415 - Android only
 
     @run_on_ui_thread
     def _run():
-        from jnius import autoclass
+        from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
         Intent = autoclass("android.content.Intent")
         action = (Intent.ACTION_CREATE_DOCUMENT if request_code == _REQ_CREATE
                   else Intent.ACTION_OPEN_DOCUMENT)

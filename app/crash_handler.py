@@ -17,7 +17,7 @@ import traceback as _traceback
 from typing import Any
 
 from app import android_jni
-from app.config import APP_VERSION
+from app.config import APP, APP_VERSION
 from app.logger import logger
 
 # Per-label cooldown for soft errors so one flaky subsystem can't spam dialogs.
@@ -27,7 +27,7 @@ _SOFT_ERROR_LAST: dict[str, float] = {}
 
 def _kivy_version() -> str:
     try:
-        import kivy  # noqa: PLC0415
+        import kivy  # noqa: PLC0415 - keeps app/session Kivy-free
         return kivy.__version__
     except Exception:  # noqa: BLE001
         return "unknown"
@@ -45,7 +45,6 @@ def _platform_string() -> str:
 def _device_name(app) -> str:
     """Best-effort device display name from app state."""
     try:
-        from app.config import APP  # noqa: PLC0415
         if getattr(APP, "USE_MOCK_DEVICE", False):
             return "Mock EEG"
         real_stream = getattr(app, "_real_stream", None)
@@ -54,8 +53,8 @@ def _device_name(app) -> str:
             if name:
                 return str(name)
             return "Real EEG"
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as e:  # noqa: BLE001 - the report goes out with "unknown" rather than not at all
+        logger.debug(f"Device name for the report not read: {e}")
     return "unknown"
 
 
@@ -105,7 +104,7 @@ _STATE = {"in_dialog": False, "app": None}
 def _schedule_dialog(report: str, fatal: bool = True, title: str = "") -> None:
     """Show the CrashDialog on the Kivy main thread. Overridden in tests."""
     try:
-        from kivy.clock import Clock  # noqa: PLC0415
+        from kivy.clock import Clock  # noqa: PLC0415 - keeps app/session Kivy-free
 
         Clock.schedule_once(
             lambda dt: CrashDialog.show(
@@ -210,7 +209,7 @@ class CrashDialog:
 
     @classmethod
     def show(cls, report: str, app, fatal: bool = True, title: str = "") -> None:
-        from kivy.core.clipboard import Clipboard  # noqa: PLC0415
+        from kivy.core.clipboard import Clipboard  # noqa: PLC0415 - keeps app/session Kivy-free
 
         try:
             Clipboard.copy(report)
@@ -230,12 +229,12 @@ class CrashDialog:
 
     @classmethod
     def _build(cls, report: str, app, fatal: bool, title: str, make: dict):
-        from kivy.core.clipboard import Clipboard  # noqa: PLC0415
-        from kivy.metrics import dp  # noqa: PLC0415
-        from kivy.uix.boxlayout import BoxLayout  # noqa: PLC0415
-        from kivy.uix.scrollview import ScrollView  # noqa: PLC0415
+        from kivy.core.clipboard import Clipboard  # noqa: PLC0415 - keeps app/session Kivy-free
+        from kivy.metrics import dp  # noqa: PLC0415 - keeps app/session Kivy-free
+        from kivy.uix.boxlayout import BoxLayout  # noqa: PLC0415 - keeps app/session Kivy-free
+        from kivy.uix.scrollview import ScrollView  # noqa: PLC0415 - keeps app/session Kivy-free
 
-        from app.ui.theme import fit_height_to_text  # noqa: PLC0415
+        from app.ui.theme import fit_height_to_text  # noqa: PLC0415 - keeps app/session Kivy-free
 
         root = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12))
         if fatal:
@@ -293,8 +292,8 @@ class CrashDialog:
             try:
                 if cls._popup is not None:
                     cls._popup.dismiss()
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as e:  # noqa: BLE001 - the dialog's state is reset below either way
+                logger.debug(f"Crash dialog not dismissed: {e}")
             _STATE["in_dialog"] = False
             if not fatal:
                 return
@@ -327,7 +326,7 @@ class CrashDialog:
 
 def _themed_makers() -> dict:
     """The dialog in the app's modal style."""
-    from app.ui.theme import (  # noqa: PLC0415
+    from app.ui.theme import (  # noqa: PLC0415 - keeps app/session Kivy-free
         C,
         StyledButton,
         ThemedLabel,
@@ -348,10 +347,10 @@ def _themed_makers() -> dict:
 
 def _plain_makers() -> dict:
     """Stock Kivy widgets, for when the app's own widgets are what failed."""
-    from kivy.uix.button import Button  # noqa: PLC0415
-    from kivy.uix.label import Label  # noqa: PLC0415
-    from kivy.uix.popup import Popup  # noqa: PLC0415  # plain-ok: theme fallback
-    from kivy.uix.textinput import TextInput  # noqa: PLC0415
+    from kivy.uix.button import Button  # noqa: PLC0415 - keeps app/session Kivy-free
+    from kivy.uix.label import Label  # noqa: PLC0415 - keeps app/session Kivy-free
+    from kivy.uix.popup import Popup  # noqa: PLC0415 - keeps app/session Kivy-free  # plain-ok: theme fallback
+    from kivy.uix.textinput import TextInput  # noqa: PLC0415 - keeps app/session Kivy-free
 
     return {
         "label": Label,
@@ -386,12 +385,11 @@ def install_crash_handler(app) -> None:
     _threading.excepthook = _thread_hook
 
     try:
-        from kivy.base import ExceptionHandler, ExceptionManager  # noqa: PLC0415
+        from kivy.base import ExceptionHandler, ExceptionManager  # noqa: PLC0415 - keeps app/session Kivy-free
 
         class _Handler(ExceptionHandler):
             def handle_exception(self, inst):
-                import sys as _s  # noqa: PLC0415
-                exc_type, exc_value, tb = _s.exc_info()
+                exc_type, exc_value, tb = _sys.exc_info()
                 _handle_exception(
                     exc_type, exc_value, tb, source="kivy-loop", app=_STATE["app"]
                 )

@@ -11,6 +11,7 @@ Parses ThinkGear serial protocol packets to extract:
 - Signal quality (code 0x02)
 - Raw wave (code 0x80, 512Hz signed 16-bit)
 """
+import os
 import select
 import socket as _socket
 import struct
@@ -19,7 +20,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 from app import android_jni
 from app.eeg.band_spec import BAND_KEYS
@@ -63,7 +64,7 @@ class ThinkGearParser:
                 break
         return results
 
-    def _try_parse_packet(self) -> Optional[dict]:
+    def _try_parse_packet(self) -> dict | None:
         """Try to extract one complete ThinkGear packet from buffer."""
         # Find sync bytes 0xAA 0xAA
         while len(self._buffer) >= 2:
@@ -176,10 +177,10 @@ class NeuroSkyStream:
         self._start_time: float = 0.0
         self._sample_count: int = 0
         self._parser: ThinkGearParser = ThinkGearParser()
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._lock: threading.Lock = threading.Lock()
-        self._device_address: Optional[str] = None
-        self._device_name: Optional[str] = None
+        self._device_address: str | None = None
+        self._device_name: str | None = None
 
         # Latest consolidated sample (updated by reader thread)
         self._latest_bands: dict[str, float] = dict.fromkeys(BAND_NAMES, 0.0)
@@ -194,9 +195,9 @@ class NeuroSkyStream:
         # Bluetooth objects (set during connect)
         self._bt_socket = None
         self._bt_input_stream = None  # Android only (Java InputStream)
-        self._desktop_socket: Optional[_socket.socket] = None  # Desktop only
+        self._desktop_socket: _socket.socket | None = None  # Desktop only
         self._windows_serial = None  # Windows only (pyserial Serial object)
-        self._serial_fd: Optional[int] = None  # Serial device mode (splitter)
+        self._serial_fd: int | None = None  # Serial device mode (splitter)
         self._read_count: int = 0
         # Backlog telemetry: a rising high-water mark means the reader is losing to the stream.
         self._avail_high_water: int = 0
@@ -400,7 +401,7 @@ class NeuroSkyStream:
         if not android_jni.on_android():
             return
         try:
-            from jnius import autoclass
+            from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
             autoclass("android.os.Process").setThreadPriority(-8)
         except Exception as e:
             logger.debug(f"Thread priority boost skipped: {e}")
@@ -444,7 +445,7 @@ class NeuroSkyStream:
     def _request_bt_permissions() -> None:
         """Request Bluetooth runtime permissions on Android 6+."""
         try:
-            from jnius import autoclass
+            from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
         except ImportError:
             return
 
@@ -508,7 +509,7 @@ class NeuroSkyStream:
     def _connect_android(self) -> None:
         """Open RFCOMM socket via Android Bluetooth API (pyjnius)."""
         try:
-            from jnius import autoclass
+            from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
         except ImportError:
             raise RuntimeError(
                 "pyjnius not available — real device connection requires Android"
@@ -575,11 +576,10 @@ class NeuroSkyStream:
 
     def _connect_serial(self) -> None:
         """Open a serial device path (e.g. /tmp/mindwave_b from splitter)."""
-        import os as _os
         path = self._device_address
         logger.info(f"Connecting to serial device {path}...")
         try:
-            fd = _os.open(path, _os.O_RDONLY | _os.O_NOCTTY)
+            fd = os.open(path, os.O_RDONLY | os.O_NOCTTY)
             self._serial_fd = fd
             logger.info(f"Serial device connected: {path}")
         except Exception as e:
@@ -639,7 +639,7 @@ class NeuroSkyStream:
         # Fallback: PyBluez BluetoothSocket (works independently of
         # CPython's socket module BT support)
         try:
-            import bluetooth
+            import bluetooth  # noqa: PLC0415 - PyBluez: Linux desktop only
         except ImportError:
             raise RuntimeError(
                 "Desktop RFCOMM connect failed: module 'socket' has no attribute "
@@ -674,7 +674,7 @@ class NeuroSkyStream:
         - A Bluetooth MAC address — we search for the matching COM port
         """
         try:
-            import serial
+            import serial  # noqa: PLC0415 - pyserial: desktop serial devices only
         except ImportError:
             raise RuntimeError(
                 "pyserial is required for Windows Bluetooth. Install it: pip install pyserial"
@@ -706,10 +706,10 @@ class NeuroSkyStream:
             raise RuntimeError(f"Windows serial connect failed ({port}): {e}")
 
     @staticmethod
-    def _find_com_port_for_mac(mac_address: str) -> Optional[str]:
+    def _find_com_port_for_mac(mac_address: str) -> str | None:
         """Search Windows registry for COM port associated with a BT MAC address."""
         try:
-            import winreg
+            import winreg  # noqa: PLC0415 - Windows only
             # Normalize MAC: remove colons for registry lookup
             mac_clean = mac_address.replace(":", "").replace("-", "").upper()
             # BT COM ports are under HKLM\SYSTEM\CurrentControlSet\Enum\BTHENUM
@@ -719,7 +719,7 @@ class NeuroSkyStream:
             except FileNotFoundError:
                 return None
             # Walk subkeys looking for our MAC and an associated COM port
-            import serial.tools.list_ports as list_ports
+            import serial.tools.list_ports as list_ports  # noqa: PLC0415 - pyserial: desktop serial devices only
             for port_info in list_ports.comports():
                 if port_info.hwid and mac_clean in port_info.hwid.upper():
                     winreg.CloseKey(key)
@@ -741,7 +741,6 @@ class NeuroSkyStream:
 
     def _read_bytes_serial(self, max_bytes: int) -> bytes:
         """Read bytes from a serial device file descriptor (splitter)."""
-        import os as _os
         fd = self._serial_fd
         if fd is None:
             return b""
@@ -749,7 +748,7 @@ class NeuroSkyStream:
             # Poll: a cross-thread os.close() doesn't wake a blocked os.read().
             if not select.select([fd], [], [], 0.5)[0]:
                 return b""
-            return _os.read(fd, max_bytes)
+            return os.read(fd, max_bytes)
         except BlockingIOError:
             return b""
         except Exception as e:
@@ -814,7 +813,6 @@ class NeuroSkyStream:
 
     def _close_socket(self) -> None:
         """Close every open handle; locked because stop() and the exiting reader both call it."""
-        import os as _os
         with self._close_lock:
             self._bt_input_stream = None
             serial, self._windows_serial = self._windows_serial, None
@@ -826,7 +824,7 @@ class NeuroSkyStream:
             fd, self._serial_fd = self._serial_fd, None
             if fd is not None:
                 try:
-                    _os.close(fd)
+                    os.close(fd)
                 except OSError as e:
                     logger.debug(f"closing serial fd: {e}")
             pending, self._pending_socket = self._pending_socket, None
@@ -880,7 +878,7 @@ class NeuroSkyStream:
     def _scan_paired_android() -> list[dict[str, str]]:
         """Scan paired devices via Android Bluetooth API."""
         try:
-            from jnius import autoclass
+            from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
         except ImportError:
             logger.debug("pyjnius not available, scan returning empty")
             return []
@@ -949,7 +947,7 @@ class NeuroSkyStream:
         Falls back to listing all available COM ports if BT filtering fails.
         """
         try:
-            import serial.tools.list_ports as list_ports
+            import serial.tools.list_ports as list_ports  # noqa: PLC0415 - pyserial: desktop serial devices only
         except ImportError:
             logger.warning("pyserial not installed — cannot scan COM ports")
             return []

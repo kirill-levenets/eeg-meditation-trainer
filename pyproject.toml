@@ -1,6 +1,7 @@
 [tool.ruff]
 preview = true
 target-version = "py311"
+line-length = 120  # the code's width; isort wraps at it (the length check itself, E501, is off)
 
 [tool.ruff.lint]
 select = [
@@ -14,7 +15,8 @@ select = [
     "PLC0415", # import-outside-toplevel — no imports inside functions
     "T201",    # print — use logger, not print()
     "UP006",   # non-pep585-annotation — list[str] not List[str]
-    "UP007",   # non-pep604-annotation — X | None not Optional[X]
+    "UP007",   # non-pep604-annotation — X | Y not Union[X, Y]
+    "UP045",   # non-pep604-annotation-optional — X | None not Optional[X]
     "UP035",   # deprecated-import — remove `from typing import List` etc.
     "TID252",  # relative-imports — always absolute imports
     "S105",    # hardcoded-password-string
@@ -27,6 +29,7 @@ select = [
 
     # Code quality
     "BLE001",  # blind-except — don't catch bare Exception without logging
+    "S110",    # try-except-pass — a broad except that only passes hides the failure
     "ASYNC100",# missing-await — coroutine created but never awaited
     "SIM102",  # collapsible-if
     "SIM118",  # in-dict-keys — use `key in dict` not `key in dict.keys()`
@@ -64,43 +67,42 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+# An import kept inside a function in app/ says why on its line (# noqa: PLC0415 - reason), never through a file-wide ignore.
 # Tests: print, broad asserts, per-test imports
 "tests/*" = ["T201", "BLE001", "PLC0415"]
 # __main__ blocks use print()
 "app/eeg/mock_stream.py" = ["T201"]
 "app/eeg/mock_stream_v2.py" = ["T201"]
 "app/session/manager.py" = ["T201", "BLE001"]
-# BT protocol: broad except, lazy platform imports, complex parser
-"app/eeg/neurosky_stream.py" = ["T201", "PLC0415", "BLE001", "PLR0912"]
-# Audio: broad except + lazy Kivy SoundLoader import
-"app/audio_feedback/noise.py" = ["T201", "PLC0415", "BLE001"]
-# DB: lazy json import, print in __main__
-"app/storage/database.py" = ["T201", "PLC0415"]
-# Android MediaStore: lazy pyjnius import, broad except for platform safety
-"app/storage/android_share.py" = ["PLC0415", "BLE001"]
-# Android SAF: lazy pyjnius import, broad except for platform safety
-"app/storage/android_saf.py" = ["PLC0415", "BLE001"]
-# pyjnius helpers: lazy pyjnius import, broad except while trying screens in turn (logged)
-"app/android_jni.py" = ["PLC0415", "BLE001"]
-# The session's keep-awake: lazy pyjnius/android imports, broad except around each Android call (logged)
-"app/keep_awake.py" = ["PLC0415", "BLE001"]
-# The native toast: lazy android/pyjnius imports, broad except around the Android call (logged)
-"app/ui/toast.py" = ["PLC0415", "BLE001"]
+# BT protocol: print in __main__, broad except, complex parser
+"app/eeg/neurosky_stream.py" = ["T201", "BLE001", "PLR0912"]
+# Audio: print in __main__, broad except
+"app/audio_feedback/noise.py" = ["T201", "BLE001"]
+# DB: print in __main__
+"app/storage/database.py" = ["T201"]
+# Android MediaStore: broad except for platform safety
+"app/storage/android_share.py" = ["BLE001"]
+# Android SAF: broad except for platform safety
+"app/storage/android_saf.py" = ["BLE001"]
+# pyjnius helpers: broad except while trying screens in turn (logged)
+"app/android_jni.py" = ["BLE001"]
+# The session's keep-awake: broad except around each Android call (logged)
+"app/keep_awake.py" = ["BLE001"]
+# The native toast: broad except around the Android call (logged)
+"app/ui/toast.py" = ["BLE001"]
 # The maker's power screens: broad except around building them through pyjnius (logged, then a toast)
 "app/ui/power_exemption.py" = ["BLE001"]
 # AST validator/evaluator: deeply branched by design
 "app/metrics/custom_formula.py" = ["BLE001", "PLR0911", "PLR0912"]
-# Android storage resolution
-"app/config.py" = ["PLC0415"]
 # App manager: a broad except around each step whose failure must not stop the app (logged)
 "app/ui/app_manager.py" = ["BLE001"]
 # Backup/restore (moved from app_manager): broad except around SAF / pyjnius / file I/O, each logged or reported
 "app/ui/backup_flow.py" = ["BLE001"]
 # UI screens: _build_ui methods are long but flat widget construction
-"app/ui/live_session.py" = ["PLR0915", "BLE001"]
+"app/ui/live_session.py" = ["PLR0915"]
 "app/ui/settings_screen.py" = ["PLR0915"]
-# diary: Android-only `copy_to_documents` lazy import inside Android branch
-"app/ui/diary_screen.py" = ["PLC0415", "BLE001", "PLR0915"]
+# diary: broad except, long flat _build_ui
+"app/ui/diary_screen.py" = ["BLE001", "PLR0915"]
 # Theme: broad except in listeners
 "app/ui/theme.py" = ["BLE001"]
 

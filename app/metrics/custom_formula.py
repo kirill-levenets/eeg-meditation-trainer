@@ -3,7 +3,6 @@ import math
 import operator
 from collections import deque
 from collections.abc import Callable, Mapping
-from typing import Optional
 
 from app.logger import logger
 
@@ -70,7 +69,7 @@ class CustomFormulaEvaluator:
 
     def __init__(self) -> None:
         self._formula: str = ""
-        self._ast_tree: Optional[ast.Expression] = None
+        self._ast_tree: ast.Expression | None = None
         self._last_error: str = ""
         self._history: dict[str, deque[float]] = {}
         self._avg_exprs: list[tuple[str, ast.AST]] = []

@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import app.crash_handler as crash_handler
 from app.config import APP
 from app.crash_handler import _device_name, _session_state
 from tests._app import HEADSET
@@ -275,3 +276,17 @@ def test_a_report_reads_the_session_state_and_the_headset_off_the_real_app(fresh
     monkeypatch.setattr(APP, "USE_MOCK_DEVICE", False)
     fresh_app._real_stream.set_device(*HEADSET)
     assert _device_name(fresh_app) == HEADSET[1]
+
+
+class _GoneStream:
+    @property
+    def _real_stream(self):
+        raise RuntimeError("stream gone")
+
+
+def test_a_device_name_that_cannot_be_read_reports_unknown_and_logs_why(monkeypatch):
+    monkeypatch.setattr(APP, "USE_MOCK_DEVICE", False)
+    logged = []
+    monkeypatch.setattr(crash_handler.logger, "debug", lambda message, *_a, **_k: logged.append(message))
+    assert _device_name(_GoneStream()) == "unknown"  # the report still goes out
+    assert logged == ["Device name for the report not read: stream gone"]

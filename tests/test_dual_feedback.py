@@ -1,5 +1,6 @@
 import os
 
+import app.audio_feedback.noise as noise
 from app.audio_feedback.noise import AudioEngine
 from app.config import APP
 from app.ui.sound_sources import source_spec
@@ -135,3 +136,52 @@ def test_reward_id_resolves_none_builtin_and_missing_custom():
     assert sounds.reward_id() == ""          # missing custom -> silent, no rain surprise
     settings["reward_sound_path"] = "/x.wav"
     assert sounds.reward_id() == "/x.wav"
+
+
+class _ScriptedPlayer:
+    """A player whose volume sets fail or succeed in turn: each step takes the next outcome (an error message, or None)."""
+
+    def __init__(self, outcomes: list) -> None:
+        self.outcomes = outcomes
+
+    @property
+    def volume(self) -> float:
+        return 0.0
+
+    @volume.setter
+    def volume(self, _v: float) -> None:
+        error = self.outcomes.pop(0)
+        if error is not None:
+            raise RuntimeError(error)
+
+
+def test_a_ramp_step_error_is_logged_once_while_it_repeats(monkeypatch):
+    e = AudioEngine()
+    a, b = "player in error state", "another error"
+    e._feedback_players = {"noise": _ScriptedPlayer([a, a, a, None, a, a, b, b])}
+    e._is_playing = e._ramp_running = True
+    steps, logged = [], []
+
+    def one_step(_seconds):  # the loop's 25 ms sleep: eight steps, then it stops
+        steps.append(1)
+        e._ramp_running = len(steps) < 8
+
+    monkeypatch.setattr(noise.time, "sleep", one_step)
+    monkeypatch.setattr(noise.logger, "debug", lambda message, *_a, **_k: logged.append(message))
+    e._ramp_loop()
+    assert len(steps) == 8
+    # each error once while it repeats; after a step that works, the same error is new again
+    assert logged == [f"Volume ramp step skipped: {m}" for m in (a, a, b)]
+
+
+def test_a_disconnect_alert_that_fails_to_play_is_logged_with_its_traceback(monkeypatch):
+    e = AudioEngine()
+
+    def fails():
+        raise RuntimeError("no player")
+
+    monkeypatch.setattr(e, "_play_disconnect", fails)
+    logged = []
+    monkeypatch.setattr(noise.logger, "exception", lambda message, *_a, **_k: logged.append(message))
+    e.play_alert()  # must not raise into the session's ending
+    assert logged == ["Disconnect alert failed to play"]

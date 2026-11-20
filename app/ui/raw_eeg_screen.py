@@ -2,7 +2,6 @@ import math
 import time as _time
 from collections import OrderedDict, deque
 from collections.abc import Iterable
-from typing import Optional
 
 from kivy.clock import Clock
 from kivy.core.text import Label as CoreLabel
@@ -115,13 +114,13 @@ class ScrollableGraphWidget(GraphGestures, GraphGlyphs, Widget):
         self._init_gestures()
         # Sync group: linked graphs zoom together
         self._sync_group: list["ScrollableGraphWidget"] = []
-        self._threshold_value: Optional[float] = None
-        self._threshold_steps: Optional[list[tuple[int, float]]] = None
+        self._threshold_value: float | None = None
+        self._threshold_steps: list[tuple[int, float]] | None = None
         # Reference line: solid horizontal line at a fixed value, drawn
         # distinctly from the (dashed) threshold line. Used on the metrics
         # graph to mark level 100 — the per-metric maximum.
-        self._reference_value: Optional[float] = None
-        self._start_wall_time: Optional[float] = None
+        self._reference_value: float | None = None
+        self._start_wall_time: float | None = None
         self._init_glyphs()
         self._pads: tuple[float, float, float, float] = (dp(30), dp(30), dp(20), dp(6))  # left, right, bottom, top
         self._pads_floor: tuple[float, float, float, float] | None = None  # the widest since the data was (re)loaded
@@ -138,7 +137,7 @@ class ScrollableGraphWidget(GraphGestures, GraphGlyphs, Widget):
         # Bind Window scroll for zoom (bypasses ScrollView interception)
         Window.bind(on_mouse_down=self._on_window_mouse_down)
 
-    def set_threshold(self, value: Optional[float]) -> None:
+    def set_threshold(self, value: float | None) -> None:
         """Set a horizontal threshold line."""
         self._threshold_value = value
         self._redraw()
@@ -156,7 +155,7 @@ class ScrollableGraphWidget(GraphGestures, GraphGlyphs, Widget):
         """The threshold line's steps, or None when it is one value."""
         return list(self._threshold_steps) if self._threshold_steps else None
 
-    def set_reference_line(self, value: Optional[float]) -> None:
+    def set_reference_line(self, value: float | None) -> None:
         """Set a solid horizontal reference line at `value` (graph units).
 
         Drawn distinctly from the dashed threshold line. Pass None to clear.
@@ -249,7 +248,7 @@ class ScrollableGraphWidget(GraphGestures, GraphGlyphs, Widget):
         self._scroll_offset = max(0, min(offset, self.max_scroll))
         self._redraw()
 
-    def set_start_wall_time(self, epoch: Optional[float]) -> None:
+    def set_start_wall_time(self, epoch: float | None) -> None:
         """Set the session start wall-clock time (epoch seconds) for real-time labels."""
         self._start_wall_time = epoch
         self._redraw()
@@ -862,7 +861,7 @@ class ScrollableGraphWidget(GraphGestures, GraphGlyphs, Widget):
                 bottom += self._make_text_texture("00:00:00", size=7, color=(0.4, 0.6, 0.4, 1)).height + dp(1)
         return left, right, bottom, top
 
-    def add_marker(self, index: Optional[int] = None) -> None:
+    def add_marker(self, index: int | None = None) -> None:
         """Add a marker at the given data point index (default: current end)."""
         idx = index if index is not None else max(0, self._total_points - 1)
         self._markers.append(idx)

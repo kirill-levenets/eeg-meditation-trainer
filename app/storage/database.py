@@ -6,7 +6,6 @@ import sqlite3
 import threading
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Optional
 
 from app.config import APP
 from app.eeg.band_spec import BAND_KEYS, group_powers
@@ -85,9 +84,9 @@ class UserExistsError(Exception):
 class DatabaseManager:
     """SQLite storage for sessions, metrics timeseries, and user profiles."""
 
-    def __init__(self, db_path: Optional[str] = None) -> None:
+    def __init__(self, db_path: str | None = None) -> None:
         self._db_path: str = db_path or APP.DB_PATH
-        self._conn_obj: Optional[sqlite3.Connection] = None
+        self._conn_obj: sqlite3.Connection | None = None
         self._shutting_down: bool = False
         self._reconnect_lock = threading.Lock()
         # One transaction at a time: the tick and UI threads share this connection.
@@ -275,9 +274,9 @@ class DatabaseManager:
 
         self._conn.commit()
 
-    def save_session(self, stats: dict, user_id: Optional[int] = None,
+    def save_session(self, stats: dict, user_id: int | None = None,
                      session_name: str = "", custom_formulas: str = "",
-                     session_program: str = "", engine_version: str = "") -> Optional[int]:
+                     session_program: str = "", engine_version: str = "") -> int | None:
         """Insert a session record and return its ID — or None if the write was
         no-oped by the null connection (shutting down); callers must treat None
         as "not persisted". `custom_formulas` is a JSON string. `engine_version`
@@ -293,8 +292,8 @@ class DatabaseManager:
         return session_id
 
     @staticmethod
-    def _insert_session(c, stats: dict, user_id: Optional[int], session_name: str, custom_formulas: str,
-                        session_program: str, engine_version: str, started_at: float | None = None) -> Optional[int]:
+    def _insert_session(c, stats: dict, user_id: int | None, session_name: str, custom_formulas: str,
+                        session_program: str, engine_version: str, started_at: float | None = None) -> int | None:
         """The session-row INSERT inside the caller's transaction: its id, or None from the null connection.
         `started_at` (epoch seconds) dates the row; without it, now."""
         row = {
@@ -379,7 +378,7 @@ class DatabaseManager:
         return (self._conn.execute("SELECT COUNT(*) FROM sessions WHERE user_id = ? AND id IS NOT ?",
                                    (user_id, exclude_id)).fetchone() or (0,))[0]  # the null connection has no row
 
-    def get_session(self, session_id: int) -> Optional[dict]:
+    def get_session(self, session_id: int) -> dict | None:
         """Return a single session by ID."""
         cursor = self._conn.execute(
             "SELECT * FROM sessions WHERE id = ?", (session_id,)
@@ -467,7 +466,7 @@ class DatabaseManager:
         logger.info(f"User '{name}' created with id {uid}")
         return uid
 
-    def find_user_by_name(self, name: str) -> Optional[dict]:
+    def find_user_by_name(self, name: str) -> dict | None:
         """Return the user row matching `name` exactly (case-sensitive), or None."""
         cursor = self._conn.execute("SELECT * FROM users WHERE name = ?", (name,))
         row = cursor.fetchone()
@@ -478,7 +477,7 @@ class DatabaseManager:
         cursor = self._conn.execute("SELECT * FROM users ORDER BY name")
         return [dict(row) for row in cursor.fetchall()]
 
-    def get_user(self, user_id: int) -> Optional[dict]:
+    def get_user(self, user_id: int) -> dict | None:
         """Return a single user by ID."""
         cursor = self._conn.execute("SELECT * FROM users WHERE id = ?", (user_id,))
         row = cursor.fetchone()
@@ -552,7 +551,7 @@ class DatabaseManager:
 
     # ---- Settings persistence ----
 
-    def get_setting(self, key: str) -> Optional[str]:
+    def get_setting(self, key: str) -> str | None:
         """Get a persisted setting value (the _conn property self-heals a closed conn)."""
         cursor = self._conn.execute(
             "SELECT value FROM app_settings WHERE key = ?", (key,)
@@ -573,7 +572,7 @@ class DatabaseManager:
                 (key, value),
             )
 
-    def get_user_setting(self, user_id: int, key: str) -> Optional[str]:
+    def get_user_setting(self, user_id: int, key: str) -> str | None:
         """Get a per-user setting value."""
         return self.get_setting(f"user_{user_id}_{key}")
 

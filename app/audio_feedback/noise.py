@@ -7,7 +7,7 @@ import threading
 import time
 import wave
 from collections.abc import Callable
-from typing import BinaryIO, Optional
+from typing import BinaryIO
 
 from kivy.clock import Clock
 
@@ -20,11 +20,26 @@ from app.storage.fileops import discard_file, write_file_atomic
 # Noise-player abstraction
 # ---------------------------------------------------------------------------
 
+class _RepeatedError:
+    """For a call that repeats (a volume ramp step every 25 ms): its failure is logged when the message changes, and a
+    success forgets the last one."""
+
+    def __init__(self) -> None:
+        self._last: str | None = None
+
+    def is_new(self, error: Exception) -> bool:
+        new, self._last = str(error) != self._last, str(error)
+        return new
+
+    def clear(self) -> None:
+        self._last = None
+
+
 class _KivyNoisePlayer:
     """Kivy SoundLoader-backed player: a noise loop or a one-shot alert. Used on desktop platforms."""
 
     def __init__(self, path: str, loop: bool = True) -> None:
-        from kivy.core.audio import SoundLoader
+        from kivy.core.audio import SoundLoader  # noqa: PLC0415 - desktop only: it loads Kivy's audio provider
         snd = SoundLoader.load(path)
         # SoundSDL2 (wav, flac, mp3, ogg) loads a file it can't decode at length 0; MusicSDL2 never reports a length
         if snd is None or (type(snd).__name__ == "SoundSDL2" and not snd.length):
@@ -74,7 +89,7 @@ class _KivyNoisePlayer:
 
 def _media_attributes():
     """The players' audio attributes, which the focus request names too: USAGE_MEDIA plays through a lock."""
-    from jnius import autoclass
+    from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
     AudioAttributes = autoclass("android.media.AudioAttributes")
     return (autoclass("android.media.AudioAttributes$Builder")()
             .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -88,7 +103,7 @@ class _AndroidMediaNoisePlayer:
     looping noise (loop=True), the one-shot timer gong and the alerts (loop=False)."""
 
     def __init__(self, path: str, loop: bool = True) -> None:
-        from jnius import autoclass
+        from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
         MediaPlayer = autoclass("android.media.MediaPlayer")
 
         self._mp = MediaPlayer()  # a failed setup leaves it to GC: its finalizer releases it, off the session's runner
@@ -101,6 +116,7 @@ class _AndroidMediaNoisePlayer:
         self._playing: bool = False
         self._on_end = None
         self._listener = None  # kept: a listener nothing references is collected while Java still holds it
+        self._volume_error = _RepeatedError()  # a player in an error state fails at every ramp step
 
     def set_on_end(self, callback) -> None:
         """Called on Android's main thread when a one-shot plays to its end (a loop never ends)."""
@@ -124,8 +140,11 @@ class _AndroidMediaNoisePlayer:
         self._volume = v
         try:
             self._mp.setVolume(v, v)
-        except Exception:
-            pass
+        except Exception as e:
+            if self._volume_error.is_new(e):
+                logger.debug(f"Player volume not set (a released player keeps none): {e}")
+        else:
+            self._volume_error.clear()
 
     def play(self) -> None:
         self._mp.start()
@@ -137,8 +156,8 @@ class _AndroidMediaNoisePlayer:
                 self._mp.pause()
                 self._mp.seekTo(0)
                 self._playing = False
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Player not stopped (a released player has nothing to stop): {e}")
 
     def unload(self) -> None:
         # release() MUST run even if stop() raises (IllegalStateException on a
@@ -156,7 +175,7 @@ class _AndroidMediaNoisePlayer:
 
 def _completion_listener(on_complete):
     """A MediaPlayer.OnCompletionListener calling on_complete; jnius is imported here, as only Android has it."""
-    from jnius import PythonJavaClass, java_method
+    from jnius import PythonJavaClass, java_method  # noqa: PLC0415 - Android only (pyjnius)
 
     class _Completion(PythonJavaClass):
         __javainterfaces__ = ["android/media/MediaPlayer$OnCompletionListener"]
@@ -198,7 +217,7 @@ class _AudioFocus:
 
     def _ask(self, gain: str) -> None:
         try:
-            from jnius import autoclass
+            from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
             AudioManager = autoclass("android.media.AudioManager")
             request = (autoclass("android.media.AudioFocusRequest$Builder")(getattr(AudioManager, gain))
                        .setAudioAttributes(_media_attributes())
@@ -480,7 +499,7 @@ class AudioEngine:
         self._one_shot_gens: dict[str, int] = {}  # bumped by each release: a player built meanwhile is called off
         self._one_shot_lock = threading.Lock()
         self._lock = threading.Lock()
-        self._ramp_thread: Optional[threading.Thread] = None
+        self._ramp_thread: threading.Thread | None = None
         self._ramp_running: bool = False
         self._focus = _AudioFocus()  # one request for the app, held while the session's feedback plays
         self._prepare_sounds()
@@ -603,6 +622,7 @@ class AudioEngine:
         target — the below/active player toward _target_volume, the reward player toward
         _reward_target_volume, all others toward 0. Volume-only, so tick/lock-safe."""
         max_step = self._RAMP_SPEED * self._RAMP_INTERVAL
+        skipped: dict[str, _RepeatedError] = {}  # per source: a step every 25 ms logs each error once
         while self._ramp_running and self._is_playing:
             for sid, player in list(self._feedback_players.items()):
                 if sid == self._active_feedback:
@@ -618,8 +638,12 @@ class AudioEngine:
                         player.volume = target
                     else:
                         player.volume = current + max(-max_step, min(max_step, diff))
-                except Exception:
-                    pass
+                except Exception as e:
+                    if skipped.setdefault(sid, _RepeatedError()).is_new(e):
+                        logger.debug(f"Volume ramp step skipped: {e}")
+                else:
+                    if sid in skipped:
+                        skipped[sid].clear()
             time.sleep(self._RAMP_INTERVAL)
         self._ramp_running = False
 
@@ -879,8 +903,8 @@ class AudioEngine:
                 self._reward_target_volume = 0.0
                 try:
                     rp.volume = 0.0
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Reward volume not reset after its test: {e}")
                 self._reward_feedback = ""
             # Sweep noise volume: 0 → max over half duration, max → 0 over other half
             sweep_duration = APP.AUDIO_TEST_DURATION
@@ -987,7 +1011,7 @@ class AudioEngine:
         try:
             self._play_disconnect()
         except Exception:
-            pass
+            logger.exception("Disconnect alert failed to play")
 
     @property
     def volume(self) -> float:
