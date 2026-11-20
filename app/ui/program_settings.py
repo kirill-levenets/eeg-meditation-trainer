@@ -83,7 +83,7 @@ class ProgramSettings:
 
     def sync_picker(self) -> None:
         """Refresh the live duration picker: a large 'P' in program mode, else the duration."""
-        self._live_screen.refresh_duration_preset(
+        self._live_screen.duration.refresh(
             self._timer_section.timer_enabled,
             self._timer_section.timer_minutes,
             program_active=self.governs_live_series(),
@@ -216,4 +216,4 @@ class ProgramSettings:
         uid = self._ctx.user_id()
         progs = self._ctx.db.get_saved_programs(uid) if uid else []
         self._timer_section.set_saved_programs(progs)
-        self._live_screen.set_session_programs(progs, self.name)
+        self._live_screen.duration.set_programs(progs, self.name)

@@ -97,7 +97,7 @@ def test_a_timer_finish_for_a_run_already_ended_does_nothing(locked):
     app._controls.discard()  # the other ending: it drops the run
     assert len(locked.finishes) == 1
     locked.unlock()
-    assert len(locked.finishes) == 1 and app._live_screen.summary_session_id is None  # no end card for it
+    assert len(locked.finishes) == 1 and app._live_screen.end_card.session_id is None  # no end card for it
 
 
 def test_without_a_stale_stop_the_timer_still_ends_it(locked):
@@ -208,7 +208,7 @@ def test_a_failed_final_save_still_ends_the_run_on_screen_and_says_so(fresh_app,
     app._controls.stop_and_save()
     frames()
     assert reported == ["session_save_failed"] and app._session.run is None and releases
-    assert app._live_screen.summary_session_id is None and not app._live_screen._btn_start.disabled
+    assert app._live_screen.end_card.session_id is None and not app._live_screen._btn_start.disabled
 
 
 def test_an_ending_under_the_stop_dialog_closes_it(fresh_app, monkeypatch):
@@ -220,7 +220,7 @@ def test_an_ending_under_the_stop_dialog_closes_it(fresh_app, monkeypatch):
     fed.end_by_timer_on_next_tick()
     fed.tick()
     frames()
-    assert "Stop session?" not in popup_titles() and app._live_screen.summary_session_id is not None
+    assert "Stop session?" not in popup_titles() and app._live_screen.end_card.session_id is not None
 
 
 def test_a_pause_sent_for_an_ended_run_leaves_the_next_session_running(fresh_app, monkeypatch):

@@ -132,7 +132,7 @@ class _Flows:
         self.deferred = _Deferred(monkeypatch)
         self.running_id: int | None = None  # the running session's row, once a checkpoint wrote it
         self.info, self.audio = MagicMock(), MagicMock()
-        self.live_screen = MagicMock(summary_session_id=None)
+        self.live_screen = MagicMock(**{"end_card.session_id": None})
         self.history_screen = history_screen or MagicMock()
         self.overlay = overlay or MagicMock()
         self.done: list = []
@@ -230,21 +230,21 @@ def test_deleting_the_end_cards_session_from_history_closes_the_card(db, monkeyp
     me = db.create_user("me")
     shown, other = _session(db, me), _session(db, me)
     flows = _Flows(db, monkeypatch)
-    flows.live_screen.summary_session_id = shown  # the session that just ended, its card still open
+    flows.live_screen.end_card.session_id = shown  # the session that just ended, its card still open
     flows.delete([shown, other])
     flows.deferred.run()
-    flows.live_screen.hide_summary.assert_called_once()
+    flows.live_screen.end_card.hide.assert_called_once()
     flows.audio.stop_timer_bell.assert_called_once()
 
 
 def test_a_failed_delete_leaves_the_end_card_and_its_notes(db, monkeypatch):
     monkeypatch.setattr(history_flow, "report_soft_error", lambda *a, **k: None)
     flows = _Flows(db, monkeypatch)
-    flows.live_screen.summary_session_id = 5
+    flows.live_screen.end_card.session_id = 5
     monkeypatch.setattr(db, "delete_sessions", lambda ids: (_ for _ in ()).throw(sqlite3.OperationalError("locked")))
     flows.delete([5])
     flows.deferred.run()
-    flows.live_screen.hide_summary.assert_not_called()
+    flows.live_screen.end_card.hide.assert_not_called()
 
 
 # ---- History: Delete N in select mode, through the one confirm ----

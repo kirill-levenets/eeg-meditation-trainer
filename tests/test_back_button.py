@@ -90,4 +90,4 @@ def test_entering_the_session_screen_shows_a_timer_changed_in_settings(app):
     timer = app._settings_screen.timer
     timer.timer_enabled, timer.timer_minutes = True, 45
     app._nav.on_tab("session")
-    assert app._live_screen._btn_duration_expand.text == "45m"
+    assert app._live_screen.duration.button.text == "45m"

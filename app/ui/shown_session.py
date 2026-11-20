@@ -57,10 +57,10 @@ class ShownSession:
                 self._show_tick(event)
             case Connected(on_mock=on_mock):
                 if on_mock:
-                    screen.update_device_status(True)  # a headset's row is the headset's (Headset.show_selected)
-                screen.update_state("Running")
+                    screen.header.update_device_status(True)  # a headset's row is the headset's (Headset.show_selected)
+                screen.header.update_state("Running")
                 screen.set_start_time(self._session.manager.started_at)
-                screen.hide_overlay()  # the session starts its feedback right after (RunningSession._deliver)
+                screen.connect_overlay.hide()  # the session starts its feedback right after (RunningSession._deliver)
             case Paused():
                 screen.set_controls_paused()
             case Resumed():
@@ -78,10 +78,10 @@ class ShownSession:
                     screen.graph.set_visible(slot, False)  # never linger as a user selection
                 screen.graph.set_program_lines()
             case Connecting(name=name):
-                screen.update_device_status(False, device_name=name, connecting=True)
-                screen.show_overlay(f"Connecting to {name}...")
+                screen.header.update_device_status(False, device_name=name, connecting=True)
+                screen.connect_overlay.show(f"Connecting to {name}...")
             case Waiting(message=message):
-                screen.update_overlay(message)
+                screen.connect_overlay.update(message)
             case Alert(message=message):
                 screen.show_alert(message)
             case _:
@@ -90,13 +90,13 @@ class ShownSession:
     def _show_tick(self, tick: Ticked) -> None:
         screen = self._live_screen
         screen.graph.add_point(tick.metrics, threshold=tick.target, scored=tick.score_key)  # coloured from this point
-        screen.update_stats(tick.live)
-        screen.update_state(tick.metrics.get("state", "Neutral"))
+        screen.stats.update(tick.live)
+        screen.header.update_state(tick.metrics.get("state", "Neutral"))
         if tick.shamatha is not None:
-            screen.set_shamatha(tick.shamatha)
+            screen.header.set_shamatha(tick.shamatha)
         if tick.scored is not None:
             screen.set_training_series(tick.scored)
-        screen.update_timer(tick.elapsed)
+        screen.header.update_timer(tick.elapsed)
         screen.add_raw_sample(tick.raw_sample)
         if tick.marked:
             screen.graph.add_marker()
@@ -105,8 +105,8 @@ class ShownSession:
 
     def show_retry(self, message: str, device_name: str) -> None:
         """The retry screen of a start whose BT wait ended without a session."""
-        self._live_screen.update_device_status(False, device_name=device_name)
-        self._live_screen.show_overlay_retry(message)
+        self._live_screen.header.update_device_status(False, device_name=device_name)
+        self._live_screen.connect_overlay.show_retry(message)
 
     def lines(self) -> frozenset[str]:
         """The lines the live graph shows now."""
@@ -114,25 +114,25 @@ class ShownSession:
 
     def update_state(self, state: str) -> None:
         """The Session screen's state line, outside a session: why a Start didn't go ahead, how a start ended."""
-        self._live_screen.update_state(state)
+        self._live_screen.header.update_state(state)
 
     def scanning(self) -> None:
         """A Start looks for the profile's headset among the paired devices."""
-        self._live_screen.show_overlay("Scanning for MindWave...")
+        self._live_screen.connect_overlay.show("Scanning for MindWave...")
         self._live_screen.set_controls_running()
 
     def found(self, name: str) -> None:
-        self._live_screen.update_overlay(f"Found {name}\nConnecting...")
+        self._live_screen.connect_overlay.update(f"Found {name}\nConnecting...")
 
     def scan_failed(self, message: str) -> None:
         """A Start's scan found no headset to start on: the controls idle, and Retry offered with `message`."""
         self._live_screen.set_controls_idle()
-        self._live_screen.show_overlay_retry(message)
+        self._live_screen.connect_overlay.show_retry(message)
 
     def ready(self) -> None:
         """The idle controls, no overlay: before a Retry's new Start, or while Settings › Device asks which headset."""
         self._live_screen.set_controls_idle()
-        self._live_screen.hide_overlay()
+        self._live_screen.connect_overlay.hide()
 
     def starting(self) -> None:
         """A session's setup: the running controls, no training mark until a program's first segment."""
@@ -144,12 +144,12 @@ class ShownSession:
         self._live_screen.graph.set_threshold(float(value))
 
     def hide_overlay(self) -> None:
-        self._live_screen.hide_overlay()
+        self._live_screen.connect_overlay.hide()
 
     def reload_whole(self) -> None:
         """An ending's, before the session's reset: the whole session on the graphs, and its score."""
         self._reload_graphs()
-        self._live_screen.update_stats(self._session.manager.live_score())
+        self._live_screen.stats.update(self._session.manager.live_score())
 
     def _reload_graphs(self) -> None:
         """The live graphs reloaded from the mirror with the whole session: a locked stretch never reached them tick by
@@ -169,25 +169,25 @@ class ShownSession:
         started = time.monotonic()
         self._reload_graphs()
         if self.mirror.last_metrics:  # no tick yet: the readout still shows the start's
-            self._live_screen.update_stats(self._session.manager.live_score())
-            self._live_screen.update_state(self.mirror.last_state)
-            self._live_screen.set_shamatha(self._session.run.shamatha_active)
-        self._live_screen.update_timer(self._session.manager.elapsed_formatted)
+            self._live_screen.stats.update(self._session.manager.live_score())
+            self._live_screen.header.update_state(self.mirror.last_state)
+            self._live_screen.header.set_shamatha(self._session.run.shamatha_active)
+        self._live_screen.header.update_timer(self._session.manager.elapsed_formatted)
         logger.info(f"on_resume: refresh complete in {time.monotonic() - started:.3f}s")
 
     def idle(self) -> None:
         """The screen's part of every teardown: idle controls, no device link, no training mark, no shamatha pill."""
         self._live_screen.set_training_series(None)
         self._live_screen.set_controls_idle()
-        self._live_screen.update_device_status(False)
-        self._live_screen.set_shamatha(False)
+        self._live_screen.header.update_device_status(False)
+        self._live_screen.header.set_shamatha(False)
 
     def finished(self, stats: dict | None, session_id: int | None) -> None:
         """An ending's last: FINISHED with the saved duration (the clock froze at a lock), History told, and the end card
         of a saved session, titled as its History row."""
-        self._live_screen.update_state("FINISHED")
+        self._live_screen.header.update_state("FINISHED")
         if stats:
-            self._live_screen.update_timer(elapsed_clock(stats.get("duration", 0)))
+            self._live_screen.header.update_timer(elapsed_clock(stats.get("duration", 0)))
         self._history.mark_dirty()
         if not (stats and session_id):
             return
@@ -197,10 +197,10 @@ class ShownSession:
             logger.exception(f"Session {session_id} saved, but its title couldn't be read for the end card")
             saved = None
         self._saved_notes = ""
-        self._live_screen.show_summary(session_id, stats, title=session_title(saved) if saved else "")
+        self._live_screen.end_card.show(session_id, stats, title=session_title(saved) if saved else "")
 
     def on_save_notes(self, *args) -> None:
-        if self._live_screen.summary_notes == self._saved_notes:
+        if self._live_screen.end_card.notes == self._saved_notes:
             if self._saved_notes:
                 self._ctx.toast("Notes saved")  # already saved; say so rather than ignore the tap
             return
@@ -208,8 +208,8 @@ class ShownSession:
 
     def flush_notes(self) -> None:
         """Write the card's notes only if they changed since the last save, so an untouched card writes nothing."""
-        sid = self._live_screen.summary_session_id
-        notes = self._live_screen.summary_notes
+        sid = self._live_screen.end_card.session_id
+        notes = self._live_screen.end_card.notes
         if sid and notes != self._saved_notes and self._history.save_notes(sid, notes=notes):
             self._saved_notes = notes
 
@@ -221,22 +221,22 @@ class ShownSession:
         if keep_notes:
             self.flush_notes()
         self._audio.stop_timer_bell()
-        self._live_screen.hide_summary()
+        self._live_screen.end_card.hide()
 
     def on_sessions_deleted(self, ids: list[int]) -> None:
         """History deleted these sessions: the Session screen lets go of one it shows (the end card, its display)."""
-        if self._session.recorder.session_id in ids or self._live_screen.summary_session_id in ids:
+        if self._session.recorder.session_id in ids or self._live_screen.end_card.session_id in ids:
             self.drop(keep_notes=False)
 
     def drop(self, keep_notes: bool) -> None:
         """Take the shown session off the Session screen: its end card, if open, and its display."""
-        if self._live_screen.summary_session_id is not None:
+        if self._live_screen.end_card.session_id is not None:
             self.close(keep_notes)
         self.clear()
         self.owner = None
 
     def on_delete(self, *args) -> None:
-        sid = self._live_screen.summary_session_id
+        sid = self._live_screen.end_card.session_id
         if not sid:
             return  # silent-ok: the card is not showing a session
 

@@ -120,7 +120,7 @@ def _listed(app) -> set[str]:
 
 def _shown(app) -> str:
     """The headset as the Session screen names it."""
-    return app._live_screen._device_label.text
+    return app._live_screen.header._device_label.text
 
 
 def _connecting(app) -> bool:
@@ -380,8 +380,8 @@ def test_start_with_no_mindwave_paired_says_why(app, paired, monkeypatch, device
     app._controls.start()
     paired.arrive()
     assert not _connecting(app)
-    assert app._live_screen._overlay_status.text.startswith(message)
-    assert app._live_screen._overlay_retry_btn.parent is not None and not app._live_screen._btn_start.disabled
+    assert app._live_screen.connect_overlay._status.text.startswith(message)
+    assert app._live_screen.connect_overlay.retry_btn.parent is not None and not app._live_screen._btn_start.disabled
 
 
 # ---- Settings → Device ----

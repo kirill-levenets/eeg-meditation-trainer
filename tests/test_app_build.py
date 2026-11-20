@@ -114,7 +114,7 @@ def test_a_mode_change_during_a_session_is_refused(fresh_app, monkeypatch):
     app = fresh_app
     app._controls.start()
     frames_until(lambda: len(app._shown.mirror.metrics) >= 1, 5.0)
-    label = app._live_screen._device_label
+    label = app._live_screen.header._device_label
     shown = (label.text, list(label.color))
     app._settings_screen.device._device_mode_cb.active = False
     assert APP.USE_MOCK_DEVICE is True and app._settings_screen.device._device_mode_cb.active

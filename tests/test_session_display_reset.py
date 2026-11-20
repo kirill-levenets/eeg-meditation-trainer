@@ -19,15 +19,15 @@ SCORE = LiveScore(value=71, target=60, streak=12, average=64.4, segmented=False,
 
 
 def _texts(screen) -> list[str]:
-    return [label.text for label in screen._stat_labels]
+    return [label.text for label in screen.stats._values]
 
 
 def _finished_screen() -> LiveSessionScreen:
     screen = LiveSessionScreen()
-    screen.update_stats(SCORE)
+    screen.stats.update(SCORE)
     screen.set_start_time(1_760_000_000.0)
-    screen.update_timer("05:00")
-    screen.update_state("FINISHED")
+    screen.header.update_timer("05:00")
+    screen.header.update_state("FINISHED")
     screen.graph.add_point(METRICS)
     return screen
 
@@ -38,15 +38,15 @@ def test_clear_readout_shows_what_a_fresh_screen_shows():
     assert _texts(screen) != _texts(fresh)
     screen.clear_readout()
     assert _texts(screen) == _texts(fresh)
-    assert screen._timer_label.text == fresh._timer_label.text == "00:00"
-    assert screen._state_label.text == fresh._state_label.text == "IDLE"
-    assert tuple(screen._state_label.color) == tuple(fresh._state_label.color)
-    screen.update_timer("00:01")
-    assert screen._timer_label.text == "00:01"  # no start time of the last session in front of it
+    assert screen.header._timer_label.text == fresh.header._timer_label.text == "00:00"
+    assert screen.header._state_label.text == fresh.header._state_label.text == "IDLE"
+    assert tuple(screen.header._state_label.color) == tuple(fresh.header._state_label.color)
+    screen.header.update_timer("00:01")
+    assert screen.header._timer_label.text == "00:01"  # no start time of the last session in front of it
 
 
 def _choose_avg(screen) -> None:
-    screen._stats_toggle.buttons["aggregate"].dispatch("on_release")
+    screen.stats._toggle.buttons["aggregate"].dispatch("on_release")
 
 
 def test_the_avg_switch_shows_the_last_sessions_numbers():
@@ -70,7 +70,7 @@ def shown(fresh_app, monkeypatch):
     start_ticked_by_hand(app, ticks=3)
     app._controls.stop_and_save(reason="timer")
     frames()
-    app.me, app.sid = app._current_user_id, app._live_screen.summary_session_id
+    app.me, app.sid = app._current_user_id, app._live_screen.end_card.session_id
     assert app.sid is not None and app._shown.owner == app.me
     app.notes_writes = []
     write = app._db.update_session_notes
@@ -81,20 +81,20 @@ def shown(fresh_app, monkeypatch):
 
 
 def _card_open(app) -> bool:
-    return app._live_screen.summary_session_id is not None
+    return app._live_screen.end_card.session_id is not None
 
 
 def _display(app) -> dict:
     """What the Session screen and its mirror hold of a session."""
     mirror, screen = app._shown.mirror, app._live_screen
     return {"mirror": (list(mirror.metrics), list(mirror.bands), list(mirror.waveform), mirror.last_metrics, mirror.marks),
-            "points": screen.graph.total_points, "timer": screen._timer_label.text, "stats": _texts(screen)}
+            "points": screen.graph.total_points, "timer": screen.header._timer_label.text, "stats": _texts(screen)}
 
 
 def _fresh_display(app) -> dict:
     """What they hold on a screen that has shown no session, in the profile's stats view."""
     fresh = LiveSessionScreen()
-    fresh.set_stats_mode(app._live_screen._stats_mode)
+    fresh.stats.set_mode(app._live_screen.stats._mode)
     return {"mirror": ([], [], [], {}, []), "points": 0, "timer": "00:00", "stats": _texts(fresh)}
 
 
@@ -121,7 +121,7 @@ def _drops(app, monkeypatch) -> list:
 
 def test_picking_another_profile_drops_the_shown_session_before_the_switch(shown, monkeypatch):
     other = _other_profile(shown)
-    shown._live_screen._summary_notes.text = "typed on the card"
+    shown._live_screen.end_card._notes.text = "typed on the card"
     seen = _drops(shown, monkeypatch)
     shown._profiles.on_switch(other)
     assert seen == [(True, shown.me)] and shown._current_user_id == other
@@ -155,7 +155,7 @@ def test_a_cold_start_shows_nothing_to_drop(fresh_app, monkeypatch):
 
 
 def test_dropping_the_shown_session_closes_its_open_card_saving_the_notes(shown):
-    shown._live_screen._summary_notes.text = "typed on the card"
+    shown._live_screen.end_card._notes.text = "typed on the card"
     shown._shown.drop(keep_notes=True)
     assert shown.notes_writes == ["typed on the card"] and len(shown.bells) == 1
     assert not _card_open(shown) and shown._shown.owner is None
@@ -171,7 +171,7 @@ def test_dropping_with_no_card_open_leaves_a_ringing_bell_alone(shown):
 
 
 def test_a_deleted_sessions_card_closes_unsaved_but_its_bell_stops(shown):
-    shown._live_screen._summary_notes.text = "typed on the card"
+    shown._live_screen.end_card._notes.text = "typed on the card"
     shown._shown.drop(keep_notes=False)
     assert shown.notes_writes == [] and len(shown.bells) == 1 and not _card_open(shown)
 
@@ -183,7 +183,7 @@ def test_an_idle_threshold_clear_keeps_the_owner_of_an_open_card(shown):
 
 
 def test_deleting_the_shown_profile_drops_its_session_without_saving_notes(shown, monkeypatch):
-    shown._live_screen._summary_notes.text = "typed on the card"
+    shown._live_screen.end_card._notes.text = "typed on the card"
     seen = _drops(shown, monkeypatch)
     shown._profiles.on_delete(shown.me)
     assert [keep for keep, _user in seen] == [False] and shown.notes_writes == [] and not _card_open(shown)
@@ -200,11 +200,11 @@ def test_the_live_title_is_the_scored_series_name_on_the_graph_kept_until_the_re
     screen = _finished_screen()
     screen.graph.set_series_name("custom_formula", "Alpha calm")
     screen.set_training_series("custom_formula")
-    assert screen._stat_title_labels[0].text == "Alpha calm"
+    assert screen.stats._titles[0].text == "Alpha calm"
     screen.set_training_series(None)  # the session ended: the legend's mark goes, its numbers stay with their name
-    assert screen._stat_title_labels[0].text == "Alpha calm"
+    assert screen.stats._titles[0].text == "Alpha calm"
     screen.clear_readout()
-    assert screen._stat_title_labels[0].text == "Score"
+    assert screen.stats._titles[0].text == "Score"
 
 
 def _scored_session(app, monkeypatch) -> FedSession:
@@ -219,20 +219,20 @@ def test_the_end_of_a_session_shows_its_numbers_before_its_scoring_is_reset(fres
         fed.tick(metrics={"shamatha_score": value})
     app._controls.stop_and_save()
     frames()
-    app._live_screen.set_stats_mode("aggregate")
+    app._live_screen.stats.set_mode("aggregate")
     assert _texts(app._live_screen) == ["57", "1s", "1s"]
 
 
 def test_a_profiles_stats_view_redraws_the_strip_not_just_the_button():
     screen = LiveSessionScreen()
-    screen.set_stats_mode("aggregate")
-    assert screen._stat_title_labels[0].text == "Average"
+    screen.stats.set_mode("aggregate")
+    assert screen.stats._titles[0].text == "Average"
 
 
 def test_the_end_of_a_session_locked_since_its_first_minute_shows_its_whole_numbers(fresh_app, monkeypatch):
     app = fresh_app
     fed = _scored_session(app, monkeypatch)
-    app._live_screen.set_stats_mode("aggregate")
+    app._live_screen.stats.set_mode("aggregate")
     fed.tick(metrics={"shamatha_score": 60})  # its readout as of the lock
     assert _texts(app._live_screen)[0] == "60"
     app.on_pause()
@@ -262,6 +262,6 @@ def test_deleting_the_shown_session_in_history_drops_it_from_the_session_screen(
 def test_idle_looks_the_same_however_it_is_reached():
     fresh = LiveSessionScreen()
     cancelled = LiveSessionScreen()
-    cancelled.update_state("Running")
-    cancelled.update_state("IDLE")  # a start cancelled before any tick
-    assert tuple(cancelled._state_label.color) == tuple(fresh._state_label.color)
+    cancelled.header.update_state("Running")
+    cancelled.header.update_state("IDLE")  # a start cancelled before any tick
+    assert tuple(cancelled.header._state_label.color) == tuple(fresh.header._state_label.color)

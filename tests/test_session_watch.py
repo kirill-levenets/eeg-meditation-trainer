@@ -31,14 +31,14 @@ class _Detector:
 @pytest.fixture
 def watch():
     events = []
-    stream, live_screen, device, audio = MagicMock(), MagicMock(), MagicMock(), MagicMock()
+    stream, header, device, audio = MagicMock(), MagicMock(), MagicMock(), MagicMock()
     stream.is_connected, stream._device_address, stream._device_name = False, "AA:BB", "MWM2"
-    headset = Headset(stub_context(live=lambda: True), stream, device, live_screen, serial_override=lambda: None)
+    headset = Headset(stub_context(live=lambda: True), stream, device, header, serial_override=lambda: None)
     w = SessionWatch(audio, stream, headset_name=headset.name, emit=lambda run, event: events.append((run, event)))
     w.headset = headset  # what the app shows on a LinkChanged
     run = SessionRun(1)
     run.phase = Phase.STARTED
-    return w, run, events, stream, live_screen, device, audio
+    return w, run, events, stream, header, device, audio
 
 
 def _shown(watch_, events) -> list[str]:
@@ -54,7 +54,7 @@ def _shown(watch_, events) -> list[str]:
 
 
 def test_the_link_coming_up_is_shown_in_settings_once(watch):
-    w, run, queued, stream, _live, device, _audio = watch
+    w, run, queued, stream, _header, device, _audio = watch
     stream.is_connected = True
     w.follow_link(run)
     w.follow_link(run)
@@ -63,19 +63,19 @@ def test_the_link_coming_up_is_shown_in_settings_once(watch):
 
 
 def test_the_link_lost_mid_session_shows_reconnecting_with_the_alert(watch):
-    w, run, queued, stream, live, _device, audio = watch
+    w, run, queued, stream, header, _device, audio = watch
     stream.is_connected = True
     w.follow_link(run)
     stream.is_connected = False
     w.follow_link(run)
     _shown(w, queued)
-    assert live.update_device_status.call_args == ((False,), {"device_name": "MWM2", "connecting": True})
+    assert header.update_device_status.call_args == ((False,), {"device_name": "MWM2", "connecting": True})
     audio.play_disconnect_alert.assert_called_once()
 
 
 def test_a_mock_session_follows_no_link_and_never_goes_stale(watch):
     # The headset's link outlives sessions: it may be up, or long silent, during a mock session.
-    w, run, queued, stream, _live, device, audio = watch
+    w, run, queued, stream, _header, device, audio = watch
     stream.is_connected, stream.seconds_since_last_packet = True, w.STALE_DATA_THRESHOLD + 1
     assert w.check(run, elapsed=0, on_headset=False) is None
     assert not queued and not run.bt_connected_notified and not run.stale_data_warned
@@ -83,7 +83,7 @@ def test_a_mock_session_follows_no_link_and_never_goes_stale(watch):
 
 
 def test_a_low_battery_is_warned_about_once_per_run(watch):
-    w, run, queued, _stream, live, _device, _audio = watch
+    w, run, queued, _stream, header, _device, _audio = watch
     for _ in range(3):
         w.check_sample(run, {"battery": 10})
     assert [r for r, _e in queued] == [run] and _shown(w, queued) == ["Low headset battery (7%)."]
@@ -92,13 +92,13 @@ def test_a_low_battery_is_warned_about_once_per_run(watch):
 
 
 def test_no_battery_reading_warns_nothing(watch):
-    w, run, queued, _stream, _live, _device, _audio = watch
+    w, run, queued, _stream, _header, _device, _audio = watch
     w.check_sample(run, {})  # the MindWave Mobile 2 doesn't send it
     assert not queued
 
 
 def test_power_line_noise_found_is_warned_about_once(watch):
-    w, run, queued, _stream, live, _device, _audio = watch
+    w, run, queued, _stream, header, _device, _audio = watch
     run.noise_detector = _Detector(after=2, found=50)
     for _ in range(4):
         w.check_sample(run, {"raw_eeg_waveform": [1, 2, 3]})
@@ -108,14 +108,14 @@ def test_power_line_noise_found_is_warned_about_once(watch):
 
 
 def test_no_noise_found_warns_nothing(watch):
-    w, run, queued, _stream, _live, _device, _audio = watch
+    w, run, queued, _stream, _header, _device, _audio = watch
     run.noise_detector = _Detector(after=1, found=None)
     w.check_sample(run, {"raw_eeg_waveform": [1]})
     assert not queued
 
 
 def test_data_flowing_again_rearms_the_stale_stop(watch):
-    w, run, _queued, stream, _live, _device, _audio = watch
+    w, run, _queued, stream, _header, _device, _audio = watch
     stream.seconds_since_last_packet = w.STALE_DATA_THRESHOLD + 1
     assert w.check_stale(run) == ("stale_data", "No EEG data. Session stopped.\nCheck headset and battery.")
     assert w.check_stale(run) is None  # once per stall
@@ -125,7 +125,7 @@ def test_data_flowing_again_rearms_the_stale_stop(watch):
 
 
 def test_the_recording_limit_ends_it_before_the_other_checks_run(watch, monkeypatch):
-    w, run, queued, stream, _live, _device, audio = watch
+    w, run, queued, stream, _header, _device, audio = watch
     monkeypatch.setattr(APP, "SESSION_MAX_SECONDS", 60)
     stream.is_connected, stream.seconds_since_last_packet = True, 0.2
     assert w.check(run, elapsed=59, on_headset=True) is None and queued  # under it: the link is followed
@@ -136,17 +136,17 @@ def test_the_recording_limit_ends_it_before_the_other_checks_run(watch, monkeypa
 
 
 def test_a_reconnect_mid_session_shows_the_headset_connected_again(watch):
-    w, run, queued, stream, live, device, _audio = watch
+    w, run, queued, stream, header, device, _audio = watch
     for connected in (True, False, True):
         stream.is_connected = connected
         w.follow_link(run)
     _shown(w, queued)
-    assert live.update_device_status.call_args.args[0] is True  # not left "reconnecting" to the session's end
+    assert header.update_device_status.call_args.args[0] is True  # not left "reconnecting" to the session's end
     assert device.update_device_status.call_args.args[0] is True
 
 
 def test_a_drop_mid_session_is_shown_in_settings_too(watch):
-    w, run, queued, stream, _live, device, _audio = watch
+    w, run, queued, stream, _header, device, _audio = watch
     for connected in (True, False):
         stream.is_connected = connected
         w.follow_link(run)

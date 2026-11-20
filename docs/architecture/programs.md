@@ -61,10 +61,10 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 - Settings Timer / Program swap: `_mode_content_box` holds either `_simple_box`, which has the Enable-Timer checkbox (a program forces the timer on), or `_program_box`; the other is detached from the tree.
   `_program_loaded_label` shows `"Loaded: <name>"` via `TimerSection.set_program_name(name)`.
   `_segments_box` holds the segment rows in insertion order, top to bottom.
-- `ProgramSettings.sync_picker` syncs the Session screen's `_DurationPickerButton` label: a large `"P"` in program mode with a loaded program, else the duration.
+- `ProgramSettings.sync_picker` syncs the Session screen's duration picker (`DurationPicker.refresh`, `session_sections/duration_picker.py`): a large `"P"` in program mode with a loaded program, else the duration.
   It re-syncs on entering the Session screen, on profile load and on each mode change, program load or duration pick.
   The duration popup's `"Programs…"` button (`"Program: <name>"` once one is loaded) lists the saved programs, the loaded one highlighted, and loads the one picked (`ProgramSettings.on_load`);
-  `LiveSessionScreen.set_session_programs(programs, current_name)` gives it the list and the name.
+  `DurationPicker.set_programs(programs, current_name)` gives it the list and the name.
 - Per-segment **feedback source picker** (issue #10): each segment row has a "Feedback" column, a picker with Default / Rain / Tone / Custom file.
   "Default" inherits the global Settings → Audio selection.
   The source switches at each segment boundary via `set_active_feedback` (setVolume-only, tick-/lock-safe).

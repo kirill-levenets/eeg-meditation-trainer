@@ -122,6 +122,7 @@ With no active user the first-run popup (the user gate) is shown.
   `LoadingOverlay` (`widgets/loading_overlay.py`) is the app-global modal spinner (status + animated dots on the theme's `ModalPanel` over a dim);
   `_build_screens` mounts it above the app root (a `FloatLayout`) and hands it to the flow that shows it (`HistoryFlow`'s `loading`), which calls `show(text, delay=0.0)`/`hide()`.
   With a `delay` it takes taps at once and paints only once the delay has passed, so a job that ends sooner never flashes it.
+  The Session screen's connection overlay is one with Cancel under the dots, and Retry once the connection failed (`ConnectOverlay`, `session_sections/connect_overlay.py`): its buttons take their taps, the rest of the screen none.
   It animates via `Clock`, so the caller must move the long work off the main thread or the overlay can't paint.
 - All legends are one wrapping `LegendBar` (`app/ui/widgets/legend.py`, a `StackLayout` flow):
   `set_items([(text, rgba)])` sizes each label to its text and wraps to extra rows, so many series (7 metrics, 3 custom formulas, 3 program lines) stay readable instead of overlapping in one row.
