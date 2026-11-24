@@ -5,10 +5,12 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 ## Navigation and theme
 
-**Navigation:** 3-tab bottom bar (Session / History / Settings) via `BottomNav` in `theme.py`.
+**Navigation:** 3-tab bottom bar (Session / History / Settings) via `BottomNav` (`widgets/bottom_nav.py`).
 With no active user the first-run popup (the user gate) is shown.
 
 - **Theme system** (`theme.py`): the `C` colour accessor (4 palettes: Dark Blue, Dark Green, Light Cream, Light Green), `F` font sizes, `S` spacing.
+  The widgets built on it live in `app/ui/widgets/`:
+  `StyledButton` (`styled_button.py`), the popups and in-screen modal cards (`popups.py`), folds (`folds.py`), the Settings accordion (`accordion.py`), the bottom nav (`bottom_nav.py`) and input rows (`rows.py`).
   `format_duration(seconds)` shows seconds under 1 min, minutes under 1 h, hours otherwise.
   `make_scroll_popup(title, rows, footer=None, *, est_rows=None, ...)` builds every list-style select dialog (series picker, saved-formula chooser, a segment's formula, sound source picker, program picker, duration picker):
   the `rows` scroll inside a `ScrollView` with the `footer` pinned below, sized to content but capped at 85% of the window so long lists scroll instead of overflowing;
@@ -48,7 +50,8 @@ With no active user the first-run popup (the user gate) is shown.
   `ThemedMixin.__setattr__` records the roles; it is mixed into `ThemedLabel`, `ThemedTextInput`/`CenteredTextInput`, `StyledButton`, `Card`, `Divider` and `ThemedPopup`, and covers these properties:
   `color`, `disabled_color`, `bg_color`, `bg_pressed`, `text_color`, `background_color`, `foreground_color`, `cursor_color`, `hint_text_color`, `selection_color`, `title_color`, `separator_color`, `overlay_color`.
   A role resolves in the current palette at assignment, so a `C.X` stored before a switch (e.g. `PresetRow`'s selected colour) still paints the new one.
-  Every Label and TextInput in `app/ui` is the themed one: `tests/test_theme_switch.py` fails on an import from `kivy.uix.label`/`kivy.uix.textinput` outside `theme.py`.
+  Every Label and TextInput in `app/ui` is the themed one: `tests/test_theme_switch.py` fails on an import from `kivy.uix.label`/`kivy.uix.textinput` outside the modules that build the themed widgets:
+  `THEMED_LABEL_MODULES`, which are `theme.py`, `widgets/styled_button.py` and `widgets/popups.py`.
   Canvas: `ThemedColor(C.X, alpha=None)` is a `Color` instruction that re-reads its role on a switch, and `fill_background(widget, C.X)` is the one background fill for screens and overlays.
   Widgets that rebuild their canvas from the palette on redraw register that redraw with `C.add_listener` (once however often registered):
   `ScrollableGraphWidget`, the History calendar and 14-day bars, `StyledButton`'s disabled/outline fill and press ring, `BandTotalsView`, the duration picker.
@@ -127,7 +130,7 @@ With no active user the first-run popup (the user gate) is shown.
 - All legends are one wrapping `LegendBar` (`app/ui/widgets/legend.py`, a `StackLayout` flow):
   `set_items([(text, rgba)])` sizes each label to its text and wraps to extra rows, so many series (7 metrics, 3 custom formulas, 3 program lines) stay readable instead of overlapping in one row.
   Used by the live metrics/band legends, the diary legend, and the fullscreen legend.
-- `_AccordionSection` (`app/ui/theme.py`) binds `_content.minimum_height` to `_update_height`, so its `_scroll.height` follows content added after the section opened (`populate_bt_devices` in an open Device section);
+- `_AccordionSection` (`app/ui/widgets/accordion.py`) binds `_content.minimum_height` to `_update_height`, so its `_scroll.height` follows content added after the section opened (`populate_bt_devices` in an open Device section);
   without it such a list is clipped to the height the content had when the section opened.
 - `theme.CenteredTextInput`: a `ThemedTextInput` with `halign="center"` (native Kivy 2.3) and vertical centring by padding (`_recenter` sets `padding[1]`/`padding[3]` to `(height - line_height) / 2` on each resize, since Kivy has no `valign`).
   All single-line inputs use it; the two multi-line fields (diary notes, the end card's quick notes) are plain `ThemedTextInput`s.
@@ -165,9 +168,9 @@ With no active user the first-run popup (the user gate) is shown.
   Kivy draws white names, unreadable on a light panel, and a fixed grey selection that puts a selected name dark on dark.
   `tests/test_modal_style.py` opens each kind of modal in all four themes:
   it checks every visible label against the surface it is drawn on (its button, card, input or the panel) for 3:1 and that each is drawn with `paint_panel`;
-  it fails on an import from `kivy.uix.popup`/`kivy.uix.filechooser` anywhere in `app/` outside `theme.py`.
-- `theme.make_message_popup` is the one message modal, built on `make_scroll_popup`.
-  It serves `_info_popup`, the profile-delete confirm, the locked-screen alert, the diary export result and `theme.confirm_popup`, the one confirm:
+  it fails on an import from `kivy.uix.popup`/`kivy.uix.filechooser` anywhere in `app/` outside `widgets/popups.py`.
+- `popups.make_message_popup` is the one message modal, built on `make_scroll_popup`.
+  It serves `_info_popup`, the profile-delete confirm, the locked-screen alert, the diary export result and `popups.confirm_popup`, the one confirm:
   History's delete confirm and `_confirm_action(title, message, ok_text, on_ok, ok_color=None, on_cancel=None)` (program save-overwrite / load / delete, a saved formula's delete, Restore, Stop, the end card's Delete).
   The message label is measured wrapped (`text_size` + `texture_update`) so the popup sizes to it, capped at 85% of the window and scrolling beyond:
   a label with `text_size` bound to a fixed-height popup makes Kivy silently drop the lines that don't fit.

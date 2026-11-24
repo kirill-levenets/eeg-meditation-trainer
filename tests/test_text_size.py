@@ -35,21 +35,21 @@ from app.ui.settings_screen import SettingsScreen
 from app.ui.startup import startup_text_size, text_size_setting
 from app.ui.theme import (
     TEXT_SIZES,
-    BottomNav,
     F,
-    FoldChevron,
     Icons,
-    PresetRow,
     S,
-    StyledButton,
     ThemedLabel,
-    ThemedPopup,
     ThemedTextInput,
     fit_height_to_text,
     fit_row_to_text,
     text_width,
 )
 from app.ui.widgets.band_totals import _BAND_ROW_H, _W_NAME, BandTotalsView
+from app.ui.widgets.bottom_nav import BottomNav
+from app.ui.widgets.folds import FoldChevron
+from app.ui.widgets.popups import ThemedPopup
+from app.ui.widgets.rows import PresetRow
+from app.ui.widgets.styled_button import StyledButton
 
 APP_DIR = Path(__file__).resolve().parents[1] / "app"  # the source tree, from wherever pytest runs
 ROLES = {"DISPLAY": 48, "H1": 22, "H2": 16, "H3": 14, "BODY": 13, "SMALL": 11, "TINY": 9}

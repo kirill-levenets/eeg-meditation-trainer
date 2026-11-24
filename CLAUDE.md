@@ -85,7 +85,9 @@ Read it before changing that subsystem.
   `app/ui/startup.py` — the startup profile (`resolve_startup_user`), the theme, text size and line colours the UI is built in; `app/ui/toast.py` — the toast.
   `app/ui/navigation.py` `Navigation` — which screen shows (a tab, `ctx.switch_screen`) and the back key's way back. → [app-platform](docs/architecture/app-platform.md#android-back-button)
   `app/ui/audio_metric.py` `AudioMetric` — the profile's choice of the metric that drives the sound, its Settings controls, their lock while a session is scored on it. → [metrics-scoring](docs/architecture/metrics-scoring.md#scoring)
-- `app/ui/theme.py`, `app/ui/widgets/` — palette `C`/`F`/`S`, themed widgets, modals, legends, overlays.
+- `app/ui/theme.py` — palette `C`/`F`/`S`, the themed label and text input, text fitting, contrast;
+  `app/ui/widgets/` — the widgets built on it: `styled_button.py`, `popups.py` (popups, file chooser, in-screen modal card), `folds.py`, `accordion.py`, `bottom_nav.py`, `rows.py`, legends, overlays;
+  `app/ui/formatting.py` — durations and counts as text.
   `app/ui/hooks.py` — `Hook`/`wire()`: the handlers the app plugs into a widget. → [ui-theme](docs/architecture/ui-theme.md)
 - `app/ui/raw_eeg_screen.py` — `ScrollableGraphWidget`, the one time-series graph class; `graph_set.py` `GraphSet` (the app's six graphs: zoom groups, line width, corner buttons);
   `graph_series.py` `GraphSeries` (the series picker, each graph's saved selection), `line_colours.py` (the scored line's gradient), `graph_runs.py` (the run fold, Kivy-free);
@@ -185,7 +187,7 @@ The linked file explains the mechanism.
   `tests/test_text_size.py` enforces these at the largest size, at 1 and at the phone's 2.75 px per dp. → [ui-theme](docs/architecture/ui-theme.md)
 - **Colours carry their theme role.**
   Read them from `C.X` (a `list()` copy freezes the colour); canvas code uses `ThemedColor` / `C.resolve()` and registers palette-dependent redraws with `C.add_listener`.
-  Labels, text inputs, popups and file choosers come from `theme.py` (`ThemedLabel`, `ThemedTextInput`, `ThemedPopup`, `ThemedFileChooser`);
+  Labels, text inputs, popups and file choosers come from `theme.py` (`ThemedLabel`, `ThemedTextInput`) and `widgets/popups.py` (`ThemedPopup`, `ThemedFileChooser`);
   `tests/test_theme_switch.py` and `tests/test_modal_style.py` fail on direct Kivy imports. → [ui-theme](docs/architecture/ui-theme.md#navigation-and-theme)
 - Decorative strokes (press ring, graph glyphs, borders) contrast with the surface they are drawn on (`C.TEXT`), not the element's fill; text on a fill uses `readable_fg(fill)`.
   Check all four themes.
@@ -229,7 +231,7 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 · a flow's access to the app `AppContext` (never one callable per service)
 · Session delete `HistoryFlow.delete_sessions(ids)`
 · notes `HistoryFlow.save_notes`
-· confirm `theme.confirm_popup` (via `_confirm_action`)
+· confirm `popups.confirm_popup` (via `_confirm_action`)
 · save under a unique name `settings_sections.common.save_under_unique_name`
 · delete a saved formula or program `settings_sections.common.confirm_saved_delete`
 · whether a formula can run `custom_formula.compile_formula`
@@ -244,15 +246,15 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 · toast `_toast`
 · modal surface `paint_panel`
 · screen background `fill_background`
-· fold button `theme.FoldChevron`
+· fold button `folds.FoldChevron`
 · a switch between views `widgets.choice_toggle.ChoiceToggle`
 · label height `fit_height_to_text`
 · label width `fit_width_to_text`
 · row height `fit_row_to_text`
 · text width `theme.text_width`
-· count with its noun `theme.format_count`
+· count with its noun `formatting.format_count`
 · a colour that must read on a surface `theme.with_contrast`
-· inline rename `theme.RenameRow`
+· inline rename `rows.RenameRow`
 · debounced change `UserSettings.after_settle`
 · session titles and stats lines `app/ui/session_labels.py`
 · scoring `scoring.GoalAccrual`

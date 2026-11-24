@@ -12,18 +12,9 @@ from app import android_jni
 from app.config import APP
 from app.crash_handler import report_soft_error
 from app.storage import android_saf as _saf
-from app.ui.theme import (
-    C,
-    F,
-    S,
-    StyledButton,
-    ThemedFileChooser,
-    ThemedLabel,
-    ThemedPopup,
-    cancel_button,
-    fit_row_to_text,
-    make_scroll_popup,
-)
+from app.ui.theme import C, F, S, ThemedLabel, fit_row_to_text
+from app.ui.widgets.popups import ThemedFileChooser, ThemedPopup, make_scroll_popup
+from app.ui.widgets.styled_button import StyledButton, cancel_button
 
 # Feedback / reward sound sources, offered through the shared source picker.
 SOURCE_LABELS: dict[str, str] = {

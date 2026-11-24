@@ -5,7 +5,7 @@ from datetime import datetime
 
 from app.session.manager import start_stamp
 from app.session.scoring import recorded_score
-from app.ui.theme import format_duration
+from app.ui.formatting import format_duration
 
 
 def _started(session: dict) -> datetime | None:

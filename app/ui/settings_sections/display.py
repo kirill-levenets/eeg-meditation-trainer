@@ -8,16 +8,9 @@ from kivy.uix.slider import Slider
 from app.ui.hooks import Hook
 from app.ui.line_colours import LINE_COLOURS, MONO, GradientStrip
 from app.ui.line_colours import OPTIONS as LINE_OPTIONS
-from app.ui.theme import (
-    TEXT_SIZES,
-    C,
-    F,
-    PresetRow,
-    S,
-    StyledButton,
-    ThemedLabel,
-    fit_row_to_text,
-)
+from app.ui.theme import TEXT_SIZES, C, F, S, ThemedLabel, fit_row_to_text
+from app.ui.widgets.rows import PresetRow
+from app.ui.widgets.styled_button import StyledButton
 
 
 def _line_width(slider_value: float) -> float:

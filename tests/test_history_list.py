@@ -334,7 +334,7 @@ def test_the_rename_editor_fits_inside_its_row(history):
 def test_the_rename_save_label_is_one_line(history):
     from kivy.core.text import Label as CoreLabel
 
-    from app.ui.theme import StyledButton
+    from app.ui.widgets.styled_button import StyledButton
     history.load_sessions(_sessions(5))
     _frames()
     history._toggle_rename(1)

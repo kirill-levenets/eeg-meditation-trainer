@@ -10,7 +10,7 @@ import app.android_jni as android_jni
 import app.ui.power_exemption as pe
 from app.ui.power_exemption import PowerExemption, advice, maker_screen
 from app.ui.settings_screen import SettingsScreen
-from app.ui.theme import StyledButton
+from app.ui.widgets.styled_button import StyledButton
 from app.ui.widgets.user_picker import UserPickerForm
 from tests._app import frames, frames_until
 from tests._context import stub_context

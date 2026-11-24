@@ -8,8 +8,8 @@ from app.ui import graph_series
 from app.ui.hooks import wire
 from app.ui.live_session import METRICS_COLORS, METRICS_SCALES
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
-from app.ui.theme import StyledButton
 from app.ui.widgets.band_totals import BAND_COLORS
+from app.ui.widgets.styled_button import StyledButton
 from tests._app import reload_with
 
 

@@ -12,14 +12,9 @@ from app.session.session_program import (
     program_line_name,
 )
 from app.ui.app_context import AppContext
-from app.ui.theme import (
-    C,
-    S,
-    StyledButton,
-    ThemedLabel,
-    cancel_button,
-    make_scroll_popup,
-)
+from app.ui.theme import C, S, ThemedLabel
+from app.ui.widgets.popups import make_scroll_popup
+from app.ui.widgets.styled_button import StyledButton, cancel_button
 
 # The live metrics graph's first-run selection, and the fallback of a profile saved before the per-graph selection.
 FIRST_RUN_LIVE_SERIES = MappingProxyType({

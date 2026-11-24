@@ -72,7 +72,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
     The screen reads them from `Headset.state()` (`app/ui/headset.py`, the app's `_headset`) whenever it shows device status:
     a list populate, `update_device_status`, and `on_pre_enter`, since the link can drop between sessions with nothing on screen.
     Every row is built with the glyph so its slot exists (`StyledButton` makes an icon label only at construction) and `set_icon("")` blanks it.
-  - **Names:** the pencil opens the inline editor History's rename uses (`theme.RenameRow`, stopping at `MAX_DEVICE_ALIAS` while typing) under the row;
+  - **Names:** the pencil opens the inline editor History's rename uses (`rows.RenameRow`, stopping at `MAX_DEVICE_ALIAS` while typing) under the row;
     a list that lands while it is open (scans run off the main thread) keeps it, with its text, under that headset's new row;
     Save or Enter calls `Headset.on_rename(address, bluetooth_name, text)`, which stores the alias and relabels the row (`relabel_bt_device`);
     for the headset in use it also relabels the status line and the Session screen's label (`Headset.show_selected`, which a pick in the list goes through too).

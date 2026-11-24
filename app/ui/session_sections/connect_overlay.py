@@ -1,6 +1,7 @@
 """The Session screen's connection overlay: the headset's connect or scan status over Cancel, and Retry once it failed."""
-from app.ui.theme import C, S, StyledButton
+from app.ui.theme import C, S
 from app.ui.widgets.loading_overlay import LoadingOverlay
+from app.ui.widgets.styled_button import StyledButton
 
 
 class ConnectOverlay(LoadingOverlay):

@@ -326,14 +326,9 @@ class CrashDialog:
 
 def _themed_makers() -> dict:
     """The dialog in the app's modal style."""
-    from app.ui.theme import (  # noqa: PLC0415 - keeps app/session Kivy-free
-        C,
-        StyledButton,
-        ThemedLabel,
-        ThemedPopup,
-        ThemedTextInput,
-        cancel_button,
-    )
+    from app.ui.theme import C, ThemedLabel, ThemedTextInput  # noqa: PLC0415 - keeps app/session Kivy-free
+    from app.ui.widgets.popups import ThemedPopup  # noqa: PLC0415 - keeps app/session Kivy-free
+    from app.ui.widgets.styled_button import StyledButton, cancel_button  # noqa: PLC0415 - keeps app/session Kivy-free
 
     return {
         "label": lambda **kw: ThemedLabel(color=C.TEXT, **kw),

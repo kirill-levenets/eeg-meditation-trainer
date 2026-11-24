@@ -1,7 +1,8 @@
 from kivy.clock import Clock
 from kivy.metrics import dp
 
-from app.ui.theme import C, F, ModalPanel, ModalScrim, ThemedLabel
+from app.ui.theme import C, F, ThemedLabel
+from app.ui.widgets.popups import ModalPanel, ModalScrim
 
 
 class LoadingOverlay(ModalScrim):

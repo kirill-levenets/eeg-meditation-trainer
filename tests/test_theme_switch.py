@@ -10,19 +10,10 @@ from kivy.base import EventLoop
 from kivy.graphics import Canvas, Color, InstructionGroup
 from kivy.uix.widget import Widget
 
-from app.ui.theme import (
-    THEMES,
-    BottomNav,
-    C,
-    Card,
-    CenteredTextInput,
-    Divider,
-    PresetRow,
-    StyledButton,
-    ThemedColor,
-    ThemedLabel,
-    ThemedTextInput,
-)
+from app.ui.theme import THEMES, C, Card, CenteredTextInput, Divider, ThemedColor, ThemedLabel, ThemedTextInput
+from app.ui.widgets.bottom_nav import BottomNav
+from app.ui.widgets.rows import PresetRow
+from app.ui.widgets.styled_button import StyledButton
 from tests._app import drop_dead_widgets
 from tests._shared_screens import SharedScreens, sections
 
@@ -326,16 +317,20 @@ def test_a_failing_listener_is_logged_and_the_rest_still_run(caplog):
     assert "listener broke" in caplog.text
 
 
+# The modules that build themed widgets out of Kivy's plain Label: the rest of the app takes them from these.
+THEMED_LABEL_MODULES = frozenset({"ui/theme.py", "ui/widgets/styled_button.py", "ui/widgets/popups.py"})
+
+
 def test_app_ui_takes_label_and_textinput_from_theme():
     # A plain Kivy Label/TextInput given C.X keeps that palette's RGBA after a switch.
-    ui = pathlib.Path(__file__).resolve().parent.parent / "app" / "ui"
+    app_dir = pathlib.Path(__file__).resolve().parent.parent / "app"
     plain = []
-    for path in sorted(ui.rglob("*.py")):
-        if path.name == "theme.py":
+    for path in sorted((app_dir / "ui").rglob("*.py")):
+        if path.relative_to(app_dir).as_posix() in THEMED_LABEL_MODULES:
             continue
         for node in ast.walk(ast.parse(path.read_text())):
             if isinstance(node, ast.ImportFrom) and node.module in ("kivy.uix.label", "kivy.uix.textinput"):
-                plain.append(f"{path.relative_to(ui)}:{node.lineno} imports from {node.module}")
+                plain.append(f"{path.relative_to(app_dir)}:{node.lineno} imports from {node.module}")
     assert not plain, "use ThemedLabel / ThemedTextInput from app.ui.theme: " + "; ".join(plain)
 
 

@@ -6,7 +6,7 @@ from app.logger import logger
 from app.session.session_config import SessionConfig
 from app.session.session_program import segment_target
 from app.ui.app_context import AppContext
-from app.ui.theme import format_count
+from app.ui.formatting import format_count
 
 
 class SessionSettings:

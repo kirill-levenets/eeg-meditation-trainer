@@ -18,10 +18,11 @@ from app.ui.session_sections.duration_picker import DurationPicker
 from app.ui.session_sections.end_card import EndCard
 from app.ui.session_sections.header import SessionHeader
 from app.ui.session_sections.stats_strip import StatsStrip
-from app.ui.theme import C, F, Icons, S, StyledButton, ThemedLabel, fill_background
+from app.ui.theme import C, F, Icons, S, ThemedLabel, fill_background
 from app.ui.widgets.band_totals import BAND_COLORS, BAND_SCALES
 from app.ui.widgets.choice_toggle import ChoiceToggle
 from app.ui.widgets.legend import LegendBar
+from app.ui.widgets.styled_button import StyledButton
 
 _RAW_SIGNAL_COLORS = {"eeg": C.MEDITATION}
 _RAW_SIGNAL_SCALES = {"eeg": 500.0}

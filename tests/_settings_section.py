@@ -3,7 +3,7 @@ from collections.abc import Callable
 
 from kivy.uix.scrollview import ScrollView
 
-from app.ui.theme import ThemedAccordion
+from app.ui.widgets.accordion import ThemedAccordion
 
 
 def settings_section(build: Callable, title: str = "Section"):

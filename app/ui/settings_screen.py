@@ -14,6 +14,7 @@ from kivy.uix.slider import Slider
 from app import android_jni
 from app.config import METRICS
 from app.logger import logger
+from app.ui.formatting import format_count
 from app.ui.hooks import Hook
 from app.ui.settings_sections.audio import AudioSection
 from app.ui.settings_sections.common import (
@@ -23,24 +24,12 @@ from app.ui.settings_sections.device import DeviceSection
 from app.ui.settings_sections.display import DisplaySection
 from app.ui.settings_sections.formulas import FormulaSection
 from app.ui.settings_sections.timer import TimerSection
-from app.ui.theme import (
-    THEMES,
-    C,
-    Divider,
-    F,
-    Icons,
-    PresetRow,
-    S,
-    StyledButton,
-    ThemedAccordion,
-    ThemedLabel,
-    cancel_button,
-    fill_background,
-    fit_height_to_text,
-    format_count,
-    make_message_popup,
-)
+from app.ui.theme import THEMES, C, Divider, F, Icons, S, ThemedLabel, fill_background, fit_height_to_text
+from app.ui.widgets.accordion import ThemedAccordion
 from app.ui.widgets.choice_toggle import ChoiceToggle
+from app.ui.widgets.popups import make_message_popup
+from app.ui.widgets.rows import PresetRow
+from app.ui.widgets.styled_button import StyledButton, cancel_button
 from app.ui.widgets.user_picker import UserPickerForm
 
 HELP_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "help")

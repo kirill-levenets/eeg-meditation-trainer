@@ -5,7 +5,8 @@ from typing import Any
 
 from kivy.uix.boxlayout import BoxLayout
 
-from app.ui.theme import C, StyledButton
+from app.ui.theme import C
+from app.ui.widgets.styled_button import StyledButton
 
 
 class ChoiceToggle(BoxLayout):

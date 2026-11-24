@@ -61,7 +61,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   the line under the title ("Recorded at <targets> · nothing is saved", or for a program "Each segment starts at its recorded target · nothing is saved") goes with the controls.
   Reset, in the always-attached header, is enabled only while a control is moved;
   every message state clears the session from the panel (and its segment controls: a late value from one is ignored) and disables it, so Reset while the next session loads can't put the last one's line on its graph.
-  The chevron right after the title (`_btn_collapse`, History's `theme.FoldChevron`) folds the body away, detached, with Reset left in the header:
+  The chevron right after the title (`_btn_collapse`, History's `folds.FoldChevron`) folds the body away, detached, with Reset left in the header:
   whichever of the controls or the message it shows comes back on unfold, and a session or message set while folded stays folded.
   It is saved per profile as the registry setting `what_if_collapsed` (`DiaryScreen.what_if` exposes the panel).
 
