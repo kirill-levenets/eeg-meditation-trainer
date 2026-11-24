@@ -58,10 +58,10 @@ class HistoryFlow:
         return [s for s in sessions_for_view(self._ctx.db, uid) if running is None or s.get("id") != running]
 
     def settings(self) -> list[Setting]:
-        """The History view a profile keeps, its chart as a calendar or bars, held by the screen: a value the screen
-        doesn't know loads as the calendar, so no profile keeps another's."""
-        screen = self._history_screen
-        return [kept("history_view_mode", (_view_mode, STR[1]), lambda: screen.view_mode, screen.set_view_mode)]
+        """The History view a profile keeps, its chart as a calendar or bars, held by the chart area: a value it doesn't
+        know loads as the calendar, so no profile keeps another's."""
+        charts = self._history_screen.chart_area
+        return [kept("history_view_mode", (_view_mode, STR[1]), lambda: charts.view_mode, charts.set_view_mode)]
 
     def on_view_mode_change(self, _mode: str) -> None:
         """The History view picked on its screen: the profile keeps it."""

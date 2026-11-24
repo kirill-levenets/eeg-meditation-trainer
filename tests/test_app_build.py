@@ -26,7 +26,7 @@ def test_the_built_app_restores_its_profile_and_the_hooks_reach_their_flows(buil
     app = build_app(last_used("me"))
     uid = app._current_user_id
     assert uid is not None and not app._gate.shown() and not app._bottom_nav.disabled
-    tap(app._history_screen._toggle_col, "14d")  # History -> HistoryFlow -> the profile's setting
+    tap(app._history_screen.chart_area._toggle_col, "14d")  # History -> HistoryFlow -> the profile's setting
     assert app._db.get_user_setting(uid, "history_view_mode") == "bars"
     audio = app._settings_screen.audio
     audio._sinking_alert_cb.active = True  # Settings -> the settings store, through the real descriptors
@@ -40,11 +40,11 @@ def test_the_built_app_restores_its_profile_and_the_hooks_reach_their_flows(buil
     assert "already exists" in form._error_label.text and len(app._db.get_all_users()) == 2
     app._profiles.on_switch(other)
     frames()
-    assert app._history_screen._view_mode == "calendar" and not audio._sinking_alert_cb.active
+    assert app._history_screen.chart_area._view_mode == "calendar" and not audio._sinking_alert_cb.active
     assert not audio._subtle_alert_cb.active and Window.rotation == 0
     app._profiles.on_switch(uid)
     frames()
-    assert app._history_screen._view_mode == "bars" and audio._sinking_alert_cb.active
+    assert app._history_screen.chart_area._view_mode == "bars" and audio._sinking_alert_cb.active
     assert audio._subtle_alert_cb.active and Window.rotation == 90
 
 

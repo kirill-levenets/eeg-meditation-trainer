@@ -119,7 +119,7 @@ def test_a_stop_confirmed_after_the_session_ended_another_way_keeps_it(fresh_app
 
 def _gone(app, sid) -> None:
     """Until the delete's worker and its main-thread half have both run."""
-    frames_until(lambda: app._db.get_session(sid) is None and app._history_screen.session_by_id(sid) is None)
+    frames_until(lambda: app._db.get_session(sid) is None and app._history_screen.session_list.session_by_id(sid) is None)
     frames()
 
 
@@ -139,7 +139,7 @@ def test_card_delete_confirmed_removes_the_session_and_stops_the_gong(card, monk
     tap(confirm.content, "Delete")  # the user confirms
     _gone(card, card.sid)
     assert card._db.get_session(card.sid) is None and bells and not _card_open(card)
-    assert card._history_screen.session_by_id(card.sid) is None and reloads == []  # the row goes in place: no rebuild
+    assert card._history_screen.session_list.session_by_id(card.sid) is None and reloads == []  # the row goes in place: no rebuild
 
 
 def test_history_row_delete_removes_its_row_in_place(card, monkeypatch):
@@ -147,7 +147,7 @@ def test_history_row_delete_removes_its_row_in_place(card, monkeypatch):
     reloads = calls_of(monkeypatch, card._history_screen, "load_sessions")
     card._history.delete_sessions([card.sid])
     _gone(card, card.sid)
-    assert card._history_screen.session_by_id(card.sid) is None and reloads == []
+    assert card._history_screen.session_list.session_by_id(card.sid) is None and reloads == []
 
 
 # --- Notes: typed notes are kept; empty or untouched notes write nothing ---------------------------------------

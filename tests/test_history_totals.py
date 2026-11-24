@@ -10,8 +10,8 @@ from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.tests.common import UnitTestTouch
 
-from app.ui import history_screen
 from app.ui.history_screen import HistoryScreen
+from app.ui.history_sections import chart_area, common
 from app.ui.hooks import wire
 from app.ui.theme import Icons
 from app.ui.widgets import folds, styled_button
@@ -35,7 +35,7 @@ SESSIONS = [  # newest first, as get_all_sessions returns them
 
 @pytest.fixture
 def history(monkeypatch):
-    monkeypatch.setattr(history_screen, "_today", lambda: TODAY)
+    monkeypatch.setattr(common, "today", lambda: TODAY)
     EventLoop.ensure_window()
     h = HistoryScreen()
     Window.add_widget(h)
@@ -47,11 +47,11 @@ def history(monkeypatch):
 
 
 def _table(h: HistoryScreen) -> list[list[str]]:
-    return [[cell.text for cell in row] for row in h._totals_rows]
+    return [[cell.text for cell in row] for row in h.chart_area._totals_rows]
 
 
 def test_the_header_names_the_columns(history):
-    assert [cell.text for cell in history._totals_header] == ["", "Total", "On target", "Best streak"]
+    assert [cell.text for cell in history.chart_area._totals_header] == ["", "Total", "On target", "Best streak"]
 
 
 def test_with_no_day_tapped_the_rows_are_todays(history):
@@ -106,32 +106,28 @@ def test_a_reload_updates_the_totals_and_keeps_the_tapped_day(history):
 def test_upright_the_table_is_under_the_chart_and_sideways_beside_it(history):
     h = history
     h._root.width = dp(360)
-    h._place_totals()
-    order = list(reversed(h._chart_area.children))
-    assert h._totals.parent is h._chart_area and order == [h._graph_row, h._totals]
+    order = list(reversed(h.chart_area.children))
+    assert h.chart_area._totals.parent is h.chart_area and order == [h.chart_area._graph_row, h.chart_area._totals]
     h._root.width = dp(640)  # a narrower phone held sideways: the heatmap wouldn't fit beside the table
-    h._place_totals()
-    assert h._totals.parent is h._chart_area
+    assert h.chart_area._totals.parent is h.chart_area
     h._root.width = dp(732)
-    h._place_totals()
-    assert h._totals.parent is h._side_col  # under the chart's period row, beside the chart
-    assert list(reversed(h._graph_row.children)) == [h._graph_wrap, h._side_col, h._toggle_col]
+    assert h.chart_area._totals.parent is h.chart_area._side_col  # under the chart's period row, beside the chart
+    assert list(reversed(h.chart_area._graph_row.children)) == [h.chart_area._graph_wrap, h.chart_area._side_col, h.chart_area._toggle_col]
     h._root.width = dp(360)
-    h._place_totals()
-    assert h._totals.parent is h._chart_area
+    assert h.chart_area._totals.parent is h.chart_area
 
 
 def test_opening_history_on_another_day_moves_today_on(history, monkeypatch):
     # The list was loaded before midnight and the app stayed open: entering History shows the new day.
-    monkeypatch.setattr(history_screen, "_today", lambda: datetime.date(2026, 10, 12))  # the next Monday
+    monkeypatch.setattr(common, "today", lambda: datetime.date(2026, 10, 12))  # the next Monday
     history.on_pre_enter()
     assert _table(history)[0][0] == "Mon 12 Oct"
-    assert "2026-10-12" in history._heatmap._cell_positions  # the calendar reaches the new day's week too
+    assert "2026-10-12" in history.chart_area._heatmap._cell_positions  # the calendar reaches the new day's week too
 
 
 def test_opening_history_on_the_same_day_redraws_nothing(history, monkeypatch):
     calls = []
-    monkeypatch.setattr(history._heatmap, "set_data", lambda data: calls.append(data))
+    monkeypatch.setattr(history.chart_area._heatmap, "set_data", lambda data: calls.append(data))
     history.on_pre_enter()
     assert calls == []
 
@@ -152,16 +148,16 @@ def test_the_chart_folds_away_and_the_list_gets_its_room(history):
     h = history
     for _ in range(5):
         EventLoop.idle()
-    list_h = h._rv.height
+    list_h = h.session_list._rv.height
     h.set_chart_collapsed(True)
     for _ in range(5):
         EventLoop.idle()
-    assert h.chart_collapsed and h._chart_area.parent is None  # detached: nothing hidden in place can take taps
-    assert h._rv.height > list_h + h._graph_row.height * 0.9
+    assert h.chart_collapsed and h.chart_area.parent is None  # detached: nothing hidden in place can take taps
+    assert h.session_list._rv.height > list_h + h.chart_area._graph_row.height * 0.9
     assert h._btn_collapse._icon_label.text == Icons.CHEVRON_RIGHT
     h.set_chart_collapsed(False)
     order = list(reversed(h._root.children))
-    assert order.index(h._chart_area) == order.index(h._title_row) + 1
+    assert order.index(h.chart_area) == order.index(h._title_row) + 1
     assert h._btn_collapse._icon_label.text == Icons.CHEVRON_DOWN
 
 
@@ -177,7 +173,7 @@ def test_tapping_the_chevron_folds_and_unfolds_and_reports_it(history):
 def test_folding_keeps_the_tapped_day(history):
     history._on_day_tap("2026-10-01")
     history.set_chart_collapsed(True)
-    assert history._filtered_date == "2026-10-01" and len(history._shown) == 1
+    assert history._filtered_date == "2026-10-01" and len(history.session_list._shown) == 1
     history.set_chart_collapsed(False)
     assert _table(history)[0][0] == "Thu 1 Oct"
 
@@ -185,13 +181,11 @@ def test_folding_keeps_the_tapped_day(history):
 def test_folded_sideways_and_turned_upright_the_table_stays_with_the_chart(history):
     h = history
     h._root.width = dp(732)
-    h._place_totals()
     h.set_chart_collapsed(True)
     h._root.width = dp(360)
-    h._place_totals()
-    assert h._totals.parent is h._chart_area and h._chart_area.parent is None
+    assert h.chart_area._totals.parent is h.chart_area and h.chart_area.parent is None
     h.set_chart_collapsed(False)
-    assert h._chart_area.parent is h._root
+    assert h.chart_area.parent is h._root
 
 
 def test_the_folded_chart_is_saved_per_profile(fresh_app):
@@ -208,7 +202,7 @@ def test_the_folded_chart_is_saved_per_profile(fresh_app):
 
 
 def test_without_the_icon_font_the_chevron_says_hide_and_show(monkeypatch):
-    monkeypatch.setattr(history_screen, "ICONS_AVAILABLE", False)
+    monkeypatch.setattr(chart_area, "ICONS_AVAILABLE", False)  # the period arrows' text
     monkeypatch.setattr(folds, "ICONS_AVAILABLE", False)  # the chevron's text
     monkeypatch.setattr(styled_button, "ICONS_AVAILABLE", False)  # no icon beside it
     h = HistoryScreen()
@@ -221,7 +215,7 @@ def test_resuming_onto_history_moves_today_on(fresh_app, monkeypatch):
     app = fresh_app
     app._nav.switch("history")
     assert _table(app._history_screen)[0][0] != "Mon 12 Oct"
-    monkeypatch.setattr(history_screen, "_today", lambda: datetime.date(2026, 10, 12))
+    monkeypatch.setattr(common, "today", lambda: datetime.date(2026, 10, 12))
     app._refresh_ui_after_resume()
     assert _table(app._history_screen)[0][0] == "Mon 12 Oct"
 

@@ -24,7 +24,7 @@ def _sessions(n: int) -> list[dict]:
 
 def _listed(h: HistoryScreen) -> dict:
     """sid -> its item in the list's data."""
-    return {d["sid"]: d for d in h._rv.data}
+    return {d["sid"]: d for d in h.session_list._rv.data}
 
 
 def _loaded(n: int) -> HistoryScreen:
@@ -47,9 +47,9 @@ def test_removing_a_session_drops_only_its_item():
 def test_removing_a_session_updates_the_calendar_and_bars():
     h = _loaded(6)  # days 28, 27, 26 with two sessions each
     h.remove_sessions([4, 5])  # both sessions of 2026-09-26
-    assert "2026-09-26" not in h._heatmap._day_values
-    assert "2026-09-26" not in h._bars._day_values
-    assert h._heatmap._day_values["2026-09-28"] == (40 + 41) / 2
+    assert "2026-09-26" not in h.chart_area._heatmap._day_values
+    assert "2026-09-26" not in h.chart_area._bars._day_values
+    assert h.chart_area._heatmap._day_values["2026-09-28"] == (40 + 41) / 2
 
 
 def test_removing_inside_a_day_filter_keeps_the_filter():
@@ -68,10 +68,10 @@ def test_removing_inside_a_day_filter_keeps_the_filter():
 def test_removing_a_selected_session_drops_it_from_the_selection():
     h = _loaded(4)
     h.set_select_mode(True)
-    h.toggle_session_selection(1)
-    h.toggle_session_selection(2)
+    h.session_list.toggle_selection(1)
+    h.session_list.toggle_selection(2)
     h.remove_sessions([1])
-    assert h.selected_ids == {2}
+    assert h.session_list.selected_ids == {2}
 
 
 def _frames(n: int = 10) -> None:
@@ -90,7 +90,7 @@ def test_a_full_rebuild_starts_at_the_top(start):
     try:
         h.load_sessions(_sessions(40))
         _frames(20)
-        sv = h._rv
+        sv = h.session_list._rv
         if start == "flung past the bottom":
             sv.effect_y.value = sv.effect_y.min + 300  # overscrolled and still moving
             sv.effect_y.velocity = -900.0
@@ -112,7 +112,7 @@ def test_a_full_rebuild_starts_at_the_top(start):
 def _bare_scroll(content_height: float):
     from kivy.uix.widget import Widget
 
-    from app.ui.history_screen import _StableScrollView
+    from app.ui.history_sections.session_list import _StableScrollView
     sv = _StableScrollView(size=(300, 400))
     content = Widget(size_hint_y=None, height=content_height)
     sv.add_widget(content)
@@ -150,11 +150,11 @@ def test_an_edge_bounce_survives_a_touch_when_the_list_does_not_change():
 def test_a_day_tap_highlights_the_day_in_both_views_and_reset_clears_both():
     h = _loaded(6)
     h._on_day_tap("2026-09-27")
-    assert h._heatmap._selected_date == h._bars._selected_date == "2026-09-27"
+    assert h.chart_area._heatmap._selected_date == h.chart_area._bars._selected_date == "2026-09-27"
     row = h._date_row.children  # right to left: Select, Show All, the heading
     assert row[1] is h._btn_show_all and row[0] is h._btn_select
     h._reset_filter()
-    assert h._heatmap._selected_date is None and h._bars._selected_date is None
+    assert h.chart_area._heatmap._selected_date is None and h.chart_area._bars._selected_date is None
     assert h._btn_show_all.parent is None  # detached, not hidden in place: it would still take the row's room and taps
 
 
@@ -162,7 +162,7 @@ def test_a_reload_for_another_profile_clears_the_day_filter():
     h = _loaded(6)
     h._on_day_tap("2026-09-27")
     h.load_sessions(_sessions(4), keep_filter=False)  # another profile
-    assert h._filtered_date is None and h._heatmap._selected_date is None and h._bars._selected_date is None
+    assert h._filtered_date is None and h.chart_area._heatmap._selected_date is None and h.chart_area._bars._selected_date is None
     assert h._date_label.text == "All sessions (4 sessions)"
     assert h._btn_show_all.parent is None
 
@@ -186,10 +186,10 @@ def test_history_keeps_the_day_filter_only_for_the_same_profile():
 def test_renaming_updates_the_row_and_the_model_in_place():
     h = _loaded(3)
     renamed = []
-    wire(h, on_rename_session=lambda sid, name: renamed.append((sid, name)))
-    h._toggle_rename(1)
-    h._rename_input.text = "Evening sit"
-    h._rename_input.dispatch("on_text_validate")
+    wire(h.session_list, on_rename=lambda sid, name: renamed.append((sid, name)))
+    h.session_list._toggle_rename(1)
+    h.session_list._rename_input.text = "Evening sit"
+    h.session_list._rename_input.dispatch("on_text_validate")
     assert renamed == [(1, "Evening sit")]
     assert next(s for s in h._sessions if s["id"] == 1)["session_name"] == "Evening sit"
     assert _listed(h)[1]["name"] == "2026-09-28 11:00 - Evening sit"
@@ -221,11 +221,11 @@ def test_renaming_a_session_rebuilds_nothing():
 def test_an_empty_list_does_not_keep_the_previous_sessions_behind_it():
     h = _loaded(5)
     h.load_sessions([])  # e.g. a profile with no sessions
-    assert h._shown == []
+    assert h.session_list._shown == []
     h.set_select_mode(True)
     assert _listed(h) == {}
-    h.select_all_shown()
-    assert h.selected_ids == set()
+    h.session_list.select_all()
+    assert h.session_list.selected_ids == set()
 
 
 def test_removing_from_an_empty_day_keeps_its_zero_count():
@@ -238,8 +238,8 @@ def test_removing_from_an_empty_day_keeps_its_zero_count():
 def test_removing_selected_sessions_updates_the_export_button():
     h = _loaded(4)
     h.set_select_mode(True)
-    h.toggle_session_selection(1)
-    h.toggle_session_selection(2)
+    h.session_list.toggle_selection(1)
+    h.session_list.toggle_selection(2)
     h.remove_sessions([1, 2])
     assert h._btn_export.text == "Export 0" and h._btn_export.disabled
 

@@ -19,7 +19,7 @@ def _restore_live(s: LiveSessionScreen, state: tuple) -> None:
 
 def _restore_history(h: HistoryScreen, state: tuple) -> None:
     h.set_select_mode(state[1])
-    h.set_view_mode(state[0])
+    h.chart_area.set_view_mode(state[0])
 
 
 def _restore_settings(s: SettingsScreen, state: tuple) -> None:
@@ -32,7 +32,7 @@ def _restore_settings(s: SettingsScreen, state: tuple) -> None:
 _VIEW = {
     LiveSessionScreen: (lambda s: (s._active_view, s.stats._mode, s.end_card.parent is not None, s.connect_overlay.opacity),
                         _restore_live),
-    HistoryScreen: (lambda h: (h._view_mode, h._select_mode), _restore_history),
+    HistoryScreen: (lambda h: (h.chart_area._view_mode, h.session_list._select_mode), _restore_history),
     DiaryScreen: (lambda d: (d._active_graph_tab,), lambda d, state: d._switch_graph_tab(state[0])),
     SettingsScreen: (lambda s: (s.timer._program_mode, tuple(x._collapsed for x in sections(s))), _restore_settings),
 }

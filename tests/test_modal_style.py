@@ -355,8 +355,8 @@ def test_the_app_selected_states_are_readable(theme, screens):
     live, hist, sett = screens(LiveSessionScreen), screens(HistoryScreen), screens(SettingsScreen)
     live._set_view("raw")
     live._set_view("metrics")
-    hist.set_view_mode("bars")
-    for btn in (live._view_toggle.buttons["metrics"], hist._toggle_col.buttons["bars"], sett._theme_toggle.buttons[theme]):
+    hist.chart_area.set_view_mode("bars")
+    for btn in (live._view_toggle.buttons["metrics"], hist.chart_area._toggle_col.buttons["bars"], sett._theme_toggle.buttons[theme]):
         assert _contrast(btn.text_color, btn.bg_color) == pytest.approx(_best_glyph_contrast(btn.bg_color)), btn.text
 
 
@@ -432,7 +432,7 @@ def test_no_screen_draws_a_fixed_glyph_colour_on_an_accent_fill(theme, screens):
                                screens(SettingsScreen))
     live._set_view("raw")
     live._set_view("metrics")
-    hist.set_view_mode("bars")
+    hist.chart_area.set_view_mode("bars")
     diary._switch_graph_tab("raw")
     sett.timer.load_program([{"minutes": 10, "target": 50, "formula": "shamatha_score"}], "program")
     bad = []

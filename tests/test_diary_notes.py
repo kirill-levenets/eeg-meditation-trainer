@@ -146,7 +146,7 @@ def test_app_pause_on_the_detail_saves_an_edit_and_acknowledges_it(app):
 
 
 def _listed(app, sid: int) -> tuple:
-    row = app._history_screen.session_by_id(sid)
+    row = app._history_screen.session_list.session_by_id(sid)
     return row["notes"], row["tags"], row["mood_rating"]
 
 

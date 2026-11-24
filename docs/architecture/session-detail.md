@@ -73,7 +73,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 ## Loading
 
 - **The session detail opens at once** (#59):
-  `SessionDetailFlow.on_session_select` (`app/ui/session_detail_flow.py`, the app's `_detail`) shows it in the tap's frame from the row History holds (`HistoryScreen.session_by_id`; `get_all_sessions` is `SELECT *`, and notes and renames update it in place):
+  `SessionDetailFlow.on_session_select` (`app/ui/session_detail_flow.py`, the app's `_detail`) shows it in the tap's frame from the row History holds (`SessionList.session_by_id`; `get_all_sessions` is `SELECT *`, and notes and renames update it in place):
   title, stats and notes, editable at once, with no full-screen spinner.
   Its band totals and graphs show a non-modal "Loading…" (`_band_placeholder`, `_graph_placeholder`; `DiaryScreen._ready` holds the sections whose data is in)
   while the worker `_load_session_detail` reads the band totals (one `SUM` query, sent first), then the metric rows **once**

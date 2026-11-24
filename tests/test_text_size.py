@@ -143,14 +143,14 @@ def test_narrow_buttons_keep_their_text_on_one_line_at_the_largest_size():
     segment's End cue / Feedback columns."""
     F.set_scale(LARGEST)
     history = HistoryScreen()
-    history.set_view_mode("bars")  # Cal unselected: drawn regular, and measured so
+    history.chart_area.set_view_mode("bars")  # Cal unselected: drawn regular, and measured so
     preset = PresetRow(items=[("1h30", 90)]).children[0]
     settings = SettingsScreen()
     settings.timer._add_segment_row({"minutes": 10, "target": 60, "formula": "shamatha_score", "end_sound": "warble"})
     row = settings.timer._segments_box.children[0]
     column = 0.16 * (dp(360) - 2 * S.PAGE_PAD - 5 * S.GAP_SM)
     end_cue = next(w for w in row.children if getattr(w, "text", "") == "Warble")
-    cal, bars = history._toggle_col.buttons["calendar"], history._toggle_col.buttons["bars"]
+    cal, bars = history.chart_area._toggle_col.buttons["calendar"], history.chart_area._toggle_col.buttons["bars"]
     for btn, width in ((cal, dp(40)), (bars, dp(40)), (preset, dp(38)),
                        (end_cue, column), (row._feedback_btn, column)):
         btn.size_hint_x, btn.width = None, width
@@ -401,7 +401,7 @@ def _history_states(screen):
           "session_name": f"2026-10-0{i} 07:30 - Mock", "notes": "Calm start, drowsy after ten minutes."}
          for i in (1, 2, 3)])
     yield " a day picked", lambda: screen._on_day_tap("2026-10-03")
-    yield " 14 days", lambda: screen.set_view_mode("bars")
+    yield " 14 days", lambda: screen.chart_area.set_view_mode("bars")
 
 
 def _settings_states(screen):

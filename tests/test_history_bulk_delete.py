@@ -297,8 +297,8 @@ def test_delete_n_follows_the_selection():
     h = _history()
     h.set_select_mode(True)
     assert (h._btn_delete.text, h._btn_delete.disabled) == ("Delete 0", True)
-    h.toggle_session_selection(1)
-    h.toggle_session_selection(4)
+    h.session_list.toggle_selection(1)
+    h.session_list.toggle_selection(4)
     assert (h._btn_delete.text, h._btn_delete.disabled) == ("Delete 2", False)
 
 
@@ -306,7 +306,7 @@ def test_delete_n_asks_with_the_count_and_the_days(confirm):
     h = _history()
     h.set_select_mode(True)
     for sid in (0, 3, 5):  # 2026-09-28, 2026-09-27, 2026-09-26
-        h.toggle_session_selection(sid)
+        h.session_list.toggle_selection(sid)
     text, buttons = confirm(h.delete_selected)
     assert "Delete 3 sessions from 2026-09-26 to 2026-09-28?" in text and "can't be undone" in text
     assert list(buttons) == ["Delete", "Cancel"]  # the order every confirm in the app uses
@@ -317,16 +317,16 @@ def test_cancel_deletes_nothing_and_confirm_deletes_the_selection_then_leaves_se
     deleted = []
     wire(h, on_delete_sessions=lambda ids, done: (deleted.append(ids), done(True)))
     h.set_select_mode(True)
-    h.toggle_session_selection(2)
-    h.toggle_session_selection(1)
+    h.session_list.toggle_selection(2)
+    h.session_list.toggle_selection(1)
     _text, buttons = confirm(h.delete_selected)
     buttons["Cancel"].dispatch("on_release")
     _frames()
-    assert deleted == [] and h._select_mode
+    assert deleted == [] and h.session_list._select_mode
     _text, buttons = confirm(h.delete_selected)
     buttons["Delete"].dispatch("on_release")
     assert deleted == [[1, 2]]
-    assert not h._select_mode
+    assert not h.session_list._select_mode
 
 
 def test_delete_tapped_during_the_fade_after_cancel_deletes_nothing(confirm):
@@ -335,7 +335,7 @@ def test_delete_tapped_during_the_fade_after_cancel_deletes_nothing(confirm):
     deleted = []
     wire(h, on_delete_sessions=lambda ids, done: (deleted.append(ids), done(True)))
     h.set_select_mode(True)
-    h.select_all_shown()
+    h.session_list.select_all()
     _text, buttons = confirm(h.delete_selected)
     buttons["Cancel"].dispatch("on_release")
     buttons["Delete"].dispatch("on_release")
@@ -346,10 +346,10 @@ def test_a_failed_bulk_delete_keeps_select_mode_and_the_selection(confirm):
     h = _history()
     wire(h, on_delete_sessions=lambda ids, done: done(False))
     h.set_select_mode(True)
-    h.toggle_session_selection(3)
+    h.session_list.toggle_selection(3)
     _text, buttons = confirm(h.delete_selected)
     buttons["Delete"].dispatch("on_release")
-    assert h._select_mode and h.selected_ids == {3}
+    assert h.session_list._select_mode and h.session_list.selected_ids == {3}
 
 
 def test_select_all_then_delete_takes_every_session_in_the_filter(confirm):
@@ -357,11 +357,11 @@ def test_select_all_then_delete_takes_every_session_in_the_filter(confirm):
     deleted = []
     wire(h, on_delete_sessions=lambda ids, done: (deleted.append(ids), h.remove_sessions(ids), done(True)))
     h.set_select_mode(True)
-    h.select_all_shown()  # including the rows the list never built
+    h.session_list.select_all()  # including the rows the list never built
     _text, buttons = confirm(h.delete_selected)
     buttons["Delete"].dispatch("on_release")
     assert deleted == [list(range(300))]
-    assert h._rv.data == [] and h._date_label.text == "All sessions (0 sessions)"
+    assert h.session_list._rv.data == [] and h._date_label.text == "All sessions (0 sessions)"
 
 
 def test_a_row_delete_asks_with_its_title_and_takes_the_same_path(confirm):
