@@ -6,7 +6,7 @@ from app.crash_handler import report_soft_error
 from app.logger import logger
 from app.settings.registry import PATH, STR, Setting, held
 from app.ui.app_context import AppContext
-from app.ui.theme import format_count
+from app.ui.formatting import format_count
 
 BUILTIN_SOURCES = ("noise", "tone", "heartbeat")
 

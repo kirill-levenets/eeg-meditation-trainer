@@ -95,7 +95,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   a confirm that arrives after the session has ended writes nothing (`tests/test_session_ending.py::test_a_stop_confirmed_after_the_session_ended_another_way_keeps_it`).
   `_confirm_action`'s `on_cancel` fires on any close that isn't OK (Cancel, tap outside, Android back), and it decides **once**:
   Kivy keeps delivering taps to a `ModalView` during its 0.1 s fade-out, so a second OK (or OK right after Cancel) would run the action again.
-  That logic is `theme.confirm_popup`, the one confirm (OK left, Cancel right); `_confirm_action` and History's delete confirm both call it.
+  That logic is `popups.confirm_popup`, the one confirm (OK left, Cancel right); `_confirm_action` and History's delete confirm both call it.
   The session-end card ("Session saved") offers **Save notes** (`ShownSession.on_save_notes`; the card stays open), **OK** and a low-emphasis **Delete session** behind a confirm.
   OK is `ShownSession.close`: it saves the notes only if they changed since the last save (`flush_notes`, against the last written text), so an untouched card writes nothing and clearing saved notes clears them;
   then it stops the gong and closes.

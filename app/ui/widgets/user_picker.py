@@ -8,15 +8,9 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
 
 from app.logger import logger
-from app.ui.theme import (
-    C,
-    CenteredTextInput,
-    F,
-    S,
-    StyledButton,
-    ThemedLabel,
-    format_count,
-)
+from app.ui.formatting import format_count
+from app.ui.theme import C, CenteredTextInput, F, S, ThemedLabel
+from app.ui.widgets.styled_button import StyledButton
 
 
 def _show_only(panel, *widgets, height: float = 0) -> None:

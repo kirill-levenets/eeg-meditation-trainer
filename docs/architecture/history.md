@@ -27,7 +27,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   On a landscape phone (~730 dp) the full-width heatmap is ~230 dp tall and leaves the list no room under it; beside the table it is ~170 dp.
   A narrower landscape window keeps the table under the chart, where the heatmap would otherwise draw beneath it.
   The chart row and the table (when under it) live in one `_chart_area` (vertical, `minimum_height` → `height`).
-  The chevron right after the title, which takes its text's width (`_btn_collapse`, a `theme.FoldChevron` driven by a `theme.Fold`), folds `_chart_area` away by **detaching** it from the page (`fold_away`) and puts it back under `_title_row`;
+  The chevron right after the title, which takes its text's width (`_btn_collapse`, a `folds.FoldChevron` driven by a `folds.Fold`), folds `_chart_area` away by **detaching** it from the page (`fold_away`) and puts it back under `_title_row`;
   the list takes the room, and nothing is hidden in place (a disabled or zero-height widget still takes taps).
   `FoldChevron` is the one fold button, also the session detail's: the accordion's chevrons, down open and right folded (`show_folded` through `StyledButton.set_icon`), "Hide"/"Show" without the icon font;
   40 dp wide, as an icon-only `StyledButton` narrower than ~36 dp crops its glyph to a tick.
@@ -39,7 +39,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   A `RevealBox` action bar (Export N / Delete N / Select all / Cancel) is attached only in select mode.
   **Delete N** (#57) → `delete_selected()` → `_confirm_delete(ids)`, the one confirm for a row's delete and the selection (one session: its `session_title`; several: the count and the days);
   then `on_delete_sessions(ids, done)`: `done(True)` ends select mode, a failure keeps the selection.
-  The confirm is the shared `theme.confirm_popup`, which decides once: Kivy still delivers taps to a popup while it fades out, so a Delete tapped during the fade after Cancel would otherwise delete the selection.
+  The confirm is the shared `popups.confirm_popup`, which decides once: Kivy still delivers taps to a popup while it fades out, so a Delete tapped during the fade after Cancel would otherwise delete the selection.
   A selection survives a day-filter change, as Export's does: the count on the button and the confirm's day span show what goes.
   `_selected_ids` and `toggle_session_selection` / `select_all_shown` / `export_selected` are the model (unit-tested).
   `export_selected` calls the `on_export_sessions` hook with sorted ids → `HistoryFlow.on_export_sessions_csv`:
@@ -85,7 +85,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   Every list operation is a data update: `_show_sessions` (a new list, from the top);
   `remove_sessions(ids)` drops the items and the model entries (`_sessions`, `_shown`, `_selected_ids`), refreshes the header count and the charts' `day_avg` via `_set_day_data()`, and keeps the scroll position and any day filter;
   `_update_item(sid)` re-derives one item's name and height after a rename opens, closes or saves.
-  Inline rename is one editor (`_rename_row`, a `theme.RenameRow`, with its `_rename_input`) attached to the row showing `_renaming_sid`, whose item is `_RENAME_H` taller;
+  Inline rename is one editor (`_rename_row`, a `rows.RenameRow`, with its `_rename_input`) attached to the row showing `_renaming_sid`, whose item is `_RENAME_H` taller;
   a row scrolled off screen detaches it (`on_parent(None)`) and its focus drops unless a row takes it back (`_rename_focus_check`), so the editor follows its session with the typed text.
   The pencil focuses it a frame later (`RenameRow.focus_soon`, only if it is still shown): Kivy unfocuses every input a tap didn't land on after that tap's touch-up, so focusing it in the tap leaves no keyboard.
   `load_sessions` keeps only selected ids that are in the new list: another profile's would be exported with it.

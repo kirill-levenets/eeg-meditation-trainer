@@ -12,7 +12,7 @@ from app.settings.registry import STR, Setting, kept
 from app.storage.android_share import copy_to_documents
 from app.storage.csv_export import build_sessions_zip
 from app.ui.app_context import AppContext
-from app.ui.theme import format_count
+from app.ui.formatting import format_count
 
 
 def sessions_for_view(db, current_uid: int | None) -> list:

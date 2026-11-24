@@ -18,20 +18,11 @@ from app.ui.settings_sections.common import (
     saved_program_label,
     source_label,
 )
-from app.ui.theme import (
-    C,
-    CenteredTextInput,
-    F,
-    Icons,
-    PresetRow,
-    S,
-    StyledButton,
-    ThemedLabel,
-    cancel_button,
-    fit_height_to_text,
-    make_scroll_popup,
-)
+from app.ui.theme import C, CenteredTextInput, F, Icons, S, ThemedLabel, fit_height_to_text
 from app.ui.widgets.choice_toggle import ChoiceToggle
+from app.ui.widgets.popups import make_scroll_popup
+from app.ui.widgets.rows import PresetRow
+from app.ui.widgets.styled_button import StyledButton, cancel_button
 
 # Built-in metric keys offered in the per-segment formula picker. These are the
 # REAL metric dict keys — native_attention/native_meditation, NOT ns_*.

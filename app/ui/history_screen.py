@@ -22,6 +22,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
 from app.logger import logger
+from app.ui.formatting import format_count, format_duration
 from app.ui.hooks import Hook, wire
 from app.ui.period_totals import (
     ALL_TIME,
@@ -44,24 +45,19 @@ from app.ui.theme import (
     Card,
     Divider,
     F,
-    Fold,
-    FoldChevron,
     Icons,
-    RenameRow,
-    RevealBox,
     S,
-    StyledButton,
     ThemedLabel,
-    confirm_popup,
     fill_background,
     fit_row_to_text,
     fit_width_to_text,
-    fold_away,
-    format_count,
-    format_duration,
 )
 from app.ui.touch_utils import point_in_rect
 from app.ui.widgets.choice_toggle import ChoiceToggle
+from app.ui.widgets.folds import Fold, FoldChevron, RevealBox, fold_away
+from app.ui.widgets.popups import confirm_popup
+from app.ui.widgets.rows import RenameRow
+from app.ui.widgets.styled_button import StyledButton
 
 
 def _today() -> datetime.date:

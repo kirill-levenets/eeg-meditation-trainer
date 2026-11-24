@@ -6,8 +6,8 @@ from pathlib import Path
 
 from kivy.base import EventLoop
 
+from app.ui.formatting import format_count
 from app.ui.history_screen import HistoryScreen
-from app.ui.theme import format_count
 from app.ui.widgets.user_picker import UserPickerForm
 
 

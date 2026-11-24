@@ -12,7 +12,7 @@ import app.ui.history_flow as history_flow
 from app.config import APP
 from app.session.manager import SessionState
 from app.storage.database import DatabaseManager
-from app.ui.theme import StyledButton
+from app.ui.widgets.styled_button import StyledButton
 from tests._app import (
     calls_of,
     frames,

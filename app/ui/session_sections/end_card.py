@@ -5,22 +5,11 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
+from app.ui.formatting import format_duration
 from app.ui.session_labels import session_score_rows
-from app.ui.theme import (
-    C,
-    Card,
-    F,
-    Icons,
-    ModalPanel,
-    ModalScrim,
-    S,
-    StyledButton,
-    ThemedLabel,
-    ThemedTextInput,
-    fit_width_to_text,
-    format_duration,
-    text_width,
-)
+from app.ui.theme import C, Card, F, Icons, S, ThemedLabel, ThemedTextInput, fit_width_to_text, text_width
+from app.ui.widgets.popups import ModalPanel, ModalScrim
+from app.ui.widgets.styled_button import StyledButton
 
 
 def _cut_to_width(text: str, label) -> str:

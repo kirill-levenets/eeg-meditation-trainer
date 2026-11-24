@@ -11,7 +11,8 @@ from app.crash_handler import report_soft_error
 from app.logger import logger
 from app.storage.database import UserExistsError
 from app.ui.app_context import AppContext
-from app.ui.theme import C, F, ThemedLabel, ThemedPopup
+from app.ui.theme import C, F, ThemedLabel
+from app.ui.widgets.popups import ThemedPopup
 from app.ui.widgets.user_picker import UserPickerForm
 
 

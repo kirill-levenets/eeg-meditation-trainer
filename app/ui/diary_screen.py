@@ -17,6 +17,7 @@ from app.metrics.series_names import SERIES_NAMES
 from app.session.scoring import recorded_score, scored_steps, target_steps
 from app.session.session_program import RunnablePlan, recorded_program
 from app.storage.android_share import copy_to_documents
+from app.ui.formatting import format_duration
 from app.ui.graph_scroll import GraphAwareScrollView
 from app.ui.graph_series import show_program_series
 from app.ui.hooks import Hook, is_wired, wire
@@ -27,26 +28,20 @@ from app.ui.theme import (
     C,
     CenteredTextInput,
     F,
-    Fold,
-    FoldChevron,
     Icons,
     S,
-    StyledButton,
-    ThemedFileChooser,
     ThemedLabel,
-    ThemedPopup,
     ThemedTextInput,
-    cancel_button,
     fill_background,
     fit_height_to_text,
     fit_width_to_text,
-    fold_away,
-    format_duration,
-    make_message_popup,
 )
 from app.ui.widgets.band_totals import BAND_COLORS, BAND_SCALES, BandTotalsView
 from app.ui.widgets.choice_toggle import ChoiceToggle
+from app.ui.widgets.folds import Fold, FoldChevron, fold_away
 from app.ui.widgets.legend import LegendBar
+from app.ui.widgets.popups import ThemedFileChooser, ThemedPopup, make_message_popup
+from app.ui.widgets.styled_button import StyledButton, cancel_button
 from app.ui.widgets.what_if import WhatIfPanel
 
 RAW_EEG_PREVIEW_COLORS = {

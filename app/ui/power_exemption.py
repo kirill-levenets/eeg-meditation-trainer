@@ -3,7 +3,9 @@
 from app import android_jni
 from app.logger import logger
 from app.ui.app_context import AppContext
-from app.ui.theme import C, StyledButton, cancel_button, make_message_popup
+from app.ui.theme import C
+from app.ui.widgets.popups import make_message_popup
+from app.ui.widgets.styled_button import StyledButton, cancel_button
 
 # dontkillmyapp.com scores these makers 3 of 5 or worse: their power managers close foreground services too.
 AGGRESSIVE_MAKERS = frozenset({

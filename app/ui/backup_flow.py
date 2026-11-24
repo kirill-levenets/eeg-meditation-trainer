@@ -19,15 +19,10 @@ from app.storage import backup as _backup
 from app.storage.backup import restore_backup, validate_backup
 from app.storage.fileops import discard_file
 from app.ui.app_context import AppContext
-from app.ui.theme import (
-    C,
-    CenteredTextInput,
-    StyledButton,
-    ThemedFileChooser,
-    ThemedPopup,
-    cancel_button,
-    format_count,
-)
+from app.ui.formatting import format_count
+from app.ui.theme import C, CenteredTextInput
+from app.ui.widgets.popups import ThemedFileChooser, ThemedPopup
+from app.ui.widgets.styled_button import StyledButton, cancel_button
 
 BACKUP_SOUND_NOTE = "Custom sound files are not included in a backup."
 

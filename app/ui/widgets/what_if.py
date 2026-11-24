@@ -14,18 +14,11 @@ from kivy.uix.slider import Slider
 from kivy.uix.widget import Widget
 
 from app.session.what_if import ScoredTicks, Segment, Stats, line_steps, rescore
+from app.ui.formatting import format_duration
 from app.ui.hooks import Hook, wire
-from app.ui.theme import (
-    C,
-    F,
-    Fold,
-    FoldChevron,
-    S,
-    StyledButton,
-    ThemedLabel,
-    fit_width_to_text,
-    format_duration,
-)
+from app.ui.theme import C, F, S, ThemedLabel, fit_width_to_text
+from app.ui.widgets.folds import Fold, FoldChevron
+from app.ui.widgets.styled_button import StyledButton
 
 _ROW_H = dp(20)
 

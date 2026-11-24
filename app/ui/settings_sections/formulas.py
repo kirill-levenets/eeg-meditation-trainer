@@ -6,15 +6,8 @@ from kivy.uix.boxlayout import BoxLayout
 
 from app.ui.hooks import Hook
 from app.ui.settings_sections.common import fill_saved_list, saved_formula_label
-from app.ui.theme import (
-    C,
-    CenteredTextInput,
-    F,
-    S,
-    StyledButton,
-    ThemedLabel,
-    fit_height_to_text,
-)
+from app.ui.theme import C, CenteredTextInput, F, S, ThemedLabel, fit_height_to_text
+from app.ui.widgets.styled_button import StyledButton
 
 
 class FormulaSection:

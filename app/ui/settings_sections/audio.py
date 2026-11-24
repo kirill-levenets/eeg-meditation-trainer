@@ -11,7 +11,8 @@ from app.ui.settings_sections.common import (
     open_source_picker,
     source_label,
 )
-from app.ui.theme import C, F, StyledButton, ThemedLabel, fit_height_to_text
+from app.ui.theme import C, F, ThemedLabel, fit_height_to_text
+from app.ui.widgets.styled_button import StyledButton
 
 _FEEDBACK_SOURCE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("Off", "none"), ("Rain", "noise"), ("Tone", "tone"), ("Custom file...", "custom"),

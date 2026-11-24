@@ -12,7 +12,7 @@ from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_sections.device import DeviceSection
 from app.ui.settings_sections.formulas import FormulaSection
 from app.ui.settings_sections.timer import TimerSection
-from app.ui.theme import ThemedAccordion
+from app.ui.widgets.accordion import ThemedAccordion
 from tests._settings_section import settings_section
 
 
@@ -622,7 +622,8 @@ class TestStyledButtonThemeText(unittest.TestCase):
         self._C.set_theme(self._orig if isinstance(self._orig, str) else "Dark Blue")
 
     def test_default_glyph_auto_contrasts_with_bg(self):
-        from app.ui.theme import C, StyledButton
+        from app.ui.theme import C
+        from app.ui.widgets.styled_button import StyledButton
         C.set_theme("Dark Blue")
         on_light = StyledButton(text="X", bg_color=[0.95, 0.95, 0.95, 1])  # no text_color -> AUTO
         self.assertLess(on_light.text_color[0], 0.5)            # dark glyph on a light fill
@@ -633,14 +634,16 @@ class TestStyledButtonThemeText(unittest.TestCase):
         self.assertGreater(on_light.text_color[0], 0.5)
 
     def test_explicit_text_color_preserved(self):
-        from app.ui.theme import C, StyledButton
+        from app.ui.theme import C
+        from app.ui.widgets.styled_button import StyledButton
         C.set_theme("Light Cream")
         b = StyledButton(text="Y", text_color=[0.9, 0.1, 0.1, 1])
         C.set_theme("Dark Blue")
         self.assertEqual(list(b.text_color), [0.9, 0.1, 0.1, 1])  # explicit colour untouched
 
     def test_explicit_theme_role_tracks(self):
-        from app.ui.theme import C, StyledButton
+        from app.ui.theme import C
+        from app.ui.widgets.styled_button import StyledButton
         C.set_theme("Dark Blue")
         b = StyledButton(text="Z", text_color=C.TEXT)            # explicit theme role
         self.assertGreater(b.text_color[0], 0.5)                 # light on dark
@@ -654,7 +657,8 @@ class TestStyledButtonThemeText(unittest.TestCase):
     def test_disabled_dims_but_stays_legible(self):
         # Kivy's Label draws `disabled_color` (default white@.3 -> invisible on light cards),
         # NOT `color`, while disabled — so assert the property that actually renders.
-        from app.ui.theme import C, Icons, StyledButton, _contrast
+        from app.ui.theme import C, Icons, _contrast
+        from app.ui.widgets.styled_button import StyledButton
         for theme in ("Dark Blue", "Light Green"):
             C.set_theme(theme)
             b = StyledButton(text="Stop", icon=Icons.STOP, bg_color=list(C.BG_CARD), disabled=True)
@@ -666,6 +670,43 @@ class TestStyledButtonThemeText(unittest.TestCase):
                 self.assertEqual(list(b._icon_label.disabled_color), list(b._label.disabled_color))
             b.disabled = False
             self.assertEqual(list(b._label.color), list(b.text_color))   # restored on enable
+
+    def test_a_disabled_buttons_glyphs_stay_dimmed_when_its_text_colour_changes(self):
+        # A new text colour with the same fill (a preset re-selected) repaints no fill: the glyphs must not go live.
+        from app.ui.theme import C, Icons, dimmed_fg
+        from app.ui.widgets.styled_button import StyledButton
+        b = StyledButton(text="Save", icon=Icons.CHECK, bg_color=C.BG_CARD, text_color=C.TEXT_MUTED, disabled=True)
+        b.text_color = C.ACCENT
+        dimmed = dimmed_fg(b._get_bg())
+        for label in (b._label, b._icon_label):
+            self.assertEqual(list(label.color), dimmed)
+            self.assertEqual(list(label.disabled_color), dimmed)
+        b.disabled = False
+        self.assertEqual(list(b._label.color), list(b.text_color))
+        b.text_color = C.TEXT  # enabled, the glyphs take a new colour at once
+        self.assertEqual(list(b._label.color), list(b.text_color))
+        self.assertEqual(list(b._icon_label.color), list(b.text_color))
+
+
+class TestStyledButtonIcon(unittest.TestCase):
+    """An icon shows beside the text, above it on a vertical button, or alone on a button with no text."""
+
+    def test_the_icon_is_beside_above_or_instead_of_the_text(self):
+        from kivy.metrics import dp
+
+        from app.ui.theme import ICONS_AVAILABLE, Icons
+        from app.ui.widgets.styled_button import StyledButton
+        if not ICONS_AVAILABLE:
+            self.skipTest("no icon font")
+        beside = StyledButton(text="Save", icon=Icons.CHECK)
+        above = StyledButton(text="Stop", icon=Icons.STOP, vertical=True)
+        alone = StyledButton(text="", icon=Icons.PENCIL)
+        self.assertEqual(beside.children[::-1], [beside._icon_label, beside._label])
+        self.assertEqual((beside._icon_label.size_hint_x, beside._icon_label.width), (None, dp(26)))
+        self.assertEqual(above.children[::-1], [above._icon_label, above._label])
+        self.assertEqual((above._icon_label.size_hint_y, above._label.size_hint_y), (0.6, 0.4))
+        self.assertEqual(alone.children, [alone._icon_label])
+        self.assertEqual([b._icon_label.text for b in (beside, above, alone)], [Icons.CHECK, Icons.STOP, Icons.PENCIL])
 
 
 class TestStyledButtonPressRing(unittest.TestCase):
@@ -681,7 +722,8 @@ class TestStyledButtonPressRing(unittest.TestCase):
         self._C.set_theme(self._orig)
 
     def test_press_raises_ring(self):
-        from app.ui.theme import C, StyledButton
+        from app.ui.theme import C
+        from app.ui.widgets.styled_button import StyledButton
         C.set_theme("Dark Blue")
         b = StyledButton(text="Save", bg_color=C.ACCENT)
         self.assertEqual(b._ring_alpha, 0.0)          # idle: no ring
@@ -691,7 +733,8 @@ class TestStyledButtonPressRing(unittest.TestCase):
     def test_ring_color_contrasts_surface_not_fill(self):
         # A bright accent fill would give a DARK readable_fg; the ring must instead be light
         # on dark themes so its glow is visible against the card/app bg it's drawn onto.
-        from app.ui.theme import C, StyledButton
+        from app.ui.theme import C
+        from app.ui.widgets.styled_button import StyledButton
         C.set_theme("Dark Blue")
         b = StyledButton(text="Save", bg_color=C.ACCENT)   # bright fill
         self.assertGreater(b._ring_rgb()[0], 0.5)          # light ring on a dark theme
@@ -701,7 +744,8 @@ class TestStyledButtonPressRing(unittest.TestCase):
     def test_ring_resets_when_disabled_while_pressed(self):
         # Disabling a pressed button before release must clear the ring, else re-enabling
         # later repaints a stuck full-opacity ring (no release event ever follows).
-        from app.ui.theme import C, StyledButton
+        from app.ui.theme import C
+        from app.ui.widgets.styled_button import StyledButton
         C.set_theme("Dark Blue")
         b = StyledButton(text="Save", bg_color=C.ACCENT)
         b.state = "down"
@@ -715,7 +759,8 @@ class TestStyledButtonFlashConfirm(unittest.TestCase):
     cue, then reverts to the true original (reentrancy-safe)."""
 
     def test_swaps_label_then_reverts(self):
-        from app.ui.theme import C, StyledButton
+        from app.ui.theme import C
+        from app.ui.widgets.styled_button import StyledButton
         b = StyledButton(text="Save", bg_color=C.ACCENT)
         b.flash_confirm("Saved")
         self.assertTrue(b._confirming)
@@ -725,7 +770,8 @@ class TestStyledButtonFlashConfirm(unittest.TestCase):
         self.assertEqual(b._label.text, "Save")
 
     def test_reentrant_keeps_true_original(self):
-        from app.ui.theme import C, StyledButton
+        from app.ui.theme import C
+        from app.ui.widgets.styled_button import StyledButton
         b = StyledButton(text="Save", bg_color=C.ACCENT)
         b.flash_confirm("Saved")
         b.flash_confirm("Saved")            # tapped again mid-flash
@@ -734,7 +780,8 @@ class TestStyledButtonFlashConfirm(unittest.TestCase):
         self.assertEqual(b._label.text, "Save")
 
     def test_morphs_and_restores_icon(self):
-        from app.ui.theme import C, Icons, StyledButton
+        from app.ui.theme import C, Icons
+        from app.ui.widgets.styled_button import StyledButton
         b = StyledButton(text="Save", icon=Icons.PENCIL, bg_color=C.ACCENT)
         b.flash_confirm("Saved", icon=Icons.CHECK)
         self.assertEqual(b._icon_label.text, Icons.CHECK)
@@ -744,7 +791,8 @@ class TestStyledButtonFlashConfirm(unittest.TestCase):
     def test_text_only_button_renders_icon_inline(self):
         # No _icon_label to morph, so the glyph is drawn inline via Icons-font markup
         # (a bare MDI codepoint would be tofu in the label's Roboto font).
-        from app.ui.theme import C, Icons, StyledButton
+        from app.ui.theme import C, Icons
+        from app.ui.widgets.styled_button import StyledButton
         b = StyledButton(text="Save", bg_color=C.ACCENT)
         self.assertIsNone(b._icon_label)
         b.flash_confirm("Saved", icon=Icons.CHECK)
@@ -758,7 +806,8 @@ class TestStyledButtonFlashConfirm(unittest.TestCase):
     def test_tints_bg_then_restores(self):
         # Text-only buttons need a colour pop to read the confirm; MDI check glyph would
         # be tofu in the label's Roboto font, so bg tint is the font-safe cue.
-        from app.ui.theme import C, StyledButton
+        from app.ui.theme import C
+        from app.ui.widgets.styled_button import StyledButton
         b = StyledButton(text="Save", bg_color=C.ACCENT)
         orig = list(b.bg_color)
         b.flash_confirm("Saved", confirm_color=C.SHAMATHA)
@@ -768,7 +817,8 @@ class TestStyledButtonFlashConfirm(unittest.TestCase):
 
     def test_original_markup_state_restored(self):
         # A button that legitimately uses markup must not have it clobbered off by a confirm.
-        from app.ui.theme import C, StyledButton
+        from app.ui.theme import C
+        from app.ui.widgets.styled_button import StyledButton
         b = StyledButton(text="Save", bg_color=C.ACCENT)
         b._label.markup = True                      # pretend this button renders markup
         b.flash_confirm("Saved", icon=None)
@@ -778,22 +828,24 @@ class TestStyledButtonFlashConfirm(unittest.TestCase):
     def test_inline_icon_falls_back_when_font_unavailable(self):
         # Without the MDI font, the inline branch must degrade to plain text, not emit a
         # [font=Icons] tag that renders tofu.
-        import app.ui.theme as theme
-        from app.ui.theme import C, Icons, StyledButton
+        import app.ui.widgets.styled_button as styled_button
+        from app.ui.theme import C, Icons
+        from app.ui.widgets.styled_button import StyledButton
         b = StyledButton(text="Save", bg_color=C.ACCENT)
-        orig_flag = theme.ICONS_AVAILABLE
-        theme.ICONS_AVAILABLE = False
+        orig_flag = styled_button.ICONS_AVAILABLE
+        styled_button.ICONS_AVAILABLE = False
         try:
             b.flash_confirm("Saved", icon=Icons.CHECK)
             self.assertNotIn("font=Icons", b._label.text)
             self.assertIn("Saved", b._label.text)
         finally:
-            theme.ICONS_AVAILABLE = orig_flag
+            styled_button.ICONS_AVAILABLE = orig_flag
 
     def test_icon_only_button_morphs_icon(self):
         # Icon-only button (empty text) has its _label off-tree; confirm morphs the icon and
         # must not push confirm text onto the invisible label.
-        from app.ui.theme import C, Icons, StyledButton
+        from app.ui.theme import C, Icons
+        from app.ui.widgets.styled_button import StyledButton
         b = StyledButton(text="", icon=Icons.PENCIL, bg_color=C.ACCENT)
         self.assertIsNone(b._label.parent)          # label never added for icon-only
         b.flash_confirm("Saved", icon=Icons.CHECK)

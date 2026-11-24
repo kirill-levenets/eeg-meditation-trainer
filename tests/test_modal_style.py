@@ -18,21 +18,9 @@ from app.ui.diary_screen import DiaryScreen
 from app.ui.history_screen import HistoryScreen
 from app.ui.live_session import LiveSessionScreen
 from app.ui.settings_screen import SettingsScreen
-from app.ui.theme import (
-    _FG_DARK,
-    _FG_LIGHT,
-    THEMES,
-    C,
-    Card,
-    ModalPanel,
-    StyledButton,
-    ThemedColor,
-    ThemedLabel,
-    ThemedPopup,
-    _contrast,
-    make_message_popup,
-    make_scroll_popup,
-)
+from app.ui.theme import _FG_DARK, _FG_LIGHT, THEMES, C, Card, ThemedColor, ThemedLabel, _contrast
+from app.ui.widgets.popups import ModalPanel, ThemedPopup, make_message_popup, make_scroll_popup
+from app.ui.widgets.styled_button import StyledButton
 from tests._shared_screens import SharedScreens, sections
 from tests.test_theme_switch import _own_instructions, stale_colours
 
@@ -462,7 +450,7 @@ def test_a_selected_file_stays_readable(tmp_path):
         (tmp_path / name).write_bytes(b"x")
     from kivy.tests.common import UnitTestTouch
 
-    from app.ui.theme import ThemedFileChooser
+    from app.ui.widgets.popups import ThemedFileChooser
     for theme in THEMES:
         C.set_theme(theme)
         chooser = ThemedFileChooser(path=str(tmp_path), filters=["*.db"], size_hint=(None, None), size=(600, 400))
@@ -485,13 +473,13 @@ def test_a_selected_file_stays_readable(tmp_path):
 
 
 def test_the_diagnostic_dialog_falls_back_to_plain_widgets_if_the_themed_one_fails(monkeypatch):
-    import app.ui.theme as theme_mod
+    import app.ui.widgets.popups as popups
     from app.crash_handler import _STATE, CrashDialog
 
     def broken(*_a, **_k):
         raise RuntimeError("theme broke")
 
-    monkeypatch.setattr(theme_mod, "ThemedPopup", broken)
+    monkeypatch.setattr(popups, "ThemedPopup", broken)
     CrashDialog.show("report body", app=None, fatal=False, title="Diagnostic report")
     popup = CrashDialog._popup
     _pump()
@@ -660,7 +648,7 @@ def test_the_session_end_card_opens_at_its_top():
 def test_a_hidden_scrim_takes_no_taps():
     from kivy.tests.common import UnitTestTouch
 
-    from app.ui.theme import ModalScrim
+    from app.ui.widgets.popups import ModalScrim
     scrim = ModalScrim(size_hint=(None, None), size=(0, 0), pos=(0, 0))
     assert not scrim.on_touch_down(UnitTestTouch(0, 0))
 
@@ -670,7 +658,7 @@ def test_app_code_builds_popups_and_file_choosers_only_through_theme():
     app_dir = pathlib.Path(__file__).resolve().parent.parent / "app"
     plain = []
     for path in sorted(app_dir.rglob("*.py")):
-        if path.name == "theme.py":
+        if path.relative_to(app_dir).as_posix() == "ui/widgets/popups.py":  # where the themed ones are built
             continue
         source = path.read_text()
         lines = source.splitlines()
@@ -679,4 +667,4 @@ def test_app_code_builds_popups_and_file_choosers_only_through_theme():
                 if "# plain-ok:" in lines[node.lineno - 1]:  # a deliberate, reasoned exception
                     continue
                 plain.append(f"{path.relative_to(app_dir)}:{node.lineno} imports from {node.module}")
-    assert not plain, "use ThemedPopup / ThemedFileChooser from app.ui.theme: " + "; ".join(plain)
+    assert not plain, "use ThemedPopup / ThemedFileChooser from app.ui.widgets.popups: " + "; ".join(plain)

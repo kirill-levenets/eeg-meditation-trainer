@@ -7,7 +7,8 @@ from kivy.metrics import dp
 
 from app import android_jni
 from app.logger import logger
-from app.ui.theme import C, F, ThemedLabel, paint_panel
+from app.ui.theme import C, F, ThemedLabel
+from app.ui.widgets.popups import paint_panel
 
 
 def show_toast(message: str) -> None:

@@ -19,8 +19,8 @@ from app.ui.history_flow import HistoryFlow
 from app.ui.history_screen import HistoryScreen
 from app.ui.hooks import wire
 from app.ui.shown_session import ShownSession
-from app.ui.theme import StyledButton
 from app.ui.widgets.loading_overlay import LoadingOverlay
+from app.ui.widgets.styled_button import StyledButton
 from tests._context import stub_context
 
 

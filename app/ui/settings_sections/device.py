@@ -10,16 +10,9 @@ from app.logger import logger
 from app.ui.device_labels import MAX_DEVICE_ALIAS, device_row_text
 from app.ui.hooks import Hook
 from app.ui.settings_sections.common import checkbox_row
-from app.ui.theme import (
-    C,
-    F,
-    Icons,
-    RenameRow,
-    S,
-    StyledButton,
-    ThemedLabel,
-    fit_height_to_text,
-)
+from app.ui.theme import C, F, Icons, S, ThemedLabel, fit_height_to_text
+from app.ui.widgets.rows import RenameRow
+from app.ui.widgets.styled_button import StyledButton
 
 
 class DeviceSection:

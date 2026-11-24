@@ -10,10 +10,11 @@ from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.tests.common import UnitTestTouch
 
-from app.ui import history_screen, theme
+from app.ui import history_screen
 from app.ui.history_screen import HistoryScreen
 from app.ui.hooks import wire
 from app.ui.theme import Icons
+from app.ui.widgets import folds, styled_button
 
 TODAY = datetime.date(2026, 10, 7)  # a Wednesday
 
@@ -208,7 +209,8 @@ def test_the_folded_chart_is_saved_per_profile(fresh_app):
 
 def test_without_the_icon_font_the_chevron_says_hide_and_show(monkeypatch):
     monkeypatch.setattr(history_screen, "ICONS_AVAILABLE", False)
-    monkeypatch.setattr(theme, "ICONS_AVAILABLE", False)
+    monkeypatch.setattr(folds, "ICONS_AVAILABLE", False)  # the chevron's text
+    monkeypatch.setattr(styled_button, "ICONS_AVAILABLE", False)  # no icon beside it
     h = HistoryScreen()
     assert h._btn_collapse.text == "Hide"
     h.set_chart_collapsed(True)

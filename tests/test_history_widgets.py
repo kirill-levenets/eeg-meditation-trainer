@@ -55,19 +55,19 @@ def test_confirm_delete_label_shows_name_visibly(monkeypatch):
     from kivy.uix.label import Label
     from kivy.uix.popup import Popup
 
-    import app.ui.theme as theme_mod
+    import app.ui.widgets.popups as popups
     from app.ui.history_screen import HistoryScreen
 
     monkeypatch.setattr(Popup, "open", lambda self, *a, **k: None)
     opened = []
-    real = theme_mod.make_message_popup
+    real = popups.make_message_popup
 
     def _capture(*a, **k):
         popup = real(*a, **k)
         opened.append(popup)
         return popup
 
-    monkeypatch.setattr(theme_mod, "make_message_popup", _capture)  # the one confirm builds its popup with it
+    monkeypatch.setattr(popups, "make_message_popup", _capture)  # the one confirm builds its popup with it
 
     screen = HistoryScreen()
     screen.load_sessions([{"id": 7, "date_time": "2026-09-26T14:32:00", "duration": 600,

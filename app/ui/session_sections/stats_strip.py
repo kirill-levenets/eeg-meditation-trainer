@@ -3,9 +3,10 @@ from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 
 from app.session.manager import NO_SCORE, LiveScore
+from app.ui.formatting import format_duration
 from app.ui.hooks import Hook
 from app.ui.session_labels import average_text
-from app.ui.theme import C, Card, F, ThemedLabel, format_duration
+from app.ui.theme import C, Card, F, ThemedLabel
 from app.ui.widgets.choice_toggle import ChoiceToggle
 
 

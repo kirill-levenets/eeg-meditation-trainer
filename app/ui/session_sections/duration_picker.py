@@ -6,20 +6,9 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
 
 from app.ui.hooks import Hook
-from app.ui.theme import (
-    ICONS_AVAILABLE,
-    C,
-    F,
-    Icons,
-    S,
-    StyledButton,
-    ThemedLabel,
-    cancel_button,
-    dimmed_fg,
-    make_scroll_popup,
-    readable_fg,
-    text_width,
-)
+from app.ui.theme import ICONS_AVAILABLE, C, F, Icons, S, ThemedLabel, dimmed_fg, readable_fg, text_width
+from app.ui.widgets.popups import make_scroll_popup
+from app.ui.widgets.styled_button import StyledButton, cancel_button
 
 _DURATION_PRESETS = [
     ("5 min", 5),

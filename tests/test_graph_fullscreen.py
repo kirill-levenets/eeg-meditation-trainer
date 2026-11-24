@@ -6,7 +6,7 @@ from kivy.uix.floatlayout import FloatLayout
 from app.ui.graph_fullscreen import GraphFullscreen
 from app.ui.hooks import is_wired, wire
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
-from app.ui.theme import StyledButton
+from app.ui.widgets.styled_button import StyledButton
 
 
 class TestGraphFullscreen(unittest.TestCase):

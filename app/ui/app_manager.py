@@ -71,18 +71,13 @@ from app.ui.startup import (
     theme_seed,
     theme_setting,
 )
-from app.ui.theme import (
-    BottomNav,
-    C,
-    F,
-    StyledButton,
-    confirm_popup,
-    fill_background,
-    make_message_popup,
-)
+from app.ui.theme import C, F, fill_background
 from app.ui.toast import android_toast, show_toast
 from app.ui.user_settings import UserSettings
+from app.ui.widgets.bottom_nav import BottomNav
 from app.ui.widgets.loading_overlay import LoadingOverlay
+from app.ui.widgets.popups import confirm_popup, make_message_popup
+from app.ui.widgets.styled_button import StyledButton
 
 
 class EEGMeditationApp(App):

@@ -1,6 +1,7 @@
 import unittest
 
-from app.ui.theme import C, PresetRow
+from app.ui.theme import C
+from app.ui.widgets.rows import PresetRow
 
 
 class TestPresetRow(unittest.TestCase):

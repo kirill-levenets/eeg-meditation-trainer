@@ -15,12 +15,12 @@ from app.metrics.formula_slots import (
 from app.storage.android_share import copy_to_documents
 from app.storage.fileops import discard_file
 from app.ui.app_context import AppContext
+from app.ui.formatting import format_count
 from app.ui.settings_sections.common import (
     confirm_saved_delete,
     save_under_unique_name,
     saved_formula_label,
 )
-from app.ui.theme import format_count
 
 
 class FormulaSettings:
