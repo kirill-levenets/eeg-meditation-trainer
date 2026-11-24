@@ -10,11 +10,9 @@ from kivy.clock import Clock
 from kivy.core.audio import SoundLoader
 
 import app.audio_feedback.noise as noise_mod
-from app.audio_feedback.noise import (
-    AudioEngine,
-    _AndroidMediaNoisePlayer,
-    _KivyNoisePlayer,
-)
+import app.audio_feedback.players as players_mod
+from app.audio_feedback.noise import AudioEngine
+from app.audio_feedback.players import _AndroidMediaNoisePlayer, _KivyNoisePlayer
 from tests._sound_sources import sounds_alone
 
 
@@ -28,7 +26,7 @@ def made(monkeypatch):
         made.append(player)
         return player
 
-    monkeypatch.setattr(noise_mod, "_make_noise_player", factory)
+    monkeypatch.setattr(players_mod, "make_player", factory)
     return made
 
 
@@ -59,7 +57,7 @@ def test_a_new_gong_file_gets_a_new_player_and_the_old_is_released_on_the_main_t
     custom.write_bytes(b"x")
     engine.play_timer_sound()
     engine.play_timer_sound(str(custom))
-    assert [p.path for p in made] == [engine._kept("timer_bell"), str(custom)]
+    assert [p.path for p in made] == [engine._sounds.path("timer_bell"), str(custom)]
     made[0].unload.assert_called_once()  # this test runs on the main thread
     made[0].set_on_end.assert_called_with(None)  # the old player's end can't end the new play
 
@@ -114,7 +112,7 @@ def test_a_stop_while_the_gong_is_being_built_calls_it_off(made, engine, monkeyp
         release_build.wait(2)  # MediaPlayer.prepare(), or SDL decoding a long file
         made.append(MagicMock(path=path))
         return made[-1]
-    monkeypatch.setattr(noise_mod, "_make_noise_player", slow_factory)
+    monkeypatch.setattr(players_mod, "make_player", slow_factory)
     played = []
     tick = threading.Thread(target=lambda: played.append(engine.play_timer_sound()))  # the timer's end
     tick.start()
@@ -122,8 +120,8 @@ def test_a_stop_while_the_gong_is_being_built_calls_it_off(made, engine, monkeyp
     engine.stop_timer_bell()  # the end card's OK, or a new session, meanwhile
     release_build.set()
     tick.join(2)
-    assert played == [engine._kept("timer_bell")]  # called off, not failed: no fallback
-    assert len(made) == 1 and engine._gong is None
+    assert played == [engine._sounds.path("timer_bell")]  # called off, not failed: no fallback
+    assert len(made) == 1 and engine._gong._player is None
     made[0].play.assert_not_called()
     Clock.tick()
     made[0].unload.assert_called_once()
@@ -133,10 +131,10 @@ def test_a_kept_player_that_cant_start_is_built_afresh(made, engine):
     engine._play_chime()
     made[0].play.side_effect = RuntimeError("MediaPlayer in its Error state")  # e.g. the media server died
     engine._play_chime()
-    assert engine._chime_sound is None
+    assert engine._chime._player is None
     made[0].unload.assert_called_once()
     engine._play_chime()
-    assert len(made) == 2 and engine._chime_sound is made[1]
+    assert len(made) == 2 and engine._chime._player is made[1]
 
 
 def test_releasing_the_gong_ends_its_test(made, engine):
@@ -159,12 +157,12 @@ def _failing_for(bad_path, made):
 def test_a_custom_gong_that_cant_play_rings_the_default(made, engine, tmp_path, monkeypatch):
     bad = tmp_path / "gong.xyz"
     bad.write_bytes(b"x")
-    monkeypatch.setattr(noise_mod, "_make_noise_player", _failing_for(str(bad), made))
+    monkeypatch.setattr(players_mod, "make_player", _failing_for(str(bad), made))
     engine.play_timer_sound()
     ended = []
-    assert engine.play_timer_sound(str(bad), on_end=lambda: ended.append(1)) == engine._kept("timer_bell")
-    assert [p.path for p in made] == [engine._kept("timer_bell")]  # the kept player stays: nothing rebuilt
-    assert engine._gong is made[0] and engine._one_shot_paths["_gong"] == engine._kept("timer_bell")
+    assert engine.play_timer_sound(str(bad), on_end=lambda: ended.append(1)) == engine._sounds.path("timer_bell")
+    assert [p.path for p in made] == [engine._sounds.path("timer_bell")]  # the kept player stays: nothing rebuilt
+    assert engine._gong._player is made[0] and engine._gong._path == engine._sounds.path("timer_bell")
     made[0].unload.assert_not_called()
     assert made[0].play.call_count == 2
     Clock.tick()
@@ -183,8 +181,8 @@ def test_a_gong_that_wont_start_has_not_played(made, engine, tmp_path, monkeypat
         if path == str(custom):
             made[-1].play.side_effect = RuntimeError("start() in a bad state")
         return made[-1]
-    monkeypatch.setattr(noise_mod, "_make_noise_player", factory)
-    assert engine.play_timer_sound(str(custom)) == engine._kept("timer_bell")
+    monkeypatch.setattr(players_mod, "make_player", factory)
+    assert engine.play_timer_sound(str(custom)) == engine._sounds.path("timer_bell")
 
 
 def test_an_android_player_whose_start_fails_says_so(monkeypatch):
@@ -234,7 +232,7 @@ def test_releasing_an_android_player_builds_no_listener(monkeypatch):
 
 
 def test_when_no_gong_can_play_the_test_still_ends(made, engine, monkeypatch):
-    monkeypatch.setattr(noise_mod, "_make_noise_player", _failing_for(engine._kept("timer_bell"), made))
+    monkeypatch.setattr(players_mod, "make_player", _failing_for(engine._sounds.path("timer_bell"), made))
     ended = []
     assert engine.play_timer_sound(on_end=lambda: ended.append(1)) == ""
     Clock.tick()
@@ -278,7 +276,7 @@ def test_on_desktop_a_gong_sdl_cannot_decode_rings_the_default(engine, monkeypat
     broken.write_bytes(b"not audio")
     # SDL hands back an empty Sound for a file it can't decode, and logs "Unable to load"
     monkeypatch.setattr(SoundLoader, "load", lambda path: _sdl_sound("SoundSDL2", 0 if path == str(broken) else 4.0))
-    assert engine.play_timer_sound(str(broken)) == engine._kept("timer_bell")
+    assert engine.play_timer_sound(str(broken)) == engine._sounds.path("timer_bell")
 
 
 def test_on_desktop_a_midi_gong_plays_though_sdl_reports_no_length(monkeypatch):
@@ -305,9 +303,9 @@ def test_a_new_gong_is_built_outside_the_one_shot_lock(engine, monkeypatch, tmp_
     held = []
 
     def factory(path, loop=True):
-        held.append(engine._one_shot_lock.locked())  # SDL decodes the whole file: a release mustn't wait on it
+        held.append(engine._gong._lock.locked())  # SDL decodes the whole file: a release mustn't wait on it
         return MagicMock(path=path)
-    monkeypatch.setattr(noise_mod, "_make_noise_player", factory)
+    monkeypatch.setattr(players_mod, "make_player", factory)
     engine.play_timer_sound()
     engine.play_timer_sound(str(custom))
     assert held == [False, False]

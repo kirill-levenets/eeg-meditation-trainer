@@ -119,7 +119,7 @@ def test_test_audio_sources_omit_reward_when_off():
 def test_heartbeat_resolves_to_a_generated_playable_file():
     e = AudioEngine()
     try:
-        path = e._feedback_path_for("heartbeat")
+        path = e._sounds.feedback_path("heartbeat")
         assert "heartbeat" in os.path.basename(path)
         assert os.path.isfile(path)
     finally:

@@ -1,454 +1,16 @@
-import functools
+"""The session's audio: the feedback loops whose volume follows the score, the alerts, the timer gong and Settings'
+Test. The players are in `players.py`, the sounds in `sounds.py`."""
 import math
 import os
-import random
-import struct
 import threading
 import time
-import wave
-from collections.abc import Callable
-from typing import BinaryIO
 
-from kivy.clock import Clock
-
-from app import android_jni
+from app.audio_feedback import players
+from app.audio_feedback.one_shot import OneShot
+from app.audio_feedback.players import AudioFocus, RepeatedError
+from app.audio_feedback.sounds import KeptSounds
 from app.config import APP
 from app.logger import logger
-from app.storage.fileops import discard_file, write_file_atomic
-
-# ---------------------------------------------------------------------------
-# Noise-player abstraction
-# ---------------------------------------------------------------------------
-
-class _RepeatedError:
-    """For a call that repeats (a volume ramp step every 25 ms): its failure is logged when the message changes, and a
-    success forgets the last one."""
-
-    def __init__(self) -> None:
-        self._last: str | None = None
-
-    def is_new(self, error: Exception) -> bool:
-        new, self._last = str(error) != self._last, str(error)
-        return new
-
-    def clear(self) -> None:
-        self._last = None
-
-
-class _KivyNoisePlayer:
-    """Kivy SoundLoader-backed player: a noise loop or a one-shot alert. Used on desktop platforms."""
-
-    def __init__(self, path: str, loop: bool = True) -> None:
-        from kivy.core.audio import SoundLoader  # noqa: PLC0415 - desktop only: it loads Kivy's audio provider
-        snd = SoundLoader.load(path)
-        # SoundSDL2 (wav, flac, mp3, ogg) loads a file it can't decode at length 0; MusicSDL2 never reports a length
-        if snd is None or (type(snd).__name__ == "SoundSDL2" and not snd.length):
-            raise RuntimeError(f"SoundLoader could not load {path!r}")
-        snd.loop = loop
-        self._snd = snd
-        self._on_end = None
-        self._stopping = False  # the app's own stop: Sound fires on_stop for it too, not only at the sound's end
-        snd.bind(on_stop=self._stopped)
-
-    def set_on_end(self, callback) -> None:
-        self._on_end = callback
-
-    def _stopped(self, *_args) -> None:
-        if not self._stopping and self._on_end is not None:
-            self._on_end()
-
-    @property
-    def volume(self) -> float:
-        return self._snd.volume
-
-    @volume.setter
-    def volume(self, v: float) -> None:
-        self._snd.volume = max(0.0, min(1.0, float(v)))
-
-    def play(self) -> None:
-        self._own(self._snd.play)  # Sound.play() first stops a sound still playing
-
-    def stop(self) -> None:
-        self._own(self._snd.stop)
-
-    def _own(self, action) -> None:
-        """The app's own play or stop, which fires on_stop like the sound's end does."""
-        self._stopping = True
-        try:
-            action()
-        finally:
-            self._stopping = False
-
-    def unload(self) -> None:
-        try:
-            self.stop()
-            self._snd.unload()
-        except Exception:
-            logger.exception("SoundLoader stop or unload failed")
-
-
-def _media_attributes():
-    """The players' audio attributes, which the focus request names too: USAGE_MEDIA plays through a lock."""
-    from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
-    AudioAttributes = autoclass("android.media.AudioAttributes")
-    return (autoclass("android.media.AudioAttributes$Builder")()
-            .setUsage(AudioAttributes.USAGE_MEDIA)
-            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-            .build())
-
-
-class _AndroidMediaNoisePlayer:
-    """MediaPlayer-backed player. USAGE_MEDIA so it keeps playing through
-    screen lock (SDL_mixer/SoundLoader is silenced while locked). Used for the
-    looping noise (loop=True), the one-shot timer gong and the alerts (loop=False)."""
-
-    def __init__(self, path: str, loop: bool = True) -> None:
-        from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
-        MediaPlayer = autoclass("android.media.MediaPlayer")
-
-        self._mp = MediaPlayer()  # a failed setup leaves it to GC: its finalizer releases it, off the session's runner
-        self._mp.setAudioAttributes(_media_attributes())
-        self._mp.setDataSource(path)
-        self._mp.setLooping(loop)
-        self._mp.prepare()  # synchronous — fine for small WAV files
-        self._volume: float = 0.0
-        self._mp.setVolume(0.0, 0.0)
-        self._playing: bool = False
-        self._on_end = None
-        self._listener = None  # kept: a listener nothing references is collected while Java still holds it
-        self._volume_error = _RepeatedError()  # a player in an error state fails at every ramp step
-
-    def set_on_end(self, callback) -> None:
-        """Called on Android's main thread when a one-shot plays to its end (a loop never ends)."""
-        self._on_end = callback
-        if callback is not None and self._listener is None:
-            self._listener = _completion_listener(self._ended)
-            self._mp.setOnCompletionListener(self._listener)
-
-    def _ended(self) -> None:
-        self._playing = False
-        if self._on_end is not None:
-            self._on_end()
-
-    @property
-    def volume(self) -> float:
-        return self._volume
-
-    @volume.setter
-    def volume(self, v: float) -> None:
-        v = max(0.0, min(1.0, float(v)))
-        self._volume = v
-        try:
-            self._mp.setVolume(v, v)
-        except Exception as e:
-            if self._volume_error.is_new(e):
-                logger.debug(f"Player volume not set (a released player keeps none): {e}")
-        else:
-            self._volume_error.clear()
-
-    def play(self) -> None:
-        self._mp.start()
-        self._playing = True
-
-    def stop(self) -> None:
-        try:
-            if self._playing:
-                self._mp.pause()
-                self._mp.seekTo(0)
-                self._playing = False
-        except Exception as e:
-            logger.debug(f"Player not stopped (a released player has nothing to stop): {e}")
-
-    def unload(self) -> None:
-        # release() MUST run even if stop() raises (IllegalStateException on a
-        # MediaPlayer left in a bad state after an aborted session) — otherwise
-        # the native player leaks and audio keeps playing until GC.
-        try:
-            self.stop()
-        except Exception:
-            logger.exception("MediaPlayer stop during unload failed")
-        try:
-            self._mp.release()
-        except Exception:
-            logger.exception("MediaPlayer release failed")
-
-
-def _completion_listener(on_complete):
-    """A MediaPlayer.OnCompletionListener calling on_complete; jnius is imported here, as only Android has it."""
-    from jnius import PythonJavaClass, java_method  # noqa: PLC0415 - Android only (pyjnius)
-
-    class _Completion(PythonJavaClass):
-        __javainterfaces__ = ["android/media/MediaPlayer$OnCompletionListener"]
-
-        @java_method("(Landroid/media/MediaPlayer;)V")
-        def onCompletion(self, _player):
-            on_complete()
-
-    return _Completion()
-
-
-class _AudioFocus:
-    """The app's one audio-focus request (listener-less requests are one client), held while any holder plays."""
-
-    def __init__(self) -> None:
-        self._mgr = None
-        self._request = None
-        self._holders: set[str] = set()
-        self._lock = threading.Lock()  # the session holds on the main thread, the gong on the tick or Android's
-
-    def hold(self, holder: str, gain: str = "AUDIOFOCUS_GAIN") -> None:
-        """`holder` plays: ask for focus unless held; the first holder's `gain` stands. Refused, the next hold asks."""
-        with self._lock:
-            self._holders.add(holder)
-            if self._request is None and android_jni.on_android():
-                self._ask(gain)
-
-    def release(self, holder: str) -> None:
-        """`holder` stopped playing; the last one out gives the focus up."""
-        with self._lock:
-            self._holders.discard(holder)
-            if self._holders or self._request is None:
-                return
-            try:
-                self._mgr.abandonAudioFocusRequest(self._request)
-            except Exception:
-                logger.exception("Abandoning audio focus failed")
-            self._mgr = self._request = None
-
-    def _ask(self, gain: str) -> None:
-        try:
-            from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
-            AudioManager = autoclass("android.media.AudioManager")
-            request = (autoclass("android.media.AudioFocusRequest$Builder")(getattr(AudioManager, gain))
-                       .setAudioAttributes(_media_attributes())
-                       .build())
-            mgr = android_jni.activity().getSystemService(autoclass("android.content.Context").AUDIO_SERVICE)
-            if mgr.requestAudioFocus(request) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED:
-                logger.info("Audio focus refused (a call?); the next start, resume or gong asks again")
-                return
-            self._mgr, self._request = mgr, request
-        except Exception as e:
-            logger.warning(f"Audio focus request failed (non-fatal, the sound plays anyway): {e}")
-
-
-def _next_frame(fn) -> None:
-    """Run `fn` on Kivy's thread at the next frame."""
-    Clock.schedule_once(lambda _dt: fn(), 0)
-
-
-def _make_noise_player(path: str, loop: bool = True):
-    """Return the right player for this platform: a noise loop, or a one-shot alert (loop=False).
-
-    On Android, tries MediaPlayer first (survives screen lock). A loop falls back
-    to SoundLoader if MediaPlayer init fails; a one-shot raises. Desktop always
-    uses SoundLoader.
-    """
-    if android_jni.on_android():
-        try:
-            return _AndroidMediaNoisePlayer(path, loop)
-        except Exception as e:
-            if not loop:
-                raise  # a one-shot plays off the main thread, where SoundLoader on Android can freeze the app
-            logger.warning(f"Falling back to SoundLoader for {path}: {e}")
-    return _KivyNoisePlayer(path, loop)
-
-_FADE_SAMPLES = 512
-_NOISE_BUFFER_SECONDS = 10
-_HEARTBEAT_PULSE_SECONDS = 0.1  # short cricket chirp on a ~10s silent bed -> one chirp per loop
-_SOUNDS_VERSION = 1  # of the generators: a kept sound is reused by its name, so a change to their samples bumps it
-
-
-def _write_wav(path: str, samples: bytes, rate: int) -> None:
-    """Write raw 16-bit mono PCM samples as a WAV file that is whole or absent: a kept sound is trusted by its name."""
-    def write(f: BinaryIO) -> None:
-        with wave.open(f, "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(rate)
-            wf.writeframes(samples)
-
-    write_file_atomic(path, write)
-
-
-def _generate_noise_wav(volume: float, rate: int, duration: float) -> bytes:
-    """Generate rain-like noise PCM with crossfade at boundaries for gapless loop.
-
-    Blends brown noise (warm low rumble) with a touch of white noise
-    (high-frequency patter), then applies a one-pole low-pass filter
-    to soften harsh edges. Sounds like steady rain.
-    """
-    n_samples = int(rate * duration)
-    if volume <= 0.001:
-        return b"\x00" * (n_samples * 2)
-
-    # Brown noise via leaky integration of white noise
-    brown = 0.0
-    leak = 0.98  # higher = deeper rumble
-    # Low-pass filter state (smooths the final mix)
-    lp = 0.0
-    alpha = _lowpass_alpha(2500.0, rate)  # tames harsh highs
-
-    raw = []
-    for _ in range(n_samples):
-        white = random.uniform(-1.0, 1.0)
-        # Brown noise: integrated white with leak to prevent drift
-        brown = leak * brown + white * (1.0 - leak)
-        # Mix: 80% brown (rumble) + 20% white (patter texture)
-        sample = 0.8 * brown + 0.2 * white
-        # One-pole low-pass
-        lp += alpha * (sample - lp)
-        raw.append(lp)
-
-    return _loop_pcm(raw, volume)
-
-
-def _lowpass_alpha(cutoff: float, rate: int) -> float:
-    """The one-pole low-pass coefficient for `cutoff` Hz at `rate` samples per second."""
-    rc = 1.0 / (2.0 * math.pi * cutoff)
-    dt = 1.0 / rate
-    return dt / (rc + dt)
-
-
-def _loop_pcm(raw: list[float], gain: float) -> bytes:
-    """Float samples as 16-bit PCM peaking at `gain` of full scale, ends crossfaded so the loop repeats without a click."""
-    n_samples = len(raw)
-    peak = max(abs(s) for s in raw) or 1.0
-    pcm = [int((s / peak) * gain * 32767) for s in raw]
-    for i in range(_FADE_SAMPLES):
-        t = i / _FADE_SAMPLES  # 0 → 1
-        head = pcm[i]
-        tail = pcm[n_samples - _FADE_SAMPLES + i]
-        pcm[i] = int(head * t + tail * (1 - t))
-        pcm[n_samples - _FADE_SAMPLES + i] = int(tail * t + head * (1 - t))
-    pcm = [max(-32767, min(32767, s)) for s in pcm]
-    return struct.pack(f"<{n_samples}h", *pcm)
-
-
-def _generate_tone_wav(rate: int, freq: float, duration: float) -> bytes:
-    """Harmonic-pad drone (fundamental + a fifth), low-passed and crossfaded for a seamless loop."""
-    n_samples = int(rate * duration)
-    fifth = freq * 1.5
-    lp = 0.0
-    alpha = _lowpass_alpha(3000.0, rate)
-
-    raw = []
-    for i in range(n_samples):
-        shimmer = 1.0 + 0.08 * math.sin(2 * math.pi * 0.2 * i / rate)
-        value = 0.6 * math.sin(2 * math.pi * freq * i / rate)
-        value += 0.4 * math.sin(2 * math.pi * fifth * i / rate)
-        value *= shimmer
-        lp += alpha * (value - lp)
-        raw.append(lp)
-
-    return _loop_pcm(raw, 0.9)  # 10% headroom below the 16-bit ceiling
-
-
-def _generate_heartbeat_wav(rate: int, duration: float, pulse_seconds: float) -> bytes:
-    """Liveness cue: a silent bed with one short cricket-like chirp, so a looping player
-    fires a soft chirp once per `duration`s. The chirp is a high tonal carrier (+ a
-    harmonic for a buzzy, cicada-ish edge) gated by a fast half-wave amplitude trill so
-    it reads as insect syllables, not a tone. Loop edges stay silent (lead-in + trailing
-    silence) and the burst is Hann-windowed to zero at both ends, so the loop is seamless."""
-    n_samples = int(rate * duration)
-    raw = [0] * n_samples
-    pulse_len = min(int(rate * pulse_seconds), max(0, n_samples - 2))
-    if pulse_len > 1:
-        start = min(int(rate * 0.2), n_samples - pulse_len - 1)  # lead-in keeps the loop head silent
-        carrier = 4800.0  # Hz — cricket-like chirp pitch (< Nyquist with its 2nd harmonic)
-        trill = 40.0      # Hz — syllable rate that gives the stridulating texture
-        burst = []
-        for i in range(pulse_len):
-            t = i / rate
-            tone = math.sin(2 * math.pi * carrier * t) + 0.3 * math.sin(2 * math.pi * 2 * carrier * t)
-            syllable = max(0.0, math.sin(2 * math.pi * trill * t)) ** 1.5  # half-wave -> distinct chirps
-            window = 0.5 * (1.0 - math.cos(2 * math.pi * i / (pulse_len - 1)))  # Hann: edges -> 0, no click
-            burst.append(tone * syllable * window)
-        peak = max(abs(s) for s in burst) or 1.0
-        for i, s in enumerate(burst):
-            raw[start + i] = max(-32767, min(32767, int((s / peak) * 0.9 * 32767)))
-    return struct.pack(f"<{n_samples}h", *raw)
-
-
-def _generate_bell_wav(rate: int, freq: float, duration: float) -> bytes:
-    """Synthesize a decaying sine wave with harmonics (tingsha bell)."""
-    n_samples = int(rate * duration)
-    samples = []
-    for i in range(n_samples):
-        progress = i / n_samples
-        envelope = math.exp(-3.0 * progress)
-        value = envelope * math.sin(2 * math.pi * freq * i / rate)
-        value += 0.3 * envelope * math.sin(4 * math.pi * freq * i / rate)
-        value += 0.15 * envelope * math.sin(6 * math.pi * freq * i / rate)
-        samples.append(int(value * 28000))
-    return struct.pack(f"<{n_samples}h", *samples)
-
-
-def _generate_chime_wav(rate: int, freq: float, duration: float) -> bytes:
-    """Synthesize a gentle chime for subtle distraction.
-
-    Higher pitch than the sinking bell, softer harmonics, longer
-    exponential decay with a shimmer effect.
-    """
-    n_samples = int(rate * duration)
-    samples = []
-    for i in range(n_samples):
-        progress = i / n_samples
-        envelope = math.exp(-2.0 * progress)
-        shimmer = 1.0 + 0.15 * math.sin(2 * math.pi * 6.0 * i / rate)
-        value = envelope * shimmer * math.sin(2 * math.pi * freq * i / rate)
-        value += 0.2 * envelope * math.sin(2 * math.pi * freq * 2.0 * i / rate)
-        value += 0.08 * envelope * math.sin(2 * math.pi * freq * 3.0 * i / rate)
-        samples.append(int(value * 20000))
-    return struct.pack(f"<{n_samples}h", *samples)
-
-
-def _generate_disconnect_wav(
-    rate: int, freq_low: float, freq_high: float, duration: float, cycles: int
-) -> bytes:
-    """Synthesize an urgent alternating dual-frequency warble alert.
-
-    Rapidly alternates between freq_low and freq_high for `cycles` times
-    within the given duration. Sounds harsh and attention-grabbing.
-    """
-    n_samples = int(rate * duration)
-    cycle_len = n_samples // cycles
-    half_cycle = cycle_len // 2
-    samples = []
-    for i in range(n_samples):
-        progress = i / n_samples
-        envelope = 1.0 - 0.3 * progress
-        pos_in_cycle = i % cycle_len
-        freq = freq_low if pos_in_cycle < half_cycle else freq_high
-        value = envelope * math.sin(2 * math.pi * freq * i / rate)
-        value += 0.5 * envelope * math.sin(2 * math.pi * freq * 1.5 * i / rate)
-        samples.append(max(-32767, min(32767, int(value * 22000))))
-    return struct.pack(f"<{n_samples}h", *samples)
-
-
-def _kept_sounds(rate: int) -> dict[str, tuple[str, Callable[[], bytes]]]:
-    """Each built-in sound's file and its generator; the file's name carries what shapes the samples."""
-    shaped = {
-        "noise": (_generate_noise_wav, 1.0, rate, _NOISE_BUFFER_SECONDS),
-        "bell": (_generate_bell_wav, rate, APP.BELL_FREQUENCY, APP.BELL_DURATION),
-        "timer_bell": (_generate_bell_wav, rate, APP.TIMER_BELL_FREQUENCY, APP.TIMER_BELL_DURATION),
-        "chime": (_generate_chime_wav, rate, APP.CHIME_FREQUENCY, APP.CHIME_DURATION),
-        "disconnect": (_generate_disconnect_wav, rate, APP.DISCONNECT_FREQ_LOW, APP.DISCONNECT_FREQ_HIGH,
-                       APP.DISCONNECT_DURATION, APP.DISCONNECT_CYCLES),
-        "tone": (_generate_tone_wav, rate, APP.TONE_FREQUENCY, _NOISE_BUFFER_SECONDS),
-        "heartbeat": (_generate_heartbeat_wav, rate, _NOISE_BUFFER_SECONDS, _HEARTBEAT_PULSE_SECONDS),
-    }
-    sounds = {}
-    for name, (generate, *args) in shaped.items():
-        file = f"v{_SOUNDS_VERSION}-{name}-{'_'.join(str(arg) for arg in args)}.wav"
-        sounds[name] = (os.path.join(APP.BUILT_IN_SOUNDS_DIR, file), functools.partial(generate, *args))
-    return sounds
-
-
-def _drop_stale_sounds() -> None:
-    """Remove the sounds another version of the generators kept."""
-    for file in os.listdir(APP.BUILT_IN_SOUNDS_DIR):
-        if file.endswith(".wav") and not file.startswith(f"v{_SOUNDS_VERSION}-"):
-            discard_file(os.path.join(APP.BUILT_IN_SOUNDS_DIR, file))
 
 
 class AudioEngine:
@@ -464,9 +26,6 @@ class AudioEngine:
 
     Uses only stdlib + Kivy. No external audio libraries.
     """
-
-    # Not the gong (_gong) or the failure warble (_disconnect_sound): both start just before stop().
-    _STOP_UNLOADS: tuple[str, ...] = ("_chime_sound",)
 
     # Volume interpolation: ramp toward target in small steps
     _RAMP_INTERVAL: float = 0.025  # 25ms between steps (40 updates/sec)
@@ -485,61 +44,35 @@ class AudioEngine:
         self._sinking_alert_enabled: bool = False
         self._subtle_alert_enabled: bool = False
         self._disconnect_alert_enabled: bool = APP.DISCONNECT_ALERT_ENABLED
-        self._test_active: bool = False
-        self._test_gen: int = 0  # bumped by end_test(): a test sequence started under an older one stops
-        self._test_owns_playing: bool = False  # the test set _is_playing; end_test() hands it back
-        self._rate: int = APP.WHITE_NOISE_SAMPLE_RATE
-        self._sounds = _kept_sounds(self._rate)
-        self._sinking_bell_sound: object = None  # each alert's one player, replayed (see _play_one_shot)
-        self._chime_sound: object = None
-        self._disconnect_sound: object = None
-        self._gong: object = None  # the timer-end gong, the same way
-        self._one_shot_paths: dict[str, str] = {}  # the file each kept one-shot player plays
-        self._one_shot_ends: dict[str, Callable[[], None]] = {}  # the on_end of each one-shot's current play
-        self._one_shot_gens: dict[str, int] = {}  # bumped by each release: a player built meanwhile is called off
-        self._one_shot_lock = threading.Lock()
+        self._test: _AudioTest | None = None  # Settings' Test run that has the engine, if one has
         self._lock = threading.Lock()
         self._ramp_thread: threading.Thread | None = None
         self._ramp_running: bool = False
-        self._focus = _AudioFocus()  # one request for the app, held while the session's feedback plays
-        self._prepare_sounds()
-
-    def _prepare_sounds(self) -> None:
-        """Have the sounds a session can't wait for on file: only the first launch generates them."""
-        os.makedirs(APP.BUILT_IN_SOUNDS_DIR, exist_ok=True)
-        _drop_stale_sounds()
-        for name in ("noise", "bell", "timer_bell", "chime", "disconnect"):
-            self._kept(name)
-
-    def _kept(self, name: str) -> str:
-        """The built-in sound's file, generated unless it is kept already."""
-        path, generate = self._sounds[name]
-        if not os.path.exists(path):
-            _write_wav(path, generate(), self._rate)
-        return path
-
-    def _feedback_path_for(self, kind: str, custom_path: str = "") -> str:
-        """Resolve a feedback source kind to a playable file; the tone and crickets loops are generated on first use."""
-        if kind == "custom" and custom_path and os.path.isfile(custom_path):
-            return custom_path
-        return self._kept(kind if kind in ("tone", "heartbeat") else "noise")
+        self._focus = AudioFocus()  # one request for the app, held while the session's feedback plays
+        # Each one-shot's one player, replayed: the alerts, and the timer-end gong.
+        self._bell = OneShot("bell", self._focus)
+        self._chime = OneShot("chime", self._focus)
+        self._disconnect = OneShot("disconnect", self._focus)
+        self._gong = OneShot("gong", self._focus)
+        self._sounds = KeptSounds(APP.WHITE_NOISE_SAMPLE_RATE)
+        self._sounds.prepare()
 
     def prepare_feedback(self, sources: dict[str, tuple[str, str]], active_id: str) -> None:
         """Instantiate one looping player per distinct feedback source at volume 0 (main thread)."""
         self._teardown_feedback_players()
-        players: dict[str, object] = {}
+        made: dict[str, object] = {}
         for sid, (kind, path) in sources.items():
             if kind == "none":
                 continue  # silent channel: no player instantiated
-            resolved = self._feedback_path_for(kind, path)
+            resolved = self._sounds.feedback_path(kind, path)
             try:
-                p = _make_noise_player(resolved)
+                p = players.make_player(resolved)
                 p.volume = 0.0
-                players[sid] = p
+                made[sid] = p
             except Exception as e:
                 logger.warning(f"Feedback source {sid!r} failed to load ({resolved!r}): {e}")
-        self._feedback_players = players
-        self._active_feedback = self._resolve_active(active_id, list(players))
+        self._feedback_players = made
+        self._active_feedback = self._resolve_active(active_id, list(made))
 
     @staticmethod
     def _resolve_active(active_id: str, player_ids: list[str]) -> str:
@@ -622,7 +155,7 @@ class AudioEngine:
         target — the below/active player toward _target_volume, the reward player toward
         _reward_target_volume, all others toward 0. Volume-only, so tick/lock-safe."""
         max_step = self._RAMP_SPEED * self._RAMP_INTERVAL
-        skipped: dict[str, _RepeatedError] = {}  # per source: a step every 25 ms logs each error once
+        skipped: dict[str, RepeatedError] = {}  # per source: a step every 25 ms logs each error once
         while self._ramp_running and self._is_playing:
             for sid, player in list(self._feedback_players.items()):
                 if sid == self._active_feedback:
@@ -639,7 +172,7 @@ class AudioEngine:
                     else:
                         player.volume = current + max(-max_step, min(max_step, diff))
                 except Exception as e:
-                    if skipped.setdefault(sid, _RepeatedError()).is_new(e):
+                    if skipped.setdefault(sid, RepeatedError()).is_new(e):
                         logger.debug(f"Volume ramp step skipped: {e}")
                 else:
                     if sid in skipped:
@@ -683,7 +216,7 @@ class AudioEngine:
         self._reward_target_volume = (
             self.compute_reward_volume(meditation_score, threshold) if self._reward_feedback else 0.0
         )
-        if not self._is_playing or self._test_active:
+        if not self._is_playing or self.testing:
             self._volume = below_vol
             return
         self._set_noise_volume(below_vol)
@@ -712,82 +245,17 @@ class AudioEngine:
             return True
         return False
 
-    def _play_one_shot(self, attr: str, path: str, volume: float, on_end=None, focus: str = "") -> bool:
-        """Replay a one-shot's kept player, a new file in a new one (a MediaPlayer on Android); False if it can't play.
-        With `focus` (a gain), the app's audio focus is held for it until its play is over."""
-        self._end_one_shot(attr)  # a replay ends the play before it
-        try:
-            with self._one_shot_lock:
-                snd = getattr(self, attr)
-                kept = snd is not None and self._one_shot_paths.get(attr) == path
-                gen = self._one_shot_gens.get(attr, 0)
-            if not kept:
-                # Built outside the lock (SDL decodes the whole file) and before the kept one goes: a failure keeps it.
-                snd = _make_noise_player(path, loop=False)
-                with self._one_shot_lock:
-                    called_off = self._one_shot_gens.get(attr, 0) != gen
-                    if not called_off:
-                        old = getattr(self, attr)
-                        setattr(self, attr, snd)
-                        self._one_shot_paths[attr] = path
-                if called_off:  # released while it was built: the app stopped this sound, nothing failed
-                    self._release(snd, attr)
-                    if on_end is not None:
-                        _next_frame(on_end)
-                    return True
-                if old is not None:
-                    self._release(old, attr)
-        except Exception as e:
-            logger.warning(f"Failed to open sound {path}: {e}")
-            return False
-        try:
-            snd.volume = volume
-            snd.stop()  # rewinds a replay
-            if on_end is not None:
-                self._one_shot_ends[attr] = on_end
-            if on_end is not None or focus:
-                snd.set_on_end(lambda: self._end_one_shot(attr))
-            if focus:
-                self._focus.hold(attr, focus)
-            snd.play()
-            return True
-        except Exception as e:
-            self._one_shot_ends.pop(attr, None)
-            logger.warning(f"Failed to play sound {path}: {e}")
-            self._unload_one_shot(attr)  # a player that can't start is built afresh next time
-            return False
-
-    def _end_one_shot(self, attr: str) -> None:
-        """A one-shot's play is over (played out, replayed or released): its focus goes, its on_end runs once."""
-        self._focus.release(attr)
-        on_end = self._one_shot_ends.pop(attr, None)
-        if on_end is not None:
-            _next_frame(on_end)
-
-    @staticmethod
-    def _release(player, attr: str) -> None:
-        """Release a one-shot player on the main thread (release() elsewhere deadlocks during a lock); it ends no play."""
-        try:
-            player.set_on_end(None)
-            if threading.current_thread() is not threading.main_thread():
-                player.volume = 0.0  # silent now: no frame comes while the screen is locked, setVolume is safe here
-                _next_frame(lambda: AudioEngine._release(player, attr))
-                return
-            player.unload()  # stops it first
-        except Exception:
-            logger.exception(f"Failed to release {attr}")
-
     def _play_bell(self) -> None:
         """Play the sinking bell WAV."""
-        self._play_one_shot("_sinking_bell_sound", self._kept("bell"), 0.8)
+        self._bell.play(self._sounds.path("bell"), 0.8)
 
     def _play_chime(self) -> None:
         """Play the gentle chime WAV for subtle distraction."""
-        self._play_one_shot("_chime_sound", self._kept("chime"), 0.6)
+        self._chime.play(self._sounds.path("chime"), 0.6)
 
     def _play_disconnect(self) -> None:
         """Play the harsh disconnect alert WAV."""
-        self._play_one_shot("_disconnect_sound", self._kept("disconnect"), 0.9)
+        self._disconnect.play(self._sounds.path("disconnect"), 0.9)
 
     def start(self) -> None:
         """Start noise playback."""
@@ -849,30 +317,21 @@ class AudioEngine:
         self._stop_ramp()
         self._teardown_feedback_players()
         self._focus.release("session")  # a gong still ringing keeps it until its end
-        for snd_attr in self._STOP_UNLOADS:
-            self._unload_one_shot(snd_attr)
+        self._chime.release()  # not the gong or the failure warble: both start just before stop()
         self._is_playing = False
         self._volume = 0.0
         self._target_volume = 0.0
-        self._test_active = False
-        self._test_owns_playing = False
+        self._test = None  # a run still on its thread sees it lost the engine and stops
 
     def test_audio(self, reward_id: str = "") -> None:
-        """Test all audio channels: reward sample → noise volume sweep → bell → chime → disconnect.
-
-        Demonstrates smooth volume gradient by ramping noise from silence
-        to max and back down, then plays alert sounds. If a reward source is
-        armed, it is previewed first (players are near loop start, so the cricket
-        chirp is caught) before the below-channel sweep.
-        """
-        self.end_test()  # a test restarted supersedes the one running
-        was_playing = self._is_playing
-        saved_volume = self._volume
-        if not was_playing:
+        """Settings' Test of every channel on its own thread (_AudioTest): the reward sample if one is armed, a volume
+        sweep of the below channel, then the three alerts; a test restarted supersedes the one running."""
+        self.end_test()
+        run = _AudioTest(self, reward_id)  # the engine as the test finds it, to hand back at its end
+        if not self._is_playing:
             self._is_playing = True
-            self._test_owns_playing = True
-        self._test_active = True
-        gen = self._test_gen
+            run.owns_playing = True
+        self._test = run
         # The Test button demos the rain sweep; prepare a player if a session
         # hasn't (a real session prepares from the user's config, respecting Off).
         if not self._feedback_players:
@@ -881,113 +340,46 @@ class AudioEngine:
         with self._lock:
             self._start_noise_loop()
         logger.info("Audio test: started")
+        threading.Thread(target=run.run, daemon=True).start()
 
-        def live() -> bool:
-            return self._test_active and self._test_gen == gen
-
-        def _run_sequence():
-            # Reward sample first: the loop just started, so the reward player is near
-            # position 0 and the cricket chirp (~0.2s in) is heard within this window.
-            if live() and reward_id and reward_id in self._feedback_players:
-                logger.info(f"Audio test: reward sample ({reward_id})")
-                self._reward_feedback = reward_id
-                self._reward_target_volume = self._max_volume
-                rp = self._feedback_players[reward_id]
-                try:
-                    rp.volume = self._max_volume
-                except Exception:
-                    logger.exception("Audio test: reward player volume set failed")
-                time.sleep(APP.AUDIO_TEST_DURATION + 1.0)  # long enough to catch one cricket chirp
-                if not live():
-                    return  # a session has the reward channel now
-                self._reward_target_volume = 0.0
-                try:
-                    rp.volume = 0.0
-                except Exception as e:
-                    logger.debug(f"Reward volume not reset after its test: {e}")
-                self._reward_feedback = ""
-            # Sweep noise volume: 0 → max over half duration, max → 0 over other half
-            sweep_duration = APP.AUDIO_TEST_DURATION
-            step_interval = 0.05  # 50ms steps = 20 updates/sec
-            n_steps = int(sweep_duration / step_interval)
-            half = n_steps // 2
-            for i in range(n_steps):
-                if not live():
-                    return
-                if i <= half:
-                    vol = self._max_volume * (i / half)
-                else:
-                    vol = self._max_volume * (1.0 - (i - half) / (n_steps - half))
-                self._set_noise_volume(vol)
-                time.sleep(step_interval)
-            self._set_noise_volume(0.0)
-            for name, play, length in (("sinking bell", self._play_bell, APP.BELL_DURATION),
-                                       ("subtle distraction chime", self._play_chime, APP.CHIME_DURATION),
-                                       ("disconnect alert", self._play_disconnect, APP.DISCONNECT_DURATION)):
-                if not live():
-                    return
-                logger.info(f"Audio test: {name}")
-                play()
-                time.sleep(length + 0.3)
-            if not live():
-                return
-            self._test_active = False
-            if not was_playing:
-                _next_frame(lambda: self._finish_test(gen))  # it releases MediaPlayers: the main thread's job
-            else:
-                self._set_noise_volume(saved_volume)
-            logger.info("Audio test complete")
-
-        t = threading.Thread(target=_run_sequence, daemon=True)
-        t.start()
+    @property
+    def testing(self) -> bool:
+        """A Settings Test run is playing: the ticks' volumes wait (update)."""
+        run = self._test
+        return run is not None and run.active
 
     def end_test(self) -> None:
         """Stop a running Settings test where it is and call off its teardown: a session takes the engine over."""
-        self._test_gen += 1
-        self._test_active = False
-        if self._test_owns_playing:
-            self._test_owns_playing = False
+        run, self._test = self._test, None
+        if run is not None and run.owns_playing:
             self._is_playing = False
             self._stop_ramp()
             self._focus.release("session")  # the test's hold: a start called off before it plays holds nothing
 
-    def _finish_test(self, gen: int) -> None:
+    def _finish_test(self, run: "_AudioTest") -> None:
         """The test's teardown, on the main thread, unless a session or a new test took the engine over meanwhile."""
-        if gen != self._test_gen:
-            return
-        self._test_owns_playing = False
-        self.stop()
+        if run is self._test:
+            self.stop()
 
     def play_timer_sound(self, custom_path: str = "", on_end=None) -> str:
         """The timer-end gong, replayed like an alert, safe on the session's runner; returns the file it plays, "" if none."""
         logger.info("Timer gong")
         custom = custom_path if (custom_path and os.path.isfile(custom_path)) else ""
         duck = "AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK"  # other audio dips while it rings, and comes back after
-        if custom and self._play_one_shot("_gong", custom, 1.0, on_end, duck):
+        if custom and self._gong.play(custom, 1.0, on_end, duck):
             return custom
         # A custom file the player can't open rings the default gong, as a missing one does.
-        if self._play_one_shot("_gong", self._kept("timer_bell"), 1.0, on_end, duck):
-            return self._kept("timer_bell")
+        if self._gong.play(self._sounds.path("timer_bell"), 1.0, on_end, duck):
+            return self._sounds.path("timer_bell")
         if on_end is not None:
-            _next_frame(on_end)  # nothing plays: the play is over
+            players.next_frame(on_end)  # nothing plays: the play is over
         return ""
 
     def stop_timer_bell(self) -> None:
         """Stop and release the gong, or call off one still being built; main thread."""
-        if self._gong is not None:
+        if self._gong.player is not None:
             logger.info("Timer gong released")
-        self._unload_one_shot("_gong")
-
-    def _unload_one_shot(self, attr: str) -> None:
-        """Stop and release a one-shot sound; an alert replays its player instead of releasing it on each play."""
-        with self._one_shot_lock:
-            snd = getattr(self, attr, None)
-            setattr(self, attr, None)
-            self._one_shot_paths.pop(attr, None)
-            self._one_shot_gens[attr] = self._one_shot_gens.get(attr, 0) + 1
-        self._end_one_shot(attr)
-        if snd:
-            self._release(snd, attr)
+        self._gong.release()
 
     def play_connect_sound(self) -> None:
         """Play a chime to confirm device connected."""
@@ -1049,8 +441,97 @@ class AudioEngine:
         """Stop playback and unload the players; the sound files stay for the next launch."""
         self.stop()
         self.stop_timer_bell()
-        self._unload_one_shot("_disconnect_sound")
-        self._unload_one_shot("_sinking_bell_sound")
+        self._disconnect.release()
+        self._bell.release()
+
+
+class _AudioTest:
+    """One run of Settings' Test: the reward sample, the sweep, the alerts, then its teardown. A newer test, or a
+    session's start (end_test), stops it where it is."""
+
+    _SWEEP_STEP = 0.05  # 20 volume steps a second
+
+    def __init__(self, engine: AudioEngine, reward_id: str) -> None:
+        self._engine = engine
+        self._reward_id = reward_id
+        self._was_playing = engine._is_playing
+        self._saved_volume = engine._volume
+        self.active = True  # until its steps are over
+        self.owns_playing = False  # it started the engine's playback, so its end hands that back
+
+    def live(self) -> bool:
+        """It still has the engine: no newer run or session took it over, and its steps aren't over."""
+        return self.active and self._engine._test is self
+
+    def run(self) -> None:
+        for step in (self._reward_sample, self._sweep, self._alerts):
+            if not step():
+                return
+        self._finish()
+
+    def _reward_sample(self) -> bool:
+        """The armed reward source first: its loop just started, so the cricket chirp (~0.2 s in) comes in the sample."""
+        engine, reward_id = self._engine, self._reward_id
+        if not (self.live() and reward_id and reward_id in engine._feedback_players):
+            return True
+        logger.info(f"Audio test: reward sample ({reward_id})")
+        engine._reward_feedback = reward_id
+        engine._reward_target_volume = engine._max_volume
+        player = engine._feedback_players[reward_id]
+        try:
+            player.volume = engine._max_volume
+        except Exception:
+            logger.exception("Audio test: reward player volume set failed")
+        time.sleep(APP.AUDIO_TEST_DURATION + 1.0)  # long enough to catch one cricket chirp
+        if not self.live():
+            return False  # a session has the reward channel now
+        engine._reward_target_volume = 0.0
+        try:
+            player.volume = 0.0
+        except Exception as e:
+            logger.debug(f"Reward volume not reset after its test: {e}")
+        engine._reward_feedback = ""
+        return True
+
+    def _sweep(self) -> bool:
+        """The below channel from silence to max over half the test's length, and back over the other half."""
+        n_steps = int(APP.AUDIO_TEST_DURATION / self._SWEEP_STEP)
+        half = n_steps // 2
+        for i in range(n_steps):
+            if not self.live():
+                return False
+            if i <= half:
+                volume = self._engine._max_volume * (i / half)
+            else:
+                volume = self._engine._max_volume * (1.0 - (i - half) / (n_steps - half))
+            self._engine._set_noise_volume(volume)
+            time.sleep(self._SWEEP_STEP)
+        if not self.live():  # taken over during the last step: the volume is the session's now
+            return False
+        self._engine._set_noise_volume(0.0)
+        return True
+
+    def _alerts(self) -> bool:
+        engine = self._engine
+        for name, play, length in (("sinking bell", engine._play_bell, APP.BELL_DURATION),
+                                   ("subtle distraction chime", engine._play_chime, APP.CHIME_DURATION),
+                                   ("disconnect alert", engine._play_disconnect, APP.DISCONNECT_DURATION)):
+            if not self.live():
+                return False
+            logger.info(f"Audio test: {name}")
+            play()
+            time.sleep(length + 0.3)
+        return self.live()
+
+    def _finish(self) -> None:
+        """The engine handed back: stopped on the main thread (it releases MediaPlayers) if the test started it."""
+        engine = self._engine
+        self.active = False
+        if not self._was_playing:
+            players.next_frame(lambda: engine._finish_test(self))
+        else:
+            engine._set_noise_volume(self._saved_volume)
+        logger.info("Audio test complete")
 
 
 if __name__ == "__main__":
@@ -1064,6 +545,6 @@ if __name__ == "__main__":
     print(f"Sinking alert enabled: {engine.sinking_alert_enabled}")
     print(f"Disconnect alert enabled: {engine.disconnect_alert_enabled}")
     for kept in ("bell", "chime", "disconnect"):
-        print(f"{kept} WAV exists: {os.path.exists(engine._kept(kept))}")
+        print(f"{kept} WAV exists: {os.path.exists(engine._sounds.path(kept))}")
     engine.cleanup()
     print("Done")

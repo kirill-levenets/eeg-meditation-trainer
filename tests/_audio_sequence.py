@@ -2,6 +2,8 @@
 import threading
 import time
 
+from app.audio_feedback.noise import _AudioTest
+
 
 def record_sequences(monkeypatch) -> list:
     """The sequence threads, kept as they start: a quick one is gone before a search would find it."""
@@ -9,7 +11,7 @@ def record_sequences(monkeypatch) -> list:
 
     class Recording(base):
         def start(self):
-            if getattr(getattr(self, "_target", None), "__name__", "") == "_run_sequence":
+            if isinstance(getattr(getattr(self, "_target", None), "__self__", None), _AudioTest):
                 started.append(self)
             super().start()
     monkeypatch.setattr(threading, "Thread", Recording)

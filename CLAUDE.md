@@ -73,7 +73,8 @@ Read it before changing that subsystem.
   `app/ui/program_settings.py` `ProgramSettings` — Settings → Timer: mode, the edited program, saved programs.
   `app/ui/formula_settings.py` `FormulaSettings` — Settings → Custom Formula.
   `app/ui/session_settings.py` `SessionSettings` — Settings as a Start reads them (`read`: the config) and an ending frees them. → [session](docs/architecture/session.md), [programs](docs/architecture/programs.md), [metrics-scoring](docs/architecture/metrics-scoring.md)
-- `app/audio_feedback/noise.py` — `AudioEngine`: below and reward feedback channels, bell/chime/warble, timer gong; `MediaPlayer` on Android.
+- `app/audio_feedback/noise.py` — `AudioEngine`: below and reward feedback channels, bell/chime/warble, timer gong; `MediaPlayer` on Android;
+  `players.py` (the platform's players, audio focus), `one_shot.py` `OneShot` (a one-shot's player slot), `sounds.py` (the built-in sounds, kept on file).
   `app/ui/sound_sources.py` `SoundSources` — which sounds a session and Settings' Tests play, a missing file warned about. → [audio](docs/architecture/audio.md)
 - `app/storage/` — `database.py` (SQLite, migrations, write lock), `backup.py`, `fileops.py`, `android_saf.py`, `android_share.py`, `csv_export.py`.
   `app/settings/registry.py` — per-user scalar settings; `app/ui/user_settings.py` `UserSettings` — their one change path, a continuous input's settle, load and save.
@@ -137,7 +138,7 @@ The linked file explains the mechanism.
   **No `AudioEngine.stop()`, `MediaPlayer.release()`/`stop()` on the runner**: they deadlock against the main Looper paused during screen lock.
   Every ending silences with `AudioEngine.mute()` (setVolume only), saves, then hands the players' teardown to the main thread (`RunningSession._deliver`, which plays the session's sound after the app's part of each event); a timer's gong rings last.
   **No SoundLoader off the main thread on Android**: SDL holds its mixer lock while the app is paused and the call keeps the GIL, so a tick's alert froze the app;
-  alerts are MediaPlayers (`_play_one_shot`). → [audio](docs/architecture/audio.md)
+  alerts are MediaPlayers (`OneShot.play`). → [audio](docs/architecture/audio.md)
 - **Every runtime DB write goes through `DatabaseManager._write()`** (one transaction under `_write_lock`): the connection is shared with the runner (`check_same_thread=False`).
   The connection is the `_conn` property; after `mark_shutting_down()` it is a null connection that swallows writes, so late access is a no-op, never a crash or a reopen. → [storage](docs/architecture/storage.md)
 - Long work runs off the main thread (DB reads are safe there: WAL + shared connection); the loading overlay animates via `Clock` and can't paint otherwise.
@@ -258,6 +259,7 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 · debounced change `UserSettings.after_settle`
 · session titles and stats lines `app/ui/session_labels.py`
 · scoring `scoring.GoalAccrual`
+· a one-shot sound `OneShot` (the engine's slots), a built-in sound's file `KeptSounds.path`
 · graph glyphs `GraphSet.wire_glyphs`
 · headset names `Headset.name()` / `device_labels.py`
 · a profile's headset `Headset.load` / `Headset.scan`, the paired devices `Headset.find_paired`

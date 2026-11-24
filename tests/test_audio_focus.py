@@ -9,8 +9,10 @@ from unittest.mock import MagicMock
 import pytest
 
 import app.audio_feedback.noise as noise_mod
+import app.audio_feedback.players as players_mod
 from app import android_jni
-from app.audio_feedback.noise import AudioEngine, _AndroidMediaNoisePlayer, _AudioFocus
+from app.audio_feedback.noise import AudioEngine
+from app.audio_feedback.players import AudioFocus, _AndroidMediaNoisePlayer
 from tests._audio_sequence import record_sequences, sequence_sleep
 
 DUCK = "AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK"
@@ -33,7 +35,7 @@ def players(monkeypatch):
         made.append(MagicMock())
         return made[-1]
 
-    monkeypatch.setattr(noise_mod, "_make_noise_player", factory)
+    monkeypatch.setattr(players_mod, "make_player", factory)
     return made
 
 
@@ -88,14 +90,15 @@ def test_a_session_with_every_channel_off_asks_for_nothing(players):
         engine.cleanup()
 
 
-def test_the_gong_ducks_other_audio_until_it_has_rung(players):
+def test_the_gong_ducks_other_audio_until_it_has_rung(players, monkeypatch):
+    focus = MagicMock()
+    monkeypatch.setattr(noise_mod, "AudioFocus", lambda: focus)  # the engine's one request, its slots' too
     engine = AudioEngine()
     try:
-        engine._focus = MagicMock()
         engine.play_timer_sound()
-        engine._focus.hold.assert_called_once_with("_gong", DUCK)
+        engine._focus.hold.assert_called_once_with("gong", DUCK)
         players[0].set_on_end.call_args.args[0]()  # it plays to its end
-        engine._focus.release.assert_any_call("_gong")
+        engine._focus.release.assert_any_call("gong")
     finally:
         engine.cleanup()
 
@@ -131,7 +134,7 @@ def test_a_gong_alone_asks_for_transient_focus_and_gives_it_up_when_stopped(jniu
 
 def test_a_refused_request_is_asked_again(jnius, monkeypatch):
     manager = _manager_answering(jnius, monkeypatch, "AUDIOFOCUS_REQUEST_FAILED")  # during a call
-    focus = _AudioFocus()
+    focus = AudioFocus()
     focus.hold("session")
     focus.release("session")
     focus.hold("session")  # resume
@@ -142,7 +145,7 @@ def test_a_refused_request_is_asked_again(jnius, monkeypatch):
 
 def test_the_focus_is_one_request_given_up_by_the_last_holder(jnius, monkeypatch):
     manager = _manager_answering(jnius, monkeypatch, "AUDIOFOCUS_REQUEST_GRANTED")
-    focus = _AudioFocus()
+    focus = AudioFocus()
     focus.hold("session")
     focus.hold("_gong", DUCK)
     assert manager.requestAudioFocus.call_count == 1
@@ -156,7 +159,7 @@ def test_the_focus_is_one_request_given_up_by_the_last_holder(jnius, monkeypatch
 
 
 def test_off_android_there_is_no_focus_to_ask_for(jnius):
-    focus = _AudioFocus()
+    focus = AudioFocus()
     focus.hold("session")
     focus.release("session")
     assert not jnius
@@ -185,7 +188,7 @@ def test_a_test_cut_short_by_stop_owns_nothing_after(players, monkeypatch):
     try:
         engine.test_audio()
         engine.stop()
-        assert not engine._test_owns_playing and not engine._is_playing
+        assert engine._test is None and not engine._is_playing
     finally:
         gate.set()
         engine.cleanup()

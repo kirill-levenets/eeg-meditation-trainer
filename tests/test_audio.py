@@ -3,11 +3,13 @@ import struct
 import threading
 import unittest
 
+import pytest
 from kivy.clock import Clock
 
 import app.audio_feedback.noise as noise_mod
-from app.audio_feedback.noise import (
-    AudioEngine,
+import app.audio_feedback.players as players_mod
+from app.audio_feedback.noise import AudioEngine
+from app.audio_feedback.sounds import (
     _generate_bell_wav,
     _generate_heartbeat_wav,
     _generate_noise_wav,
@@ -104,7 +106,7 @@ class TestAudioFeedback(unittest.TestCase):
             self.assertAlmostEqual(vol_threshold, 0.0)
 
     def test_bell_wav_created(self):
-        self.assertTrue(os.path.exists(self.gen._kept("bell")))
+        self.assertTrue(os.path.exists(self.gen._sounds.path("bell")))
 
     def test_update_only_sets_internal_volume(self):
         self.gen.update(50, 100)
@@ -170,9 +172,9 @@ class TestAudioFeedback(unittest.TestCase):
         self.gen.update_sinking(99.0)
 
     def test_stop_resets_test_active(self):
-        self.gen._test_active = True
+        self.gen._test = noise_mod._AudioTest(self.gen, "")  # a run that has the engine
         self.gen.stop()
-        self.assertFalse(self.gen._test_active)
+        self.assertFalse(self.gen.testing)
 
     def test_thread_safe_volume_update(self):
         results = []
@@ -192,18 +194,18 @@ class TestAudioFeedback(unittest.TestCase):
             self.assertLessEqual(v, 1.0)
 
     def test_feedback_path_noise_is_rain(self):
-        self.assertEqual(self.gen._feedback_path_for("noise"), self.gen._kept("noise"))
+        self.assertEqual(self.gen._sounds.feedback_path("noise"), self.gen._sounds.path("noise"))
 
     def test_feedback_path_custom_existing(self):
         self.assertEqual(
-            self.gen._feedback_path_for("custom", self.gen._kept("bell")),  # any file that isn't the fallback's
-            self.gen._kept("bell"),
+            self.gen._sounds.feedback_path("custom", self.gen._sounds.path("bell")),  # any file that isn't the fallback's
+            self.gen._sounds.path("bell"),
         )
 
     def test_feedback_path_custom_missing_falls_back_to_rain(self):
         self.assertEqual(
-            self.gen._feedback_path_for("custom", "/no/such/file.wav"),
-            self.gen._kept("noise"),
+            self.gen._sounds.feedback_path("custom", "/no/such/file.wav"),
+            self.gen._sounds.path("noise"),
         )
 
 
@@ -224,32 +226,32 @@ class TestTimerBellLifecycle(unittest.TestCase):
     def test_stop_does_not_kill_timer_gong(self):
         from unittest.mock import MagicMock
         gong = MagicMock()
-        self.engine._gong = gong
+        self.engine._gong._player = gong
         self.engine.stop()
         gong.unload.assert_not_called()       # gong must keep ringing past stop()
-        self.assertIs(self.engine._gong, gong)  # slot preserved for stop_timer_bell
+        self.assertIs(self.engine._gong._player, gong)  # slot preserved for stop_timer_bell
 
     def test_stop_timer_bell_clears_reference(self):
         from unittest.mock import MagicMock
         snd = MagicMock()
-        self.engine._gong = snd
+        self.engine._gong._player = snd
         self.engine.stop_timer_bell()
         snd.set_on_end.assert_called_once_with(None)  # its end no longer ends a play
         snd.unload.assert_called_once()  # each player's unload() stops it first
-        self.assertIsNone(self.engine._gong)
+        self.assertIsNone(self.engine._gong._player)
 
     def test_stop_timer_bell_safe_when_nothing_playing(self):
         # Must not raise if the slot is empty.
-        self.engine._gong = None
+        self.engine._gong._player = None
         self.engine.stop_timer_bell()
-        self.assertIsNone(self.engine._gong)
+        self.assertIsNone(self.engine._gong._player)
 
     def test_play_timer_sound_after_stop_assigns_fresh_bell(self):
         # The fix relies on this ordering: tear the engine down first,
         # then play the bell. After stop() the slot is None; play_timer_sound
         # creates a fresh Sound that nothing else will preempt.
         self.engine.stop()
-        self.assertIsNone(self.engine._gong)
+        self.assertIsNone(self.engine._gong._player)
         self.engine.play_timer_sound("")  # default bell path
         # On headless test envs SoundLoader can return None for the WAV
         # backend, so we accept either a Sound or None — what matters is
@@ -261,9 +263,9 @@ class TestTimerBellLifecycle(unittest.TestCase):
         # stay short/high (mid-session ping), timer end needs to be
         # deeper and longer (meditation closure). They live in separate
         # WAV files so the synthesis params can diverge.
-        self.assertNotEqual(self.engine._kept("bell"), self.engine._kept("timer_bell"))
-        self.assertTrue(os.path.exists(self.engine._kept("timer_bell")))
-        self.assertTrue(os.path.exists(self.engine._kept("bell")))
+        self.assertNotEqual(self.engine._sounds.path("bell"), self.engine._sounds.path("timer_bell"))
+        self.assertTrue(os.path.exists(self.engine._sounds.path("timer_bell")))
+        self.assertTrue(os.path.exists(self.engine._sounds.path("bell")))
 
     def test_timer_bell_config_is_deeper_and_longer(self):
         # Pin the human-meaningful intent of the change: the timer bell
@@ -295,14 +297,12 @@ class TestFeedbackChannel(unittest.TestCase):
     """Multi-player feedback channel: one active (modulated), the rest at 0."""
 
     def setUp(self):
-        import app.audio_feedback.noise as noise_mod
-        self._noise_mod = noise_mod
-        self._orig_factory = noise_mod._make_noise_player
-        noise_mod._make_noise_player = lambda path: _FakePlayer(path)
+        self._orig_factory = players_mod.make_player
+        players_mod.make_player = lambda path: _FakePlayer(path)
         self.gen = AudioEngine()
 
     def tearDown(self):
-        self._noise_mod._make_noise_player = self._orig_factory
+        players_mod.make_player = self._orig_factory
         self.gen.cleanup()
 
     def test_prepare_creates_one_player_per_source(self):
@@ -362,17 +362,17 @@ if __name__ == "__main__":
 
 def test_the_audio_tests_teardown_runs_on_the_main_thread(monkeypatch):
     # The sequence runs on a daemon thread; its stop() releases MediaPlayers, which belongs to the main thread.
-    monkeypatch.setattr(noise_mod, "_make_noise_player", lambda path, loop=True: _FakePlayer(path))
+    monkeypatch.setattr(players_mod, "make_player", lambda path, loop=True: _FakePlayer(path))
     sequence_sleep(monkeypatch, record_sequences(monkeypatch), lambda _s: None)
     eng = AudioEngine()
     stops = []
     monkeypatch.setattr(eng, "stop", lambda: stops.append(threading.current_thread()))
     eng.test_audio()
     for _ in range(200):
-        if not eng._test_active:
+        if not eng.testing:
             break
         threading.Event().wait(0.01)
-    assert not eng._test_active
+    assert not eng.testing
     assert stops == []
     Clock.tick()
     assert stops == [threading.main_thread()]
@@ -383,7 +383,7 @@ def test_the_audio_tests_teardown_runs_on_the_main_thread(monkeypatch):
 def _gated_test(monkeypatch, eng, gate):
     """Start the Settings test with every sleep held at `gate`; record the alerts it plays and its stop."""
     sequences = record_sequences(monkeypatch)
-    monkeypatch.setattr(noise_mod, "_make_noise_player", lambda path, loop=True: _FakePlayer(path))
+    monkeypatch.setattr(players_mod, "make_player", lambda path, loop=True: _FakePlayer(path))
     sequence_sleep(monkeypatch, sequences, lambda _s: gate.wait(2))
     played, stops = [], []
     for name in ("_play_bell", "_play_chime", "_play_disconnect"):
@@ -410,7 +410,7 @@ def test_a_session_taking_the_engine_over_ends_the_settings_test(monkeypatch):
 def test_a_session_starting_during_the_alerts_stops_them(monkeypatch):
     eng = AudioEngine()
     sequences = record_sequences(monkeypatch)
-    monkeypatch.setattr(noise_mod, "_make_noise_player", lambda path, loop=True: _FakePlayer(path))
+    monkeypatch.setattr(players_mod, "make_player", lambda path, loop=True: _FakePlayer(path))
     sequence_sleep(monkeypatch, sequences, lambda _s: None)
     played = []
 
@@ -456,6 +456,79 @@ def test_a_test_restarted_supersedes_the_one_running(monkeypatch):
     eng.cleanup()
 
 
+def _run_to_end(eng) -> None:
+    for _ in range(300):
+        if not eng.testing:
+            break
+        threading.Event().wait(0.01)
+    assert not eng.testing
+
+
+@pytest.fixture
+def instant_test(monkeypatch):
+    """An engine whose Settings test runs at once on fake players, its alerts silent."""
+    monkeypatch.setattr(players_mod, "make_player", lambda path, loop=True: _FakePlayer(path))
+    sequences = record_sequences(monkeypatch)
+    eng = AudioEngine()
+    for name in ("_play_bell", "_play_chime", "_play_disconnect"):
+        monkeypatch.setattr(eng, name, lambda: None)
+    yield eng, sequences
+    Clock.tick()
+    eng.cleanup()
+
+
+def test_a_test_run_over_playing_feedback_hands_its_volume_back(instant_test, monkeypatch):
+    eng, sequences = instant_test
+    sequence_sleep(monkeypatch, sequences, lambda _s: None)
+    eng.prepare_feedback({"noise": ("noise", "")}, "noise")
+    eng.start()
+    eng._set_noise_volume(0.42)
+    eng.test_audio()
+    _run_to_end(eng)
+    assert eng._target_volume == 0.42 and eng._is_playing  # the feedback it found, as it found it
+
+
+def test_a_test_a_session_stopped_leaves_the_sessions_volume_alone(instant_test, monkeypatch):
+    eng, sequences = instant_test
+    gate = threading.Event()
+    sequence_sleep(monkeypatch, sequences, lambda _s: gate.wait(2))
+    eng.prepare_feedback({"noise": ("noise", "")}, "noise")
+    eng.start()
+    eng._set_noise_volume(0.42)
+    eng.test_audio()
+    eng.end_test()  # the session takes the engine over, mid-sweep
+    eng._set_noise_volume(0.17)  # and drives its own volume
+    gate.set()
+    sequences[0].join(2)
+    assert eng._target_volume == 0.17
+
+
+def test_a_session_taking_over_in_the_last_sweep_step_keeps_its_volume(instant_test, monkeypatch):
+    eng, sequences = instant_test
+    last = int(APP.AUDIO_TEST_DURATION / noise_mod._AudioTest._SWEEP_STEP)
+    steps = []
+
+    def sweep_step(seconds):
+        steps.append(seconds)
+        if len(steps) == last:  # the session starts during the sweep's last step
+            eng.end_test()
+            eng._set_noise_volume(0.17)
+    sequence_sleep(monkeypatch, sequences, sweep_step)
+    eng.test_audio()
+    sequences[0].join(2)
+    assert len(steps) == last and eng._target_volume == 0.17  # not zeroed by the run it took over from
+
+
+def test_a_reward_sample_disarms_the_reward_channel_after_it(instant_test, monkeypatch):
+    eng, sequences = instant_test
+    sequence_sleep(monkeypatch, sequences, lambda _s: None)
+    eng.prepare_feedback({"noise": ("noise", ""), "tone": ("tone", "")}, "noise")
+    eng.test_audio("tone")
+    _run_to_end(eng)
+    assert (eng._reward_feedback, eng._reward_target_volume) == ("", 0.0)
+    assert eng._feedback_players["tone"].volume == 0.0
+
+
 def test_the_settings_audio_test_is_refused_while_a_session_runs(fresh_app, monkeypatch):
     app = fresh_app
     app._controls.start()  # running: paused or connecting are refused the same way (_session_pipeline_live)
@@ -483,7 +556,7 @@ class _ResetFailsPlayer(_FakePlayer):
 
 
 def test_a_reward_test_whose_volume_fails_to_reset_says_so_in_the_log(monkeypatch):
-    monkeypatch.setattr(noise_mod, "_make_noise_player",
+    monkeypatch.setattr(players_mod, "make_player",
                         lambda path, loop=True: _ResetFailsPlayer(path) if "tone" in path else _FakePlayer(path))
     sequence_sleep(monkeypatch, record_sequences(monkeypatch), lambda _s: None)
     logged = []
@@ -492,7 +565,7 @@ def test_a_reward_test_whose_volume_fails_to_reset_says_so_in_the_log(monkeypatc
     eng.prepare_feedback({"noise": ("noise", ""), "tone": ("tone", "")}, "noise")
     eng.test_audio("tone")  # the reward sample first, then its volume back to 0
     for _ in range(200):
-        if not eng._test_active:
+        if not eng.testing:
             break
         threading.Event().wait(0.01)
     assert "Reward volume not reset after its test: no going down" in logged

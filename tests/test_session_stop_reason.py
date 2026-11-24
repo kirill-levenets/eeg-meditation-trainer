@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock
 
-import app.audio_feedback.noise as noise_mod
+import app.audio_feedback.players as players_mod
 from app.audio_feedback.noise import AudioEngine
 from app.session.manager import SessionManager
 
@@ -56,10 +56,10 @@ def test_failure_stop_warble_survives_the_audio_teardown_that_follows_it(monkeyp
     engine = AudioEngine()
     try:
         played = []
-        monkeypatch.setattr(noise_mod, "_make_noise_player",
+        monkeypatch.setattr(players_mod, "make_player",
                             lambda path, loop=True: played.append(MagicMock()) or played[-1])
         chime = MagicMock()
-        engine._chime_sound = chime
+        engine._chime._player = chime
         mgr = _make_manager()
         mgr._audio = engine
         mgr.stop(reason="stale_data")
