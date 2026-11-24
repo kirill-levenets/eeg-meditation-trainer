@@ -6,7 +6,8 @@ import pytest
 from kivy.base import EventLoop
 from kivy.metrics import dp
 
-from app.ui.history_screen import HistoryScreen, _SessionRow
+from app.ui.history_screen import HistoryScreen
+from app.ui.history_sections.session_list import _SessionRow
 from app.ui.hooks import wire
 from app.ui.session_labels import (
     session_label,
@@ -146,7 +147,7 @@ def _sessions() -> list[dict]:
 
 
 def _views(h: HistoryScreen) -> dict:
-    return {v.sid: v for v in h._rv.layout_manager.children if isinstance(v, _SessionRow)}
+    return {v.sid: v for v in h.session_list._rv.layout_manager.children if isinstance(v, _SessionRow)}
 
 
 def test_a_row_shows_its_three_lines_and_one_without_notes_shows_two(history):
@@ -191,28 +192,28 @@ def test_saved_notes_show_on_the_row_at_once(history):
 
 def test_saving_the_rename_editor_unchanged_writes_nothing(history):
     renamed = []
-    wire(history, on_rename_session=lambda sid, name: renamed.append((sid, name)))
+    wire(history.session_list, on_rename=lambda sid, name: renamed.append((sid, name)))
     history.load_sessions(_sessions())
     _frames()
-    history._toggle_rename(1)
+    history.session_list._toggle_rename(1)
     _frames()
-    history._rename_input.dispatch("on_text_validate")
+    history.session_list._rename_input.dispatch("on_text_validate")
     _frames()
     assert renamed == []  # the stored "2026-09-26 14:05 - MindWave Mobile" keeps its date
     assert history._sessions[0]["session_name"] == "2026-09-26 14:05 - MindWave Mobile"
-    assert history._renaming_sid is None
+    assert history.session_list._renaming_sid is None
 
 
 def test_the_rename_editor_edits_the_name_and_the_row_keeps_its_date(history):
     renamed = []
-    wire(history, on_rename_session=lambda sid, name: renamed.append((sid, name)))
+    wire(history.session_list, on_rename=lambda sid, name: renamed.append((sid, name)))
     history.load_sessions(_sessions())
     _frames()
-    history._toggle_rename(1)
+    history.session_list._toggle_rename(1)
     _frames()
-    assert history._rename_input.text == "MindWave Mobile"  # not the date and time, which aren't the name
-    history._rename_input.text = "Morning sit"
-    history._rename_input.dispatch("on_text_validate")
+    assert history.session_list._rename_input.text == "MindWave Mobile"  # not the date and time, which aren't the name
+    history.session_list._rename_input.text = "Morning sit"
+    history.session_list._rename_input.dispatch("on_text_validate")
     _frames()
     assert renamed == [(1, "Morning sit")]
     assert _views(history)[1]._name_label.text == "2026-09-26 14:05 - Morning sit"
@@ -222,10 +223,10 @@ def test_a_renamed_row_with_notes_is_taller_by_the_editor(history):
     history.load_sessions(_sessions())
     _frames()
     plain = _views(history)[1].height
-    history._toggle_rename(1)
+    history.session_list._toggle_rename(1)
     _frames()
     row = _views(history)[1]
-    assert row.height == plain + history._rename_row.height
+    assert row.height == plain + history.session_list._rename_row.height
     assert row._card.height == plain
 
 

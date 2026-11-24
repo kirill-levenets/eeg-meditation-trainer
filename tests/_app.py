@@ -127,7 +127,7 @@ def saved_session(app, ticks: int = 4, name: str = "a sit", **stats) -> int:
 def open_history(app, sid: int) -> None:
     """The History screen, its list loaded with session `sid` in it."""
     app._nav.switch("history")
-    frames_until(lambda: app._history_screen.session_by_id(sid) is not None)
+    frames_until(lambda: app._history_screen.session_list.session_by_id(sid) is not None)
 
 
 def open_detail(app, sid: int) -> None:

@@ -383,7 +383,7 @@ def test_history_screen_repaints_in_both_views_and_select_mode(old, new, screens
         _drain_history(h)
         C.set_theme(new)
         _assert_repainted(h, old, new, "calendar")
-        h.set_view_mode("bars")
+        h.chart_area.set_view_mode("bars")
         _assert_repainted(h, old, new, "14-day bars")
         h.set_select_mode(True)
         _drain_history(h)

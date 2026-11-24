@@ -1,6 +1,6 @@
 import datetime
 
-from app.ui.history_screen import Last14DaysBars
+from app.ui.history_sections.charts import Last14DaysBars
 from app.ui.hooks import wire
 
 
@@ -24,26 +24,26 @@ def test_history_screen_set_view_mode_swaps_active_widget():
     from app.ui.history_screen import HistoryScreen
     screen = HistoryScreen()
 
-    screen.set_view_mode("calendar")
+    screen.chart_area.set_view_mode("calendar")
     # Only heatmap is parented in graph_wrap
-    assert screen._heatmap.parent is screen._graph_wrap
-    assert screen._bars.parent is None
+    assert screen.chart_area._heatmap.parent is screen.chart_area._graph_wrap
+    assert screen.chart_area._bars.parent is None
 
-    screen.set_view_mode("bars")
+    screen.chart_area.set_view_mode("bars")
     # Now only bars is parented
-    assert screen._heatmap.parent is None
-    assert screen._bars.parent is screen._graph_wrap
+    assert screen.chart_area._heatmap.parent is None
+    assert screen.chart_area._bars.parent is screen.chart_area._graph_wrap
 
 
 def test_history_screen_view_mode_callback_fires_on_toggle():
     from app.ui.history_screen import HistoryScreen
     screen = HistoryScreen()
     received = []
-    wire(screen, on_view_mode_change=lambda mode: received.append(mode))
+    wire(screen.chart_area, on_view_mode_change=lambda mode: received.append(mode))
 
-    screen._on_toggle_pressed("bars")
+    screen.chart_area._on_toggle_pressed("bars")
     assert received == ["bars"]
-    screen._on_toggle_pressed("calendar")
+    screen.chart_area._on_toggle_pressed("calendar")
     assert received == ["bars", "calendar"]
 
 

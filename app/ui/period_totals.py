@@ -48,6 +48,13 @@ def day_range(first: datetime.date, last: datetime.date) -> str:
     return f"{day_month(first)} – {day_month(last)}"
 
 
+def period_text(first: datetime.date, last: datetime.date, today: datetime.date) -> str:
+    """A chart's period as the totals write a week, with the year wherever it isn't today's (no row under it says)."""
+    if first.year != last.year:
+        return f"{day_month(first)} {first.year} – {day_month(last)} {last.year}"
+    return day_range(first, last) + ("" if last.year == today.year else f" {last.year}")
+
+
 def periods_around(day: datetime.date, today: datetime.date) -> list[tuple[str, datetime.date, datetime.date]]:
     """(label, first day, last day) of the day, its Monday-to-Sunday week (the calendar's) and its month; a day or month
     of another year than today's says which."""

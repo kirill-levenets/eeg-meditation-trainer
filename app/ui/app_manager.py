@@ -321,13 +321,13 @@ class EEGMeditationApp(App):
 
         wire(
             self._history_screen,
-            on_session_select=self._detail.on_session_select,
             on_delete_sessions=self._history.delete_sessions,
-            on_rename_session=self._history.on_rename_session,
-            on_view_mode_change=self._history.on_view_mode_change,
             on_export_sessions=self._history.on_export_sessions_csv,
             on_chart_collapse=lambda _collapsed: self._user_settings.changed("history_chart_collapsed"),
         )
+        wire(self._history_screen.session_list, on_open=self._detail.on_session_select,
+             on_rename=self._history.on_rename_session)
+        wire(self._history_screen.chart_area, on_view_mode_change=self._history.on_view_mode_change)
         wire(self._diary_screen.what_if, on_collapse=lambda _collapsed: self._user_settings.changed("what_if_collapsed"))
 
     def _activate_user(self, uid: int) -> None:

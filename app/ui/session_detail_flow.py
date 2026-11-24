@@ -29,7 +29,7 @@ class SessionDetailFlow:
     def on_session_select(self, session_id: int) -> None:
         """Open the session detail at once (#59): title, stats and notes from the row History holds, so they can be read
         and edited at once; the band totals and graphs load on a worker and fill in, one section per frame."""
-        session = self._history_screen.session_by_id(session_id)
+        session = self._history_screen.session_list.session_by_id(session_id)
         if session is None:  # not in History's list: nothing was tapped
             logger.warning(f"Session detail: session {session_id} isn't listed")
             return
