@@ -50,7 +50,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   **The store holds a setting's value** when its descriptor has no `get` (`get=None`): the store's copy is the only one while the profile is active;
   `set` applies it (its consumers and its widget, idempotent), and `SettingsStore.change(key, value)` is its one change path.
   `UserSettings.change(key, value)` is what a widget's hook calls (a flow: `ctx.change_setting`): the store holds and applies the value, then it is persisted at once or, for a continuous input (`settle=True`: a slider, typing), once it settles.
-  A setting its widget holds is persisted after the widget changed it, through `UserSettings.changed(key)` (a flow: `ctx.setting_changed`; the stats view: its `on_stats_mode` hook), at once or, with `settle=True` (the threshold slider), once it settles;
+  A setting its widget holds is persisted after the widget changed it, through `UserSettings.changed(key)` (a flow: `ctx.setting_changed`; the stats view: the Session screen's stats strip's `on_mode` hook), at once or, with `settle=True` (the threshold slider), once it settles;
   never by saving every setting.
   Readers ask the store (`value(key)`), from any thread; save and persist write the held value, never a widget's.
   The store holds every setting that had two copies kept in step by hand (a consumer and its widget, or an app field and its widget):

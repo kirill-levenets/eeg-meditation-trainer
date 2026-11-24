@@ -29,7 +29,7 @@ def test_a_start_on_the_mock_data_shows_the_session_running_at_once(fresh_app, m
     app, screen = fresh_app, fresh_app._live_screen
     started, chimes = calls_of(monkeypatch, app._audio, "start"), calls_of(monkeypatch, app._audio, "play_connect_sound")
     start_ticked_by_hand(app)
-    assert screen._device_label.text == "[Mock EEG] *" and screen._last_state == "Running" and screen._overlay.opacity == 0
+    assert screen.header._device_label.text == "[Mock EEG] *" and screen.header._last_state == "Running" and screen.connect_overlay.opacity == 0
     assert started == [()] and chimes == []  # the feedback plays; the connect chime is a headset's
 
 
@@ -84,32 +84,32 @@ def test_an_ending_leaves_the_screen_finished_and_idle(fresh_app, monkeypatch):
     fed = FedSession(app, monkeypatch)
     for _ in range(3):
         fed.tick(metrics=tick_metrics(80.0))
-    assert screen._shamatha_active and screen._device_label.text == "[Mock EEG] *"
+    assert screen.header._shamatha_active and screen.header._device_label.text == "[Mock EEG] *"
     app._history._history_dirty = False
-    screen.update_timer("59:59")  # the clock as a screen lock froze it
+    screen.header.update_timer("59:59")  # the clock as a screen lock froze it
     app._controls.stop_and_save()
     frames()
     duration = app._db.get_all_sessions(app._current_user_id)[0]["duration"]
-    assert screen._last_state == "FINISHED" and screen._timer_label.text.endswith(elapsed_clock(duration))
-    assert not screen._shamatha_active and screen._device_label.text == "[Disconnected]" and app._history._history_dirty
+    assert screen.header._last_state == "FINISHED" and screen.header._timer_label.text.endswith(elapsed_clock(duration))
+    assert not screen.header._shamatha_active and screen.header._device_label.text == "[Disconnected]" and app._history._history_dirty
 
 
 def test_the_session_screens_buttons_reach_its_controls(fresh_app, monkeypatch):
     app, screen, pressed = fresh_app, fresh_app._live_screen, []
     for name in ("start", "toggle_pause", "stop", "mark", "cancel", "retry"):
         monkeypatch.setattr(app._controls, name, lambda *_a, name=name: pressed.append(name))
-    for button in (screen.btn_start, screen.btn_pause, screen.btn_stop, screen.btn_marker, screen.overlay_cancel_btn,
-                   screen.overlay_retry_btn):
+    for button in (screen.btn_start, screen.btn_pause, screen.btn_stop, screen.btn_marker, screen.connect_overlay.cancel_btn,
+                   screen.connect_overlay.retry_btn):
         button.dispatch("on_release")
     assert pressed == ["start", "toggle_pause", "stop", "mark", "cancel", "retry"]
 
 
 def test_retry_leaves_the_retry_screen_and_starts_again(fresh_app, monkeypatch):
     app, starts = fresh_app, []
-    app._live_screen.show_overlay_retry("Connection to MWM2 failed.")
+    app._live_screen.connect_overlay.show_retry("Connection to MWM2 failed.")
     monkeypatch.setattr(app._controls, "start", lambda: starts.append(True))
     app._controls.retry()
-    assert starts == [True] and app._live_screen._overlay.opacity == 0 and not app._live_screen._btn_start.disabled
+    assert starts == [True] and app._live_screen.connect_overlay.opacity == 0 and not app._live_screen._btn_start.disabled
 
 
 def test_the_shamatha_pill_lights_after_three_ticks_above_the_threshold(fresh_app, monkeypatch):
@@ -117,7 +117,7 @@ def test_the_shamatha_pill_lights_after_three_ticks_above_the_threshold(fresh_ap
     fed = FedSession(fresh_app, monkeypatch)
     for shown in (False, False, True):
         fed.tick(metrics=tick_metrics(80.0))
-        assert fresh_app._live_screen._shamatha_active is shown
+        assert fresh_app._live_screen.header._shamatha_active is shown
 
 
 def test_a_custom_segment_shows_its_line_again_after_it_was_hidden():
@@ -131,7 +131,7 @@ def test_the_bt_wait_shows_its_progress_on_the_overlay(fresh_app, monkeypatch):
     wait = HeadsetSession(fresh_app, monkeypatch, start=False)
     wait.connected, wait.since_packet = True, 0.0  # linked, no packet yet
     wait.tick()
-    assert "Waiting for EEG data" in fresh_app._live_screen._overlay_status.text
+    assert "Waiting for EEG data" in fresh_app._live_screen.connect_overlay._status.text
 
 
 def test_a_low_headset_battery_is_shown_over_the_session(fresh_app, monkeypatch):
@@ -143,7 +143,7 @@ def test_a_low_headset_battery_is_shown_over_the_session(fresh_app, monkeypatch)
 def test_a_link_dropped_mid_session_shows_the_headset_reconnecting(fresh_app, monkeypatch):
     session = HeadsetSession(fresh_app, monkeypatch)
     session.tick()  # the session's first tick follows the link: up
-    label = fresh_app._live_screen._device_label
+    label = fresh_app._live_screen.header._device_label
     assert label.text.endswith("] *")
     session.connected = False
     session.tick()

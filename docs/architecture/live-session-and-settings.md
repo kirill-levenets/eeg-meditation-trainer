@@ -5,13 +5,17 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 ## Session screen
 
-- **Session screen** (`live_session.py`): Metrics/Raw EEG toggle (inline, no separate screen), connection overlay with status + countdown, and the session-end summary card with quick notes.
-  `show_summary(sid, stats, title=)` fills the card: Duration, the `session_score_rows` rows, Time Above Threshold and Longest Streak, 22 dp lines with no gap (`_set_summary_rows` attaches as many pooled rows as the session has).
-  `_layout_summary` arranges it by the card's width, re-run on every width change, so a phone turned with the card open re-flows it with the typed notes kept:
+- **Session screen** (`live_session.py`): the graphs with their Metrics/Raw EEG toggle (inline, no separate screen) and the controls.
+  The parts around them are their own widgets in `session_sections/`, built by the screen and reached as its attributes:
+  `header` (`SessionHeader`: the headset, the clock, the state or the SHAMATHA pill), `stats` (`StatsStrip`), `duration` (`DurationPicker`, Start's companion button and its popup),
+  `end_card` (`EndCard`, the session-end card with quick notes) and `connect_overlay` (`ConnectOverlay`: the `LoadingOverlay` with Cancel, and Retry once the connection failed).
+  The screen keeps what spans them: the controls' states, the training mark (`set_training_series`: legend and stats strip), the start time (header and graph) and `clear_readout`.
+  `end_card.show(sid, stats, title=)` fills the card: Duration, the `session_score_rows` rows, Time Above Threshold and Longest Streak, 22 dp lines with no gap (`_set_rows` attaches as many pooled rows as the session has).
+  `_arrange` lays it out by the card's width, re-run on every width change, so a phone turned with the card open re-flows it with the typed notes kept:
   from 520 dp inside the card (a landscape phone, ~670) two columns, the stats left and the notes field over **Save notes** right (the field takes the stats' height less Save notes, a few lines);
   else one column, the stats over the notes field, two lines of its text tall (`_notes_h`, `F.box(44)`: Save notes' height at the normal text size), with Save notes beside it;
   Delete and OK under both.
-  The title follows the arrangement by the same rule, `_summary_in_two_columns`, applied to its own width, which spans the card's inside (`_fit_summary_title`, so it can't depend on which of the two width changes Kivy dispatches first):
+  The title follows the arrangement by the same rule, `_in_two_columns`, applied to its own width, which spans the card's inside (`_fit_title`, so it can't depend on which of the two width changes Kivy dispatches first):
   `Session saved · <session_title>` on one line over two columns, the name on a line of its own under `Session saved` over one, either cut with an ellipsis to its line (`_cut_to_width`), never wrapped further.
   Bottom-bar action buttons (Start/Pause/Stop/Mark) put the icon over the text (`StyledButton(vertical=True)`).
   Adaptive landscape layout: `_compute_graph_height_adaptive` uses a fixed graph height when the viewport is tall, or switches to scroll mode when the graph would fall below `dp(400)`.
@@ -21,15 +25,15 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   It holds the graphs' `mirror` (`LiveMirror`, which the tick records into and the graphs reload from), and the end card's notes and delete go through the history flow (`HistoryFlow.save_notes`, `delete_sessions`).
   `drop` takes it off the screen:
   the end card, if open, closes through `close` (notes saved unless the session is gone, bell stopped; the one way every card closes, OK included);
-  then `clear` empties the graphs, their mirrors and the readout (`LiveSessionScreen.clear_readout`: what a fresh screen shows).
+  then `clear` empties the graphs, their mirrors and the readout (`LiveSessionScreen.clear_readout`: what a fresh screen shows, through the header's and the stats strip's `clear`).
   It runs when another profile is picked (`_activate_user`), when that profile is deleted, and when History deletes the shown session (`RunningSession.recorder.session_id`, kept after the stop).
   Re-picking the shown profile resets nothing (`Profiles.on_switch` allows that mid-session, and a reset there would wipe the running session's graph).
   An idle threshold change (#83) clears the display but keeps the owner, so a later switch still closes an open card.
-  The stats bar shows the `LiveScore` each tick hands it (`update_stats`), refreshed once more at the session's end and on resume (ticks are skipped while locked), and `set_stats_mode` redraws it when a profile's LIVE/AVG choice loads.
+  The stats bar shows the `LiveScore` each tick hands it (`stats.update`), refreshed once more at the session's end and on resume (ticks are skipped while locked), and `stats.set_mode` redraws it when a profile's LIVE/AVG choice loads.
 - Stats bar (#113): three slots on the metric the session is scored on, the end card's numbers as they build up.
   LIVE: the scored value, the Target it is scored against (the threshold, or a program segment's target) and the current Streak; AVG: the Average, the time On target and the Best streak.
   The AVG titles are History's period-totals words, which fit a third of a 360 dp phone at the largest size where the end card's "Time Above Threshold" and "Longest Streak" don't.
-  The first LIVE title is the name on the graph of the series the legend marks `»` (`set_training_series`, which redraws the bar); it stays after the session ends (`_score_name_key`) until `clear_readout`, and reads "Score" before any.
+  The first LIVE title is the name on the graph of the series the legend marks `»` (`set_training_series`, which redraws the bar through `stats.set_scored`); it stays after the session ends until `clear_readout`, and reads "Score" before any.
   A program's segments are scored on different metrics, so its AVG average is the running segment's ("Segment avg"); the time above and the streaks are the whole session's, as on the end card.
   The bar reads `SessionManager.live_score()`, running totals, not `compute_statistics`, which walks every tick and runs only at a checkpoint or the save.
   LIVE / AVG is a `ChoiceToggle` (both positions shown, the chosen one filled); the choice persists per profile as the `stats_view_mode` setting.
@@ -37,8 +41,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `test_the_stats_bars_titles_and_values_keep_to_their_thirds` checks every other title and every value at the largest size, at 1 and at 2.75 px per dp.
 - **Shamatha-reached status emphasis** (issue #13): while the live `shamatha_score` holds at/above the session threshold the header status label becomes a bold `SHAMATHA` on a green `C.SHAMATHA` rounded pill;
   otherwise it shows the classified state.
-  The pill is a `Color`+`RoundedRectangle` in `_state_label.canvas.before` sized to the text (`_position_shamatha_chip`, bound to the label's `texture_size`).
-  `set_shamatha(active)` toggles its alpha and the text/`readable_fg(C.SHAMATHA)` colour; `update_state` records `_last_state` but skips restyling while the chip is active, so the tick stream can't overwrite it.
+  The pill is a `Color`+`RoundedRectangle` in the header's `_state_label.canvas.before` sized to the text (`_position_shamatha_chip`, bound to the label's `texture_size`).
+  `header.set_shamatha(active)` toggles its alpha and the text/`readable_fg(C.SHAMATHA)` colour; `update_state` records `_last_state` but skips restyling while the chip is active, so the tick stream can't overwrite it.
   Crossing is detected by the pure `scoring.shamatha_transition(active, above, streak, enter_ticks=3, exit_ticks=3)` on the session's runner (debounced: 3 ticks / 1.5 s each way against 2 Hz noise);
   only the *change* is dispatched to `set_shamatha`.
   Gated on the threshold in force, not per-segment program targets: a program's start puts its first segment's target in force (`SessionControls.put_threshold_in_force`), and that gates the pill for the whole run.

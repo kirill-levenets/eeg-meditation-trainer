@@ -55,7 +55,7 @@ def test_a_profiles_sound_files_and_stats_view_show_after_its_load(fresh_app):
     audio = app._settings_screen.audio
     assert (audio._feedback_sound_path, audio._reward_sound_path) == ("/sounds/rain.wav", "/sounds/bell.wav")
     assert app._settings_screen.timer.timer_sound_path == "/sounds/gong.wav"
-    assert app._live_screen.stats_mode == "aggregate"
+    assert app._live_screen.stats.mode == "aggregate"
 
 
 def test_a_history_view_pick_writes_it_and_a_profile_keeps_its_own(fresh_app, monkeypatch):
@@ -116,7 +116,7 @@ def test_re_picking_the_profile_mid_program_keeps_the_programs_end(fresh_app, mo
         fed.tick()
     frames()
     sessions = app._db.get_all_sessions(app._current_user_id)
-    assert app._session.run is None and app._live_screen.summary_session_id == sessions[0]["id"]  # ended at 1 min, end card up
+    assert app._session.run is None and app._live_screen.end_card.session_id == sessions[0]["id"]  # ended at 1 min, end card up
 
 
 def test_re_picking_the_profile_keeps_a_timed_session_timed_after_the_timer_was_unticked(fresh_app, monkeypatch):

@@ -30,12 +30,12 @@ class Headset:
     refused while a session runs, and the selected headset is the active profile's own or none. A headset's alias is
     the same for every profile: it is the same headset whoever uses it."""
 
-    def __init__(self, ctx: AppContext, stream, device_section, live_screen, *,
+    def __init__(self, ctx: AppContext, stream, device_section, session_header, *,
                  serial_override: Callable[[], str | None]) -> None:
         self._ctx = ctx
         self.stream = stream  # the link to the selected headset: it outlives sessions
         self._device_section = device_section
-        self._live_screen = live_screen
+        self._session_header = session_header  # the Session screen's
         self._serial_override = serial_override
         # address -> the name its user gave the headset; replaced, never changed in place (the session's runner reads it)
         self.aliases: Mapping[str, str] = MappingProxyType({})
@@ -82,7 +82,7 @@ class Headset:
         connecting, since the reader reconnects."""
         connected = self.stream.is_connected
         label = self.name()
-        self._live_screen.update_device_status(connected, device_name=label,
+        self._session_header.update_device_status(connected, device_name=label,
                                                connecting=self._ctx.session.live() and not connected)
         if connected:
             self._device_section.update_device_status(True, name=label)
@@ -100,7 +100,7 @@ class Headset:
             self.stream.set_device(address, self._ctx.db.get_user_setting(uid, "bt_device_name") or "")
             self._device_section.update_device_status(False, meta=f"Saved device: {self.name()}" if address else "")
         self._device_section.clear_picker_banner()  # it asked the last profile
-        self._live_screen.update_device_status(False, device_name=self._session_label())
+        self._session_header.update_device_status(False, device_name=self._session_label())
         if not self.stream._device_address and not APP.USE_MOCK_DEVICE:
             self.scan()
 
@@ -118,7 +118,7 @@ class Headset:
         addr = self.stream._device_address or "none"
         self._device_section.update_device_status(False, meta="Mode: Mock Data" if use_mock
                                                   else f"Mode: Real Device ({addr})")
-        self._live_screen.update_device_status(False, device_name=self._session_label())
+        self._session_header.update_device_status(False, device_name=self._session_label())
         logger.info(f"Device mode: {'Mock' if use_mock else 'Real'}")
 
     def on_scan(self) -> None:

@@ -60,7 +60,7 @@ def test_a_failed_count_shows_the_profile_without_one_and_the_end_card_still_ope
     _session_ended_on(app, "settings")
     form = app._settings_screen._user_picker_form
     assert {w.text for w in form._existing_list.walk(restrict=True) if getattr(w, "text", "") == app._profiles.current_name()}
-    assert app._live_screen.summary_session_id is not None  # the end card
+    assert app._live_screen.end_card.session_id is not None  # the end card
 
 
 def test_a_running_sessions_row_is_counted_once_it_ends(fresh_app):

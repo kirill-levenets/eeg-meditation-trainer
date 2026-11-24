@@ -351,22 +351,22 @@ def test_the_end_card_shows_the_name_duration_and_the_scored_stats(phone_window)
         stats = {"duration": 600, "avg_shamatha": 70, "avg_meditation": 50, "time_above_threshold": 300,
                  "time_shamatha_90": 20, "longest_streak": 120, "threshold_used": 50,
                  "score_metric_key": "shamatha_score", "score_metric_name": "Shamatha", "avg_score": 70.0}
-        screen.show_summary(7, stats, title="2026-10-03 20:05 - MindWave Mobile")
+        screen.end_card.show(7, stats, title="2026-10-03 20:05 - MindWave Mobile")
         _frames()
-        assert screen._summary_title.text == "Session saved\n2026-10-03 20:05 - MindWave Mobile"
+        assert screen.end_card._title.text == "Session saved\n2026-10-03 20:05 - MindWave Mobile"
         assert _summary_rows(screen) == [("Duration", "10m 00s"), ("Metric", "Shamatha"), ("Average", "70"),
                                          ("Threshold", "50"), ("Time Above Threshold", "5m 00s"),
                                          ("Longest Streak", "2m 00s")]
-        card = screen._summary_stats_card
+        card = screen.end_card._stats_card
         assert len(card.children) == 6  # the rows: the name is in the title
         assert card.height >= sum(c.height for c in card.children) + card.padding[1] + card.padding[3]
     finally:
-        screen.hide_summary()
+        screen.end_card.hide()
         phone_window.remove_widget(screen)
 
 
 def _summary_rows(screen) -> list[tuple[str, str]]:
-    return [(label.text, value.text) for label, value in screen._summary_rows]
+    return [(label.text, value.text) for label, value in screen.end_card._rows]
 
 
 def test_the_end_card_follows_the_rows_of_each_session_it_shows():
@@ -381,17 +381,17 @@ def test_the_end_card_follows_the_rows_of_each_session_it_shows():
         (dict(scored, threshold_used=70), ["Duration", "Metric", "Average", "Threshold", "Time Above Threshold",
                                            "Longest Streak"]),
     ]:
-        screen.show_summary(1, stats)
+        screen.end_card.show(1, stats)
         assert [label for label, _ in _summary_rows(screen)] == titles
-        assert len(screen._summary_stats_card.children) == len(titles)
+        assert len(screen.end_card._stats_card.children) == len(titles)
     assert _summary_rows(screen)[3] == ("Threshold", "70")
 
 
 def test_the_end_card_is_titled_with_the_saved_session(fresh_app):
     app = fresh_app
     row, _started = _ended_session(app)
-    assert app._live_screen.summary_session_id == row["id"]
-    assert app._live_screen._summary_session_title == session_title(row) != ""
+    assert app._live_screen.end_card.session_id == row["id"]
+    assert app._live_screen.end_card._session_title == session_title(row) != ""
 
 
 # ---- review round: widths at phone size, one name per series, a failed title read ----
@@ -423,13 +423,13 @@ def test_the_end_card_shows_a_long_scored_on_value_whole_on_a_phone(phone_window
     try:
         stats = {"duration": 600, "threshold_used": 40, "score_metric_key": "program",
                  "score_metric_name": "Morning ladder", "avg_score": None}
-        screen.show_summary(1, stats, title="2026-10-03 07:15 - MindWave Mobile")
+        screen.end_card.show(1, stats, title="2026-10-03 07:15 - MindWave Mobile")
         _frames()
-        value = screen._summary_rows[1][1]
+        value = screen.end_card._rows[1][1]
         assert value.text == "Morning ladder (program)"
         assert value.width >= _natural_width(value), (value.width, _natural_width(value))
     finally:
-        screen.hide_summary()
+        screen.end_card.hide()
         phone_window.remove_widget(screen)
 
 
@@ -470,4 +470,4 @@ def test_a_failed_title_read_still_shows_the_end_card(fresh_app, monkeypatch):
     monkeypatch.setattr(app._db, "get_session", unreadable)
     app._controls.stop_and_save()  # the session is saved; only its title couldn't be read
     frames()
-    assert app._live_screen.summary_session_id is not None and app._live_screen._summary_session_title == ""
+    assert app._live_screen.end_card.session_id is not None and app._live_screen.end_card._session_title == ""

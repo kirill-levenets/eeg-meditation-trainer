@@ -157,7 +157,7 @@ class EEGMeditationApp(App):
 
     def _build_flows(self) -> None:
         """The objects that own each concern, each given the app context and the screens it works on."""
-        self._headset = Headset(self._ctx, self._real_stream, self._settings_screen.device, self._live_screen,
+        self._headset = Headset(self._ctx, self._real_stream, self._settings_screen.device, self._live_screen.header,
                                 serial_override=lambda: self.serial_device_override)
         self._headset.load_aliases()
         self._session = RunningSession(self._ctx, self._audio, self._headset, on_event=lambda event: self._controls.on_event(event))
@@ -227,21 +227,21 @@ class EEGMeditationApp(App):
         self._live_screen.btn_stop.bind(on_release=lambda _b: self._controls.stop())
         self._live_screen.btn_marker.bind(on_release=lambda _b: self._controls.mark())
         wire(
-            self._live_screen,
-            on_duration_preset=self._program_settings.on_duration_preset,
+            self._live_screen.duration,
+            on_preset=self._program_settings.on_duration_preset,
             on_program_pick=self._program_settings.on_load,
         )
-        self._live_screen.overlay_cancel_btn.bind(on_release=lambda _b: self._controls.cancel())
-        self._live_screen.overlay_retry_btn.bind(on_release=lambda _b: self._controls.retry())
-        self._live_screen.summary_ok_btn.bind(on_release=self._shown.on_ok)
-        self._live_screen.summary_save_notes_btn.bind(on_release=self._shown.on_save_notes)
-        self._live_screen.summary_delete_btn.bind(on_release=self._shown.on_delete)
+        self._live_screen.connect_overlay.cancel_btn.bind(on_release=lambda _b: self._controls.cancel())
+        self._live_screen.connect_overlay.retry_btn.bind(on_release=lambda _b: self._controls.retry())
+        self._live_screen.end_card.ok_btn.bind(on_release=self._shown.on_ok)
+        self._live_screen.end_card.save_notes_btn.bind(on_release=self._shown.on_save_notes)
+        self._live_screen.end_card.delete_btn.bind(on_release=self._shown.on_delete)
 
         # Tap on graph to set marker (Android — no keyboard available)
         if android_jni.on_android():
             wire(self._live_screen.graph, on_tap=lambda *_a: self._controls.mark())
-        wire(self._live_screen, on_lines_shown=self._session.set_shown,
-             on_stats_mode=lambda _mode: self._user_settings.changed("stats_view_mode"))
+        wire(self._live_screen, on_lines_shown=self._session.set_shown)
+        wire(self._live_screen.stats, on_mode=lambda _mode: self._user_settings.changed("stats_view_mode"))
 
         # Shared fullscreen-expand + series-picker glyphs on every graph
         self._graphs.wire_glyphs(self._fullscreen.present, self._graph_series.present_picker)
@@ -501,7 +501,7 @@ class EEGMeditationApp(App):
         return [held("rotation", INT, display._current_rotation, apply_rotation),
                 kept("marker_hotkey", STR, lambda: display.marker_hotkey,
                      lambda v: setattr(self._settings_screen, "marker_hotkey", v)),
-                kept("stats_view_mode", STR, lambda: ls.stats_mode, ls.set_stats_mode),
+                kept("stats_view_mode", STR, lambda: ls.stats.mode, ls.stats.set_mode),
                 # Its default is the seed, not the startup profile's theme the UI was built in.
                 theme_setting(self._theme_seed), text_size_setting(), line_colours_setting()]
 

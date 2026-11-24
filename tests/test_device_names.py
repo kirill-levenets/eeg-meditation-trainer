@@ -48,14 +48,14 @@ def _real_mode(monkeypatch):
 
 def _rig(db: DatabaseManager | None = None, uid: int = 1) -> SimpleNamespace:
     """A Headset built by its constructor, with BLUE selected and not connected: `headset`, and the stand-ins it works
-    on (`stream`, `device` for Settings › Device, `live_screen`, `db` unless a real one is given)."""
+    on (`stream`, `device` for Settings › Device, `header` for the Session screen's, `db` unless a real one is given)."""
     stream = MagicMock(_device_address=BLUE, _device_name="MindWave Mobile", is_connected=False)
-    device, live_screen = MagicMock(), MagicMock()
+    device, header = MagicMock(), MagicMock()
     ctx = stub_context(db=db or MagicMock(), user_id=lambda: uid)
-    headset = Headset(ctx, stream, device, live_screen, serial_override=lambda: None)
+    headset = Headset(ctx, stream, device, header, serial_override=lambda: None)
     if db is not None:
         headset.load_aliases()
-    return SimpleNamespace(headset=headset, stream=stream, device=device, live_screen=live_screen, db=ctx.db)
+    return SimpleNamespace(headset=headset, stream=stream, device=device, header=header, db=ctx.db)
 
 
 # ---- one name for a headset, everywhere ----
@@ -138,11 +138,11 @@ def test_renaming_the_selected_headset_renames_it_on_screen(db_path):
         rig = _rig(db)
         rig.headset.on_rename(BLUE, "MindWave Mobile", "Blue")
         rig.device.relabel_bt_device.assert_called_with(BLUE, "Blue")
-        assert rig.live_screen.update_device_status.call_args.kwargs["device_name"] == "Blue"
+        assert rig.header.update_device_status.call_args.kwargs["device_name"] == "Blue"
         rig.device.update_device_status.assert_called_with(False, meta="Selected: Blue")
         rig.stream.is_connected = True
         rig.headset.on_rename(BLUE, "MindWave Mobile", "Blue 2")
-        rig.live_screen.update_device_status.assert_called_with(True, device_name="Blue 2", connecting=False)
+        rig.header.update_device_status.assert_called_with(True, device_name="Blue 2", connecting=False)
         rig.device.update_device_status.assert_called_with(True, name="Blue 2")
     finally:
         db.close()
@@ -157,7 +157,7 @@ def test_in_mock_mode_no_headset_is_in_use_and_a_rename_leaves_the_mock_labels(d
         assert rig.headset.state() == (None, None)
         rig.headset.on_rename(BLUE, "MindWave Mobile", "Blue")
         rig.device.relabel_bt_device.assert_called_with(BLUE, "Blue")
-        rig.live_screen.update_device_status.assert_not_called()
+        rig.header.update_device_status.assert_not_called()
         rig.device.update_device_status.assert_not_called()
     finally:
         db.close()
@@ -169,7 +169,7 @@ def test_renaming_another_headset_leaves_the_selected_ones_labels(db_path):
         rig = _rig(db)
         rig.headset.on_rename(GREY, "MindWave Mobile", "Grey")
         rig.device.relabel_bt_device.assert_called_with(GREY, "Grey")
-        rig.live_screen.update_device_status.assert_not_called()
+        rig.header.update_device_status.assert_not_called()
     finally:
         db.close()
 
@@ -263,7 +263,7 @@ def test_picking_another_headset_shows_it_unconnected_everywhere(db_path):
         _select_for_real(rig)
         rig.stream.is_connected = True  # linked to BLUE between sessions
         rig.headset.on_select(GREY, "MindWave Mobile")
-        rig.live_screen.update_device_status.assert_called_with(False, device_name="Grey", connecting=False)
+        rig.header.update_device_status.assert_called_with(False, device_name="Grey", connecting=False)
         rig.device.update_device_status.assert_called_with(False, meta="Selected: Grey")
     finally:
         db.close()
@@ -275,7 +275,7 @@ def test_picking_the_connected_headset_again_keeps_it_shown_connected():
     rig.stream.is_connected = True
     rig.headset.on_select(BLUE, "MindWave Mobile")
     rig.device.update_device_status.assert_called_with(True, name="MindWave Mobile")
-    rig.live_screen.update_device_status.assert_called_with(True, device_name="MindWave Mobile", connecting=False)
+    rig.header.update_device_status.assert_called_with(True, device_name="MindWave Mobile", connecting=False)
 
 
 def test_the_list_learns_which_headset_is_selected_and_which_connected():

@@ -1,64 +1,27 @@
-
-import time
-
-from kivy.clock import Clock
+"""The Session screen: its graphs and controls, composing the parts around them (`session_sections/`)."""
 from kivy.core.window import Window
-from kivy.graphics import Color, RoundedRectangle
 from kivy.metrics import dp
-from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
-from kivy.uix.gridlayout import GridLayout
 from kivy.uix.screenmanager import Screen
-from kivy.uix.scrollview import ScrollView
-from kivy.uix.widget import Widget
 
 from app.config import APP
 from app.eeg.band_spec import BAND_KEYS, GROUP_KEYS, GROUP_NAMES, group_powers
 from app.metrics.series_names import SERIES_NAMES
 from app.session.live_mirror import MirrorView
-from app.session.manager import NO_SCORE, LiveScore
 from app.session.scoring import scored_steps, target_steps
 from app.ui.graph_scroll import GraphAwareScrollView
 from app.ui.hooks import Hook, wire
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
-from app.ui.session_labels import average_text, session_score_rows
-from app.ui.theme import (
-    ICONS_AVAILABLE,
-    C,
-    Card,
-    F,
-    Icons,
-    ModalPanel,
-    ModalScrim,
-    S,
-    StyledButton,
-    ThemedLabel,
-    ThemedTextInput,
-    cancel_button,
-    dimmed_fg,
-    fill_background,
-    fit_width_to_text,
-    format_duration,
-    make_scroll_popup,
-    readable_fg,
-    text_width,
-)
+from app.ui.session_sections.connect_overlay import ConnectOverlay
+from app.ui.session_sections.duration_picker import DurationPicker
+from app.ui.session_sections.end_card import EndCard
+from app.ui.session_sections.header import SessionHeader
+from app.ui.session_sections.stats_strip import StatsStrip
+from app.ui.theme import C, F, Icons, S, StyledButton, ThemedLabel, fill_background
 from app.ui.widgets.band_totals import BAND_COLORS, BAND_SCALES
 from app.ui.widgets.choice_toggle import ChoiceToggle
 from app.ui.widgets.legend import LegendBar
-
-_DURATION_PRESETS = [
-    ("5 min", 5),
-    ("10 min", 10),
-    ("15 min", 15),
-    ("20 min", 20),
-    ("30 min", 30),
-    ("1 h", 60),
-    ("1 h 30 min", 90),
-    ("2 h", 120),
-    ("Free", None),
-]
 
 _RAW_SIGNAL_COLORS = {"eeg": C.MEDITATION}
 _RAW_SIGNAL_SCALES = {"eeg": 500.0}
@@ -114,152 +77,14 @@ def _compute_graph_height_adaptive(
     return max(viewport_h, min_graph_floor)
 
 
-def _format_stats_slots(mode: str, name: str, score: LiveScore) -> tuple[list[str], list[str]]:
-    """(titles, values) of the stats bar's three slots, on the metric the session is scored on: LIVE, its value, the
-    target and the streak now; AVG, the end card's numbers so far (a program's average is its running segment's)."""
-    if mode == "aggregate":
-        average = "-" if score.average is None else average_text(score.average)
-        return (["Segment avg" if score.segmented else "Average", "On target", "Best streak"],  # History's words
-                [average, format_duration(int(score.time_above)), format_duration(int(score.longest_streak))])
-    value = "-" if score.value is None else str(int(round(score.value)))
-    target = "-" if score.target is None else f"{score.target:g}"
-    return [name, "Target", "Streak"], [value, target, format_duration(int(score.streak))]
-
-
-def _cut_to_width(text: str, label) -> str:
-    """`text`, or its longest start plus an ellipsis, no wider than `label` at its font."""
-    def width(s: str) -> float:
-        return text_width(s, label.font_size, label.bold)
-
-    if width(text) <= label.width:
-        return text
-    lo, hi = 0, len(text)
-    while lo < hi:
-        mid = (lo + hi + 1) // 2
-        if width(text[:mid].rstrip() + "\u2026") <= label.width:
-            lo = mid
-        else:
-            hi = mid - 1
-    return text[:lo].rstrip() + "\u2026"
-
-
-class _DurationPickerButton(BoxLayout):
-    """Compact 2-row duration picker: text on top, chevron on bottom.
-
-    Press feedback via on_touch_down/up; uses a callback for activation.
-    """
-
-    def __init__(self, on_release=None, **kwargs):
-        super().__init__(**kwargs)
-        self.orientation = "vertical"
-        self.padding = 0
-        self.spacing = 0
-        self._on_release = on_release
-        self._pressed = False
-
-        self._text_label = ThemedLabel(
-            text="",
-            font_size=F.capped(F.TINY),  # the bottom bar's width is fixed
-            bold=True,
-            color=C.TEXT,
-            halign="center",
-            valign="middle",
-            size_hint_y=0.55,
-        )
-        self._text_label.bind(size=self._text_label.setter("text_size"))
-        F.add_listener(self._fit_width)
-        self._fit_width()
-
-        self._chevron_label = ThemedLabel(
-            text=Icons.MENU_DOWN if ICONS_AVAILABLE else "v",
-            font_name="Icons" if ICONS_AVAILABLE else "Roboto",
-            font_size=F.SMALL,
-            color=C.TEXT,
-            halign="center",
-            valign="middle",
-            size_hint_y=0.45,
-        )
-        self._chevron_label.bind(size=self._chevron_label.setter("text_size"))
-
-        self.add_widget(self._text_label)
-        self.add_widget(self._chevron_label)
-
-        self.bind(size=self._redraw, pos=self._redraw, disabled=self._redraw)
-        C.add_listener(self._redraw)
-        self._redraw()
-
-    @property
-    def text(self) -> str:
-        return self._text_label.text
-
-    @text.setter
-    def text(self, value: str) -> None:
-        self._text_label.text = value
-        self._fit_width()
-
-    def _fit_width(self, *_args) -> None:
-        """As wide as its text on one line ("105m"), at least 20 dp at the text size in use."""
-        label = self._text_label
-        self.width = max(F.box(20, F.CAPPED_MAX),
-                         text_width(label.text, label.font_size, label.bold, label.font_name) + dp(4))
-
-    def set_label(self, text: str, large: bool = False) -> None:
-        """Set the button text; `large` bumps the font (used for the program 'P')."""
-        self._text_label.font_size = F.capped(F.H3 if large else F.TINY)
-        self._text_label.text = text
-        self._fit_width()
-
-    def _redraw(self, *args) -> None:
-        self.canvas.before.clear()
-        if self.disabled:
-            bg = C.BG_CARD
-        elif self._pressed:
-            bg = C.ACCENT_DIM
-        else:
-            bg = C.ACCENT
-        with self.canvas.before:
-            Color(*bg)
-            RoundedRectangle(pos=self.pos, size=self.size, radius=[S.RADIUS])
-        # The glyph Start's own text takes on the same fill: a pressed fill keeps it, as a StyledButton's does.
-        label_color = dimmed_fg(bg) if self.disabled else readable_fg(C.ACCENT)
-        for label in (self._text_label, self._chevron_label):
-            label.color = label.disabled_color = label_color
-
-    def on_touch_down(self, touch):
-        if self.collide_point(*touch.pos):
-            if self.disabled:
-                return True
-            self._pressed = True
-            self._redraw()
-            touch.grab(self)
-            return True
-        return super().on_touch_down(touch)
-
-    def on_touch_up(self, touch):
-        if touch.grab_current is self:
-            touch.ungrab(self)
-            was_inside = self.collide_point(*touch.pos)
-            self._pressed = False
-            self._redraw()
-            if was_inside and self._on_release is not None:
-                self._on_release(self)
-            return True
-        return super().on_touch_up(touch)
-
-
 class LiveSessionScreen(Screen):
     """Main session screen with graph, stats, and controls."""
 
-    on_program_pick = Hook()  # a saved program picked on the duration picker, by its index
     on_lines_shown = Hook()  # the metrics graph's shown lines changed: their keys
-    on_stats_mode = Hook()  # the stats strip's view picked: "live" or "aggregate"
-    on_duration_preset = Hook()  # a duration preset picked: minutes, or None for no timer
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.name = "live_session"
-        self._last_score = NO_SCORE  # what the stats bar shows, kept for the LIVE / AVG switch
-        self._score_name_key: str | None = None  # the series it was scored on, named until the readout clears
         self._build_ui()
         # Scroll height tracking is persistent (the widget itself lives for the screen's lifetime)
         self._scroll.bind(height=self._reflow)
@@ -267,13 +92,6 @@ class LiveSessionScreen(Screen):
     def on_enter(self, *args) -> None:
         Window.bind(on_resize=self._reflow, on_rotate=self._reflow)
         self._reflow()
-
-    @staticmethod
-    def _header_h() -> float:
-        return F.box(10, F.CAPPED_MAX)  # its text is capped (a status line), and spills a little past it at normal
-
-    def _fit_header(self) -> None:
-        self._header.height = self._header_h()
 
     def _build_ui(self) -> None:
         float_root = FloatLayout()
@@ -284,43 +102,8 @@ class LiveSessionScreen(Screen):
         root = self._root
         fill_background(root, C.BG)
 
-        # ── Header ──
-        header = BoxLayout(size_hint_y=None, height=self._header_h(), spacing=S.GAP_SM)
-        self._header = header
-        F.add_listener(self._fit_header)
-        self._device_label = ThemedLabel(
-            text="[Mock EEG]",
-            size_hint_x=1 / 3,
-            color=C.DEVICE_IDLE,
-            font_size=F.capped(F.SMALL),  # a 10 dp status line
-        )
-        self._timer_label = ThemedLabel(
-            text="00:00",
-            size_hint_x=1 / 3,
-            font_size=F.capped(F.BODY),
-            bold=True,
-            color=C.TEXT,
-        )
-        self._start_time_str: str = ""  # wall-clock string cached for combined display
-        self._state_label = ThemedLabel(
-            size_hint_x=1 / 3,
-            font_size=F.capped(F.BODY),
-        )
-        # "In shamatha" chip — a rounded pill drawn behind the status text, sized to
-        # the text and toggled via set_shamatha(). Alpha 0 = hidden.
-        with self._state_label.canvas.before:
-            self._shamatha_bg = Color(*C.SHAMATHA[:3], 0)
-            self._shamatha_rect = RoundedRectangle(radius=[dp(9)])
-        self._show_idle_state()
-        self._state_label.bind(
-            pos=self._position_shamatha_chip,
-            size=self._position_shamatha_chip,
-            texture_size=self._position_shamatha_chip,
-        )
-        header.add_widget(self._device_label)
-        header.add_widget(self._timer_label)
-        header.add_widget(self._state_label)
-        root.add_widget(header)
+        self.header = SessionHeader()
+        root.add_widget(self.header)
 
         # ── Alert banner ──
         self._alert_label = ThemedLabel(
@@ -410,30 +193,7 @@ class LiveSessionScreen(Screen):
         for g in self._view_graphs("raw"):
             g.set_drawing_enabled(False)
 
-        # ── Stats row: three slots on the scored metric, and the LIVE / AVG switch ──
-        stats_card = Card(orientation="horizontal", size_hint_y=None, height=dp(64), bg_color=C.BG_CARD)
-        self._stats_card = stats_card
-        self._stat_title_labels: list[ThemedLabel] = []
-        self._stat_labels: list[ThemedLabel] = []
-        for slot in range(3):
-            box = BoxLayout(orientation="vertical")
-            title = ThemedLabel(font_size=F.TINY, color=C.TEXT_MUTED, size_hint_y=0.4)
-            if slot == 0:  # the metric's name: a long formula name is cut, not run into the next slot
-                title.shorten, title.shorten_from, title.halign, title.valign = True, "right", "center", "middle"
-                title.bind(size=title.setter("text_size"))
-            value = ThemedLabel(font_size=F.capped(F.H2), bold=True, color=C.TEXT, size_hint_y=0.6)  # "59m 59s"
-            box.add_widget(title)
-            box.add_widget(value)
-            self._stat_title_labels.append(title)
-            self._stat_labels.append(value)
-            stats_card.add_widget(box)
-
-        self._stats_mode = "live"
-        self._stats_toggle = ChoiceToggle([("live", "LIVE"), ("aggregate", "AVG")], "live", self._choose_stats_mode,
-                                          button={"size_hint_y": 1, "font_size": F.capped(F.SMALL)},
-                                          orientation="vertical", size_hint_x=None, width=dp(56), spacing=dp(2))
-        stats_card.add_widget(self._stats_toggle)
-        self._render_stats()
+        self.stats = StatsStrip(self._graph)
 
         # Scrollable body: graph + stats
         self._scroll = GraphAwareScrollView(size_hint=(1, 1), do_scroll_x=False)
@@ -444,18 +204,9 @@ class LiveSessionScreen(Screen):
         )
         self._body.bind(minimum_height=self._body.setter("height"))
         self._body.add_widget(self._graph_area)
-        self._body.add_widget(stats_card)
+        self._body.add_widget(self.stats)
         self._scroll.add_widget(self._body)
         root.add_widget(self._scroll)
-
-        # Current timer state cached for popup highlighting
-        self._current_timer_enabled = False
-        self._current_timer_minutes = 0
-        self._program_active = False
-        self._duration_popup = None
-        # Saved programs offered by the in-session "Programs…" picker.
-        self._session_programs: list = []
-        self._session_program_current_name: str = ""  # loaded program (button + highlight)
 
         # ── Controls ──
         self._bottom_bar = BoxLayout(
@@ -469,20 +220,14 @@ class LiveSessionScreen(Screen):
             bg_pressed=C.ACCENT_DIM,
             vertical=True,
         )
-        self._btn_duration_expand = _DurationPickerButton(
-            size_hint_x=None,
-            size_hint_y=None,
-            height=S.BTN_H,
-            on_release=self._open_duration_popup,
-        )
-        self._btn_duration_expand.text = "\u221e"  # updated by refresh_duration_preset
+        self.duration = DurationPicker()
         start_cluster = BoxLayout(
             orientation="horizontal",
             spacing=dp(1),  # tiny separator
             size_hint_y=None, height=S.BTN_H,
         )
         start_cluster.add_widget(self._btn_start)
-        start_cluster.add_widget(self._btn_duration_expand)
+        start_cluster.add_widget(self.duration.button)
 
         self._btn_pause = StyledButton(
             text="Pause", icon=Icons.PAUSE, bg_color=C.WARM,
@@ -507,159 +252,22 @@ class LiveSessionScreen(Screen):
 
         float_root.add_widget(root)
 
-        # ── Session summary overlay: the theme's modal panel over the dimmed screen, like every popup ──
-        self._summary = ModalScrim(
-            size_hint=(1, 1),
-            pos_hint={"x": 0, "y": 0},
-            padding=[dp(20), dp(6)],  # tight vertically: a landscape phone has ~314 dp above the bottom nav
-        )
-        # Every ending saves the session; the title says so, and names the session (_fit_summary_title).
-        summary_panel = ModalPanel(title="Session saved")
-        self._summary_panel = summary_panel
-        self._summary_title = summary_panel.title_label
-        self._summary_session_title = ""
-        self._summary_title.bind(width=self._fit_summary_title, font_size=self._fit_summary_title)
-
-        # Stats card: one (label, value) row per stat, set by show_summary — a session that saved no metric has one
-        # threshold row where the others have Metric and Threshold. Lines are 22 dp with no gap between them.
-        self._summary_stats_card = Card(
-            orientation="vertical",
-            size_hint_y=None,
-            bg_color=C.BG_CARD,
-            spacing=0,
-        )
-        self._summary_line_h = dp(22)
-        self._summary_row_pool: list[tuple[BoxLayout, ThemedLabel, ThemedLabel]] = []
-        self._summary_rows: list[tuple[ThemedLabel, ThemedLabel]] = []  # (label, value) of the rows shown, in order
-
-        # The stats, then the notes field and Save notes: arranged by _layout_summary in one column or two.
-        self._summary_body = BoxLayout(size_hint_y=None, spacing=S.GAP)
-        self._summary_notes_box = BoxLayout(size_hint_y=None, spacing=S.GAP)
-        self._summary_notes = ThemedTextInput(
-            hint_text="Quick notes: how was the session?",
-            multiline=True,
-            font_size=F.BODY,
-            foreground_color=C.TEXT,
-            background_color=C.BG_INPUT,
-            cursor_color=C.PRIMARY,
-        )
-        self._summary_save_notes_btn = StyledButton(
-            text="Save notes", bg_color=C.PRIMARY, bg_pressed=C.PRIMARY_DIM,
-            size_hint_x=None, width=dp(110),
-        )
-        self._summary_save_holder = AnchorLayout(anchor_x="right", size_hint_y=None, height=S.BTN_H)
-        self._summary_save_holder.add_widget(self._summary_save_notes_btn)
-        self._summary_notes_box.add_widget(self._summary_notes)
-        self._summary_notes_box.add_widget(self._summary_save_holder)
-        self._summary_body.add_widget(self._summary_stats_card)
-        self._summary_body.add_widget(self._summary_notes_box)
-        summary_panel.add_widget(self._summary_body)
-        self._set_summary_rows([])
-        summary_panel.bind(width=self._layout_summary)
-        F.add_listener(self._layout_summary)  # the notes field's height follows its text
-
-        # Delete is low-emphasis and kept apart from OK: it is the one destructive action here.
-        summary_btns = BoxLayout(size_hint_y=None, height=S.BTN_H, spacing=S.GAP)
-        self._summary_delete_btn = StyledButton(
-            text="Delete session", icon=Icons.DELETE,
-            bg_color=C.BG_CARD, text_color=C.DANGER,
-            size_hint_x=None, width=dp(150),
-        )
-        self._summary_ok_btn = StyledButton(
-            text="OK", icon=Icons.CHECK,
-            bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM,
-            size_hint_x=None, width=dp(120),
-        )
-        summary_btns.add_widget(self._summary_delete_btn)
-        summary_btns.add_widget(Widget())
-        summary_btns.add_widget(self._summary_ok_btn)
-        summary_panel.add_widget(summary_btns)
-        # As tall as the card when it fits, else the space there is, scrolling the rest: like every popup's cap.
-        summary_scroll = ScrollView(size_hint=(1, None), do_scroll_x=False)
-        summary_scroll.add_widget(summary_panel)
-        self._summary_scroll = summary_scroll
-
-        def _fit_summary(*_a):
-            pad = self._summary.padding
-            summary_scroll.height = min(summary_panel.height, max(0, self._summary.height - pad[1] - pad[3]))
-
-        summary_panel.bind(height=_fit_summary)
-        self._summary.bind(height=_fit_summary, padding=_fit_summary)
-        self._summary.add_widget(summary_scroll)
-
-        # Shown by attaching, hidden by detaching: invisible attached buttons swallowed Start/Stop taps.
-        self._summary_host = float_root
-        self._summary_session_id = None
-
-        # ── Connection overlay: the theme's modal panel over the dimmed screen ──
-        self._overlay = ModalScrim(
-            size_hint=(1, 1),
-            pos_hint={"x": 0, "y": 0},
-            padding=dp(20),
-        )
-        overlay_panel = ModalPanel(size_hint_x=0.85, spacing=S.GAP_LG)
-        self._overlay_panel = overlay_panel
-
-        self._overlay_status = ThemedLabel(
-            text="",
-            font_size=F.BODY,
-            color=C.TEXT,
-            halign="center",
-            valign="middle",
-            size_hint_y=None,
-            height=dp(100),
-        )
-        self._overlay_status.bind(size=self._overlay_status.setter("text_size"))
-        overlay_panel.add_widget(self._overlay_status)
-
-        self._overlay_dots = ThemedLabel(
-            text="",
-            font_size=F.px(24),
-            color=C.PRIMARY,
-            size_hint_y=None,
-            height=dp(30),
-        )
-        overlay_panel.add_widget(self._overlay_dots)
-
-        self._overlay_cancel_btn = StyledButton(
-            text="Cancel",
-            size_hint=(0.4, None),
-            height=S.BTN_H,
-            pos_hint={"center_x": 0.5},
-            bg_color=C.DANGER,
-            bg_pressed=C.DANGER_DIM,
-        )
-        overlay_panel.add_widget(self._overlay_cancel_btn)
-
-        self._overlay_retry_btn = StyledButton(
-            text="Retry",
-            size_hint=(0.4, None),
-            height=S.BTN_H,
-            pos_hint={"center_x": 0.5},
-            bg_color=C.PRIMARY,
-            bg_pressed=C.PRIMARY_DIM,
-        )  # attached only on failure (show_overlay_retry): a hidden one left a blank slot in the card
-        self._overlay.add_widget(overlay_panel)
-
-        self._overlay.opacity = 0
-        self._overlay.size_hint = (0, 0)
-        self._overlay.size = (0, 0)
-        self._dot_event = None
-        self._dot_count = 0
-        float_root.add_widget(self._overlay)
+        self.end_card = EndCard(float_root)
+        self.connect_overlay = ConnectOverlay()
+        float_root.add_widget(self.connect_overlay)
 
         self.add_widget(float_root)
 
     def _reflow(self, *args) -> None:
         """Resize graph to fill viewport OR to leftover space if viewport is tall enough."""
-        needed = ("_scroll", "_graph_area", "_stats_card", "_bottom_bar")
+        needed = ("_scroll", "_graph_area", "stats", "_bottom_bar")
         if not all(hasattr(self, a) for a in needed):
             return
         # spacing between body's 3 children (graph, stats_card, bottom_bar) = 2 gaps
         spacing = S.GAP_SM * 2
         self._graph_area.height = _compute_graph_height_adaptive(
             viewport_h=self._scroll.height,
-            stats_h=self._stats_card.height,
+            stats_h=self.stats.height,
             bottom_h=self._bottom_bar.height,
             spacing=spacing,
             min_fixed_graph=dp(400),
@@ -704,10 +312,8 @@ class LiveSessionScreen(Screen):
         pass None/a non-plotted key to clear the marker. The line colours come with each point (add_point's `scored`),
         so a new mark recolours nothing already drawn."""
         self._training_key = key
-        if key is not None:
-            self._score_name_key = key
         self._rebuild_metric_legend(self._graph.visible_keys())
-        self._render_stats()  # the bar's first title names it
+        self.stats.set_scored(key)  # the strip's first title names it
 
     @property
     def graph(self) -> ScrollableGraphWidget:
@@ -746,101 +352,21 @@ class LiveSessionScreen(Screen):
             self._raw_graph.add_point({"eeg": sum(sample.get(k, 0.0) for k in BAND_KEYS)})
         self._band_graph.add_point(group_powers(lambda k: sample.get(k, 0.0)))
 
-    def update_timer(self, text: str) -> None:
-        if self._start_time_str:
-            self._timer_label.text = f"{self._start_time_str} · {text}"
-        else:
-            self._timer_label.text = text
-
     def clear_readout(self) -> None:
         """Back to the readout a fresh screen shows: no session's numbers, timer, start time, state or alert."""
-        self._last_score, self._score_name_key = NO_SCORE, None
-        self._render_stats()
-        self._start_time_str = ""
+        self.stats.clear()
+        self.header.clear()
         self._graph.set_start_wall_time(None)
-        self._timer_label.text = "00:00"
-        self._show_idle_state()
         self.hide_alert()
 
-    def _show_idle_state(self) -> None:
-        """The state a fresh screen shows: IDLE, no shamatha chip."""
-        self._last_state = "IDLE"
-        self.set_shamatha(False)
-
     def set_start_time(self, epoch: float) -> None:
-        """Cache session start wall-clock time, update combined timer, and pass to graph."""
-        lt = time.localtime(epoch)
-        self._start_time_str = f"{lt.tm_hour:02d}:{lt.tm_min:02d}"
+        """The session's start wall-clock time: the header's clock shows it, the graph's time axis counts from it."""
+        self.header.set_start_time(epoch)
         self._graph.set_start_wall_time(epoch)
-
-    def _apply_state_style(self, state: str) -> None:
-        self._state_label.text = state
-        self._state_label.bold = False
-        color_map = {
-            "Stable Focus": C.STATE_FOCUS,
-            "Subtle Distraction": C.STATE_SUBTLE,
-            "Gross Distraction": C.STATE_DISTRACTED,
-            "Sinking": C.STATE_SINKING,
-            "Neutral": C.STATE_NEUTRAL,
-            "IDLE": C.TEXT_SECONDARY,
-        }
-        self._state_label.color = color_map.get(state, C.STATE_NEUTRAL)
-
-    def update_state(self, state: str) -> None:
-        self._last_state = state
-        # While in the shamatha zone the chip owns the label; classified-state
-        # ticks are remembered but must not overwrite it.
-        if not self._shamatha_active:
-            self._apply_state_style(state)
-
-    def set_shamatha(self, active: bool) -> None:
-        """Toggle the 'in shamatha' emphasis on the status label (main thread)."""
-        self._shamatha_active = active
-        if active:
-            self._state_label.text = "SHAMATHA"
-            self._state_label.bold = True
-            self._state_label.color = readable_fg(C.SHAMATHA)
-            self._shamatha_bg.rgb = C.SHAMATHA[:3]
-            self._shamatha_bg.a = 1
-        else:
-            self._shamatha_bg.a = 0
-            self._apply_state_style(self._last_state)
-
-    def _position_shamatha_chip(self, *_args) -> None:
-        lbl = self._state_label
-        tw, th = lbl.texture_size
-        w = tw + dp(16)
-        h = th + dp(6)
-        cx = lbl.x + lbl.width / 2
-        cy = lbl.y + lbl.height / 2
-        self._shamatha_rect.pos = (cx - w / 2, cy - h / 2)
-        self._shamatha_rect.size = (w, h)
-
-    def update_stats(self, score: LiveScore) -> None:
-        self._last_score = score
-        self._render_stats()
-
-    def update_device_status(
-        self, connected: bool, device_name: str = "", connecting: bool = False
-    ) -> None:
-        if connecting:
-            name = device_name or "Device"
-            self._device_label.text = f"[{name}] ..."
-            self._device_label.color = C.CONNECTING
-        elif connected:
-            label = f"[{device_name}] *" if device_name else "[Mock EEG] *"
-            self._device_label.text = label
-            self._device_label.color = C.CONNECTED
-        elif device_name:
-            self._device_label.text = f"[{device_name}]"
-            self._device_label.color = C.DEVICE_IDLE
-        else:
-            self._device_label.text = "[Disconnected]"
-            self._device_label.color = C.DISCONNECTED
 
     def set_controls_running(self) -> None:
         self._btn_start.disabled = True
-        self._btn_duration_expand.disabled = True
+        self.duration.button.disabled = True
         self._btn_pause.text = "Pause"
         self._btn_pause.disabled = False
         self._btn_stop.disabled = False
@@ -848,7 +374,7 @@ class LiveSessionScreen(Screen):
 
     def set_controls_paused(self) -> None:
         self._btn_start.disabled = True
-        self._btn_duration_expand.disabled = True
+        self.duration.button.disabled = True
         self._btn_pause.text = "Resume"
         self._btn_pause.disabled = False
         self._btn_stop.disabled = False
@@ -856,7 +382,7 @@ class LiveSessionScreen(Screen):
 
     def set_controls_idle(self) -> None:
         self._btn_start.disabled = False
-        self._btn_duration_expand.disabled = False
+        self.duration.button.disabled = False
         self._btn_pause.disabled = True
         self._btn_pause.text = "Pause"
         self._btn_stop.disabled = True
@@ -865,176 +391,6 @@ class LiveSessionScreen(Screen):
     def _rebuild_band_legend(self) -> None:
         """Repopulate the band legend with only the band graph's visible series."""
         self._band_legend.show_graph(self._band_graph)
-
-    def _open_duration_popup(self, *_args) -> None:
-        """Open a modal Popup to pick a session duration preset.
-
-        Timed presets are laid out in a 2-column grid; "Free" (no timer) spans
-        the full width below so the list stays compact as presets grow.
-        """
-        def _make_btn(label, value):
-            is_active = (
-                (value is None and not self._current_timer_enabled)
-                or (
-                    value is not None
-                    and self._current_timer_enabled
-                    and value == self._current_timer_minutes
-                )
-            )
-            btn = StyledButton(
-                text=label,
-                bg_color=C.ACCENT if is_active else C.BG_CARD,
-                text_color=None if is_active else C.TEXT_SECONDARY,
-                bold=is_active,
-                size_hint_y=None,
-                height=dp(44),
-            )
-            btn.bind(on_release=lambda b, v=value: self._pick_from_popup(v))
-            return btn
-
-        timed = [(lbl, v) for lbl, v in _DURATION_PRESETS if v is not None]
-        free = [(lbl, v) for lbl, v in _DURATION_PRESETS if v is None]
-
-        grid = GridLayout(cols=2, spacing=S.GAP_SM, size_hint_y=None)
-        grid.bind(minimum_height=grid.setter("height"))
-        for lbl, v in timed:
-            grid.add_widget(_make_btn(lbl, v))
-
-        rows = [grid]
-        rows.extend(_make_btn(lbl, v) for lbl, v in free)
-
-        # Programs picker: jump straight to a saved program from the session
-        # screen. The button shows the loaded program's name when one is active.
-        programs_btn = StyledButton(
-            text=(f"Program: {self._session_program_current_name}"
-                  if self._session_program_current_name else "Programs…"),
-            bg_color=C.PRIMARY_DIM,
-            size_hint_y=None,
-            height=dp(44),
-        )
-        programs_btn.bind(on_release=lambda *_a: self._open_program_picker())
-        rows.append(programs_btn)
-
-        # The grid is one row widget but spans ceil(timed/2) visual rows — count those
-        # so the popup sizes to the real content height.
-        est = (len(timed) + 1) // 2 + len(free) + 1
-        self._duration_popup = make_scroll_popup("Session duration", rows, est_rows=est)
-        self._duration_popup.open()
-
-    def set_session_programs(self, programs: list, current_name: str = "") -> None:
-        """Cache the saved programs (+ the loaded one's name) for the picker."""
-        self._session_programs = programs or []
-        self._session_program_current_name = current_name or ""
-
-    def _open_program_picker(self) -> None:
-        """List saved programs; tapping one asks AppManager to load it."""
-        if self._duration_popup is not None:
-            self._duration_popup.dismiss()
-            self._duration_popup = None
-
-        def _pick(index):
-            popup.dismiss()
-            self.on_program_pick(index)
-
-        rows = []
-        if not self._session_programs:
-            rows.append(ThemedLabel(text="No saved programs", color=C.TEXT,
-                              size_hint_y=None, height=dp(44)))
-        else:
-            for i, entry in enumerate(self._session_programs):
-                name = entry.get("name", f"Program {i + 1}")
-                is_current = name == self._session_program_current_name
-                btn = StyledButton(
-                    text=name,
-                    bg_color=C.ACCENT if is_current else C.BG_CARD,
-                    text_color=None if is_current else C.TEXT_SECONDARY,
-                    bold=is_current,
-                    size_hint_y=None, height=dp(44),
-                )
-                btn.bind(on_release=lambda _b, idx=i: _pick(idx))
-                rows.append(btn)
-        cancel = cancel_button(size_hint_y=None, height=dp(44))
-        popup = make_scroll_popup("Choose program", rows, footer=cancel)
-        cancel.bind(on_release=lambda *_a: popup.dismiss())
-        popup.open()
-
-    def _pick_from_popup(self, value) -> None:
-        self.on_duration_preset(value)
-        if self._duration_popup is not None:
-            self._duration_popup.dismiss()
-            self._duration_popup = None
-
-    def refresh_duration_preset(self, timer_enabled: bool, timer_minutes: int,
-                                program_active: bool = False) -> None:
-        """Cache timer state and update the duration-picker label."""
-        self._current_timer_enabled = timer_enabled
-        self._current_timer_minutes = timer_minutes
-        self._program_active = program_active
-        self._apply_duration_picker_label()
-
-    def _apply_duration_picker_label(self) -> None:
-        """Update duration picker text."""
-        # Program mode owns the timer (its total drives the countdown) — show a
-        # large "P" instead of a duration so the user sees a program will run.
-        if self._program_active:
-            self._btn_duration_expand.set_label("P", large=True)
-        elif not self._current_timer_enabled:
-            self._btn_duration_expand.set_label("∞")
-        elif self._current_timer_minutes >= 60 and self._current_timer_minutes % 60 == 0:
-            self._btn_duration_expand.set_label(f"{self._current_timer_minutes // 60}h")
-        else:
-            self._btn_duration_expand.set_label(f"{self._current_timer_minutes}m")
-
-    def show_overlay(self, text: str = "Connecting...") -> None:
-        """Show semi-transparent connection overlay with animated dots."""
-        self._overlay_status.text = text
-        self._overlay.opacity = 1
-        self._overlay.size_hint = (1, 1)
-        if self._overlay_retry_btn.parent is not None:
-            self._overlay_panel.remove_widget(self._overlay_retry_btn)
-        self._overlay_cancel_btn.text = "Cancel"
-        self._dot_count = 0
-        if self._dot_event:
-            self._dot_event.cancel()
-        self._dot_event = Clock.schedule_interval(self._animate_dots, 0.5)
-
-    def update_overlay(self, text: str) -> None:
-        """Update the overlay status text."""
-        if self._overlay.opacity > 0:
-            self._overlay_status.text = text
-
-    def hide_overlay(self) -> None:
-        """Hide the connection overlay and remove from touch chain."""
-        self._overlay.opacity = 0
-        self._overlay.size_hint = (0, 0)
-        self._overlay.size = (0, 0)
-        if self._dot_event:
-            self._dot_event.cancel()
-            self._dot_event = None
-        self._overlay_dots.text = ""
-
-    def show_overlay_retry(self, text: str) -> None:
-        """Show failure state with Retry button."""
-        self._overlay_status.text = text
-        if self._overlay_retry_btn.parent is None:
-            self._overlay_panel.add_widget(self._overlay_retry_btn)
-        self._overlay_cancel_btn.text = "Close"
-        if self._dot_event:
-            self._dot_event.cancel()
-            self._dot_event = None
-        self._overlay_dots.text = ""
-
-    def _animate_dots(self, dt: float) -> None:
-        self._dot_count = (self._dot_count + 1) % 4
-        self._overlay_dots.text = ".  " * self._dot_count
-
-    @property
-    def overlay_cancel_btn(self) -> StyledButton:
-        return self._overlay_cancel_btn
-
-    @property
-    def overlay_retry_btn(self) -> StyledButton:
-        return self._overlay_retry_btn
 
     def show_alert(self, text: str) -> None:
         """Show a warning banner below the header."""
@@ -1060,130 +416,3 @@ class LiveSessionScreen(Screen):
         self._alert_label.text = ""
         self._alert_label.height = dp(0)
 
-    def show_summary(self, session_id: int, stats: dict, title: str = "") -> None:
-        """Show the post-session card: the session's name, its duration and scored stats, and a notes field."""
-        self._summary_session_id = session_id
-        self._summary_session_title = title
-        self._fit_summary_title()
-        self._set_summary_rows([
-            ("Duration", format_duration(int(stats.get("duration", 0) or 0))),
-            *session_score_rows(stats),  # the scored metric, its average and threshold
-            ("Time Above Threshold", format_duration(int(stats.get("time_above_threshold", 0) or 0))),
-            ("Longest Streak", format_duration(int(stats.get("longest_streak", 0) or 0))),
-        ])
-        self._summary_notes.text = ""
-        self._summary_scroll.scroll_y = 1  # each card opens at its title, wherever the last one was scrolled to
-        if self._summary.parent is None:
-            self._summary_host.add_widget(self._summary)
-
-    def _fit_summary_title(self, *_a) -> None:
-        """"Session saved · <name>" on one line over two columns, else the name on a line of its own under it; a name
-        too long for its line is cut with an ellipsis, so the title never takes more lines than that."""
-        title, name = self._summary_title, self._summary_session_title
-        if not name:
-            title.text = "Session saved"
-        elif self._summary_in_two_columns(title.width):  # the title spans the card's inside, as the columns do
-            title.text = _cut_to_width(f"Session saved \u00b7 {name}", title)
-        else:
-            title.text = "Session saved\n" + _cut_to_width(name, title)
-
-    def _make_summary_row(self) -> tuple[BoxLayout, ThemedLabel, ThemedLabel]:
-        row = BoxLayout(size_hint_y=None, height=self._summary_line_h)
-        # The label takes its text's width and the value the rest: a Metric value can be longer than its label.
-        label = ThemedLabel(text="", font_size=F.BODY, color=C.TEXT_SECONDARY, size_hint_x=None)
-        fit_width_to_text(label, S.GAP)
-        value = ThemedLabel(text="-", font_size=F.BODY, bold=True, color=C.TEXT, halign="right", valign="middle",
-                            shorten=True, shorten_from="right")
-        value.bind(size=value.setter("text_size"))
-        row.add_widget(label)
-        row.add_widget(value)
-        return row, label, value
-
-    def _set_summary_rows(self, rows: list[tuple[str, str]]) -> None:
-        """Show these (label, value) rows under the session's name; the card is as tall as its lines."""
-        card = self._summary_stats_card
-        while len(self._summary_row_pool) < len(rows):
-            self._summary_row_pool.append(self._make_summary_row())
-        for box, _label, _value in self._summary_row_pool:
-            if box.parent is not None:
-                card.remove_widget(box)
-        used = self._summary_row_pool[:len(rows)]
-        for (text, shown), (box, label, value) in zip(rows, used):
-            label.text, value.text = text, shown
-            card.add_widget(box)
-        self._summary_rows = [(label, value) for _box, label, value in used]
-        lines = len(rows)
-        card.height = lines * self._summary_line_h + max(lines - 1, 0) * card.spacing + card.padding[1] + card.padding[3]
-        self._layout_summary()
-
-    @staticmethod
-    def _summary_in_two_columns(inner_width: float) -> bool:
-        """Two columns from 520 dp inside the card: a landscape phone has ~670 dp there, a portrait one ~300."""
-        return inner_width >= dp(520)
-
-    def _layout_summary(self, *_a) -> None:
-        """Two columns on a wide card (a landscape phone): the stats left, the notes field over Save notes right, which
-        gives the notes a few lines and keeps OK well inside the screen. Else one column: the stats, then the notes
-        field as tall as Save notes beside it. Delete and OK stay under both."""
-        panel, card, body, box, holder = (self._summary_panel, self._summary_stats_card, self._summary_body,
-                                          self._summary_notes_box, self._summary_save_holder)
-        two = self._summary_in_two_columns(panel.width - panel.padding[0] - panel.padding[2])
-        if two:
-            body.orientation, body.height = "horizontal", card.height
-            box.orientation, box.height = "vertical", card.height
-            holder.size_hint_x = 1
-        else:
-            body.orientation, body.height = "vertical", card.height + S.GAP + self._notes_h()
-            box.orientation, box.height = "horizontal", self._notes_h()
-            holder.size_hint_x, holder.width = None, self._summary_save_notes_btn.width
-
-    @staticmethod
-    def _notes_h() -> float:
-        return F.box(44)  # two lines of the notes field's text, at any text size
-
-    def hide_summary(self) -> None:
-        if self._summary.parent is not None:
-            self._summary.parent.remove_widget(self._summary)
-        self._summary_session_id = None
-
-    @property
-    def summary_ok_btn(self) -> StyledButton:
-        return self._summary_ok_btn
-
-    @property
-    def summary_delete_btn(self) -> StyledButton:
-        return self._summary_delete_btn
-
-    @property
-    def summary_save_notes_btn(self) -> StyledButton:
-        return self._summary_save_notes_btn
-
-    @property
-    def summary_notes(self) -> str:
-        return self._summary_notes.text.strip()
-
-    @property
-    def summary_session_id(self):
-        return self._summary_session_id
-
-    def _choose_stats_mode(self, mode: str) -> None:
-        self.set_stats_mode(mode)
-        self.on_stats_mode(self._stats_mode)
-
-    @property
-    def stats_mode(self) -> str:
-        return self._stats_mode
-
-    def set_stats_mode(self, mode: str) -> None:
-        """Show the stats strip as live values or session averages, redrawn at once."""
-        self._stats_mode = mode if mode in ("live", "aggregate") else "live"
-        self._stats_toggle.show(self._stats_mode)
-        self._render_stats()
-
-    def _render_stats(self) -> None:
-        """The bar on the series the legend marks as scored (kept after the session ends), by its name on the graph."""
-        key = self._score_name_key
-        name = self._graph.series_name(key) if key else "Score"
-        titles, values = _format_stats_slots(self._stats_mode, name, self._last_score)
-        for title, value, title_text, value_text in zip(self._stat_title_labels, self._stat_labels, titles, values):
-            title.text, value.text = title_text, value_text

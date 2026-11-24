@@ -15,6 +15,7 @@ class LoadingOverlay(ModalScrim):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         panel = ModalPanel(size_hint_x=0.8)
+        self._panel = panel
 
         self._status = ThemedLabel(
             text="", font_size=F.BODY, color=C.TEXT,
@@ -45,10 +46,8 @@ class LoadingOverlay(ModalScrim):
 
     def on_touch_down(self, touch):
         # Modal from show() on, also before a delayed show paints: swallow taps so they don't reach the screen
-        # behind (e.g. a tap on a session row while it is being deleted).
-        if self._active:
-            return True
-        return super().on_touch_down(touch)
+        # behind (e.g. a tap on a session row while it is being deleted); its own buttons, if any, take theirs.
+        return super().on_touch_down(touch) or self._active
 
     def show(self, text: str = "Loading…", delay: float = 0.0) -> None:
         """Make the screen modal now and paint after `delay` seconds, so a job that ends sooner never flashes it."""

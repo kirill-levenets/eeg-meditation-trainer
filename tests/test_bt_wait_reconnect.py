@@ -147,8 +147,8 @@ def test_packets_without_contact_keep_the_wait_open(wait):
 def _retry_message(app) -> str:
     """The retry screen the last wait exit queued."""
     frames()
-    assert app._live_screen._overlay_retry_btn.parent is not None
-    return app._live_screen._overlay_status.text
+    assert app._live_screen.connect_overlay.retry_btn.parent is not None
+    return app._live_screen.connect_overlay._status.text
 
 
 def test_a_drop_after_the_connect_timeout_still_gets_its_reconnect(wait):
@@ -254,4 +254,4 @@ def test_every_wait_ending_names_the_headset_on_the_session_screen(wait, ending)
     ending(stream, tick)
     assert _gave_up(stream)
     _retry_message(app)
-    assert app._live_screen._device_label.text == "[Blue]"
+    assert app._live_screen.header._device_label.text == "[Blue]"
