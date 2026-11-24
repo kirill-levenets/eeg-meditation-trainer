@@ -7,7 +7,7 @@ import weakref
 
 import pytest
 from kivy.base import EventLoop
-from kivy.graphics import Canvas, Color, InstructionGroup
+from kivy.graphics import Canvas, Color, InstructionGroup, RoundedRectangle
 from kivy.uix.widget import Widget
 
 from app.ui.theme import THEMES, C, Card, CenteredTextInput, Divider, ThemedColor, ThemedLabel, ThemedTextInput
@@ -457,6 +457,32 @@ def test_bottom_nav_repaint(old, new):
         _assert_repainted(nav, old, new, "bottom nav")
         nav.active_tab = "history"
         _assert_repainted(nav, old, new, "bottom nav, another tab")
+    finally:
+        _unmount(nav)
+
+
+def test_only_the_active_tab_draws_its_marker_and_the_marker_follows_its_tab():
+    nav = BottomNav(tabs=[("Session", "session"), ("History", "history"), ("Settings", "settings")],
+                    size_hint_x=None, width=600)  # tabs 200 wide
+    _mount(nav)
+
+    def marker(key: str) -> list:
+        return [i for i in nav._tab_widgets[key]._indicator.canvas.before.children if isinstance(i, RoundedRectangle)]
+
+    def on_its_tab(key: str) -> bool:
+        [bar], indicator = marker(key), nav._tab_widgets[key]._indicator
+        return [*bar.pos, *bar.size] == pytest.approx([*indicator.pos, *indicator.size])  # the canvas keeps float32
+
+    try:
+        nav.active_tab = "history"
+        _pump()
+        assert marker("session") == [] and marker("settings") == [] and on_its_tab("history")
+        nav.width = 900  # the tabs widen to 300: the marker with its tab
+        _pump()
+        assert nav._tab_widgets["history"]._indicator.width == pytest.approx(300) and on_its_tab("history")
+        nav.active_tab = "session"
+        _pump()
+        assert marker("history") == [] and on_its_tab("session")
     finally:
         _unmount(nav)
 

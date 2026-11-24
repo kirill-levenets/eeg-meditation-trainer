@@ -50,63 +50,7 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
         self._fits_padding = padding is None and not vertical
         self._fit_measure: tuple = ((), 0.0)  # (what was measured, its one-line width)
         self._vertical = vertical
-        self._icon_extra = 0.0  # the icon's size over the button's font
-
-        self._label = Label(
-            text=self.text,
-            color=self.text_color,
-            font_size=self._text_font(),
-            bold=self.bold,
-            halign="center",
-            valign="middle",
-        )
-        self._label.bind(size=self._label.setter("text_size"))
-
-        self._icon_label = None
-        if self.icon and ICONS_AVAILABLE:
-            icon_kwargs = {"font_name": "Icons"}
-            if not self.text:
-                self._icon_extra = dp(6)
-                self._icon_label = Label(
-                    text=self.icon,
-                    font_size=self.font_size + self._icon_extra,
-                    color=self.text_color,
-                    halign="center",
-                    valign="middle",
-                    **icon_kwargs,
-                )
-                self._icon_label.bind(size=self._icon_label.setter("text_size"))
-                self.add_widget(self._icon_label)
-            elif vertical:
-                # Icon on top, text on bottom — mobile tab-bar convention.
-                self._icon_extra = dp(2)
-                self._icon_label = Label(
-                    text=self.icon,
-                    font_size=self.font_size + self._icon_extra,
-                    color=self.text_color,
-                    halign="center",
-                    valign="middle",
-                    size_hint_y=0.6,
-                    **icon_kwargs,
-                )
-                self._icon_label.bind(size=self._icon_label.setter("text_size"))
-                self._label.size_hint_y = 0.4
-                self.add_widget(self._icon_label)
-                self.add_widget(self._label)
-            else:
-                self._icon_extra = dp(4)
-                self._icon_label = Label(
-                    text=self.icon,
-                    font_size=self.font_size + self._icon_extra,
-                    color=self.text_color,
-                    size_hint_x=None,
-                    width=dp(26),
-                    **icon_kwargs,
-                )
-                self.add_widget(self._icon_label)
-                self.add_widget(self._label)
-        else:
-            self.add_widget(self._label)
+        self._build_children()
 
         self._confirming = False
         self._confirm_orig = None
@@ -115,8 +59,8 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
         self.bind(
             text=self._update_label,
             bold=self._update_label,
-            text_color=self._update_colors,
-            bg_color=self._on_bg_change,
+            text_color=self._paint_glyphs,
+            bg_color=self._repaint,
             size=self._redraw,
             pos=self._redraw,
             disabled=self._on_disabled,
@@ -127,7 +71,35 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
             self.bind(width=self._fit_padding, text=self._fit_padding, bold=self._fit_padding, icon=self._fit_padding)
             self._fit_padding()
         self._redraw()
-        C.add_listener(self._on_theme_change)
+        C.add_listener(self._repaint)
+
+    def _build_children(self) -> None:
+        """The text label, with the icon beside it, above it (vertical) or instead of it (no text)."""
+        self._label = Label(text=self.text, color=self.text_color, font_size=self._text_font(), bold=self.bold,
+                            halign="center", valign="middle")
+        self._label.bind(size=self._label.setter("text_size"))
+        self._icon_label, self._icon_extra = None, 0.0  # the icon's size over the button's font
+        if self.icon and ICONS_AVAILABLE:
+            if not self.text:
+                self._icon_extra, layout = dp(6), {"centred": True}
+            elif self._vertical:  # icon on top, text under it: the mobile tab-bar convention
+                self._icon_extra, layout = dp(2), {"centred": True, "size_hint_y": 0.6}
+                self._label.size_hint_y = 0.4
+            else:
+                self._icon_extra, layout = dp(4), {"centred": False, "size_hint_x": None, "width": dp(26)}
+            self._icon_label = self._make_icon_label(**layout)
+            self.add_widget(self._icon_label)
+        if self._icon_label is None or self.text:  # an icon-only button shows no text label
+            self.add_widget(self._label)
+
+    def _make_icon_label(self, centred: bool, **layout) -> Label:
+        """The icon glyph _icon_extra above the button's font; a centred one fills its box."""
+        label = Label(text=self.icon, font_name="Icons", font_size=self.font_size + self._icon_extra,
+                      color=self.text_color, **layout)
+        if centred:
+            label.halign, label.valign = "center", "middle"
+            label.bind(size=label.setter("text_size"))
+        return label
 
     def _text_font(self) -> float:
         return float(F.TINY) if self._vertical and self.icon else self.font_size  # a plain Label takes a plain size
@@ -214,13 +186,9 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
         self._confirming = False
         self._confirm_ev = None
 
-    def _on_theme_change(self, *args):
-        """Repaint: the disabled/outline fill and the press ring are drawn from the palette."""
-        self._apply_role_text()
-        self._redraw()
-
-    def _on_bg_change(self, *args):
-        """Background changed — AUTO contrast depends on it; re-resolve then repaint."""
+    def _repaint(self, *_args) -> None:
+        """A fill change (AUTO's glyph colour follows it) or a theme switch (the disabled and outline fills and the press
+        ring come from the palette): the glyph colour again, then the drawing."""
         self._apply_role_text()
         self._redraw()
 
@@ -239,13 +207,6 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
     def _update_label(self, *args):
         self._label.text = self.text
         self._label.bold = self.bold
-
-    def _update_colors(self, *args):
-        self._label.color = self.text_color
-        self._label.disabled_color = self.text_color
-        if self._icon_label:
-            self._icon_label.color = self.text_color
-            self._icon_label.disabled_color = self.text_color
 
     def _get_bg(self):
         if self.disabled:
@@ -284,19 +245,16 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
                     rounded_rectangle=[self.x, self.y, self.width, self.height, S.RADIUS],
                     width=dp(2),
                 )
-        # Disabled: dim BOTH label and icon to 60% of the max-contrast glyph for the
-        # (greyed) disabled bg. The greyed background already signals 'disabled', so the
-        # glyph stays legible (~4:1) instead of washing into a light card the way the
-        # theme's light TEXT_MUTED did. Enabled restores the live text colour; pressed
-        # leaves the glyph alone (only the background dims). Kivy's Label draws
-        # `disabled_color` (default white@.3 -> invisible on light cards) when disabled,
-        # so set it too, not just `color`.
-        fg = dimmed_fg(bg) if self.disabled else list(self.text_color)
-        self._label.color = fg
-        self._label.disabled_color = fg
-        if self._icon_label:
-            self._icon_label.color = fg
-            self._icon_label.disabled_color = fg
+        self._paint_glyphs()
+
+    def _paint_glyphs(self, *_args) -> None:
+        """The one writer of the text and icon colour: the glyph colour, or on a disabled button 60 % of the readable one
+        on its grey fill, legible (~4:1) without reading as live; pressed, only the fill dims. A disabled Label draws
+        disabled_color, so both are set."""
+        fg = dimmed_fg(self._get_bg()) if self.disabled else list(self.text_color)
+        for label in (self._label, self._icon_label):
+            if label is not None:
+                label.color = label.disabled_color = fg
 
     def on_state(self, *args):
         if self.state == "down":

@@ -671,6 +671,44 @@ class TestStyledButtonThemeText(unittest.TestCase):
             b.disabled = False
             self.assertEqual(list(b._label.color), list(b.text_color))   # restored on enable
 
+    def test_a_disabled_buttons_glyphs_stay_dimmed_when_its_text_colour_changes(self):
+        # A new text colour with the same fill (a preset re-selected) repaints no fill: the glyphs must not go live.
+        from app.ui.theme import C, Icons, dimmed_fg
+        from app.ui.widgets.styled_button import StyledButton
+        b = StyledButton(text="Save", icon=Icons.CHECK, bg_color=C.BG_CARD, text_color=C.TEXT_MUTED, disabled=True)
+        b.text_color = C.ACCENT
+        dimmed = dimmed_fg(b._get_bg())
+        for label in (b._label, b._icon_label):
+            self.assertEqual(list(label.color), dimmed)
+            self.assertEqual(list(label.disabled_color), dimmed)
+        b.disabled = False
+        self.assertEqual(list(b._label.color), list(b.text_color))
+        b.text_color = C.TEXT  # enabled, the glyphs take a new colour at once
+        self.assertEqual(list(b._label.color), list(b.text_color))
+        self.assertEqual(list(b._icon_label.color), list(b.text_color))
+
+
+class TestStyledButtonIcon(unittest.TestCase):
+    """An icon shows beside the text, above it on a vertical button, or alone on a button with no text."""
+
+    def test_the_icon_is_beside_above_or_instead_of_the_text(self):
+        from kivy.metrics import dp
+
+        from app.ui.theme import ICONS_AVAILABLE, Icons
+        from app.ui.widgets.styled_button import StyledButton
+        if not ICONS_AVAILABLE:
+            self.skipTest("no icon font")
+        beside = StyledButton(text="Save", icon=Icons.CHECK)
+        above = StyledButton(text="Stop", icon=Icons.STOP, vertical=True)
+        alone = StyledButton(text="", icon=Icons.PENCIL)
+        self.assertEqual(beside.children[::-1], [beside._icon_label, beside._label])
+        self.assertEqual((beside._icon_label.size_hint_x, beside._icon_label.width), (None, dp(26)))
+        self.assertEqual(above.children[::-1], [above._icon_label, above._label])
+        self.assertEqual((above._icon_label.size_hint_y, above._label.size_hint_y), (0.6, 0.4))
+        self.assertEqual(alone.children, [alone._icon_label])
+        self.assertEqual([b._icon_label.text for b in (beside, above, alone)], [Icons.CHECK, Icons.STOP, Icons.PENCIL])
+
+
 class TestStyledButtonPressRing(unittest.TestCase):
     """Issue #33 Layer 1 (B): press shows an edge-visible ring that contrasts with the
     SURROUNDING surface (light on dark themes, dark on light) — not the button fill."""

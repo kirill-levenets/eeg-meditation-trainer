@@ -103,6 +103,7 @@ class _NavTab(ButtonBehavior, BoxLayout):
         )
         self._label.bind(size=self._label.setter("text_size"))
         self._indicator = BoxLayout(size_hint_y=None, height=dp(3))
+        self._indicator.bind(pos=self._draw_indicator, size=self._draw_indicator)
 
         self.add_widget(self._label)
         self.add_widget(self._indicator)
@@ -110,31 +111,16 @@ class _NavTab(ButtonBehavior, BoxLayout):
         self._redraw()
 
     def _redraw(self, *args):
+        colour = C.PRIMARY if self.active else C.TEXT_MUTED
+        self._label.color = colour
+        if self._icon:
+            self._icon.color = colour
+        self._draw_indicator()
+
+    def _draw_indicator(self, *_args):
+        """The active tab's bar under its label; none under the others."""
         self._indicator.canvas.before.clear()
         if self.active:
-            self._label.color = C.PRIMARY
-            if self._icon:
-                self._icon.color = C.PRIMARY
             with self._indicator.canvas.before:
                 ThemedColor(C.PRIMARY)
-                RoundedRectangle(
-                    pos=self._indicator.pos,
-                    size=self._indicator.size,
-                    radius=[dp(2)],
-                )
-            self._indicator.bind(pos=self._redraw_indicator, size=self._redraw_indicator)
-        else:
-            self._label.color = C.TEXT_MUTED
-            if self._icon:
-                self._icon.color = C.TEXT_MUTED
-
-    def _redraw_indicator(self, *args):
-        if self.active:
-            self._indicator.canvas.before.clear()
-            with self._indicator.canvas.before:
-                ThemedColor(C.PRIMARY)
-                RoundedRectangle(
-                    pos=self._indicator.pos,
-                    size=self._indicator.size,
-                    radius=[dp(2)],
-                )
+                RoundedRectangle(pos=self._indicator.pos, size=self._indicator.size, radius=[dp(2)])
