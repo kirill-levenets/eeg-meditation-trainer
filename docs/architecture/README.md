@@ -9,7 +9,7 @@ How each subsystem works and why.
 | [metrics-scoring.md](metrics-scoring.md) | Metrics engine and its formulas, custom formulas, the scored metric (#51), the threshold in force (#83) | `app/metrics/`, `app/session/scoring.py`, `app/session/manager.py` |
 | [session.md](session.md) | Session state machine, the runner (its one writer), session names and labels, checkpoints (#30), the session ending path, timer, screen lock | `app/session/manager.py`, `app/session/session_run.py`, `app/session/timer_state.py`, `app/session/running_session.py`, `app/ui/session_controls.py`, `app/ui/session_labels.py`, `android_src/` |
 | [programs.md](programs.md) | Session programs: model, live series, Settings and picker controls, per-segment feedback | `app/session/session_program.py`, `app/ui/session_controls.py`, `app/ui/session_settings.py`, `app/ui/settings_screen.py` |
-| [audio.md](audio.md) | Audio engine: below/reward channels, cues, timer gong, MediaPlayer threading | `app/audio_feedback/noise.py` |
+| [audio.md](audio.md) | Audio engine: below/reward channels, cues, timer gong, MediaPlayer threading | `app/audio_feedback/` |
 | [storage.md](storage.md) | SQLite, write lock, DB paths and migrations, per-user settings registry, backup/restore and SAF, exports to shared storage | `app/storage/`, `app/settings/registry.py` |
 | [ui-theme.md](ui-theme.md) | Navigation, theme system and colour roles, shared widgets, modals | `app/ui/theme.py`, `app/ui/widgets/` |
 | [graphs.md](graphs.md) | `ScrollableGraphWidget`: fit, threshold steps, drawing cost, the run fold, touch routing, glyphs, fullscreen | `app/ui/raw_eeg_screen.py`, `app/ui/graph_runs.py`, `app/ui/graph_gestures.py`, `app/ui/graph_glyphs.py`, `app/ui/graph_scroll.py`, `app/ui/touch_utils.py` |

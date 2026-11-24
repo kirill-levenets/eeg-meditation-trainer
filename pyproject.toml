@@ -78,6 +78,10 @@ ignore = [
 "app/eeg/neurosky_stream.py" = ["T201", "BLE001", "PLR0912"]
 # Audio: print in __main__, broad except
 "app/audio_feedback/noise.py" = ["T201", "BLE001"]
+# The platform's players: broad except around each MediaPlayer or SoundLoader call (logged)
+"app/audio_feedback/players.py" = ["BLE001"]
+# A one-shot's slot: broad except around building, playing and releasing its player (logged)
+"app/audio_feedback/one_shot.py" = ["BLE001"]
 # DB: print in __main__
 "app/storage/database.py" = ["T201"]
 # Android MediaStore: broad except for platform safety

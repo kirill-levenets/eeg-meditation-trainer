@@ -270,9 +270,9 @@ def test_a_settings_test_played_during_the_scan_ends_when_the_session_starts(sca
     app, paired = scanning
     app._controls.start()
     app._settings_screen.audio.on_test_audio()
-    assert app._audio._test_active
+    assert app._audio.testing
     paired.arrive()
-    assert _connecting(app) and not app._audio._test_active and not app._audio.is_playing
+    assert _connecting(app) and not app._audio.testing and not app._audio.is_playing
 
 
 def test_a_scan_result_for_a_profile_picked_away_ends_the_start(scanning):

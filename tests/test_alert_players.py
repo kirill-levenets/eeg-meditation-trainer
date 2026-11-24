@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from kivy.core.audio import SoundLoader
 
-import app.audio_feedback.noise as noise_mod
+import app.audio_feedback.players as players_mod
 from app import android_jni
 from app.audio_feedback.noise import AudioEngine
 
@@ -19,7 +19,7 @@ def made(monkeypatch) -> list[tuple[str, bool, MagicMock]]:
         made.append((path, loop, player))
         return player
 
-    monkeypatch.setattr(noise_mod, "_make_noise_player", factory)
+    monkeypatch.setattr(players_mod, "make_player", factory)
     return made
 
 
@@ -41,7 +41,7 @@ def test_a_cue_on_the_tick_thread_plays_one_shot_through_the_platform_player(mad
     engine = AudioEngine()
     try:
         _on_tick_thread(engine.play_transition_cue)
-        assert [(path, loop) for path, loop, _ in made] == [(engine._kept("chime"), False)]
+        assert [(path, loop) for path, loop, _ in made] == [(engine._sounds.path("chime"), False)]
         made[0][2].play.assert_called_once()
         soundloader.assert_not_called()
     finally:
@@ -54,7 +54,7 @@ def test_every_alert_replays_its_one_player_and_releases_nothing_on_the_tick(mad
         for _ in range(3):
             for alert in (engine.play_transition_cue, engine._play_bell, engine.play_alert):
                 _on_tick_thread(alert)
-        assert [path for path, _, _ in made] == [engine._kept("chime"), engine._kept("bell"), engine._kept("disconnect")]
+        assert [path for path, _, _ in made] == [engine._sounds.path("chime"), engine._sounds.path("bell"), engine._sounds.path("disconnect")]
         for _, _, player in made:
             assert player.play.call_count == 3
             player.unload.assert_not_called()
@@ -66,8 +66,8 @@ def test_every_alert_replays_its_one_player_and_releases_nothing_on_the_tick(mad
 
 def test_on_android_an_alert_player_is_a_media_player_that_plays_once(monkeypatch):
     monkeypatch.setattr(android_jni, "on_android", lambda: True)
-    monkeypatch.setattr(noise_mod, "_AndroidMediaNoisePlayer", lambda path, loop: ("MediaPlayer", path, loop))
-    assert noise_mod._make_noise_player("chime.wav", loop=False) == ("MediaPlayer", "chime.wav", False)
+    monkeypatch.setattr(players_mod, "_AndroidMediaNoisePlayer", lambda path, loop: ("MediaPlayer", path, loop))
+    assert players_mod.make_player("chime.wav", loop=False) == ("MediaPlayer", "chime.wav", False)
 
 
 @pytest.fixture
@@ -76,7 +76,7 @@ def broken_media_player(monkeypatch):
         raise RuntimeError("MediaPlayer prepare failed")
 
     monkeypatch.setattr(android_jni, "on_android", lambda: True)
-    monkeypatch.setattr(noise_mod, "_AndroidMediaNoisePlayer", fail)
+    monkeypatch.setattr(players_mod, "_AndroidMediaNoisePlayer", fail)
 
 
 def test_on_android_an_alert_whose_media_player_fails_stays_silent_rather_than_use_soundloader(
@@ -84,7 +84,7 @@ def test_on_android_an_alert_whose_media_player_fails_stays_silent_rather_than_u
     engine = AudioEngine()
     try:
         _on_tick_thread(engine.play_transition_cue)
-        assert engine._chime_sound is None
+        assert engine._chime._player is None
         soundloader.assert_not_called()
     finally:
         engine.cleanup()
@@ -95,7 +95,7 @@ def test_on_android_a_gong_whose_media_player_fails_stays_silent_rather_than_use
     engine = AudioEngine()
     try:
         _on_tick_thread(engine.play_timer_sound)
-        assert engine._gong is None
+        assert engine._gong._player is None
         soundloader.assert_not_called()
     finally:
         engine.cleanup()
@@ -107,12 +107,12 @@ def test_on_android_the_settings_gong_test_plays_what_the_timer_end_will(broken_
     engine = AudioEngine()
     try:
         engine.play_timer_sound()
-        assert engine._gong is None
+        assert engine._gong._player is None
         soundloader.assert_not_called()
     finally:
         engine.cleanup()
 
 
 def test_on_android_a_noise_loop_whose_media_player_fails_still_falls_back(broken_media_player, monkeypatch):
-    monkeypatch.setattr(noise_mod, "_KivyNoisePlayer", lambda path, loop: ("SoundLoader", path, loop))
-    assert noise_mod._make_noise_player("rain.wav") == ("SoundLoader", "rain.wav", True)
+    monkeypatch.setattr(players_mod, "_KivyNoisePlayer", lambda path, loop: ("SoundLoader", path, loop))
+    assert players_mod.make_player("rain.wav") == ("SoundLoader", "rain.wav", True)

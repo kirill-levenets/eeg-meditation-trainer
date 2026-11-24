@@ -2,7 +2,7 @@
 
 import pytest
 
-import app.audio_feedback.noise as noise_mod
+import app.audio_feedback.players as players_mod
 from app.audio_feedback.noise import AudioEngine
 from app.session.manager import SessionState
 from tests._app import frames, reload_with, start_ticked_by_hand
@@ -29,7 +29,7 @@ class _FakePlayer:
 
 @pytest.fixture
 def engine(monkeypatch):
-    monkeypatch.setattr(noise_mod, "_make_noise_player", _FakePlayer)
+    monkeypatch.setattr(players_mod, "make_player", _FakePlayer)
     e = AudioEngine()
     e.prepare_feedback({"tone": ("tone", ""), "heartbeat": ("heartbeat", "")}, "tone")
     e.set_reward("heartbeat")
@@ -75,7 +75,7 @@ def test_stop_after_pause_still_tears_the_players_down(engine):
 
 def test_the_pause_button_twice_brings_the_same_sounds_back(fresh_app, monkeypatch):
     app = fresh_app
-    monkeypatch.setattr(noise_mod, "_make_noise_player", _FakePlayer)
+    monkeypatch.setattr(players_mod, "make_player", _FakePlayer)
     reload_with(app, feedback_source="tone", reward_source="heartbeat")
     start_ticked_by_hand(app)  # the test writes the session: its commands run at once, their events on frames()
     engine = app._audio
