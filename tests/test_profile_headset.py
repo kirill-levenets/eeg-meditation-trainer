@@ -9,7 +9,7 @@ import pytest
 
 import app.ui.headset as headset_module
 from app.config import APP
-from app.eeg.neurosky_stream import NeuroSkyStream
+from app.eeg import bt_links
 from app.session.session_run import Phase
 from app.ui.headset import Headset
 from tests._app import popups
@@ -374,7 +374,7 @@ def test_start_with_no_mindwave_paired_says_why(app, paired, monkeypatch, device
     _load(app, _profile(app, "B"))
     paired.arrive()
     if callable(devices):
-        monkeypatch.setattr(NeuroSkyStream, "scan_paired_devices", staticmethod(devices))
+        monkeypatch.setattr(bt_links, "scan_paired", devices)
     else:
         paired.devices.extend(devices)
     app._controls.start()

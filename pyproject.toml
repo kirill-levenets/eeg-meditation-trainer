@@ -74,8 +74,11 @@ ignore = [
 "app/eeg/mock_stream.py" = ["T201"]
 "app/eeg/mock_stream_v2.py" = ["T201"]
 "app/session/manager.py" = ["T201", "BLE001"]
-# BT protocol: print in __main__, broad except, complex parser
-"app/eeg/neurosky_stream.py" = ["T201", "BLE001", "PLR0912"]
+# BT link: broad except around each socket, JNI and serial call (logged)
+"app/eeg/neurosky_stream.py" = ["BLE001"]
+"app/eeg/bt_links.py" = ["BLE001"]
+# ThinkGear protocol: print in the __main__ demo, a parser branched by packet code
+"app/eeg/thinkgear.py" = ["T201", "PLR0912"]
 # Audio: print in __main__, broad except
 "app/audio_feedback/noise.py" = ["T201", "BLE001"]
 # The platform's players: broad except around each MediaPlayer or SoundLoader call (logged)

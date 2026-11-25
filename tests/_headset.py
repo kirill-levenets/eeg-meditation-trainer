@@ -2,7 +2,7 @@
 from types import SimpleNamespace
 
 import app.ui.headset as headset
-from app.eeg.neurosky_stream import NeuroSkyStream
+from app.eeg import bt_links
 
 
 def fake_paired(monkeypatch) -> SimpleNamespace:
@@ -10,7 +10,7 @@ def fake_paired(monkeypatch) -> SimpleNamespace:
     would run it."""
     devices: list[dict] = []
     queued: list = []
-    monkeypatch.setattr(NeuroSkyStream, "scan_paired_devices", staticmethod(lambda: list(devices)))
+    monkeypatch.setattr(bt_links, "scan_paired", lambda: list(devices))
     monkeypatch.setattr(headset, "threading", SimpleNamespace(Thread=lambda target, **k: SimpleNamespace(start=target)))
     monkeypatch.setattr(headset, "Clock", SimpleNamespace(schedule_once=lambda cb, *a, **k: queued.append(cb)))
 

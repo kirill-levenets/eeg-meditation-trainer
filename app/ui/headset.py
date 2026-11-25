@@ -8,7 +8,7 @@ from kivy.clock import Clock
 
 from app.config import APP
 from app.crash_handler import report_soft_error
-from app.eeg.neurosky_stream import NeuroSkyStream
+from app.eeg import bt_links
 from app.logger import logger
 from app.settings.registry import BOOL, Setting, held
 from app.ui.app_context import AppContext
@@ -162,7 +162,7 @@ class Headset:
         """The paired devices, listed off the main thread, to `then` on the main thread ([] when listing fails)."""
         def run():
             try:
-                devices = NeuroSkyStream.scan_paired_devices()
+                devices = bt_links.scan_paired()
             except Exception as e:  # noqa: BLE001 - a failed scan finds nothing: the headset is picked by hand; logged
                 logger.warning(f"BT scan failed: {e}")
                 devices = []

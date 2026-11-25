@@ -2,12 +2,14 @@
 lock, the native toast, the Bluetooth permissions and thread priority, the crash report's platform and the Bluetooth
 backend (#108)."""
 import sys
+import threading
 import types
 from unittest.mock import MagicMock
 
 import pytest
 
 from app import android_jni, crash_handler
+from app.eeg import bt_links
 from app.eeg.neurosky_stream import NeuroSkyStream
 from app.keep_awake import KeepAwake
 from app.ui.toast import android_toast
@@ -117,7 +119,7 @@ def test_off_android_the_native_toast_is_a_logged_no_op(monkeypatch):
 
 
 def test_bluetooth_permissions_are_asked_through_the_activity(monkeypatch):
-    monkeypatch.setattr("app.eeg.neurosky_stream.time.sleep", lambda _s: None)
+    monkeypatch.setattr("app.eeg.bt_links.time.sleep", lambda _s: None)
     asked = []
     activity = types.SimpleNamespace(checkSelfPermission=lambda perm: -1,
                                      requestPermissions=lambda perms, code: asked.append((list(perms), code)))
@@ -126,7 +128,7 @@ def test_bluetooth_permissions_are_asked_through_the_activity(monkeypatch):
         "android.content.pm.PackageManager": types.SimpleNamespace(PERMISSION_GRANTED=0),
         "android.os.Build$VERSION": types.SimpleNamespace(SDK_INT=33),
     })
-    NeuroSkyStream._request_bt_permissions()
+    bt_links.request_bt_permissions()
     [(perms, code)] = asked
     assert code == 1 and "android.permission.BLUETOOTH_CONNECT" in perms and len(perms) == 5
 
@@ -149,15 +151,10 @@ def test_the_crash_report_names_android_when_android_jni_says_so(monkeypatch):
     assert not crash_handler._platform_string().startswith("Android (")
 
 
-def test_the_scan_and_the_connect_take_the_android_backend(monkeypatch):
+def test_the_scan_and_the_link_take_the_android_backend(monkeypatch):
     monkeypatch.setattr(android_jni, "on_android", lambda: True)
-    monkeypatch.setattr(NeuroSkyStream, "_scan_paired_android",
+    monkeypatch.setattr(bt_links.AndroidRfcomm, "scan_paired",
                         staticmethod(lambda: [{"name": "MindWave", "address": "AA"}]))
-    assert NeuroSkyStream.scan_paired_devices() == [{"name": "MindWave", "address": "AA"}]
-    stream = NeuroSkyStream()
-    stream.set_device("AA:BB", "MindWave")
-    picked = []
-    for backend in ("android", "desktop", "windows"):
-        monkeypatch.setattr(stream, f"_connect_{backend}", lambda backend=backend: picked.append(backend))
-    stream._connect_bluetooth()
-    assert picked == ["android"]
+    assert bt_links.scan_paired() == [{"name": "MindWave", "address": "AA"}]
+    assert type(bt_links.link_for("AA:BB", "MindWave", threading.Event())) is bt_links.AndroidRfcomm
+    assert type(bt_links.link_for("/tmp/mindwave_b", "splitter", threading.Event())) is bt_links.SerialDevice
