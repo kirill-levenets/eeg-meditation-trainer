@@ -160,9 +160,8 @@ class SessionControls:
         """Main thread: the session's events, its runner's for the current run, and those its start and a program's end
         raise here; the screen's part of each goes to `ShownSession.show`."""
         match event:
-            case Connected(on_mock=on_mock):
-                if not on_mock:
-                    self._headset.show_selected()
+            case Connected():
+                self._headset.show_selected()  # the headset's label, the mock's included
                 self._shown.show(event)
             case StartFailed(message=message):
                 self._shown.owner = None  # no session came of the start, which emptied the display

@@ -82,7 +82,7 @@ class Headset:
         label, selected = self.name(), self.stream._device_address
         if APP.USE_MOCK_DEVICE:
             self._shown_link = None
-            self._session_header.update_device_status(False, device_name=MOCK_LABEL)
+            self._session_header.update_device_status(True, device_name=MOCK_LABEL)  # the mock is always there
             self._device_section.update_device_status(False, meta=f"Saved device: {label}" if selected else "")
             return
         connected = self.stream.is_connected

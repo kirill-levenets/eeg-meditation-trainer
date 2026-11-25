@@ -28,9 +28,9 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   On app exit the socket is not closed explicitly (`on_stop`): the kernel closes it while BlueZ may keep the ACL link, for a faster reconnect at the next launch.
   A session whose headset sends no packets for `STALE_DATA_THRESHOLD` (10 s) is stopped and saved (`SessionWatch.check_stale`, `app/session/session_watch.py`, `RunningSession.watch`;
   each tick it also checks the recording limit, follows the headset's link and warns once of a low battery or power-line noise).
-  The selected headset's link as it is is drawn by `Headset.show_selected`, on the Session screen's label (`[name] *` connected, `[name]` not) and in Settings › Device's status line:
+  The selected headset's link as it is is drawn by `Headset.show_selected`, on the Session screen's label (its marker: a green dot connected, a grey ring not) and in Settings › Device's status line:
   at a pick or rename, a profile load, a mode change and every session's teardown, and at each change of the link.
-  While a session runs, its ticks follow the link (`LinkChanged`): a lost link shows as connecting (`[name] ...`), since the reader reconnects, and plays the disconnect alert.
+  While a session runs, its ticks follow the link (`LinkChanged`): a lost link shows as connecting (an amber ring), since the reader reconnects, and plays the disconnect alert.
   Outside a session a 1 s main-thread watch follows it (`Headset._watch_link`), since the link outlives sessions and its reader reconnects or gives up on its own: after a session the label says whether the link is still up.
   In mock mode the label shows the mock and Settings the saved headset; only the BT wait's connecting screen draws its own (`Connecting`).
 - **The selected headset is the active profile's own, or none.**

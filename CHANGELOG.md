@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **A marker before the headset's name on the Session screen** (#147): a grey ring when the headset isn't connected, an amber ring while it connects, a green dot while it is connected (between sessions and while paused too), a red dot while a session records.
+  It replaces the `*` and `...` after the name; ring or dot tells the connection apart without its colour.
 - **Locked-screen sessions: what the phone needs to allow them** (#104): some phones close apps in the background even with the session's notification showing, as Huawei's power manager does.
   At the first start the app now says what your phone needs and opens the screens: **Battery** (Android's battery optimisation) and, on Huawei and Honor, **App launch** (Manage manually), or **App info** on other makers known for this.
   Nothing changes unless you allow it there; the same buttons are under Settings › Device › Locked-screen sessions.

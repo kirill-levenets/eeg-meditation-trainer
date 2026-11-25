@@ -53,6 +53,18 @@ If the device won't connect:
 8. Test with manufacturer's app — if it also
    can't connect, the headset may be faulty
 
+## Headset Marker
+
+On the Session screen a marker before the
+headset's name shows its connection:
+grey ring — not connected;
+amber ring — connecting;
+green dot — connected (between sessions
+and while paused too);
+red dot — a session is recording.
+In demo mode (Use Mock Data) the dot is
+green: the demo headset is always there.
+
 ## Several Headsets
 
 Every MindWave has the same Bluetooth name.

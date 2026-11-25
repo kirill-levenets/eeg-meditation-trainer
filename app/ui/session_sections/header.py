@@ -2,12 +2,68 @@
 SHAMATHA pill."""
 import time
 
-from kivy.graphics import Color, RoundedRectangle
+from kivy.graphics import Color, Ellipse, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 
 from app.ui.device_labels import MOCK_LABEL
-from app.ui.theme import C, F, S, ThemedLabel, readable_fg
+from app.ui.theme import C, F, S, ThemedLabel, readable_fg, with_contrast
+
+
+class HeadsetLabel(ThemedLabel):
+    """The headset's name after its marker: a grey ring not connected, an amber ring connecting, a green dot connected,
+    a red dot recording (a session running on it; a paused one is connected). The ring or dot tells the link without
+    its colour; recording beside connected is told by the running clock too."""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._link = "off"  # "off" | "connecting" | "connected"
+        self._recording = False
+        with self.canvas.after:  # a ring is its disc with a hole in the screen's colour, a dot one in its own colour
+            self._paint = Color(1, 1, 1, 1)
+            self._disc = Ellipse(size=(0, 0))
+            self._hole_paint = Color(1, 1, 1, 1)
+            self._hole = Ellipse(size=(0, 0))  # never resized to 0: Kivy keeps drawing a zero-size Ellipse's last shape
+        self.bind(pos=self._draw, size=self._draw, texture_size=self._draw, font_size=self._fit_padding)
+        C.add_listener(self._draw)
+        self._fit_padding()
+
+    @property
+    def marker(self) -> tuple[str, str]:
+        """The marker drawn now: ("ring" or "dot", its colour role)."""
+        if self._link == "connecting":
+            return "ring", "CONNECTING"
+        if self._link == "connected":
+            return "dot", "RECORDING" if self._recording else "CONNECTED"
+        return "ring", "TEXT_SECONDARY"
+
+    def show(self, name: str, link: str) -> None:
+        self.text = f"[{name}]"
+        self._link = link
+        self._draw()
+
+    def set_recording(self, recording: bool) -> None:
+        self._recording = recording
+        self._draw()
+
+    def _marker_size(self) -> tuple[float, float]:
+        """(its diameter, its gap to the name): it follows the text size."""
+        return self.font_size * 0.75, self.font_size * 0.4
+
+    def _fit_padding(self, *_args) -> None:
+        diameter, gap = self._marker_size()
+        self.padding = [diameter + gap, 0, 0, 0]  # the marker sits in it: centred with the name as one
+
+    def _draw(self, *_args) -> None:
+        shape, role = self.marker
+        bg = C.resolve(C.BG)  # the screen's, which the label sits on
+        self._paint.rgba = (*with_contrast(C.resolve(getattr(C, role)), bg), 1)
+        self._hole_paint.rgba = self._paint.rgba if shape == "dot" else bg
+        diameter, _gap = self._marker_size()
+        cx, cy = self.center_x - self.texture_size[0] / 2 + diameter / 2, self.center_y
+        self._disc.pos, self._disc.size = (cx - diameter / 2, cy - diameter / 2), (diameter, diameter)
+        hole = diameter - 2 * max(1.0, diameter * 0.16)
+        self._hole.pos, self._hole.size = (cx - hole / 2, cy - hole / 2), (hole, hole)
 
 
 class SessionHeader(BoxLayout):
@@ -16,7 +72,7 @@ class SessionHeader(BoxLayout):
     def __init__(self) -> None:
         super().__init__(size_hint_y=None, height=self._box_height(), spacing=S.GAP_SM)
         F.add_listener(self._fit_height)
-        self._device_label = ThemedLabel(
+        self._device_label = HeadsetLabel(
             text=f"[{MOCK_LABEL}]",
             size_hint_x=1 / 3,
             color=C.DEVICE_IDLE,
@@ -121,13 +177,9 @@ class SessionHeader(BoxLayout):
         self._shamatha_rect.size = (w, h)
 
     def update_device_status(self, connected: bool, device_name: str, connecting: bool = False) -> None:
-        """The headset: `[name] ...` connecting, `[name] *` connected, `[name]` neither."""
-        if connecting:
-            self._device_label.text = f"[{device_name}] ..."
-            self._device_label.color = C.CONNECTING
-        elif connected:
-            self._device_label.text = f"[{device_name}] *"
-            self._device_label.color = C.CONNECTED
-        else:
-            self._device_label.text = f"[{device_name}]"
-            self._device_label.color = C.DEVICE_IDLE
+        """The headset's name and its link: connecting, connected or neither."""
+        self._device_label.show(device_name, "connecting" if connecting else "connected" if connected else "off")
+
+    def set_recording(self, recording: bool) -> None:
+        """A session running (recording) or not: paused, ended, not started."""
+        self._device_label.set_recording(recording)

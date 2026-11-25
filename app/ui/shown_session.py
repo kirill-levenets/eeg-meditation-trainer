@@ -20,7 +20,6 @@ from app.session.session_events import (
 )
 from app.session.session_program import PROGRAM_FORMULA_KEYS
 from app.ui.app_context import AppContext
-from app.ui.device_labels import MOCK_LABEL
 from app.ui.graph_series import show_program_series
 from app.ui.session_labels import session_title
 from app.ui.theme import C
@@ -56,16 +55,17 @@ class ShownSession:
         match event:
             case Ticked():
                 self._show_tick(event)
-            case Connected(on_mock=on_mock):
-                if on_mock:
-                    screen.header.update_device_status(True, MOCK_LABEL)  # a headset's is the headset's (show_selected)
+            case Connected():
                 screen.header.update_state("Running")
+                screen.header.set_recording(True)
                 screen.set_start_time(self._session.manager.started_at)
                 screen.connect_overlay.hide()  # the session starts its feedback right after (RunningSession._deliver)
             case Paused():
                 screen.set_controls_paused()
+                screen.header.set_recording(False)
             case Resumed():
                 screen.set_controls_running()
+                screen.header.set_recording(True)
             case SegmentStarted(key=key, line_name=line_name):
                 if line_name is not None:  # a custom segment's line: labelled and shown
                     screen.graph.set_series_name(key, line_name)
@@ -176,11 +176,12 @@ class ShownSession:
         logger.info(f"on_resume: refresh complete in {time.monotonic() - started:.3f}s")
 
     def idle(self) -> None:
-        """The screen's part of every teardown: idle controls, no training mark, no shamatha pill (the headset's label is
-        the headset's: Headset.show_selected)."""
+        """The screen's part of every teardown: idle controls, no training mark, no shamatha pill, not recording (the
+        headset's link is the headset's: Headset.show_selected)."""
         self._live_screen.set_training_series(None)
         self._live_screen.set_controls_idle()
         self._live_screen.header.set_shamatha(False)
+        self._live_screen.header.set_recording(False)
 
     def finished(self, stats: dict | None, session_id: int | None) -> None:
         """An ending's last: FINISHED with the saved duration (the clock froze at a lock), History told, and the end card
