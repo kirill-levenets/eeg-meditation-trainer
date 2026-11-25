@@ -7,7 +7,7 @@ from kivy.core.text import Label as CoreLabel
 from kivy.core.window import Window
 
 from app.eeg.band_spec import BANDS, GROUP_NAMES, GROUPS, group_powers, range_text
-from app.eeg.neurosky_stream import BAND_NAMES
+from app.eeg.thinkgear import BAND_NAMES
 from app.metrics.custom_formula import ALLOWED_VARIABLES
 from app.ui.diary_screen import DiaryScreen, detail_graph_data
 from app.ui.live_session import LiveSessionScreen

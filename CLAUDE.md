@@ -58,7 +58,7 @@ Read it before changing that subsystem.
 ### Module map
 
 - `app/eeg/`
-  — `neurosky_stream.py` (real headset: Bluetooth RFCOMM / pyserial, ThinkGear protocol), `band_spec.py` (the 8 bands and 5 groups:
+  — `neurosky_stream.py` (the real headset's reader), `bt_links.py` (its links: Android, Linux, Windows RFCOMM and a serial path), `thinkgear.py` (the protocol), `band_spec.py` (the 8 bands and 5 groups:
   key, name, Hz range, in protocol order), `mock_stream_v2.py` (mock headset), `buffer.py` (rolling buffers). → [eeg-bluetooth](docs/architecture/eeg-bluetooth.md)
 - `app/metrics/`
   — `engine.py` `MetricsEngine` (meditation, shamatha, distraction/sinking ported from the original Vernihor app, subtle distraction;

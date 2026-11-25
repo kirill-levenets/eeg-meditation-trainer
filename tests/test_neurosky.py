@@ -1,14 +1,15 @@
 """Tests for NeuroSky ThinkGear parser and stream interface."""
 import unittest
 
-from app.eeg.neurosky_stream import (
+from app.eeg import bt_links
+from app.eeg.neurosky_stream import NeuroSkyStream
+from app.eeg.thinkgear import (
     BAND_NAMES,
     CODE_ASIC_EEG_POWER,
     CODE_ATTENTION,
     CODE_MEDITATION,
     CODE_POOR_SIGNAL,
     CODE_RAW_WAVE,
-    NeuroSkyStream,
     ThinkGearParser,
 )
 
@@ -182,7 +183,7 @@ class TestNeuroSkyStreamInterface(unittest.TestCase):
 
     def test_scan_paired_devices_returns_list_on_desktop(self):
         # On desktop, should return list of paired devices via bluetoothctl
-        devices = NeuroSkyStream.scan_paired_devices()
+        devices = bt_links.scan_paired()
         self.assertIsInstance(devices, list)
         for dev in devices:
             self.assertIn("name", dev)

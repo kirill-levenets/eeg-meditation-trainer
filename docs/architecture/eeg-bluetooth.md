@@ -5,13 +5,14 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 ## Sources
 
-- **EEG sources** (`app/eeg/`): `mock_stream_v2.py` (mock with frequency-based synthesis, NeuroSky-compatible format) and `neurosky_stream.py` (real Bluetooth RFCOMM / pyserial, ThinkGear protocol).
+- **EEG sources** (`app/eeg/`): `mock_stream_v2.py` (mock with frequency-based synthesis, NeuroSky-compatible format) and `neurosky_stream.py` (the real headset's reader and its sample);
+  `bt_links.py` (the links to the headset) and `thinkgear.py` (the ThinkGear protocol: its packet codes and `ThinkGearParser`).
   Both produce 8 band powers, a raw waveform (512 Hz from the headset; the mock synthesizes 64 samples per 0.5 s tick) and eSense attention/meditation.
   The real stream tracks `_last_packet_time` for stale-data detection and parses battery level (code 0x01, though TGAM hardware doesn't send it); `reset_sample_state()` clears its cached values for a new session.
 - **The bands** (`app/eeg/band_spec.py`):
   the 8 bands in their `ASIC_EEG_POWER` (0x83) order, each with the app's name (Alpha 1 for NeuroSky's "low-alpha", matching the custom-formula variables) and its ThinkGear protocol range (delta 0.5–2.75 Hz … gamma2 41–49.75 Hz).
   It also holds the 5 grouped bands, each spanning its sub-bands (the hardware's bands leave gaps: 9.25–10, 16.75–18 and 39.75–41 Hz).
-  `neurosky_stream.BAND_NAMES` takes its order from it; the band table and the live and diary band graphs take their names and their 5-band sums (`group_powers`) from it.
+  `thinkgear.BAND_NAMES` takes its order from it; the band table and the live and diary band graphs take their names and their 5-band sums (`group_powers`) from it.
   So do the metrics engine (`derive_bands`, `total_power`), the formula replay (`formula_vars_from_row`) and the live band record, so a replayed formula sees exactly the live inputs.
   The band graphs share one scale table and one colour table with the band table's bars (`band_totals.BAND_SCALES` / `BAND_COLORS`).
   The mock's `BAND_FREQ_RANGES` (`mock_stream_v2.py`) are its own invented synthesis bands, not these.
@@ -19,6 +20,9 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 ## Connection
 
 - NeuroSky Bluetooth uses pyjnius on Android, a Python `BTPROTO_RFCOMM` socket on Linux, and pyserial over a virtual COM port on Windows.
+  Each is a `Link` in `bt_links.py` (`AndroidRfcomm`, `LinuxRfcomm`, `WindowsSerial`, and `SerialDevice` for a `--serial` path), which owns its handles and connects, reads and closes them;
+  the platform is told apart in one place (`_platform_link`), which picks the link (`link_for`) and the paired-device scan (`scan_paired`, each platform's next to its link).
+  `NeuroSkyStream.start()` makes the one link to the selected headset; the reader connects, reads and reconnects through it.
   Desktop Linux falls back to PyBluez when `socket.AF_BLUETOOTH` is missing (common in PyInstaller bundles).
   The link is kept open between sessions (a session stop doesn't close it) to avoid RFCOMM EBUSY and ThinkGear reinit failures.
   On app exit the socket is not closed explicitly (`on_stop`): the kernel closes it while BlueZ may keep the ACL link, for a faster reconnect at the next launch.
@@ -57,22 +61,23 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 - **The MindWave serves one RFCOMM channel; a connected socket nobody drains stalls its transmitter until the headset is power-cycled.**
   So `NeuroSkyStream`'s reader lifecycle must never orphan one, and **at most one reader thread may exist**.
   That single-reader invariant is the real guarantee:
-  readers share `_bt_socket`/`_running`/`_connected`, so with two alive a late reader's `_adopt_socket` overwrites the live one's socket reference and its failure path kills the live session, which the epoch check cannot prevent.
+  readers share the stream's link and `_running`/`_connected`, so with two alive a late reader's connect overwrites the live one's link and its failure path kills the live session, which the epoch check cannot prevent.
   `start()` bumps `_connect_epoch`, passes it to `_read_loop(epoch)` and **returns a bool**: False (with `_last_connect_error` set) when refused, for no device or a previous reader still alive ("Previous connection is still closing").
-  `stop()` sets `_stop_event`, bumps the epoch and closes the socket **before** `join(_STOP_JOIN_TIMEOUT=5s)`; the close interrupts **every** blocking point:
-  Android `connect()` (`_run_connect_attempts` publishes each socket as `_pending_socket` before `connect()` and re-checks `_running` after, so `stop()` either closes it or the reader sees the stop;
+  `stop()` sets `_stop_event`, bumps the epoch and closes the link **before** `join(_STOP_JOIN_TIMEOUT=5s)`; the close interrupts **every** blocking point:
+  a connect (`RfcommLink._connect_abortable`, the Android and Linux links' base, publishes each socket as the link's `_pending` before `connect()` and checks the stop event after, so `stop()` either closes it or the reader sees the stop;
   a `BluetoothSocket.close()` from another thread aborts `connect()`);
   Android read (socket close);
-  desktop `connect()`/`recv()` (`_shutdown_before_close` → `shutdown(SHUT_RDWR)` on native and PyBluez sockets: on Linux a cross-thread `close()` alone doesn't wake them);
+  desktop `connect()`/`recv()` (`bt_links._shutdown_before_close` → `shutdown(SHUT_RDWR)` on native and PyBluez sockets: on Linux a cross-thread `close()` alone doesn't wake them);
   serial read (a `select` 0.5 s poll: a cross-thread `os.close()` doesn't wake `os.read()`);
-  and the back-off sleeps (`_stop_event.wait`).
+  and the back-off sleeps (`_stop_event.wait`, Linux's busy-channel wait included).
   An aborted connect raises instead of falling through to the next method, and the superseded reader returns quietly without writing `_last_connect_error`.
   A headset-off connect chain takes ~3×7.7 s on the phone; without the abort `stop()` would block the main thread for the full join.
   If the join still times out, `stop()` **keeps** `_thread` so `start()` refuses (nulling it would let a second reader start); it joins a local copy because the session's runner and the main thread can both be in `stop()`.
-  `_close_socket` runs under `_close_lock` (`stop()` and the exiting reader both call it).
-  A late reader (epoch superseded after its connect returned) closes its socket instead of adopting it, and `_last_connect_error` is cleared only after that check.
+  `Link.close` runs under the link's close lock (`stop()` and the exiting reader both call it).
+  A late reader (epoch superseded after its connect returned) closes its link instead of adopting it, and `_last_connect_error` is cleared only after that check.
   The reader clears `_connected` on exit, so a `stop()` landing just after `_connected = True` can't leave `is_connected` stuck True with no reader (the next Start would "reuse" a dead connection).
-  Every failed Android connect attempt (secure → insecure → `createRfcommSocket(1)`) closes its socket; the ch=1 fallback is called directly on the device, since through `Class.getMethod` pyjnius can't resolve its varargs overload.
+  Every failed connect closes its socket (`_connect_abortable`): left open, it keeps the headset's only channel reserved.
+  Android tries secure → insecure → `createRfcommSocket(1)`; the ch=1 fallback is called directly on the device, since through `Class.getMethod` pyjnius can't resolve its varargs overload.
   The wait is `BtWait` (`app/session/bt_wait.py`, `RunningSession.bt_wait`): `begin(run)` (from `RunningSession.connect`, on the main thread before the runner starts) checks `start()`'s result **before** entering the wait;
   then the runner's tick drives `tick(run)` while the run is CONNECTING, and `RunningSession._follow_bt_wait` acts on how the wait ended (`WaitEnd`: started, or the retry screen's message):
   the first data starts the session on the runner, its countdown armed there before the next tick reads it, and the `Connected` event shows it on main (the headset's row, then `ShownSession.show`);

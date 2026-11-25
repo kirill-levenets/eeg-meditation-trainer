@@ -14,6 +14,7 @@ from kivy.uix.popup import Popup
 
 import app.ui.app_manager as am
 from app.config import APP
+from app.eeg import bt_links
 from app.eeg.neurosky_stream import NeuroSkyStream
 from app.storage.database import DatabaseManager
 from app.ui.line_colours import LINE_COLOURS
@@ -252,7 +253,7 @@ def _environment(monkeypatch, db_path) -> list:
     monkeypatch.setattr(APP, "DB_PATH", str(db_path))
     monkeypatch.setattr(APP, "USE_MOCK_DEVICE", True)
     monkeypatch.setenv("LANGUAGE", "en")
-    monkeypatch.setattr(NeuroSkyStream, "scan_paired_devices", staticmethod(lambda: []))
+    monkeypatch.setattr(bt_links, "scan_paired", lambda: [])
     installed: list = []
     monkeypatch.setattr(am, "install_crash_handler", installed.append)
     return installed
