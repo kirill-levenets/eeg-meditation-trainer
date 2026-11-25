@@ -107,6 +107,7 @@ class SessionControls:
         dropped, so what is still queued for it does nothing), then the screen's, then Settings'."""
         self._session.undo_setup()
         self._shown.idle()
+        self._headset.show_selected()  # the link outlives the session
         self._settings.teardown()
 
     # ---- while it runs, and its ending ----
@@ -166,7 +167,7 @@ class SessionControls:
             case StartFailed(message=message):
                 self._shown.owner = None  # no session came of the start, which emptied the display
                 self._undo()
-                self._shown.show_retry(message, self._headset.name())
+                self._shown.show_retry(message)
             case Ended(stats=stats, session_id=session_id, alert=alert):
                 if self._stop_confirm is not None:  # the timer or a check ended it under "Stop session?"
                     self._stop_confirm.dismiss()

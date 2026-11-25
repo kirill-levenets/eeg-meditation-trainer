@@ -6,6 +6,7 @@ from kivy.graphics import Color, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 
+from app.ui.device_labels import MOCK_LABEL
 from app.ui.theme import C, F, S, ThemedLabel, readable_fg
 
 
@@ -16,7 +17,7 @@ class SessionHeader(BoxLayout):
         super().__init__(size_hint_y=None, height=self._box_height(), spacing=S.GAP_SM)
         F.add_listener(self._fit_height)
         self._device_label = ThemedLabel(
-            text="[Mock EEG]",
+            text=f"[{MOCK_LABEL}]",
             size_hint_x=1 / 3,
             color=C.DEVICE_IDLE,
             font_size=F.capped(F.SMALL),  # a 10 dp status line
@@ -119,20 +120,14 @@ class SessionHeader(BoxLayout):
         self._shamatha_rect.pos = (cx - w / 2, cy - h / 2)
         self._shamatha_rect.size = (w, h)
 
-    def update_device_status(
-        self, connected: bool, device_name: str = "", connecting: bool = False
-    ) -> None:
+    def update_device_status(self, connected: bool, device_name: str, connecting: bool = False) -> None:
+        """The headset: `[name] ...` connecting, `[name] *` connected, `[name]` neither."""
         if connecting:
-            name = device_name or "Device"
-            self._device_label.text = f"[{name}] ..."
+            self._device_label.text = f"[{device_name}] ..."
             self._device_label.color = C.CONNECTING
         elif connected:
-            label = f"[{device_name}] *" if device_name else "[Mock EEG] *"
-            self._device_label.text = label
+            self._device_label.text = f"[{device_name}] *"
             self._device_label.color = C.CONNECTED
-        elif device_name:
+        else:
             self._device_label.text = f"[{device_name}]"
             self._device_label.color = C.DEVICE_IDLE
-        else:
-            self._device_label.text = "[Disconnected]"
-            self._device_label.color = C.DISCONNECTED

@@ -12,7 +12,7 @@ from app.eeg import bt_links
 from app.logger import logger
 from app.settings.registry import BOOL, Setting, held
 from app.ui.app_context import AppContext
-from app.ui.device_labels import MAX_DEVICE_ALIAS, device_label
+from app.ui.device_labels import MAX_DEVICE_ALIAS, MOCK_LABEL, device_label
 
 
 def filter_mindwave(devices: list) -> list:
@@ -41,6 +41,8 @@ class Headset:
         self.aliases: Mapping[str, str] = MappingProxyType({})
         # Moved by a profile load, a pick, a mode change and each profile scan: a profile scan applies while current.
         self._scan_seq = 0
+        self._shown_link: bool | None = None  # the link the labels show; None: shown without one (the mock)
+        Clock.schedule_interval(self._watch_link, 1.0)
 
     def settings(self) -> list[Setting]:
         """The device mode, held by the profile's settings: its apply writes `APP.USE_MOCK_DEVICE` and the checkbox (an
@@ -74,20 +76,31 @@ class Headset:
             return None, None
         return stream._device_address, stream._device_address if stream.is_connected else None
 
-    def _session_label(self) -> str:
-        return "Mock EEG" if APP.USE_MOCK_DEVICE else self.name()
-
     def show_selected(self) -> None:
-        """The selected headset's name and link, on the Session screen and in Settings; a session's lost link shows as
-        connecting, since the reader reconnects."""
+        """The headset on the Session screen and in Settings: in real mode the selected one's name and the stream's link,
+        a live session's lost link as connecting (the reader reconnects); in mock mode the mock, and the saved headset."""
+        label, selected = self.name(), self.stream._device_address
+        if APP.USE_MOCK_DEVICE:
+            self._shown_link = None
+            self._session_header.update_device_status(False, device_name=MOCK_LABEL)
+            self._device_section.update_device_status(False, meta=f"Saved device: {label}" if selected else "")
+            return
         connected = self.stream.is_connected
-        label = self.name()
+        self._shown_link = connected
         self._session_header.update_device_status(connected, device_name=label,
                                                connecting=self._ctx.session.live() and not connected)
         if connected:
             self._device_section.update_device_status(True, name=label)
         else:
-            self._device_section.update_device_status(False, meta=f"Selected: {label}")
+            self._device_section.update_device_status(False, meta=f"Selected: {label}" if selected else "")
+
+    def _watch_link(self, _dt: float) -> None:
+        """Outside a session the labels follow the link, which outlives sessions and whose reader reconnects or gives up
+        on its own; while a session runs, its ticks follow it (SessionWatch.follow_link)."""
+        if APP.USE_MOCK_DEVICE or self._ctx.session.live():
+            return
+        if self.stream.is_connected != self._shown_link:
+            self.show_selected()
 
     def load(self, uid: int) -> None:
         """Select the profile's own headset, or none (closing a link to another profile's) and, in real mode, scan for
@@ -98,9 +111,8 @@ class Headset:
         if not self._serial_override():
             address = self._ctx.db.get_user_setting(uid, "bt_device_address") or None
             self.stream.set_device(address, self._ctx.db.get_user_setting(uid, "bt_device_name") or "")
-            self._device_section.update_device_status(False, meta=f"Saved device: {self.name()}" if address else "")
         self._device_section.clear_picker_banner()  # it asked the last profile
-        self._session_header.update_device_status(False, device_name=self._session_label())
+        self.show_selected()
         if not self.stream._device_address and not APP.USE_MOCK_DEVICE:
             self.scan()
 
@@ -115,10 +127,7 @@ class Headset:
         self._scan_seq += 1
         self._ctx.change_setting("use_mock", use_mock)
         self._device_section.clear_picker_banner()  # Start's question was for the real headset
-        addr = self.stream._device_address or "none"
-        self._device_section.update_device_status(False, meta="Mode: Mock Data" if use_mock
-                                                  else f"Mode: Real Device ({addr})")
-        self._session_header.update_device_status(False, device_name=self._session_label())
+        self.show_selected()
         logger.info(f"Device mode: {'Mock' if use_mock else 'Real'}")
 
     def on_scan(self) -> None:

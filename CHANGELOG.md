@@ -56,6 +56,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **The headset's state between sessions** (#147): the Session screen said "[Disconnected]" after every session while the app kept the headset connected, and Settings › Device went on saying "Connected" after the headset was switched off between sessions.
+  Both now show the connection as it is, between sessions too.
 - **A marker hotkey on a key with no character never placed a marker** (desktop): a key such as F5 or an arrow was picked by its name, but a press was compared by its code; both now name the key the same way.
 - **A session whose final save failed stayed "running" on screen**, with the phone kept awake and nothing said (the timer's ending; every later Stop was ignored).
   The failure is now reported, and the session still ends on screen and lets the phone sleep.

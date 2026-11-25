@@ -91,7 +91,7 @@ def test_an_ending_leaves_the_screen_finished_and_idle(fresh_app, monkeypatch):
     frames()
     duration = app._db.get_all_sessions(app._current_user_id)[0]["duration"]
     assert screen.header._last_state == "FINISHED" and screen.header._timer_label.text.endswith(elapsed_clock(duration))
-    assert not screen.header._shamatha_active and screen.header._device_label.text == "[Disconnected]" and app._history._history_dirty
+    assert not screen.header._shamatha_active and screen.header._device_label.text == "[Mock EEG]" and app._history._history_dirty
 
 
 def test_the_session_screens_buttons_reach_its_controls(fresh_app, monkeypatch):

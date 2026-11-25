@@ -20,6 +20,7 @@ from app.session.session_events import (
 )
 from app.session.session_program import PROGRAM_FORMULA_KEYS
 from app.ui.app_context import AppContext
+from app.ui.device_labels import MOCK_LABEL
 from app.ui.graph_series import show_program_series
 from app.ui.session_labels import session_title
 from app.ui.theme import C
@@ -57,7 +58,7 @@ class ShownSession:
                 self._show_tick(event)
             case Connected(on_mock=on_mock):
                 if on_mock:
-                    screen.header.update_device_status(True)  # a headset's row is the headset's (Headset.show_selected)
+                    screen.header.update_device_status(True, MOCK_LABEL)  # a headset's is the headset's (show_selected)
                 screen.header.update_state("Running")
                 screen.set_start_time(self._session.manager.started_at)
                 screen.connect_overlay.hide()  # the session starts its feedback right after (RunningSession._deliver)
@@ -103,9 +104,8 @@ class ShownSession:
             screen.raw_graph.add_marker()
             screen.band_graph.add_marker()
 
-    def show_retry(self, message: str, device_name: str) -> None:
+    def show_retry(self, message: str) -> None:
         """The retry screen of a start whose BT wait ended without a session."""
-        self._live_screen.header.update_device_status(False, device_name=device_name)
         self._live_screen.connect_overlay.show_retry(message)
 
     def lines(self) -> frozenset[str]:
@@ -176,10 +176,10 @@ class ShownSession:
         logger.info(f"on_resume: refresh complete in {time.monotonic() - started:.3f}s")
 
     def idle(self) -> None:
-        """The screen's part of every teardown: idle controls, no device link, no training mark, no shamatha pill."""
+        """The screen's part of every teardown: idle controls, no training mark, no shamatha pill (the headset's label is
+        the headset's: Headset.show_selected)."""
         self._live_screen.set_training_series(None)
         self._live_screen.set_controls_idle()
-        self._live_screen.header.update_device_status(False)
         self._live_screen.header.set_shamatha(False)
 
     def finished(self, stats: dict | None, session_id: int | None) -> None:

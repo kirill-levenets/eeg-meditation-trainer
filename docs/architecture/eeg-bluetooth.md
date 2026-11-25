@@ -28,9 +28,11 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   On app exit the socket is not closed explicitly (`on_stop`): the kernel closes it while BlueZ may keep the ACL link, for a faster reconnect at the next launch.
   A session whose headset sends no packets for `STALE_DATA_THRESHOLD` (10 s) is stopped and saved (`SessionWatch.check_stale`, `app/session/session_watch.py`, `RunningSession.watch`;
   each tick it also checks the recording limit, follows the headset's link and warns once of a low battery or power-line noise).
-  The selected headset's link as it is (a pick or rename, a session's start, a drop or a reconnect mid-session) is drawn by `Headset.show_selected` on the Session screen's label and in Settings › Device:
-  a session's lost link shows as connecting, since the reader reconnects; a drop also plays the disconnect alert.
-  The states that aren't the link draw their own: the BT wait's connecting and retry screens (`BtWait`), a profile load or mode change (`Headset.load`, `on_mode_toggle`), the mock headset, the idle screen after a session.
+  The selected headset's link as it is is drawn by `Headset.show_selected`, on the Session screen's label (`[name] *` connected, `[name]` not) and in Settings › Device's status line:
+  at a pick or rename, a profile load, a mode change and every session's teardown, and at each change of the link.
+  While a session runs, its ticks follow the link (`LinkChanged`): a lost link shows as connecting (`[name] ...`), since the reader reconnects, and plays the disconnect alert.
+  Outside a session a 1 s main-thread watch follows it (`Headset._watch_link`), since the link outlives sessions and its reader reconnects or gives up on its own: after a session the label says whether the link is still up.
+  In mock mode the label shows the mock and Settings the saved headset; only the BT wait's connecting screen draws its own (`Connecting`).
 - **The selected headset is the active profile's own, or none.**
   Every profile load (`_load_user_settings` → `Headset.load`, so startup, a switch and a first-run pick) selects the profile's saved `bt_device_address`, or none (`set_device(None)`), which closes a link to the last profile's headset:
   a profile with none used to keep the last one's for the rest of the run, unsaved, and get a different answer after a restart.
@@ -116,7 +118,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The session starts only on band data with a packet on this connection (`total > 0 and has_packets`), since the reader keeps the last band values across a reconnect.
   Restarting the windows unbounds a headset that keeps connecting and closing, so a wait ends at its third drop (`MAX_DROPS` = 2, counted by the run's `drops`: a Retry is a new Start, with none) with "keeps closing the connection";
   every wait exit that gives up (keeps closing, no data, a failed connect, the connect timeout) returns its message to `_follow_bt_wait`, which ends the run and queues its `StartFailed` (`SessionControls.on_event`);
-  `ShownSession.show_retry` leaves the headset's name on the Session screen under its retry screen.
+  Under its retry screen the Session screen's label stays the headset's name (`SessionControls._undo` → `Headset.show_selected`).
   A failed connect's diagnostic travels in the `WaitEnd` and is filed by `_follow_bt_wait` after that check, so a late tick reports nothing.
   `tests/test_bt_wait_reconnect.py` replays drops and reconnects on a fake clock.
   Android reads drain what is available in one `InputStream.read(buf, 0, n)` per chunk, the buffer sized to the read (pyjnius copies the whole array both ways, so an oversized buffer is slower);
