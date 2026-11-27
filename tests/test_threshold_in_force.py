@@ -120,7 +120,7 @@ def test_a_slider_drag_is_one_change_at_the_value_it_settles_on(fresh_app, monke
     app_ = fresh_app
     _simple(app_, monkeypatch)
     for v in range(71, 86):
-        app_._settings_screen.threshold = v
+        app_._settings_screen.threshold.value = v
         assert _next_target(app_) == 70  # still the value in force while the slider moves
     _settled(app_)
     assert _next_target(app_) == 85
@@ -346,11 +346,11 @@ def test_a_touch_after_the_program_ended_is_not_refused(fresh_app, monkeypatch):
 def test_a_program_session_locks_the_threshold_controls_and_its_end_unlocks_them(program, fresh_app, monkeypatch):
     app_ = fresh_app
     (_program if program else _simple)(app_, monkeypatch)
-    lock = app_._settings_screen._threshold_lock
+    lock = app_._settings_screen.threshold._lock
     assert (lock == app_._controls.refuse_program_threshold) if program else (lock is None)
     app_._controls.stop_and_save()  # every ending
     frames()
-    assert app_._settings_screen._threshold_lock is None
+    assert app_._settings_screen.threshold._lock is None
 
 
 def test_the_locked_controls_take_no_touch_and_each_touch_says_why():
@@ -364,7 +364,7 @@ def test_the_locked_controls_take_no_touch_and_each_touch_says_why():
              and x._header.text == "Threshold").open()
         for _ in range(8):
             EventLoop.idle()
-        slider_row, presets = screen._threshold_controls
+        slider_row, presets = screen.threshold._controls
         minus, slider, _label, plus = reversed(slider_row.children)
         preset = presets.children[0]
 
@@ -376,21 +376,21 @@ def test_the_locked_controls_take_no_touch_and_each_touch_says_why():
             for _ in range(2):
                 EventLoop.idle()
 
-        screen.threshold = 70
+        screen.threshold.value = 70
         refused = []
-        screen.lock_threshold(lambda: refused.append(1) or True)
+        screen.threshold.lock(lambda: refused.append(1) or True)
         for widget, dx in ((minus, 0), (plus, 0), (slider, slider.width / 3), (preset, 0)):
             tap(widget, dx)
-        assert screen.threshold == 70 and len(refused) == 4
+        assert screen.threshold.value == 70 and len(refused) == 4
         assert slider_row.opacity == presets.opacity == 0.5
         wheel = SimpleNamespace(is_mouse_scrolling=True, pos=slider.center)  # a mouse wheel steps a slider
-        assert screen._on_threshold_controls_touch(slider_row, wheel) is True and len(refused) == 5
-        screen.lock_threshold(lambda: False)  # the program has just ended: the touch goes through
+        assert screen.threshold._on_controls_touch(slider_row, wheel) is True and len(refused) == 5
+        screen.threshold.lock(lambda: False)  # the program has just ended: the touch goes through
         tap(plus)
-        assert screen.threshold == 75
-        screen.lock_threshold(None)
+        assert screen.threshold.value == 75
+        screen.threshold.lock(None)
         tap(plus)
-        assert screen.threshold == 80 and slider_row.opacity == 1.0
+        assert screen.threshold.value == 80 and slider_row.opacity == 1.0
     finally:
         Window.remove_widget(screen)
 
@@ -401,7 +401,7 @@ def test_a_slider_move_just_before_starting_a_program_is_not_applied_during_it(f
     app_ = fresh_app
     reload_with(app_, threshold="70")
     program_mode(app_, SEGMENTS)
-    app_._settings_screen.threshold = 80  # its apply is still pending
+    app_._settings_screen.threshold.value = 80  # its apply is still pending
     FedSession(app_, monkeypatch)
     _settled(app_)
     assert app_._session.manager.threshold == 60 and popups() == []  # the slider's pending apply, cancelled by Start
@@ -424,7 +424,7 @@ def test_a_program_start_that_fails_in_its_setup_leaves_the_controls_unlocked(fr
     monkeypatch.setattr(app_._session.program_run, "begin", failing)
     with pytest.raises(RuntimeError):
         app_._controls.start()
-    assert app_._settings_screen._threshold_lock is None
+    assert app_._settings_screen.threshold._lock is None
 
 
 def test_a_session_start_holds_the_phone_awake(fresh_app, monkeypatch):
@@ -455,7 +455,7 @@ def _live_points(app_) -> list[int]:
 def test_moving_the_slider_while_idle_clears_the_last_sessions_graphs(fresh_app, monkeypatch):
     app_ = fresh_app
     _ended(app_, monkeypatch)
-    app_._settings_screen.threshold = 85
+    app_._settings_screen.threshold.value = 85
     mirror = app_._shown.mirror
     assert _live_points(app_) == [0, 0, 0] and app_._live_screen.graph._threshold_steps is None
     assert not mirror.metrics and not mirror.bands and not mirror.waveform
@@ -476,7 +476,7 @@ def test_reapplying_the_settings_threshold_keeps_the_graphs(fresh_app, monkeypat
 
 def test_nothing_to_clear_before_any_session(fresh_app, monkeypatch):
     cleared = calls_of(monkeypatch, fresh_app._live_screen.graph, "clear_data")
-    fresh_app._settings_screen.threshold = 85
+    fresh_app._settings_screen.threshold.value = 85
     assert cleared == []
 
 
@@ -486,5 +486,5 @@ def test_moving_the_slider_during_a_simple_session_keeps_its_graphs(fresh_app, m
     for _ in range(3):
         fed.tick()
     steps = app_._live_screen.graph._threshold_steps
-    app_._settings_screen.threshold = 85
+    app_._settings_screen.threshold.value = 85
     assert app_._live_screen.graph.total_points == 3 and app_._live_screen.graph._threshold_steps == steps

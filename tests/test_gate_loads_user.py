@@ -29,7 +29,7 @@ def gated(build_app, monkeypatch):
     ids = {u["name"]: u["id"] for u in app._db.get_all_users()}
     app.mock, app.real, app.scans = ids["M"], ids["Existing"], []
     monkeypatch.setattr(app._headset, "find_paired", app.scans.append)  # the scan's Bluetooth half
-    app._settings_screen.threshold = 33  # what the last profile left on screen
+    app._settings_screen.threshold.value = 33  # what the last profile left on screen
     return app
 
 
@@ -42,21 +42,21 @@ def test_gate_create_loads_new_users_settings(gated):
     frames()
     new = next(u["id"] for u in gated._db.get_all_users() if u["name"] == "NewUser")
     assert gated._current_user_id == new and not gated._gate.active()
-    assert gated._settings_screen.threshold not in (33, 70, 85)  # its own (the default), nobody else's
-    assert gated._settings_screen._profile_current_label.text == "Current: NewUser"
+    assert gated._settings_screen.threshold.value not in (33, 70, 85)  # its own (the default), nobody else's
+    assert gated._settings_screen.profile._current_label.text == "Current: NewUser"
 
 
 def test_gate_adopt_existing_loads_that_users_settings(gated):
     gated._gate.complete_first_run("Existing")
     frames()
-    assert gated._current_user_id == gated.real and gated._settings_screen.threshold == 70
+    assert gated._current_user_id == gated.real and gated._settings_screen.threshold.value == 70
     assert _names(gated) == ["Existing", "M"]  # picked, not made again
 
 
 def test_gate_pick_existing_activates_it_by_id_with_its_own_settings(gated):
     gated._gate.pick_existing(gated.real)
     frames()
-    assert gated._current_user_id == gated.real and gated._settings_screen.threshold == 70
+    assert gated._current_user_id == gated.real and gated._settings_screen.threshold.value == 70
     assert _names(gated) == ["Existing", "M"]
     assert gated._db.get_user_setting(gated.real, "use_mock") == "False" and APP.USE_MOCK_DEVICE is False  # its mode stays
 
@@ -97,4 +97,4 @@ def test_a_database_error_at_first_run_create_is_reported_not_raised(gated, monk
     monkeypatch.setattr(gated._db, "create_user", locked)
     gated._gate.complete_first_run("NewUser")
     assert reported == ["user_create_failed"]
-    assert gated._current_user_id is None and gated._settings_screen.threshold == 33  # nothing was loaded
+    assert gated._current_user_id is None and gated._settings_screen.threshold.value == 33  # nothing was loaded

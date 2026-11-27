@@ -18,7 +18,7 @@ from app.ui.settings_sections.common import (
     saved_program_label,
     source_label,
 )
-from app.ui.theme import C, CenteredTextInput, F, Icons, S, ThemedLabel, fit_height_to_text
+from app.ui.theme import C, CenteredTextInput, F, Icons, S, ThemedLabel, fit_height_to_text, text_fills_box
 from app.ui.widgets.choice_toggle import ChoiceToggle
 from app.ui.widgets.popups import make_scroll_popup
 from app.ui.widgets.rows import PresetRow
@@ -105,7 +105,7 @@ class TimerSection:
             text="Duration:", font_size=F.BODY, color=C.TEXT_SECONDARY,
             size_hint_x=0.25, halign="left",
         )
-        timer_dur_lbl.bind(size=timer_dur_lbl.setter("text_size"))
+        text_fills_box(timer_dur_lbl)
         self._timer_duration_slider = Slider(
             min=1, max=120, value=20, step=1, size_hint_x=0.55,
         )
@@ -146,10 +146,7 @@ class TimerSection:
             size_hint_y=None, height=dp(22),
             halign="left", valign="middle",
         )
-        self._program_total_label.bind(
-            size=self._program_total_label.setter("text_size")
-        )
-
+        text_fills_box(self._program_total_label)
         # At-a-glance "which program is loaded" indicator at the top of the editor.
         self._program_loaded_label = ThemedLabel(
             text="Loaded: (unsaved)",
@@ -157,10 +154,7 @@ class TimerSection:
             size_hint_y=None, height=dp(22),
             halign="left", valign="middle",
         )
-        self._program_loaded_label.bind(
-            size=self._program_loaded_label.setter("text_size")
-        )
-
+        text_fills_box(self._program_loaded_label)
         self._add_segment_btn = StyledButton(
             text="+ Add Segment",
             font_size=F.SMALL,
@@ -202,9 +196,7 @@ class TimerSection:
             size_hint_y=None, height=dp(22),
             halign="left", valign="middle",
         )
-        saved_programs_label.bind(
-            size=saved_programs_label.setter("text_size")
-        )
+        text_fills_box(saved_programs_label)
         self._saved_programs_box = BoxLayout(
             orientation="vertical", size_hint_y=None, height=dp(0), spacing=dp(2),
         )
@@ -239,7 +231,7 @@ class TimerSection:
                 text=_lbl, font_size=F.capped(F.TINY), bold=True, color=C.TEXT_MUTED,
                 size_hint_x=_w, halign="center", valign="middle",
             )
-            col.bind(size=col.setter("text_size"))
+            text_fills_box(col)
             segments_header.add_widget(col)
 
         self._program_box.add_widget(program_intro)
@@ -260,7 +252,7 @@ class TimerSection:
             size_hint_y=None, height=dp(20),
             halign="left",
         )
-        timer_sound_lbl.bind(size=timer_sound_lbl.setter("text_size"))
+        text_fills_box(timer_sound_lbl)
         section.add_widget(timer_sound_lbl)
 
         timer_sound_row = BoxLayout(

@@ -56,13 +56,17 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 - **Settings screen** (`settings_screen.py`): `ThemedAccordion` sections:
   User Profile, **Timer / Program**, Device, Data Backup, Threshold (max 180), Audio, Display, Custom Formula, Theme, Developer Tools (crash triggers), Help & Troubleshooting (`help_language()`: Android's locale, or on desktop `LANGUAGE`'s list and then `LC_ALL`/`LC_MESSAGES`/`LANG`; the first language with a help file, else English; Windows and macOS builds usually set none of these).
-  The larger sections are their own classes in `settings_sections/`, built into their accordion section and reached as attributes of the screen:
-  `settings_screen.formulas` is `FormulaSection`, `.timer` is `TimerSection`, `.device` is `DeviceSection`, `.audio` is `AudioSection`, `.display` is `DisplaySection`;
-  what more than one section builds with is in `settings_sections/common.py`.
+  Every fold is its own class in `settings_sections/`, built into its accordion section, reporting the user's actions through its hooks and reached as an attribute of the screen:
+  `.profile` `ProfileSection`, `.timer` `TimerSection`, `.device` `DeviceSection`, `.backup` `BackupSection`, `.audio` `AudioSection`, `.display` `DisplaySection`, `.formulas` `FormulaSection`, `.theme` `ThemeSection`, and the Developer Tools and Help sections;
+  the Threshold fold holds two, `.threshold` `ThresholdSlider` (the slider, its steps and presets, its lock while a program runs) and `.metric` `MetricPicker` (the sound's metric), because two owners use them: the threshold the session's controls and Start, the metric `AudioMetric`.
+  The screen keeps only the fold order and its on-enter refresh; each part of the app is given the section it owns (`Profiles` the profile section, `BackupFlow` the backup one, `AudioMetric` the picker), as `Headset` is given the device one.
+  The metric picker keeps no copy of the choice: it reads its radios and slot buttons, and the profile's setting is the one owner.
+  Audio's feedback and reward pickers are one `SourcePicker` each (a `SourceSpec`: label, title, choices, default), and its alert toggles are a table by setting key with one hook (`on_alert_toggle(key, on)`).
+  What more than one section builds with is in `settings_sections/common.py`.
   User Profile uses the shared `UserPickerForm`; Data Backup has Backup/Restore buttons.
   Graph series are picked on the graph (the series picker); `graph_series.FIRST_RUN_LIVE_SERIES` is only the first-run default set.
   Custom Formula has **three named slots** (Formula 1/2/3, named Custom 1–3 by default), each with name input, expression input, Apply, Save, and per-slot status.
-  In Threshold, a `[1][2][3]` button group below the "Custom Formula" audio-metric radio selects which slot drives the audio (the `on_audio_formula_index` hook → `AudioMetric.on_formula_index`).
+  In Threshold, a `[1][2][3]` button group below the "Custom Formula" audio-metric radio selects which slot drives the audio (`MetricPicker.on_formula_index` → `AudioMetric.on_formula_index`).
   **Timer / Program** has a **Simple | Program** toggle: Simple = single duration + Enable-Timer checkbox;
   Program = the segment editor (`TimerSection`, `settings_sections/timer.py`: `_segments_box`, rows with duration, formula, target, end-cue picker (Chime/Warble), feedback-source picker);
   with it the loaded-program label (`_program_loaded_label`) and the saved-programs library (save/load/delete named programs).

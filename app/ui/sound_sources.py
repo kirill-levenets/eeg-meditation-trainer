@@ -57,16 +57,16 @@ class SoundSources:
         audio, timer, value = self._audio_section, self._timer_section, self._ctx.setting
 
         def apply_feedback_source(v):
-            audio.set_feedback_source(v, value("feedback_sound_path"))
+            audio.feedback.show(v, value("feedback_sound_path"))
 
         def apply_feedback_path(v):
-            audio.set_feedback_source(value("feedback_source"), v)
+            audio.feedback.show(value("feedback_source"), v)
 
         def apply_reward_source(v):
-            audio.set_reward_source(v, value("reward_sound_path"))
+            audio.reward.show(v, value("reward_sound_path"))
 
         def apply_reward_path(v):
-            audio.set_reward_source(value("reward_source"), v)
+            audio.reward.show(value("reward_source"), v)
 
         return [held("feedback_source", STR, "noise", apply_feedback_source),
                 held("feedback_sound_path", PATH, "", apply_feedback_path),

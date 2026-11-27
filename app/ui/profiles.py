@@ -11,7 +11,7 @@ from app.crash_handler import report_soft_error
 from app.logger import logger
 from app.storage.database import UserExistsError
 from app.ui.app_context import AppContext
-from app.ui.theme import C, F, ThemedLabel
+from app.ui.theme import C, F, ThemedLabel, text_fills_box
 from app.ui.widgets.popups import ThemedPopup
 from app.ui.widgets.user_picker import UserPickerForm
 
@@ -79,7 +79,7 @@ class ProfileGate:
             size_hint_y=None, height=dp(48),
             halign="center",
         )
-        welcome.bind(size=welcome.setter("text_size"))
+        text_fills_box(welcome)
         content.add_widget(welcome)
 
         popup = ThemedPopup(
@@ -159,16 +159,16 @@ class Profiles:
     """Settings → Profile: the profile list, a switch, a create, a delete. A session's part in a switch or a delete is
     the app's, through the callables given; a delete that leaves no active profile opens the gate."""
 
-    def __init__(self, ctx: AppContext, settings_screen, gate: ProfileGate, *, deactivate: Callable[[], None],
+    def __init__(self, ctx: AppContext, section, gate: ProfileGate, *, deactivate: Callable[[], None],
                  on_deleted: Callable[[int], None]) -> None:
         self._ctx = ctx
-        self._settings_screen = settings_screen
+        self._section = section  # Settings › User Profile
         self._gate = gate
         self._deactivate = deactivate
         self._on_deleted = on_deleted
 
     def refresh(self) -> None:
-        self._settings_screen.populate_users(self._ctx.db.get_all_users(), self._ctx.user_id())
+        self._section.show_users(self._ctx.db.get_all_users(), self._ctx.user_id())
 
     def on_switch(self, user_id: int) -> None:
         """Switch the active user profile."""
@@ -194,9 +194,7 @@ class Profiles:
         try:
             self._ctx.db.create_user(name)
         except UserExistsError as e:
-            form = getattr(self._settings_screen, "_user_picker_form", None)
-            if form is not None:
-                form.show_duplicate_error(user_id=e.user_id, name=e.name)
+            self._section.picker.show_duplicate_error(user_id=e.user_id, name=e.name)
             return
         except Exception as e:  # noqa: BLE001 - any failure is reported and creates nothing
             report_soft_error(

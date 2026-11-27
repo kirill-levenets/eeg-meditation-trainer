@@ -17,24 +17,24 @@ def app(fresh_app):
 
 
 def _current(app) -> str:
-    return app._settings_screen._profile_current_label.text
+    return app._settings_screen.profile._current_label.text
 
 
 def test_switch_is_refused_while_a_session_runs(app):
     mine = _current(app)
     app._controls.start()
-    app._settings_screen._profile_current_label.text = "Current: B"  # what the picker's tap showed
+    app._settings_screen.profile._current_label.text = "Current: B"  # what the picker's tap showed
     app._profiles.on_switch(app.other)
     frames()
     assert app._current_user_id == app.mine and popup_titles() == ["Session in progress"]
-    assert app._settings_screen.threshold == 60  # B's settings were not loaded under the running session
+    assert app._settings_screen.threshold.value == 60  # B's settings were not loaded under the running session
     assert _current(app) == mine  # the picker snapped back
 
 
 def test_switch_proceeds_when_idle(app):
-    app._settings_screen.threshold = 62  # changed, not yet saved
+    app._settings_screen.threshold.value = 62  # changed, not yet saved
     app._profiles.on_switch(app.other)
     frames()
     assert app._current_user_id == app.other and popup_titles() == []
-    assert app._settings_screen.threshold == 85 and _current(app) == "Current: B"
+    assert app._settings_screen.threshold.value == 85 and _current(app) == "Current: B"
     assert app._db.get_user_setting(app.mine, "threshold") == "62"  # the first profile's settings were saved first

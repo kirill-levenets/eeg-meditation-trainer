@@ -1,7 +1,7 @@
 from kivy.clock import Clock
 from kivy.metrics import dp
 
-from app.ui.theme import C, F, ThemedLabel
+from app.ui.theme import C, F, ThemedLabel, text_wraps_at_width
 from app.ui.widgets.popups import ModalPanel, ModalScrim
 
 
@@ -22,8 +22,8 @@ class LoadingOverlay(ModalScrim):
             text="", font_size=F.BODY, color=C.TEXT,
             halign="center", valign="middle", size_hint_y=None,
         )
-        self._status.bind(width=lambda w, v: setattr(w, "text_size", (v, None)),
-                          texture_size=lambda w, v: setattr(w, "height", max(v[1], dp(24))))
+        text_wraps_at_width(self._status)
+        self._status.bind(texture_size=lambda w, v: setattr(w, "height", max(v[1], dp(24))))
         panel.add_widget(self._status)
 
         self._dots = ThemedLabel(

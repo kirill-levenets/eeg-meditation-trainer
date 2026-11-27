@@ -8,15 +8,15 @@ from tests._app import frames, start_ticked_by_hand
 
 
 def _rows(screen) -> set[str]:
-    rows = screen._user_picker_form._existing_list.walk(restrict=True)
+    rows = screen.profile.picker._existing_list.walk(restrict=True)
     return {w.text for w in rows if "session" in getattr(w, "text", "")}
 
 
 def test_entering_settings_reads_the_counts_again():
     counts = {1: 5}
     screen = SettingsScreen()
-    wire(screen, session_counter=lambda uid: counts[uid])
-    screen.populate_users([{"id": 1, "name": "Mock"}], 1)
+    wire(screen.profile, session_counter=lambda uid: counts[uid])
+    screen.profile.show_users([{"id": 1, "name": "Mock"}], 1)
     assert _rows(screen) == {"Mock (5 sessions)"}
     counts[1] = 6  # a session saved since
     screen.on_pre_enter()
@@ -58,7 +58,7 @@ def test_a_failed_count_shows_the_profile_without_one_and_the_end_card_still_ope
 
     monkeypatch.setattr(app._db, "count_sessions", failing)
     _session_ended_on(app, "settings")
-    form = app._settings_screen._user_picker_form
+    form = app._settings_screen.profile.picker
     assert {w.text for w in form._existing_list.walk(restrict=True) if getattr(w, "text", "") == app._profiles.current_name()}
     assert app._live_screen.end_card.session_id is not None  # the end card
 

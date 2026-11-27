@@ -410,7 +410,7 @@ def _settings_states(screen):
         yield f" section {k}", section.open
     yield " program", lambda: (screen.timer.set_program_mode("program"), screen.timer.load_program(PROGRAM, "program"),
                                screen._accordion._sections[1].open())
-    yield " profiles", lambda: (screen.populate_users([{"id": 1, "name": "Mock"}, {"id": 2, "name": "Second mock"}], 1),
+    yield " profiles", lambda: (screen.profile.show_users([{"id": 1, "name": "Mock"}, {"id": 2, "name": "Second mock"}], 1),
                                 screen._accordion._sections[0].open())
     yield " locked-screen row", lambda: (  # attached only on Android: shown here by hand
         screen.device.show_power_state("Android's battery optimisation is on: with the screen locked, the phone may "

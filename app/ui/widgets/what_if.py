@@ -16,7 +16,7 @@ from kivy.uix.widget import Widget
 from app.session.what_if import ScoredTicks, Segment, Stats, line_steps, rescore
 from app.ui.formatting import format_duration
 from app.ui.hooks import Hook, wire
-from app.ui.theme import C, F, S, ThemedLabel, fit_width_to_text
+from app.ui.theme import C, F, S, ThemedLabel, fit_width_to_text, text_fills_box
 from app.ui.widgets.folds import Fold, FoldChevron
 from app.ui.widgets.styled_button import StyledButton
 
@@ -26,7 +26,7 @@ _ROW_H = dp(20)
 def _secondary(text: str = "") -> ThemedLabel:
     label = ThemedLabel(text=text, font_size=F.SMALL, color=C.TEXT_SECONDARY, halign="left", valign="middle",
                         shorten=True, shorten_from="right", size_hint_y=None, height=_ROW_H)
-    label.bind(size=label.setter("text_size"))
+    text_fills_box(label)
     return label
 
 
@@ -125,7 +125,7 @@ class WhatIfPanel(BoxLayout):
             fit_width_to_text(label, S.GAP)
             value = ThemedLabel(text="", font_size=F.H3, bold=True, color=C.TEXT, halign="left", valign="middle",
                                 size_hint_y=None, height=_ROW_H)
-            value.bind(size=value.setter("text_size"))
+            text_fills_box(value)
             results.add_widget(label)
             results.add_widget(value)
             return value

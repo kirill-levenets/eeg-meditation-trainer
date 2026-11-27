@@ -7,7 +7,18 @@ from kivy.uix.widget import Widget
 
 from app.ui.formatting import format_duration
 from app.ui.session_labels import session_score_rows
-from app.ui.theme import C, Card, F, Icons, S, ThemedLabel, ThemedTextInput, fit_width_to_text, text_width
+from app.ui.theme import (
+    C,
+    Card,
+    F,
+    Icons,
+    S,
+    ThemedLabel,
+    ThemedTextInput,
+    fit_width_to_text,
+    text_fills_box,
+    text_width,
+)
 from app.ui.widgets.popups import ModalPanel, ModalScrim
 from app.ui.widgets.styled_button import StyledButton
 
@@ -146,7 +157,7 @@ class EndCard(ModalScrim):
         fit_width_to_text(label, S.GAP)
         value = ThemedLabel(text="-", font_size=F.BODY, bold=True, color=C.TEXT, halign="right", valign="middle",
                             shorten=True, shorten_from="right")
-        value.bind(size=value.setter("text_size"))
+        text_fills_box(value)
         row.add_widget(label)
         row.add_widget(value)
         return row, label, value

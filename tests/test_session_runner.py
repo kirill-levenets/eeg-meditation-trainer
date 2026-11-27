@@ -250,7 +250,7 @@ def test_a_start_after_a_stuck_runners_run_ended_puts_its_own_threshold_in_force
     app._controls.stop_and_save()  # the stuck runner doesn't take it: the Stop ends the run here
     frames()
     app._shown.close(keep_notes=False)
-    setting = app._settings_screen.threshold
+    setting = app._settings_screen.threshold.value
     app._session.manager.set_threshold(setting - 20)  # as a program's last segment leaves it
     start_connecting(app, monkeypatch)
     assert old.is_alive() and app._session.manager.threshold == setting

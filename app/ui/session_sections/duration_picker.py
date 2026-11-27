@@ -6,7 +6,18 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
 
 from app.ui.hooks import Hook
-from app.ui.theme import ICONS_AVAILABLE, C, F, Icons, S, ThemedLabel, dimmed_fg, readable_fg, text_width
+from app.ui.theme import (
+    ICONS_AVAILABLE,
+    C,
+    F,
+    Icons,
+    S,
+    ThemedLabel,
+    dimmed_fg,
+    readable_fg,
+    text_fills_box,
+    text_width,
+)
 from app.ui.widgets.popups import make_scroll_popup
 from app.ui.widgets.styled_button import StyledButton, cancel_button
 
@@ -46,7 +57,7 @@ class _DurationPickerButton(BoxLayout):
             valign="middle",
             size_hint_y=0.55,
         )
-        self._text_label.bind(size=self._text_label.setter("text_size"))
+        text_fills_box(self._text_label)
         F.add_listener(self._fit_width)
         self._fit_width()
 
@@ -59,8 +70,7 @@ class _DurationPickerButton(BoxLayout):
             valign="middle",
             size_hint_y=0.45,
         )
-        self._chevron_label.bind(size=self._chevron_label.setter("text_size"))
-
+        text_fills_box(self._chevron_label)
         self.add_widget(self._text_label)
         self.add_widget(self._chevron_label)
 

@@ -6,7 +6,7 @@ from kivy.properties import BooleanProperty, StringProperty
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
 
-from app.ui.theme import ICONS_AVAILABLE, C, F, Icons, S, ThemedColor, ThemedLabel
+from app.ui.theme import ICONS_AVAILABLE, C, F, Icons, S, ThemedColor, ThemedLabel, text_fills_box
 
 
 class BottomNav(BoxLayout):
@@ -101,7 +101,7 @@ class _NavTab(ButtonBehavior, BoxLayout):
             size_hint_y=None,
             height=dp(14),
         )
-        self._label.bind(size=self._label.setter("text_size"))
+        text_fills_box(self._label)
         self._indicator = BoxLayout(size_hint_y=None, height=dp(3))
         self._indicator.bind(pos=self._draw_indicator, size=self._draw_indicator)
 

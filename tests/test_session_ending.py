@@ -197,7 +197,7 @@ def test_save_notes_on_already_saved_text_confirms_without_writing(card):
 
 
 def test_app_pause_with_the_card_open_flushes_typed_notes(card):
-    card._settings_screen.threshold = 62  # changed, not yet written: the pause saves the settings too
+    card._settings_screen.threshold.value = 62  # changed, not yet written: the pause saves the settings too
     _type(card, "written before the phone locked")
     assert card.on_pause() is True
     assert card.notes_writes == ["written before the phone locked"]
@@ -231,7 +231,7 @@ def test_app_exit_with_the_card_open_flushes_typed_notes_before_the_db_closes(bu
 @pytest.mark.parametrize("hook", ["on_pause", "on_stop"])
 def test_leaving_during_a_restore_writes_no_notes(build_app, hook):
     app, sid = _ended_in_its_own_app(build_app)
-    app._settings_screen.threshold = 62
+    app._settings_screen.threshold.value = 62
     _type(app, "typed")
     app._on_db_replaced()
     getattr(app, hook)()

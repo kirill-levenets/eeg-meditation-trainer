@@ -34,17 +34,17 @@ class SessionSettings:
         return SessionConfig(metric=self._ctx.setting("audio_metric"), formulas=tuple(self._formulas.active()),
                              timer_minutes=minutes, gong=self._ctx.setting("timer_sound") if minutes else "",
                              mock=mock, device=device, shown=lines(),
-                             threshold=segment_target(program.segments[0]) if program else self._settings_screen.threshold,
+                             threshold=segment_target(program.segments[0]) if program else self._settings_screen.threshold.value,
                              program=program, program_name=self._program_settings.name)
 
     def started(self, config: SessionConfig, refuse: Callable[[], bool]) -> None:
         """A program's segments own its targets: its threshold controls refuse a touch (`refuse`) until the session ends."""
-        self._settings_screen.lock_threshold(refuse if config.program else None)
+        self._settings_screen.threshold.lock(refuse if config.program else None)
 
     def teardown(self) -> None:
         """Every ending's, after the session's reset: the threshold controls free, the idle series derived again (while
         the session still read live, nothing was)."""
-        self._settings_screen.lock_threshold(None)
+        self._settings_screen.threshold.lock(None)
         self._program_settings.sync_picker()
 
     def saved(self) -> None:
@@ -52,4 +52,4 @@ class SessionSettings:
         else entering Settings redraws them)."""
         manager = self._settings_screen.manager
         if manager is not None and manager.current == self._settings_screen.name:
-            self._settings_screen.refresh_profile_counts()
+            self._settings_screen.profile.refresh_counts()

@@ -142,7 +142,7 @@ def test_re_picking_the_shown_profile_keeps_its_session_even_mid_session(fresh_a
 def test_a_threshold_moved_during_a_session_keeps_its_graphs(fresh_app):
     app = fresh_app
     start_ticked_by_hand(app, ticks=3)
-    app._settings_screen.threshold = app._settings_screen.threshold - 5  # allowed mid-session (no program)
+    app._settings_screen.threshold.value = app._settings_screen.threshold.value - 5  # allowed mid-session (no program)
     assert len(app._shown.mirror.metrics) == 3 and app._live_screen.graph.total_points == 3
 
 
@@ -177,7 +177,7 @@ def test_a_deleted_sessions_card_closes_unsaved_but_its_bell_stops(shown):
 
 
 def test_an_idle_threshold_clear_keeps_the_owner_of_an_open_card(shown):
-    shown._settings_screen.threshold = shown._settings_screen.threshold - 5  # an idle slider move clears the display
+    shown._settings_screen.threshold.value = shown._settings_screen.threshold.value - 5  # an idle slider move clears the display
     assert shown._live_screen.graph.total_points == 0 and _card_open(shown)
     assert shown._shown.owner == shown.me  # a later switch to another profile still closes the card
 

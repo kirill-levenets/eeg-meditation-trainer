@@ -202,7 +202,7 @@ def test_a_failing_checkpoint_on_leave_still_saves_the_settings(fresh_app, monke
     monkeypatch.setattr(rs, "report_soft_error", lambda label, detail, **k: reported.append(label))
     app = fresh_app
     _session_of(app, 4, 2)
-    app._settings_screen.threshold = 62  # changed, not yet written
+    app._settings_screen.threshold.value = 62  # changed, not yet written
     monkeypatch.setattr(app._db, "checkpoint_session", _locked)
     app._flush_on_leave()
     assert app._db.get_user_setting(app._current_user_id, "threshold") == "62"

@@ -18,7 +18,7 @@ from app.ui.session_sections.duration_picker import DurationPicker
 from app.ui.session_sections.end_card import EndCard
 from app.ui.session_sections.header import SessionHeader
 from app.ui.session_sections.stats_strip import StatsStrip
-from app.ui.theme import C, F, Icons, S, ThemedLabel, fill_background
+from app.ui.theme import C, F, Icons, S, ThemedLabel, fill_background, text_fills_box
 from app.ui.widgets.band_totals import BAND_COLORS, BAND_SCALES
 from app.ui.widgets.choice_toggle import ChoiceToggle
 from app.ui.widgets.legend import LegendBar
@@ -115,7 +115,7 @@ class LiveSessionScreen(Screen):
             color=C.WARM,
             halign="center",
         )
-        self._alert_label.bind(size=self._alert_label.setter("text_size"))
+        text_fills_box(self._alert_label)
         root.add_widget(self._alert_label)
 
         # ── View toggle: Metrics / Raw EEG ──

@@ -11,7 +11,7 @@ from tests._backup_flow import make_flow
 def test_desktop_success_names_the_file_and_the_sound_note():
     flow = make_flow()
     flow._report_backup_saved("/home/u/eeg_backup_carl_2026-09-29_17-49.db")
-    flow._settings_screen.show_backup_status.assert_called_once_with("Backup saved")
+    flow._section.show_status.assert_called_once_with("Backup saved")
     title, body = flow._ctx.info.call_args.args
     assert title == "Backup saved"
     assert "/home/u/eeg_backup_carl_2026-09-29_17-49.db" in body

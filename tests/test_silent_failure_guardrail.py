@@ -19,7 +19,7 @@ APP = pathlib.Path(__file__).resolve().parent.parent / "app"
 FEEDBACK_FNS = {
     "report_soft_error", "_toast", "android_toast", "_info_popup", "_require_user",
     "set_formula_slot_status", "_confirm_program_action", "focus_device_section",
-    "update_state", "show_alert", "notify_user", "show_backup_status",
+    "update_state", "show_alert", "notify_user", "show_status",
     "gate.open",  # the blocking profile picker
 }
 MARKER = re.compile(r"#\s*silent-ok:\s*\S")
