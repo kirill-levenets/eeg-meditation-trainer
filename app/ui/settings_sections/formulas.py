@@ -6,7 +6,7 @@ from kivy.uix.boxlayout import BoxLayout
 
 from app.ui.hooks import Hook
 from app.ui.settings_sections.common import fill_saved_list, saved_formula_label
-from app.ui.theme import C, CenteredTextInput, F, S, ThemedLabel, fit_height_to_text
+from app.ui.theme import C, CenteredTextInput, F, S, ThemedLabel, fit_height_to_text, text_fills_box
 from app.ui.widgets.styled_button import StyledButton
 
 
@@ -52,7 +52,7 @@ class FormulaSection:
                 color=C.TEXT_SECONDARY,
                 halign="left",
             )
-            slot_header.bind(size=slot_header.setter("text_size"))
+            text_fills_box(slot_header)
             section.add_widget(slot_header)
 
             name_input = CenteredTextInput(
@@ -117,7 +117,7 @@ class FormulaSection:
                 color=C.ACCENT,
                 halign="left",
             )
-            status.bind(size=status.setter("text_size"))
+            text_fills_box(status)
             self._formula_statuses.append(status)
             section.add_widget(status)
 
@@ -130,7 +130,7 @@ class FormulaSection:
             color=C.TEXT_SECONDARY,
             halign="left",
         )
-        saved_label.bind(size=saved_label.setter("text_size"))
+        text_fills_box(saved_label)
         saved_header.add_widget(saved_label)
 
         export_formulas_btn = StyledButton(

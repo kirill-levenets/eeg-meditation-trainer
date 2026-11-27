@@ -47,10 +47,10 @@ def _type_into_slot(a, idx: int, name: str, formula: str) -> None:
 
 
 def test_the_audio_metric_cant_change_while_a_session_runs(app):
-    app._audio_metric.on_change("meditation_score")
+    app._settings_screen.metric._radios["native_meditation"].active = True  # a tap on another metric's radio
     assert _refused(app)
     assert app._user_settings.value("audio_metric") == "shamatha_score" and app.writes == []
-    assert app._settings_screen.audio_metric == "shamatha_score"  # the radio shows the metric in force again
+    assert app._settings_screen.metric.metric == "shamatha_score"  # the radio shows the metric in force again
 
 
 def test_the_audio_metric_changes_when_no_session_runs(idle):
@@ -70,7 +70,7 @@ def test_switching_to_a_formula_while_a_session_runs_is_refused(app):
     app._audio_metric.on_change("custom_formula")
     assert _refused(app)
     assert app._user_settings.value("audio_metric") == "shamatha_score"
-    assert app._settings_screen.audio_metric == "shamatha_score"
+    assert app._settings_screen.metric.metric == "shamatha_score"
 
 
 def test_the_formula_slot_that_drives_the_sound_cant_change_while_a_session_runs(app):
@@ -79,7 +79,7 @@ def test_the_formula_slot_that_drives_the_sound_cant_change_while_a_session_runs
     assert _refused(app)
     store = app._user_settings._store
     assert (store.value("audio_metric"), store.value("audio_formula_index")) == (FORMULA_KEYS[0], 0)
-    assert app._settings_screen.audio_formula_index == 0
+    assert app._settings_screen.metric.formula_index == 0
 
 
 def test_picking_a_slot_while_another_metric_drives_is_only_remembered(app):

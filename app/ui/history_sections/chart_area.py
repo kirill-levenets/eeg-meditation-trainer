@@ -11,7 +11,7 @@ from app.ui.history_sections import common
 from app.ui.history_sections.charts import CalendarHeatmap, DayChart, Last14DaysBars
 from app.ui.hooks import Hook, wire
 from app.ui.period_totals import ALL_TIME, period_text, periods_around, session_day
-from app.ui.theme import ICONS_AVAILABLE, C, F, Icons, S, ThemedLabel
+from app.ui.theme import ICONS_AVAILABLE, C, F, Icons, S, ThemedLabel, text_fills_box
 from app.ui.widgets.choice_toggle import ChoiceToggle
 from app.ui.widgets.styled_button import StyledButton
 
@@ -100,7 +100,7 @@ class ChartArea(BoxLayout):
             label = ThemedLabel(text=text, font_size=F.SMALL, color=C.TEXT_SECONDARY if muted else C.TEXT,
                                 halign="left" if first else "right", valign="middle", shorten=True,
                                 shorten_from="right", size_hint_x=1.5 if first else 1.0)
-            label.bind(size=label.setter("text_size"))
+            text_fills_box(label)
             return label
 
         self._totals = GridLayout(cols=4, size_hint_y=None, height=5 * self._TOTALS_ROW_H, spacing=(dp(6), 0),

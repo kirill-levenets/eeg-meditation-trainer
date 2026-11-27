@@ -283,7 +283,7 @@ def test_a_restore_replaces_the_file_then_hands_the_app_to_a_relaunch(tmp_path, 
 def test_the_app_stops_flushing_and_asks_for_a_relaunch_once_the_db_is_replaced(build_app):
     app = build_app()
     uid = app._current_user_id
-    app._settings_screen.threshold = 62  # changed, not yet written
+    app._settings_screen.threshold.value = 62  # changed, not yet written
     app._on_db_replaced()
     assert app._restoring is True and popup_titles() == ["Restore complete"]
     app.on_pause()

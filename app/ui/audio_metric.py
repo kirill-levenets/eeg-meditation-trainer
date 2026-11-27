@@ -15,10 +15,10 @@ class AudioMetric:
     """The profile's metric as Settings shows it and its one change path, refused while a simple session is scored on
     it."""
 
-    def __init__(self, ctx: AppContext, program_run, settings_screen) -> None:
+    def __init__(self, ctx: AppContext, program_run, picker) -> None:
         self._ctx = ctx
         self._program_run = program_run
-        self._settings_screen = settings_screen
+        self._picker = picker  # Settings › Threshold's metric picker
 
     def scoring_locked(self, doing: str) -> bool:
         """True (after telling the user) while a simple session runs: it is scored on this metric until it stops. A
@@ -32,8 +32,8 @@ class AudioMetric:
     def show(self) -> None:
         """Settings' metric choice and formula-slot buttons show the metric in force."""
         key = self._ctx.setting("audio_metric")
-        self._settings_screen.audio_metric = "custom_formula" if key in FORMULA_KEYS else key
-        self._settings_screen.audio_formula_index = self._ctx.setting("audio_formula_index")
+        self._picker.metric = "custom_formula" if key in FORMULA_KEYS else key
+        self._picker.formula_index = self._ctx.setting("audio_formula_index")
 
     def on_change(self, key: str) -> None:
         """Settings' metric choice: a running session keeps the one it is scored on (a switch mixed both metrics into

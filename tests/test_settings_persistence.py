@@ -18,8 +18,8 @@ def test_the_alert_toggles_and_the_rotation_are_applied_and_persist_via_the_stor
     app = fresh_app
     writes = setting_writes(app, monkeypatch)
     audio = app._settings_screen.audio
-    audio._disconnect_alert_cb.active = True
-    audio._subtle_alert_cb.active = True
+    audio.alerts["disconnect_alert"].active = True
+    audio.alerts["subtle_alert"].active = True
     app._settings_screen.display.on_rotate_screen(90)
     assert app._audio.disconnect_alert_enabled is True and Window.rotation == 90
     assert writes == [("disconnect_alert", "True"), ("subtle_alert", "True"), ("rotation", "90")]
@@ -28,7 +28,7 @@ def test_the_alert_toggles_and_the_rotation_are_applied_and_persist_via_the_stor
 def test_a_theme_text_size_or_line_colours_pick_writes_that_setting(fresh_app, monkeypatch):
     app = fresh_app
     writes = setting_writes(app, monkeypatch)
-    app._settings_screen.on_theme_change(C.theme_name)  # each picker applies its choice, then tells the app
+    app._settings_screen.theme.on_change(C.theme_name)  # each picker applies its choice, then tells the app
     app._settings_screen.display.on_text_size(F.SCALE)
     app._settings_screen.display.on_line_colours(LINE_COLOURS.name)
     assert [key for key, _ in writes] == ["theme", "text_size", "line_colours"]
@@ -42,7 +42,7 @@ def test_the_line_width_reaches_every_graph(fresh_app):
 def test_a_new_profile_plays_rain_below_the_threshold_and_no_reward(fresh_app):
     app, audio = fresh_app, fresh_app._settings_screen.audio
     assert (app._user_settings.value("feedback_source"), app._user_settings.value("reward_source")) == ("noise", "none")
-    assert (audio.feedback_source, audio._reward_source) == ("noise", "none")
+    assert (audio.feedback.source, audio.reward.source) == ("noise", "none")
 
 
 def test_a_profiles_sound_files_and_stats_view_show_after_its_load(fresh_app):
@@ -53,7 +53,7 @@ def test_a_profiles_sound_files_and_stats_view_show_after_its_load(fresh_app):
         app._db.set_user_setting(uid, key, value)
     app._activate_user(uid)
     audio = app._settings_screen.audio
-    assert (audio._feedback_sound_path, audio._reward_sound_path) == ("/sounds/rain.wav", "/sounds/bell.wav")
+    assert (audio.feedback.path, audio.reward.path) == ("/sounds/rain.wav", "/sounds/bell.wav")
     assert app._settings_screen.timer.timer_sound_path == "/sounds/gong.wav"
     assert app._live_screen.stats.mode == "aggregate"
 
@@ -146,11 +146,22 @@ def test_re_picking_the_profile_keeps_a_running_formulas_window(fresh_app, monke
 def test_the_formula_slot_switch_tells_the_app_and_shows_a_slot_set_elsewhere():
     screen = SettingsScreen()
     picked = []
-    wire(screen, on_audio_formula_index=picked.append)
-    screen._slot_toggle.buttons[2].dispatch("on_release")
-    assert (picked, screen.audio_formula_index, screen._slot_toggle.chosen) == ([2], 2, 2)
-    screen.audio_formula_index = 0  # a profile's load
-    assert (picked, screen._slot_toggle.chosen) == ([2], 0)
+    wire(screen.metric, on_formula_index=picked.append)
+    screen.metric._slot_toggle.buttons[2].dispatch("on_release")
+    assert (picked, screen.metric.formula_index, screen.metric._slot_toggle.chosen) == ([2], 2, 2)
+    screen.metric.formula_index = 0  # a profile's load
+    assert (picked, screen.metric._slot_toggle.chosen) == ([2], 0)
+
+
+def test_the_metric_picker_reports_a_tapped_metric_and_reads_back_what_its_radios_show():
+    screen = SettingsScreen()
+    picked = []
+    wire(screen.metric, on_metric_change=picked.append)
+    screen.metric._radios["native_attention"].active = True  # a tap on its radio
+    assert picked == ["native_attention"] and screen.metric.metric == "native_attention"
+    screen.metric.metric = "custom_formula"  # a profile's load shows its metric
+    assert screen.metric.metric == "custom_formula" and not screen.metric._radios["native_attention"].active
+    assert picked == ["native_attention", "custom_formula"]  # shown as tapped: the app's change path sees no change
 
 
 def test_a_stored_formula_metric_loads_its_slot_and_the_load_writes_nothing(fresh_app, monkeypatch):
@@ -159,7 +170,7 @@ def test_a_stored_formula_metric_loads_its_slot_and_the_load_writes_nothing(fres
                                           {"name": "Custom 3", "formula": ""}]}, audio_metric=FORMULA_KEYS[1])
     store = app._user_settings._store
     assert (store.value("audio_metric"), store.value("audio_formula_index")) == (FORMULA_KEYS[1], 1)
-    assert app._settings_screen.audio_formula_index == 1  # Settings shows the slot that drives the sound
+    assert app._settings_screen.metric.formula_index == 1  # Settings shows the slot that drives the sound
     writes = setting_writes(app, monkeypatch)
     app._activate_user(app._current_user_id)  # the load again
     assert writes == [] and store.value("audio_metric") == FORMULA_KEYS[1]  # nothing of the load's own

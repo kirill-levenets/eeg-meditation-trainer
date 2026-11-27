@@ -1,7 +1,11 @@
 """Settings → Audio: the feedback sound below the threshold and the reward above it, the alert bells and the sound
 test."""
 
+from collections.abc import Callable
+from dataclasses import dataclass
+
 from kivy.metrics import dp
+from kivy.uix.checkbox import CheckBox
 
 from app.config import APP
 from app.ui.hooks import Hook
@@ -11,170 +15,94 @@ from app.ui.settings_sections.common import (
     open_source_picker,
     source_label,
 )
-from app.ui.theme import C, F, ThemedLabel, fit_height_to_text
+from app.ui.theme import C, F, ThemedLabel, fit_height_to_text, text_fills_box
 from app.ui.widgets.styled_button import StyledButton
 
-_FEEDBACK_SOURCE_OPTIONS: tuple[tuple[str, str], ...] = (
-    ("Off", "none"), ("Rain", "noise"), ("Tone", "tone"), ("Custom file...", "custom"),
-)
+
+@dataclass(frozen=True)
+class SourceSpec:
+    """A sound channel's picker: its label, the picker's title, its choices and the source shown by default."""
+
+    label: str
+    title: str
+    options: tuple[tuple[str, str], ...]
+    default: str
+
+
+FEEDBACK = SourceSpec("Feedback sound:", "Feedback sound",
+                      (("Off", "none"), ("Rain", "noise"), ("Tone", "tone"), ("Custom file...", "custom")), "noise")
 # Reward adds the periodic Crickets cue (issue #11); below-threshold feedback does not.
 # ("heartbeat" is the stable internal source id — the timbre is a cricket chirp.)
-_REWARD_SOURCE_OPTIONS: tuple[tuple[str, str], ...] = (
-    ("Off", "none"), ("Rain", "noise"), ("Tone", "tone"),
-    ("Crickets", "heartbeat"), ("Custom file...", "custom"),
-)
+REWARD = SourceSpec("Reward sound (above threshold):", "Reward sound",
+                    (("Off", "none"), ("Rain", "noise"), ("Tone", "tone"), ("Crickets", "heartbeat"),
+                     ("Custom file...", "custom")), "none")
+# Each alert toggle by the setting it holds.
+ALERTS = (("sinking_alert", "Enable Sinking Alert Bell"), ("subtle_alert", "Enable Distraction Chime"),
+          ("disconnect_alert", "Audio alert on disconnect / signal loss"))
+
+
+class SourcePicker:
+    """A sound channel's source: its label, a button naming the source, and the picker it opens (a file for Custom)."""
+
+    def __init__(self, section, spec: SourceSpec, on_change: Callable[[str, str], None]) -> None:
+        self._spec, self._on_change = spec, on_change
+        self.source, self.path = spec.default, ""
+        label = ThemedLabel(text=spec.label, font_size=F.SMALL, color=C.TEXT_SECONDARY, size_hint_y=None,
+                            height=dp(24), halign="left", valign="middle")
+        text_fills_box(label)
+        section.add_widget(label)
+        self.button = StyledButton(text=source_label(self.source, self.path), font_size=F.SMALL, bg_color=C.BG_CARD,
+                                   text_color=C.TEXT, size_hint_y=None, height=dp(36))
+        self.button.bind(on_release=lambda *_a: open_source_picker(spec.title, spec.options, self.choose))
+        section.add_widget(self.button)
+
+    def show(self, source: str, path: str = "") -> None:
+        """A restored or loaded choice, on the button (nothing reported)."""
+        self.source = source or self._spec.default
+        self.path = path or ""
+        self.button.text = source_label(self.source, self.path)
+
+    def choose(self, value: str) -> None:
+        """The picker's choice: Custom opens the file chooser first."""
+        if value == "custom":
+            open_audio_file_chooser(lambda p: self._apply("custom", p), title=f"{self._spec.title} file")
+            return
+        self._apply(value, "")
+
+    def _apply(self, source: str, path: str) -> None:
+        self.show(source, path)
+        self._on_change(self.source, self.path)
 
 
 class AudioSection:
-    """Builds the section's content into `section` and reports the user's actions through its callbacks."""
+    """Builds the section's content into `section` and reports the user's actions through its hooks."""
 
     on_test_audio = Hook()
     on_feedback_source_change = Hook()
     on_reward_source_change = Hook()
-    on_sinking_alert_toggle = Hook()
-    on_subtle_alert_toggle = Hook()
-    on_disconnect_alert_toggle = Hook()
+    on_alert_toggle = Hook()  # (the alert's setting key, on)
 
     def __init__(self, section) -> None:
-        self._feedback_source: str = "noise"
-        self._feedback_sound_path: str = ""
-        self._feedback_source_btn: StyledButton | None = None
-        self._reward_source: str = "none"   # above-threshold reward (off by default)
-        self._reward_sound_path: str = ""
-        self._reward_source_btn: StyledButton | None = None
-        self._build(section)
-
-    def _build(self, section) -> None:
-
-        audio_desc = ThemedLabel(
+        desc = ThemedLabel(
             text=(
                 "Rain noise — volume decreases as meditation deepens\n"
                 "Test: reward sample, feedback sweep (0-max-0), sinking bell (every 15s),\n"
                 "distraction chime (subtle > 30, every 20s), disconnect warble (device lost)"
             ),
-            font_size=F.SMALL,
-            size_hint_y=None,
-            color=C.TEXT_SECONDARY,
-            halign="left",
+            font_size=F.SMALL, size_hint_y=None, color=C.TEXT_SECONDARY, halign="left",
         )
-        fit_height_to_text(audio_desc)
-        section.add_widget(audio_desc)
-
-        # Test Audio button
-        self._test_audio_btn = StyledButton(
-            text="Test Audio",
-            font_size=F.H3,
-            bold=True,
-            bg_color=C.PRIMARY,
-            size_hint_y=None,
-            height=dp(40),
-        )
-        self._test_audio_btn.bind(on_release=self._on_test_audio_pressed)
-        section.add_widget(self._test_audio_btn)
-
-        fb_label = ThemedLabel(
-            text="Feedback sound:", font_size=F.SMALL, color=C.TEXT_SECONDARY,
-            size_hint_y=None, height=dp(24), halign="left", valign="middle",
-        )
-        fb_label.bind(size=fb_label.setter("text_size"))
-        section.add_widget(fb_label)
-
-        self._feedback_source_btn = StyledButton(
-            text=source_label(self._feedback_source, self._feedback_sound_path),
-            font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT,
-            size_hint_y=None, height=dp(36),
-        )
-        self._feedback_source_btn.bind(on_release=lambda *_a: self._open_feedback_source_picker())
-        section.add_widget(self._feedback_source_btn)
-
-        # Above-threshold reward channel (issue #12): a second sound that rises as the
-        # score climbs above the threshold. Off by default.
-        rw_label = ThemedLabel(
-            text="Reward sound (above threshold):", font_size=F.SMALL, color=C.TEXT_SECONDARY,
-            size_hint_y=None, height=dp(24), halign="left", valign="middle",
-        )
-        rw_label.bind(size=rw_label.setter("text_size"))
-        section.add_widget(rw_label)
-
-        self._reward_source_btn = StyledButton(
-            text=source_label(self._reward_source, self._reward_sound_path),
-            font_size=F.SMALL, bg_color=C.BG_CARD, text_color=C.TEXT,
-            size_hint_y=None, height=dp(36),
-        )
-        self._reward_source_btn.bind(on_release=lambda *_a: self._open_reward_source_picker())
-        section.add_widget(self._reward_source_btn)
-
-        # Sinking alert toggle
-        sinking_row, self._sinking_alert_cb = checkbox_row("Enable Sinking Alert Bell", dp(36), active=False)
-        self._sinking_alert_cb.bind(active=self._on_sinking_alert_change)
-        section.add_widget(sinking_row)
-
-        # Subtle distraction alert toggle
-        subtle_row, self._subtle_alert_cb = checkbox_row("Enable Distraction Chime", dp(36), active=False)
-        self._subtle_alert_cb.bind(active=self._on_subtle_alert_change)
-        section.add_widget(subtle_row)
-
-        # Disconnect alert toggle
-        disconnect_row, self._disconnect_alert_cb = checkbox_row(
-            "Audio alert on disconnect / signal loss", dp(36), active=APP.DISCONNECT_ALERT_ENABLED)
-        self._disconnect_alert_cb.bind(active=self._on_disconnect_alert_change)
-        section.add_widget(disconnect_row)
-
-    def _on_test_audio_pressed(self, *args) -> None:
-        self.on_test_audio()
-
-    def _on_sinking_alert_change(self, checkbox, active) -> None:
-        self.on_sinking_alert_toggle(active)
-
-    def _on_subtle_alert_change(self, checkbox, active) -> None:
-        self.on_subtle_alert_toggle(active)
-
-    def _on_disconnect_alert_change(self, checkbox, active) -> None:
-        self.on_disconnect_alert_toggle(active)
-
-    @property
-    def feedback_source(self) -> str:
-        return self._feedback_source
-
-    def set_feedback_source(self, source: str, path: str = "") -> None:
-        """Reflect a restored/loaded feedback selection on the picker button (no callback)."""
-        self._feedback_source = source or "noise"
-        self._feedback_sound_path = path or ""
-        if self._feedback_source_btn is not None:
-            self._feedback_source_btn.text = source_label(self._feedback_source, self._feedback_sound_path)
-
-    def _open_feedback_source_picker(self) -> None:
-        open_source_picker("Feedback sound", _FEEDBACK_SOURCE_OPTIONS, self._choose_feedback_source)
-
-    def _choose_feedback_source(self, value: str) -> None:
-        if value == "custom":
-            open_audio_file_chooser(
-                lambda p: self._apply_feedback_source("custom", p), title="Feedback sound file")
-            return
-        self._apply_feedback_source(value, "")
-
-    def _apply_feedback_source(self, source: str, path: str) -> None:
-        self.set_feedback_source(source, path)
-        self.on_feedback_source_change(self._feedback_source, self._feedback_sound_path)
-
-    def set_reward_source(self, source: str, path: str = "") -> None:
-        """Reflect a restored/loaded reward selection on the picker button (no callback)."""
-        self._reward_source = source or "none"
-        self._reward_sound_path = path or ""
-        if self._reward_source_btn is not None:
-            self._reward_source_btn.text = source_label(self._reward_source, self._reward_sound_path)
-
-    def _open_reward_source_picker(self) -> None:
-        open_source_picker("Reward sound", _REWARD_SOURCE_OPTIONS, self._choose_reward_source)
-
-    def _choose_reward_source(self, value: str) -> None:
-        if value == "custom":
-            open_audio_file_chooser(
-                lambda p: self._apply_reward_source("custom", p), title="Reward sound file")
-            return
-        self._apply_reward_source(value, "")
-
-    def _apply_reward_source(self, source: str, path: str) -> None:
-        self.set_reward_source(source, path)
-        self.on_reward_source_change(self._reward_source, self._reward_sound_path)
-
+        fit_height_to_text(desc)
+        section.add_widget(desc)
+        test_btn = StyledButton(text="Test Audio", font_size=F.H3, bold=True, bg_color=C.PRIMARY, size_hint_y=None,
+                                height=dp(40))
+        test_btn.bind(on_release=lambda *_a: self.on_test_audio())
+        section.add_widget(test_btn)
+        self.feedback = SourcePicker(section, FEEDBACK, lambda s, p: self.on_feedback_source_change(s, p))
+        # Above-threshold reward channel (issue #12): a second sound that rises as the score climbs above the threshold.
+        self.reward = SourcePicker(section, REWARD, lambda s, p: self.on_reward_source_change(s, p))
+        self.alerts: dict[str, CheckBox] = {}
+        for key, text in ALERTS:
+            row, box = checkbox_row(text, dp(36), active=key == "disconnect_alert" and APP.DISCONNECT_ALERT_ENABLED)
+            box.bind(active=lambda _box, on, k=key: self.on_alert_toggle(k, on))
+            section.add_widget(row)
+            self.alerts[key] = box

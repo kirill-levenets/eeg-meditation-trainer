@@ -9,7 +9,7 @@ from kivy.uix.scrollview import ScrollView
 
 from app.logger import logger
 from app.ui.formatting import format_count
-from app.ui.theme import C, CenteredTextInput, F, S, ThemedLabel
+from app.ui.theme import C, CenteredTextInput, F, S, ThemedLabel, text_wraps_at_width
 from app.ui.widgets.styled_button import StyledButton
 
 
@@ -67,8 +67,7 @@ class UserPickerForm(BoxLayout):
             halign="left",
             valign="middle",
         )
-        self._existing_header.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
-
+        text_wraps_at_width(self._existing_header)
         self._existing_scroll = ScrollView(size_hint_y=None, height=dp(0))
         self._existing_list = BoxLayout(
             orientation="vertical",
@@ -126,8 +125,7 @@ class UserPickerForm(BoxLayout):
             halign="left",
             valign="middle",
         )
-        self._error_label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
-
+        text_wraps_at_width(self._error_label)
         btn_row = BoxLayout(size_hint_y=None, height=dp(38), spacing=S.GAP_SM)
         self._btn_use_existing = StyledButton(
             text="Use existing",
@@ -156,6 +154,11 @@ class UserPickerForm(BoxLayout):
         self._render_filtered_list(text)
 
     # ---- Population ----
+
+    @property
+    def users(self) -> list[dict]:
+        """The profiles it lists (each a dict with "id" and "name")."""
+        return self._users
 
     def populate_users(self, users: list[dict]) -> None:
         """Set the full user list. The visible dropdown is then derived

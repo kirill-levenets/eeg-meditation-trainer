@@ -8,7 +8,7 @@ from kivy.uix.slider import Slider
 from app.ui.hooks import Hook
 from app.ui.line_colours import LINE_COLOURS, MONO, GradientStrip
 from app.ui.line_colours import OPTIONS as LINE_OPTIONS
-from app.ui.theme import TEXT_SIZES, C, F, S, ThemedLabel, fit_row_to_text
+from app.ui.theme import TEXT_SIZES, C, F, S, ThemedLabel, fit_row_to_text, text_fills_box
 from app.ui.widgets.rows import PresetRow
 from app.ui.widgets.styled_button import StyledButton
 
@@ -37,26 +37,33 @@ class DisplaySection:
     on_line_colours = Hook()
 
     def __init__(self, section) -> None:
-        self._build(section)
+        self._current_rotation: int = 0
+        self._marker_hotkey: str = "m"
+        self._waiting_for_hotkey: bool = False
+        self._build_text_size(section)
+        self._build_line_colours(section)
+        self._build_line_width(section)
+        self._build_rotation(section)
+        self._build_marker_hotkey(section)
 
-    def _build(self, section) -> None:
+    @staticmethod
+    def _heading(section, text: str) -> None:
+        label = ThemedLabel(text=text, font_size=F.BODY, color=C.TEXT, halign="left", size_hint_y=None, height=dp(28))
+        text_fills_box(label)
+        section.add_widget(label)
 
-        # Text size: every font in the app, applied at once (F.set_scale).
-        ts_label = ThemedLabel(text="Text size:", font_size=F.BODY, color=C.TEXT, halign="left", size_hint_y=None,
-                               height=dp(28))
-        ts_label.bind(size=ts_label.setter("text_size"))
-        section.add_widget(ts_label)
+    def _build_text_size(self, section) -> None:
+        """Text size: every font in the app, applied at once (F.set_scale)."""
+        self._heading(section, "Text size:")
         self._text_size_presets = PresetRow(items=[(name, scale) for scale, name in TEXT_SIZES],
                                             callback=self._on_text_size_pressed)
         section.add_widget(self._text_size_presets)
         self._show_text_size()
         F.add_listener(self._show_text_size)
 
-        # Scored line colours (#94): the trained series in its own colour or a gradient by value, on every graph at once.
-        lc_label = ThemedLabel(text="Scored line colours:", font_size=F.BODY, color=C.TEXT, halign="left",
-                               size_hint_y=None, height=dp(28))
-        lc_label.bind(size=lc_label.setter("text_size"))
-        section.add_widget(lc_label)
+    def _build_line_colours(self, section) -> None:
+        """Scored line colours (#94): the trained series in its own colour or a gradient by value, on every graph."""
+        self._heading(section, "Scored line colours:")
         self._line_colour_rows = [PresetRow(items=[(label, name) for name, label in LINE_OPTIONS[i:i + 3]],
                                             callback=self._on_line_colours_pressed, height=dp(34))
                                   for i in (0, 3)]
@@ -68,80 +75,41 @@ class DisplaySection:
         self._show_line_colours()
         LINE_COLOURS.add_listener(self._show_line_colours)
 
-        # Line width slider
+    def _build_line_width(self, section) -> None:
+        """Line width: a slider and presets."""
         lw_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
-        lw_label = ThemedLabel(
-            text="Line Width:", font_size=F.BODY,
-            color=C.TEXT,
-            size_hint_x=0.3, halign="left",
-        )
-        lw_label.bind(size=lw_label.setter("text_size"))
-        self._line_width_slider = Slider(
-            min=0.5, max=4.0, value=1.2, step=0.1, size_hint_x=0.5,
-        )
-        self._line_width_value = ThemedLabel(
-            text="1.2", font_size=F.BODY, bold=True, color=C.TEXT, size_hint_x=0.2,
-        )
+        lw_label = ThemedLabel(text="Line Width:", font_size=F.BODY, color=C.TEXT, size_hint_x=0.3, halign="left")
+        text_fills_box(lw_label)
+        self._line_width_slider = Slider(min=0.5, max=4.0, value=1.2, step=0.1, size_hint_x=0.5)
+        self._line_width_value = ThemedLabel(text="1.2", font_size=F.BODY, bold=True, color=C.TEXT, size_hint_x=0.2)
         self._line_width_slider.bind(value=self._on_line_width_slider)
-        lw_row.add_widget(lw_label)
-        lw_row.add_widget(self._line_width_slider)
-        lw_row.add_widget(self._line_width_value)
+        for widget in (lw_label, self._line_width_slider, self._line_width_value):
+            lw_row.add_widget(widget)
         section.add_widget(lw_row)
+        section.add_widget(PresetRow(values=[0.5, 1.0, 1.5, 2.0, 3.0],
+                                     callback=lambda v: setattr(self._line_width_slider, "value", v), fmt="{}"))
 
-        lw_presets = PresetRow(
-            values=[0.5, 1.0, 1.5, 2.0, 3.0],
-            callback=lambda v: setattr(self._line_width_slider, 'value', v),
-            fmt="{}",
-        )
-        section.add_widget(lw_presets)
-
-        # Screen rotation button
-        self._rotate_btn = StyledButton(
-            text="Rotate Screen (0\u00b0)",
-            font_size=F.BODY,
-            bg_color=C.PRIMARY_DIM,
-            size_hint_y=None,
-            height=dp(36),
-        )
+    def _build_rotation(self, section) -> None:
+        self._rotate_btn = StyledButton(text="Rotate Screen (0\u00b0)", font_size=F.BODY, bg_color=C.PRIMARY_DIM,
+                                        size_hint_y=None, height=dp(36))
         self._rotate_btn.bind(on_release=self._on_rotate_pressed)
-        self._current_rotation: int = 0
         section.add_widget(self._rotate_btn)
 
-        # Marker hotkey picker
+    def _build_marker_hotkey(self, section) -> None:
+        """The marker hotkey: its key, picked by pressing it, and Clear."""
         marker_row = BoxLayout(size_hint_y=None, height=dp(36), spacing=S.GAP)
-        marker_lbl = ThemedLabel(
-            text="Marker Hotkey:", font_size=F.BODY,
-            color=C.TEXT,
-            size_hint_x=0.35, halign="left", valign="middle",
-        )
-        self._marker_hotkey_btn = StyledButton(
-            text="m",
-            font_size=F.BODY,
-            bold=True,
-            bg_color=C.BG_CARD,
-            text_color=C.PRIMARY,
-            size_hint_x=0.35,
-            size_hint_y=None,
-            height=dp(36),
-        )
+        marker_lbl = ThemedLabel(text="Marker Hotkey:", font_size=F.BODY, color=C.TEXT, size_hint_x=0.35,
+                                 halign="left", valign="middle")
+        self._marker_hotkey_btn = StyledButton(text="m", font_size=F.BODY, bold=True, bg_color=C.BG_CARD,
+                                               text_color=C.PRIMARY, size_hint_x=0.35, size_hint_y=None, height=dp(36))
         self._marker_hotkey_btn.bind(on_release=self._on_marker_hotkey_pressed)
-        self._marker_hotkey_clear = StyledButton(
-            text="Clear",
-            font_size=F.SMALL,
-            bg_color=C.BG_CARD,
-            text_color=C.DANGER,
-            size_hint_x=0.3,
-            size_hint_y=None,
-            height=dp(36),
-        )
+        self._marker_hotkey_clear = StyledButton(text="Clear", font_size=F.SMALL, bg_color=C.BG_CARD,
+                                                 text_color=C.DANGER, size_hint_x=0.3, size_hint_y=None, height=dp(36))
         self._marker_hotkey_clear.bind(on_release=self._on_marker_hotkey_clear)
-        marker_row.add_widget(marker_lbl)
-        marker_row.add_widget(self._marker_hotkey_btn)
-        marker_row.add_widget(self._marker_hotkey_clear)
+        for widget in (marker_lbl, self._marker_hotkey_btn, self._marker_hotkey_clear):
+            marker_row.add_widget(widget)
         fit_row_to_text(marker_row, marker_lbl, dp(36))
         section.add_widget(marker_row)
-        self._marker_hotkey: str = "m"
-        self._waiting_for_hotkey: bool = False
 
     @property
     def line_width(self) -> float:

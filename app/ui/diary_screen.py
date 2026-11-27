@@ -35,6 +35,7 @@ from app.ui.theme import (
     fill_background,
     fit_height_to_text,
     fit_width_to_text,
+    text_fills_box,
 )
 from app.ui.widgets.band_totals import BAND_COLORS, BAND_SCALES, BandTotalsView
 from app.ui.widgets.choice_toggle import ChoiceToggle
@@ -199,7 +200,7 @@ class DiaryScreen(Screen):
             shorten=True,
             shorten_from="right",
         )
-        self._detail_title.bind(size=self._detail_title.setter("text_size"))
+        text_fills_box(self._detail_title)
         self._detail_layout.add_widget(self._detail_title)
 
         # Stats grid: one (title, value) row per stat, set by show_session_detail — a session that saved no metric has one
@@ -493,7 +494,7 @@ class DiaryScreen(Screen):
         fit_width_to_text(title, S.GAP)
         value = ThemedLabel(text="-", font_size=F.H3, bold=True, color=C.TEXT, halign="left", size_hint_y=None,
                             height=dp(20), shorten=True, shorten_from="right")
-        value.bind(size=value.setter("text_size"))
+        text_fills_box(value)
         return title, value
 
     def _set_detail_rows(self, rows: list[tuple[str, str]]) -> None:

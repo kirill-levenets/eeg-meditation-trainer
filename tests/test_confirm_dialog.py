@@ -38,8 +38,9 @@ def _laid_out_words(label) -> list[str]:
 def _open_profile_delete(_app, _text):
     from app.ui.settings_screen import SettingsScreen
     screen = SettingsScreen()
-    wire(screen, session_counter=lambda uid: 12)
-    screen._confirm_user_delete(5, "test")
+    wire(screen.profile, session_counter=lambda uid: 12)
+    screen.profile.show_users([{"id": 5, "name": "test"}], None)
+    screen.profile._confirm_delete(5)
 
 
 @pytest.mark.parametrize(("open_dialog", "text"), [

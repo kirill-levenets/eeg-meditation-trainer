@@ -31,10 +31,10 @@ class BackupFlow:
     """Backup and Restore: the file pickers, the copy on a worker thread, the restore's confirmation and replace.
     It reaches the app only through what it is given."""
 
-    def __init__(self, ctx: AppContext, settings_screen, *, user_name: Callable[[], str | None],
+    def __init__(self, ctx: AppContext, section, *, user_name: Callable[[], str | None],
                  checkpoint: Callable[[], None], on_db_replaced: Callable[[], None]) -> None:
         self._ctx = ctx
-        self._settings_screen = settings_screen
+        self._section = section  # Settings › Data Backup
         self._user_name = user_name
         self._checkpoint = checkpoint
         self._on_db_replaced = on_db_replaced
@@ -59,10 +59,10 @@ class BackupFlow:
         """
         def _on_uri(uri_str):
             if not uri_str:
-                Clock.schedule_once(lambda dt: self._settings_screen.show_backup_status(
+                Clock.schedule_once(lambda dt: self._section.show_status(
                     "Backup canceled"))
                 return
-            Clock.schedule_once(lambda dt: self._settings_screen.show_backup_status(
+            Clock.schedule_once(lambda dt: self._section.show_status(
                 "Backing up…"))
             threading.Thread(
                 target=self._backup_to_uri_worker, args=(uri_str,), daemon=True,
@@ -90,7 +90,7 @@ class BackupFlow:
                 discard_file(tmp_path)
 
     def _run_backup_async(self, target_path: str) -> None:
-        self._settings_screen.show_backup_status("Backing up…")
+        self._section.show_status("Backing up…")
 
         def _worker():
             try:
@@ -109,7 +109,7 @@ class BackupFlow:
     def _report_backup_saved(self, location: str, *, show_location: bool = True) -> None:
         """Success also pops up: the status line is small and sits at the bottom of a collapsed section."""
         logger.info(f"Backup saved to {location}")
-        self._settings_screen.show_backup_status("Backup saved")
+        self._section.show_status("Backup saved")
         body = f"Saved to:\n{location}\n\n{BACKUP_SOUND_NOTE}" if show_location else BACKUP_SOUND_NOTE
         self._ctx.info("Backup saved", body)
 

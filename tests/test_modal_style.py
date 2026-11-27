@@ -356,7 +356,7 @@ def test_the_app_selected_states_are_readable(theme, screens):
     live._set_view("raw")
     live._set_view("metrics")
     hist.chart_area.set_view_mode("bars")
-    for btn in (live._view_toggle.buttons["metrics"], hist.chart_area._toggle_col.buttons["bars"], sett._theme_toggle.buttons[theme]):
+    for btn in (live._view_toggle.buttons["metrics"], hist.chart_area._toggle_col.buttons["bars"], sett.theme._toggle.buttons[theme]):
         assert _contrast(btn.text_color, btn.bg_color) == pytest.approx(_best_glyph_contrast(btn.bg_color)), btn.text
 
 

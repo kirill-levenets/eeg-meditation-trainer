@@ -87,6 +87,7 @@ With no active user the first-run popup (the user gate) is shown.
   The app doesn't follow Android's system font size: every size is `dp`.
 - **Boxes that hold text follow it; text in a box that can't stops growing.** At 150 % a fixed box cuts text off or wraps it, so:
   - a multi-line label takes its text's height (`fit_height_to_text(label)`; the same test fails on a multi-line `ThemedLabel` with a fixed height);
+    a label whose text is placed by its `halign`/`valign` lays it out in its whole box (`text_fills_box(label)`), and one that only wraps at its width binds that alone (`text_wraps_at_width(label)`, which `fit_height_to_text` builds on);
     a row of a wrapping label beside fixed-height controls is as tall as the label, at least its old height, with the controls centred (`fit_row_to_text(row, label, min_height)`: Settings' checkbox rows, Marker Hotkey, History's list heading);
   - a box sized for its text takes `F.box(n)` (a plain `dp(n) * F.SCALE`, up to a cap when its text is capped) and re-reads it in an `F.add_listener`:
     the band table's rows and columns, the 14-day chart's margins and label boxes, the saved card's notes field, the Session screen's status line;

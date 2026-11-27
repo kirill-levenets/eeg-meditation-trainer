@@ -10,7 +10,7 @@ from app.logger import logger
 from app.ui.device_labels import MAX_DEVICE_ALIAS, device_row_text
 from app.ui.hooks import Hook
 from app.ui.settings_sections.common import checkbox_row
-from app.ui.theme import C, F, Icons, S, ThemedLabel, fit_height_to_text
+from app.ui.theme import C, F, Icons, S, ThemedLabel, fit_height_to_text, text_fills_box
 from app.ui.widgets.rows import RenameRow
 from app.ui.widgets.styled_button import StyledButton
 
@@ -38,93 +38,50 @@ class DeviceSection:
 
     def _build(self, section) -> None:
         self._device_section = section
-
-        # One-shot banner used by focus_device_section(message). Empty/0-height
-        # by default so it doesn't take space; populated when we route the
-        # user here (e.g. multiple MindWave devices found, scan returned 0).
-        self._device_picker_banner = ThemedLabel(
-            text="",
-            font_size=F.BODY,
-            color=C.WARM,
-            bold=True,
-            size_hint_y=None,
-            height=0,
-            halign="left", valign="middle",
-            opacity=0,
-        )
-        self._device_picker_banner.bind(
-            size=self._device_picker_banner.setter("text_size")
-        )
-        section.add_widget(self._device_picker_banner)
-
-        self._device_status_label = ThemedLabel(
-            text="Not connected",
-            font_size=F.BODY,
-            size_hint_y=None,
-            height=dp(24),
-            color=C.DISCONNECTED,
-            halign="left",
-        )
-        self._device_status_label.bind(size=self._device_status_label.setter("text_size"))
-        section.add_widget(self._device_status_label)
-
-        self._device_meta_label = ThemedLabel(
-            text="Mode: Mock Data",
-            font_size=F.SMALL,
-            size_hint_y=None,
-            height=dp(20),
-            color=C.TEXT_MUTED,
-            halign="left",
-        )
-        self._device_meta_label.bind(size=self._device_meta_label.setter("text_size"))
-        section.add_widget(self._device_meta_label)
-
-        # Mock / Real device switch
+        self._build_status(section)
         device_mode_row, self._device_mode_cb = checkbox_row(
             "Use Mock Data (uncheck for real device)", dp(36), active=APP.USE_MOCK_DEVICE)
         self._device_mode_cb.bind(active=self._on_device_mode_change)
         section.add_widget(device_mode_row)
+        self._build_device_list(section)
+        self._build_device_rename_row()
+        self._build_diagnostics(section)
+        self._build_power_box()
 
-        # Scan + device list
-        self._bt_section = BoxLayout(
-            orientation="vertical", size_hint_y=None, spacing=S.GAP_SM,
-        )
+    def _build_status(self, section) -> None:
+        """The banner that asks for a pick (empty until focus_device_section), the link's status and the mode line."""
+        self._device_picker_banner = ThemedLabel(text="", font_size=F.BODY, color=C.WARM, bold=True, size_hint_y=None,
+                                                 height=0, halign="left", valign="middle", opacity=0)
+        text_fills_box(self._device_picker_banner)
+        section.add_widget(self._device_picker_banner)
+        self._device_status_label = ThemedLabel(text="Not connected", font_size=F.BODY, size_hint_y=None,
+                                                height=dp(24), color=C.DISCONNECTED, halign="left")
+        text_fills_box(self._device_status_label)
+        section.add_widget(self._device_status_label)
+        self._device_meta_label = ThemedLabel(text="Mode: Mock Data", font_size=F.SMALL, size_hint_y=None,
+                                              height=dp(20), color=C.TEXT_MUTED, halign="left")
+        text_fills_box(self._device_meta_label)
+        section.add_widget(self._device_meta_label)
+
+    def _build_device_list(self, section) -> None:
+        """Scan, and the paired devices it found."""
+        self._bt_section = BoxLayout(orientation="vertical", size_hint_y=None, spacing=S.GAP_SM)
         self._bt_section.bind(minimum_height=self._bt_section.setter("height"))
-
-        self._scan_btn = StyledButton(
-            text="Scan Paired Devices",
-            font_size=F.BODY,
-            bg_color=C.PRIMARY_DIM,
-            size_hint_y=None,
-            height=dp(36),
-        )
+        self._scan_btn = StyledButton(text="Scan Paired Devices", font_size=F.BODY, bg_color=C.PRIMARY_DIM,
+                                      size_hint_y=None, height=dp(36))
         self._scan_btn.bind(on_release=self._on_scan_pressed)
         self._bt_section.add_widget(self._scan_btn)
-
-        self._bt_device_list = BoxLayout(
-            orientation="vertical", size_hint_y=None, spacing=dp(2),
-        )
-        self._bt_device_list.bind(
-            minimum_height=self._bt_device_list.setter("height")
-        )
+        self._bt_device_list = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(2))
+        self._bt_device_list.bind(minimum_height=self._bt_device_list.setter("height"))
         self._bt_section.add_widget(self._bt_device_list)
         section.add_widget(self._bt_section)
-        self._build_device_rename_row()
 
-        # On-demand diagnostics button — useful for users we can't reach in
-        # person. Builds a copy-pasteable report with platform/device/audio
-        # state and opens the same dialog the crash handler uses.
-        self._diagnostics_btn = StyledButton(
-            text="Copy Diagnostics",
-            font_size=F.SMALL,
-            bg_color=C.BG_CARD,
-            text_color=C.TEXT_SECONDARY,
-            size_hint_y=None,
-            height=dp(32),
-        )
+    def _build_diagnostics(self, section) -> None:
+        """Copy Diagnostics: a report to paste, for users we can't reach in person (the crash handler's dialog)."""
+        self._diagnostics_btn = StyledButton(text="Copy Diagnostics", font_size=F.SMALL, bg_color=C.BG_CARD,
+                                             text_color=C.TEXT_SECONDARY, size_hint_y=None, height=dp(32))
         self._diagnostics_btn.bind(on_release=self._on_diagnostics_pressed)
         section.add_widget(self._diagnostics_btn)
-        self._build_power_box()
 
     def _build_power_box(self) -> None:
         """What may close a locked session; attached by show_power_state, so off Android it never shows."""

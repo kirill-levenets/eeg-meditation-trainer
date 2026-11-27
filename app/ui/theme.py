@@ -462,10 +462,20 @@ def text_width(text: str, font_size: float, bold: bool = False, font_name: str =
     return core.texture.size[0]
 
 
+def text_fills_box(label) -> None:
+    """The label's text is laid out in its whole box, so its halign and valign place it there."""
+    label.bind(size=label.setter("text_size"))
+
+
+def text_wraps_at_width(label) -> None:
+    """The label's text wraps at its width, however tall it comes out."""
+    label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)))
+
+
 def fit_height_to_text(label, extra: float = 0) -> None:
     """The label wraps at its width and is as tall as its text (plus `extra`): a fixed height cuts a larger text off."""
-    label.bind(width=lambda w, v: setattr(w, "text_size", (v, None)),
-               texture_size=lambda w, v: setattr(w, "height", v[1] + extra))
+    text_wraps_at_width(label)
+    label.bind(texture_size=lambda w, v: setattr(w, "height", v[1] + extra))
 
 
 def fit_width_to_text(label, extra: float = 0) -> None:

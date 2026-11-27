@@ -55,25 +55,33 @@ def test_set_feedback_source_does_not_fire_callback():
     s = _screen()
     fired = []
     wire(s.audio, on_feedback_source_change=lambda src, path: fired.append((src, path)))
-    s.audio.set_feedback_source("custom", "/tmp/x.wav")  # restore -> silent
+    s.audio.feedback.show("custom", "/tmp/x.wav")  # restore -> silent
     assert fired == []
-    s.audio._choose_feedback_source("tone")  # user action -> fires, clears stale custom path
+    s.audio.feedback.choose("tone")  # user action -> fires, clears stale custom path
     assert fired == [("tone", "")]
+
+
+def test_a_sound_picker_given_no_source_shows_its_channel_s_default():
+    s = _screen()
+    s.audio.feedback.show("", "")
+    s.audio.reward.show("", "")
+    assert (s.audio.feedback.source, s.audio.reward.source) == ("noise", "none")
+    assert (s.audio.feedback.button.text, s.audio.reward.button.text) == ("Rain", "Off")
 
 
 def test_choose_feedback_source_updates_button_label():
     s = _screen()
-    s.audio._choose_feedback_source("tone")
-    assert s.audio._feedback_source_btn.text == "Tone"
+    s.audio.feedback.choose("tone")
+    assert s.audio.feedback.button.text == "Tone"
 
 
 def test_choose_reward_crickets_fires_and_labels():
     s = _screen()
     fired = []
     wire(s.audio, on_reward_source_change=lambda src, path: fired.append((src, path)))
-    s.audio._choose_reward_source("heartbeat")
+    s.audio.reward.choose("heartbeat")
     assert fired == [("heartbeat", "")]
-    assert s.audio._reward_source_btn.text == "Crickets"
+    assert s.audio.reward.button.text == "Crickets"
 
 
 def test_segment_feedback_sound_roundtrips():
@@ -93,7 +101,7 @@ def test_custom_choice_opens_chooser(monkeypatch):
     calls = []
     monkeypatch.setattr(audio, "open_audio_file_chooser", lambda *a, **k: calls.append(a))
     s = _screen()
-    s.audio._choose_feedback_source("custom")
+    s.audio.feedback.choose("custom")
     assert len(calls) == 1, "choosing Custom file... should open the chooser"
 
 
@@ -102,7 +110,7 @@ def test_rain_choice_does_not_open_chooser(monkeypatch):
     calls = []
     monkeypatch.setattr(audio, "open_audio_file_chooser", lambda *a, **k: calls.append(a))
     s = _screen()
-    s.audio._choose_feedback_source("noise")
+    s.audio.feedback.choose("noise")
     assert calls == []
 
 

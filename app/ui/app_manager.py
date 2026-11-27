@@ -157,7 +157,7 @@ class EEGMeditationApp(App):
         self._headset.load_aliases()
         self._session = RunningSession(self._ctx, self._audio, self._headset, on_event=lambda event: self._controls.on_event(event))
         self._sounds = SoundSources(self._ctx, self._audio, self._settings_screen.audio, self._settings_screen.timer)
-        self._audio_metric = AudioMetric(self._ctx, self._session.program_run, self._settings_screen)
+        self._audio_metric = AudioMetric(self._ctx, self._session.program_run, self._settings_screen.metric)
         self._program_settings = ProgramSettings(
             self._ctx, self._settings_screen.timer, self._live_screen,
             show_saved_series=lambda uid: self._graph_series.apply_saved(self._live_screen.graph, uid))
@@ -178,9 +178,9 @@ class EEGMeditationApp(App):
         self._gate = ProfileGate(
             self._ctx, self._bottom_nav, refresh_profiles=lambda: self._profiles.refresh(),
             scan_for_new_profile=self._headset.scan_for_new_profile, offer_power_exemption=self._power.offer_once)
-        self._profiles = Profiles(self._ctx, self._settings_screen, self._gate, deactivate=self._deactivate_user,
+        self._profiles = Profiles(self._ctx, self._settings_screen.profile, self._gate, deactivate=self._deactivate_user,
                                   on_deleted=self._on_profile_deleted)
-        self._backup_flow = BackupFlow(self._ctx, self._settings_screen, user_name=self._profiles.current_name,
+        self._backup_flow = BackupFlow(self._ctx, self._settings_screen.backup, user_name=self._profiles.current_name,
                                        checkpoint=self._session.checkpoint_or_report,
                                        on_db_replaced=self._on_db_replaced)
         # Entering History reloads a stale list; the Session screen's duration picker shows a Timer change.
@@ -248,65 +248,41 @@ class EEGMeditationApp(App):
             self._live_screen.graph.set_visible(key, active)
 
     def _wire_settings_screen(self) -> None:
-        wire(
-            self._settings_screen,
-            on_threshold_change=self._controls.on_threshold_slider,
-            on_audio_metric_change=self._audio_metric.on_change,
-            on_audio_formula_index=self._audio_metric.on_formula_index,
-            on_theme_change=lambda _name: self._user_settings.changed("theme"),  # the selector applied it to C
-            on_profile_switch=self._profiles.on_switch,
-            on_profile_create=self._profiles.on_create,
-            on_profile_delete=self._profiles.on_delete,
-            session_counter=self._profiles.count_sessions,
-        )
-        wire(
-            self._settings_screen.audio,
-            on_test_audio=self._sounds.on_test_audio,
-            on_sinking_alert_toggle=lambda on: self._user_settings.change("sinking_alert", on),
-            on_subtle_alert_toggle=lambda on: self._user_settings.change("subtle_alert", on),
-            on_disconnect_alert_toggle=lambda on: self._user_settings.change("disconnect_alert", on),
-            on_feedback_source_change=self._sounds.on_feedback_source_change,
-            on_reward_source_change=self._sounds.on_reward_source_change,
-        )
-        wire(
-            self._settings_screen.device,
-            on_device_mode_toggle=self._headset.on_mode_toggle,
-            on_scan_devices=self._headset.on_scan,
-            on_device_select=self._headset.on_select,
-            device_state=self._headset.state,
-            on_device_rename=self._headset.on_rename,
-            on_copy_diagnostics=self._headset.on_copy_diagnostics,
-            on_battery_settings=self._power.on_battery_settings,
-            on_maker_settings=self._power.on_maker_settings,
-        )
-        wire(
-            self._settings_screen.display,
-            on_text_size=lambda _size: self._user_settings.changed("text_size"),
-            on_line_colours=lambda _name: self._user_settings.changed("line_colours"),
-            on_line_width_change=lambda width: self._user_settings.change("line_width", width),
-            on_rotate_screen=lambda rotation: self._user_settings.change("rotation", rotation),
-        )
-        wire(
-            self._settings_screen.formulas,
-            on_formula_slot_change=self._formula_settings.on_slot_change,
-            on_save_formula=self._formula_settings.on_save,
-            on_load_formula=self._formula_settings.on_load,
-            on_delete_formula=self._formula_settings.on_delete,
-            on_export_formulas=self._formula_settings.on_export,
-        )
-        wire(
-            self._settings_screen.timer,
-            on_program_mode=self._program_settings.on_mode_change,
-            on_program_changed=self._program_settings.on_changed,
-            on_program_save=self._program_settings.on_save,
-            on_program_load=self._program_settings.on_load,
-            on_program_delete=self._program_settings.on_delete,
-            on_test_timer_sound=self._sounds.on_test_timer_sound,
-            on_stop_timer_sound=self._sounds.on_stop_test_timer_sound,
-            on_timer_sound_change=self._sounds.on_timer_sound_change,
-        )
-        wire(self._settings_screen, on_backup_pressed=self._backup_flow.on_backup_pressed,
-             on_restore_pressed=self._backup_flow.on_restore_pressed)
+        """Settings' own folds: the profile, the backup, the threshold and the sound's metric, the theme."""
+        ss = self._settings_screen
+        wire(ss.profile, on_switch=self._profiles.on_switch, on_create=self._profiles.on_create,
+             on_delete=self._profiles.on_delete, session_counter=self._profiles.count_sessions)
+        wire(ss.backup, on_backup=self._backup_flow.on_backup_pressed, on_restore=self._backup_flow.on_restore_pressed)
+        wire(ss.threshold, on_change=self._controls.on_threshold_slider)
+        wire(ss.metric, on_metric_change=self._audio_metric.on_change,
+             on_formula_index=self._audio_metric.on_formula_index)
+        wire(ss.theme, on_change=lambda _name: self._user_settings.changed("theme"))  # the selector applied it to C
+        self._wire_settings_sections()
+
+    def _wire_settings_sections(self) -> None:
+        """The folds the app's parts own: sounds, the headset, the display, formulas and the timer."""
+        ss = self._settings_screen
+        wire(ss.audio, on_test_audio=self._sounds.on_test_audio,
+             on_alert_toggle=lambda key, on: self._user_settings.change(key, on),
+             on_feedback_source_change=self._sounds.on_feedback_source_change,
+             on_reward_source_change=self._sounds.on_reward_source_change)
+        wire(ss.device, on_device_mode_toggle=self._headset.on_mode_toggle, on_scan_devices=self._headset.on_scan,
+             on_device_select=self._headset.on_select, device_state=self._headset.state,
+             on_device_rename=self._headset.on_rename, on_copy_diagnostics=self._headset.on_copy_diagnostics,
+             on_battery_settings=self._power.on_battery_settings, on_maker_settings=self._power.on_maker_settings)
+        wire(ss.display, on_text_size=lambda _size: self._user_settings.changed("text_size"),
+             on_line_colours=lambda _name: self._user_settings.changed("line_colours"),
+             on_line_width_change=lambda width: self._user_settings.change("line_width", width),
+             on_rotate_screen=lambda rotation: self._user_settings.change("rotation", rotation))
+        wire(ss.formulas, on_formula_slot_change=self._formula_settings.on_slot_change,
+             on_save_formula=self._formula_settings.on_save, on_load_formula=self._formula_settings.on_load,
+             on_delete_formula=self._formula_settings.on_delete, on_export_formulas=self._formula_settings.on_export)
+        wire(ss.timer, on_program_mode=self._program_settings.on_mode_change,
+             on_program_changed=self._program_settings.on_changed, on_program_save=self._program_settings.on_save,
+             on_program_load=self._program_settings.on_load, on_program_delete=self._program_settings.on_delete,
+             on_test_timer_sound=self._sounds.on_test_timer_sound,
+             on_stop_timer_sound=self._sounds.on_stop_test_timer_sound,
+             on_timer_sound_change=self._sounds.on_timer_sound_change)
 
     def _wire_history_screens(self) -> None:
         """History's list and chart, and a session's detail."""
@@ -453,30 +429,31 @@ class EEGMeditationApp(App):
         ss = self._settings_screen
 
         def set_threshold(v):
-            ss.threshold = v
+            ss.threshold.value = v
             self._controls.apply_threshold(v)
 
         self._user_settings.register([
             *self._program_settings.settings(), *self._alert_settings(), *self._fold_settings(),
-            kept("threshold", INT, lambda: int(ss.threshold), set_threshold, settle=True),
+            kept("threshold", INT, lambda: ss.threshold.value, set_threshold, settle=True),
             *self._headset.settings(), *self._audio_metric.settings(), *self._sounds.settings(),
             *self._history.settings(), *self._graphs.settings(), *self._display_settings()])
 
     def _alert_settings(self) -> list[Setting]:
-        audio = self._settings_screen.audio
+        """Settings › Audio's alert toggles, each held by the profile's settings: its apply turns the engine's alert
+        (`<key>_enabled`) and its checkbox."""
+        boxes, engine = self._settings_screen.audio.alerts, self._audio
 
-        def apply_sinking(v):
-            self._audio.sinking_alert_enabled = v; audio._sinking_alert_cb.active = v
+        def alert(key: str) -> Setting:
+            switch = f"{key}_enabled"
+            if not hasattr(type(engine), switch):  # a set would make a new attribute: the toggle would reach nothing
+                raise AttributeError(f"AudioEngine has no {switch}: each alert in settings_sections/audio.py ALERTS needs one")
 
-        def apply_subtle(v):
-            self._audio.subtle_alert_enabled = v; audio._subtle_alert_cb.active = v
+            def apply(v):
+                setattr(engine, switch, v)
+                boxes[key].active = v
+            return held(key, BOOL, boxes[key].active, apply)
 
-        def apply_disconnect(v):
-            self._audio.disconnect_alert_enabled = v; audio._disconnect_alert_cb.active = v
-
-        return [held("sinking_alert", BOOL, audio._sinking_alert_cb.active, apply_sinking),
-                held("subtle_alert", BOOL, audio._subtle_alert_cb.active, apply_subtle),
-                held("disconnect_alert", BOOL, audio._disconnect_alert_cb.active, apply_disconnect)]
+        return [alert(key) for key in boxes]
 
     def _fold_settings(self) -> list[Setting]:
         """What each screen keeps folded: History's chart, a session detail's What-if and band power."""

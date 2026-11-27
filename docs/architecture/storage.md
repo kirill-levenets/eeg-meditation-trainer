@@ -21,7 +21,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `delete_user` **purges** the user's metrics, sessions and `user_{id}_*` settings explicitly, in order:
   FKs are declared but not enforced (no `PRAGMA foreign_keys`/cascade), and its sessions, metrics and settings rows would otherwise stay orphaned.
   The settings go by GLOB, not LIKE, so the literal `_` in the key prefix isn't a wildcard.
-  The confirm (`SettingsScreen._confirm_user_delete`) states the profile's session count and that they are deleted with it.
+  The confirm (`ProfileSection._confirm_delete`) states the profile's session count and that they are deleted with it.
 - The DB opens with `check_same_thread=False` so the session's runner can write metric batches — and that shared connection is why **every runtime write goes through `DatabaseManager._write()`**:
   one transaction at a time under `_write_lock` (RLock), commit on success, rollback on error.
   Without it the UI thread's commit could end the runner's `save_metrics_batch` transaction mid-batch, raise "cannot commit - no transaction is active" into a UI callback, or drop a batch.

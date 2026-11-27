@@ -9,7 +9,7 @@ from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 
-from app.ui.theme import ICONS_AVAILABLE, C, F, S, ThemedMixin, dimmed_fg, readable_fg, text_width
+from app.ui.theme import ICONS_AVAILABLE, C, F, S, ThemedMixin, dimmed_fg, readable_fg, text_fills_box, text_width
 
 
 class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
@@ -77,7 +77,7 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
         """The text label, with the icon beside it, above it (vertical) or instead of it (no text)."""
         self._label = Label(text=self.text, color=self.text_color, font_size=self._text_font(), bold=self.bold,
                             halign="center", valign="middle")
-        self._label.bind(size=self._label.setter("text_size"))
+        text_fills_box(self._label)
         self._icon_label, self._icon_extra = None, 0.0  # the icon's size over the button's font
         if self.icon and ICONS_AVAILABLE:
             if not self.text:
@@ -98,7 +98,7 @@ class StyledButton(ThemedMixin, ButtonBehavior, BoxLayout):
                       color=self.text_color, **layout)
         if centred:
             label.halign, label.valign = "center", "middle"
-            label.bind(size=label.setter("text_size"))
+            text_fills_box(label)
         return label
 
     def _text_font(self) -> float:

@@ -11,7 +11,7 @@ from kivy.uix.widget import Widget
 
 from app.eeg import band_spec
 from app.eeg.band_spec import range_text
-from app.ui.theme import ICONS_AVAILABLE, C, F, Icons, S, ThemedLabel
+from app.ui.theme import ICONS_AVAILABLE, C, F, Icons, S, ThemedLabel, text_fills_box
 from app.ui.widgets.choice_toggle import ChoiceToggle
 
 BANDS = list(band_spec.BAND_KEYS)
@@ -209,7 +209,7 @@ class BandTotalsView(BoxLayout):
             color=C.PRIMARY if active else C.TEXT_SECONDARY,
             halign=halign, valign="middle", size_hint_x=None, width=width,
         )
-        cell.bind(size=cell.setter("text_size"))
+        text_fills_box(cell)
         return cell
 
     def _build_header(self) -> BoxLayout:
@@ -228,7 +228,7 @@ class BandTotalsView(BoxLayout):
         for text, size, color, key in ((r["name"], F.SMALL, C.TEXT_SECONDARY, None),
                                        (r["range"], F.TINY, C.TEXT_MUTED, r["key"])):
             line = ThemedLabel(text=text, font_size=size, color=color, halign="left", valign="middle")
-            line.bind(size=line.setter("text_size"))
+            text_fills_box(line)
             name_lbl.add_widget(line)
             if key:
                 self._range_labels[key] = line
@@ -240,11 +240,10 @@ class BandTotalsView(BoxLayout):
 
         power_lbl = ThemedLabel(text=format_power(r["total"]), font_size=F.SMALL, color=C.TEXT,
                           halign="right", valign="middle", size_hint_x=None, width=F.box(_W_POWER))
-        power_lbl.bind(size=power_lbl.setter("text_size"))
+        text_fills_box(power_lbl)
         pct_lbl = ThemedLabel(text=f"{round(r['share'] * 100)}%", font_size=F.SMALL, color=C.TEXT,
                         halign="right", valign="middle", size_hint_x=None, width=F.box(_W_PCT))
-        pct_lbl.bind(size=pct_lbl.setter("text_size"))
-
+        text_fills_box(pct_lbl)
         row.add_widget(name_lbl)
         row.add_widget(track)
         row.add_widget(power_lbl)

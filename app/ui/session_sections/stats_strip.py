@@ -6,7 +6,7 @@ from app.session.manager import NO_SCORE, LiveScore
 from app.ui.formatting import format_duration
 from app.ui.hooks import Hook
 from app.ui.session_labels import average_text
-from app.ui.theme import C, Card, F, ThemedLabel
+from app.ui.theme import C, Card, F, ThemedLabel, text_fills_box
 from app.ui.widgets.choice_toggle import ChoiceToggle
 
 
@@ -40,7 +40,7 @@ class StatsStrip(Card):
             title = ThemedLabel(font_size=F.TINY, color=C.TEXT_MUTED, size_hint_y=0.4)
             if slot == 0:  # the metric's name: a long formula name is cut, not run into the next slot
                 title.shorten, title.shorten_from, title.halign, title.valign = True, "right", "center", "middle"
-                title.bind(size=title.setter("text_size"))
+                text_fills_box(title)
             value = ThemedLabel(font_size=F.capped(F.H2), bold=True, color=C.TEXT, size_hint_y=0.6)  # "59m 59s"
             box.add_widget(title)
             box.add_widget(value)

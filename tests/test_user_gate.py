@@ -159,9 +159,9 @@ def test_deleting_the_last_profile_while_none_is_active_regates(gated):
 def test_settings_names_the_active_profile_or_none(current, shown):
     # None while the gate is up; an id the list doesn't hold must not leave the previous profile's name showing.
     screen = SettingsScreen()
-    screen._profile_current_label.text = "Current: A"
-    screen.populate_users([{"id": 1, "name": "A"}, {"id": 2, "name": "B"}], current)
-    assert screen._profile_current_label.text == shown
+    screen.profile._current_label.text = "Current: A"
+    screen.profile.show_users([{"id": 1, "name": "A"}, {"id": 2, "name": "B"}], current)
+    assert screen.profile._current_label.text == shown
 
 
 def _gate_form(app) -> UserPickerForm:
@@ -298,3 +298,14 @@ def test_unresolvable_last_user_routes_to_the_gate():
     db.create_user("Kirill")
     db.set_setting("last_user_id", "999")  # reinstall / restored-DB shape
     assert resolve_startup_user(db) is None
+
+
+def test_a_new_profile_under_a_taken_name_is_offered_the_existing_one(fresh_app):
+    app = fresh_app
+    taken = app._db.get_user(app._current_user_id)["name"]
+    profiles = len(app._db.get_all_users())
+    app._settings_screen.profile.on_create(taken)  # the form's Create, as the section reports it
+    form = app._settings_screen.profile.picker
+    assert len(app._db.get_all_users()) == profiles
+    assert form._error_label.text == f"User '{taken}' already exists" and form._duplicate_user_id == app._current_user_id
+    form._hide_error()

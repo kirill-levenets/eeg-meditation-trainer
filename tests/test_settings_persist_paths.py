@@ -33,7 +33,7 @@ def _settled(app, key: str) -> list[str]:
 
 def test_a_threshold_drag_writes_once_after_it_settles(app):
     for v in range(20, 181):  # a full slider sweep
-        app._settings_screen.threshold = v
+        app._settings_screen.threshold.value = v
     assert app.writes == [] and app._session.manager.threshold != 180
     assert _settled(app, "threshold") == ["180"]
     assert app._session.manager.threshold == 180  # put in force once too, at the value it settled on
@@ -56,7 +56,7 @@ def test_a_line_width_drag_writes_once_after_it_settles(app):
 
 
 def test_a_toggle_writes_at_once(app):
-    app._settings_screen.audio._sinking_alert_cb.active = True
+    app._settings_screen.audio.alerts["sinking_alert"].active = True
     assert app.writes == [("sinking_alert", "True")]
 
 
@@ -77,7 +77,7 @@ def test_no_write_is_scheduled_while_settings_load(app):
     app.writes.clear()
     app._activate_user(app._current_user_id)  # the load applies the value itself; nothing saves it back
     frames_until(lambda: False, 4 * SETTLE_S)
-    assert app._settings_screen.threshold == 90 and app.writes == []
+    assert app._settings_screen.threshold.value == 90 and app.writes == []
 
 
 def _locked(*_args):
@@ -86,7 +86,7 @@ def _locked(*_args):
 
 def test_a_failed_setting_write_is_reported_not_raised(app, monkeypatch):
     monkeypatch.setattr(app._db, "set_user_setting", _locked)
-    app._settings_screen.audio._sinking_alert_cb.active = True  # must not raise into the Kivy callback
+    app._settings_screen.audio.alerts["sinking_alert"].active = True  # must not raise into the Kivy callback
     assert app.reports and app.reports[0][0] == "settings_save_failed"
     assert "database is locked" in app.reports[0][1]
     assert app._user_settings.value("sinking_alert") is True  # applied in memory: the next batch save retries it

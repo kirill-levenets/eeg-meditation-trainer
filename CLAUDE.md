@@ -100,7 +100,7 @@ Read it before changing that subsystem.
   the first-start alert and Settings → Device's row → [app-platform](docs/architecture/app-platform.md#background-running-android))
   · `app/ui/live_session.py` (its graphs and controls; the parts around them in `session_sections/`: header, stats strip, duration picker, end card, connection overlay),
   `shown_session.py` `ShownSession` (the session the screen shows: its graphs' mirror, its end card, the screen's part of every session event and of a resume),
-  `settings_screen.py` (its larger sections in `settings_sections/`), `device_labels.py` → [live-session-and-settings](docs/architecture/live-session-and-settings.md);
+  `settings_screen.py` (its folds, each a section in `settings_sections/`), `device_labels.py` → [live-session-and-settings](docs/architecture/live-session-and-settings.md);
   `history_screen.py` (its parts in `history_sections/`: charts, chart area, session list), `period_totals.py`, `history_flow.py` `HistoryFlow` (what the app does with History's rows) → [history](docs/architecture/history.md);
   `diary_screen.py` (session detail), `session_detail_flow.py` `SessionDetailFlow` (opens and loads it) → [session-detail](docs/architecture/session-detail.md);
   `session_labels.py` → [session](docs/architecture/session.md)
@@ -249,7 +249,7 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 · screen background `fill_background`
 · fold button `folds.FoldChevron`
 · a switch between views `widgets.choice_toggle.ChoiceToggle`
-· label height `fit_height_to_text`
+· label height `fit_height_to_text`, text placed in its box `text_fills_box`, wrapped at its width `text_wraps_at_width`
 · label width `fit_width_to_text`
 · row height `fit_row_to_text`
 · text width `theme.text_width`

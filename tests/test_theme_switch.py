@@ -493,7 +493,7 @@ def test_the_theme_selector_shows_the_active_theme_however_it_was_applied():
     C.set_theme("Dark Blue")
     s = SettingsScreen()
     C.set_theme("Light Cream")
-    selected = {name for name, btn in s._theme_toggle.buttons.items() if btn.bold}
+    selected = {name for name, btn in s.theme._toggle.buttons.items() if btn.bold}
     assert selected == {"Light Cream"}
-    assert _rgb(s._theme_toggle.buttons["Light Cream"].bg_color) == _rgb(THEMES["Light Cream"]["PRIMARY"])
-    assert _rgb(s._theme_toggle.buttons["Dark Blue"].bg_color) == _rgb(THEMES["Light Cream"]["TEXT_SECONDARY"])
+    assert _rgb(s.theme._toggle.buttons["Light Cream"].bg_color) == _rgb(THEMES["Light Cream"]["PRIMARY"])
+    assert _rgb(s.theme._toggle.buttons["Dark Blue"].bg_color) == _rgb(THEMES["Light Cream"]["TEXT_SECONDARY"])

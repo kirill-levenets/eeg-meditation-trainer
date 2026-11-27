@@ -15,7 +15,7 @@ from kivy.uix.widget import Widget
 from app.ui.history_sections.common import score_colour
 from app.ui.hooks import Hook
 from app.ui.session_labels import session_label, session_notes_line, session_stats_line, session_title
-from app.ui.theme import ICONS_AVAILABLE, C, Card, F, Icons, S, ThemedLabel
+from app.ui.theme import ICONS_AVAILABLE, C, Card, F, Icons, S, ThemedLabel, text_fills_box
 from app.ui.widgets.rows import RenameRow
 from app.ui.widgets.styled_button import StyledButton
 
@@ -74,7 +74,7 @@ class _SessionRow(RecycleDataViewBehavior, BoxLayout):
         self._notes_label = ThemedLabel(font_size=F.TINY, color=C.TEXT_MUTED, halign="left", valign="middle",
                                         size_hint_y=0.45, shorten=True, shorten_from="right")
         for label in (self._name_label, self._stats_label, self._notes_label):
-            label.bind(size=label.setter("text_size"))
+            text_fills_box(label)
         info.add_widget(self._name_label)
         info.add_widget(self._stats_label)
         # Rename + delete are drawn only: the list's router hit-tests the strip (see SessionList._list_touch_down).
