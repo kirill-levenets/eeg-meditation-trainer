@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.storage.database import DatabaseManager
+from tests._app import popups, program_mode, tap
 from tests._program_settings import make_programs
 
 SEGMENTS = [{"minutes": 5, "target": 60, "formula": "shamatha_score"}]
@@ -94,3 +95,17 @@ def test_deleting_a_program_asks_with_its_name_then_deletes_it(db, uid):
     assert [x["name"] for x in db.get_saved_programs(uid)] == ["Morning"]
     p.on_delete(3)  # an index the list no longer has asks nothing
     assert p._ctx.confirm.call_count == 1
+
+
+def test_a_save_shows_the_name_it_saved_under_on_the_loaded_line(fresh_app):
+    app, editor = fresh_app, fresh_app._settings_screen.timer.editor
+    app._db.add_saved_program(app._current_user_id, "Ramp", SEGMENTS)
+    app._program_settings._load(0, "Ramp")
+    program_mode(app, SEGMENTS + SEGMENTS)  # edited after the load
+    app._program_settings.on_save("Evening")  # a new name: added at once
+    assert (editor._loaded_label.text, editor._name_input.text) == ("Loaded: Evening", "Evening")
+    app._program_settings.on_save("Ramp")  # a name that exists: overwritten once confirmed
+    (popup,) = popups()
+    tap(popup.content, "Overwrite")
+    assert (editor._loaded_label.text, editor._name_input.text) == ("Loaded: Ramp", "Ramp")
+    assert app._db.get_saved_programs(app._current_user_id)[0]["segments"] == SEGMENTS + SEGMENTS

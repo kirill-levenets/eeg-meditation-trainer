@@ -148,6 +148,7 @@ class ProgramSettings:
         self.name = name  # the active program now carries this name
         self.persist(uid)
         self.refresh_saved()
+        self._editor.show_name(name)
         self._editor.confirm_saved()
 
     def has_unsaved_changes(self) -> bool:

@@ -16,7 +16,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 - The `sessions.session_program` column stores the JSON segments of the program each session started with (`ProgramRun.segments_json`; empty when none ran).
   The saved-programs library uses `get/add/update/remove_saved_program` in `DatabaseManager` (a JSON list in the user-settings KV store under `user_{id}_saved_programs`).
   Program Save keeps names unique (`SavedNames.save_unique`, as saved formulas do): an existing name is overwritten after a confirmation;
-  load reflects the name back so the next save goes to the same record.
+  a load and a save show the name in the name field, so the next save goes to the same record.
 
 ## Live series
 
@@ -59,7 +59,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 ## Settings and pickers
 
 - Settings Timer / Program swap: `TimerSection._mode_box` holds either `_simple_box`, which has the Enable-Timer checkbox (a program forces the timer on), or the program editor's box (`TimerSection.editor`, a `ProgramEditor` in `settings_sections/program_editor.py`); the other is detached from the tree.
-  The editor's Loaded line shows `"Loaded: <name>"` from `ProgramEditor.show(segments, name)`, which rebuilds the rows and reports nothing.
+  The editor's Loaded line shows `"Loaded: <name>"` (`ProgramEditor.show_name`) for the program loaded (`ProgramEditor.show(segments, name)`, which rebuilds the rows and reports nothing) or just saved.
   The rows are one `SegmentRow` each, in insertion order, top to bottom: its cells (minutes, metric, target, end cue, feedback) and their pickers, and `segment()`, the segment as a program stores it.
 - `ProgramSettings.sync_picker` syncs the Session screen's duration picker (`DurationPicker.refresh`, `session_sections/duration_picker.py`): a large `"P"` in program mode with a loaded program, else the duration.
   It re-syncs on entering the Session screen, on profile load and on each mode change, program load or duration pick.

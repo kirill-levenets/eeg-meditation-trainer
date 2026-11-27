@@ -75,6 +75,9 @@ class _StubEditor:
     def show(self, segs, name):
         self.loaded = (segs, name)
 
+    def show_name(self, name):
+        self.name = name
+
     def confirm_saved(self):
         self.confirmed = True
 

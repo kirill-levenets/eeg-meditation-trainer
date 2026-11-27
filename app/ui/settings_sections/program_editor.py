@@ -219,8 +219,7 @@ class ProgramEditor:
         return row
 
     def show(self, segments: list[dict], name: str) -> None:
-        """A loaded program: its rows rebuilt and its name in the field and the Loaded line, so a re-save overwrites
-        it (nothing reported)."""
+        """A loaded program: its rows rebuilt and its name shown (nothing reported)."""
         self._showing = True
         try:
             for row in self.rows:
@@ -231,6 +230,10 @@ class ProgramEditor:
             self.edited()  # the total, for no segments too
         finally:
             self._showing = False
+        self.show_name(name)
+
+    def show_name(self, name: str) -> None:
+        """The program's name, loaded or just saved, in the field and the Loaded line, so a re-save overwrites it."""
         self._name_input.text = name or ""
         self._loaded_label.text = f"Loaded: {name}" if name else "Loaded: (unsaved)"
 
