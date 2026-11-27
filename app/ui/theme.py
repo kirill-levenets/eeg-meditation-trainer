@@ -102,6 +102,7 @@ _METRICS = {
     "CONNECTED": (0.35, 0.80, 0.50, 1.0),
     "CONNECTING": (0.85, 0.75, 0.30, 1.0),
     "DISCONNECTED": (0.70, 0.30, 0.30, 1.0),
+    "RECORDING": (0.90, 0.20, 0.20, 1.0),
 }
 
 _DARK_BLUE = {

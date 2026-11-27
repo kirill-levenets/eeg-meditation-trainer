@@ -10,6 +10,9 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `header` (`SessionHeader`: the headset, the clock, the state or the SHAMATHA pill), `stats` (`StatsStrip`), `duration` (`DurationPicker`, Start's companion button and its popup),
   `end_card` (`EndCard`, the session-end card with quick notes) and `connect_overlay` (`ConnectOverlay`: the `LoadingOverlay` with Cancel, and Retry once the connection failed).
   The screen keeps what spans them: the controls' states, the training mark (`set_training_series`: legend and stats strip), the start time (header and graph) and `clear_readout`.
+  The header's headset label (`HeadsetLabel`) draws a marker before the name, in the label's left padding so the two centre as one: a grey ring not connected, an amber ring connecting, a green dot connected, a red dot recording.
+  The link comes from `Headset.show_selected`, recording from the session's `Connected`, `Paused`, `Resumed` and the teardown (`set_recording`); ring or dot tells the link without its colour, and the colour is the role's `with_contrast` on `C.BG`, repainted on a theme switch.
+  A ring is a disc with a hole in the screen's colour, a dot the same hole in its own colour: Kivy keeps drawing an `Ellipse` resized to 0 in its last shape.
   `end_card.show(sid, stats, title=)` fills the card: Duration, the `session_score_rows` rows, Time Above Threshold and Longest Streak, 22 dp lines with no gap (`_set_rows` attaches as many pooled rows as the session has).
   `_arrange` lays it out by the card's width, re-run on every width change, so a phone turned with the card open re-flows it with the typed notes kept:
   from 520 dp inside the card (a landscape phone, ~670) two columns, the stats left and the notes field over **Save notes** right (the field takes the stats' height less Save notes, a few lines);

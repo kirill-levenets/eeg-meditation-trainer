@@ -62,6 +62,9 @@ If it fails, the overlay says why, with **Retry** and **Close**.
 - **Raw EEG**: the raw waveform (512 Hz) and the frequency bands
 
 The header shows the headset, the start and elapsed time, and the current state, colour-coded: green = Stable Focus, yellow = Subtle Distraction, red = Gross Distraction, orange = Sinking.
+A marker before the headset's name shows its connection: a green dot while it is connected, between sessions too (the app keeps the connection for the next Start);
+a red dot while a session records on it (a paused session shows green); an amber ring while a Start or a session connects or reconnects to it; a grey ring when it isn't connected.
+In demo mode (Use Mock Data) the dot is green, red while a session records: the demo headset is always there.
 When your shamatha score holds at or above the threshold, the state turns into a bold **SHAMATHA** badge on a green pill; it reverts when you drop below (after a short delay, so it doesn't flicker).
 
 **Scrolling and zooming:** drag sideways on a graph to scroll back through up to 3 hours.

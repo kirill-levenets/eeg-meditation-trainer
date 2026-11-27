@@ -55,16 +55,17 @@ class ShownSession:
         match event:
             case Ticked():
                 self._show_tick(event)
-            case Connected(on_mock=on_mock):
-                if on_mock:
-                    screen.header.update_device_status(True)  # a headset's row is the headset's (Headset.show_selected)
+            case Connected():
                 screen.header.update_state("Running")
+                screen.header.set_recording(True)
                 screen.set_start_time(self._session.manager.started_at)
                 screen.connect_overlay.hide()  # the session starts its feedback right after (RunningSession._deliver)
             case Paused():
                 screen.set_controls_paused()
+                screen.header.set_recording(False)
             case Resumed():
                 screen.set_controls_running()
+                screen.header.set_recording(True)
             case SegmentStarted(key=key, line_name=line_name):
                 if line_name is not None:  # a custom segment's line: labelled and shown
                     screen.graph.set_series_name(key, line_name)
@@ -103,9 +104,8 @@ class ShownSession:
             screen.raw_graph.add_marker()
             screen.band_graph.add_marker()
 
-    def show_retry(self, message: str, device_name: str) -> None:
+    def show_retry(self, message: str) -> None:
         """The retry screen of a start whose BT wait ended without a session."""
-        self._live_screen.header.update_device_status(False, device_name=device_name)
         self._live_screen.connect_overlay.show_retry(message)
 
     def lines(self) -> frozenset[str]:
@@ -176,11 +176,12 @@ class ShownSession:
         logger.info(f"on_resume: refresh complete in {time.monotonic() - started:.3f}s")
 
     def idle(self) -> None:
-        """The screen's part of every teardown: idle controls, no device link, no training mark, no shamatha pill."""
+        """The screen's part of every teardown: idle controls, no training mark, no shamatha pill, not recording (the
+        headset's link is the headset's: Headset.show_selected)."""
         self._live_screen.set_training_series(None)
         self._live_screen.set_controls_idle()
-        self._live_screen.header.update_device_status(False)
         self._live_screen.header.set_shamatha(False)
+        self._live_screen.header.set_recording(False)
 
     def finished(self, stats: dict | None, session_id: int | None) -> None:
         """An ending's last: FINISHED with the saved duration (the clock froze at a lock), History told, and the end card

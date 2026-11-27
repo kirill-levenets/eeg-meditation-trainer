@@ -4,6 +4,7 @@ Bluetooth name, so lists show the address too."""
 from collections.abc import Mapping
 
 MAX_DEVICE_ALIAS = 24  # with the address, still one line in the device list
+MOCK_LABEL = "Mock EEG"  # the mock headset, in mock mode
 
 
 def device_label(address: str, name: str, aliases: Mapping[str, str]) -> str:

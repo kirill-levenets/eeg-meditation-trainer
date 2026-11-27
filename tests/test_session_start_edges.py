@@ -406,7 +406,8 @@ def test_a_link_kept_from_the_last_session_starts_the_session_at_once(fresh_app,
     assert app._session.run.phase is Phase.STARTED and app._session.manager.state == SessionState.RUNNING
     assert reader_starts == []  # no BT wait
     assert len(resets) == 1  # the last session's sample can't start this one
-    assert app._live_screen.header._device_label.text == f"[{HEADSET[1]}] *" and len(connect_sounds) == 1
+    label = app._live_screen.header._device_label
+    assert (label.text, label.marker) == (f"[{HEADSET[1]}]", ("dot", "RECORDING")) and len(connect_sounds) == 1
 
 
 def test_with_no_link_the_start_enters_the_bt_wait(fresh_app, monkeypatch):

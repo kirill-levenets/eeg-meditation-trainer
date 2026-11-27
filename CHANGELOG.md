@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **A marker before the headset's name on the Session screen** (#147): a grey ring when the headset isn't connected, an amber ring while it connects, a green dot while it is connected (between sessions and while paused too), a red dot while a session records.
+  It replaces the `*` and `...` after the name; ring or dot tells the connection apart without its colour.
 - **Locked-screen sessions: what the phone needs to allow them** (#104): some phones close apps in the background even with the session's notification showing, as Huawei's power manager does.
   At the first start the app now says what your phone needs and opens the screens: **Battery** (Android's battery optimisation) and, on Huawei and Honor, **App launch** (Manage manually), or **App info** on other makers known for this.
   Nothing changes unless you allow it there; the same buttons are under Settings › Device › Locked-screen sessions.
@@ -56,6 +58,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **The headset's state between sessions** (#147): the Session screen said "[Disconnected]" after every session while the app kept the headset connected, and Settings › Device went on saying "Connected" after the headset was switched off between sessions.
+  Both now show the connection as it is, between sessions too.
 - **A marker hotkey on a key with no character never placed a marker** (desktop): a key such as F5 or an arrow was picked by its name, but a press was compared by its code; both now name the key the same way.
 - **A session whose final save failed stayed "running" on screen**, with the phone kept awake and nothing said (the timer's ending; every later Stop was ignored).
   The failure is now reported, and the session still ends on screen and lets the phone sleep.

@@ -60,7 +60,13 @@ def wait(fresh_app, monkeypatch):
     monkeypatch.setattr(stream, "read_sample", link.read_sample)
     stopped: list = []
     real_stop = stream.stop
-    monkeypatch.setattr(stream, "stop", lambda: (stopped.append(True), real_stop())[1])
+
+    def stop() -> None:
+        stopped.append(True)
+        link.connected = False  # as the real stop() drops it, before it closes the link
+        real_stop()
+
+    monkeypatch.setattr(stream, "stop", stop)
     monkeypatch.setattr(stream, "stops", stopped, raising=False)
     start_connecting(app, monkeypatch)  # the wait as Start enters it, at T0; its ticks are the test's
 

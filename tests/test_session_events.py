@@ -29,7 +29,8 @@ def test_a_start_on_the_mock_data_shows_the_session_running_at_once(fresh_app, m
     app, screen = fresh_app, fresh_app._live_screen
     started, chimes = calls_of(monkeypatch, app._audio, "start"), calls_of(monkeypatch, app._audio, "play_connect_sound")
     start_ticked_by_hand(app)
-    assert screen.header._device_label.text == "[Mock EEG] *" and screen.header._last_state == "Running" and screen.connect_overlay.opacity == 0
+    assert (screen.header._device_label.text, screen.header._device_label.marker) == ("[Mock EEG]", ("dot", "RECORDING"))
+    assert screen.header._last_state == "Running" and screen.connect_overlay.opacity == 0
     assert started == [()] and chimes == []  # the feedback plays; the connect chime is a headset's
 
 
@@ -84,14 +85,15 @@ def test_an_ending_leaves_the_screen_finished_and_idle(fresh_app, monkeypatch):
     fed = FedSession(app, monkeypatch)
     for _ in range(3):
         fed.tick(metrics=tick_metrics(80.0))
-    assert screen.header._shamatha_active and screen.header._device_label.text == "[Mock EEG] *"
+    assert screen.header._shamatha_active and screen.header._device_label.marker == ("dot", "RECORDING")
     app._history._history_dirty = False
     screen.header.update_timer("59:59")  # the clock as a screen lock froze it
     app._controls.stop_and_save()
     frames()
     duration = app._db.get_all_sessions(app._current_user_id)[0]["duration"]
     assert screen.header._last_state == "FINISHED" and screen.header._timer_label.text.endswith(elapsed_clock(duration))
-    assert not screen.header._shamatha_active and screen.header._device_label.text == "[Disconnected]" and app._history._history_dirty
+    assert not screen.header._shamatha_active and app._history._history_dirty
+    assert (screen.header._device_label.text, screen.header._device_label.marker) == ("[Mock EEG]", ("dot", "CONNECTED"))
 
 
 def test_the_session_screens_buttons_reach_its_controls(fresh_app, monkeypatch):
@@ -144,10 +146,10 @@ def test_a_link_dropped_mid_session_shows_the_headset_reconnecting(fresh_app, mo
     session = HeadsetSession(fresh_app, monkeypatch)
     session.tick()  # the session's first tick follows the link: up
     label = fresh_app._live_screen.header._device_label
-    assert label.text.endswith("] *")
+    assert label.marker == ("dot", "RECORDING")
     session.connected = False
     session.tick()
-    assert label.text.endswith("] ...")
+    assert label.marker == ("ring", "CONNECTING")
 
 
 def _handled(function) -> set[str]:

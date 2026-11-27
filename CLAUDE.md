@@ -261,7 +261,7 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 · scoring `scoring.GoalAccrual`
 · a one-shot sound `OneShot` (the engine's slots), a built-in sound's file `KeptSounds.path`
 · graph glyphs `GraphSet.wire_glyphs`
-· headset names `Headset.name()` / `device_labels.py`
+· headset names `Headset.name()` / `device_labels.py`, its label and status line `Headset.show_selected`
 · a profile's headset `Headset.load` / `Headset.scan`, the paired devices `Headset.find_paired`
 · the Android check `android_jni.on_android()`, the app's Activity `android_jni.activity()`
 · legends `LegendBar`
