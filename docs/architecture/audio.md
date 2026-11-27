@@ -75,8 +75,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `SoundSources.reward_id()` resolves the reward source: a custom selection with no file is silent, where the below channel falls back to rain.
   Persisted per-user: `reward_source` (`"none"`/`"noise"`/`"tone"`/`"heartbeat"`/`"custom"`, default `"none"`) + `reward_sound_path`; `SoundSources.on_reward_source_change` mirrors `on_feedback_source_change`.
   **Source selection UI**: one button per channel, showing the current label (`common.source_label`), opens the shared popup picker:
-  `settings_sections.common.open_source_picker(title, options, on_choose)` → `AudioSection._choose_feedback_source`/`_choose_reward_source` → `_apply_*_source`;
-  `"custom"` opens the file chooser directly.
+  `settings_sections.common.open_sound_picker(title, options, on_pick)`, the shared list popup (`open_source_picker`) whose `"custom"` opens the file chooser directly, → the channel's `SourcePicker`;
+  the timer's and a program segment's sound pickers open it too.
 - **Custom sound files** are picked through `settings_sections.common.open_audio_file_chooser`, the one picker for the feedback, reward, timer and segment sounds.
   The desktop uses Kivy's file browser.
   On Android an app can't list `/data` (the `~` of an app with no `HOME`), or shared storage by path (scoped storage; the app holds no storage permission), so the picker is the system one, `android_saf.open_document(_AUDIO_TYPES)`:

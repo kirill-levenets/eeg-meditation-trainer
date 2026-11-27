@@ -16,11 +16,7 @@ from app.storage.android_share import copy_to_documents
 from app.storage.fileops import discard_file
 from app.ui.app_context import AppContext
 from app.ui.formatting import format_count
-from app.ui.settings_sections.common import (
-    confirm_saved_delete,
-    save_under_unique_name,
-    saved_formula_label,
-)
+from app.ui.settings_sections.common import SavedNames, saved_formula_label
 
 
 class FormulaSettings:
@@ -32,6 +28,8 @@ class FormulaSettings:
                  scoring_locked: Callable[[str, str], bool]) -> None:
         self._ctx = ctx
         self._section = section  # Settings' FormulaSection
+        self._slots = section.slots
+        self._names = SavedNames("formula", "this formula", saved_formula_label, ctx.confirm)
         self._graph = live_graph
         self._formulas = formulas
         self._scoring_locked = scoring_locked  # (slot key, doing): True, after saying why, while a session scores it
@@ -45,8 +43,8 @@ class FormulaSettings:
         self._formulas.load(read_active(self._ctx.db, user_id))
         for key, name in zip(FORMULA_KEYS, self._formulas.names):
             self._graph.set_series_name(key, name)
-        for i, (name, ev) in enumerate(zip(self._formulas.names, self._formulas.evaluators)):
-            self._section.set_formula_slot(i, name, ev.formula)
+        for slot, name, ev in zip(self._slots, self._formulas.names, self._formulas.evaluators, strict=True):
+            slot.show(name, ev.formula)
 
     def on_slot_change(self, idx: int, name: str, formula: str) -> str:
         """Apply a slot's name+formula; a valid one shows its line (you typed a formula, you want to see it), and one
@@ -56,23 +54,23 @@ class FormulaSettings:
         key = FORMULA_KEYS[idx]
         # The slot the sound is set to is what a running session is scored on (or its shamatha fallback, while empty).
         if formula != ev.formula and self._scoring_locked(key, "changing the formula it is scored on"):
-            self._section.set_formula_slot(idx, self._formulas.names[idx], ev.formula)
+            self._slots[idx].show(self._formulas.names[idx], ev.formula)
             return ""  # the refusal says why itself
         error = self._refusal(formula)
         if error:
-            self._section.set_formula_slot_status(idx, f"Error: {error}", is_error=True)
+            self._slots[idx].show_status(f"Error: {error}", is_error=True)
             return error
         self._formulas.names[idx] = name or default_name(idx)
         self._graph.set_series_name(key, self._formulas.names[idx])
         if not formula:
             ev.set_formula("")
             self._graph.set_visible(key, False)
-            self._section.set_formula_slot_status(idx, "Formula cleared")
+            self._slots[idx].show_status("Formula cleared")
             logger.info(f"Custom formula slot {idx} cleared")
         else:
             ev.set_formula(formula)
             self._graph.set_visible(key, True)  # if it was hidden, the graph's visibility callback rebuilds the legend
-            self._section.set_formula_slot_status(idx, "Formula active")
+            self._slots[idx].show_status("Formula active")
             logger.info(f"Custom formula slot {idx} applied: {formula}")
         self._ctx.session.set_formula(idx, self._formulas.names[idx], formula)
         uid = self._ctx.user_id()
@@ -87,16 +85,16 @@ class FormulaSettings:
         if uid is None:
             return
         if not formula:
-            self._section.set_formula_slot_status(idx, "Nothing to save", is_error=True)
+            self._slots[idx].show_status("Nothing to save", is_error=True)
             return
         error = self._refusal(formula)
         if error:
-            self._section.set_formula_slot_status(idx, f"Error: {error}", is_error=True)
+            self._slots[idx].show_status(f"Error: {error}", is_error=True)
             return
         # Fall back to a truncated formula as the display name when none is given.
         label = name or (formula[:40] + ("..." if len(formula) > 40 else ""))
-        save_under_unique_name("formula", self._ctx.db.get_saved_formulas(uid), label, "this formula",
-                               lambda index: self._save(idx, index, label, formula), self._ctx.confirm)
+        self._names.save_unique(self._ctx.db.get_saved_formulas(uid), label,
+                                lambda index: self._save(idx, index, label, formula))
 
     @staticmethod
     def _refusal(formula: str) -> str:
@@ -113,13 +111,12 @@ class FormulaSettings:
         uid = self._ctx.user_id()
         if index is None:
             if not self._ctx.db.add_saved_formula(uid, label, formula):
-                self._section.set_formula_slot_status(idx, f"Limit reached ({self._ctx.db._MAX_SAVED_FORMULAS} max)",
-                                                      is_error=True)
+                self._slots[idx].show_status(f"Limit reached ({self._ctx.db._MAX_SAVED_FORMULAS} max)", is_error=True)
                 return
         elif not self._ctx.db.update_saved_formula(uid, index, label, formula):
             logger.warning(f"Overwrite skipped: formula index {index} out of range")
             return
-        self._section.set_formula_slot_status(idx, "Formula saved")
+        self._slots[idx].show_status("Formula saved")
         self.refresh_saved()
         logger.info(f"Formula saved: {label} = {formula}")
 
@@ -142,20 +139,19 @@ class FormulaSettings:
             self._ctx.info("Can't use this formula", f'"{saved_formula_label(idx, entry)}" can\'t run: {error}')
             return
         self.on_slot_change(idx, entry.get("name", ""), formula)
-        self._section.set_formula_slot(idx, self._formulas.names[idx], self._formulas.evaluators[idx].formula)
+        self._slots[idx].show(self._formulas.names[idx], self._formulas.evaluators[idx].formula)
 
     def on_delete(self, index: int) -> None:
         """Delete a saved formula, after a confirmation as a saved program's delete asks."""
         uid = self._ctx.require_user("delete a formula")
         if uid is None:
             return
-        rows = [saved_formula_label(i, f) for i, f in enumerate(self._ctx.db.get_saved_formulas(uid))]
-        confirm_saved_delete(self._ctx.confirm, "formula", rows, index, self._delete)
+        self._names.confirm_delete(self._ctx.db.get_saved_formulas(uid), index, self._delete)
 
     def _delete(self, index: int) -> None:
         self._ctx.db.remove_saved_formula(self._ctx.user_id(), index)
         self.refresh_saved()
-        self._section.set_formula_slot_status(0, "Formula deleted")
+        self._slots[0].show_status("Formula deleted")
         logger.info(f"Saved formula #{index} deleted")
 
     def on_export(self) -> None:
@@ -191,6 +187,6 @@ class FormulaSettings:
         """Refresh the saved formulas list in settings UI."""
         uid = self._ctx.user_id()
         if not uid:
-            self._section.populate_saved_formulas([])
+            self._section.show_saved([])
             return  # silent-ok: renders empty library; no per-user formulas without a user
-        self._section.populate_saved_formulas(self._ctx.db.get_saved_formulas(uid))
+        self._section.show_saved(self._ctx.db.get_saved_formulas(uid))

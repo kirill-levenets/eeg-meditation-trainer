@@ -23,7 +23,7 @@ def _restore_history(h: HistoryScreen, state: tuple) -> None:
 
 
 def _restore_settings(s: SettingsScreen, state: tuple) -> None:
-    s.timer.set_program_mode(state[0])
+    s.timer.show_mode(state[0])
     for sec, collapsed in zip(sections(s), state[1], strict=True):
         sec._set_collapsed(collapsed, notify=False)
 
@@ -34,7 +34,8 @@ _VIEW = {
                         _restore_live),
     HistoryScreen: (lambda h: (h.chart_area._view_mode, h.session_list._select_mode), _restore_history),
     DiaryScreen: (lambda d: (d._active_graph_tab,), lambda d, state: d._switch_graph_tab(state[0])),
-    SettingsScreen: (lambda s: (s.timer._program_mode, tuple(x._collapsed for x in sections(s))), _restore_settings),
+    SettingsScreen: (lambda s: (s.timer._mode_toggle.chosen, tuple(x._collapsed for x in sections(s))),
+                     _restore_settings),
 }
 
 

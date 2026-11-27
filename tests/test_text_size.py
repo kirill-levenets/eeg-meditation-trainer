@@ -146,13 +146,13 @@ def test_narrow_buttons_keep_their_text_on_one_line_at_the_largest_size():
     history.chart_area.set_view_mode("bars")  # Cal unselected: drawn regular, and measured so
     preset = PresetRow(items=[("1h30", 90)]).children[0]
     settings = SettingsScreen()
-    settings.timer._add_segment_row({"minutes": 10, "target": 60, "formula": "shamatha_score", "end_sound": "warble"})
-    row = settings.timer._segments_box.children[0]
+    settings.timer.editor.add_segment({"minutes": 10, "target": 60, "formula": "shamatha_score", "end_sound": "warble"})
+    row = settings.timer.editor.rows[-1]
     column = 0.16 * (dp(360) - 2 * S.PAGE_PAD - 5 * S.GAP_SM)
-    end_cue = next(w for w in row.children if getattr(w, "text", "") == "Warble")
+    end_cue = row.end_cue_button
     cal, bars = history.chart_area._toggle_col.buttons["calendar"], history.chart_area._toggle_col.buttons["bars"]
     for btn, width in ((cal, dp(40)), (bars, dp(40)), (preset, dp(38)),
-                       (end_cue, column), (row._feedback_btn, column)):
+                       (end_cue, column), (row.feedback_button, column)):
         btn.size_hint_x, btn.width = None, width
         assert _fits(btn.text, btn._label.font_size, width, btn.padding[0], btn._label.bold), btn.text
 
@@ -408,7 +408,7 @@ def _settings_states(screen):
     yield "", None
     for k, section in enumerate(screen._accordion._sections):
         yield f" section {k}", section.open
-    yield " program", lambda: (screen.timer.set_program_mode("program"), screen.timer.load_program(PROGRAM, "program"),
+    yield " program", lambda: (screen.timer.show_mode("program"), screen.timer.editor.show(PROGRAM, ""),
                                screen._accordion._sections[1].open())
     yield " profiles", lambda: (screen.profile.show_users([{"id": 1, "name": "Mock"}, {"id": 2, "name": "Second mock"}], 1),
                                 screen._accordion._sections[0].open())

@@ -5,8 +5,8 @@ from app.ui.sound_sources import SoundSources
 from tests._context import stub_context
 
 
-def sounds_alone(settings: dict | None = None, *, audio=None, audio_section=None, timer_section=None,
+def sounds_alone(settings: dict | None = None, *, audio=None, audio_section=None, timer_sound=None,
                  **ctx_fields) -> SoundSources:
     """Its context a stub that reads the profile's `settings`; mocks for the parts not given."""
     ctx = stub_context(**{"setting": lambda key: (settings or {})[key], **ctx_fields})
-    return SoundSources(ctx, audio or MagicMock(), audio_section or MagicMock(), timer_section or MagicMock())
+    return SoundSources(ctx, audio or MagicMock(), audio_section or MagicMock(), timer_sound or MagicMock())

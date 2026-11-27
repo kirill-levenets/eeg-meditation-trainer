@@ -56,7 +56,7 @@ def test_an_overwrite_of_an_entry_gone_meanwhile_writes_nothing_and_claims_nothi
     settings.on_save(0, "Calm", "alpha1")
     settings.on_save(0, "Calm", "alpha2")
     db.remove_saved_formula(uid, 0)
-    settings._section.reset_mock()
+    settings._section.slots[0].reset_mock()
     asked[0]()  # Overwrite, its index now past the list's end
     assert db.get_saved_formulas(uid) == []
-    settings._section.set_formula_slot_status.assert_not_called()  # no "Formula saved" for a write that didn't happen
+    settings._section.slots[0].show_status.assert_not_called()  # no "Formula saved" for a write that didn't happen

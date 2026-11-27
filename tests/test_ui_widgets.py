@@ -4,6 +4,7 @@ from unittest import mock
 from kivy.clock import Clock
 from kivy.metrics import dp
 
+import app.ui.settings_sections.common as common
 import app.ui.settings_sections.device as device_section
 from app.ui.graph_scroll import GraphAwareScrollView
 from app.ui.headset import filter_mindwave
@@ -11,7 +12,7 @@ from app.ui.hooks import wire
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_sections.device import DeviceSection
 from app.ui.settings_sections.formulas import FormulaSection
-from app.ui.settings_sections.timer import TimerSection
+from app.ui.settings_sections.timer import TimerSound
 from app.ui.widgets.accordion import ThemedAccordion
 from tests._settings_section import settings_section
 
@@ -369,42 +370,45 @@ class TestSettingsTimerSoundRow(unittest.TestCase):
     loaded path shows on it without counting as a change, and a pick reaches TimerState through the change callback."""
 
     def setUp(self):
-        self.timer = settings_section(lambda section, _scroll: TimerSection(section, saved_formulas=lambda: []))
+        self.sound = settings_section(lambda section, _scroll: TimerSound(section))
         self.captured = []
-        wire(self.timer, on_timer_sound_change=self.captured.append)
+        wire(self.sound, on_change=self.captured.append)
+
+    def _tap(self, label):
+        """Open the button's picker and tap `label` in it."""
+        offered = []
+        with mock.patch.object(common, "make_scroll_popup", lambda title, rows, **_k: offered.extend(rows) or mock.Mock()):
+            self.sound.button.dispatch("on_release")
+        next(b for b in offered if b.text == label).dispatch("on_release")
+        return offered
 
     def test_a_loaded_path_shows_on_the_button_without_a_change(self):
-        self.timer.timer_sound_path = "/tmp/bell.wav"
-        self.assertEqual(self.timer.timer_sound_path, "/tmp/bell.wav")
-        self.assertEqual(self.timer._timer_sound_btn.text, "Custom: bell.wav")
+        self.sound.show("/tmp/bell.wav")
+        self.assertEqual(self.sound.path, "/tmp/bell.wav")
+        self.assertEqual(self.sound.button.text, "Custom: bell.wav")
         self.assertEqual(self.captured, [])
 
     def test_default_bell_clears_the_custom_file(self):
-        self.timer.timer_sound_path = "/tmp/bell.wav"
-        self.timer._choose_timer_sound("")
-        self.assertEqual(self.timer.timer_sound_path, "")
-        self.assertEqual(self.timer._timer_sound_btn.text, "Default bell")
+        self.sound.show("/tmp/bell.wav")
+        self._tap("Default bell")
+        self.assertEqual(self.sound.path, "")
+        self.assertEqual(self.sound.button.text, "Default bell")
         self.assertEqual(self.captured, [""])
 
     def test_custom_file_takes_the_picked_file(self):
-        import app.ui.settings_sections.timer as timer
-        with mock.patch.object(timer, "open_audio_file_chooser", lambda on_select, **_k: on_select("/tmp/gong.mp3")):
-            self.timer._choose_timer_sound("custom")
-        self.assertEqual(self.timer.timer_sound_path, "/tmp/gong.mp3")
-        self.assertEqual(self.timer._timer_sound_btn.text, "Custom: gong.mp3")
+        with mock.patch.object(common, "open_audio_file_chooser", lambda on_select, **_k: on_select("/tmp/gong.mp3")):
+            self._tap("Custom file...")
+        self.assertEqual(self.sound.path, "/tmp/gong.mp3")
+        self.assertEqual(self.sound.button.text, "Custom: gong.mp3")
         self.assertEqual(self.captured, ["/tmp/gong.mp3"])
 
     def test_the_button_offers_default_bell_and_a_custom_file(self):
-        import app.ui.settings_sections.common as common
-        offered = []
-        with mock.patch.object(common, "make_scroll_popup", lambda title, rows, **_k: offered.extend(rows) or mock.Mock()):
-            self.timer._timer_sound_btn.dispatch("on_release")
-        self.assertEqual([b.text for b in offered], ["Default bell", "Custom file..."])
+        self.assertEqual([b.text for b in self._tap("Default bell")], ["Default bell", "Custom file..."])
 
     def test_test_button_invokes_callback(self):
         called = []
-        wire(self.timer, on_test_timer_sound=lambda: called.append(True))
-        self.timer._timer_sound_test_btn.dispatch("on_release")
+        wire(self.sound, on_test=lambda: called.append(True))
+        self.sound.test_button.dispatch("on_release")
         self.assertEqual(called, [True])
 
     def test_test_button_toggles_to_stop_then_back(self):
@@ -412,73 +416,85 @@ class TestSettingsTimerSoundRow(unittest.TestCase):
         # to interrupt them. The Test button doubles as a Stop button.
         played = []
         stopped = []
-        wire(
-            self.timer,
-            on_test_timer_sound=lambda: played.append(True),
-            on_stop_timer_sound=lambda: stopped.append(True),
-        )
+        wire(self.sound, on_test=lambda: played.append(True), on_stop=lambda: stopped.append(True))
 
-        self.assertEqual(self.timer._timer_sound_test_btn.text, "Test")
-        self.timer._timer_sound_test_btn.dispatch("on_release")
-        self.assertEqual(self.timer._timer_sound_test_btn.text, "Stop")
+        self.assertEqual(self.sound.test_button.text, "Test")
+        self.sound.test_button.dispatch("on_release")
+        self.assertEqual(self.sound.test_button.text, "Stop")
         self.assertEqual(played, [True])
         self.assertEqual(stopped, [])
 
         # Second tap stops playback and reverts text.
-        self.timer._timer_sound_test_btn.dispatch("on_release")
-        self.assertEqual(self.timer._timer_sound_test_btn.text, "Test")
+        self.sound.test_button.dispatch("on_release")
+        self.assertEqual(self.sound.test_button.text, "Test")
         self.assertEqual(stopped, [True])
         self.assertEqual(played, [True])  # unchanged
 
     def test_natural_playback_end_resets_button_text(self):
-        wire(self.timer, on_test_timer_sound=lambda: None)
-        self.timer._timer_sound_test_btn.dispatch("on_release")
-        self.assertEqual(self.timer._timer_sound_test_btn.text, "Stop")
-        # Sound.on_stop fires → app_manager calls notify_timer_sound_test_ended.
-        self.timer.notify_timer_sound_test_ended()
-        self.assertEqual(self.timer._timer_sound_test_btn.text, "Test")
-        self.assertFalse(self.timer._timer_sound_test_playing)
+        stopped = []
+        wire(self.sound, on_test=lambda: None, on_stop=lambda: stopped.append(True))
+        self.sound.test_button.dispatch("on_release")
+        self.assertEqual(self.sound.test_button.text, "Stop")
+        # The engine's end-of-sound callback.
+        self.sound.test_ended()
+        self.assertEqual(self.sound.test_button.text, "Test")
+        self.sound.test_button.dispatch("on_release")  # a tap after the end plays it again, not stop
+        self.assertEqual((self.sound.test_button.text, stopped), ("Stop", []))
 
 
 class TestSettingsFormulaSlots(unittest.TestCase):
-    """Settings exposes three named formula slots, each with its own
-    name input, formula input, and status label."""
+    """Settings exposes three named formula slots, each with its own name input, formula input, and status label; each
+    slot's Apply and Save report that slot."""
 
     def setUp(self):
         self.formulas = settings_section(lambda section, _scroll: FormulaSection(section))
 
-    def test_settings_has_three_formula_slots(self):
-        self.assertEqual(len(self.formulas._formula_inputs), 3)
-        self.assertEqual(len(self.formulas._formula_name_inputs), 3)
-        self.assertEqual(len(self.formulas._formula_statuses), 3)
+    def _type(self, idx, name, formula):
+        slot = self.formulas.slots[idx]
+        slot._name_input.text, slot._formula_input.text = name, formula
+        return slot
 
-    def test_submit_slot_fires_callback_with_index_name_formula(self):
+    def _button(self, idx, text):
+        slot = self.formulas.slots[idx]
+        section = slot._name_input.parent
+        rows = section.children[::-1]
+        buttons = rows[rows.index(slot._formula_input) + 1]
+        return next(b for b in buttons.children if b.text == text)
+
+    def test_settings_has_three_formula_slots(self):
+        self.assertEqual(len(self.formulas.slots), 3)
+        names = [w.hint_text for w in self.formulas.slots[0]._name_input.parent.children[::-1]
+                 if getattr(w, "hint_text", "").startswith("name")]
+        self.assertEqual(names, [f"name (default Custom {i})" for i in (1, 2, 3)])
+
+    def test_apply_reports_its_slot_with_the_name_and_formula_trimmed(self):
         captured = []
         wire(self.formulas, on_formula_slot_change=lambda idx, name, formula: captured.append((idx, name, formula)))
-        self.formulas._formula_name_inputs[1].text = "  Focus  "
-        self.formulas._formula_inputs[1].text = "  alpha + beta  "
-        self.formulas._submit_slot(1)
-        self.assertEqual(captured, [(1, "Focus", "alpha + beta")])
+        self._type(1, "  Focus  ", "  alpha + beta  ")
+        self._button(1, "Apply").dispatch("on_release")
+        self.formulas.slots[1]._formula_input.dispatch("on_text_validate")  # Enter applies too
+        self.assertEqual(captured, [(1, "Focus", "alpha + beta")] * 2)
 
-    def test_save_slot_reuses_library_callback_with_index_name_formula(self):
+    def test_save_reports_its_slot_with_the_name_and_formula(self):
         captured = []
         wire(self.formulas, on_save_formula=lambda idx, name, formula: captured.append((idx, name, formula)))
-        self.formulas._formula_name_inputs[2].text = "Calm"
-        self.formulas._formula_inputs[2].text = "theta / (delta + 1)"
-        self.formulas._save_slot(2)
+        self._type(2, "Calm", "theta / (delta + 1)")
+        self._button(2, "Save").dispatch("on_release")
         self.assertEqual(captured, [(2, "Calm", "theta / (delta + 1)")])
 
-    def test_set_formula_slot_reflects_into_inputs(self):
-        self.formulas.set_formula_slot(0, "MyName", "alpha")
-        self.assertEqual(self.formulas._formula_name_inputs[0].text, "MyName")
-        self.assertEqual(self.formulas._formula_inputs[0].text, "alpha")
+    def test_show_reflects_into_the_slot_s_inputs(self):
+        self.formulas.slots[0].show("MyName", "alpha")
+        self.assertEqual((self.formulas.slots[0].name, self.formulas.slots[0].formula), ("MyName", "alpha"))
+        self.assertEqual((self.formulas.slots[1].name, self.formulas.slots[1].formula), ("", ""))
 
-    def test_set_formula_slot_status_routes_to_the_right_slot(self):
+    def test_a_status_shows_under_its_own_slot(self):
         from app.ui.theme import C
-        self.formulas.set_formula_slot_status(1, "boom", is_error=True)
-        self.assertEqual(self.formulas._formula_statuses[1].text, "boom")
-        self.assertEqual(tuple(self.formulas._formula_statuses[1].color), tuple(C.DANGER))
-        self.assertEqual(self.formulas._formula_statuses[0].text, "")  # slot 0 untouched
+        self.formulas.slots[1].show_status("boom", is_error=True)
+        self.assertEqual(self.formulas.slots[1]._status.text, "boom")
+        self.assertEqual(tuple(self.formulas.slots[1]._status.color), tuple(C.DANGER))
+        self.assertEqual(self.formulas.slots[0]._status.text, "")  # slot 0 untouched
+        self.formulas.slots[1].show_status("ok")
+        self.assertEqual(tuple(self.formulas.slots[1]._status.color), tuple(C.ACCENT))
 
 
 class TestAccordionGrandchildGrowth(unittest.TestCase):

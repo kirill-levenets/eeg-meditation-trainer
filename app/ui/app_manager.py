@@ -156,7 +156,8 @@ class EEGMeditationApp(App):
                                 serial_override=lambda: self.serial_device_override)
         self._headset.load_aliases()
         self._session = RunningSession(self._ctx, self._audio, self._headset, on_event=lambda event: self._controls.on_event(event))
-        self._sounds = SoundSources(self._ctx, self._audio, self._settings_screen.audio, self._settings_screen.timer)
+        self._sounds = SoundSources(self._ctx, self._audio, self._settings_screen.audio,
+                                    self._settings_screen.timer_sound)
         self._audio_metric = AudioMetric(self._ctx, self._session.program_run, self._settings_screen.metric)
         self._program_settings = ProgramSettings(
             self._ctx, self._settings_screen.timer, self._live_screen,
@@ -277,12 +278,12 @@ class EEGMeditationApp(App):
         wire(ss.formulas, on_formula_slot_change=self._formula_settings.on_slot_change,
              on_save_formula=self._formula_settings.on_save, on_load_formula=self._formula_settings.on_load,
              on_delete_formula=self._formula_settings.on_delete, on_export_formulas=self._formula_settings.on_export)
-        wire(ss.timer, on_program_mode=self._program_settings.on_mode_change,
-             on_program_changed=self._program_settings.on_changed, on_program_save=self._program_settings.on_save,
-             on_program_load=self._program_settings.on_load, on_program_delete=self._program_settings.on_delete,
-             on_test_timer_sound=self._sounds.on_test_timer_sound,
-             on_stop_timer_sound=self._sounds.on_stop_test_timer_sound,
-             on_timer_sound_change=self._sounds.on_timer_sound_change)
+        programs = self._program_settings
+        wire(ss.timer, on_mode=programs.on_mode_change)
+        wire(ss.timer.editor, on_change=programs.on_changed, on_save=programs.on_save, on_load=programs.on_load,
+             on_delete=programs.on_delete)
+        wire(ss.timer_sound, on_change=self._sounds.on_timer_sound_change, on_test=self._sounds.on_test_timer_sound,
+             on_stop=self._sounds.on_stop_test_timer_sound)
 
     def _wire_history_screens(self) -> None:
         """History's list and chart, and a session's detail."""

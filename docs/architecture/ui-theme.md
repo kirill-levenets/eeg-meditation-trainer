@@ -35,7 +35,7 @@ With no active user the first-run popup (the user gate) is shown.
   it morphs the label (and optionally the icon / fill) to a success state, then `Clock`-reverts to the **true** original (reentrancy-safe: a repeat tap restarts the timer without capturing the intermediate state).
   Main-thread only.
   On a text-only button the icon is drawn inline in `Icons`-font markup, and only when the font loaded (a bare `[font=Icons]` tag is tofu).
-  The program **Save** success path uses it: `ProgramSettings._save` → `TimerSection.confirm_program_saved()`, "Saved" with a check on a `C.SHAMATHA` green fill.
+  The program **Save** success path uses it: `ProgramSettings._save` → `ProgramEditor.confirm_saved()`, "Saved" with a check on a `C.SHAMATHA` green fill.
   **`RevealBox(content_height)`** is the touch-safe way to show a row conditionally: `set_content(*widgets)` once, then `reveal(bool)`;
   it **detaches** the children when hidden (an empty box at height 0) rather than collapsing them in place.
   Never hide interactive content with `height=0`/`opacity=0`/`disabled=True`:

@@ -312,9 +312,9 @@ def test_a_new_gong_is_built_outside_the_one_shot_lock(engine, monkeypatch, tmp_
 
 
 def test_the_settings_test_button_hears_the_gongs_end():
-    audio, timer_section = MagicMock(), MagicMock()
-    sounds_alone({"timer_sound": ""}, audio=audio, timer_section=timer_section).on_test_timer_sound()
-    assert audio.play_timer_sound.call_args.kwargs["on_end"] == timer_section.notify_timer_sound_test_ended
+    audio, timer_sound = MagicMock(), MagicMock()
+    sounds_alone({"timer_sound": ""}, audio=audio, timer_sound=timer_sound).on_test_timer_sound()
+    assert audio.play_timer_sound.call_args.kwargs["on_end"] == timer_sound.test_ended
 
 
 @pytest.mark.parametrize("custom, exists, played, said", [

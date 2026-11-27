@@ -68,24 +68,26 @@ def test_session_program_json_records_the_program_it_began_with():
     assert make_run().segments_json() == ""
 
 
+class _StubEditor:
+    def show_saved(self, progs):
+        self.saved = progs
+
+    def show(self, segs, name):
+        self.loaded = (segs, name)
+
+    def confirm_saved(self):
+        self.confirmed = True
+
+
 class _StubSettings:
     timer_enabled = False
     timer_minutes = 20
 
-    def set_saved_programs(self, progs):
-        self.saved = progs
+    def __init__(self):
+        self.editor = _StubEditor()
 
-    def load_program(self, segs, mode):
-        self.loaded = (segs, mode)
-
-    def set_program_name(self, name):
-        self.name = name
-
-    def set_program_mode(self, mode):
+    def show_mode(self, mode):
         self.mode = mode
-
-    def confirm_program_saved(self):
-        self.confirmed = True
 
 
 class _StubLive:
@@ -111,7 +113,7 @@ def test_saved_program_unique_upsert_load_delete(tmp_path):
     # New name -> added directly (no confirm popup path).
     programs.on_save("Ramp")
     progs = db.get_saved_programs(uid)
-    assert [p["name"] for p in progs] == ["Ramp"]
+    assert [p["name"] for p in progs] == ["Ramp"] and settings.editor.confirmed  # Save says so
 
     # Same name, edited segments -> overwrite (simulate the confirmed action).
     programs.segments = [{"minutes": 5, "target": 90, "formula": "meditation_score"}]
@@ -124,7 +126,7 @@ def test_saved_program_unique_upsert_load_delete(tmp_path):
     programs._load(0, "Ramp")
     assert programs.mode == "program"
     assert programs.segments[0]["target"] == 90
-    assert settings.name == "Ramp"
+    assert settings.editor.loaded[1] == "Ramp" and settings.mode == "program"
 
     # Delete -> removed.
     programs._delete(0)

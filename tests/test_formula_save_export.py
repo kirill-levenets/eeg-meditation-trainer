@@ -30,8 +30,8 @@ def test_a_formula_that_doesnt_compile_isnt_saved(make, caplog):
     fs.on_save(0, "Broken", "alpha1 +")
     assert "'alpha1 +' can't run" in caplog.text  # logged where the user sees it
     assert db.get_saved_formulas(uid) == []  # a program segment could pick it: constant maximum noise
-    status = fs._section.set_formula_slot_status.call_args
-    assert status.args[1].startswith("Error:") and status.kwargs == {"is_error": True}
+    status = fs._section.slots[0].show_status.call_args
+    assert status.args[0].startswith("Error:") and status.kwargs == {"is_error": True}
 
 
 def test_a_formula_that_compiles_is_saved(make):
@@ -47,11 +47,12 @@ def test_a_formula_that_doesnt_compile_leaves_the_slot_as_it_was(make, via, capl
         fs.on_slot_change(slot, f"Mine{slot}", "alpha1")
     saved = db.get_user_json_setting(uid, "active_formulas")
     fs._graph.reset_mock()
-    fs._section.reset_mock()
+    for slot in fs._section.slots:
+        slot.reset_mock()
     if via == "apply":
         assert fs.on_slot_change(0, "Broken", "alpha1 +").startswith("Syntax error")
-        status = fs._section.set_formula_slot_status.call_args
-        assert status.args[1].startswith("Error:") and status.kwargs == {"is_error": True}
+        status = fs._section.slots[0].show_status.call_args
+        assert status.args[0].startswith("Error:") and status.kwargs == {"is_error": True}
     else:  # an entry saved before Save checked, picked far from the slot's status line
         if via == "choose":
             fs.assign_saved(0, {"name": "Broken", "formula": "alpha1 +"})
@@ -60,8 +61,9 @@ def test_a_formula_that_doesnt_compile_leaves_the_slot_as_it_was(make, via, capl
             fs.on_load(0)
         assert fs._ctx.info.call_args.args == ("Can't use this formula",
                                                   '"Broken" can\'t run: Syntax error: invalid syntax')
-        fs._section.set_formula_slot.assert_not_called()  # a draft typed in its inputs stays
-        fs._section.set_formula_slot_status.assert_not_called()
+        for slot in fs._section.slots:
+            slot.show.assert_not_called()  # a draft typed in its inputs stays
+            slot.show_status.assert_not_called()
     assert "'alpha1 +' can't run" in caplog.text
     assert (fs._formulas.names[0], fs._formulas.evaluators[0].formula) == ("Mine0", "alpha1")
     fs._graph.set_series_name.assert_not_called()
@@ -75,7 +77,7 @@ def test_a_tap_in_saved_formulas_fills_the_first_empty_slot_and_its_inputs(make)
     db.add_saved_formula(uid, "Calm", "alpha1 * 2")
     fs.on_load(0)
     assert (fs._formulas.names[1], fs._formulas.evaluators[1].formula) == ("Calm", "alpha1 * 2")
-    fs._section.set_formula_slot.assert_called_with(1, "Calm", "alpha1 * 2")
+    fs._section.slots[1].show.assert_called_with("Calm", "alpha1 * 2")
     fs._ctx.info.assert_not_called()
 
 
@@ -84,7 +86,7 @@ def test_a_full_library_says_so_under_the_slot(make):
     for n in range(db._MAX_SAVED_FORMULAS):
         db.add_saved_formula(uid, f"F{n}", "alpha1")
     fs.on_save(0, "One more", "alpha1")
-    assert fs._section.set_formula_slot_status.call_args.args == (0, f"Limit reached ({db._MAX_SAVED_FORMULAS} max)")
+    assert fs._section.slots[0].show_status.call_args.args == (f"Limit reached ({db._MAX_SAVED_FORMULAS} max)",)
     assert len(db.get_saved_formulas(uid)) == db._MAX_SAVED_FORMULAS
 
 
@@ -94,7 +96,8 @@ def test_save_and_export_without_a_profile_ask_for_one_as_load_and_delete_do(mak
     fs, _db, _uid = make(profile=False)
     call(fs)
     fs._ctx.require_user.assert_called_once_with(action)
-    fs._section.set_formula_slot_status.assert_not_called()  # the popup says it, not a slot's status line
+    for slot in fs._section.slots:
+        slot.show_status.assert_not_called()  # the popup says it, not a slot's status line
 
 
 def test_export_delivers_to_documents_and_leaves_no_private_copy(make, tmp_path, monkeypatch):

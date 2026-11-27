@@ -32,7 +32,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   a formula that doesn't compile changes neither the slot nor its inputs, so a draft typed there stays
   (a scoring-lock refusal puts the inputs back to the formula the session is scored on, as it does for Apply).
   A profile's load leaves a slot empty when its stored formula doesn't compile (`FormulaSlots.load`), where a failed set would have kept the last profile's formula.
-  Saved formulas and programs keep unique names through `settings_sections.common.save_under_unique_name`: a new name is added, an existing one is overwritten after a confirmation.
+  Saved formulas and programs keep unique names through `settings_sections.common.SavedNames.save_unique`: a new name is added, an existing one is overwritten after a confirmation.
   Export writes the library to a private file and delivers it with `copy_to_documents` ([storage](storage.md#exports-to-shared-storage)): `Documents/EEGMeditation/` through MediaStore on Android, `~/Documents/EEGMeditation/` on desktop.
   A popup says where (`info`, the app's `_info_popup`), as the backup's does: slot 1's status line is far from the button and clipped at the larger text sizes.
   Each tick the session's `formulas.evaluate_into` writes every valid line into `metrics` through `custom_formula.evaluate_series`, the same function a running program's formulas use.
@@ -73,7 +73,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   SessionManager reports no key and a NULL `avg_score` when no tick was scored (a session stopped within its first tick).
   **A running simple session's scored metric can't change**: `SessionManager` keeps one running sum, time above and streak, so a mid-session switch would mix two metrics' scales under the last one's name.
   While a simple session runs or connects, `AudioMetric.on_change`, `on_formula_index` (when a formula slot drives) and `FormulaSettings.on_slot_change` (a formula change to the slot the sound is set to; a name-only rename passes) refuse;
-  they put Settings back (`AudioMetric.show`, `set_formula_slot`).
+  they put Settings back (`AudioMetric.show`, the slot's `FormulaSlot.show`).
   The check is `AudioMetric.scoring_locked(doing)`: not `ProgramRun.active`, then the shared refusal; a program is scored on its segments' metrics, so the control stays free.
   The other slots and, in a simple session, the threshold stay editable.
   Every such refusal is `SessionControls.refused(doing, why="")`: "Session in progress" / "<why> Stop the current session before <doing>.";
