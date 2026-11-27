@@ -136,8 +136,8 @@ def open_detail(app, sid: int) -> None:
     open_history(app, sid)
     app._detail.on_session_select(sid)
     detail = app._diary_screen
-    frames_until(lambda: detail._selected_session_id == sid
-                 and detail._ready >= {"metrics", "raw", "freq", "bands", "what_if"})
+    frames_until(lambda: detail._session_id == sid and detail.graphs._ready >= {"metrics", "raw", "freq"}
+                 and detail.bands._filled and not detail.what_if.loading)
 
 
 def raw_sample(seed: float = 1.0, with_waveform: bool = True) -> dict:

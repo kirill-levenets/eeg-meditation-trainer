@@ -147,5 +147,5 @@ def test_a_formula_of_the_wrong_type_runs_as_one_that_doesnt_compile(formula):
 def test_a_session_detail_opened_on_an_unreadable_program_draws_its_plain_threshold():
     from app.ui.diary_screen import DiaryScreen
     detail = DiaryScreen()
-    detail.set_program('[{"minutes": "x"}]')  # a hand-edited or corrupt record: no steps, never a crash
-    assert detail._metrics_graph.threshold_steps is None
+    detail.graphs.show_program('[{"minutes": "x"}]')  # a hand-edited or corrupt record: no steps, never a crash
+    assert detail.graphs.metrics.threshold_steps is None

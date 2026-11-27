@@ -33,7 +33,7 @@ def test_json_selection_applied_per_graph(fresh_app):
     app._db.set_user_json_setting(uid, "graph_series_live_metrics", ["distraction", "sinking"])
     app._db.set_user_json_setting(uid, "graph_series_diary_freq", ["alpha", "beta"])
     _restore(app)
-    graph, freq = app._live_screen.graph, app._diary_screen._freq_graph
+    graph, freq = app._live_screen.graph, app._diary_screen.graphs.freq
     assert graph.is_visible("distraction") and graph.is_visible("sinking") and not graph.is_visible("shamatha_score")
     assert freq.is_visible("alpha") and freq.is_visible("beta") and not freq.is_visible("gamma")
 
@@ -47,7 +47,7 @@ def test_legacy_migration_only_for_live_metrics(fresh_app):
     assert graph.is_visible("native_attention") and not graph.is_visible("shamatha_score")
     # Diary graphs ignore the legacy live-only keys → default to all-visible, but a program's lines, which follow
     # the session shown.
-    diary_m = app._diary_screen._metrics_graph
+    diary_m = app._diary_screen.graphs.metrics
     assert set(diary_m.visible_keys()) == set(diary_m.series_keys()) - set(PROGRAM_FORMULA_KEYS)
 
 
@@ -65,7 +65,7 @@ def test_single_series_graphs_untouched(fresh_app):
     # the line); their sole series stays visible.
     app = fresh_app
     _restore(app)
-    assert app._live_screen.raw_graph.is_visible("eeg") and app._diary_screen._raw_eeg_graph.is_visible("eeg")
+    assert app._live_screen.raw_graph.is_visible("eeg") and app._diary_screen.graphs.raw.is_visible("eeg")
 
 
 def test_toggle_flips_and_persists_per_graph(fresh_app):
@@ -76,7 +76,7 @@ def test_toggle_flips_and_persists_per_graph(fresh_app):
     app._graph_series.persist(graph)
     assert "distraction" in app._db.get_user_json_setting(uid, "graph_series_live_metrics")
 
-    freq = app._diary_screen._freq_graph
+    freq = app._diary_screen.graphs.freq
     _toggle(app, freq, "gamma")  # gamma was visible by default → now hidden
     assert not freq.is_visible("gamma")
     app._graph_series.persist(freq)
@@ -85,7 +85,7 @@ def test_toggle_flips_and_persists_per_graph(fresh_app):
 
 def test_a_detail_showing_a_programs_lines_lists_them_and_saves_none_of_its_set(fresh_app, monkeypatch):
     app, uid = fresh_app, fresh_app._current_user_id
-    diary = app._diary_screen._metrics_graph
+    diary = app._diary_screen.graphs.metrics
     shown = frozenset({"shamatha_score", "program_formula"})
     for key in diary.series_keys():
         diary.set_visible(key, key in shown)  # what show_program_series does for a program session
@@ -115,7 +115,7 @@ def test_custom_formula_gated_on_live_graph_only(fresh_app):
     assert graph.is_visible("custom_formula")
 
     # Diary metrics: custom_formula is recorded data → toggles freely.
-    diary_m = app._diary_screen._metrics_graph
+    diary_m = app._diary_screen.graphs.metrics
     slot.set_formula("")
     diary_m.set_visible("custom_formula", False)
     _toggle(app, diary_m, "custom_formula")
@@ -180,9 +180,9 @@ def test_the_live_screen_and_a_sessions_detail_draw_a_series_in_one_colour():
     from app.ui.live_session import LiveSessionScreen
     live, detail = LiveSessionScreen(), DiaryScreen()
     for key in METRICS_COLORS:
-        assert detail._metrics_graph.series_color(key) == live.graph.series_color(key), key
+        assert detail.graphs.metrics.series_color(key) == live.graph.series_color(key), key
     for key in BAND_COLORS:
-        assert detail._freq_graph.series_color(key) == live.band_graph.series_color(key), key
+        assert detail.graphs.freq.series_color(key) == live.band_graph.series_color(key), key
 
 
 def test_choosing_a_saved_formula_renames_its_picker_row_at_once(fresh_app, monkeypatch):

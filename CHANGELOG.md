@@ -58,6 +58,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **Exports leave nothing behind in the app's storage**: after a session's CSV (on Android) or a selection's ZIP was copied to Documents, its private copy stayed in the app's storage.
+- **A session's CSV that couldn't be copied to Documents says so and where it is kept**: the message pointed to a Share button the app doesn't have.
+- **A session's CSV exported on Windows has one line break per row**: each row ended in an extra carriage return (Windows' text mode added one to the CSV's own).
 - **Settings › Timer's Loaded line names a program once it is saved**: it went on saying "(unsaved)", or the program loaded before, until the next load.
 - **The headset's state between sessions** (#147): the Session screen said "[Disconnected]" after every session while the app kept the headset connected, and Settings › Device went on saying "Connected" after the headset was switched off between sessions.
   Both now show the connection as it is, between sessions too.

@@ -149,3 +149,5 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   on Android through MediaStore into `Documents/EEGMeditation/`, with no storage permission; on desktop a copy into `~/Documents/EEGMeditation/` that replaces a file of the same name.
   MediaStore keeps a file already there and stores a clashing name as "name (1)", so the helper reads the stored name back (`_stored_name`) and returns that path for the export's message;
   a failed read-back returns the requested name, since the file is written.
+  The session exports (a session's CSV on Android, the bulk ZIP) call it through `move_to_documents`, which then removes the private copy; a copy that failed leaves it, and their message names it.
+  The formula export removes its private file either way.

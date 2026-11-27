@@ -292,9 +292,9 @@ class EEGMeditationApp(App):
             on_save_notes=self._history.save_notes,
             on_export_csv=self._history.on_export_csv,
             on_back=self._detail.on_diary_back,
-            on_band_view_change=self._detail.persist_band_view,
-            on_band_collapse=lambda _collapsed: self._user_settings.changed("band_power_collapsed"),
         )
+        wire(self._diary_screen.bands, on_view_change=self._detail.persist_band_view,
+             on_collapse=lambda _collapsed: self._user_settings.changed("band_power_collapsed"))
 
         wire(
             self._history_screen,
@@ -357,7 +357,7 @@ class EEGMeditationApp(App):
             # Only on screen: leaving it already saved (or reported a failed save), and a retry on every pause
             # repeated the error, e.g. for a session deleted since.
             if getattr(self, "_diary_screen", None) is not None and self._sm.current == self._diary_screen.name:
-                self._diary_screen.flush_notes()
+                self._diary_screen.notes.flush()
             self._save_user_settings()
         finally:
             self._leaving = False
@@ -461,7 +461,7 @@ class EEGMeditationApp(App):
         hs, ds = self._history_screen, self._diary_screen
         return [kept("history_chart_collapsed", BOOL, lambda: hs.chart_collapsed, hs.set_chart_collapsed),
                 kept("what_if_collapsed", BOOL, lambda: ds.what_if.collapsed, ds.what_if.set_collapsed),
-                kept("band_power_collapsed", BOOL, lambda: ds.band_collapsed, ds.set_band_collapsed)]
+                kept("band_power_collapsed", BOOL, lambda: ds.bands.collapsed, ds.bands.set_collapsed)]
 
     def _display_settings(self) -> list[Setting]:
         display, ls = self._settings_screen.display, self._live_screen

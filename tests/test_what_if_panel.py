@@ -234,7 +234,7 @@ def test_the_detail_opens_its_session_as_recorded_and_the_line_follows_the_slide
                                    _scored_rows(VALUES, targets), user_id=a._current_user_id, session_name="s")
     _open(a, workers, sid)
     d = a._diary_screen
-    panel, graph = d._what_if, d._metrics_graph
+    panel, graph = d.what_if, d.graphs.metrics
     assert panel._controls.parent is panel and panel._note.text == "Recorded at 70 › 90 · nothing is saved"
     assert _results(panel) == ("5s", "1s")  # the recorded numbers, from its own ticks
     assert graph._threshold_steps == [(0, 70), (7, 90)]
@@ -250,7 +250,7 @@ def test_the_detail_opens_its_session_as_recorded_and_the_line_follows_the_slide
 def test_an_older_session_is_scored_on_its_stored_column(app):  # noqa: F811
     a, workers = app
     _open(a, workers, a.sessions["A"])  # rows without a per-tick record, scored on shamatha at 70
-    panel = a._diary_screen._what_if
+    panel = a._diary_screen.what_if
     assert panel._controls.parent is panel and _control(panel).slider.value == 70
 
 
@@ -267,7 +267,7 @@ def test_a_program_session_opens_with_a_control_per_segment(app):  # noqa: F811
                                    session_name="p", session_program=json.dumps(program))
     _open(a, workers, sid)
     d = a._diary_screen
-    panel, graph = d._what_if, d._metrics_graph
+    panel, graph = d.what_if, d.graphs.metrics
     assert panel._controls.parent is panel
     assert [c.title.text for c in panel._seg_controls] == ["1 · Shamatha · recorded 90", "2 · Meditation · recorded 60"]
     assert _results(panel) == ("1m 01s", "1m 01s")  # 90 91 92, then all 120 at 80 >= 60: one run of 123 ticks
@@ -283,11 +283,11 @@ def test_a_program_session_opens_with_a_control_per_segment(app):  # noqa: F811
 def test_another_session_opens_as_recorded_again(app):  # noqa: F811
     a, workers = app
     _open(a, workers, a.sessions["A"])
-    _control(a._diary_screen._what_if).slider.value = 120
+    _control(a._diary_screen.what_if).slider.value = 120
     _frames()
     a._detail.on_diary_back()
     _open(a, workers, a.sessions["B"])
-    panel = a._diary_screen._what_if
+    panel = a._diary_screen.what_if
     assert _control(panel).slider.value == 70 and panel._btn_reset.disabled
 
 
@@ -296,7 +296,7 @@ def test_the_next_session_shows_loading_until_its_data_arrives(app):  # noqa: F8
     _open(a, workers, a.sessions["A"])
     a._detail.on_diary_back()
     a._detail.on_session_select(a.sessions["B"])  # its worker hasn't run yet
-    panel = a._diary_screen._what_if
+    panel = a._diary_screen.what_if
     assert panel._controls.parent is None and panel._message.text == "Loading…"  # not A's what-if
 
 
@@ -307,7 +307,7 @@ def test_a_formula_the_replay_couldnt_rebuild_says_so(app):  # noqa: F811
                                    [{"timestamp": i * 0.5, "shamatha_score": 60.0} for i in range(10)],
                                    user_id=a._current_user_id, session_name="f")
     _open(a, workers, sid)
-    panel = a._diary_screen._what_if
+    panel = a._diary_screen.what_if
     assert panel._controls.parent is None and "can't be replayed" in panel._message.text
 
 
@@ -316,8 +316,8 @@ def test_a_what_if_that_fails_fails_alone(app, monkeypatch):  # noqa: F811
     monkeypatch.setattr(session_detail_flow, "scored_ticks", lambda *_a: (_ for _ in ()).throw(KeyError("score_value")))
     _open(a, workers, a.sessions["A"])
     d = a._diary_screen
-    assert d._what_if._message.text.startswith("Couldn't load")
-    assert max(len(v) for v in d._metrics_graph._data.values()) == 40  # the graphs still filled
+    assert d.what_if._message.text.startswith("Couldn't load")
+    assert max(len(v) for v in d.graphs.metrics._data.values()) == 40  # the graphs still filled
 
 
 def test_an_older_programs_formula_is_replayed_for_its_segment(app):  # noqa: F811
@@ -326,7 +326,7 @@ def test_an_older_programs_formula_is_replayed_for_its_segment(app):  # noqa: F8
                {"minutes": 1, "target": 60, "formula": {"name": "Steady", "formula": "80"}}]
     sid = _program_session(a, program, [{"timestamp": i * 0.5, "shamatha_score": 50.0} for i in range(240)])
     _open(a, workers, sid)
-    panel = a._diary_screen._what_if
+    panel = a._diary_screen.what_if
     assert [c.title.text for c in panel._seg_controls] == ["1 · Shamatha · recorded 90", "2 · Steady · recorded 60"]
     assert [c.stats.text for c in panel._seg_controls] == ["Above 0s · Streak 0s", "Above 1m 00s · Streak 1m 00s"]
 
@@ -340,7 +340,7 @@ def test_an_older_programs_formula_runs_once_for_the_graph_and_the_what_if(app, 
     monkeypatch.setattr(a._db, "recompute_formula_series", lambda *args: replays.append(sorted(args[1])) or real(*args))
     _open(a, workers, sid)
     assert replays == [["program_formula"]]  # the detail's replay, which the what-if scores the segment on
-    assert a._diary_screen._what_if._seg_controls[1].stats.text == "Above 1m 00s · Streak 1m 00s"
+    assert a._diary_screen.what_if._seg_controls[1].stats.text == "Above 1m 00s · Streak 1m 00s"
 
 def test_a_program_whose_ticks_stored_their_scoring_replays_no_formula(app, monkeypatch):  # noqa: F811
     a, workers = app
@@ -350,7 +350,7 @@ def test_a_program_whose_ticks_stored_their_scoring_replays_no_formula(app, monk
     replays = []
     monkeypatch.setattr(a._db, "recompute_formula_series", lambda *args: replays.append(args) or {})
     _open(a, workers, sid)
-    panel = a._diary_screen._what_if
+    panel = a._diary_screen.what_if
     # One replay, the graph's line of the program formula; the what-if reads the stored scoring and replays nothing.
     assert [list(args[1]) for args in replays] == [["program_formula"]] and _results(panel) == ("1m 00s", "1m 00s")
 

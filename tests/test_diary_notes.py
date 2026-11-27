@@ -26,7 +26,7 @@ def _detail(session: dict = SESSION, saved: bool = True):
         return saved
 
     wire(diary, on_save_notes=save)
-    diary.show_session_detail(dict(session))
+    diary.show_session(dict(session))
     sm.current = "diary"
     return sm, diary, saves
 
@@ -36,7 +36,7 @@ def _detail(session: dict = SESSION, saved: bool = True):
 
 def test_leaving_the_detail_saves_an_edit():
     sm, diary, saves = _detail()
-    diary._notes_input.text = "calm start, then drowsy"
+    diary.notes.notes_input.text = "calm start, then drowsy"
     sm.current = "history"  # Back, a bottom-nav tab and Android back all leave the screen this way
     assert saves == [(7, "calm start, then drowsy", None, None)]  # only what changed
 
@@ -52,34 +52,34 @@ def test_leaving_without_an_edit_writes_nothing(mood_rating):
 def test_a_tag_or_mood_edit_alone_is_saved_on_leave(edit, sent):
     sm, diary, saves = _detail()
     if edit == "tags":
-        diary._tags_input.text = "evening"
+        diary.notes.tags_input.text = "evening"
     else:
-        diary._mood_slider.value = 2
+        diary.notes.mood_slider.value = 2
     sm.current = "history"
     assert saves == [sent]
 
 
 def test_save_then_leave_writes_once():
     sm, diary, saves = _detail()
-    diary._notes_input.text = "edited"
-    diary._on_save_pressed()
+    diary.notes.notes_input.text = "edited"
+    diary.notes.save_button.dispatch("on_release")
     sm.current = "history"
     assert saves == [(7, "edited", "morning", 4)]  # Save sends what the screen shows
 
 
 def test_a_failed_save_stays_pending_and_is_tried_again_on_leave():
     sm, diary, saves = _detail(saved=False)
-    diary._notes_input.text = "edited"
-    diary._on_save_pressed()
+    diary.notes.notes_input.text = "edited"
+    diary.notes.save_button.dispatch("on_release")
     sm.current = "history"
     assert [s[1] for s in saves] == ["edited", "edited"]
 
 
 def test_flush_saves_an_edit_once():
     _sm, diary, saves = _detail()
-    diary._notes_input.text = "edited"
-    diary.flush_notes()
-    diary.flush_notes()
+    diary.notes.notes_input.text = "edited"
+    diary.notes.flush()
+    diary.notes.flush()
     assert len(saves) == 1
 
 
@@ -109,15 +109,15 @@ def _stored(app, sid: int) -> tuple:
 def test_an_unrated_session_stays_unrated_when_only_its_notes_change(app):
     sid = _noted_session(app, mood=0)
     open_detail(app, sid)
-    app._diary_screen._notes_input.text = "notes only"
-    app._diary_screen.flush_notes()
+    app._diary_screen.notes.notes_input.text = "notes only"
+    app._diary_screen.notes.flush()
     assert _stored(app, sid) == ("notes only", "morning", 0)
 
 
 def test_save_rates_an_unrated_session_as_shown(app):
     sid = _noted_session(app, mood=0)
     open_detail(app, sid)
-    app._diary_screen._on_save_pressed()
+    app._diary_screen.notes.save_button.dispatch("on_release")
     assert _stored(app, sid) == ("calm start", "morning", 3)
     assert app.toasts == ["Notes saved"]
 
@@ -128,7 +128,7 @@ def test_a_failed_save_on_leave_is_not_retried_when_the_app_pauses_later(app, mo
     monkeypatch.setattr(history_flow, "report_soft_error", lambda label, detail, **k: reported.append(label))
     open_detail(app, _noted_session(app))
     monkeypatch.setattr(app._db, "update_session_notes", lambda *a, **k: tries.append(k) or False)
-    app._diary_screen._notes_input.text = "edited"
+    app._diary_screen.notes.notes_input.text = "edited"
     app._nav.switch("history")
     assert len(tries) == 1
     app.on_pause()
@@ -139,7 +139,7 @@ def test_a_failed_save_on_leave_is_not_retried_when_the_app_pauses_later(app, mo
 def test_app_pause_on_the_detail_saves_an_edit_and_acknowledges_it(app):
     sid = _noted_session(app)
     open_detail(app, sid)
-    app._diary_screen._notes_input.text = "typed before the phone locked"
+    app._diary_screen.notes.notes_input.text = "typed before the phone locked"
     assert app.on_pause() is True
     assert _stored(app, sid) == ("typed before the phone locked", "morning", 4)
     assert app.toasts == ["Notes saved"]

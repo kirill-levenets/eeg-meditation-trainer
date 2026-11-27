@@ -30,6 +30,11 @@ def _secondary(text: str = "") -> ThemedLabel:
     return label
 
 
+# What a session detail's part shows while its data loads, and once it won't come.
+LOADING = "Loading\u2026"
+LOAD_FAILED = "Couldn't load this session's data."
+
+
 class _SegmentControl(BoxLayout):
     """One segment's threshold: -5, a slider, its value, +5; a program's segment also has its title and its stats."""
 
@@ -174,10 +179,15 @@ class WhatIfPanel(BoxLayout):
         self._show(self._message)
 
     def show_loading(self) -> None:
-        self._show_message("Loading…")
+        self._show_message(LOADING)
+
+    @property
+    def loading(self) -> bool:
+        """Waiting for its session: neither the controls nor a message about them shown yet."""
+        return self._content is self._message and self._message.text == LOADING
 
     def show_load_failed(self) -> None:
-        self._show_message("Couldn't load this session's data.")
+        self._show_message(LOAD_FAILED)
 
     def set_session(self, ticks: ScoredTicks | None, note: str, titles: list[str] | None = None,
                     unavailable: str = "") -> None:

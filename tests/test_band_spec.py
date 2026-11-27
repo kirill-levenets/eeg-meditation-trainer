@@ -9,7 +9,8 @@ from kivy.core.window import Window
 from app.eeg.band_spec import BANDS, GROUP_NAMES, GROUPS, group_powers, range_text
 from app.eeg.thinkgear import BAND_NAMES
 from app.metrics.custom_formula import ALLOWED_VARIABLES
-from app.ui.diary_screen import DiaryScreen, detail_graph_data
+from app.ui.detail_sections.graphs import detail_graph_data
+from app.ui.diary_screen import DiaryScreen
 from app.ui.live_session import LiveSessionScreen
 from app.ui.theme import F
 from app.ui.widgets.band_totals import BandTotalsView
@@ -128,4 +129,4 @@ def test_the_detail_band_graph_plots_the_grouped_powers():
 def test_the_band_graphs_name_their_bands_from_the_table():
     names = {g.key: g.name for g in GROUPS}
     assert LiveSessionScreen()._band_graph._names == names
-    assert DiaryScreen()._freq_graph._names == names
+    assert DiaryScreen().graphs.freq._names == names

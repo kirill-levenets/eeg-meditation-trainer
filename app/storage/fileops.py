@@ -1,9 +1,9 @@
 """File copies for app data: bytes only, never metadata, and never a partly written target."""
 
 import os
+import secrets
 import shutil
 import stat
-import tempfile
 from collections.abc import Callable
 from typing import BinaryIO
 
@@ -11,8 +11,10 @@ from app.logger import logger
 
 
 def write_file_atomic(dst: str, write: Callable[[BinaryIO], None], mode: int | None = None) -> None:
-    """Have `write` fill a temp file beside dst, then os.replace it in: dst is untouched or complete."""
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(dst) or ".", prefix=".", suffix=".part")
+    """Have `write` fill a temp file beside dst, then os.replace it in: dst is untouched or complete, with `mode` or
+    the permissions a plain open() gives a new file (mkstemp's are the owner's alone)."""
+    tmp = os.path.join(os.path.dirname(dst) or ".", f".{os.path.basename(dst)}.{secrets.token_hex(4)}.part")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o666)  # the umask applies
     try:
         with os.fdopen(fd, "wb") as f:
             write(f)

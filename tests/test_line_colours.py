@@ -11,7 +11,8 @@ from app.metrics.formula_slots import session_formulas
 from app.session.session_program import recorded_plan
 from app.settings.registry import SettingsStore
 from app.storage.database import DatabaseManager
-from app.ui.diary_screen import DiaryScreen, detail_graph_data
+from app.ui.detail_sections.graphs import detail_graph_data
+from app.ui.diary_screen import DiaryScreen
 from app.ui.hooks import wire
 from app.ui.line_colours import (
     DEFAULT,
@@ -203,12 +204,12 @@ def test_a_segment_boundary_splits_the_two_lines_colouring_where_it_was_crossed(
 
 def test_history_colours_the_metric_a_session_was_scored_on():
     detail = DiaryScreen()
-    detail.show_session_detail({"id": 1, "date_time": "2026-10-10T07:30:00", "duration": 600,
+    detail.show_session({"id": 1, "date_time": "2026-10-10T07:30:00", "duration": 600,
                                 "score_metric_key": "custom_formula", "score_metric_name": "Calm"})
-    assert detail._metrics_graph.gradient_steps == [(0, "custom_formula")]
-    detail.show_session_detail({"id": 2, "date_time": "2026-10-10T08:30:00", "duration": 600,
+    assert detail.graphs.metrics.gradient_steps == [(0, "custom_formula")]
+    detail.show_session({"id": 2, "date_time": "2026-10-10T08:30:00", "duration": 600,
                                 "score_metric_key": "program", "score_metric_name": "Deep"})
-    assert detail._metrics_graph.gradient_steps == []  # until its ticks say what each segment was scored on
+    assert detail.graphs.metrics.gradient_steps == []  # until its ticks say what each segment was scored on
 
 
 def test_a_programs_detail_colours_each_segment_as_it_was_scored():
@@ -218,10 +219,10 @@ def test_a_programs_detail_colours_each_segment_as_it_was_scored():
     assert data["gradient_steps"] == [(0, "shamatha_score"), (3, "custom_formula")]
     assert detail_graph_data([{**r, "score_key": None} for r in rows], {})["gradient_steps"] is None  # before #51
     detail = DiaryScreen()
-    detail.show_session_detail({"id": 2, "date_time": "2026-10-10T08:30:00", "duration": 600,
+    detail.show_session({"id": 2, "date_time": "2026-10-10T08:30:00", "duration": 600,
                                 "score_metric_key": "program", "score_metric_name": "Deep"})
-    detail.fill_graph("metrics", data)
-    assert detail._metrics_graph.gradient_steps == [(0, "shamatha_score"), (3, "custom_formula")]
+    detail.graphs.fill("metrics", data)
+    assert detail.graphs.metrics.gradient_steps == [(0, "shamatha_score"), (3, "custom_formula")]
 
 
 def test_a_program_sessions_detail_draws_its_formula_line_as_the_session_did():
@@ -237,16 +238,16 @@ def test_a_program_sessions_detail_draws_its_formula_line_as_the_session_did():
             for i, key in enumerate(["shamatha_score"] * 2 + ["program_formula"] * 2)]
     replayed = {"program_formula": [10.0, 20.0, 30.0, 40.0]}
     detail = DiaryScreen()
-    detail.show_session_detail(session)
-    detail.set_session_formulas(replayed, names)
-    detail.fill_graph("metrics", detail_graph_data(rows, replayed))
-    detail.show_program_lines(recorded_plan(session["session_program"]))
-    graph = detail._metrics_graph
+    detail.show_session(session)
+    detail.graphs.set_formula_names(names)
+    detail.graphs.fill("metrics", detail_graph_data(rows, replayed))
+    detail.graphs.show_program_lines(recorded_plan(session["session_program"]))
+    graph = detail.graphs.metrics
     assert graph.is_visible("program_formula") and graph.series_name("program_formula") == "Program: Calm"
     assert list(graph._data["program_formula"]) == [10.0, 20.0, 30.0, 40.0]
     assert graph._gradient_spans("program_formula", 0, 4) == [(2, 4)]
     assert graph._gradient_spans("shamatha_score", 0, 4) == [(0, 2)]
-    detail.show_program_lines(None)  # a simple session next
+    detail.graphs.show_program_lines(None)  # a simple session next
     assert graph.program_keys == frozenset()
 
 

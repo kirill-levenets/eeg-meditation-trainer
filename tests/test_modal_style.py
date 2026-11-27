@@ -14,6 +14,7 @@ from kivy.uix.popup import Popup
 from kivy.uix.textinput import TextInput
 
 from app import android_jni
+from app.ui.detail_sections.export import show_export_result
 from app.ui.diary_screen import DiaryScreen
 from app.ui.history_screen import HistoryScreen
 from app.ui.live_session import LiveSessionScreen
@@ -433,7 +434,7 @@ def test_no_screen_draws_a_fixed_glyph_colour_on_an_accent_fill(theme, screens):
     live._set_view("raw")
     live._set_view("metrics")
     hist.chart_area.set_view_mode("bars")
-    diary._switch_graph_tab("raw")
+    diary.graphs.show_tab("raw")
     sett.timer.editor.show([{"minutes": 10, "target": 50, "formula": "shamatha_score"}], "")
     sett.timer.show_mode("program")
     bad = []
@@ -604,9 +605,8 @@ def test_the_export_result_message_is_readable(theme, screens):
     C.set_theme(theme)
     screen = screens(DiaryScreen)
     for success in (True, False):
-        screen._show_export_result("Saved to /tmp/session_1.csv" if success else "Export error:\nno space",
+        popup = show_export_result("Saved to /tmp/session_1.csv" if success else "Export error:\nno space",
                                    success=success)
-        popup = screen._export_result_popup
         _pump()
         try:
             assert not unreadable_text(popup, {_frame(popup)}), unreadable_text(popup, {_frame(popup)})

@@ -11,7 +11,7 @@ class GraphSet:
 
     def __init__(self, live_screen, diary_screen, display_section) -> None:
         self.live = (live_screen.graph, live_screen.raw_graph, live_screen.band_graph)
-        self.detail = diary_screen.graphs
+        self.detail = diary_screen.graphs.all
         self._display = display_section  # its slider shows the line width
         ScrollableGraphWidget.link_zoom(*self.live)
         ScrollableGraphWidget.link_zoom(*self.detail)

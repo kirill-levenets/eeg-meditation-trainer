@@ -33,7 +33,7 @@ _VIEW = {
     LiveSessionScreen: (lambda s: (s._active_view, s.stats._mode, s.end_card.parent is not None, s.connect_overlay.opacity),
                         _restore_live),
     HistoryScreen: (lambda h: (h.chart_area._view_mode, h.session_list._select_mode), _restore_history),
-    DiaryScreen: (lambda d: (d._active_graph_tab,), lambda d, state: d._switch_graph_tab(state[0])),
+    DiaryScreen: (lambda d: (d.graphs.tab,), lambda d, state: d.graphs.show_tab(state[0])),
     SettingsScreen: (lambda s: (s.timer._mode_toggle.chosen, tuple(x._collapsed for x in sections(s))),
                      _restore_settings),
 }

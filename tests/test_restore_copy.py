@@ -219,6 +219,15 @@ def test_the_copy_keeps_the_sources_permission_bits(tmp_path):
     assert (tmp_path / "out.csv").stat().st_mode & 0o777 == 0o644
 
 
+def test_an_atomic_write_gives_a_new_file_the_permissions_a_plain_write_would(tmp_path):
+    from app.storage.fileops import write_file_atomic
+
+    (tmp_path / "plain.csv").write_bytes(b"a,b\n")  # the umask decides, as for any file the user exports
+    write_file_atomic(str(tmp_path / "atomic.csv"), lambda f: f.write(b"a,b\n"))
+    assert (tmp_path / "atomic.csv").stat().st_mode & 0o777 == (tmp_path / "plain.csv").stat().st_mode & 0o777
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["atomic.csv", "plain.csv"]  # no temp file left
+
+
 def test_a_backup_onto_the_live_database_is_refused(tmp_path):
     db = DatabaseManager(db_path=str(tmp_path / "meditation.db"))
     try:

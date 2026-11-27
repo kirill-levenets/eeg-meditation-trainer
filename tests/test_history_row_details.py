@@ -236,8 +236,8 @@ def test_a_renamed_row_with_notes_is_taller_by_the_editor(history):
 def test_the_session_detail_is_titled_like_its_row():
     from app.ui.diary_screen import DiaryScreen
     diary = DiaryScreen()
-    diary.show_session_detail(dict(_sessions()[0]))
-    assert diary._detail_title.text == "2026-09-26 14:05 - MindWave Mobile"
+    diary.show_session(dict(_sessions()[0]))
+    assert diary._title.text == "2026-09-26 14:05 - MindWave Mobile"
 
 
 def _ended_session(app) -> tuple[dict, float]:
@@ -258,8 +258,8 @@ def test_a_long_session_title_is_cut_to_the_detail_screen_width():
     from app.ui.diary_screen import DiaryScreen
     diary = DiaryScreen()
     session = dict(_sessions()[0], session_name="Evening sit after a long day at work with lots of meetings")
-    diary.show_session_detail(session)
-    title = diary._detail_title
+    diary.show_session(session)
+    title = diary._title
     title.width = dp(320)
     title.texture_update()
     assert title.texture_size[0] <= title.width + 1
@@ -278,21 +278,21 @@ def test_the_default_name_is_recognised_as_the_sessions_own_time(fresh_app):
 def _diary_with(session):
     from app.ui.diary_screen import DiaryScreen
     diary = DiaryScreen()
-    diary.show_session_detail(dict(session))
+    diary.show_session(dict(session))
     return diary
 
 
 def _legend_texts(diary) -> list[str]:
-    diary._rebuild_legend("metrics")
-    return [w.text for w in diary._legend_container.children]
+    diary.graphs.show_tab("metrics")
+    return [w.text for w in diary.graphs._legend.children]
 
 
 def _detail_rows(diary) -> list[tuple[str, str]]:
-    return [(title.text, value.text) for title, value in diary._detail_rows]
+    return [(title.text, value.text) for title, value in diary.stats.rows]
 
 
 def _detail_row(diary, title: str):
-    return next(value for t, value in diary._detail_rows if t.text == title)
+    return next(value for t, value in diary.stats.rows if t.text == title)
 
 
 def test_the_session_detail_names_the_metric_and_its_threshold_on_their_own_rows():
@@ -306,7 +306,7 @@ def test_the_session_detail_shows_only_the_scored_stats():
     assert [title for title, _ in _detail_rows(diary)] == [
         "Duration", "Metric", "Average", "Threshold", "Time Above Threshold", "Longest Streak", "Mood Rating",
     ]  # the scored metric's average only: no average meditation or shamatha besides it, no time shamatha >= 90
-    grid = diary._stats_grid
+    grid = diary.stats.grid
     rows = len(grid.children) // 2
     assert rows == 7
     assert grid.height >= rows * dp(20) + (rows - 1) * grid.spacing[1] + grid.padding[1] + grid.padding[3]
@@ -331,9 +331,9 @@ def test_the_session_detail_follows_the_rows_of_each_session_it_shows():
         (dict(_sessions()[0], threshold_used=60), ["Duration", "Metric", "Average", "Threshold",
                                                    "Time Above Threshold", "Longest Streak", "Mood Rating"]),
     ]:
-        diary.show_session_detail(session)
+        diary.show_session(session)
         assert [title for title, _ in _detail_rows(diary)] == titles
-        assert len(diary._stats_grid.children) == 2 * len(titles)
+        assert len(diary.stats.grid.children) == 2 * len(titles)
     assert _detail_row(diary, "Threshold").text == "60"
 
 
@@ -439,7 +439,7 @@ def test_the_session_detail_shows_a_long_scored_on_value_whole_on_a_phone(phone_
     diary = DiaryScreen()
     phone_window.add_widget(diary)
     try:
-        diary.show_session_detail(dict(_sessions()[0], score_metric_key="program", score_metric_name="Morning ladder",
+        diary.show_session(dict(_sessions()[0], score_metric_key="program", score_metric_name="Morning ladder",
                                        avg_score=None, session_program='[{"duration": 60, "target": 50}]'))
         _frames()
         value = _detail_row(diary, "Metric")
@@ -455,7 +455,7 @@ def test_the_detail_legend_names_a_series_as_the_live_graph_does():
     diary = _diary_with(dict(_sessions()[0], score_metric_key="native_meditation", score_metric_name="NS Meditation",
                              threshold_used=50))
     assert _detail_row(diary, "Metric").text == "NS Meditation"
-    assert diary._metrics_graph.series_name("native_meditation") == SERIES_NAMES["native_meditation"]
+    assert diary.graphs.metrics.series_name("native_meditation") == SERIES_NAMES["native_meditation"]
     assert "» NS Meditation" in _legend_texts(diary)
 
 
