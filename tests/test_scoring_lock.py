@@ -36,14 +36,14 @@ def _refused(a) -> bool:
 
 
 def _slot_inputs(a, idx: int) -> tuple[str, str]:
-    section = a._settings_screen.formulas
-    return section._formula_name_inputs[idx].text, section._formula_inputs[idx].text
+    slot = a._settings_screen.formulas.slots[idx]
+    return slot.name, slot.formula
 
 
 def _type_into_slot(a, idx: int, name: str, formula: str) -> None:
-    section = a._settings_screen.formulas
-    section._formula_name_inputs[idx].text, section._formula_inputs[idx].text = name, formula
-    section._submit_slot(idx)
+    slot = a._settings_screen.formulas.slots[idx]
+    slot._name_input.text, slot._formula_input.text = name, formula
+    slot._formula_input.dispatch("on_text_validate")  # Enter, as Apply does
 
 
 def test_the_audio_metric_cant_change_while_a_session_runs(app):
@@ -96,6 +96,13 @@ def test_the_driving_slots_formula_cant_change_while_a_session_runs(app):
     assert _refused(app)
     assert app._formulas.evaluators[0].formula == "alpha1 / beta1 * 100"
     assert _slot_inputs(app, 0) == ("Custom 1", "alpha1 / beta1 * 100")  # inputs restored
+
+
+def test_a_refused_slot_gets_its_own_inputs_back_and_no_other_slot_changes(app):
+    app._user_settings._store.change("audio_metric", FORMULA_KEYS[1])
+    _type_into_slot(app, 1, "Drowsy", "theta / beta1 * 100")
+    assert _refused(app)
+    assert [_slot_inputs(app, i) for i in range(3)] == [(s["name"], s["formula"]) for s in SLOTS]
 
 
 def test_the_driving_slot_cant_be_cleared_either(app):

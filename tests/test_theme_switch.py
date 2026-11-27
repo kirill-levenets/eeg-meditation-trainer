@@ -428,9 +428,9 @@ def test_settings_screen_repaints_every_section(old, new, screens):
     _mount(s)
     segments = [{"minutes": 10, "target": 50, "formula": "shamatha_score"},
                 {"minutes": 5, "target": 60, "formula": "meditation_score"}]
-    s.timer.load_program(segments, "program")
-    s.timer.set_saved_programs([{"name": "Ramp", "segments": segments}])
-    s.timer.set_program_mode("simple")  # the program editor is built, then detached
+    s.timer.editor.show(segments, "Ramp")
+    s.timer.editor.show_saved([{"name": "Ramp", "segments": segments}])
+    s.timer.show_mode("simple")  # the program editor is built, then detached
     try:
         C.set_theme(new)
         _assert_repainted(s, old, new, "sections as built")
@@ -441,7 +441,7 @@ def test_settings_screen_repaints_every_section(old, new, screens):
             _assert_repainted(s, old, new, f"{sec._header.text} open")
         timer = next(sec for sec in secs if sec._header.text.startswith("Timer"))
         timer.open()
-        s.timer.set_program_mode("program")
+        s.timer.show_mode("program")
         _assert_repainted(s, old, new, "Timer in Program mode, built before the switch")
     finally:
         _unmount(s)

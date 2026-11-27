@@ -124,7 +124,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 ## Timer
 
 - The meditation timer is split: a headless `TimerState` (`app/session/timer_state.py`) drives the countdown on the session's ticks;
-  the user-visible controls (enable, duration, the end-sound picker: Default bell or Custom file..., through the shared source picker, and Test) live in Settings → Timer (`TimerSection`, `app/ui/settings_sections/timer.py`).
+  the user-visible controls live in Settings → Timer (`app/ui/settings_sections/timer.py`): enable and duration in `TimerSection`, the end-sound picker (Default bell or Custom file..., through the shared source picker) and Test in `TimerSound`.
   When the timer expires, the tick runs `_finish(run, "timer")` (as above: claim, mute, save, queue the teardown for the main thread);
   the save left the session FINISHED, so `RunningSession.live()` is False and Restore and the profile switch aren't refused after a timed session;
   then `play_timer_sound()` **last** (a one-shot `MediaPlayer` gong, which rings through the lock), with the end sound the session's config holds.

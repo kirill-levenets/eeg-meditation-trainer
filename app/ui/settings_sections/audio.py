@@ -9,12 +9,7 @@ from kivy.uix.checkbox import CheckBox
 
 from app.config import APP
 from app.ui.hooks import Hook
-from app.ui.settings_sections.common import (
-    checkbox_row,
-    open_audio_file_chooser,
-    open_source_picker,
-    source_label,
-)
+from app.ui.settings_sections.common import checkbox_row, open_sound_picker, source_label
 from app.ui.theme import C, F, ThemedLabel, fit_height_to_text, text_fills_box
 from app.ui.widgets.styled_button import StyledButton
 
@@ -53,7 +48,7 @@ class SourcePicker:
         section.add_widget(label)
         self.button = StyledButton(text=source_label(self.source, self.path), font_size=F.SMALL, bg_color=C.BG_CARD,
                                    text_color=C.TEXT, size_hint_y=None, height=dp(36))
-        self.button.bind(on_release=lambda *_a: open_source_picker(spec.title, spec.options, self.choose))
+        self.button.bind(on_release=lambda *_a: open_sound_picker(spec.title, spec.options, self._apply))
         section.add_widget(self.button)
 
     def show(self, source: str, path: str = "") -> None:
@@ -62,14 +57,8 @@ class SourcePicker:
         self.path = path or ""
         self.button.text = source_label(self.source, self.path)
 
-    def choose(self, value: str) -> None:
-        """The picker's choice: Custom opens the file chooser first."""
-        if value == "custom":
-            open_audio_file_chooser(lambda p: self._apply("custom", p), title=f"{self._spec.title} file")
-            return
-        self._apply(value, "")
-
     def _apply(self, source: str, path: str) -> None:
+        """The picker's choice, shown and reported."""
         self.show(source, path)
         self._on_change(self.source, self.path)
 

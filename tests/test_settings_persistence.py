@@ -54,8 +54,16 @@ def test_a_profiles_sound_files_and_stats_view_show_after_its_load(fresh_app):
     app._activate_user(uid)
     audio = app._settings_screen.audio
     assert (audio.feedback.path, audio.reward.path) == ("/sounds/rain.wav", "/sounds/bell.wav")
-    assert app._settings_screen.timer.timer_sound_path == "/sounds/gong.wav"
+    assert app._settings_screen.timer_sound.path == "/sounds/gong.wav"
     assert app._live_screen.stats.mode == "aggregate"
+
+
+def test_a_profiles_formulas_show_in_their_slots_after_its_load(fresh_app):
+    app = fresh_app
+    reload_with(app, {"active_formulas": [{"name": "Calm", "formula": "alpha1 * 2"}, {"name": "", "formula": ""},
+                                          {"name": "Busy", "formula": "beta1 +"}]})  # the last one doesn't compile
+    slots = app._settings_screen.formulas.slots
+    assert [(slot.name, slot.formula) for slot in slots] == [("Calm", "alpha1 * 2"), ("Custom 2", ""), ("Busy", "")]
 
 
 def test_a_history_view_pick_writes_it_and_a_profile_keeps_its_own(fresh_app, monkeypatch):

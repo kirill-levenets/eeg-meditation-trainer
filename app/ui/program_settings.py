@@ -7,11 +7,7 @@ from app.session.session_program import SessionProgram, runnable_plan
 from app.settings.registry import BOOL, INT, Setting, kept
 from app.ui.app_context import AppContext
 from app.ui.graph_series import show_program_series
-from app.ui.settings_sections.common import (
-    confirm_saved_delete,
-    save_under_unique_name,
-    saved_program_label,
-)
+from app.ui.settings_sections.common import SavedNames, saved_program_label
 
 
 class ProgramSettings:
@@ -22,7 +18,9 @@ class ProgramSettings:
                  show_saved_series: Callable[[int], None]) -> None:
         self._ctx = ctx
         self._timer_section = timer_section
+        self._editor = timer_section.editor
         self._live_screen = live_screen
+        self._names = SavedNames("program", "the current segments", saved_program_label, ctx.confirm)
         self._show_saved_series = show_saved_series
         self.mode = "simple"
         self.segments: list[dict] = []
@@ -51,8 +49,8 @@ class ProgramSettings:
         self._show_in_settings()
 
     def _show_in_settings(self) -> None:
-        self._timer_section.load_program(self.segments, self.mode)
-        self._timer_section.set_program_name(self.name)
+        self._editor.show(self.segments, self.name)
+        self._timer_section.show_mode(self.mode)
 
     def program(self) -> SessionProgram:
         return SessionProgram(self.segments)
@@ -99,7 +97,7 @@ class ProgramSettings:
             self._timer_section.timer_enabled = True
             self._timer_section.timer_minutes = value
         self.mode = "simple"
-        self._timer_section.set_program_mode("simple")
+        self._timer_section.show_mode("simple")
         self.persist(self._ctx.user_id())
         self._ctx.setting_changed("timer_enabled")
         self._ctx.setting_changed("timer_minutes")
@@ -128,8 +126,7 @@ class ProgramSettings:
         uid = self._ctx.require_user("save a program")
         if uid is None:
             return
-        save_under_unique_name("program", self._ctx.db.get_saved_programs(uid), name, "the current segments",
-                               lambda index: self._save(index, name), self._ctx.confirm)
+        self._names.save_unique(self._ctx.db.get_saved_programs(uid), name, lambda index: self._save(index, name))
 
     def _save(self, index, name: str) -> None:
         """Add (index=None) or overwrite (index set) a saved program by name."""
@@ -151,7 +148,8 @@ class ProgramSettings:
         self.name = name  # the active program now carries this name
         self.persist(uid)
         self.refresh_saved()
-        self._timer_section.confirm_program_saved()  # issue #33 E: visible save confirmation
+        self._editor.show_name(name)
+        self._editor.confirm_saved()
 
     def has_unsaved_changes(self) -> bool:
         """True when the active program differs from its saved namesake (or is unnamed but
@@ -203,8 +201,7 @@ class ProgramSettings:
         uid = self._ctx.require_user("delete a program")
         if uid is None:
             return
-        rows = [saved_program_label(i, p) for i, p in enumerate(self._ctx.db.get_saved_programs(uid))]
-        confirm_saved_delete(self._ctx.confirm, "program", rows, index, self._delete)
+        self._names.confirm_delete(self._ctx.db.get_saved_programs(uid), index, self._delete)
 
     def _delete(self, index: int) -> None:
         self._ctx.db.remove_saved_program(self._ctx.user_id(), index)
@@ -215,5 +212,5 @@ class ProgramSettings:
         """Push the current saved-programs list to the settings + session UIs."""
         uid = self._ctx.user_id()
         progs = self._ctx.db.get_saved_programs(uid) if uid else []
-        self._timer_section.set_saved_programs(progs)
+        self._editor.show_saved(progs)
         self._live_screen.duration.set_programs(progs, self.name)

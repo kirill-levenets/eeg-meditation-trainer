@@ -233,15 +233,14 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 · Session delete `HistoryFlow.delete_sessions(ids)`
 · notes `HistoryFlow.save_notes`
 · confirm `popups.confirm_popup` (via `_confirm_action`)
-· save under a unique name `settings_sections.common.save_under_unique_name`
-· delete a saved formula or program `settings_sections.common.confirm_saved_delete`
+· save under a unique name, and delete a saved formula or program `settings_sections.common.SavedNames`
 · whether a formula can run `custom_formula.compile_formula`
 · a saved session's formula lines `formula_slots.session_formulas`
 · a saved session's program `session_program.recorded_plan`
 · a saved formula into a slot `FormulaSettings.assign_saved`
 · message `make_message_popup` / `_info_popup`
 · list picker `make_scroll_popup`
-· sound source picker `settings_sections.common.open_source_picker`
+· sound source picker `settings_sections.common.open_source_picker`, a sound's with its Custom file `open_sound_picker`
 · sound file `open_audio_file_chooser`
 · Cancel/Close `cancel_button()`
 · toast `_toast`

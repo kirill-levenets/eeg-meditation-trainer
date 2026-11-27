@@ -434,12 +434,13 @@ def test_no_screen_draws_a_fixed_glyph_colour_on_an_accent_fill(theme, screens):
     live._set_view("metrics")
     hist.chart_area.set_view_mode("bars")
     diary._switch_graph_tab("raw")
-    sett.timer.load_program([{"minutes": 10, "target": 50, "formula": "shamatha_score"}], "program")
+    sett.timer.editor.show([{"minutes": 10, "target": 50, "formula": "shamatha_score"}], "")
+    sett.timer.show_mode("program")
     bad = []
     for sec in sections(sett):
         sec.open()
         bad += _accent_buttons_with_unreadable_text(sett)
-    sett.timer.set_program_mode("simple")
+    sett.timer.show_mode("simple")
     for root in (live, hist, diary, sett):
         bad += _accent_buttons_with_unreadable_text(root)
     assert not sorted(set(bad)), sorted(set(bad))

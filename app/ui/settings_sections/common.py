@@ -1,5 +1,5 @@
-"""Pieces more than one Settings section builds with: the sound file chooser, the list-select source picker, the saved
-formulas/programs list and its unique-name save, and the checkbox row."""
+"""Pieces more than one Settings section builds with: the sound file chooser, the list-select source picker and its
+Custom file choice, the saved formulas/programs list with its save and delete confirmations, and the checkbox row."""
 import os
 from collections.abc import Callable
 
@@ -89,9 +89,22 @@ def open_source_picker(title: str, options, on_choose: Callable) -> None:
     holder["popup"].open()
 
 
+def open_sound_picker(title: str, options, on_pick: Callable[[str, str], None]) -> None:
+    """The source picker for a sound: Custom file... opens the file chooser and hands on ("custom", the file), any other
+    choice (its value, "")."""
+    def choose(value: str) -> None:
+        if value == "custom":
+            open_audio_file_chooser(lambda path: on_pick("custom", path), title=f"{title} file")
+            return
+        on_pick(value, "")
+
+    open_source_picker(title, options, choose)
+
+
 def saved_formula_label(index: int, entry: dict) -> str:
-    """A saved formula as its list row and its delete confirmation name it."""
-    return entry.get("name", entry.get("formula", "")[:30])
+    """A saved formula as its list row, a segment's metric picker and its delete confirmation name it: its name, or
+    its text when it has none."""
+    return entry.get("name") or entry.get("formula", "")[:30]
 
 
 def saved_program_label(index: int, entry: dict) -> str:
@@ -99,25 +112,31 @@ def saved_program_label(index: int, entry: dict) -> str:
     return entry.get("name", f"Program {index + 1}")
 
 
-def confirm_saved_delete(confirm: Callable[..., None], kind: str, rows: list[str], index: int,
-                         delete: Callable[[int], None]) -> None:
-    """Ask before deleting the saved formula or program at `index`, named as its list row (`rows`) names it; an index
-    the list no longer has asks nothing."""
-    if 0 <= index < len(rows):
-        confirm(f"Delete {kind}", f"Delete saved {kind} '{rows[index]}'?", "Delete", lambda: delete(index),
-                ok_color=C.DANGER)
+class SavedNames:
+    """A library of saved formulas or programs, as its Save and Delete ask: a name no other entry has, overwritten only
+    once confirmed, and a delete confirmed under the name its list row shows."""
 
+    def __init__(self, kind: str, overwrite_with: str, label: Callable[[int, dict], str],
+                 confirm: Callable[..., None]) -> None:
+        self._kind, self._overwrite_with, self._label, self._confirm = kind, overwrite_with, label, confirm
 
-def save_under_unique_name(kind: str, entries: list[dict], name: str, overwrite_with: str,
-                           save: Callable[[int | None], None], confirm: Callable[..., None]) -> None:
-    """A saved formula or program keeps a name no other has: a new name is added (`save(None)`), and an existing one
-    is overwritten (`save(index)`) once the user confirms."""
-    existing = next((i for i, entry in enumerate(entries) if entry.get("name") == name), None)
-    if existing is None:
-        save(None)
-        return
-    confirm(f"Overwrite {kind}", f"A {kind} named '{name}' already exists.\nOverwrite it with {overwrite_with}?",
-            "Overwrite", lambda: save(existing), ok_color=C.WARM)
+    def save_unique(self, entries: list[dict], name: str, save: Callable[[int | None], None]) -> None:
+        """A new name is added (`save(None)`), and an existing one is overwritten (`save(index)`) once the user confirms."""
+        existing = next((i for i, entry in enumerate(entries) if entry.get("name") == name), None)
+        if existing is None:
+            save(None)
+            return
+        kind = self._kind
+        self._confirm(f"Overwrite {kind}",
+                      f"A {kind} named '{name}' already exists.\nOverwrite it with {self._overwrite_with}?",
+                      "Overwrite", lambda: save(existing), ok_color=C.WARM)
+
+    def confirm_delete(self, entries: list[dict], index: int, delete: Callable[[int], None]) -> None:
+        """Ask before deleting the entry at `index`; an index the list no longer has asks nothing."""
+        if 0 <= index < len(entries):
+            kind = self._kind
+            self._confirm(f"Delete {kind}", f"Delete saved {kind} '{self._label(index, entries[index])}'?", "Delete",
+                          lambda: delete(index), ok_color=C.DANGER)
 
 
 def fill_saved_list(box, entries, label: Callable, on_load: Callable, on_delete: Callable) -> None:

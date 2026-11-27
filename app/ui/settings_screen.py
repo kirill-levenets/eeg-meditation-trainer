@@ -15,13 +15,14 @@ from app.ui.settings_sections.help import HelpSection
 from app.ui.settings_sections.profile import ProfileSection
 from app.ui.settings_sections.theme_choice import ThemeSection
 from app.ui.settings_sections.threshold import MetricPicker, ThresholdSlider
-from app.ui.settings_sections.timer import TimerSection
+from app.ui.settings_sections.timer import TimerSection, TimerSound
 from app.ui.theme import C, fill_background
 from app.ui.widgets.accordion import ThemedAccordion
 
 
 class SettingsScreen(Screen):
-    """The folds, each its section; Threshold holds two, the slider and the sound's metric, which two owners use."""
+    """The folds, each its section; Timer and Threshold hold two each, which two owners use: the timer and its end sound,
+    the slider and the sound's metric."""
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -32,7 +33,9 @@ class SettingsScreen(Screen):
         self._accordion = ThemedAccordion()
         fold = self._accordion.add_section
         self.profile = ProfileSection(fold("User Profile", collapsed=False))
-        self.timer = TimerSection(fold("Timer / Program"), saved_formulas=lambda: self.formulas.saved)
+        timer = fold("Timer / Program")
+        self.timer = TimerSection(timer, saved_formulas=lambda: self.formulas.saved)
+        self.timer_sound = TimerSound(timer)
         self.device = DeviceSection(fold("Device"), scroll=self._settings_scroll)
         self.backup = BackupSection(fold("Data Backup"))
         threshold = fold("Threshold")

@@ -1,11 +1,12 @@
 """Settings' small folds act on their own controls: the threshold's steps and presets stay in the slider's range, Data
-Backup's buttons report through their hooks, and each Developer Tools button raises where it says."""
+Backup's buttons report through their hooks, and each Developer Tools button raises where it says; the app plugs a
+handler into every section's hooks."""
 import threading
 
 import pytest
 from kivy.clock import Clock
 
-from app.ui.hooks import wire
+from app.ui.hooks import Hook, is_wired, wire
 from app.ui.settings_screen import SettingsScreen
 from app.ui.settings_sections.developer import CRASHES
 
@@ -83,3 +84,25 @@ def test_an_alert_with_no_engine_switch_fails_at_registration_naming_the_fix(fre
     monkeypatch.setitem(alerts, "bogus_alert", alerts["sinking_alert"])  # a row added to ALERTS, no engine property
     with pytest.raises(AttributeError, match="AudioEngine has no bogus_alert_enabled: each alert in"):
         fresh_app._alert_settings()
+
+
+def _hooked_parts(obj, seen: set) -> list:
+    """The Settings parts under `obj`, at any depth (the timer's program editor), that declare hooks."""
+    parts = []
+    for value in vars(obj).values():
+        if id(value) in seen or not type(value).__module__.startswith("app.ui.settings_sections."):
+            continue
+        seen.add(id(value))
+        if any(isinstance(v, Hook) for k in type(value).__mro__ for v in vars(k).values()):
+            parts.append(value)
+        parts += _hooked_parts(value, seen)
+    return parts
+
+
+def test_the_app_plugs_a_handler_into_every_settings_hook(fresh_app):
+    """A hook left unwired does nothing when its control is tapped, and nothing says so."""
+    parts = _hooked_parts(fresh_app._settings_screen, set())
+    assert {type(p).__name__ for p in parts} >= {"TimerSection", "ProgramEditor", "TimerSound", "FormulaSection"}
+    unwired = [f"{type(p).__name__}.{name}" for p in parts for k in type(p).__mro__
+               for name, v in vars(k).items() if isinstance(v, Hook) and not is_wired(p, name)]
+    assert unwired == []

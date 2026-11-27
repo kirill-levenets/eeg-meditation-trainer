@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.storage.database import DatabaseManager
+from tests._app import popups, program_mode, tap
 from tests._program_settings import make_programs
 
 SEGMENTS = [{"minutes": 5, "target": 60, "formula": "shamatha_score"}]
@@ -32,7 +33,7 @@ def test_a_duration_tap_is_a_simple_timer_and_leaves_program_mode(db, uid):
     p.on_duration_preset(20)
     timer = p._timer_section
     assert (timer.timer_enabled, timer.timer_minutes, p.mode) == (True, 20, "simple")
-    timer.set_program_mode.assert_called_with("simple")
+    timer.show_mode.assert_called_with("simple")
     assert db.get_user_setting(uid, "timer_mode") == "simple"
     assert [c.args for c in p._ctx.setting_changed.call_args_list] == [("timer_enabled",), ("timer_minutes",)]
     p._ctx.save_settings.assert_not_called()  # the timer's two fields persist, not every setting
@@ -47,7 +48,8 @@ def test_the_mode_and_the_edited_segments_come_back_with_the_profile(db, uid):
     again = _programs(db, uid)
     again.load(uid)
     assert (again.mode, again.segments) == ("program", SEGMENTS)
-    again._timer_section.load_program.assert_called_once_with(SEGMENTS, "program")
+    again._timer_section.editor.show.assert_called_once_with(SEGMENTS, "")
+    again._timer_section.show_mode.assert_called_once_with("program")
 
 
 def test_a_program_needs_a_name_to_be_saved(db, uid):
@@ -93,3 +95,17 @@ def test_deleting_a_program_asks_with_its_name_then_deletes_it(db, uid):
     assert [x["name"] for x in db.get_saved_programs(uid)] == ["Morning"]
     p.on_delete(3)  # an index the list no longer has asks nothing
     assert p._ctx.confirm.call_count == 1
+
+
+def test_a_save_shows_the_name_it_saved_under_on_the_loaded_line(fresh_app):
+    app, editor = fresh_app, fresh_app._settings_screen.timer.editor
+    app._db.add_saved_program(app._current_user_id, "Ramp", SEGMENTS)
+    app._program_settings._load(0, "Ramp")
+    program_mode(app, SEGMENTS + SEGMENTS)  # edited after the load
+    app._program_settings.on_save("Evening")  # a new name: added at once
+    assert (editor._loaded_label.text, editor._name_input.text) == ("Loaded: Evening", "Evening")
+    app._program_settings.on_save("Ramp")  # a name that exists: overwritten once confirmed
+    (popup,) = popups()
+    tap(popup.content, "Overwrite")
+    assert (editor._loaded_label.text, editor._name_input.text) == ("Loaded: Ramp", "Ramp")
+    assert app._db.get_saved_programs(app._current_user_id)[0]["segments"] == SEGMENTS + SEGMENTS

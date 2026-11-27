@@ -302,7 +302,7 @@ Each segment row has:
 Type a name and tap **Save** to store the segments in your library.
 Names are unique: saving under a name that exists asks you to confirm the **overwrite**.
 Saved programs are listed below the editor: tap one to **load** it (the app asks first when the current program has unsaved changes), or its **X** to **delete** it (after a confirmation).
-**Loaded: \<name\>** at the top of the editor names the loaded program, and the name field holds that name, so **Save** overwrites it without retyping.
+**Loaded: \<name\>** at the top of the editor names the program loaded or just saved, and the name field holds that name, so **Save** overwrites it without retyping.
 Each profile has its own library.
 
 **Quick-loading from the Session screen:**

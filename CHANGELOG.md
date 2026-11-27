@@ -58,6 +58,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **Settings › Timer's Loaded line names a program once it is saved**: it went on saying "(unsaved)", or the program loaded before, until the next load.
 - **The headset's state between sessions** (#147): the Session screen said "[Disconnected]" after every session while the app kept the headset connected, and Settings › Device went on saying "Connected" after the headset was switched off between sessions.
   Both now show the connection as it is, between sessions too.
 - **A marker hotkey on a key with no character never placed a marker** (desktop): a key such as F5 or an arrow was picked by its name, but a press was compared by its code; both now name the key the same way.
