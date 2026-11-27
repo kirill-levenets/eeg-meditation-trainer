@@ -12,7 +12,7 @@ import os
 from app import android_jni
 from app.logger import logger
 from app.storage import android_saf
-from app.storage.fileops import copy_file_atomic
+from app.storage.fileops import copy_file_atomic, discard_file
 
 
 def copy_to_documents(private_path: str, subfolder: str = "EEGMeditation",
@@ -39,6 +39,15 @@ def copy_to_documents(private_path: str, subfolder: str = "EEGMeditation",
         return _copy_desktop(private_path, subfolder, display_name)
 
     return _copy_android_mediastore(private_path, subfolder, display_name)
+
+
+def move_to_documents(private_path: str, display_name: str = "") -> str | None:
+    """copy_to_documents, then the private copy removed; a copy that failed leaves it, for the caller to name or
+    remove."""
+    shared = copy_to_documents(private_path, display_name=display_name)
+    if shared:
+        discard_file(private_path)
+    return shared
 
 
 def _copy_desktop(private_path: str, subfolder: str, display_name: str) -> str | None:

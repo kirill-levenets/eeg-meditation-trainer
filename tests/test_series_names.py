@@ -31,14 +31,14 @@ def _program_rows(app, monkeypatch) -> list[str]:
 
 
 def test_opening_a_past_session_leaves_the_session_screens_names(app):
-    app._diary_screen.set_session_formulas({}, PAST_NAMES)
+    app._diary_screen.graphs.set_formula_names(PAST_NAMES)
     assert app._live_screen.graph.series_name("custom_formula") == "Calm alpha"
-    assert app._diary_screen._metrics_graph.series_name("custom_formula") == "Old beta"
+    assert app._diary_screen.graphs.metrics.series_name("custom_formula") == "Old beta"
 
 
 def test_the_detail_starts_from_the_defaults_not_the_session_screens_names(app):
     assert app._live_screen.graph.series_name("custom_formula") == "Calm alpha"  # built in the same process
-    assert DiaryScreen()._metrics_graph.series_name("custom_formula") == "Custom 1"
+    assert DiaryScreen().graphs.metrics.series_name("custom_formula") == "Custom 1"
     assert SERIES_NAMES["custom_formula"] == "Custom 1"
 
 

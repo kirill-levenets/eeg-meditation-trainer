@@ -9,8 +9,9 @@ from datetime import datetime as _dt
 from app.crash_handler import report_soft_error
 from app.logger import logger, timed
 from app.settings.registry import STR, Setting, kept
-from app.storage.android_share import copy_to_documents
+from app.storage.android_share import move_to_documents
 from app.storage.csv_export import build_sessions_zip
+from app.storage.fileops import write_file_atomic
 from app.ui.app_context import AppContext
 from app.ui.formatting import format_count
 
@@ -22,6 +23,12 @@ def sessions_for_view(db, current_uid: int | None) -> list:
 
 def _view_mode(stored: str) -> str:
     return stored if stored in ("calendar", "bars") else "calendar"
+
+
+def csv_name(typed: str, session_id: int) -> str:
+    """The export's file name: what was typed, or session_<id>, ending in .csv."""
+    name = typed.strip() or f"session_{session_id}.csv"
+    return name if name.endswith(".csv") else f"{name}.csv"
 
 
 class HistoryFlow:
@@ -132,19 +139,30 @@ class HistoryFlow:
 
     # ---- export ----
 
-    def on_export_csv(self, session_id: int, path: str | None = None) -> str | None:
-        """Export session data as CSV file. Returns file path or None."""
-        csv_data = self._ctx.db.export_session_csv(session_id, formula=self._formulas.evaluators[0].formula)
-        if not csv_data:
-            return None
-        if not path:
-            export_dir = os.path.dirname(self._ctx.db._db_path)
-            path = os.path.join(export_dir, f"session_{session_id}.csv")
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        with open(path, "w") as f:
-            f.write(csv_data)
-        logger.info(f"Session {session_id} exported to {path}")
-        return path
+    def on_export_csv(self, session_id: int, folder: str | None, name: str) -> tuple[str, bool]:
+        """Export a session's CSV under `name` into `folder`, or with none (Android, where the app can't write shared
+        storage by path) into the app's storage and on to Documents; (what to tell the user, whether it worked)."""
+        name = csv_name(name, session_id)
+        target = folder or os.path.join(os.path.dirname(self._ctx.db._db_path), "exports")
+        try:
+            csv_data = self._ctx.db.export_session_csv(session_id, formula=self._formulas.evaluators[0].formula)
+            if not csv_data:
+                return "No data to export", False
+            os.makedirs(target, exist_ok=True)
+            path = os.path.join(target, name)
+            write_file_atomic(path, lambda f: f.write(csv_data.encode("utf-8")))
+            logger.info(f"Session {session_id} exported to {path}")
+            if folder:
+                return f"File saved:\n{path}", True
+            shared = move_to_documents(path, display_name=name)
+            if shared:
+                return f"Saved to:\n{shared}\n\nVisible in file browser", True
+            return f"Couldn't copy it to Documents. It is kept in the app's storage:\n{path}", False
+        except PermissionError:
+            return f"Permission denied for:\n{target}\n\nTry a different folder.", False
+        except Exception as e:  # noqa: BLE001 - the export's popup says why, and the log has the trace
+            logger.error(f"Export failed: {e}", exc_info=True)
+            return f"Export error:\n{e}", False
 
     def on_export_sessions_csv(self, session_ids: list) -> None:
         """Bulk-export selected sessions as one ZIP of per-session CSVs (issue #7).
@@ -172,9 +190,7 @@ class HistoryFlow:
                     return
                 dest = tmp_zip
                 try:
-                    shared = copy_to_documents(tmp_zip, display_name=fname)
-                    if shared:
-                        dest = shared
+                    dest = move_to_documents(tmp_zip, display_name=fname) or tmp_zip
                 except Exception:  # noqa: BLE001 - the ZIP stays in app storage, and the message names where; logged
                     logger.exception("copy_to_documents failed for bulk export")
                 self._ctx.on_main(lambda: self._finish_bulk_export(n, dest))

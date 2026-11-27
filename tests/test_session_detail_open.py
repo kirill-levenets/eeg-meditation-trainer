@@ -13,7 +13,8 @@ from kivy.base import EventLoop
 
 import app.ui.session_detail_flow as session_detail_flow
 from app.storage.database import DatabaseManager
-from app.ui.diary_screen import DiaryScreen, detail_graph_data
+from app.ui.detail_sections.graphs import detail_graph_data
+from app.ui.diary_screen import DiaryScreen
 
 BANDS = ("delta", "theta", "alpha1", "alpha2", "beta1", "beta2", "gamma1", "gamma2")
 
@@ -85,11 +86,11 @@ def _filled(graph) -> int:
 
 
 def _graphs(d: DiaryScreen) -> dict[str, int]:
-    return {"metrics": _filled(d._metrics_graph), "raw": _filled(d._raw_eeg_graph), "freq": _filled(d._freq_graph)}
+    return {"metrics": _filled(d.graphs.metrics), "raw": _filled(d.graphs.raw), "freq": _filled(d.graphs.freq)}
 
 
 def _shown_in_graph_area(d: DiaryScreen):
-    return d._graph_container.children[0]
+    return d.graphs._area.children[0]
 
 
 def test_the_detail_opens_at_once_with_title_stats_and_notes(app):
@@ -98,11 +99,11 @@ def test_the_detail_opens_at_once_with_title_stats_and_notes(app):
     _select(a, a.sessions["A"])
     d = a._diary_screen
     assert a._sm.current == "diary" and workers  # on screen before the worker has read anything
-    assert d._detail_title.text.endswith("Morning sit")
-    assert ("Metric", "Shamatha") in [(t.text, v.text) for t, v in d._detail_rows]
-    assert d._notes_input.text == "Calm, then sleepy" and not d._notes_input.disabled
-    assert _shown_in_graph_area(d) is d._graph_placeholder and d._graph_placeholder.text == "Loading…"
-    assert d._band_placeholder.parent is not None and d._band_totals.parent is None
+    assert d._title.text.endswith("Morning sit")
+    assert ("Metric", "Shamatha") in [(t.text, v.text) for t, v in d.stats.rows]
+    assert d.notes.notes_input.text == "Calm, then sleepy" and not d.notes.notes_input.disabled
+    assert _shown_in_graph_area(d) is d.graphs._placeholder and d.graphs._placeholder.text == "Loading…"
+    assert d.bands._placeholder.parent is not None and d.bands.totals.parent is None
     assert _graphs(d) == {"metrics": 0, "raw": 0, "freq": 0}
 
 
@@ -112,9 +113,9 @@ def test_band_totals_then_one_graph_per_frame(app):
     d = a._diary_screen
     workers.pop()()
     _frames()
-    assert d._band_totals.parent is not None and d._band_totals._totals["alpha1"] == pytest.approx(100.0 * 40)
+    assert d.bands.totals.parent is not None and d.bands.totals._totals["alpha1"] == pytest.approx(100.0 * 40)
     assert _graphs(d) == {"metrics": 40, "raw": 0, "freq": 0}  # the shown tab first
-    assert _shown_in_graph_area(d) is d._metrics_graph
+    assert _shown_in_graph_area(d) is d.graphs.metrics
     _frames()
     assert _graphs(d)["raw"] > 0 and _graphs(d)["freq"] == 0
     _frames()
@@ -126,7 +127,7 @@ def test_the_scored_formula_series_and_its_name_arrive_with_the_metrics_graph(ap
     _select(a, a.sessions["A"])
     workers.pop()()
     _frames(3)
-    graph = a._diary_screen._metrics_graph
+    graph = a._diary_screen.graphs.metrics
     assert graph.series_name("custom_formula") == "Calm ratio"
     assert list(graph._data["custom_formula"]) == pytest.approx([100.0] * 40)
 
@@ -150,7 +151,7 @@ def test_back_while_loading_drops_the_late_results(app):
     _frames(4)
     d = a._diary_screen
     assert _graphs(d) == {"metrics": 0, "raw": 0, "freq": 0}
-    assert d._band_totals.parent is None
+    assert d.bands.totals.parent is None
 
 
 def test_opening_another_session_while_one_loads_shows_only_the_new_one(app):
@@ -164,9 +165,9 @@ def test_opening_another_session_while_one_loads_shows_only_the_new_one(app):
     first()  # then A's slower load lands
     _frames(4)
     d = a._diary_screen
-    assert d._detail_title.text.endswith("Evening sit")
+    assert d._title.text.endswith("Evening sit")
     assert _graphs(d) == {"metrics": 60, "raw": _graphs(d)["raw"], "freq": 60}
-    assert d._band_totals._totals["alpha1"] == pytest.approx(300.0 * 60)
+    assert d.bands.totals._totals["alpha1"] == pytest.approx(300.0 * 60)
 
 
 def test_a_failed_load_says_so_in_each_section(app, monkeypatch):
@@ -179,22 +180,22 @@ def test_a_failed_load_says_so_in_each_section(app, monkeypatch):
     _frames(2)
     d = a._diary_screen
     assert reported == ["session_detail_load_failed"]
-    assert d._graph_placeholder.text.startswith("Couldn't load")
-    assert d._notes_input.text == ""  # the fields still work: notes can be written and saved
-    d._switch_graph_tab("raw")
-    assert _shown_in_graph_area(d) is d._graph_placeholder and d._graph_placeholder.text.startswith("Couldn't load")
+    assert d.graphs._placeholder.text.startswith("Couldn't load")
+    assert d.notes.notes_input.text == ""  # the fields still work: notes can be written and saved
+    d.graphs.show_tab("raw")
+    assert _shown_in_graph_area(d) is d.graphs._placeholder and d.graphs._placeholder.text.startswith("Couldn't load")
 
 
 def test_a_tab_picked_while_loading_shows_its_placeholder_then_its_graph(app):
     a, workers = app
     _select(a, a.sessions["A"])
     d = a._diary_screen
-    d._switch_graph_tab("raw")
-    assert _shown_in_graph_area(d) is d._graph_placeholder
+    d.graphs.show_tab("raw")
+    assert _shown_in_graph_area(d) is d.graphs._placeholder
     workers.pop()()
     _frames()
     assert _graphs(d)["raw"] > 0 and _graphs(d)["metrics"] == 0  # the shown tab's graph comes first
-    assert _shown_in_graph_area(d) is d._raw_eeg_graph
+    assert _shown_in_graph_area(d) is d.graphs.raw
     _frames(2)
     assert _graphs(d)["metrics"] == 40 and _graphs(d)["freq"] == 40
 
@@ -207,7 +208,7 @@ def test_the_legend_names_the_new_sessions_formulas_while_its_graphs_load(app):
     _frames(3)
     a._detail.on_diary_back()
     _select(a, a.sessions["B"])
-    assert a._diary_screen._metrics_graph.series_name("custom_formula") == "Drowsy"
+    assert a._diary_screen.graphs.metrics.series_name("custom_formula") == "Drowsy"
 
 
 @pytest.mark.parametrize("program, lines", [
@@ -221,7 +222,7 @@ def test_a_program_sessions_detail_shows_its_lines_and_never_saves_them(app, pro
     they show nothing saves over that selection, and a simple session opened next shows it again (#113)."""
     a, workers = app
     d, uid = a._diary_screen, a._current_user_id
-    graph = d._metrics_graph
+    graph = d.graphs.metrics
     a._db.set_user_json_setting(uid, "graph_series_diary_metrics", ["distraction"])
     a._graph_series.apply_saved(graph, uid)
     _open(a, workers, _program_session(a, program, [{"timestamp": i * 0.5, "shamatha_score": 50.0} for i in range(360)]))
@@ -236,7 +237,7 @@ def test_a_program_sessions_detail_shows_its_lines_and_never_saves_them(app, pro
 
 def test_every_simple_session_opens_with_the_profiles_selection(app):
     a, workers = app
-    graph = a._diary_screen._metrics_graph
+    graph = a._diary_screen.graphs.metrics
     a._db.set_user_json_setting(a._current_user_id, "graph_series_diary_metrics", ["shamatha_score"])
     _open(a, workers, a.sessions["A"])
     graph.set_visible("sinking", True)  # shown, never saved
@@ -247,7 +248,7 @@ def test_every_simple_session_opens_with_the_profiles_selection(app):
 def test_the_band_tables_view_is_kept_per_profile_for_the_next_detail(app):
     a, _workers = app
     _select(a, a.sessions["A"])
-    table = a._diary_screen._band_totals
+    table = a._diary_screen.bands.totals
     table._set_mode("grouped")
     table._toggle_sort("power")  # the user's taps: by power, largest first
     _select(a, a.sessions["B"])
@@ -258,16 +259,16 @@ def test_the_band_tables_view_is_kept_per_profile_for_the_next_detail(app):
     a._profiles.on_switch(other)
     a._nav.switch("history")
     _select(a, theirs)
-    assert a._diary_screen._selected_session_id == theirs
+    assert a._diary_screen._session_id == theirs
     assert (table._mode, table._sort_by, table._descending) == ("detailed", "band", False)  # its own: the default
 
 
 def test_a_details_graphs_carry_the_sessions_markers():
     rows = [{"timestamp": float(i), "marker": 1 if i == 2 else 0} for i in range(4)]
     detail = DiaryScreen()
-    detail.show_session_detail({"id": 1, "date_time": "2026-10-10T07:30:00", "duration": 600})
+    detail.show_session({"id": 1, "date_time": "2026-10-10T07:30:00", "duration": 600})
     data = detail_graph_data(rows, {})
     for section in ("metrics", "raw", "freq"):
-        detail.fill_graph(section, data)
-    shown = [list(detail._graph_for_tab(s)._markers) for s in ("metrics", "raw", "freq")]
+        detail.graphs.fill(section, data)
+    shown = [list(graph._markers) for graph in detail.graphs.all]
     assert shown == [[2], [2 * 256], [2]]  # its tick, and its tick's first synthesized raw sample (256 per tick)

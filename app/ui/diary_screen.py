@@ -1,460 +1,101 @@
-import math
-import os
-
+"""The session detail, opened from History: the session's title and stats, its what-if, band power, notes and graphs,
+each part a section in detail_sections/, and its CSV export."""
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.gridlayout import GridLayout
 from kivy.uix.screenmanager import Screen
-from kivy.uix.slider import Slider
-from kivy.uix.widget import Widget
 
-from app import android_jni
-from app.config import APP
-from app.eeg.band_spec import BAND_KEYS, GROUP_NAMES, group_powers
-from app.logger import logger, timed
-from app.metrics.formula_slots import COMPUTED_SERIES
 from app.metrics.series_names import SERIES_NAMES
-from app.session.scoring import recorded_score, scored_steps, target_steps
-from app.session.session_program import RunnablePlan, recorded_program
-from app.storage.android_share import copy_to_documents
+from app.session.scoring import recorded_score
+from app.ui.detail_sections.bands import BandSection
+from app.ui.detail_sections.export import open_export_dialog, show_export_result
+from app.ui.detail_sections.graphs import DetailGraphs
+from app.ui.detail_sections.notes import SessionNotes
+from app.ui.detail_sections.stats import StatsRows
 from app.ui.formatting import format_duration
 from app.ui.graph_scroll import GraphAwareScrollView
-from app.ui.graph_series import show_program_series
 from app.ui.hooks import Hook, is_wired, wire
-from app.ui.live_session import METRICS_COLORS, METRICS_SCALES
-from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.session_labels import session_score_rows, session_title
-from app.ui.theme import (
-    C,
-    CenteredTextInput,
-    F,
-    Icons,
-    S,
-    ThemedLabel,
-    ThemedTextInput,
-    fill_background,
-    fit_height_to_text,
-    fit_width_to_text,
-    text_fills_box,
-)
-from app.ui.widgets.band_totals import BAND_COLORS, BAND_SCALES, BandTotalsView
-from app.ui.widgets.choice_toggle import ChoiceToggle
-from app.ui.widgets.folds import Fold, FoldChevron, fold_away
-from app.ui.widgets.legend import LegendBar
-from app.ui.widgets.popups import ThemedFileChooser, ThemedPopup, make_message_popup
-from app.ui.widgets.styled_button import StyledButton, cancel_button
+from app.ui.theme import C, F, Icons, S, ThemedLabel, fill_background, text_fills_box
+from app.ui.widgets.styled_button import StyledButton
 from app.ui.widgets.what_if import WhatIfPanel
-
-RAW_EEG_PREVIEW_COLORS = {
-    "eeg": (0.3, 0.8, 1.0, 1.0),
-}
-
-RAW_EEG_PREVIEW_SCALES = {
-    "eeg": 500.0,
-}
-
-_SYNTH_RATE: float = 512.0
-_TICK_DURATION: float = 0.5
-_SAMPLES_PER_TICK: int = int(_SYNTH_RATE * _TICK_DURATION)
-
-_BAND_FREQS = {
-    "delta": 2.5,
-    "theta": 6.0,
-    "alpha1": 9.0,
-    "alpha2": 11.0,
-    "beta1": 15.0,
-    "beta2": 24.0,
-    "gamma1": 35.0,
-    "gamma2": 45.0,
-}
-
-_AMPLITUDE_SCALE: float = 0.0004
-
-
-_RAW_KEYS = {k: f"{k}_raw" for k in BAND_KEYS}
-# The raw-EEG preview graph's deque is capped at sample_rate*60 (last 60s), so
-# synthesizing the whole session then discarding all but the tail cost ~3.6s on
-# a 47-min session. Synthesize only the retained tail.
-_RAW_MAX_SAMPLES: int = int(_SYNTH_RATE * 60)
-
-
-def _synthesize_waveform(rows: list[dict]) -> tuple[list[float], int]:
-    """Synthesize the retained *tail* of an approximate EEG waveform from band powers.
-
-    For each 2Hz tick, generates ~256 samples (0.5s at 512Hz) by combining sine
-    waves at characteristic band frequencies with amplitudes proportional to the
-    sqrt of the stored band power. Only the last `_RAW_MAX_SAMPLES` samples (what
-    the graph keeps) are built; the global sample index is preserved so the tail
-    is bit-identical to a full synthesis. Returns (waveform, start_tick) so the
-    caller can map markers to the tail.
-    """
-    spt = _SAMPLES_PER_TICK
-    keep_ticks = -(-_RAW_MAX_SAMPLES // spt)  # ceil
-    start = max(0, len(rows) - keep_ticks)
-    waveform: list[float] = []
-    sample_idx = start * spt
-    for row in rows[start:]:
-        amps = {}
-        for band, db_key in _RAW_KEYS.items():
-            power = max(row.get(db_key, 0.0), 0.0)
-            amps[band] = math.sqrt(power) * _AMPLITUDE_SCALE
-
-        for _i in range(spt):
-            t = sample_idx / _SYNTH_RATE
-            val = 0.0
-            for band, freq in _BAND_FREQS.items():
-                val += amps.get(band, 0.0) * math.sin(2.0 * math.pi * freq * t)
-            waveform.append(val)
-            sample_idx += 1
-
-    if not waveform:
-        return waveform, start
-    peak = max(abs(v) for v in waveform) or 1.0
-    scale_factor = (500.0 * 0.8) / peak
-    return [v * scale_factor for v in waveform], start
-
-
-
-
-def detail_graph_data(rows: list[dict], formula_series: dict[str, list[float]]) -> dict:
-    """{"metrics" | "raw" | "freq": (series, marker indices), "threshold_steps": ...} from a session's stored rows: pure
-    Python, so the open builds it on its worker and the main thread only loads it."""
-    # Formula lines (the Settings slots', a program's) aren't stored per tick: they come entirely from the session's
-    # formula replay. A slot the session didn't record stays empty (no flat zero-line phantom).
-    stored = [k for k in METRICS_COLORS if k not in COMPUTED_SERIES]
-    metrics_series: dict[str, list[float]] = {k: [row.get(k, 0.0) for row in rows] for k in stored}
-    metrics_series.update({k: formula_series.get(k, []) for k in METRICS_COLORS if k in COMPUTED_SERIES})
-
-    with timed("diary.synth_waveform"):
-        synth, raw_start = _synthesize_waveform(rows)  # tail only, see _synthesize_waveform
-
-    freq_series: dict[str, list[float]] = {k: [] for k in BAND_COLORS}
-    for row in rows:
-        for key, power in group_powers(lambda k: row.get(f"{k}_raw", 0.0)).items():
-            freq_series[key].append(power)
-
-    markers = [i for i, row in enumerate(rows) if row.get("marker", 0)]
-    # The raw graph holds only the tail (from raw_start): its markers are offset to it.
-    raw_markers = [(i - raw_start) * _SAMPLES_PER_TICK for i in markers if i >= raw_start]
-    return {"metrics": (metrics_series, markers), "raw": ({"eeg": synth}, raw_markers), "freq": (freq_series, markers),
-            "threshold_steps": target_steps(row.get("score_target") for row in rows),  # None: rows without targets
-            "gradient_steps": scored_steps(row.get("score_key") for row in rows)}  # a program's, segment by segment
 
 
 class DiaryScreen(Screen):
-    """Session detail, opened from History: stats, notes, tags and mood, graphs."""
+    """Shows the session it is given, its parts filled as their data arrives, and reports the user's actions through
+    its hooks."""
 
-    on_save_notes = Hook(default=False)  # True once saved
-    on_export_csv = Hook()
+    on_save_notes = Hook(default=False)  # (session id, **fields) -> True once saved
+    on_export_csv = Hook()  # (session id, folder or None, name typed) -> (what to tell the user, whether it worked)
     on_back = Hook()
-    on_band_view_change = Hook()  # (mode, sort_by, descending): the app keeps it per profile
-    on_band_collapse = Hook()  # the user folded the band breakdown (True) or opened it
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.name = "diary"
-        self._selected_session_id: int | None = None
-        self._scored_key: str | None = None  # the series the shown session was scored on, marked in its legend
-        self._saved_notes_state: tuple[str, str, int] | None = None  # the fields as loaded or last saved
-        self._session_formula_series: dict[str, list[float]] = {}
-        self._build_ui()
-
-    def _build_ui(self) -> None:
+        self._session_id: int | None = None
         root = BoxLayout(orientation="vertical", padding=S.PAGE_PAD, spacing=S.GAP)
         fill_background(root, C.BG)
-
-        detail_scroll = GraphAwareScrollView()
-        self._detail_layout = BoxLayout(
-            orientation="vertical",
-            padding=dp(8),
-            spacing=dp(8),
-            size_hint_y=None,
-        )
-        self._detail_layout.bind(
-            minimum_height=self._detail_layout.setter("height")
-        )
-
-        # Back button (shown when navigated from History)
-        self._back_btn = StyledButton(
-            text="Back", icon=Icons.CHEVRON_LEFT,
-            font_size=F.BODY,
-            size_hint=(None, None),
-            width=dp(90),
-            height=dp(32),
-            bg_color=C.BG_CARD,
-            text_color=C.PRIMARY,
-            bold=False,
-        )
-        self._back_btn.bind(on_release=self._on_back_pressed)
-        self._detail_layout.add_widget(self._back_btn)
-
-        self._detail_title = ThemedLabel(
-            text="Select a session",
-            font_size=F.H2,
-            bold=True,
-            color=C.TEXT,
-            size_hint_y=None,
-            height=dp(30),
-            halign="center",
-            valign="middle",
-            shorten=True,
-            shorten_from="right",
-        )
-        text_fills_box(self._detail_title)
-        self._detail_layout.add_widget(self._detail_title)
-
-        # Stats grid: one (title, value) row per stat, set by show_session_detail — a session that saved no metric has one
-        # threshold row where the others have Metric and Threshold.
-        self._stats_grid = GridLayout(cols=2, size_hint_y=None, spacing=dp(4), padding=dp(4))
-        self._detail_row_pool: list[tuple[ThemedLabel, ThemedLabel]] = []
-        self._detail_rows: list[tuple[ThemedLabel, ThemedLabel]] = []  # (title, value) of the rows shown, in order
-        self._set_detail_rows([])
-        self._detail_layout.add_widget(self._stats_grid)
-
+        page = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(8), size_hint_y=None)
+        page.bind(minimum_height=page.setter("height"))
+        back = StyledButton(text="Back", icon=Icons.CHEVRON_LEFT, font_size=F.BODY, size_hint=(None, None),
+                            width=dp(90), height=dp(32), bg_color=C.BG_CARD, text_color=C.PRIMARY, bold=False)
+        back.bind(on_release=lambda *_a: self.on_back())
+        page.add_widget(back)
+        self._title = ThemedLabel(text="Select a session", font_size=F.H2, bold=True, color=C.TEXT, size_hint_y=None,
+                                  height=dp(30), halign="center", valign="middle", shorten=True, shorten_from="right")
+        text_fills_box(self._title)
+        page.add_widget(self._title)
+        self.stats = StatsRows(page)
         # What if the session had run against another threshold (#50): view only.
-        self._what_if = WhatIfPanel(on_threshold=self._on_what_if_threshold)
+        self.what_if = WhatIfPanel(on_threshold=self._on_what_if_threshold)
         self._recorded_steps = None  # the metrics graph's line as recorded, which Reset puts back
-        self._detail_layout.add_widget(self._what_if)
-
-        # Per-band total power over the whole session; the chevron right after its title folds the table away.
-        self._band_header = BoxLayout(size_hint_y=None, height=dp(28), spacing=S.GAP_SM)
-        band_title = ThemedLabel(text="Band Power (whole session)", font_size=F.SMALL, color=C.TEXT_SECONDARY,
-                                 size_hint_x=None)
-        fit_width_to_text(band_title)
-        self._btn_band_fold = FoldChevron(size_hint_y=None, height=dp(28))
-        self._band_fold = Fold(self._btn_band_fold, lambda folded: fold_away(
-            self._detail_layout, self._band_holder, self._band_header, folded))
-        wire(self._band_fold, on_change=lambda folded: self.on_band_collapse(folded))
-        for w in (band_title, self._btn_band_fold, Widget()):
-            self._band_header.add_widget(w)
-        self._detail_layout.add_widget(self._band_header)
-        self._band_totals = BandTotalsView(on_change=self._on_band_view_change)
-        self._band_placeholder = ThemedLabel(text="", font_size=F.BODY, color=C.TEXT_SECONDARY,
-                                             size_hint_y=None, height=dp(40))
-        # Holds the table, or the placeholder until the session's totals arrive; as tall as what it holds.
-        self._band_holder = BoxLayout(size_hint_y=None)
-        self._band_totals.bind(height=self._fit_band_holder)
-        self._band_placeholder.bind(height=self._fit_band_holder)
-        self._detail_layout.add_widget(self._band_holder)
-
-        # Notes
-        notes_label = ThemedLabel(
-            text="Notes:",
-            font_size=F.BODY,
-            color=C.TEXT_SECONDARY,
-            size_hint_y=None,
-            halign="left",
-            valign="bottom",
-            padding=[0, dp(4)],
-        )
-        fit_height_to_text(notes_label)
-        self._detail_layout.add_widget(notes_label)
-
-        self._notes_input = ThemedTextInput(
-            hint_text="Enter session notes...",
-            multiline=True,
-            size_hint_y=None,
-            height=dp(80),
-            font_size=F.BODY,
-            foreground_color=C.TEXT,
-            background_color=C.BG_INPUT,
-            cursor_color=C.PRIMARY,
-        )
-        self._detail_layout.add_widget(self._notes_input)
-
-        # Tags
-        tags_label = ThemedLabel(
-            text="Tags (comma-separated):",
-            font_size=F.BODY,
-            color=C.TEXT_SECONDARY,
-            size_hint_y=None,
-            halign="left",
-            valign="bottom",
-            padding=[0, dp(4)],
-        )
-        fit_height_to_text(tags_label)
-        self._detail_layout.add_widget(tags_label)
-
-        self._tags_input = CenteredTextInput(
-            hint_text="morning, calm, focused...",
-            multiline=False,
-            size_hint_y=None,
-            height=dp(34),
-            font_size=F.BODY,
-            foreground_color=C.TEXT,
-            background_color=C.BG_INPUT,
-            cursor_color=C.PRIMARY,
-        )
-        self._detail_layout.add_widget(self._tags_input)
-
-        # Mood slider
-        mood_row = BoxLayout(size_hint_y=None, height=dp(34), spacing=S.GAP)
-        mood_label = ThemedLabel(
-            text="Mood:", font_size=F.BODY, color=C.TEXT_SECONDARY, size_hint_x=0.2,
-        )
-        self._mood_slider = Slider(min=1, max=5, value=3, step=1, size_hint_x=0.6)
-        self._mood_value = ThemedLabel(
-            text="3", font_size=F.H3, bold=True, color=C.TEXT, size_hint_x=0.2,
-        )
-        self._mood_slider.bind(
-            value=lambda inst, val: setattr(self._mood_value, "text", str(int(val)))
-        )
-        mood_row.add_widget(mood_label)
-        mood_row.add_widget(self._mood_slider)
-        mood_row.add_widget(self._mood_value)
-        self._detail_layout.add_widget(mood_row)
-
-        # Save + Export row
-        btn_row = BoxLayout(size_hint_y=None, height=dp(38), spacing=S.GAP)
-        self._save_btn = StyledButton(
-            text="Save Notes",
-            bg_color=C.PRIMARY,
-            bg_pressed=C.PRIMARY_DIM,
-            height=dp(38),
-        )
-        self._save_btn.bind(on_release=self._on_save_pressed)
-        self._export_btn = StyledButton(
-            text="Export CSV",
-            bg_color=C.ACCENT,
-            bg_pressed=C.ACCENT_DIM,
-            height=dp(38),
-        )
-        self._export_btn.bind(on_release=self._on_export_pressed)
-        btn_row.add_widget(self._save_btn)
-        btn_row.add_widget(self._export_btn)
-        self._detail_layout.add_widget(btn_row)
-
-        self._export_status = ThemedLabel(
-            text="",
-            font_size=F.TINY,
-            color=C.ACCENT,
-            size_hint_y=None,
-            height=dp(18),
-        )
-        self._detail_layout.add_widget(self._export_status)
-
-        # --- Graph tab buttons ---
-        graph_tabs = ChoiceToggle([("metrics", "Metrics"), ("raw", "Raw EEG"), ("freq", "Frequencies")], "metrics",
-                                  self._switch_graph_tab, button={"font_size": F.SMALL, "height": dp(30)},
-                                  size_hint_y=None, height=dp(30), spacing=S.GAP_SM)
-        self._graph_tabs = graph_tabs
-        self._detail_layout.add_widget(graph_tabs)
-
-        # --- Graph container (holds one graph at a time) ---
-        self._graph_container = BoxLayout(
-            orientation="vertical", size_hint_y=None, height=dp(200),
-        )
-        self._detail_layout.add_widget(self._graph_container)
-        self._graph_placeholder = ThemedLabel(text="", font_size=F.BODY, color=C.TEXT_SECONDARY)
-        # The sections with their data in place: "metrics", "raw", "freq" (graphs) and "bands" (the totals table).
-        self._ready: set[str] = {"metrics", "raw", "freq", "bands"}
-        self._load_failed = False
-
-        # Create all three graphs
-        self._metrics_graph = ScrollableGraphWidget(
-            colors=METRICS_COLORS,
-            scales=METRICS_SCALES,
-            names=SERIES_NAMES,  # the live graph's names: a session's Metric is saved under them
-            viewport_seconds=60,
-            show_value_labels=True,
-            show_timestamps=True,
-            size_hint_y=1,
-            graph_id="diary_metrics",
-        )
-        self._raw_eeg_graph = ScrollableGraphWidget(
-            colors=RAW_EEG_PREVIEW_COLORS,
-            scales=RAW_EEG_PREVIEW_SCALES,
-            viewport_seconds=10,
-            show_value_labels=True,
-            show_timestamps=True,
-            sample_rate=_SYNTH_RATE,
-            max_points=_RAW_MAX_SAMPLES,  # what the synthesizer keeps: the raw marker indices count into it
-            bipolar=True,
-            size_hint_y=1,
-            graph_id="diary_raw",
-        )
-        self._freq_graph = ScrollableGraphWidget(
-            colors=BAND_COLORS,
-            scales=BAND_SCALES,
-            viewport_seconds=60,
-            show_value_labels=True,
-            show_timestamps=True,
-            auto_scale=True,
-            size_hint_y=1,
-            graph_id="diary_freq",
-            names=GROUP_NAMES,
-        )
-        # Legend tracks the active graph's visible set; a picker toggle (or a
-        # restore) on the displayed graph rebuilds it.
-        for g in (self._metrics_graph, self._raw_eeg_graph, self._freq_graph):
-            wire(g, on_series_change=lambda gr=g: self._on_graph_visibility(gr))
-
-        # Legend container (wrapping flow layout — handles many series)
-        self._legend_container = LegendBar()
-        self._detail_layout.add_widget(self._legend_container)
-
-        self._active_graph_tab: str = "metrics"
-        self._show_band_section()
-        self._graph_container.add_widget(self._metrics_graph)
-        self._rebuild_legend("metrics")
-
-        detail_scroll.add_widget(self._detail_layout)
-        root.add_widget(detail_scroll)
-
+        page.add_widget(self.what_if)
+        self.bands = BandSection(page)
+        self.notes = SessionNotes(page)
+        wire(self.notes, on_save=self._save_notes)
+        buttons = BoxLayout(size_hint_y=None, height=dp(38), spacing=S.GAP)
+        export = StyledButton(text="Export CSV", bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM, height=dp(38))
+        export.bind(on_release=self._on_export_pressed)
+        buttons.add_widget(self.notes.save_button)
+        buttons.add_widget(export)
+        page.add_widget(buttons)
+        self.graphs = DetailGraphs(page)
+        scroll = GraphAwareScrollView()
+        scroll.add_widget(page)
+        root.add_widget(scroll)
         self.add_widget(root)
 
-    def _on_back_pressed(self, *args) -> None:
-        self.on_back()
+    def show_session(self, session: dict) -> None:
+        """A session just opened: its title, stats and notes at once; the what-if, band power and graphs load."""
+        self._session_id = session.get("id")
+        self._title.text = session_title(session)
+        score = recorded_score(session)
 
-    def _fit_band_holder(self, *_a) -> None:
-        if self._band_holder.children:
-            self._band_holder.height = self._band_holder.children[0].height
+        def duration(key: str) -> str:
+            val = session.get(key, "-")
+            return format_duration(int(val)) if isinstance(val, (int, float)) else str(val)
 
-    @property
-    def band_collapsed(self) -> bool:
-        return self._band_fold.folded
-
-    def set_band_collapsed(self, collapsed: bool) -> None:
-        """Fold the table (or its placeholder) away, detached, or bring it back under its title; the title stays."""
-        self._band_fold.set(collapsed)
-
-    def _show_band_section(self) -> None:
-        """The totals table once its data is in, else the placeholder (loading, or the load failed)."""
-        shown = self._band_totals if "bands" in self._ready else self._band_placeholder
-        self._band_placeholder.text = self._placeholder_text()
-        if shown.parent is not self._band_holder:
-            self._band_holder.clear_widgets()
-            self._band_holder.add_widget(shown)
-        self._fit_band_holder()
-
-    def _placeholder_text(self) -> str:
-        return "Couldn't load this session's data." if self._load_failed else "Loading\u2026"
+        self.stats.show([
+            ("Duration", duration("duration")),
+            *session_score_rows(session),  # the scored metric, its average and threshold
+            ("Time Above Threshold", duration("time_above_threshold")),
+            ("Longest Streak", duration("longest_streak")),
+            ("Mood Rating", str(session.get("mood_rating", "-"))),
+        ])
+        self.notes.show(session)
+        self.what_if.show_loading()
+        self.bands.show_loading()
+        self.graphs.show_loading(score[0] if score is not None else None)  # a program's "program" is no series
 
     def show_load_failed(self) -> None:
-        """The sections still waiting for data say they won't get it; the stats and notes keep working."""
-        self._load_failed = True
-        self._show_band_section()
-        self._switch_graph_tab(self._active_graph_tab)
-        if "what_if" not in self._ready:
-            self._what_if.show_load_failed()
-
-    @property
-    def what_if(self) -> WhatIfPanel:
-        return self._what_if
-
-    @property
-    def metrics_graph(self) -> ScrollableGraphWidget:
-        return self._metrics_graph
-
-    @property
-    def graphs(self) -> tuple:
-        """The detail's three graphs: metrics, raw EEG, band power."""
-        return self._metrics_graph, self._raw_eeg_graph, self._freq_graph
+        """The parts still waiting for data say they won't get it; the stats and notes keep working."""
+        self.bands.show_failed()
+        self.graphs.show_failed()
+        self.what_if.show_load_failed()
 
     def set_what_if(self, ticks, session: dict) -> None:
         """Give the what-if panel the session's scored ticks (None: it can't rescore it), once its graphs are in: the
         metrics graph's line is then the recorded one, which Reset puts back."""
-        self._recorded_steps = self._metrics_graph.threshold_steps
+        self._recorded_steps = self.graphs.metrics.threshold_steps
         if ticks is not None and session.get("session_program"):
             note = "Each segment starts at its recorded target · nothing is saved"
             titles = [f"{s.index + 1} · {s.name or SERIES_NAMES.get(s.key, s.key)} · recorded {s.target:g}"
@@ -463,362 +104,21 @@ class DiaryScreen(Screen):
             recorded = dict(session_score_rows(session))
             note = f"Recorded at {recorded.get('Threshold') or recorded.get('Threshold Used', '')} · nothing is saved"
             titles = None
-        self._what_if.set_session(ticks, note, titles, "This session can't be replayed.")
-        self._ready.add("what_if")
-
-    def show_what_if_failed(self) -> None:
-        self._what_if.show_load_failed()
-        self._ready.add("what_if")
+        self.what_if.set_session(ticks, note, titles, "This session can't be replayed.")
 
     def _on_what_if_threshold(self, steps: list[tuple[int, float]] | None) -> None:
         """The metrics graph's dashed line follows the what-if, and goes back to the recorded one on Reset."""
-        self._metrics_graph.set_threshold_steps(steps if steps is not None else self._recorded_steps)
+        self.graphs.metrics.set_threshold_steps(steps if steps is not None else self._recorded_steps)
 
-    def set_band_totals(self, totals: dict[str, float]) -> None:
-        """Populate the per-band session power breakdown."""
-        self._band_totals.set_totals(totals)
-        self._ready.add("bands")
-        self._show_band_section()
-
-    def set_band_view_state(self, mode: str, sort_by: str, descending: bool) -> None:
-        """Restore the persisted band-table view (mode / sort) before populating."""
-        self._band_totals.set_view_state(mode, sort_by, descending)
-
-    def _on_band_view_change(self, mode: str, sort_by: str, descending: bool) -> None:
-        self.on_band_view_change(mode, sort_by, descending)
-
-    @staticmethod
-    def _make_detail_row() -> tuple[ThemedLabel, ThemedLabel]:
-        # A title takes its text's width (the column, its widest title) and the value the rest of the row.
-        title = ThemedLabel(text="", font_size=F.SMALL, color=C.TEXT_SECONDARY, size_hint=(None, None), height=dp(20))
-        fit_width_to_text(title, S.GAP)
-        value = ThemedLabel(text="-", font_size=F.H3, bold=True, color=C.TEXT, halign="left", size_hint_y=None,
-                            height=dp(20), shorten=True, shorten_from="right")
-        text_fills_box(value)
-        return title, value
-
-    def _set_detail_rows(self, rows: list[tuple[str, str]]) -> None:
-        """Show these (title, value) rows in the stats grid, which is as tall as they are."""
-        while len(self._detail_row_pool) < len(rows):
-            self._detail_row_pool.append(self._make_detail_row())
-        grid = self._stats_grid
-        grid.clear_widgets()
-        self._detail_rows = self._detail_row_pool[:len(rows)]
-        for (text, shown), (title, value) in zip(rows, self._detail_rows):
-            title.text, value.text = text, shown
-            grid.add_widget(title)
-            grid.add_widget(value)
-        n = len(rows)
-        grid.height = n * dp(20) + max(n - 1, 0) * grid.spacing[1] + grid.padding[1] + grid.padding[3]
-
-    def show_session_detail(self, session: dict) -> None:
-        """Display detail for a selected session."""
-        self._selected_session_id = session.get("id")
-        self._detail_title.text = session_title(session)
-        score = recorded_score(session)
-        self._scored_key = score[0] if score is not None else None  # a program's "program" is no series: unmarked
-
-        def _time(key: str) -> str:
-            val = session.get(key, "-")
-            return format_duration(int(val)) if isinstance(val, (int, float)) else str(val)
-
-        self._set_detail_rows([
-            ("Duration", _time("duration")),
-            *session_score_rows(session),  # the scored metric, its average and threshold
-            ("Time Above Threshold", _time("time_above_threshold")),
-            ("Longest Streak", _time("longest_streak")),
-            ("Mood Rating", str(session.get("mood_rating", "-"))),
-        ])
-
-        self._notes_input.text = session.get("notes", "")
-        self._tags_input.text = session.get("tags", "")
-        self._mood_slider.value = session.get("mood_rating", 3) or 3
-        # Compared with what the fields show, not the row: an unrated session shows mood 3 and isn't an edit.
-        self._saved_notes_state = self._notes_state()
-        self._metrics_graph.clear_data()
-        self._metrics_graph.set_gradient_series(self._scored_key)
-        self._raw_eeg_graph.clear_data()
-        self._freq_graph.clear_data()
-        self._session_formula_series = {}
-        self._ready = set()  # graphs and band totals: "Loading…" until their data arrives
-        self._load_failed = False
-        self._what_if.show_loading()
-        self._show_band_section()
-        self._switch_graph_tab("metrics")
-
-    def set_session_formulas(self, series: dict[str, list[float]], names: dict[str, str]) -> None:
-        """Inject recomputed per-session formula series + names before display."""
-        self._session_formula_series = series
-        for key, name in names.items():
-            self._metrics_graph.set_series_name(key, name)
-
-    def show_program_lines(self, plan: RunnablePlan | None) -> None:
-        """A program session shows exactly its program's lines, as the Session screen did while it ran, marked as the
-        program's (never saved as the profile's selection); None, a simple session, clears the mark."""
-        if plan is not None:
-            show_program_series(self._metrics_graph, plan)
-        else:
-            self._metrics_graph.set_program_lines()
-
-    def load_metrics_preview(self, metrics_rows: list[dict]) -> None:
-        """Load session metrics into all three preview graphs at once (the async open fills them one per frame)."""
-        data = detail_graph_data(metrics_rows, self._session_formula_series)
-        for section in self.graph_fill_order():
-            self.fill_graph(section, data)
-
-    def graph_fill_order(self) -> list[str]:
-        """The graphs in the order to fill them: the shown tab first."""
-        return [self._active_graph_tab] + [s for s in ("metrics", "raw", "freq") if s != self._active_graph_tab]
-
-    def fill_graph(self, section: str, data: dict) -> None:
-        """Put one graph's data (from detail_graph_data) in place, and show it if its tab is the shown one."""
-        series, markers = data[section]
-        graph = self._graph_for_tab(section)
-        with timed(f"diary.fill_{section}"):
-            graph.load_static_data(series, markers=markers)
-            if section == "metrics" and data["threshold_steps"]:  # else the line the open drew from the session row
-                graph.set_threshold_steps(data["threshold_steps"])
-            if section == "metrics" and data["gradient_steps"]:  # else the series the open coloured from the row
-                graph.set_gradient_steps(data["gradient_steps"])
-            graph.set_scroll_offset(0)  # at the end, so the user sees the latest data and can drag back
-        self._ready.add(section)
-        if section == self._active_graph_tab:
-            self._switch_graph_tab(section)
-
-    def set_metrics_threshold(self, value: float) -> None:
-        """Set threshold line on the metrics preview graph."""
-        self._metrics_graph.set_threshold(value)
-
-    def set_program(self, program_json: str) -> None:
-        """Draw the recorded program's stepped threshold on the metrics graph.
-
-        Empty/invalid JSON clears the steps so a non-program session falls back
-        to its single-value threshold.
-        """
-        prog = recorded_program(program_json)
-        if prog is not None:
-            self._metrics_graph.set_threshold_steps(
-                prog.threshold_steps(self._metrics_graph._sample_rate)
-            )
-        else:
-            self._metrics_graph.set_threshold_steps(None)
-
-    def _switch_graph_tab(self, tab: str) -> None:
-        """Switch the visible graph in the preview area."""
-        self._active_graph_tab = tab
-        self._graph_container.clear_widgets()
-
-        self._graph_tabs.show(tab)
-
-        shown = None
-        if tab not in self._ready:
-            self._graph_placeholder.text = self._placeholder_text()
-            self._graph_container.add_widget(self._graph_placeholder)
-        else:
-            shown = self._graph_for_tab(tab)
-            self._graph_container.add_widget(shown)
-        for g in (self._metrics_graph, self._raw_eeg_graph, self._freq_graph):
-            g.set_drawing_enabled(g is shown)  # a hidden tab's graph draws once it is shown (enabling redraws it)
-        self._rebuild_legend(tab)
-
-    def _graph_for_tab(self, tab: str) -> ScrollableGraphWidget:
-        return {
-            "metrics": self._metrics_graph,
-            "raw": self._raw_eeg_graph,
-            "freq": self._freq_graph,
-        }[tab]
-
-    def _on_graph_visibility(self, graph: ScrollableGraphWidget) -> None:
-        """A series toggled on `graph` — refresh the legend if it's the shown tab."""
-        if graph is self._graph_for_tab(self._active_graph_tab):
-            self._rebuild_legend(self._active_graph_tab)
-
-    def _rebuild_legend(self, tab: str) -> None:
-        """Rebuild legend labels for the active graph tab's visible series."""
-        graph = self._graph_for_tab(tab)
-        scored = self._scored_key if tab == "metrics" and self._scored_key in graph.visible_keys() else None
-        self._legend_container.show_graph(graph, active_key=scored)  # » on the series it was scored on
-
-    def _on_save_pressed(self, *args) -> None:
-        notes, tags, mood = self._notes_state()
-        self._save_notes(notes=notes, tags=tags, mood=mood)  # Save keeps what the screen shows, mood included
-
-    def _notes_state(self) -> tuple[str, str, int]:
-        return self._notes_input.text, self._tags_input.text, int(self._mood_slider.value)
-
-    def _changes(self) -> dict:
-        """The fields that differ from what was loaded or last saved: leaving can't rate an unrated session."""
-        saved = self._saved_notes_state or (None, None, None)
-        return {key: now for key, now, then in zip(("notes", "tags", "mood"), self._notes_state(), saved)
-                if now != then}
-
-    def _save_notes(self, **fields) -> None:
-        if self._selected_session_id is None:
-            return
-        state = self._notes_state()
-        if self.on_save_notes(self._selected_session_id, **fields):
-            self._saved_notes_state = state
-
-    def flush_notes(self) -> None:
-        """Save the fields that changed since they were loaded or last saved."""
-        changes = self._changes()
-        if changes:
-            self._save_notes(**changes)
+    def _save_notes(self, **fields) -> bool:
+        return self._session_id is not None and bool(self.on_save_notes(self._session_id, **fields))
 
     def on_pre_leave(self, *args) -> None:
         # Every way out of the detail (Back, a bottom-nav tab, Android back) is a screen change: none loses an edit.
-        self.flush_notes()
+        self.notes.flush()
 
-    @staticmethod
-    def _get_android_export_dir() -> str:
-        """Get writable export directory on Android.
-
-        Uses the same base dir as the DB (tested for write access at startup).
-        Falls back to app-private storage if /sdcard isn't writable.
-        """
-        export_dir = os.path.join(os.path.dirname(APP.DB_PATH), "exports")
-        os.makedirs(export_dir, exist_ok=True)
-        return export_dir
-
-    def _on_export_pressed(self, *args) -> None:
-        if not self._selected_session_id or not is_wired(self, "on_export_csv"):
-            return
-
-        is_android = android_jni.on_android()
-
-        content = BoxLayout(orientation="vertical", spacing=S.GAP, padding=S.GAP)
-
-        if is_android:
-            # Android: save directly to app's writable dir (no FileChooser —
-            # it can't browse /sdcard on Android 11+ without special permission)
-            self._file_chooser = None
-
-            loc_label = ThemedLabel(
-                text="Will appear in:\nDocuments/EEGMeditation/",
-                font_size=F.SMALL,
-                color=C.TEXT_SECONDARY,
-                size_hint_y=None,
-                halign="left",
-                valign="middle",
-            )
-            fit_height_to_text(loc_label)
-            content.add_widget(loc_label)
-        else:
-            # Desktop: FileChooser
-            self._file_chooser = ThemedFileChooser(
-                path=os.path.expanduser("~"),
-                dirselect=True,
-                filters=["!.*"],
-            )
-            content.add_widget(self._file_chooser)
-
-        # Filename row
-        name_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=S.GAP)
-        name_label = ThemedLabel(text="File name:", font_size=F.BODY, size_hint_x=0.25,
-                           color=C.TEXT_SECONDARY)
-        self._export_filename = CenteredTextInput(
-            text=f"session_{self._selected_session_id}.csv",
-            multiline=False,
-            font_size=F.BODY,
-            size_hint_x=0.75,
-            foreground_color=C.TEXT,
-            background_color=C.BG_INPUT,
-        )
-        name_row.add_widget(name_label)
-        name_row.add_widget(self._export_filename)
-        content.add_widget(name_row)
-
-        btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=S.GAP)
-        btn_cancel = cancel_button(height=dp(40))
-        btn_save = StyledButton(
-            text="Save", icon=Icons.CHECK, bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM,
-            height=dp(40),
-        )
-        btn_row.add_widget(btn_cancel)
-        btn_row.add_widget(btn_save)
-        content.add_widget(btn_row)
-
-        popup = ThemedPopup(
-            title="Export CSV",
-            content=content,
-            size_hint=(0.9, None) if is_android else (0.95, 0.85),
-        )
-        btn_cancel.bind(on_release=popup.dismiss)
-        btn_save.bind(on_release=lambda x: self._do_export(popup))
-        popup.open()
-
-    def _do_export(self, popup) -> None:
-        """Perform export and show result popup."""
-        try:
-            if self._file_chooser is not None:
-                # Desktop
-                selection = self._file_chooser.selection
-                if selection:
-                    folder = selection[0]
-                    if not os.path.isdir(folder):
-                        folder = os.path.dirname(folder)
-                else:
-                    folder = self._file_chooser.path
-            else:
-                # Android
-                folder = self._get_android_export_dir()
-
-            filename = self._export_filename.text.strip()
-            if not filename:
-                filename = f"session_{self._selected_session_id}.csv"
-            if not filename.endswith(".csv"):
-                filename += ".csv"
-
-            # Create folder if needed
-            os.makedirs(folder, exist_ok=True)
-
-            full_path = os.path.join(folder, filename)
-            popup.dismiss()
-
-            if self._selected_session_id and is_wired(self, "on_export_csv"):
-                result = self.on_export_csv(self._selected_session_id, full_path)
-                if not result:
-                    self._show_export_result("No data to export", success=False)
-                    return
-
-                # On Android: copy from private storage to shared Documents.
-                if android_jni.on_android():
-                    shared = copy_to_documents(result, display_name=filename)
-                    if shared:
-                        self._show_export_result(
-                            f"Saved to:\n{shared}\n\nVisible in file browser",
-                            success=True,
-                        )
-                    else:
-                        # MediaStore failed — still saved to private, offer share
-                        self._show_export_result(
-                            f"Saved to app storage:\n{result}\n\n"
-                            "Use Share to send the file",
-                            success=True,
-                        )
-                else:
-                    self._show_export_result(
-                        f"File saved:\n{result}", success=True,
-                    )
-        except PermissionError:
-            popup.dismiss()
-            self._show_export_result(
-                f"Permission denied for:\n{folder}\n\n"
-                "Try a different folder.",
-                success=False,
-            )
-        except Exception as e:
-            popup.dismiss()
-            self._show_export_result(f"Export error:\n{e}", success=False)
-            logger.error(f"Export failed: {e}", exc_info=True)
-
-    def _show_export_result(self, message: str, success: bool = True) -> None:
-        """Show a result popup after export attempt."""
-        tone = C.ACCENT if success else C.DANGER
-        btn_ok = StyledButton(text="OK", bg_color=tone)
-        popup = make_message_popup("Export Complete" if success else "Export Failed", message, [btn_ok])
-        btn_ok.bind(on_release=popup.dismiss)
-        self._export_result_popup = popup
-        popup.open()
-
-
+    def _on_export_pressed(self, *_args) -> None:
+        if self._session_id and is_wired(self, "on_export_csv"):
+            session_id = self._session_id
+            open_export_dialog(session_id, lambda folder, name: show_export_result(
+                *self.on_export_csv(session_id, folder, name)))

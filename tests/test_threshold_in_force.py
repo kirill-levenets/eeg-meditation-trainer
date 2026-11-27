@@ -12,7 +12,7 @@ from kivy.tests.common import UnitTestTouch
 
 from app.session.manager import SessionManager, SessionState
 from app.session.scoring import target_steps
-from app.ui.diary_screen import detail_graph_data
+from app.ui.detail_sections.graphs import detail_graph_data
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
 from tests._app import (
@@ -265,9 +265,9 @@ def test_the_detail_draws_a_sessions_threshold_steps(app):  # noqa: F811
     _select(a, sid)
     workers.pop()()
     _frames(3)
-    graph = a._diary_screen._metrics_graph
+    graph = a._diary_screen.graphs.metrics
     assert graph._threshold_steps == [(0, 70), (2, 85)]
-    assert ("Threshold", "70 › 85") in [(t.text, v.text) for t, v in a._diary_screen._detail_rows]
+    assert ("Threshold", "70 › 85") in [(t.text, v.text) for t, v in a._diary_screen.stats.rows]
 
 
 def test_a_session_saved_before_the_targets_keeps_its_line(app):  # noqa: F811
@@ -275,7 +275,7 @@ def test_a_session_saved_before_the_targets_keeps_its_line(app):  # noqa: F811
     _select(a, a.sessions["A"])  # rows without targets, threshold_used 70
     workers.pop()()
     _frames(3)
-    graph = a._diary_screen._metrics_graph
+    graph = a._diary_screen.graphs.metrics
     assert graph._threshold_steps is None and graph._threshold_value == 70.0
 
 
@@ -312,7 +312,7 @@ def test_an_old_session_opened_after_a_new_one_does_not_keep_its_steps(app):  # 
     _select(a, a.sessions["A"])
     workers.pop()()
     _frames(3)
-    assert a._diary_screen._metrics_graph._threshold_steps is None
+    assert a._diary_screen.graphs.metrics._threshold_steps is None
 
 
 def test_a_settle_runs_the_latest_function_given_for_its_input(fresh_app):

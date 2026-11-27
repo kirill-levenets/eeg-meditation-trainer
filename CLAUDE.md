@@ -102,7 +102,7 @@ Read it before changing that subsystem.
   `shown_session.py` `ShownSession` (the session the screen shows: its graphs' mirror, its end card, the screen's part of every session event and of a resume),
   `settings_screen.py` (its folds, each a section in `settings_sections/`), `device_labels.py` → [live-session-and-settings](docs/architecture/live-session-and-settings.md);
   `history_screen.py` (its parts in `history_sections/`: charts, chart area, session list), `period_totals.py`, `history_flow.py` `HistoryFlow` (what the app does with History's rows) → [history](docs/architecture/history.md);
-  `diary_screen.py` (session detail), `session_detail_flow.py` `SessionDetailFlow` (opens and loads it) → [session-detail](docs/architecture/session-detail.md);
+  `diary_screen.py` (session detail; its parts in `detail_sections/`: stats, band power, notes, graphs, the export dialog), `session_detail_flow.py` `SessionDetailFlow` (opens and loads it) → [session-detail](docs/architecture/session-detail.md);
   `session_labels.py` → [session](docs/architecture/session.md)
 - `app/crash_handler.py`, `app/logger.py`, `app/android_jni.py`, `app/ui/kivy_providers.py` (the Kivy providers the app picks itself),
   `app/keep_awake.py` `KeepAwake` (a session's wake lock, screen-on flag and foreground service) → [app-platform](docs/architecture/app-platform.md)
@@ -264,7 +264,7 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 · a profile's headset `Headset.load` / `Headset.scan`, the paired devices `Headset.find_paired`
 · the Android check `android_jni.on_android()`, the app's Activity `android_jni.activity()`
 · legends `LegendBar`
-· file copy `copy_file_atomic`, a file the app writes `write_file_atomic`
+· file copy `copy_file_atomic`, a file the app writes `write_file_atomic`, a file exported to Documents `android_share.move_to_documents`
 · temp removal `discard_file`
 · in tests, the app `fresh_app` (the run's one built app, on a new profile) or `build_app(seed)` (a private one), a flow alone on `stub_context()`, a session by `tests/_app.py`'s helpers:
   never `__new__` → [app-platform](docs/architecture/app-platform.md#tests).

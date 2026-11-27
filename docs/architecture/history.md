@@ -49,7 +49,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   A selection survives a day-filter change, as Export's does: the count on the button and the confirm's day span show what goes.
   The selection is the list's: `toggle_selection` and `select_all` go through `keep_selected`, its one change, which re-syncs the rows and reports the count (`on_selection`) for Export N / Delete N.
   `export_selected` calls the `on_export_sessions` hook with sorted ids → `HistoryFlow.on_export_sessions_csv`:
-  it loops `export_session_csv` off-thread into `csv_export.build_sessions_zip(path, {sid: csv})` (one `session_<id>.csv` entry each, skips empty) and delivers it through the shared `android_share.copy_to_documents` (desktop and Android).
+  it loops `export_session_csv` off-thread into `csv_export.build_sessions_zip(path, {sid: csv})` (one `session_<id>.csv` entry each, skips empty) and delivers it through the shared `android_share.move_to_documents` (desktop and Android), which removes the ZIP from app storage once it is copied.
   A CSV's `custom_formula` column is formula slot 1's text recomputed from the stored rows on an evaluator of the export's own (`export_session_csv(sid, formula)`):
   the slot's evaluator holds the running session's `avg()` windows, which an export must neither feed nor read.
 - **The chart's period** (#44).

@@ -230,18 +230,18 @@ def test_the_zoom_saved_is_the_window_from_before_the_fit(build_app):
 
 def test_a_hidden_tabs_graph_does_not_draw_until_it_is_shown(monkeypatch):
     d = DiaryScreen()
-    for graph in (d._metrics_graph, d._freq_graph):
+    for graph in (d.graphs.metrics, d.graphs.freq):
         graph.load_static_data({k: [1.0] * HOUR for k in graph._data})
-    d._ready.update({"metrics", "raw", "freq"})
-    d._switch_graph_tab("metrics")
+    d.graphs._ready.update({"metrics", "raw", "freq"})
+    d.graphs.show_tab("metrics")
     drawn = []
     monkeypatch.setattr(ScrollableGraphWidget, "_draw", lambda self: drawn.append(self))
-    for graph in (d._metrics_graph, d._freq_graph):
+    for graph in (d.graphs.metrics, d.graphs.freq):
         graph.set_fitted(True)
-    assert d._metrics_graph in drawn and d._freq_graph not in drawn  # fitted, but not drawn off screen
+    assert d.graphs.metrics in drawn and d.graphs.freq not in drawn  # fitted, but not drawn off screen
     drawn.clear()
-    d._switch_graph_tab("freq")
-    assert drawn == [d._freq_graph] and d._freq_graph.fitted
+    d.graphs.show_tab("freq")
+    assert drawn == [d.graphs.freq] and d.graphs.freq.fitted
 
 
 # ---- the app's zoom links ----

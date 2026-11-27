@@ -10,6 +10,7 @@ from kivy.base import EventLoop
 from kivy.graphics import Canvas, Color, InstructionGroup, RoundedRectangle
 from kivy.uix.widget import Widget
 
+from app.ui.detail_sections.graphs import detail_graph_data
 from app.ui.theme import THEMES, C, Card, CenteredTextInput, Divider, ThemedColor, ThemedLabel, ThemedTextInput
 from app.ui.widgets.bottom_nav import BottomNav
 from app.ui.widgets.rows import PresetRow
@@ -399,22 +400,24 @@ def test_session_detail_repaints(old, new, screens):
     screen = screens(DiaryScreen)
     _mount(screen)
     try:
-        screen.show_session_detail({"id": 1, "date_time": "2026-09-20T10:00:00", "duration": 600,
+        screen.show_session({"id": 1, "date_time": "2026-09-20T10:00:00", "duration": 600,
                                     "avg_shamatha": 55, "avg_meditation": 45, "session_name": "Morning",
                                     "notes": "calm"})
-        screen.load_metrics_preview([
+        data = detail_graph_data([
             {"meditation_score": 50, "shamatha_score": 30 + i, "distraction": 20, "sinking": 10,
              "delta_raw": 300, "theta_raw": 200, "alpha1_raw": 400, "alpha2_raw": 350,
              "beta1_raw": 100, "beta2_raw": 80, "gamma1_raw": 30, "gamma2_raw": 20}
             for i in range(10)
-        ])
-        screen.set_band_totals({"delta": 3.0, "theta": 2.0, "alpha1": 4.0, "alpha2": 3.5,
+        ], {})
+        for section in screen.graphs.fill_order():
+            screen.graphs.fill(section, data)
+        screen.bands.show_totals({"delta": 3.0, "theta": 2.0, "alpha1": 4.0, "alpha2": 3.5,
                                 "beta1": 1.0, "beta2": 0.8, "gamma1": 0.3, "gamma2": 0.2})
         _pump()
         C.set_theme(new)
         _assert_repainted(screen, old, new, "metrics tab")
         for tab in ("raw", "freq"):
-            screen._switch_graph_tab(tab)
+            screen.graphs.show_tab(tab)
             _assert_repainted(screen, old, new, f"{tab} tab")
     finally:
         _unmount(screen)

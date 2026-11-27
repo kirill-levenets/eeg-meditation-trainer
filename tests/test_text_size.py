@@ -423,7 +423,7 @@ PROGRAM = [{"minutes": 10, "formula": "shamatha_score", "target": 60, "end_sound
 
 
 def _detail_states(screen):
-    yield "", lambda: screen.set_band_totals(
+    yield "", lambda: screen.bands.show_totals(
         {"delta": 4e6, "theta": 2e6, "alpha1": 8e5, "alpha2": 6e5, "beta1": 4e5, "beta2": 3e5, "gamma1": 1e5,
          "gamma2": 6e4})
 

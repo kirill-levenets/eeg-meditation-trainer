@@ -10,7 +10,7 @@ from app.metrics.formula_slots import session_formulas
 from app.session.session_program import recorded_plan
 from app.session.what_if import scored_ticks
 from app.ui.app_context import AppContext
-from app.ui.diary_screen import detail_graph_data
+from app.ui.detail_sections.graphs import detail_graph_data
 
 
 class SessionDetailFlow:
@@ -38,18 +38,18 @@ class SessionDetailFlow:
         d = self._diary_screen
         uid = self._ctx.user_id()
         with timed("diary.open"):
-            d.set_session_formulas({}, session_formulas(session)[1])  # the legend's names from the first frame
-            d.show_session_detail(session)
-            d.set_metrics_threshold(float(session.get("threshold_used", 50)))
-            d.set_program(session.get("session_program", ""))
+            d.graphs.set_formula_names(session_formulas(session)[1])  # the legend's names from the first frame
+            d.show_session(session)
+            d.graphs.set_threshold(float(session.get("threshold_used", 50)))
+            d.graphs.show_program(session.get("session_program", ""))
             plan = recorded_plan(session.get("session_program") or "")
             if plan is None and uid:  # the profile's own selection, whatever the last session showed
-                self._graph_series.apply_saved(d.metrics_graph, uid)
-            d.show_program_lines(plan)  # the program's mark goes last: lines it still shows are never saved
+                self._graph_series.apply_saved(d.graphs.metrics, uid)
+            d.graphs.show_program_lines(plan)  # the program's mark goes last: lines it still shows are never saved
             bv = {}
             if uid:
                 bv = self._ctx.db.get_user_json_setting(uid, "band_breakdown_view", {}) or {}
-            d.set_band_view_state(bv.get("mode", "detailed"), bv.get("sort", "band"), bool(bv.get("desc", False)))
+            d.bands.set_view_state(bv.get("mode", "detailed"), bv.get("sort", "band"), bool(bv.get("desc", False)))
             self._session_detail_back = self._sm.current
             self._sm.current = "diary"
         threading.Thread(target=self._load_session_detail, args=(token, session_id, session), daemon=True,
@@ -62,7 +62,7 @@ class SessionDetailFlow:
         try:
             with timed("diary.band_totals"):
                 totals = self._ctx.db.get_session_band_totals(session_id)
-            self._ctx.on_main(lambda: self._fill_detail(token, [lambda: d.set_band_totals(totals)]))
+            self._ctx.on_main(lambda: self._fill_detail(token, [lambda: d.bands.show_totals(totals)]))
             with timed("diary.get_metrics"):
                 rows = self._ctx.db.get_session_metrics(session_id)
             with timed("diary.compute_formulas"):
@@ -81,17 +81,17 @@ class SessionDetailFlow:
 
         def fill(section: str) -> None:
             if section == "metrics":
-                d.set_session_formulas(series, names)  # the formula lines' names, before their graph
-            d.fill_graph(section, data)
+                d.graphs.set_formula_names(names)  # the formula lines' names, before their graph
+            d.graphs.fill(section, data)
 
         try:
             ticks = scored_ticks(session, rows, series)
             what_if = lambda: d.set_what_if(ticks, session)
         except Exception:  # noqa: BLE001 - a row it can't score must not take the graphs down with it
             logger.exception(f"What-if scoring failed for session {session_id}")
-            what_if = d.show_what_if_failed
+            what_if = d.what_if.show_load_failed
 
-        self._ctx.on_main(lambda: self._fill_detail(token, [*(lambda s=s: fill(s) for s in d.graph_fill_order()),
+        self._ctx.on_main(lambda: self._fill_detail(token, [*(lambda s=s: fill(s) for s in d.graphs.fill_order()),
                                                             what_if]))
 
     def _fill_detail(self, token: int, steps: list) -> None:

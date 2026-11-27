@@ -6,6 +6,7 @@ from kivy.metrics import dp
 
 import app.ui.settings_sections.common as common
 import app.ui.settings_sections.device as device_section
+from app.ui.detail_sections.graphs import detail_graph_data
 from app.ui.graph_scroll import GraphAwareScrollView
 from app.ui.headset import filter_mindwave
 from app.ui.hooks import wire
@@ -293,27 +294,29 @@ class TestDiaryScreenUI(unittest.TestCase):
              "gamma1_raw": 30, "gamma2_raw": 20}
             for i in range(10)
         ]
-        screen.load_metrics_preview(rows)
-        self.assertEqual(screen._metrics_graph.total_points, 10)
-        self.assertEqual(screen._raw_eeg_graph.total_points, 10 * 256)
-        self.assertEqual(screen._freq_graph.total_points, 10)
+        data = detail_graph_data(rows, {})
+        for section in screen.graphs.fill_order():
+            screen.graphs.fill(section, data)
+        self.assertEqual(screen.graphs.metrics.total_points, 10)
+        self.assertEqual(screen.graphs.raw.total_points, 10 * 256)
+        self.assertEqual(screen.graphs.freq.total_points, 10)
 
     def test_diary_tab_switching(self):
         from app.ui.diary_screen import DiaryScreen
         screen = DiaryScreen()
-        self.assertEqual(screen._active_graph_tab, "metrics")
-        screen._switch_graph_tab("raw")
-        self.assertEqual(screen._active_graph_tab, "raw")
-        screen._switch_graph_tab("freq")
-        self.assertEqual(screen._active_graph_tab, "freq")
-        screen._switch_graph_tab("metrics")
-        self.assertEqual(screen._active_graph_tab, "metrics")
+        self.assertEqual(screen.graphs.tab, "metrics")
+        screen.graphs.show_tab("raw")
+        self.assertEqual(screen.graphs.tab, "raw")
+        screen.graphs.show_tab("freq")
+        self.assertEqual(screen.graphs.tab, "freq")
+        screen.graphs.show_tab("metrics")
+        self.assertEqual(screen.graphs.tab, "metrics")
 
     def test_set_metrics_threshold(self):
         from app.ui.diary_screen import DiaryScreen
         screen = DiaryScreen()
-        screen.set_metrics_threshold(80.0)
-        self.assertEqual(screen._metrics_graph._threshold_value, 80.0)
+        screen.graphs.set_threshold(80.0)
+        self.assertEqual(screen.graphs.metrics._threshold_value, 80.0)
 
 
 
