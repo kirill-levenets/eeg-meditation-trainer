@@ -22,7 +22,8 @@ from app.session.live_mirror import LiveMirror
 from app.session.manager import SessionState, elapsed_clock
 from app.session.recorder import RecordedTick
 from app.session.session_run import Phase
-from app.ui.live_session import METRICS_COLORS, LiveSessionScreen
+from app.ui.graph_kinds import METRICS_COLORS
+from app.ui.live_session import LiveSessionScreen
 from tests._app import (
     FedSession,
     calls_of,
@@ -109,7 +110,7 @@ def test_tick_stores_metrics_copy_not_reference(fed):
 
 
 def test_mirror_fills_while_paused_but_skips_ui_dispatch(fed):
-    graph = fed.app._live_screen.graph
+    graph = fed.app._live_screen.graphs.metrics
     fed.app.on_pause()  # the screen locks
     fed.tick()
     # The whole point of the fix: data still accrues while the screen is
@@ -122,7 +123,7 @@ def test_mirror_fills_while_paused_but_skips_ui_dispatch(fed):
 def test_unpaused_tick_dispatches_ui_once(fed):
     fed.tick()
     assert len(_mirror(fed).metrics) == 1
-    assert _points(fed.app._live_screen.graph) == 1
+    assert _points(fed.app._live_screen.graphs.metrics) == 1
 
 
 # --- resume reload (main thread) ------------------------------------------
@@ -139,7 +140,7 @@ def _reloads(fed: FedSession, monkeypatch) -> dict[str, list]:
     """Each live graph's batch loads from here on, by graph."""
     screen = fed.app._live_screen
     return {name: calls_of(monkeypatch, graph, "load_static_data")
-            for name, graph in (("metrics", screen.graph), ("bands", screen.band_graph), ("raw", screen.raw_graph))}
+            for name, graph in (("metrics", screen.graphs.metrics), ("bands", screen.graphs.band), ("raw", screen.graphs.raw))}
 
 
 def _unlock(fed: FedSession) -> None:
@@ -150,7 +151,7 @@ def _unlock(fed: FedSession) -> None:
 def test_resume_batch_reloads_each_graph_once(fed, monkeypatch):
     _locked_for(fed, 5)
     loads = _reloads(fed, monkeypatch)
-    added = calls_of(monkeypatch, fed.app._live_screen.graph, "add_point")
+    added = calls_of(monkeypatch, fed.app._live_screen.graphs.metrics, "add_point")
     _unlock(fed)
     # One batched load per graph — never the per-tick add_point path.
     assert [len(calls) for calls in loads.values()] == [1, 1, 1] and added == []
@@ -179,11 +180,11 @@ def test_an_ending_reloads_the_full_graph_and_sets_the_duration(fed):
     app, screen = fed.app, fed.app._live_screen
     fed.tick()  # one tick shown before the lock
     _locked_for(fed, 9)
-    assert _points(screen.graph) == 1
+    assert _points(screen.graphs.metrics) == 1
     app._controls.stop_and_save(reason="timer")
     frames()
     duration = app._db.get_all_sessions(app._current_user_id)[0]["duration"]
-    assert _points(screen.graph) == 10  # full session, not partial
+    assert _points(screen.graphs.metrics) == 10  # full session, not partial
     assert screen.header._timer_label.text.endswith(elapsed_clock(duration))  # real duration, not frozen
     assert screen.end_card.session_id is not None
 
@@ -218,8 +219,8 @@ def test_a_reload_keeps_each_points_colouring():
         mirror.record(RecordedTick(tick_metrics(seed=1.0), raw_sample(seed=1.0),
                                    {"score_target": 50, "score_key": key}, False))
     screen = LiveSessionScreen()
-    screen.load_mirror(mirror.snapshot())
-    assert screen.graph.gradient_steps == [(0, "shamatha_score"), (3, "custom_formula")]
+    screen.graphs.load_mirror(mirror.snapshot())
+    assert screen.graphs.metrics.gradient_steps == [(0, "shamatha_score"), (3, "custom_formula")]
 
 
 def test_resume_skips_entirely_when_not_running(fed, monkeypatch):
@@ -251,8 +252,8 @@ def test_tick_then_resume_roundtrip_preserves_data(fed):
     screen = fed.app._live_screen
     _locked_for(fed, 4)
     _unlock(fed)
-    assert list(screen.graph._data["shamatha_score"]) == [0.0, 1.0, 2.0, 3.0]
-    assert len(screen.raw_graph._data["eeg"]) == 4 * 3
+    assert list(screen.graphs.metrics._data["shamatha_score"]) == [0.0, 1.0, 2.0, 3.0]
+    assert len(screen.graphs.raw._data["eeg"]) == 4 * 3
 
 
 # --- timer arm-on-connect race (BT-wait success path) ---------------------

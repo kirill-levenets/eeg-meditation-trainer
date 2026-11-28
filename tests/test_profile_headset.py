@@ -317,7 +317,7 @@ def test_start_with_several_mindwaves_asks_which_in_settings(app, paired):
     paired.arrive()
     assert not _connecting(app) and app._sm.current == "settings"
     assert app._settings_screen.device._device_picker_banner.text.startswith("Found 2 MindWave devices.")
-    assert not app._live_screen._btn_start.disabled  # the idle controls: Start can be pressed again
+    assert not app._live_screen.controls.start.disabled  # the idle controls: Start can be pressed again
 
 
 @pytest.mark.parametrize("answer", ["pick", "another profile", "Mock Data"])
@@ -381,7 +381,7 @@ def test_start_with_no_mindwave_paired_says_why(app, paired, monkeypatch, device
     paired.arrive()
     assert not _connecting(app)
     assert app._live_screen.connect_overlay._status.text.startswith(message)
-    assert app._live_screen.connect_overlay.retry_btn.parent is not None and not app._live_screen._btn_start.disabled
+    assert app._live_screen.connect_overlay.retry_btn.parent is not None and not app._live_screen.controls.start.disabled
 
 
 # ---- Settings → Device ----

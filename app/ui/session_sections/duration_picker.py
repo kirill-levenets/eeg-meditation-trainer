@@ -159,42 +159,25 @@ class DurationPicker:
         self._programs: list = []  # the saved programs the "Programs…" picker offers
         self._program_name: str = ""  # the loaded program's (button + highlight)
 
+    def _preset_button(self, label: str, minutes: int | None) -> StyledButton:
+        """A preset's button, filled when it is the duration set (None: no timer)."""
+        chosen = minutes == self._timer_minutes if self._timer_enabled else minutes is None
+        btn = StyledButton(text=label, bg_color=C.ACCENT if chosen else C.BG_CARD,
+                           text_color=None if chosen else C.TEXT_SECONDARY, bold=chosen, size_hint_y=None,
+                           height=dp(44))
+        btn.bind(on_release=lambda _b: self._pick_preset(minutes))
+        return btn
+
     def _open_popup(self, *_args) -> None:
-        """Open a modal Popup to pick a session duration preset.
-
-        Timed presets are laid out in a 2-column grid; "Free" (no timer) spans
-        the full width below so the list stays compact as presets grow.
-        """
-        def _make_btn(label, value):
-            is_active = (
-                (value is None and not self._timer_enabled)
-                or (
-                    value is not None
-                    and self._timer_enabled
-                    and value == self._timer_minutes
-                )
-            )
-            btn = StyledButton(
-                text=label,
-                bg_color=C.ACCENT if is_active else C.BG_CARD,
-                text_color=None if is_active else C.TEXT_SECONDARY,
-                bold=is_active,
-                size_hint_y=None,
-                height=dp(44),
-            )
-            btn.bind(on_release=lambda b, v=value: self._pick_preset(v))
-            return btn
-
+        """The presets: the timed ones two to a row, Free (no timer) across under them, then Programs."""
         timed = [(lbl, v) for lbl, v in _DURATION_PRESETS if v is not None]
         free = [(lbl, v) for lbl, v in _DURATION_PRESETS if v is None]
-
         grid = GridLayout(cols=2, spacing=S.GAP_SM, size_hint_y=None)
         grid.bind(minimum_height=grid.setter("height"))
         for lbl, v in timed:
-            grid.add_widget(_make_btn(lbl, v))
-
+            grid.add_widget(self._preset_button(lbl, v))
         rows = [grid]
-        rows.extend(_make_btn(lbl, v) for lbl, v in free)
+        rows.extend(self._preset_button(lbl, v) for lbl, v in free)
 
         # Programs picker: jump straight to a saved program from the session
         # screen. The button shows the loaded program's name when one is active.

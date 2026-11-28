@@ -5,8 +5,8 @@ import pytest
 
 from app.session.session_program import PROGRAM_FORMULA_KEYS
 from app.ui import graph_series
+from app.ui.graph_kinds import METRICS_COLORS, METRICS_SCALES, GraphKind
 from app.ui.hooks import wire
-from app.ui.live_session import METRICS_COLORS, METRICS_SCALES
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.widgets.band_totals import BAND_COLORS
 from app.ui.widgets.styled_button import StyledButton
@@ -14,7 +14,7 @@ from tests._app import reload_with
 
 
 def _g(colors, scales, graph_id, names=None):
-    return ScrollableGraphWidget(colors=colors, scales=scales, graph_id=graph_id, names=names)
+    return ScrollableGraphWidget(GraphKind(colors=colors, scales=scales, names=names or {}), graph_id=graph_id)
 
 
 # ---- The series picker, persistence, and restore generalized to every graph ----
@@ -33,7 +33,7 @@ def test_json_selection_applied_per_graph(fresh_app):
     app._db.set_user_json_setting(uid, "graph_series_live_metrics", ["distraction", "sinking"])
     app._db.set_user_json_setting(uid, "graph_series_diary_freq", ["alpha", "beta"])
     _restore(app)
-    graph, freq = app._live_screen.graph, app._diary_screen.graphs.freq
+    graph, freq = app._live_screen.graphs.metrics, app._diary_screen.graphs.freq
     assert graph.is_visible("distraction") and graph.is_visible("sinking") and not graph.is_visible("shamatha_score")
     assert freq.is_visible("alpha") and freq.is_visible("beta") and not freq.is_visible("gamma")
 
@@ -43,7 +43,7 @@ def test_legacy_migration_only_for_live_metrics(fresh_app):
     app._db.set_user_setting(uid, "toggle_native_attention", "True")
     app._db.set_user_setting(uid, "toggle_shamatha_score", "False")
     _restore(app)
-    graph = app._live_screen.graph
+    graph = app._live_screen.graphs.metrics
     assert graph.is_visible("native_attention") and not graph.is_visible("shamatha_score")
     # Diary graphs ignore the legacy live-only keys → default to all-visible, but a program's lines, which follow
     # the session shown.
@@ -54,9 +54,9 @@ def test_legacy_migration_only_for_live_metrics(fresh_app):
 def test_first_run_defaults(fresh_app):
     app = fresh_app  # a new profile's load restored them
     # Live metrics: FIRST_RUN_LIVE_SERIES = Shamatha only.
-    assert app._live_screen.graph.visible_keys() == ["shamatha_score"]
+    assert app._live_screen.graphs.metrics.visible_keys() == ["shamatha_score"]
     # Other multi-series graphs: all visible.
-    band = app._live_screen.band_graph
+    band = app._live_screen.graphs.band
     assert set(band.visible_keys()) == set(band.series_keys())
 
 
@@ -65,12 +65,12 @@ def test_single_series_graphs_untouched(fresh_app):
     # the line); their sole series stays visible.
     app = fresh_app
     _restore(app)
-    assert app._live_screen.raw_graph.is_visible("eeg") and app._diary_screen.graphs.raw.is_visible("eeg")
+    assert app._live_screen.graphs.raw.is_visible("eeg") and app._diary_screen.graphs.raw.is_visible("eeg")
 
 
 def test_toggle_flips_and_persists_per_graph(fresh_app):
     app, uid = fresh_app, fresh_app._current_user_id
-    graph = app._live_screen.graph  # live: shamatha only
+    graph = app._live_screen.graphs.metrics  # live: shamatha only
     _toggle(app, graph, "distraction")
     assert graph.is_visible("distraction")
     app._graph_series.persist(graph)
@@ -105,7 +105,7 @@ def test_a_detail_showing_a_programs_lines_lists_them_and_saves_none_of_its_set(
 
 def test_custom_formula_gated_on_live_graph_only(fresh_app):
     app = fresh_app
-    graph, slot = app._live_screen.graph, app._formulas.evaluators[0]
+    graph, slot = app._live_screen.graphs.metrics, app._formulas.evaluators[0]
     # Live metrics: custom_formula stays hidden while the formula is invalid.
     assert not slot.is_valid
     _toggle(app, graph, "custom_formula")
@@ -125,7 +125,7 @@ def test_custom_formula_gated_on_live_graph_only(fresh_app):
 def test_custom_formula_2_gated_on_its_own_slot(fresh_app):
     # The per-slot gate must key off slot 1's evaluator, not slot 0's.
     app = fresh_app
-    graph = app._live_screen.graph
+    graph = app._live_screen.graphs.metrics
     app._formulas.evaluators[0].set_formula("alpha1 * 2")  # slot 0 runs; slot 1 doesn't
     _toggle(app, graph, "custom_formula_2")
     assert not graph.is_visible("custom_formula_2")
@@ -143,7 +143,7 @@ def test_the_custom_formulas_shown_or_hidden_choice_survives_reload(fresh_app, p
     saved = ["shamatha_score", "custom_formula" if picked else "distraction"]
     reload_with(app, {"graph_series_live_metrics": saved}, custom_formula="alpha + beta")
     assert app._formulas.evaluators[0].is_valid  # formula loaded
-    assert app._live_screen.graph.is_visible("custom_formula") is picked
+    assert app._live_screen.graphs.metrics.is_visible("custom_formula") is picked
 
 
 def _threshold_ys(g) -> tuple[list[float], float, float]:
@@ -165,7 +165,7 @@ def _threshold_ys(g) -> tuple[list[float], float, float]:
 def test_a_threshold_below_zero_is_drawn_on_the_graphs_floor_like_its_values():
     # Values below 0 are drawn on the floor; a threshold there must not fall under the graph.
     from app.ui.raw_eeg_screen import ScrollableGraphWidget
-    g = ScrollableGraphWidget(colors={"a": (1, 1, 1, 1)}, scales={"a": 100}, size=(400, 200), pos=(0, 0))
+    g = ScrollableGraphWidget(GraphKind(colors={"a": (1, 1, 1, 1)}, scales={"a": 100}), size=(400, 200), pos=(0, 0))
     for v in (-40.0, 10.0, 60.0):
         g.add_point({"a": v})
     for draw in (lambda: g.set_threshold(-30.0), lambda: g.set_threshold_steps([(0, -30.0)])):
@@ -180,9 +180,9 @@ def test_the_live_screen_and_a_sessions_detail_draw_a_series_in_one_colour():
     from app.ui.live_session import LiveSessionScreen
     live, detail = LiveSessionScreen(), DiaryScreen()
     for key in METRICS_COLORS:
-        assert detail.graphs.metrics.series_color(key) == live.graph.series_color(key), key
+        assert detail.graphs.metrics.series_color(key) == live.graphs.metrics.series_color(key), key
     for key in BAND_COLORS:
-        assert detail.graphs.freq.series_color(key) == live.band_graph.series_color(key), key
+        assert detail.graphs.freq.series_color(key) == live.graphs.band.series_color(key), key
 
 
 def test_choosing_a_saved_formula_renames_its_picker_row_at_once(fresh_app, monkeypatch):
@@ -197,7 +197,7 @@ def test_choosing_a_saved_formula_renames_its_picker_row_at_once(fresh_app, monk
     app._graph_series._choose_saved_formula(0, row)
     shown_rows[0].dispatch("on_release")
 
-    assert app._live_screen.graph.series_name("custom_formula") == "Calm"
+    assert app._live_screen.graphs.metrics.series_name("custom_formula") == "Calm"
     assert row.text == "Calm"  # the open picker's row says what the line and the legend say
 
 

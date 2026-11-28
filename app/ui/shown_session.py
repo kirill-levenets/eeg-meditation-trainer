@@ -61,23 +61,23 @@ class ShownSession:
                 screen.set_start_time(self._session.manager.started_at)
                 screen.connect_overlay.hide()  # the session starts its feedback right after (RunningSession._deliver)
             case Paused():
-                screen.set_controls_paused()
+                screen.controls.show_paused()
                 screen.header.set_recording(False)
             case Resumed():
-                screen.set_controls_running()
+                screen.controls.show_running()
                 screen.header.set_recording(True)
             case SegmentStarted(key=key, line_name=line_name):
                 if line_name is not None:  # a custom segment's line: labelled and shown
-                    screen.graph.set_series_name(key, line_name)
-                    screen.graph.set_visible(key, True)
+                    screen.graphs.metrics.set_series_name(key, line_name)
+                    screen.graphs.metrics.set_visible(key, True)
                 screen.set_training_series(key)  # bold + » on the trained series
             case ProgramShown(plan=plan):
-                show_program_series(screen.graph, plan)
+                show_program_series(screen.graphs.metrics, plan)
             case ProgramDropped():
                 for slot in PROGRAM_FORMULA_KEYS:
-                    screen.graph.set_series_name(slot, SERIES_NAMES.get(slot, "Program"))  # drop stale labels
-                    screen.graph.set_visible(slot, False)  # never linger as a user selection
-                screen.graph.set_program_lines()
+                    screen.graphs.metrics.set_series_name(slot, SERIES_NAMES.get(slot, "Program"))  # drop stale labels
+                    screen.graphs.metrics.set_visible(slot, False)  # never linger as a user selection
+                screen.graphs.metrics.set_program_lines()
             case Connecting(name=name):
                 screen.header.update_device_status(False, device_name=name, connecting=True)
                 screen.connect_overlay.show(f"Connecting to {name}...")
@@ -90,7 +90,7 @@ class ShownSession:
 
     def _show_tick(self, tick: Ticked) -> None:
         screen = self._live_screen
-        screen.graph.add_point(tick.metrics, threshold=tick.target, scored=tick.score_key)  # coloured from this point
+        screen.graphs.metrics.add_point(tick.metrics, threshold=tick.target, scored=tick.score_key)  # coloured from this point
         screen.stats.update(tick.live)
         screen.header.update_state(tick.metrics.get("state", "Neutral"))
         if tick.shamatha is not None:
@@ -98,11 +98,11 @@ class ShownSession:
         if tick.scored is not None:
             screen.set_training_series(tick.scored)
         screen.header.update_timer(tick.elapsed)
-        screen.add_raw_sample(tick.raw_sample)
+        screen.graphs.add_raw_sample(tick.raw_sample)
         if tick.marked:
-            screen.graph.add_marker()
-            screen.raw_graph.add_marker()
-            screen.band_graph.add_marker()
+            screen.graphs.metrics.add_marker()
+            screen.graphs.raw.add_marker()
+            screen.graphs.band.add_marker()
 
     def show_retry(self, message: str) -> None:
         """The retry screen of a start whose BT wait ended without a session."""
@@ -110,7 +110,7 @@ class ShownSession:
 
     def lines(self) -> frozenset[str]:
         """The lines the live graph shows now."""
-        return frozenset(self._live_screen.graph.visible_keys())
+        return frozenset(self._live_screen.graphs.metrics.visible_keys())
 
     def update_state(self, state: str) -> None:
         """The Session screen's state line, outside a session: why a Start didn't go ahead, how a start ended."""
@@ -119,29 +119,29 @@ class ShownSession:
     def scanning(self) -> None:
         """A Start looks for the profile's headset among the paired devices."""
         self._live_screen.connect_overlay.show("Scanning for MindWave...")
-        self._live_screen.set_controls_running()
+        self._live_screen.controls.show_running()
 
     def found(self, name: str) -> None:
         self._live_screen.connect_overlay.update(f"Found {name}\nConnecting...")
 
     def scan_failed(self, message: str) -> None:
         """A Start's scan found no headset to start on: the controls idle, and Retry offered with `message`."""
-        self._live_screen.set_controls_idle()
+        self._live_screen.controls.show_idle()
         self._live_screen.connect_overlay.show_retry(message)
 
     def ready(self) -> None:
         """The idle controls, no overlay: before a Retry's new Start, or while Settings › Device asks which headset."""
-        self._live_screen.set_controls_idle()
+        self._live_screen.controls.show_idle()
         self._live_screen.connect_overlay.hide()
 
     def starting(self) -> None:
         """A session's setup: the running controls, no training mark until a program's first segment."""
         self._live_screen.set_training_series(None)
-        self._live_screen.set_controls_running()
+        self._live_screen.controls.show_running()
 
     def show_threshold(self, value: float) -> None:
         """The threshold in force, drawn until the ticks step the line."""
-        self._live_screen.graph.set_threshold(float(value))
+        self._live_screen.graphs.metrics.set_threshold(float(value))
 
     def hide_overlay(self) -> None:
         self._live_screen.connect_overlay.hide()
@@ -155,7 +155,7 @@ class ShownSession:
         """The live graphs reloaded from the mirror with the whole session: a locked stretch never reached them tick by
         tick."""
         try:
-            self._live_screen.load_mirror(self.mirror.snapshot())
+            self._live_screen.graphs.load_mirror(self.mirror.snapshot())
         except Exception:  # noqa: BLE001 - logged; a failed redraw must not keep the rest of the screen stale
             logger.exception("graph reload from the mirror failed")
 
@@ -179,7 +179,7 @@ class ShownSession:
         """The screen's part of every teardown: idle controls, no training mark, no shamatha pill, not recording (the
         headset's link is the headset's: Headset.show_selected)."""
         self._live_screen.set_training_series(None)
-        self._live_screen.set_controls_idle()
+        self._live_screen.controls.show_idle()
         self._live_screen.header.set_shamatha(False)
         self._live_screen.header.set_recording(False)
 
@@ -248,8 +248,8 @@ class ShownSession:
     def clear(self) -> None:
         """Empty the Session screen of its session: graphs, their mirrors, threshold steps and the readout."""
         self.mirror.clear()
-        self._live_screen.graph.clear_data()
-        self._live_screen.raw_graph.clear_data()
-        self._live_screen.band_graph.clear_data()
-        self._live_screen.graph.set_threshold_steps(None)  # each tick's target steps it, a program's too
+        self._live_screen.graphs.metrics.clear_data()
+        self._live_screen.graphs.raw.clear_data()
+        self._live_screen.graphs.band.clear_data()
+        self._live_screen.graphs.metrics.set_threshold_steps(None)  # each tick's target steps it, a program's too
         self._live_screen.clear_readout()

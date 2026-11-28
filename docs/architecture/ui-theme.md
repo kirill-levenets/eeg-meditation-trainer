@@ -10,7 +10,7 @@ With no active user the first-run popup (the user gate) is shown.
 
 - **Theme system** (`theme.py`): the `C` colour accessor (4 palettes: Dark Blue, Dark Green, Light Cream, Light Green), `F` font sizes, `S` spacing.
   The widgets built on it live in `app/ui/widgets/`:
-  `StyledButton` (`styled_button.py`), the popups and in-screen modal cards (`popups.py`), folds (`folds.py`), the Settings accordion (`accordion.py`), the bottom nav (`bottom_nav.py`) and input rows (`rows.py`).
+  `StyledButton` (`styled_button.py`), the popups and in-screen modal cards (`popups.py`), folds (`folds.py`), the Settings accordion (`accordion.py`), the bottom nav (`bottom_nav.py`) and rows (`rows.py`: presets, the inline rename, `StatRows`, the stats rows the end card and the session detail share).
   `format_duration(seconds)` shows seconds under 1 min, minutes under 1 h, hours otherwise.
   `make_scroll_popup(title, rows, footer=None, *, est_rows=None, ...)` builds every list-style select dialog (series picker, saved-formula chooser, a segment's formula, sound source picker, program picker, duration picker):
   the `rows` scroll inside a `ScrollView` with the `footer` pinned below, sized to content but capped at 85% of the window so long lists scroll instead of overflowing;
@@ -59,7 +59,7 @@ With no active user the first-run popup (the user gate) is shown.
   Listeners run after the roles are re-applied; a bound method is held weakly and its entry drops itself when the widget dies; a failing listener or widget repaint is logged without stopping the switch.
   To save and restore a themed colour use `widget.assigned_color(prop)`: a `list()` copy freezes it (`flash_confirm` restores its fill this way).
   Code that keeps colours and unpacks them into canvas `Color`s draws `C.resolve(color)`, a palette colour in the current palette and anything else as it is:
-  module-level series dicts like `live_session.METRICS_COLORS` are read once at import, and `ScrollableGraphWidget.series_color` resolves them, so a line and its legend swatch agree.
+  module-level series dicts like `graph_kinds.METRICS_COLORS` are read once at import, and `ScrollableGraphWidget.series_color` resolves them, so a line and its legend swatch agree.
   The Settings → Theme highlight is a listener, so it also follows a theme applied by a profile switch.
   `build()` builds the UI in `startup_theme(db)`, the startup profile's theme (see [storage.md](storage.md#per-user-settings)), so loading that profile applies the theme already showing.
   `tests/test_theme_switch.py` shows each screen in one palette from its default view (each screen is built once per module and handed back reset to that view, `tests/_shared_screens.py`);

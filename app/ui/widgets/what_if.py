@@ -99,49 +99,15 @@ class WhatIfPanel(BoxLayout):
         self._seg_controls: list[_SegmentControl] = []
         self._per_segment = False  # a program's segments show their own stats
 
-        # The title, its chevron right after it (History's fold), and Reset, which stays in reach while folded.
-        header = BoxLayout(size_hint_y=None, height=dp(28), spacing=S.GAP_SM)
-        self._title = ThemedLabel(text="Try another threshold", font_size=F.SMALL, bold=True,
-                                  color=C.TEXT_SECONDARY, size_hint_x=None)
-        fit_width_to_text(self._title)
-        self._btn_collapse = FoldChevron(size_hint_y=None, height=dp(28))
-        self._fold = Fold(self._btn_collapse, lambda _folded: self._show(self._content))
-        wire(self._fold, on_change=lambda folded: self.on_collapse(folded))
-        self._btn_reset = StyledButton(text="Reset", font_size=F.SMALL, bg_color=C.BG_CARD,
-                                       text_color=C.TEXT_SECONDARY, size_hint=(None, None), width=dp(64),
-                                       height=dp(28))
-        self._btn_reset.bind(on_release=lambda *_a: self.reset())
-        for w in (self._title, self._btn_collapse, Widget(), self._btn_reset):
-            header.add_widget(w)
-        self.add_widget(header)
-
+        self.add_widget(self._build_header())
         self._note = _secondary()
         self._segments_box = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(8))
         self._segments_box.bind(minimum_height=self._segments_box.setter("height"))
-
-        # The detail's stats grid's padding and spacing, so the values line up under its values.
-        results = GridLayout(cols=2, size_hint_y=None, height=2 * _ROW_H + dp(4), spacing=dp(4),
-                             padding=(dp(4), 0, dp(4), 0))
-
-        def row(text: str) -> ThemedLabel:
-            # As the session detail's stats rows: the title takes its text's width, the value the rest.
-            label = ThemedLabel(text=text, font_size=F.SMALL, color=C.TEXT_SECONDARY, size_hint=(None, None),
-                                height=_ROW_H)
-            fit_width_to_text(label, S.GAP)
-            value = ThemedLabel(text="", font_size=F.H3, bold=True, color=C.TEXT, halign="left", valign="middle",
-                                size_hint_y=None, height=_ROW_H)
-            text_fills_box(value)
-            results.add_widget(label)
-            results.add_widget(value)
-            return value
-
-        self._time_above = row("Time Above Threshold")
-        self._streak = row("Longest Streak")
-        self._results = results
+        self._results = self._build_results()
         self._total_title = _secondary("Whole session")  # a program's totals, under its segments' own
         self._controls = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(4))
         self._controls.bind(minimum_height=self._controls.setter("height"))
-        for w in (self._note, self._segments_box, results):
+        for w in (self._note, self._segments_box, self._results):
             self._controls.add_widget(w)
         self._message = ThemedLabel(text="", font_size=F.BODY, color=C.TEXT_SECONDARY, size_hint_y=None,
                                     height=dp(28))
@@ -159,6 +125,45 @@ class WhatIfPanel(BoxLayout):
                 self.remove_widget(w)
         if not self._fold.folded and content.parent is None:
             self.add_widget(content)
+
+    def _build_header(self) -> BoxLayout:
+        """The title, its chevron right after it (History's fold), and Reset, which stays in reach while folded."""
+        header = BoxLayout(size_hint_y=None, height=dp(28), spacing=S.GAP_SM)
+        self._title = ThemedLabel(text="Try another threshold", font_size=F.SMALL, bold=True,
+                                  color=C.TEXT_SECONDARY, size_hint_x=None)
+        fit_width_to_text(self._title)
+        self._btn_collapse = FoldChevron(size_hint_y=None, height=dp(28))
+        self._fold = Fold(self._btn_collapse, lambda _folded: self._show(self._content))
+        wire(self._fold, on_change=lambda folded: self.on_collapse(folded))
+        self._btn_reset = StyledButton(text="Reset", font_size=F.SMALL, bg_color=C.BG_CARD,
+                                       text_color=C.TEXT_SECONDARY, size_hint=(None, None), width=dp(64),
+                                       height=dp(28))
+        self._btn_reset.bind(on_release=lambda *_a: self.reset())
+        for w in (self._title, self._btn_collapse, Widget(), self._btn_reset):
+            header.add_widget(w)
+        return header
+
+    def _build_results(self) -> GridLayout:
+        """Time above threshold and the longest streak at the thresholds set: the detail's stats grid's padding and
+        spacing, so the values line up under its values."""
+        results = GridLayout(cols=2, size_hint_y=None, height=2 * _ROW_H + dp(4), spacing=dp(4),
+                             padding=(dp(4), 0, dp(4), 0))
+
+        def row(text: str) -> ThemedLabel:
+            # As the session detail's stats rows: the title takes its text's width, the value the rest.
+            label = ThemedLabel(text=text, font_size=F.SMALL, color=C.TEXT_SECONDARY, size_hint=(None, None),
+                                height=_ROW_H)
+            fit_width_to_text(label, S.GAP)
+            value = ThemedLabel(text="", font_size=F.H3, bold=True, color=C.TEXT, halign="left", valign="middle",
+                                size_hint_y=None, height=_ROW_H)
+            text_fills_box(value)
+            results.add_widget(label)
+            results.add_widget(value)
+            return value
+
+        self._time_above = row("Time Above Threshold")
+        self._streak = row("Longest Streak")
+        return results
 
     @property
     def collapsed(self) -> bool:

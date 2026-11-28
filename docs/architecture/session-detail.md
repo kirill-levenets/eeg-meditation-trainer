@@ -7,10 +7,10 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 - **Diary detail** (`diary_screen.py`): session stats, notes/tags/mood, graph tabs (metrics/raw/freq).
   Its parts are sections in `app/ui/detail_sections/`, each built into the detail's page by the screen and reached as its attribute:
-  `.stats` `StatsRows`, `.bands` `BandSection`, `.notes` `SessionNotes`, `.graphs` `DetailGraphs` (with `detail_graph_data`), and the CSV export dialog (`export.py`); the what-if panel is `.what_if`.
+  `.stats` (the stats grid's `rows.StatRows`), `.bands` `BandSection`, `.notes` `SessionNotes`, `.graphs` `DetailGraphs` (with `detail_graph_data`), and the CSV export dialog (`export.py`); the what-if panel is `.what_if`.
   Each part keeps its own loading state; the screen keeps the order, the title, Back and the what-if's wiring, and `SessionDetailFlow` fills the parts.
   Opened only from History (`show_session(session)`), with a back button, titled by `session_title` like its row (one line, cut with an ellipsis).
-  Its stats grid (`StatsRows.show`, like the end card's) is Duration, the `session_score_rows` rows, Time Above Threshold, Longest Streak and Mood Rating;
+  Its stats grid (`StatRows.show`, as the end card's) is Duration, the `session_score_rows` rows, Time Above Threshold, Longest Streak and Mood Rating;
   the one average it shows is the scored metric's (Avg Shamatha for a session that saved no metric).
   Avg Meditation, Avg Shamatha and Time Shamatha ≥ 90 aren't on the cards but are still stored; the calendar uses Avg Shamatha.
   **Notes are never lost** (#40):
@@ -73,7 +73,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   A copy to Documents that failed keeps the file in the app's storage and says where.
 
 - **Only the shown tab's graph draws**:
-  `DetailGraphs.show_tab` enables drawing on the shown graph and pauses the others (`set_drawing_enabled`; enabling redraws), as the live screen's `_set_view` does for its hidden view
+  `DetailGraphs.show_tab` enables drawing on the shown graph and pauses the others (`set_drawing_enabled`; enabling redraws), as the live screen's `LiveGraphs.show_view` does for its hidden view
   — so a fit, a data load or a theme switch costs nothing on the hidden tabs.
   The three tabs are one zoom group (see [graphs](graphs.md)).
 

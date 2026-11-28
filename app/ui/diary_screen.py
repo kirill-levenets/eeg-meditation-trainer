@@ -10,7 +10,7 @@ from app.ui.detail_sections.bands import BandSection
 from app.ui.detail_sections.export import open_export_dialog, show_export_result
 from app.ui.detail_sections.graphs import DetailGraphs
 from app.ui.detail_sections.notes import SessionNotes
-from app.ui.detail_sections.stats import StatsRows
+from app.ui.detail_sections.stats import stats_rows
 from app.ui.formatting import format_duration
 from app.ui.graph_scroll import GraphAwareScrollView
 from app.ui.hooks import Hook, is_wired, wire
@@ -44,7 +44,7 @@ class DiaryScreen(Screen):
                                   height=dp(30), halign="center", valign="middle", shorten=True, shorten_from="right")
         text_fills_box(self._title)
         page.add_widget(self._title)
-        self.stats = StatsRows(page)
+        self.stats = stats_rows(page)
         # What if the session had run against another threshold (#50): view only.
         self.what_if = WhatIfPanel(on_threshold=self._on_what_if_threshold)
         self._recorded_steps = None  # the metrics graph's line as recorded, which Reset puts back

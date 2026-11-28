@@ -4,6 +4,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 
 from app.ui.graph_fullscreen import GraphFullscreen
+from app.ui.graph_kinds import GraphKind
 from app.ui.hooks import is_wired, wire
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.widgets.styled_button import StyledButton
@@ -15,7 +16,7 @@ class TestGraphFullscreen(unittest.TestCase):
     def _make(self):
         app = GraphFullscreen(FloatLayout())
         parent = BoxLayout()
-        g = ScrollableGraphWidget(colors={"a": (1, 0, 0, 1)}, scales={"a": 100.0})
+        g = ScrollableGraphWidget(GraphKind(colors={"a": (1, 0, 0, 1)}, scales={"a": 100.0}))
         g.size_hint = (0.5, 0.5)
         g.set_expand_callback(app.present)
         parent.add_widget(g)
@@ -24,11 +25,11 @@ class TestGraphFullscreen(unittest.TestCase):
     def test_present_reparents_and_fills(self):
         app, parent, g = self._make()
         app.present(g)
-        self.assertIsNotNone(app._overlay)
-        self.assertIn(app._overlay, app._root.children)
+        self.assertIsNotNone(app._shown)
+        self.assertIn(app._shown.overlay, app._root.children)
         self.assertIsNot(g.parent, parent)                 # reparented out
         self.assertTrue(g._expand_closes)                  # the corner glyph is the close cross in fullscreen
-        self.assertFalse(any(isinstance(c, StyledButton) for c in app._overlay.children))  # no other close
+        self.assertFalse(any(isinstance(c, StyledButton) for c in app._shown.overlay.children))  # no other close
         self.assertEqual(tuple(g.size_hint), (1, 1))       # fills the overlay slot
         self.assertEqual(g.pos_hint, {})                   # in a BoxLayout, not positioned
 
@@ -46,9 +47,9 @@ class TestGraphFullscreen(unittest.TestCase):
         app, parent, g = self._make()
         orig_size_hint = tuple(g.size_hint)
         app.present(g)
-        overlay = app._overlay
+        overlay = app._shown.overlay
         g._expand_callback(g)                              # a tap on the close cross in the plot's corner
-        self.assertIsNone(app._overlay)
+        self.assertIsNone(app._shown)
         self.assertIs(g.parent, parent)                    # back in original parent
         self.assertFalse(g._expand_closes)                 # the expand glyph again
         self.assertEqual(g._expand_callback, app.present)
@@ -59,7 +60,8 @@ class TestGraphFullscreen(unittest.TestCase):
         # The fullscreen legend follows every rename and toggle of its graph, as the owning screen's legend does.
         app = GraphFullscreen(FloatLayout())
         parent = BoxLayout()
-        g = ScrollableGraphWidget(colors={"a": (1, 0, 0, 1), "b": (0, 1, 0, 1)}, scales={"a": 100.0, "b": 100.0})
+        g = ScrollableGraphWidget(GraphKind(colors={"a": (1, 0, 0, 1), "b": (0, 1, 0, 1)},
+                                            scales={"a": 100.0, "b": 100.0}))
         parent.add_widget(g)
         owner = []
         wire(g, on_series_change=lambda: owner.append(1))  # the owning screen's legend
@@ -69,7 +71,7 @@ class TestGraphFullscreen(unittest.TestCase):
         app.present(g)
 
         def legend():
-            return [w.text for w in app._legend.walk() if getattr(w, "text", "")]
+            return [w.text for w in app._shown.legend.walk() if getattr(w, "text", "")]
         g.set_series_name("a", "Calm")
         self.assertTrue(any("Calm" in t for t in legend()))
         g.set_visible("b", True)
@@ -78,22 +80,32 @@ class TestGraphFullscreen(unittest.TestCase):
         g._expand_callback(g)  # close
         g.set_series_name("a", "Deep")
         self.assertEqual(len(owner), 3)
-        self.assertIsNone(app._legend)
+        self.assertIsNone(app._shown)
 
     def test_a_graph_no_screen_listens_to_follows_too_and_close_leaves_it_unwired(self):
         app, parent, g = self._make()
         app.present(g)
         g.set_series_name("a", "Calm")
-        self.assertTrue(any("Calm" in getattr(w, "text", "") for w in app._legend.walk()))
+        self.assertTrue(any("Calm" in getattr(w, "text", "") for w in app._shown.legend.walk()))
         g._expand_callback(g)  # close
         self.assertFalse(is_wired(g, "on_series_change"))
         app.present(g)  # and again: the chain is set up afresh
         g.set_series_name("a", "Deep")
-        self.assertTrue(any("Deep" in getattr(w, "text", "") for w in app._legend.walk()))
+        self.assertTrue(any("Deep" in getattr(w, "text", "") for w in app._shown.legend.walk()))
+
+    def test_close_puts_it_back_between_its_neighbours(self):
+        app, parent, g = self._make()
+        before, after = BoxLayout(), BoxLayout()
+        parent.add_widget(before, index=len(parent.children))  # parent.children is last-added first
+        parent.add_widget(after)
+        order = list(parent.children)
+        app.present(g)
+        app.close()
+        self.assertEqual(parent.children, order)
 
     def test_present_is_reentrant_guarded(self):
         app, parent, g = self._make()
         app.present(g)
-        first = app._overlay
+        first = app._shown
         app.present(g)                   # second call is a no-op
-        self.assertIs(app._overlay, first)
+        self.assertIs(app._shown, first)

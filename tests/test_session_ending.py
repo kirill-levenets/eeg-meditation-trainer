@@ -83,11 +83,11 @@ def test_user_stop_derives_the_idle_series_and_clears_the_training_marker(fresh_
     start_ticked_by_hand(app, ticks=2)
     program_mode(app, [])  # the editor emptied meanwhile: what the idle graph is derived from after the ending
     marks = calls_of(monkeypatch, app._live_screen, "set_training_series")
-    assert app._session.program_run.active and app._live_screen.graph.is_visible("program_formula")
+    assert app._session.program_run.active and app._live_screen.graphs.metrics.is_visible("program_formula")
     app._controls.stop_and_save(reason="user")
     frames()
     assert not app._session.program_run.active and marks[-1] == (None,)
-    assert not app._live_screen.graph.is_visible("program_formula")  # the live graph's idle series derived again
+    assert not app._live_screen.graphs.metrics.is_visible("program_formula")  # the live graph's idle series derived again
     assert _card_open(app)
 
 

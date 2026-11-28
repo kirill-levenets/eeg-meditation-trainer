@@ -145,7 +145,7 @@ def test_hidden_session_end_card_leaves_no_invisible_buttons_and_start_stop_take
         screen.end_card.hide()
         _pump()
         assert find_invisible_interactive(screen) == []
-        for btn in (screen._btn_start, screen._btn_stop):
+        for btn in (screen.controls.start, screen.controls.stop):
             btn.disabled = False
             hits = []
             btn.bind(on_release=lambda *_a, b=btn: hits.append(b))

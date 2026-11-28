@@ -1,7 +1,7 @@
 import math
 import time as _time
 from collections import OrderedDict, deque
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 from kivy.clock import Clock
 from kivy.core.text import Label as CoreLabel
@@ -23,6 +23,7 @@ from app.session.scoring import extend_steps
 from app.ui import render_stats
 from app.ui.graph_gestures import GraphGestures
 from app.ui.graph_glyphs import GraphGlyphs
+from app.ui.graph_kinds import GraphKind
 from app.ui.graph_runs import RunExtremes, run_indices
 from app.ui.hooks import Hook
 from app.ui.line_colours import GRADIENT_TOP, LINE_COLOURS, MONO, gradient_texture
@@ -37,6 +38,7 @@ _LABEL_CACHE_MAX = 512
 _X_GRID_STEPS_S = (10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200)
 _MAX_Y_GRID_LINES = 20  # a fixed grid step far below the scale gives way to a nice one (each line has a label)
 _MIN_X_LABEL_GAP_DP = 70
+_Y_GRID_STEP = 20.0  # the y grid's step on a fixed scale
 # New data waits its last redraw's cost / _REDRAW_BUDGET once a redraw takes _SLOW_REDRAW_S (graphs.md, item 6).
 _REDRAW_BUDGET = 0.1
 _SLOW_REDRAW_S = 0.025
@@ -72,41 +74,32 @@ class ScrollableGraphWidget(GraphGestures, GraphGlyphs, Widget):
     on_series_change = Hook()  # a series shown, hidden or renamed: the owner's legend follows
     on_tap = Hook()  # a tap on the plot, not on a glyph (the marker on Android)
 
-    def __init__(self, colors: dict[str, tuple], scales: dict[str, float],
-                 viewport_seconds: int = 60, show_value_labels: bool = True,
-                 show_timestamps: bool = True, sample_rate: float = 0.0,
-                 max_points: int = 0, bipolar: bool = False,
-                 auto_scale: bool = False, grid_step: float = 20.0,
-                 graph_id: str = "", names: dict[str, str] | None = None,
-                 **kwargs) -> None:
+    def __init__(self, kind: GraphKind, graph_id: str = "", max_points: int = 0, **kwargs) -> None:
+        """`graph_id` keys the graph's saved series selection (graph_series_<id>); `max_points` caps its data (0:
+        GRAPH_POINTS_MAX)."""
         super().__init__(**kwargs)
-        self._colors: dict[str, tuple] = colors
-        self._scales: dict[str, float] = scales
-        # Stable identity for per-graph persistence (graph_series_<graph_id>)
-        # and friendly labels for the series picker / legends.
+        self._colors: Mapping[str, tuple] = kind.colors
+        self._scales: Mapping[str, float] = kind.scales
         self._graph_id: str = graph_id
-        self._names: dict[str, str] = dict(names or {})  # its own: a rename never reaches another graph
-        self._bipolar: bool = bipolar
-        self._auto_scale: bool = auto_scale
-        self._grid_step: float = grid_step
+        self._names: dict[str, str] = dict(kind.names)  # its own: a rename never reaches another graph
+        self._bipolar: bool = kind.bipolar
+        self._auto_scale: bool = kind.auto_scale
         self._markers: list[int] = []
         self._drawing_enabled: bool = True
         self._line_width: float = 1.2
-        self._sample_rate: float = sample_rate if sample_rate > 0 else (1.0 / APP.UPDATE_FREQUENCY)
+        self._sample_rate: float = kind.sample_rate if kind.sample_rate > 0 else (1.0 / APP.UPDATE_FREQUENCY)
         effective_max = max_points if max_points > 0 else APP.GRAPH_POINTS_MAX
-        self._viewport_points: int = int(viewport_seconds * self._sample_rate)
-        self._data: dict[str, deque] = {
-            key: deque(maxlen=effective_max) for key in colors
-        }
-        self._visible: dict[str, bool] = dict.fromkeys(colors, True)
+        self._viewport_points: int = int(kind.viewport_seconds * self._sample_rate)
+        self._data: dict[str, deque] = {key: deque(maxlen=effective_max) for key in kind.colors}
+        self._visible: dict[str, bool] = dict.fromkeys(kind.colors, True)
         self._program_keys: frozenset[str] = frozenset()  # a program's set shown: never saved as the selection
-        self._appended: dict[str, int] = dict.fromkeys(colors, 0)  # samples ever added: a run's absolute position
+        self._appended: dict[str, int] = dict.fromkeys(kind.colors, 0)  # samples ever added: a run's absolute position
         self._run_extremes: dict[str, RunExtremes] = {}
         self._gradient_steps: list[tuple[int, str]] = []  # (first point, series): drawn from there in LINE_COLOURS
         self._scroll_offset: int = 0
         self._total_points: int = 0
-        self._show_value_labels: bool = show_value_labels
-        self._show_timestamps: bool = show_timestamps
+        self._show_value_labels: bool = True  # the line-end values and the y scale's numbers
+        self._show_timestamps: bool = True
         self._default_viewport: int = self._viewport_points
         self._min_viewport: int = max(4, int(self._sample_rate * 2))  # min 2 seconds
         self._max_viewport: int = effective_max  # max = full buffer
@@ -425,8 +418,8 @@ class ScrollableGraphWidget(GraphGestures, GraphGlyphs, Widget):
                         size=tex.size,
                     ))
         else:
-            fixed = not self._auto_scale and max_scale / self._grid_step <= _MAX_Y_GRID_LINES
-            step = self._grid_step if fixed else self._compute_nice_step(max_scale)
+            fixed = not self._auto_scale and max_scale / _Y_GRID_STEP <= _MAX_Y_GRID_LINES
+            step = _Y_GRID_STEP if fixed else self._compute_nice_step(max_scale)
             val = 0.0
             while val <= max_scale:
                 frac = val / max_scale if max_scale > 0 else 0

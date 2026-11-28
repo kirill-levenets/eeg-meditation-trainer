@@ -74,14 +74,14 @@ class ProgramSettings:
         if not uid:
             return  # silent-ok: idle live-graph preview; nothing to show without a user
         if self.governs_live_series():
-            show_program_series(self._live_screen.graph, runnable_plan(self.program()))
+            show_program_series(self._live_screen.graphs.metrics, runnable_plan(self.program()))
             self._live_screen.set_training_series(None)  # no active segment in idle
         else:
             self._show_saved_series(uid)
 
     def sync_picker(self) -> None:
         """Refresh the live duration picker: a large 'P' in program mode, else the duration."""
-        self._live_screen.duration.refresh(
+        self._live_screen.controls.duration.refresh(
             self._timer_section.timer_enabled,
             self._timer_section.timer_minutes,
             program_active=self.governs_live_series(),
@@ -213,4 +213,4 @@ class ProgramSettings:
         uid = self._ctx.user_id()
         progs = self._ctx.db.get_saved_programs(uid) if uid else []
         self._editor.show_saved(progs)
-        self._live_screen.duration.set_programs(progs, self.name)
+        self._live_screen.controls.duration.set_programs(progs, self.name)

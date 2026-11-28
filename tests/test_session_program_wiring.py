@@ -95,11 +95,13 @@ class _StubSettings:
 
 class _StubLive:
     def __init__(self):
+        from types import SimpleNamespace
         from unittest.mock import MagicMock
-        self.graph = MagicMock()
-        self.graph.series_keys.return_value = []  # empty catalog -> preview is a no-op
-        self.graph.is_visible.return_value = False
-        self.duration = MagicMock()
+        graph = MagicMock()
+        graph.series_keys.return_value = []  # empty catalog -> preview is a no-op
+        graph.is_visible.return_value = False
+        self.graphs = SimpleNamespace(metrics=graph)
+        self.controls = SimpleNamespace(duration=MagicMock())
 
     def set_training_series(self, key):
         self.training = key
@@ -144,7 +146,7 @@ def test_program_custom_formula_plots_and_marks(fresh_app, monkeypatch):
     marks = calls_of(monkeypatch, app._live_screen, "set_training_series")
     metrics = {"shamatha_score": 50}
     fed.tick({**fed.raw, "alpha1": 80.0}, metrics)
-    graph = app._live_screen.graph
+    graph = app._live_screen.graphs.metrics
     assert metrics["program_formula"] == 80.0  # custom formula evaluated + plotted
     assert app._session.program_run.audio_key == "program_formula"  # transient program drive
     assert app._user_settings.value("audio_metric") == "shamatha_score"  # user's baseline left untouched
@@ -162,7 +164,7 @@ def test_a_segment_whose_formula_cant_run_drives_and_shows_shamatha(fresh_app, m
     marks = calls_of(monkeypatch, app._live_screen, "set_training_series")
     metrics = {"shamatha_score": 50}
     fed.tick({**fed.raw, "alpha1": 80.0}, metrics)
-    graph, score = app._live_screen.graph, app._session.manager.live_score()
+    graph, score = app._live_screen.graphs.metrics, app._session.manager.live_score()
     assert app._session.program_run.audio_key == "shamatha_score"
     assert metrics.get(app._session.drive_key(), 0) == 50  # what the tick sounds: shamatha, not 0
     assert (score.value, score.target) == (50, 120)  # scored on what it sounds
@@ -208,7 +210,7 @@ def test_program_shows_exactly_its_metric_set_whole_session():
     per-segment). Unrelated user selections are hidden during the program and
     restored on stop; only the legend marker moves as segments cross."""
     screen = LiveSessionScreen()
-    graph, shown = screen.graph, shown_on(screen)
+    graph, shown = screen.graphs.metrics, shown_on(screen)
     run = make_run(show=shown.show)
     # User had a custom slot + shamatha on; an unrelated metric off.
     graph.set_visible("custom_formula", True)
@@ -244,7 +246,7 @@ def test_program_with_two_distinct_customs_shows_three_lines():
     (program_formula + program_formula_2), so a 3-distinct-metric program shows 3
     lines — not one shared 'Program' line. The per-tick eval fills each line."""
     screen = LiveSessionScreen()
-    g = screen.graph
+    g = screen.graphs.metrics
     run = make_run(session_manager=MagicMock(elapsed_seconds=0), show=shown_on(screen).show)
 
     prog = SessionProgram([
@@ -276,7 +278,7 @@ def test_idle_program_preview_shows_program_set(fresh_app, monkeypatch):
     is never persisted over it."""
     app = fresh_app
     reload_with(app, {"graph_series_live_metrics": ["shamatha_score"]})
-    g = app._live_screen.graph
+    g = app._live_screen.graphs.metrics
     program_mode(app, [{"minutes": 1, "target": 50, "formula": "meditation_score"},  # outside the saved selection
                        {"minutes": 1, "target": 80, "formula": {"name": "Alpha", "formula": "alpha1"}}])
     preview = {"meditation_score", "program_formula"}
@@ -355,6 +357,6 @@ def test_a_running_programs_series_are_not_saved_once_settings_is_switched_to_si
     program_mode(app, [{"minutes": 1, "target": 50, "formula": "meditation_score"}])
     start_ticked_by_hand(app)
     app._program_settings.on_mode_change("simple")  # switched back mid-session
-    assert app._live_screen.graph.visible_keys() == ["meditation_score"]
-    app._graph_series.persist(app._live_screen.graph)
+    assert app._live_screen.graphs.metrics.visible_keys() == ["meditation_score"]
+    app._graph_series.persist(app._live_screen.graphs.metrics)
     assert _saved_live_series(app) == ["shamatha_score"]

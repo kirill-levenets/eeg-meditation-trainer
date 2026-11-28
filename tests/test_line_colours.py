@@ -13,6 +13,7 @@ from app.settings.registry import SettingsStore
 from app.storage.database import DatabaseManager
 from app.ui.detail_sections.graphs import detail_graph_data
 from app.ui.diary_screen import DiaryScreen
+from app.ui.graph_kinds import METRICS_COLORS, METRICS_SCALES, GraphKind
 from app.ui.hooks import wire
 from app.ui.line_colours import (
     DEFAULT,
@@ -24,11 +25,12 @@ from app.ui.line_colours import (
     gradient_rgb,
     gradient_texture,
 )
-from app.ui.live_session import METRICS_COLORS, METRICS_SCALES, LiveSessionScreen
+from app.ui.live_session import LiveSessionScreen
 from app.ui.raw_eeg_screen import ScrollableGraphWidget, _split_at_spans
 from app.ui.settings_screen import SettingsScreen
 from app.ui.startup import line_colours_setting
 from app.ui.theme import THEMES, C, _contrast
+from tests._graph import bare
 
 GRADIENTS = [name for name, _label in OPTIONS if name != MONO]
 RAMP = [240.0 * i / 299 for i in range(300)]
@@ -50,8 +52,8 @@ def db(tmp_path):
 
 
 def _graph(values=RAMP) -> ScrollableGraphWidget:
-    g = ScrollableGraphWidget(colors=METRICS_COLORS, scales=METRICS_SCALES, graph_id="live_metrics",
-                              show_value_labels=False, show_timestamps=False, size_hint=(None, None), size=(600, 360))
+    g = bare(ScrollableGraphWidget(GraphKind(colors=METRICS_COLORS, scales=METRICS_SCALES), graph_id="live_metrics",
+                                   size_hint=(None, None), size=(600, 360)))
     for k in METRICS_COLORS:
         g._visible[k] = k == "shamatha_score"
     g.set_gradient_series("shamatha_score")
@@ -169,7 +171,7 @@ def test_each_point_keeps_the_colour_of_the_series_it_was_scored_on():
     """A program's next segment moves the legend's mark and colours the new series from there; nothing drawn before is
     recoloured (#113)."""
     screen = LiveSessionScreen()
-    graph = screen.graph
+    graph = screen.graphs.metrics
     for _ in range(3):
         _tick(graph, "shamatha_score")
     screen.set_training_series("custom_formula")

@@ -23,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **The session detail's raw EEG line takes the theme's colour**, as the Session screen's does: it was a fixed blue in every theme.
 - **The Session screen's connecting card is laid out as the loading card is** (#140): its message sits right above the dots and Cancel, so the card is shorter.
 - **A session goes on recording while "Stop session?" is open**: Cancel loses nothing, and Stop saves up to then; the ticks used to stop while the session's clock ran on, leaving a gap in its data.
   If the timer or a lost signal ends the session meanwhile, the question closes.

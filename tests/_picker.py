@@ -19,5 +19,5 @@ def picker_rows(app, monkeypatch) -> list[str]:
         return _Popup()
 
     monkeypatch.setattr(graph_series, "make_scroll_popup", capture)
-    app._graph_series.present_picker(app._live_screen.graph)
+    app._graph_series.present_picker(app._live_screen.graphs.metrics)
     return shown

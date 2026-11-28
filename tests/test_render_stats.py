@@ -1,6 +1,7 @@
 """Render stats must attribute redraw time per graph and report the longest real frame gap once per window."""
 
 from app.ui import render_stats
+from app.ui.graph_kinds import GraphKind
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.render_stats import SUSPEND_GAP_S, WINDOW_S, RenderStats
 
@@ -45,7 +46,8 @@ def test_suspended_loop_is_not_a_stall():
 def test_graph_redraw_is_recorded_under_its_graph_id(monkeypatch):
     s = RenderStats()
     monkeypatch.setattr(render_stats, "STATS", s)
-    graph = ScrollableGraphWidget(colors={"alpha": (1, 0, 0, 1)}, scales={"alpha": 100.0}, graph_id="diary_freq")
+    graph = ScrollableGraphWidget(GraphKind(colors={"alpha": (1, 0, 0, 1)}, scales={"alpha": 100.0}),
+                                  graph_id="diary_freq")
     graph.size = (400, 300)
     graph._redraw()
     assert "diary_freq" in s._redraws
@@ -60,16 +62,16 @@ def test_hidden_live_view_graphs_do_not_draw_until_shown_again(monkeypatch):
     s = RenderStats()
     monkeypatch.setattr(render_stats, "STATS", s)
     screen = LiveSessionScreen()
-    raw, band, metrics = screen._raw_graph, screen._band_graph, screen._graph
+    raw, band, metrics = screen.graphs.raw, screen.graphs.band, screen.graphs.metrics
     for g in (raw, band, metrics):
         g.size = (400, 300)
-    screen._set_view("raw")
-    screen._set_view("metrics")
+    screen.graphs.show_view("raw")
+    screen.graphs.show_view("metrics")
     s._redraws.clear()
     raw.add_points_batch(next(iter(raw._data)), [1.0] * 50)
     band.add_point(dict.fromkeys(band._data, 1.0))
     metrics.add_point(dict.fromkeys(metrics._data, 50.0))
     assert "live_raw" not in s._redraws and "live_band" not in s._redraws
     assert "live_metrics" in s._redraws
-    screen._set_view("raw")
+    screen.graphs.show_view("raw")
     assert "live_raw" in s._redraws and "live_band" in s._redraws, "shown again: drawn with what accrued while hidden"

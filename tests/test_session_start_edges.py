@@ -94,7 +94,7 @@ def test_stop_after_a_failed_wait_cleans_up_without_offering_to_save(waiting, mo
     waiting.first_data()  # the wait just ended on the writer; the controls still show Stop; nothing was started
     app._controls.stop()
     assert popups() == []  # no "Stop session? It will be saved" for a session that never existed
-    assert not app._live_screen._btn_start.disabled and app._session.run is None
+    assert not app._live_screen.controls.start.disabled and app._session.run is None
 
 
 def test_stop_during_a_running_session_still_asks(fresh_app):
@@ -286,7 +286,7 @@ def test_a_scan_result_for_a_profile_picked_away_ends_the_start(scanning):
     paired.arrive()
     assert app._session.run is None and app._real_stream._device_address is None
     assert app._db.get_user_setting(other, "bt_device_address") is None
-    assert app._live_screen.connect_overlay.opacity == 0 and not app._live_screen._btn_start.disabled
+    assert app._live_screen.connect_overlay.opacity == 0 and not app._live_screen.controls.start.disabled
 
 
 def test_a_wait_tick_that_outlived_its_run_ends_nothing(waiting, monkeypatch):
@@ -317,7 +317,7 @@ def program_waiting(fresh_app, monkeypatch) -> _Waiting:
     """A program session's Start in its BT wait: the program has begun and shows its lines."""
     program_mode(fresh_app, DEEP)
     waiting = _Waiting(fresh_app, monkeypatch)
-    assert fresh_app._session.program_run.active and fresh_app._live_screen.graph.is_visible("program_formula")
+    assert fresh_app._session.program_run.active and fresh_app._live_screen.graphs.metrics.is_visible("program_formula")
     return waiting
 
 
@@ -326,9 +326,9 @@ def test_an_ending_derives_the_idle_series_once_the_session_no_longer_reads_live
     app = program_waiting.app
     app._program_settings.on_mode_change("simple")  # while it waits: the idle series is derived at its ending
     program_waiting.first_data()
-    assert app._session.manager.state == SessionState.RUNNING and app._live_screen.graph.is_visible("program_formula")
+    assert app._session.manager.state == SessionState.RUNNING and app._live_screen.graphs.metrics.is_visible("program_formula")
     app._controls.cancel()
-    graph = app._live_screen.graph
+    graph = app._live_screen.graphs.metrics
     assert graph.visible_keys() == ["shamatha_score"] and graph.program_keys == frozenset()  # the profile's own
 
 
@@ -336,7 +336,7 @@ def test_a_cancelled_program_session_derives_the_idle_series_and_leaves_no_progr
     app = program_waiting.app
     app._controls.cancel()
     assert not app._session.program_run.active and app._session.run is None
-    assert app._live_screen.graph.is_visible("program_formula")  # program mode still: its preview, derived again
+    assert app._live_screen.graphs.metrics.is_visible("program_formula")  # program mode still: its preview, derived again
 
 
 @pytest.mark.parametrize("exit_case", ["failed", "no data", "timeout"])

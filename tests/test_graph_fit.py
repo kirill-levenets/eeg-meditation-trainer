@@ -9,14 +9,16 @@ from kivy.tests.common import UnitTestTouch
 
 from app.session.manager import elapsed_clock
 from app.ui.diary_screen import DiaryScreen
+from app.ui.graph_kinds import GraphKind
 from app.ui.hooks import wire
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
+from tests._graph import bare
 
 HOUR = 7200  # ticks at 2 a second
 
 
 def _graph(n: int = HOUR, viewport_s: int = 60) -> ScrollableGraphWidget:
-    g = ScrollableGraphWidget(colors={"a": (1, 1, 1, 1)}, scales={"a": 100}, viewport_seconds=viewport_s,
+    g = ScrollableGraphWidget(GraphKind(colors={"a": (1, 1, 1, 1)}, scales={"a": 100}, viewport_seconds=viewport_s),
                               max_points=3 * HOUR, size=(dp(900), dp(400)), pos=(0, 0))
     g.load_static_data({"a": [50.0] * n})
     return g
@@ -135,7 +137,7 @@ def test_the_plot_reaches_closer_to_the_edges_as_far_as_its_labels_allow():
     g._draw()
     left, right, _bottom, _top = g._pads
     assert left < dp(30) and right < dp(30)  # were 48 and 60
-    wide = ScrollableGraphWidget(colors={"a": (1, 1, 1, 1)}, scales={"a": 200000}, size=(dp(900), dp(400)))
+    wide = ScrollableGraphWidget(GraphKind(colors={"a": (1, 1, 1, 1)}, scales={"a": 200000}), size=(dp(900), dp(400)))
     wide.load_static_data({"a": [150000.0] * 100})
     wide._draw()
     assert wide._pads[0] > left and wide._pads[1] > right  # six-digit labels get the room they need
@@ -221,7 +223,7 @@ def _saved_zoom(app) -> str:
 
 def test_the_zoom_saved_is_the_window_from_before_the_fit(build_app):
     a = build_app()  # its own: an hour of data on the live graph, which the shared app keeps for the next test
-    g = a._live_screen.graph
+    g = a._live_screen.graphs.metrics
     _an_hour_in(g)
     g.set_fitted(True)
     assert g.viewport_points == HOUR and g.zoom_points == 120
@@ -299,7 +301,7 @@ def test_a_drag_that_starts_on_a_glyph_pans_and_fires_nothing():
 
 
 def test_the_plot_keeps_its_margins_as_an_auto_scaled_peak_crosses_a_digit():
-    g = ScrollableGraphWidget(colors={"a": (1, 1, 1, 1)}, scales={"a": 1.0}, auto_scale=True,
+    g = ScrollableGraphWidget(GraphKind(colors={"a": (1, 1, 1, 1)}, scales={"a": 1.0}, auto_scale=True),
                               size=(dp(900), dp(400)), pos=(0, 0))
     g.load_static_data({"a": [80000.0] * 50})
     g._draw()
@@ -372,8 +374,9 @@ def test_a_graph_off_screen_ignores_the_mouse_wheel():
 
 
 def test_stacked_end_labels_stay_inside_the_graph():
-    g = ScrollableGraphWidget(colors={"a": (1, 0, 0, 1), "b": (0, 1, 0, 1), "c": (0, 0, 1, 1)},
-                              scales={"a": 100, "b": 100, "c": 100}, size=(dp(400), dp(300)), pos=(0, 0))
+    g = ScrollableGraphWidget(GraphKind(colors={"a": (1, 0, 0, 1), "b": (0, 1, 0, 1), "c": (0, 0, 1, 1)},
+                                        scales={"a": 100, "b": 100, "c": 100}),
+                              size=(dp(400), dp(300)), pos=(0, 0))
     for _ in range(2):  # a line needs two points
         g.add_point({"a": 100.0, "b": 100.0, "c": 99.0})  # all at the top of the axis
     g._draw()
@@ -480,8 +483,8 @@ def test_the_saved_zoom_starts_both_groups_and_the_detail_never_saves(fresh_app)
 
 
 def test_without_value_labels_the_last_time_label_stays_inside():
-    g = ScrollableGraphWidget(colors={"a": (1, 1, 1, 1)}, scales={"a": 100}, show_value_labels=False,
-                              size=(dp(400), dp(200)), pos=(0, 0))
+    g = bare(ScrollableGraphWidget(GraphKind(colors={"a": (1, 1, 1, 1)}, scales={"a": 100}), size=(dp(400), dp(200)),
+                                   pos=(0, 0)), timestamps=True)
     g.load_static_data({"a": [50.0] * 7201})  # an hour and half a second: a mark at 1:00:00 on the right edge
     g.set_fitted(True)
     g._draw()
@@ -499,7 +502,7 @@ def test_a_step_at_the_top_of_the_scale_keeps_its_label_inside():
 
 def test_end_labels_near_zero_stay_above_the_time_rows():
     keys = "abcdef"
-    g = ScrollableGraphWidget(colors=dict.fromkeys(keys, (1, 0, 0, 1)), scales=dict.fromkeys(keys, 100),
+    g = ScrollableGraphWidget(GraphKind(colors=dict.fromkeys(keys, (1, 0, 0, 1)), scales=dict.fromkeys(keys, 100)),
                               size=(dp(400), dp(80)), pos=(0, 0))  # a short plot: no room above for all six
     g.set_start_wall_time(1_759_648_500.0)  # two time rows under the plot
     for _ in range(2):
@@ -514,8 +517,9 @@ def test_end_labels_near_zero_stay_above_the_time_rows():
 
 
 def _raw_and_band():
-    raw = ScrollableGraphWidget(colors={"eeg": (1, 1, 1, 1)}, scales={"eeg": 500}, sample_rate=512, max_points=512 * 60,
-                                viewport_seconds=10, size=(dp(900), dp(400)), pos=(0, 0))
+    raw = ScrollableGraphWidget(GraphKind(colors={"eeg": (1, 1, 1, 1)}, scales={"eeg": 500}, sample_rate=512,
+                                          viewport_seconds=10),
+                                max_points=512 * 60, size=(dp(900), dp(400)), pos=(0, 0))
     raw.load_static_data({"eeg": [1.0] * (512 * 60)})  # its last minute
     band = _graph()  # an hour
     ScrollableGraphWidget.link_zoom(band, raw)

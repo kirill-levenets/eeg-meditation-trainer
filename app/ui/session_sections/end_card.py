@@ -20,6 +20,7 @@ from app.ui.theme import (
     text_width,
 )
 from app.ui.widgets.popups import ModalPanel, ModalScrim
+from app.ui.widgets.rows import StatRows
 from app.ui.widgets.styled_button import StyledButton
 
 
@@ -56,72 +57,52 @@ class EndCard(ModalScrim):
         self._session_title = ""
         self._title.bind(width=self._fit_title, font_size=self._fit_title)
 
-        # Stats card: one (label, value) row per stat, set by show — a session that saved no metric has one
-        # threshold row where the others have Metric and Threshold. Lines are 22 dp with no gap between them.
-        self._stats_card = Card(
-            orientation="vertical",
-            size_hint_y=None,
-            bg_color=C.BG_CARD,
-            spacing=0,
-        )
-        self._line_h = dp(22)
-        self._row_pool: list[tuple[BoxLayout, ThemedLabel, ThemedLabel]] = []
-        self._rows: list[tuple[ThemedLabel, ThemedLabel]] = []  # (label, value) of the rows shown, in order
+        panel.add_widget(self._build_body())
+        self._set_rows([])
+        panel.bind(width=self._arrange)
+        F.add_listener(self._arrange)  # the notes field's height follows its text
+        panel.add_widget(self._build_buttons())
+        # As tall as the card when it fits, else the space there is, scrolling the rest: like every popup's cap.
+        self._scroll = ScrollView(size_hint=(1, None), do_scroll_x=False)
+        self._scroll.add_widget(panel)
+        panel.bind(height=self._fit_scroll)
+        self.bind(height=self._fit_scroll, padding=self._fit_scroll)
+        self.add_widget(self._scroll)
 
-        # The stats, then the notes field and Save notes: arranged by _arrange in one column or two.
+    def _build_body(self) -> BoxLayout:
+        """The stats card, then the notes field and Save notes: arranged by _arrange in one column or two."""
+        # One (label, value) row per stat, set by show; lines are 22 dp with no gap between them.
+        self._stats_card = Card(orientation="vertical", size_hint_y=None, bg_color=C.BG_CARD, spacing=0)
+        self._stats = StatRows(self._stats_card, self._make_row, dp(22))
         self._body = BoxLayout(size_hint_y=None, spacing=S.GAP)
         self._notes_box = BoxLayout(size_hint_y=None, spacing=S.GAP)
-        self._notes = ThemedTextInput(
-            hint_text="Quick notes: how was the session?",
-            multiline=True,
-            font_size=F.BODY,
-            foreground_color=C.TEXT,
-            background_color=C.BG_INPUT,
-            cursor_color=C.PRIMARY,
-        )
-        self.save_notes_btn = StyledButton(
-            text="Save notes", bg_color=C.PRIMARY, bg_pressed=C.PRIMARY_DIM,
-            size_hint_x=None, width=dp(110),
-        )
+        self._notes = ThemedTextInput(hint_text="Quick notes: how was the session?", multiline=True, font_size=F.BODY,
+                                      foreground_color=C.TEXT, background_color=C.BG_INPUT, cursor_color=C.PRIMARY)
+        self.save_notes_btn = StyledButton(text="Save notes", bg_color=C.PRIMARY, bg_pressed=C.PRIMARY_DIM,
+                                           size_hint_x=None, width=dp(110))
         self._save_holder = AnchorLayout(anchor_x="right", size_hint_y=None, height=S.BTN_H)
         self._save_holder.add_widget(self.save_notes_btn)
         self._notes_box.add_widget(self._notes)
         self._notes_box.add_widget(self._save_holder)
         self._body.add_widget(self._stats_card)
         self._body.add_widget(self._notes_box)
-        panel.add_widget(self._body)
-        self._set_rows([])
-        panel.bind(width=self._arrange)
-        F.add_listener(self._arrange)  # the notes field's height follows its text
+        return self._body
 
-        # Delete is low-emphasis and kept apart from OK: it is the one destructive action here.
+    def _build_buttons(self) -> BoxLayout:
+        """Delete, low-emphasis and kept apart from OK: it is the one destructive action here."""
         buttons = BoxLayout(size_hint_y=None, height=S.BTN_H, spacing=S.GAP)
-        self.delete_btn = StyledButton(
-            text="Delete session", icon=Icons.DELETE,
-            bg_color=C.BG_CARD, text_color=C.DANGER,
-            size_hint_x=None, width=dp(150),
-        )
-        self.ok_btn = StyledButton(
-            text="OK", icon=Icons.CHECK,
-            bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM,
-            size_hint_x=None, width=dp(120),
-        )
+        self.delete_btn = StyledButton(text="Delete session", icon=Icons.DELETE, bg_color=C.BG_CARD,
+                                       text_color=C.DANGER, size_hint_x=None, width=dp(150))
+        self.ok_btn = StyledButton(text="OK", icon=Icons.CHECK, bg_color=C.ACCENT, bg_pressed=C.ACCENT_DIM,
+                                   size_hint_x=None, width=dp(120))
         buttons.add_widget(self.delete_btn)
         buttons.add_widget(Widget())
         buttons.add_widget(self.ok_btn)
-        panel.add_widget(buttons)
-        # As tall as the card when it fits, else the space there is, scrolling the rest: like every popup's cap.
-        scroll = ScrollView(size_hint=(1, None), do_scroll_x=False)
-        scroll.add_widget(panel)
-        self._scroll = scroll
+        return buttons
 
-        def _fit_scroll(*_a):
-            pad = self.padding
-            scroll.height = min(panel.height, max(0, self.height - pad[1] - pad[3]))
-
-        panel.bind(height=_fit_scroll)
-        self.bind(height=_fit_scroll, padding=_fit_scroll)
-        self.add_widget(scroll)
+    def _fit_scroll(self, *_a) -> None:
+        pad = self.padding
+        self._scroll.height = min(self._panel.height, max(0, self.height - pad[1] - pad[3]))
 
     def show(self, session_id: int, stats: dict, title: str = "") -> None:
         """Show the post-session card: the session's name, its duration and scored stats, and a notes field."""
@@ -150,8 +131,9 @@ class EndCard(ModalScrim):
         else:
             title.text = "Session saved\n" + _cut_to_width(name, title)
 
-    def _make_row(self) -> tuple[BoxLayout, ThemedLabel, ThemedLabel]:
-        row = BoxLayout(size_hint_y=None, height=self._line_h)
+    @staticmethod
+    def _make_row() -> tuple[tuple[BoxLayout], ThemedLabel, ThemedLabel]:
+        row = BoxLayout(size_hint_y=None, height=dp(22))
         # The label takes its text's width and the value the rest: a Metric value can be longer than its label.
         label = ThemedLabel(text="", font_size=F.BODY, color=C.TEXT_SECONDARY, size_hint_x=None)
         fit_width_to_text(label, S.GAP)
@@ -160,23 +142,11 @@ class EndCard(ModalScrim):
         text_fills_box(value)
         row.add_widget(label)
         row.add_widget(value)
-        return row, label, value
+        return (row,), label, value
 
     def _set_rows(self, rows: list[tuple[str, str]]) -> None:
         """Show these (label, value) rows under the session's name; the card is as tall as its lines."""
-        card = self._stats_card
-        while len(self._row_pool) < len(rows):
-            self._row_pool.append(self._make_row())
-        for box, _label, _value in self._row_pool:
-            if box.parent is not None:
-                card.remove_widget(box)
-        used = self._row_pool[:len(rows)]
-        for (text, shown), (box, label, value) in zip(rows, used):
-            label.text, value.text = text, shown
-            card.add_widget(box)
-        self._rows = [(label, value) for _box, label, value in used]
-        lines = len(rows)
-        card.height = lines * self._line_h + max(lines - 1, 0) * card.spacing + card.padding[1] + card.padding[3]
+        self._stats.show(rows)
         self._arrange()
 
     @staticmethod
