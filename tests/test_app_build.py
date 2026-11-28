@@ -175,7 +175,7 @@ def _start_and_tick(app) -> None:
 
 def test_a_program_session_owns_the_live_graph_until_its_ending_derives_the_idle_series(fresh_app, monkeypatch):
     app = fresh_app
-    uid, g = app._current_user_id, app._live_screen.graph
+    uid, g = app._current_user_id, app._live_screen.graphs.metrics
     app._program_settings.segments = [dict(s) for s in _DEEP]
     app._program_settings.on_mode_change("program")  # the idle preview: shown, not listed
     assert g.is_visible("program_formula") and _program_rows(app, monkeypatch) == []
@@ -209,7 +209,7 @@ def test_a_duration_tap_while_a_program_previews_saves_nothing_of_it(fresh_app):
     app._program_settings.on_mode_change("program")
     app._program_settings.on_duration_preset(20)  # the Session screen's duration: simple mode, the settings saved
     assert app._db.get_user_json_setting(uid, "graph_series_live_metrics") == saved
-    assert not app._live_screen.graph.is_visible("program_formula")
+    assert not app._live_screen.graphs.metrics.is_visible("program_formula")
 
 
 def test_a_start_derives_the_idle_series_whatever_an_editor_change_left(fresh_app, monkeypatch):
@@ -218,7 +218,7 @@ def test_a_start_derives_the_idle_series_whatever_an_editor_change_left(fresh_ap
     app._program_settings.on_mode_change("program")  # the preview, marked
     app._program_settings.segments = []  # a writer that skipped the derivation: the next Start is a simple session
     _start_and_tick(app)
-    assert app._live_screen.graph.program_keys == frozenset() and _program_rows(app, monkeypatch) == []
+    assert app._live_screen.graphs.metrics.program_keys == frozenset() and _program_rows(app, monkeypatch) == []
     app._controls.stop_and_save()
     frames()
 

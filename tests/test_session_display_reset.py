@@ -28,7 +28,7 @@ def _finished_screen() -> LiveSessionScreen:
     screen.set_start_time(1_760_000_000.0)
     screen.header.update_timer("05:00")
     screen.header.update_state("FINISHED")
-    screen.graph.add_point(METRICS)
+    screen.graphs.metrics.add_point(METRICS)
     return screen
 
 
@@ -88,7 +88,7 @@ def _display(app) -> dict:
     """What the Session screen and its mirror hold of a session."""
     mirror, screen = app._shown.mirror, app._live_screen
     return {"mirror": (list(mirror.metrics), list(mirror.bands), list(mirror.waveform), mirror.last_metrics, mirror.marks),
-            "points": screen.graph.total_points, "timer": screen.header._timer_label.text, "stats": _texts(screen)}
+            "points": screen.graphs.metrics.total_points, "timer": screen.header._timer_label.text, "stats": _texts(screen)}
 
 
 def _fresh_display(app) -> dict:
@@ -99,7 +99,7 @@ def _fresh_display(app) -> dict:
 
 
 def test_clear_live_display_empties_the_graphs_their_mirrors_and_the_readout(shown):
-    assert shown._live_screen.graph.total_points == 3 and _display(shown) != _fresh_display(shown)
+    assert shown._live_screen.graphs.metrics.total_points == 3 and _display(shown) != _fresh_display(shown)
     shown._shown.clear()
     assert _display(shown) == _fresh_display(shown)
 
@@ -135,7 +135,7 @@ def test_re_picking_the_shown_profile_keeps_its_session_even_mid_session(fresh_a
     app._db.set_user_setting(app._current_user_id, "line_width", "2.5")
     seen = _drops(app, monkeypatch)
     app._activate_user(app._current_user_id)
-    assert seen == [] and len(app._shown.mirror.metrics) == 3 and app._live_screen.graph.total_points == 3
+    assert seen == [] and len(app._shown.mirror.metrics) == 3 and app._live_screen.graphs.metrics.total_points == 3
     assert app._user_settings.value("line_width") == 2.5  # its settings were loaded again
 
 
@@ -143,7 +143,7 @@ def test_a_threshold_moved_during_a_session_keeps_its_graphs(fresh_app):
     app = fresh_app
     start_ticked_by_hand(app, ticks=3)
     app._settings_screen.threshold.value = app._settings_screen.threshold.value - 5  # allowed mid-session (no program)
-    assert len(app._shown.mirror.metrics) == 3 and app._live_screen.graph.total_points == 3
+    assert len(app._shown.mirror.metrics) == 3 and app._live_screen.graphs.metrics.total_points == 3
 
 
 def test_a_cold_start_shows_nothing_to_drop(fresh_app, monkeypatch):
@@ -178,7 +178,7 @@ def test_a_deleted_sessions_card_closes_unsaved_but_its_bell_stops(shown):
 
 def test_an_idle_threshold_clear_keeps_the_owner_of_an_open_card(shown):
     shown._settings_screen.threshold.value = shown._settings_screen.threshold.value - 5  # an idle slider move clears the display
-    assert shown._live_screen.graph.total_points == 0 and _card_open(shown)
+    assert shown._live_screen.graphs.metrics.total_points == 0 and _card_open(shown)
     assert shown._shown.owner == shown.me  # a later switch to another profile still closes the card
 
 
@@ -198,7 +198,7 @@ def test_deleting_another_profile_leaves_the_shown_session(shown, monkeypatch):
 
 def test_the_live_title_is_the_scored_series_name_on_the_graph_kept_until_the_readout_clears():
     screen = _finished_screen()
-    screen.graph.set_series_name("custom_formula", "Alpha calm")
+    screen.graphs.metrics.set_series_name("custom_formula", "Alpha calm")
     screen.set_training_series("custom_formula")
     assert screen.stats._titles[0].text == "Alpha calm"
     screen.set_training_series(None)  # the session ended: the legend's mark goes, its numbers stay with their name
@@ -253,7 +253,7 @@ def test_a_start_that_never_connected_leaves_no_owner(fresh_app, monkeypatch):
 
 def test_deleting_the_shown_session_in_history_drops_it_from_the_session_screen(shown):
     shown._shown.on_ok()  # its card was closed with OK; its graphs still show
-    assert shown._live_screen.graph.total_points == 3
+    assert shown._live_screen.graphs.metrics.total_points == 3
     shown._history.delete_sessions([shown.sid])
     frames_until(lambda: shown._shown.owner is None)  # the delete's worker, then its main-thread half
     assert shown._db.get_session(shown.sid) is None and _display(shown) == _fresh_display(shown)

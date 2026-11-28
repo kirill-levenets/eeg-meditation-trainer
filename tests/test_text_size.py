@@ -27,6 +27,7 @@ from app.session.manager import LiveScore
 from app.settings.registry import Setting, SettingsStore
 from app.storage.database import DatabaseManager
 from app.ui.diary_screen import DiaryScreen
+from app.ui.graph_kinds import GraphKind
 from app.ui.history_screen import HistoryScreen
 from app.ui.hooks import wire
 from app.ui.live_session import LiveSessionScreen
@@ -90,7 +91,7 @@ def test_widgets_built_after_the_scale_take_it_even_by_default():
 
 
 def test_a_graphs_labels_follow_the_scale():
-    graph = ScrollableGraphWidget(colors={"a": (1, 1, 1, 1)}, scales={"a": 100.0})
+    graph = ScrollableGraphWidget(GraphKind(colors={"a": (1, 1, 1, 1)}, scales={"a": 100.0}))
     normal = graph._make_text_texture("123", size=8).height
     F.set_scale(1.2)
     assert graph._make_text_texture("123", size=8).height > normal  # not the cached normal-size texture
@@ -204,9 +205,9 @@ def test_the_timer_pill_holds_every_timer_on_one_line(scale):
     """Every length the slider sets (1 to 120 min), no timer and a program's P: the pill is as wide as its text."""
     F.set_scale(scale)
     screen = LiveSessionScreen()
-    pill, label = screen.duration.button, screen.duration.button._text_label
+    pill, label = screen.controls.duration.button, screen.controls.duration.button._text_label
     for timer in [(False, 20, False), (True, 20, True), *((True, minutes, False) for minutes in range(1, 121))]:
-        screen.duration.refresh(*timer)
+        screen.controls.duration.refresh(*timer)
         assert text_width(label.text, label.font_size, label.bold, label.font_name) <= pill.width - dp(1), label.text
 
 
@@ -356,7 +357,7 @@ def test_a_change_redraws_the_graphs():
             redraws.append(1)
             super()._redraw(*args)
 
-    _graph = Graph(colors={"a": (1, 1, 1, 1)}, scales={"a": 100.0})  # held: a listener doesn't keep it alive
+    _graph = Graph(GraphKind(colors={"a": (1, 1, 1, 1)}, scales={"a": 100.0}))  # held: a listener doesn't keep it alive
     redraws.clear()
     F.set_scale(1.2)
     assert redraws
@@ -386,8 +387,8 @@ WIDE_SCORE = LiveScore(value=188, target=120, streak=3599, average=187.55, segme
 
 def _session_states(screen):
     yield "", None
-    yield " a 105 min timer", lambda: screen.duration.refresh(True, 105)
-    yield " a filled stats bar", lambda: (screen.graph.set_series_name("custom_formula", "Alpha calm, evening"),
+    yield " a 105 min timer", lambda: screen.controls.duration.refresh(True, 105)
+    yield " a filled stats bar", lambda: (screen.graphs.metrics.set_series_name("custom_formula", "Alpha calm, evening"),
                                           screen.set_training_series("custom_formula"), screen.stats.update(WIDE_SCORE))
     yield " its AVG side", lambda: screen.stats.set_mode("aggregate")
     yield " saved card", lambda: screen.end_card.show(

@@ -161,13 +161,13 @@ class EEGMeditationApp(App):
         self._audio_metric = AudioMetric(self._ctx, self._session.program_run, self._settings_screen.metric)
         self._program_settings = ProgramSettings(
             self._ctx, self._settings_screen.timer, self._live_screen,
-            show_saved_series=lambda uid: self._graph_series.apply_saved(self._live_screen.graph, uid))
+            show_saved_series=lambda uid: self._graph_series.apply_saved(self._live_screen.graphs.metrics, uid))
         self._session_settings = SessionSettings(self._ctx, self._settings_screen, self._program_settings, self._formulas)
-        self._formula_settings = FormulaSettings(self._ctx, self._settings_screen.formulas, self._live_screen.graph,
+        self._formula_settings = FormulaSettings(self._ctx, self._settings_screen.formulas, self._live_screen.graphs.metrics,
                                                  self._formulas, scoring_locked=self._audio_metric.formula_scoring_locked)
         self._power = PowerExemption(self._ctx, self._settings_screen.device)
         self._graphs = GraphSet(self._live_screen, self._diary_screen, self._settings_screen.display)
-        self._graph_series = GraphSeries(self._ctx, self._live_screen.graph, self._formulas, self._formula_settings,
+        self._graph_series = GraphSeries(self._ctx, self._live_screen.graphs.metrics, self._formulas, self._formula_settings,
                                          graphs=self._graphs.all)
         self._history = HistoryFlow(self._ctx, self._history_screen, self._formulas, self._loading_overlay,
                                     on_sessions_deleted=lambda ids: self._shown.on_sessions_deleted(ids))
@@ -218,12 +218,11 @@ class EEGMeditationApp(App):
 
     def _wire_session_screen(self) -> None:
         """The Session screen's controls, its end card, its graphs' glyphs and the series its graph starts with."""
-        self._live_screen.btn_start.bind(on_release=lambda _b: self._controls.start())
-        self._live_screen.btn_pause.bind(on_release=lambda _b: self._controls.toggle_pause())
-        self._live_screen.btn_stop.bind(on_release=lambda _b: self._controls.stop())
-        self._live_screen.btn_marker.bind(on_release=lambda _b: self._controls.mark())
+        wire(self._live_screen.controls, on_start=lambda: self._controls.start(),
+             on_pause=lambda: self._controls.toggle_pause(), on_stop=lambda: self._controls.stop(),
+             on_mark=lambda: self._controls.mark())
         wire(
-            self._live_screen.duration,
+            self._live_screen.controls.duration,
             on_preset=self._program_settings.on_duration_preset,
             on_program_pick=self._program_settings.on_load,
         )
@@ -235,8 +234,8 @@ class EEGMeditationApp(App):
 
         # Tap on graph to set marker (Android — no keyboard available)
         if android_jni.on_android():
-            wire(self._live_screen.graph, on_tap=lambda *_a: self._controls.mark())
-        wire(self._live_screen, on_lines_shown=self._session.set_shown)
+            wire(self._live_screen.graphs.metrics, on_tap=lambda *_a: self._controls.mark())
+        wire(self._live_screen.graphs, on_lines_shown=self._session.set_shown)
         wire(self._live_screen.stats, on_mode=lambda _mode: self._user_settings.changed("stats_view_mode"))
 
         # Shared fullscreen-expand + series-picker glyphs on every graph
@@ -244,9 +243,9 @@ class EEGMeditationApp(App):
         # The formula series stay hidden until a formula is shown through the picker, the program ones while no program
         # with formula segments runs; a new profile starts on Shamatha alone (a profile load applies its own).
         for key in (*FORMULA_KEYS, *PROGRAM_FORMULA_KEYS):
-            self._live_screen.graph.set_visible(key, False)
+            self._live_screen.graphs.metrics.set_visible(key, False)
         for key, active in FIRST_RUN_LIVE_SERIES.items():
-            self._live_screen.graph.set_visible(key, active)
+            self._live_screen.graphs.metrics.set_visible(key, active)
 
     def _wire_settings_screen(self) -> None:
         """Settings' own folds: the profile, the backup, the threshold and the sound's metric, the theme."""

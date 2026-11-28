@@ -150,7 +150,7 @@ def test_record_includes_visible_and_drove_audio(fresh_app):
     app._formulas.names[0] = "Ratio"
     app._user_settings._store.change("audio_metric", "custom_formula")
     start_ticked_by_hand(app)
-    app._live_screen.graph.set_visible("custom_formula", True)  # shown during the session: Start derives the series
+    app._live_screen.graphs.metrics.set_visible("custom_formula", True)  # shown during the session: Start derives the series
     rec = json.loads(app._session.custom_formulas_json())
     assert (rec[0]["name"], rec[0]["formula"]) == ("Ratio", "alpha + beta")
     assert rec[0]["visible"] and rec[0]["drove_audio"]
@@ -206,7 +206,7 @@ def test_assign_saved_formula_to_slot(fresh_app):
     app = fresh_app
     app._formula_settings.assign_saved(0, {"name": "Ratio", "formula": "alpha + beta"})
     assert app._formulas.evaluators[0].is_valid and app._formulas.names[0] == "Ratio"
-    assert app._live_screen.graph.is_visible("custom_formula")
+    assert app._live_screen.graphs.metrics.is_visible("custom_formula")
 
 
 def test_deleting_a_saved_formula_asks_first_like_a_saved_program(fresh_app):

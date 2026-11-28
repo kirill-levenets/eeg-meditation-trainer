@@ -5,15 +5,16 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 ## Session screen
 
-- **Session screen** (`live_session.py`): the graphs with their Metrics/Raw EEG toggle (inline, no separate screen) and the controls.
-  The parts around them are their own widgets in `session_sections/`, built by the screen and reached as its attributes:
-  `header` (`SessionHeader`: the headset, the clock, the state or the SHAMATHA pill), `stats` (`StatsStrip`), `duration` (`DurationPicker`, Start's companion button and its popup),
+- **Session screen** (`live_session.py`): its parts in `session_sections/`, built by the screen and reached as its attributes, and the alert line under the header:
+  `header` (`SessionHeader`: the headset, the clock, the state or the SHAMATHA pill),
+  `graphs` (`LiveGraphs`: Metrics, the metrics graph and its legend, or Raw EEG, the waveform, the band power and its legend, behind their switch, inline, no separate screen; the view shown is the one in its area, and only its graphs draw; the training mark, the raw feed, the mirror reload, `on_lines_shown`),
+  `stats` (`StatsStrip`), `controls` (`ControlBar`: Start with `duration`, the `DurationPicker` beside it, Pause, Stop, Mark; `show_running` / `show_paused` / `show_idle`, and a hook per tap),
   `end_card` (`EndCard`, the session-end card with quick notes) and `connect_overlay` (`ConnectOverlay`: the `LoadingOverlay` with Cancel, and Retry once the connection failed).
-  The screen keeps what spans them: the controls' states, the training mark (`set_training_series`: legend and stats strip), the start time (header and graph) and `clear_readout`.
+  The screen keeps what spans them: the training mark (`set_training_series`: legend and stats strip), the start time (header and graph) and `clear_readout`.
   The header's headset label (`HeadsetLabel`) draws a marker before the name, in the label's left padding so the two centre as one: a grey ring not connected, an amber ring connecting, a green dot connected, a red dot recording.
   The link comes from `Headset.show_selected`, recording from the session's `Connected`, `Paused`, `Resumed` and the teardown (`set_recording`); ring or dot tells the link without its colour, and the colour is the role's `with_contrast` on `C.BG`, repainted on a theme switch.
   A ring is a disc with a hole in the screen's colour, a dot the same hole in its own colour: Kivy keeps drawing an `Ellipse` resized to 0 in its last shape.
-  `end_card.show(sid, stats, title=)` fills the card: Duration, the `session_score_rows` rows, Time Above Threshold and Longest Streak, 22 dp lines with no gap (`_set_rows` attaches as many pooled rows as the session has).
+  `end_card.show(sid, stats, title=)` fills the card: Duration, the `session_score_rows` rows, Time Above Threshold and Longest Streak, 22 dp lines with no gap (`_set_rows`: `rows.StatRows`, the session detail's too, attaches as many pooled rows as the session has).
   `_arrange` lays it out by the card's width, re-run on every width change, so a phone turned with the card open re-flows it with the typed notes kept:
   from 520 dp inside the card (a landscape phone, ~670) two columns, the stats left and the notes field over **Save notes** right (the field takes the stats' height less Save notes, a few lines);
   else one column, the stats over the notes field, two lines of its text tall (`_notes_h`, `F.box(44)`: Save notes' height at the normal text size), with Save notes beside it;
@@ -21,7 +22,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The title follows the arrangement by the same rule, `_in_two_columns`, applied to its own width, which spans the card's inside (`_fit_title`, so it can't depend on which of the two width changes Kivy dispatches first):
   `Session saved · <session_title>` on one line over two columns, the name on a line of its own under `Session saved` over one, either cut with an ellipsis to its line (`_cut_to_width`), never wrapped further.
   Bottom-bar action buttons (Start/Pause/Stop/Mark) put the icon over the text (`StyledButton(vertical=True)`).
-  Adaptive landscape layout: `_compute_graph_height_adaptive` uses a fixed graph height when the viewport is tall, or switches to scroll mode when the graph would fall below `dp(400)`.
+  Adaptive landscape layout: `_graph_height` gives the graph what the page leaves it under the stats and the controls when that is at least `dp(400)`, else the viewport's height, the page scrolling (never under `dp(240)`).
   The bottom bar lives inside the body ScrollView.
 - **The Session screen shows one profile's session.**
   `ShownSession` (`app/ui/shown_session.py`, the app's `_shown`) is that session: its `owner` is the profile whose session the screen shows (graphs, readout, end card), set at Start (`take`), cleared when the start never became a session (a Cancel, a wait's give-up) (the Start already emptied the display).

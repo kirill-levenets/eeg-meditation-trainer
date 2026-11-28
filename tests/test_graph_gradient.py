@@ -10,10 +10,11 @@ from kivy.uix.scrollview import ScrollView
 from PIL import Image
 
 import app.ui.raw_eeg_screen as rg
+from app.ui.graph_kinds import METRICS_COLORS, METRICS_SCALES, GraphKind
 from app.ui.line_colours import gradient_colour
-from app.ui.live_session import METRICS_COLORS, METRICS_SCALES
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.theme import C
+from tests._graph import bare
 
 RAMP = [120.0 * i / 299 for i in range(300)]
 RAMP_PAST_TOP = [240.0 * i / 299 for i in range(300)]  # the gradient spans 0 to 200
@@ -21,8 +22,8 @@ JAGGED = [60 + 55 * ((-1) ** i) * ((i % 7) / 6) for i in range(300)]
 
 
 def _graph(values, gradient=True, size=(600, 360)) -> ScrollableGraphWidget:
-    g = ScrollableGraphWidget(colors=METRICS_COLORS, scales=METRICS_SCALES, graph_id="live_metrics",
-                              show_value_labels=False, show_timestamps=False, size_hint=(None, None), size=size)
+    g = bare(ScrollableGraphWidget(GraphKind(colors=METRICS_COLORS, scales=METRICS_SCALES), graph_id="live_metrics",
+                                   size_hint=(None, None), size=size))
     for k in METRICS_COLORS:
         g._visible[k] = k == "shamatha_score"
     if gradient:

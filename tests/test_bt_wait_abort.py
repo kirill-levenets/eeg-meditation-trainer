@@ -66,7 +66,7 @@ def test_a_cancel_before_any_start_is_harmless(build_app):
     app = build_app()
     assert app._session.run is None and not app._session.connecting()
     app._controls.cancel()  # must not raise
-    assert app._session.run is None and not app._live_screen._btn_start.disabled
+    assert app._session.run is None and not app._live_screen.controls.start.disabled
 
 
 def test_failed_connect_exit_releases_wake_lock_and_service(fresh_app, monkeypatch):

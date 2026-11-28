@@ -105,8 +105,6 @@ ignore = [
 "app/ui/app_manager.py" = ["BLE001"]
 # Backup/restore (moved from app_manager): broad except around SAF / pyjnius / file I/O, each logged or reported
 "app/ui/backup_flow.py" = ["BLE001"]
-# diary: broad except, long flat _build_ui
-"app/ui/diary_screen.py" = ["BLE001", "PLR0915"]
 # Theme: broad except in listeners
 "app/ui/theme.py" = ["BLE001"]
 

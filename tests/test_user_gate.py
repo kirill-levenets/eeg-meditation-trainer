@@ -197,7 +197,7 @@ def test_discard_running_session_deletes_partial_row_and_resets_ui(fresh_app):
     assert _session_rows(app) == 0  # orphan removed
     assert app._session.recorder.session_id is None and app._session.recorder._buffer == []
     assert app._session.run is None and not runner_alive(app)
-    assert app._live_screen._btn_stop.disabled and not app._live_screen._btn_start.disabled  # the idle controls
+    assert app._live_screen.controls.stop.disabled and not app._live_screen.controls.start.disabled  # the idle controls
     assert popup_titles() == []  # no end card for a session that is gone
 
 

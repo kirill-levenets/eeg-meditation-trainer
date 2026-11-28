@@ -5,13 +5,13 @@ import time
 import pytest
 
 from app.ui import raw_eeg_screen as rg
-from app.ui.live_session import METRICS_COLORS, METRICS_SCALES
+from app.ui.graph_kinds import METRICS_COLORS, METRICS_SCALES, GraphKind
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 
 
 @pytest.fixture
 def graph(monkeypatch):
-    g = ScrollableGraphWidget(colors=METRICS_COLORS, scales=METRICS_SCALES, viewport_seconds=60)
+    g = ScrollableGraphWidget(GraphKind(colors=METRICS_COLORS, scales=METRICS_SCALES, viewport_seconds=60))
     g.size = (800, 400)
     draws = []
     monkeypatch.setattr(g, "_draw", lambda: draws.append(g._total_points))

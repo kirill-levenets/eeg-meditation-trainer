@@ -41,7 +41,7 @@ def test_open_modal_not_intercepted(app):
 
 
 def test_fullscreen_overlay_closes(app):
-    app._fullscreen.present(app._live_screen.graph)
+    app._fullscreen.present(app._live_screen.graphs.metrics)
     assert app._fullscreen.is_open
     assert _back(app) is True
     assert not app._fullscreen.is_open and app._sm.current == "live_session" and app.toasts == []
@@ -90,4 +90,4 @@ def test_entering_the_session_screen_shows_a_timer_changed_in_settings(app):
     timer = app._settings_screen.timer
     timer.timer_enabled, timer.timer_minutes = True, 45
     app._nav.on_tab("session")
-    assert app._live_screen.duration.button.text == "45m"
+    assert app._live_screen.controls.duration.button.text == "45m"

@@ -22,26 +22,26 @@ def _marked_mirror(ticks: int, marked: set, waveform: int = 3) -> LiveMirror:
 
 
 def _markers(screen) -> list:
-    return [list(g._markers) for g in (screen.graph, screen.band_graph, screen.raw_graph)]
+    return [list(g._markers) for g in (screen.graphs.metrics, screen.graphs.band, screen.graphs.raw)]
 
 
 def test_a_reload_keeps_the_markers_where_the_live_graphs_put_them():
     screen = LiveSessionScreen()
-    screen.load_mirror(_marked_mirror(3, {1}).snapshot())
+    screen.graphs.load_mirror(_marked_mirror(3, {1}).snapshot())
     assert _markers(screen) == [[1], [1], [5]]  # its tick, and its tick's last raw sample (3 per tick)
 
 
 def test_a_full_buffer_shifts_the_markers_and_drops_the_ones_it_dropped(monkeypatch):
     monkeypatch.setattr(APP, "GRAPH_POINTS_MAX", 3)  # the metrics and bands keep the last 3 ticks
     screen = LiveSessionScreen()
-    screen.load_mirror(_marked_mirror(5, {0, 3}, waveform=0).snapshot())
+    screen.graphs.load_mirror(_marked_mirror(5, {0, 3}, waveform=0).snapshot())
     assert _markers(screen) == [[1], [1], [0, 3]]  # the raw buffer still holds every sample
 
 
 def test_a_full_raw_buffer_shifts_its_markers_and_drops_the_ones_it_dropped(monkeypatch):
     monkeypatch.setattr(APP, "RAW_WAVEFORM_MAX", 6)  # the raw graph and the mirror keep the last 6 samples
     screen = LiveSessionScreen()
-    screen.load_mirror(_marked_mirror(5, {0, 3}).snapshot())  # 3 samples a tick: 15, the first 9 dropped
+    screen.graphs.load_mirror(_marked_mirror(5, {0, 3}).snapshot())  # 3 samples a tick: 15, the first 9 dropped
     assert _markers(screen)[2] == [2]  # tick 3's last sample, the 12th; tick 0's went with its sample
 
 
@@ -50,7 +50,7 @@ def test_a_cleared_mirror_forgets_its_markers():
     mirror.clear()
     mirror.record(RecordedTick(tick_metrics(), raw_sample(), {"score_target": 50, "score_key": "shamatha_score"}, False))
     screen = LiveSessionScreen()
-    screen.load_mirror(mirror.snapshot())
+    screen.graphs.load_mirror(mirror.snapshot())
     assert _markers(screen) == [[], [], []]
 
 
@@ -70,13 +70,13 @@ def test_the_live_graphs_and_a_reload_put_a_marker_in_the_same_places(fresh_app,
             app._controls.mark()
         fed.tick(raw_sample(seed=float(i)), tick_metrics(seed=float(i)))
     reloaded = LiveSessionScreen()
-    reloaded.load_mirror(app._shown.mirror.snapshot())
+    reloaded.graphs.load_mirror(app._shown.mirror.snapshot())
     assert _markers(app._live_screen) == _markers(reloaded) == [[1], [1], [5]]
 
 
 def test_the_mirror_keeps_as_many_raw_samples_as_the_raw_graph():
     # A reload's raw marker indices count back from the mirror's buffer: it must hold what the graph holds.
-    assert LiveMirror().waveform.maxlen == LiveSessionScreen().raw_graph._data["eeg"].maxlen
+    assert LiveMirror().waveform.maxlen == LiveSessionScreen().graphs.raw._data["eeg"].maxlen
 
 
 def _guarded(lock: NotedLock, base: type) -> type:

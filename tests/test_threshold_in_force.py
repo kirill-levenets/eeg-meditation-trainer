@@ -13,6 +13,7 @@ from kivy.tests.common import UnitTestTouch
 from app.session.manager import SessionManager, SessionState
 from app.session.scoring import target_steps
 from app.ui.detail_sections.graphs import detail_graph_data
+from app.ui.graph_kinds import GraphKind
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.settings_screen import SettingsScreen
 from tests._app import (
@@ -142,8 +143,8 @@ def test_a_session_waiting_for_the_headset_starts_with_the_threshold_set_during_
 
 def _points_drawn(app_, monkeypatch) -> list[tuple]:
     """Each point the live graph is given from here on, as (threshold, scored series)."""
-    drawn, add = [], app_._live_screen.graph.add_point
-    monkeypatch.setattr(app_._live_screen.graph, "add_point",
+    drawn, add = [], app_._live_screen.graphs.metrics.add_point
+    monkeypatch.setattr(app_._live_screen.graphs.metrics, "add_point",
                         lambda m, **kw: (drawn.append((kw.get("threshold"), kw.get("scored"))), add(m, **kw))[1])
     return drawn
 
@@ -204,7 +205,7 @@ def test_a_tick_the_session_paused_under_is_not_recorded(fresh_app, monkeypatch)
     app_._controls.mark()
     fed.tick()
     assert app_._session.recorder._buffer == [] and len(app_._shown.mirror.metrics) == 0
-    assert app_._live_screen.graph.total_points == 0
+    assert app_._live_screen.graphs.metrics.total_points == 0
     assert app_._session.run.pending_marker  # it goes on the next tick that is recorded
 
 
@@ -216,16 +217,16 @@ def test_the_live_graph_reloaded_from_the_mirror_steps_its_line(fresh_app, monke
         if i == 2:
             app_._controls.apply_threshold(85)
         fed.tick(metrics=tick_metrics(seed=80.0))
-    app_._live_screen.graph.set_threshold_steps(None)
-    app_._live_screen.load_mirror(app_._shown.mirror.snapshot())
-    assert app_._live_screen.graph._threshold_steps == [(0, 70), (2, 85)]
+    app_._live_screen.graphs.metrics.set_threshold_steps(None)
+    app_._live_screen.graphs.load_mirror(app_._shown.mirror.snapshot())
+    assert app_._live_screen.graphs.metrics._threshold_steps == [(0, 70), (2, 85)]
 
 
 # ---- the graph ----
 
 
 def _graph() -> ScrollableGraphWidget:
-    return ScrollableGraphWidget(colors={"shamatha_score": (1, 0, 0, 1)}, scales={"shamatha_score": 100.0})
+    return ScrollableGraphWidget(GraphKind(colors={"shamatha_score": (1, 0, 0, 1)}, scales={"shamatha_score": 100.0}))
 
 
 def test_points_with_a_threshold_step_the_line_where_it_changes():
@@ -288,7 +289,7 @@ def test_a_session_start_puts_its_threshold_in_force_and_clears_the_last_session
     # Both kinds step their line from the ticks: a program no longer draws its segments upfront. The start applies its
     # own threshold, whatever the last session left in force.
     app_ = fresh_app
-    graph = app_._live_screen.graph
+    graph = app_._live_screen.graphs.metrics
     reload_with(app_, threshold="70")
     app_._session.manager.set_threshold(33)  # what the last session left
     graph.set_threshold_steps([(0, 50)])  # and its steps
@@ -444,12 +445,12 @@ def _ended(app_, monkeypatch, fed_session=_simple) -> None:
     app_._controls.stop_and_save()
     frames()
     app_._shown.on_ok()
-    assert app_._live_screen.graph.total_points == 3
+    assert app_._live_screen.graphs.metrics.total_points == 3
 
 
 def _live_points(app_) -> list[int]:
     screen = app_._live_screen
-    return [screen.graph.total_points, screen.raw_graph.total_points, screen.band_graph.total_points]
+    return [screen.graphs.metrics.total_points, screen.graphs.raw.total_points, screen.graphs.band.total_points]
 
 
 def test_moving_the_slider_while_idle_clears_the_last_sessions_graphs(fresh_app, monkeypatch):
@@ -457,10 +458,10 @@ def test_moving_the_slider_while_idle_clears_the_last_sessions_graphs(fresh_app,
     _ended(app_, monkeypatch)
     app_._settings_screen.threshold.value = 85
     mirror = app_._shown.mirror
-    assert _live_points(app_) == [0, 0, 0] and app_._live_screen.graph._threshold_steps is None
+    assert _live_points(app_) == [0, 0, 0] and app_._live_screen.graphs.metrics._threshold_steps is None
     assert not mirror.metrics and not mirror.bands and not mirror.waveform
     _settled(app_)  # the settled value
-    assert app_._live_screen.graph._threshold_value == 85.0 and app_._session.manager.threshold == 85
+    assert app_._live_screen.graphs.metrics._threshold_value == 85.0 and app_._session.manager.threshold == 85
 
 
 def test_reapplying_the_settings_threshold_keeps_the_graphs(fresh_app, monkeypatch):
@@ -471,11 +472,11 @@ def test_reapplying_the_settings_threshold_keeps_the_graphs(fresh_app, monkeypat
     assert app_._session.manager.threshold == 60
     app_._activate_user(app_._current_user_id)
     _settled(app_)
-    assert app_._live_screen.graph.total_points == 3 and app_._session.manager.threshold == 70
+    assert app_._live_screen.graphs.metrics.total_points == 3 and app_._session.manager.threshold == 70
 
 
 def test_nothing_to_clear_before_any_session(fresh_app, monkeypatch):
-    cleared = calls_of(monkeypatch, fresh_app._live_screen.graph, "clear_data")
+    cleared = calls_of(monkeypatch, fresh_app._live_screen.graphs.metrics, "clear_data")
     fresh_app._settings_screen.threshold.value = 85
     assert cleared == []
 
@@ -485,6 +486,6 @@ def test_moving_the_slider_during_a_simple_session_keeps_its_graphs(fresh_app, m
     fed = _simple(app_, monkeypatch)
     for _ in range(3):
         fed.tick()
-    steps = app_._live_screen.graph._threshold_steps
+    steps = app_._live_screen.graphs.metrics._threshold_steps
     app_._settings_screen.threshold.value = 85
-    assert app_._live_screen.graph.total_points == 3 and app_._live_screen.graph._threshold_steps == steps
+    assert app_._live_screen.graphs.metrics.total_points == 3 and app_._live_screen.graphs.metrics._threshold_steps == steps

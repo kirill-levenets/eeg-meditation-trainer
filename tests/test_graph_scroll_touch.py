@@ -10,6 +10,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
+from app.ui.graph_kinds import GraphKind
 from app.ui.graph_scroll import GraphAwareScrollView
 from app.ui.hooks import wire
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
@@ -27,7 +28,8 @@ def _detail(scroll_y: float):
     sv = GraphAwareScrollView(size_hint=(None, None), size=(400, 300), pos=(0, 0), do_scroll_x=False)
     content = BoxLayout(orientation="vertical", size_hint_y=None, height=1000)
     notes = TextInput(size_hint_y=None, height=100)
-    graph = ScrollableGraphWidget(colors={"a": (1, 0, 0, 1)}, scales={"a": 100.0}, size_hint_y=None, height=300)
+    graph = ScrollableGraphWidget(GraphKind(colors={"a": (1, 0, 0, 1)}, scales={"a": 100.0}), size_hint_y=None,
+                                  height=300)
     for w in (Widget(size_hint_y=None, height=300), notes, Widget(size_hint_y=None, height=300), graph):
         content.add_widget(w)
     sv.add_widget(content)
@@ -95,7 +97,8 @@ def _body(scroll_y: float, points: int = 400):
     EventLoop.ensure_window()
     sv = GraphAwareScrollView(size_hint=(None, None), size=(400, 300), pos=(0, 100), do_scroll_x=False)
     content = BoxLayout(orientation="vertical", size_hint_y=None, height=600)
-    graph = ScrollableGraphWidget(colors={"a": (1, 0, 0, 1)}, scales={"a": 100.0}, size_hint_y=None, height=300)
+    graph = ScrollableGraphWidget(GraphKind(colors={"a": (1, 0, 0, 1)}, scales={"a": 100.0}), size_hint_y=None,
+                                  height=300)
     for i in range(points):  # more data than one screen, so a horizontal drag can pan
         graph.add_point({"a": float(i % 100)})
     content.add_widget(graph)
@@ -163,6 +166,16 @@ def test_a_horizontal_drag_over_the_graph_pans_it_and_keeps_the_page(body_at):
 
 
 @pytest.mark.parametrize("body_at", [1.0], indirect=True)
+def test_a_drag_goes_on_from_where_the_graph_was_scrolled(body_at):
+    _sv, graph = body_at
+    start = graph.max_scroll // 2
+    graph.set_scroll_offset(start)
+    x, y = graph.to_window(graph.center_x, graph.center_y)
+    _drag(x, y, -30, 0)  # a short drag back in time: a few points from there, not from the live edge
+    assert start < graph._scroll_offset < start + graph._viewport_points
+
+
+@pytest.mark.parametrize("body_at", [1.0], indirect=True)
 def test_a_two_finger_pinch_zooms_the_graph_and_never_scrolls_the_page(body_at):
     sv, graph = body_at
     viewport = graph._viewport_points
@@ -177,7 +190,7 @@ def test_a_two_finger_pinch_zooms_the_graph_and_never_scrolls_the_page(body_at):
     a.touch_up()
     b.touch_up()
     _frames(3)
-    assert graph._viewport_points != viewport
+    assert graph._viewport_points < viewport  # spread apart: zoomed in, fewer points shown
     assert sv.scroll_y == 1
 
 
@@ -191,7 +204,7 @@ def test_a_vertical_drag_on_a_graph_outside_any_scroll_view_stays_with_the_graph
     from kivy.uix.floatlayout import FloatLayout
     EventLoop.ensure_window()
     overlay = FloatLayout(size_hint=(None, None), size=(400, 300), pos=(0, 0))  # the fullscreen graph overlay
-    graph = ScrollableGraphWidget(colors={"a": (1, 0, 0, 1)}, scales={"a": 100.0}, size_hint=(1, 1))
+    graph = ScrollableGraphWidget(GraphKind(colors={"a": (1, 0, 0, 1)}, scales={"a": 100.0}), size_hint=(1, 1))
     overlay.add_widget(graph)
     Window.add_widget(overlay)
     taps = []
@@ -270,7 +283,8 @@ def test_a_vertical_swipe_on_a_page_that_cannot_scroll_stays_with_the_graph():
     EventLoop.ensure_window()
     sv = GraphAwareScrollView(size_hint=(None, None), size=(400, 300), pos=(0, 100), do_scroll_x=False)
     content = BoxLayout(orientation="vertical", size_hint_y=None, height=300)  # fits: nothing to scroll
-    graph = ScrollableGraphWidget(colors={"a": (1, 0, 0, 1)}, scales={"a": 100.0}, size_hint_y=None, height=300)
+    graph = ScrollableGraphWidget(GraphKind(colors={"a": (1, 0, 0, 1)}, scales={"a": 100.0}), size_hint_y=None,
+                                  height=300)
     content.add_widget(graph)
     sv.add_widget(content)
     Window.add_widget(sv)

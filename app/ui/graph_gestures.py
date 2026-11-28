@@ -63,55 +63,54 @@ class GraphGestures:
     def on_touch_move(self, touch):
         if touch.grab_current is not self:
             return super().on_touch_move(touch)
-
         finger = self._grabbed_touches.get(touch.uid)
         if finger is None:
             return True
         finger["pos"] = tuple(touch.pos)
-        glyph = finger.get("glyph")
-        if glyph is not None:
-            sx0, sy0 = finger["start"]
-            drift = max(abs(touch.x - sx0), abs(touch.y - sy0))
-            if drift <= _GLYPH_DRIFT_DP * dp(1) and touch_in_window_rect(self, touch, glyph[1]()):
-                return True  # a fingertip drifting on a glyph: still its press, as on a button
-            finger["glyph"] = None  # dragged off it: an ordinary gesture from here
-            self._tap_cancelled = True
-            self._press_glyph(None)
+        if finger.get("glyph") is not None and self._still_on_glyph(touch, finger):
+            return True
         sx, sy = finger["start"]
         dx, dy = abs(touch.x - sx), abs(touch.y - sy)
         if dx > dp(10):
             self._touch_moved = True
         if dx > dp(10) or dy > dp(10):
             self._tap_cancelled = True
-
-        # Pinch zoom detection (Android / multi-touch)
         active = [f["pos"] for f in self._grabbed_touches.values() if self.collide_point(*f["pos"])]
-        if len(active) >= 2:
-            self._gesture_pinched = self._tap_cancelled = True
-            (x1, y1), (x2, y2) = active[0], active[1]
-            dist = ((x1 - x2) ** 2 + (y1 - y2) ** 2) ** 0.5
-            if not self._pinch_active:
-                self._pinch_active = True
-                self._pinch_start_dist = max(dist, 1.0)
-                self._pinch_start_viewport = self._zoom_base()
-            else:
-                scale = self._pinch_start_dist / max(dist, 1.0)
-                new_vp = int(self._pinch_start_viewport * scale)
-                self._set_viewport(new_vp)
-            return True
+        if len(active) >= 2:  # a pinch (Android, multi-touch)
+            self._pinch(*active[:2])
+        elif not self._hand_off_vertical_swipe(touch, dx, dy):
+            self._drag(touch.x - sx)
+        return True
 
-        if self._hand_off_vertical_swipe(touch, dx, dy):
+    def _still_on_glyph(self, touch, finger) -> bool:
+        """A fingertip drifting on a corner glyph is still its press, as on a button; dragged off it, the touch is an
+        ordinary gesture from here and the glyph's press ends."""
+        sx0, sy0 = finger["start"]
+        drift = max(abs(touch.x - sx0), abs(touch.y - sy0))
+        if drift <= _GLYPH_DRIFT_DP * dp(1) and touch_in_window_rect(self, touch, finger["glyph"][1]()):
             return True
+        finger["glyph"] = None
+        self._tap_cancelled = True
+        self._press_glyph(None)
+        return False
 
-        # Single touch — scroll
+    def _pinch(self, first: tuple[float, float], second: tuple[float, float]) -> None:
+        """Two fingers on the graph zoom it by the change in their distance since the pinch began."""
+        self._gesture_pinched = self._tap_cancelled = True
+        dist = max(((first[0] - second[0]) ** 2 + (first[1] - second[1]) ** 2) ** 0.5, 1.0)
+        if not self._pinch_active:
+            self._pinch_active = True
+            self._pinch_start_dist = dist
+            self._pinch_start_viewport = self._zoom_base()
+        else:
+            self._set_viewport(int(self._pinch_start_viewport * (self._pinch_start_dist / dist)))
+
+    def _drag(self, dx: float) -> None:
+        """One finger scrolls the data under it, from where the touch began, while there is more than fits."""
         graph_w = self._plot_rect()[2]
         if graph_w > 0 and self._total_points > self._viewport_points:
-            dx = touch.x - sx
             points_per_pixel = self._viewport_points / graph_w
-            delta_points = int(-dx * points_per_pixel)
-            new_offset = self._touch_start_offset + delta_points
-            self.set_scroll_offset(new_offset)
-        return True
+            self.set_scroll_offset(self._touch_start_offset + int(-dx * points_per_pixel))
 
     def on_touch_up(self, touch):
         if touch.grab_current is self:

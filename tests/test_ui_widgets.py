@@ -7,6 +7,7 @@ from kivy.metrics import dp
 import app.ui.settings_sections.common as common
 import app.ui.settings_sections.device as device_section
 from app.ui.detail_sections.graphs import detail_graph_data
+from app.ui.graph_kinds import GraphKind
 from app.ui.graph_scroll import GraphAwareScrollView
 from app.ui.headset import filter_mindwave
 from app.ui.hooks import wire
@@ -15,6 +16,7 @@ from app.ui.settings_sections.device import DeviceSection
 from app.ui.settings_sections.formulas import FormulaSection
 from app.ui.settings_sections.timer import TimerSound
 from app.ui.widgets.accordion import ThemedAccordion
+from tests._graph import bare
 from tests._settings_section import settings_section
 
 
@@ -60,9 +62,7 @@ class TestGraphExpandAffordance(unittest.TestCase):
     """Expand-to-fullscreen affordance on the shared graph widget."""
 
     def _make_graph(self):
-        g = ScrollableGraphWidget(
-            colors={"a": (1, 0, 0, 1)}, scales={"a": 100.0}, viewport_seconds=10,
-        )
+        g = ScrollableGraphWidget(GraphKind(colors={"a": (1, 0, 0, 1)}, scales={"a": 100.0}, viewport_seconds=10))
         g.pos = (0, 0)
         g.size = (400, 300)
         return g
@@ -133,7 +133,7 @@ class TestGraphAwareScrollViewGuard(unittest.TestCase):
         sv = GraphAwareScrollView()
         sv.pos = (0, 0)
         sv.size = (400, viewport_h)
-        g = ScrollableGraphWidget(colors={"a": (1, 0, 0, 1)}, scales={"a": 100.0})
+        g = ScrollableGraphWidget(GraphKind(colors={"a": (1, 0, 0, 1)}, scales={"a": 100.0}))
         g.pos = (0, 0)
         g.size = (400, 600)  # graph logical bounds always 600 tall
         sv.add_widget(g)
@@ -157,11 +157,8 @@ class TestScrollableGraphWidget(unittest.TestCase):
     """Test ScrollableGraphWidget data management (no rendering)."""
 
     def setUp(self):
-        self.graph = ScrollableGraphWidget(
-            colors={"a": (1, 0, 0, 1), "b": (0, 1, 0, 1)},
-            scales={"a": 100.0, "b": 200.0},
-            viewport_seconds=10,
-        )
+        self.graph = ScrollableGraphWidget(GraphKind(colors={"a": (1, 0, 0, 1), "b": (0, 1, 0, 1)},
+                                                     scales={"a": 100.0, "b": 200.0}, viewport_seconds=10))
 
     def test_initial_state(self):
         self.assertEqual(self.graph.total_points, 0)
@@ -205,10 +202,7 @@ class TestScrollableGraphWidget(unittest.TestCase):
         self.assertTrue(self.graph._show_timestamps)
 
     def test_show_flags_disabled(self):
-        g = ScrollableGraphWidget(
-            colors={"x": (1, 0, 0, 1)}, scales={"x": 100.0},
-            show_value_labels=False, show_timestamps=False,
-        )
+        g = bare(ScrollableGraphWidget(GraphKind(colors={"x": (1, 0, 0, 1)}, scales={"x": 100.0})))
         self.assertFalse(g._show_value_labels)
         self.assertFalse(g._show_timestamps)
 
@@ -217,11 +211,8 @@ class TestGraphTouchScroll(unittest.TestCase):
     """Test horizontal touch-drag scrolling on graph widgets."""
 
     def setUp(self):
-        self.graph = ScrollableGraphWidget(
-            colors={"a": (1, 0, 0, 1)},
-            scales={"a": 100.0},
-            viewport_seconds=10,
-        )
+        self.graph = ScrollableGraphWidget(GraphKind(colors={"a": (1, 0, 0, 1)}, scales={"a": 100.0},
+                                                     viewport_seconds=10))
 
     def test_touch_fields_initialized(self):
         self.assertEqual(self.graph._grabbed_touches, {})
@@ -239,41 +230,30 @@ class TestGraphBipolarAndBatch(unittest.TestCase):
     """Test bipolar mode and batch point adding."""
 
     def test_bipolar_flag_stored(self):
-        g = ScrollableGraphWidget(
-            colors={"eeg": (1, 1, 1, 1)}, scales={"eeg": 100.0},
-            bipolar=True,
-        )
+        g = ScrollableGraphWidget(GraphKind(colors={"eeg": (1, 1, 1, 1)}, scales={"eeg": 100.0}, bipolar=True))
         self.assertTrue(g._bipolar)
 
     def test_custom_sample_rate_and_max_points(self):
-        g = ScrollableGraphWidget(
-            colors={"eeg": (1, 1, 1, 1)}, scales={"eeg": 100.0},
-            sample_rate=128.0, max_points=7680, viewport_seconds=10,
-        )
+        g = ScrollableGraphWidget(GraphKind(colors={"eeg": (1, 1, 1, 1)}, scales={"eeg": 100.0}, sample_rate=128.0,
+                                            viewport_seconds=10),
+                                  max_points=7680)
         self.assertEqual(g._sample_rate, 128.0)
         self.assertEqual(g._viewport_points, 1280)
         self.assertEqual(g._data["eeg"].maxlen, 7680)
 
     def test_add_points_batch(self):
-        g = ScrollableGraphWidget(
-            colors={"eeg": (1, 1, 1, 1)}, scales={"eeg": 100.0},
-            max_points=1000,
-        )
+        g = ScrollableGraphWidget(GraphKind(colors={"eeg": (1, 1, 1, 1)}, scales={"eeg": 100.0}), max_points=1000)
         g.add_points_batch("eeg", [1.0, 2.0, -3.0, 4.0])
         self.assertEqual(g._total_points, 4)
         self.assertEqual(list(g._data["eeg"]), [1.0, 2.0, -3.0, 4.0])
 
     def test_set_threshold(self):
-        g = ScrollableGraphWidget(
-            colors={"med": (1, 1, 1, 1)}, scales={"med": 200.0},
-        )
+        g = ScrollableGraphWidget(GraphKind(colors={"med": (1, 1, 1, 1)}, scales={"med": 200.0}))
         g.set_threshold(100.0)
         self.assertEqual(g._threshold_value, 100.0)
 
     def test_set_threshold_none_clears(self):
-        g = ScrollableGraphWidget(
-            colors={"med": (1, 1, 1, 1)}, scales={"med": 200.0},
-        )
+        g = ScrollableGraphWidget(GraphKind(colors={"med": (1, 1, 1, 1)}, scales={"med": 200.0}))
         g.set_threshold(100.0)
         g.set_threshold(None)
         self.assertIsNone(g._threshold_value)
@@ -358,10 +338,7 @@ class TestScrollableGraphSetSeriesName(unittest.TestCase):
 
     def test_set_series_name_updates_label_and_fires_callback(self):
         fired = []
-        g = ScrollableGraphWidget(
-            colors={"custom_formula": (1, 0, 0, 1)},
-            scales={"custom_formula": 200.0},
-        )
+        g = ScrollableGraphWidget(GraphKind(colors={"custom_formula": (1, 0, 0, 1)}, scales={"custom_formula": 200.0}))
         wire(g, on_series_change=lambda: fired.append(True))
         g.set_series_name("custom_formula", "Alpha Ratio")
         self.assertEqual(g.series_name("custom_formula"), "Alpha Ratio")

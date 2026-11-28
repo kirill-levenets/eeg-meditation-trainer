@@ -100,8 +100,8 @@ def test_the_session_screens_buttons_reach_its_controls(fresh_app, monkeypatch):
     app, screen, pressed = fresh_app, fresh_app._live_screen, []
     for name in ("start", "toggle_pause", "stop", "mark", "cancel", "retry"):
         monkeypatch.setattr(app._controls, name, lambda *_a, name=name: pressed.append(name))
-    for button in (screen.btn_start, screen.btn_pause, screen.btn_stop, screen.btn_marker, screen.connect_overlay.cancel_btn,
-                   screen.connect_overlay.retry_btn):
+    bar, overlay = screen.controls, screen.connect_overlay
+    for button in (bar.start, bar.pause, bar.stop, bar.mark, overlay.cancel_btn, overlay.retry_btn):
         button.dispatch("on_release")
     assert pressed == ["start", "toggle_pause", "stop", "mark", "cancel", "retry"]
 
@@ -111,7 +111,7 @@ def test_retry_leaves_the_retry_screen_and_starts_again(fresh_app, monkeypatch):
     app._live_screen.connect_overlay.show_retry("Connection to MWM2 failed.")
     monkeypatch.setattr(app._controls, "start", lambda: starts.append(True))
     app._controls.retry()
-    assert starts == [True] and app._live_screen.connect_overlay.opacity == 0 and not app._live_screen._btn_start.disabled
+    assert starts == [True] and app._live_screen.connect_overlay.opacity == 0 and not app._live_screen.controls.start.disabled
 
 
 def test_the_shamatha_pill_lights_after_three_ticks_above_the_threshold(fresh_app, monkeypatch):
@@ -124,9 +124,9 @@ def test_the_shamatha_pill_lights_after_three_ticks_above_the_threshold(fresh_ap
 
 def test_a_custom_segment_shows_its_line_again_after_it_was_hidden():
     screen = LiveSessionScreen()
-    screen.graph.set_visible("program_formula", False)  # hidden through the picker during the session
+    screen.graphs.metrics.set_visible("program_formula", False)  # hidden through the picker during the session
     shown_on(screen).show(SegmentStarted("program_formula", "Program: Alpha"))
-    assert screen.graph.is_visible("program_formula") and screen.graph.series_name("program_formula") == "Program: Alpha"
+    assert screen.graphs.metrics.is_visible("program_formula") and screen.graphs.metrics.series_name("program_formula") == "Program: Alpha"
 
 
 def test_the_bt_wait_shows_its_progress_on_the_overlay(fresh_app, monkeypatch):

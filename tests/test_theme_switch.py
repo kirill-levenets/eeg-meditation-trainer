@@ -199,11 +199,12 @@ def test_a_button_with_a_fixed_fill_still_repaints_its_disabled_fill():
 
 def test_a_graph_draws_a_series_colour_read_before_the_switch_in_the_current_palette():
     # Series colour dicts are module constants, read once at import in the default palette.
+    from app.ui.graph_kinds import GraphKind
     from app.ui.raw_eeg_screen import ScrollableGraphWidget
     C.set_theme("Dark Blue")
     colors = {"warm": C.WARM}
     C.set_theme("Light Cream")
-    g = ScrollableGraphWidget(colors=colors, scales={"warm": 100}, size=(400, 300), size_hint=(None, None))
+    g = ScrollableGraphWidget(GraphKind(colors=colors, scales={"warm": 100}), size=(400, 300), size_hint=(None, None))
     for i in range(5):
         g.add_point({"warm": 10.0 * i})
     g._redraw()
@@ -367,7 +368,7 @@ def test_live_session_screen_repaints(old, new, screens):
         screen.end_card.show(1, {"duration": 60, "avg_shamatha": 50, "avg_meditation": 40})
         _assert_repainted(screen, old, new, "session-end card")
         screen.end_card.hide()
-        screen._set_view("raw")
+        screen.graphs.show_view("raw")
         _assert_repainted(screen, old, new, "raw view")
     finally:
         _unmount(screen)

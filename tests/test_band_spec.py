@@ -114,10 +114,10 @@ SAMPLE = {"delta": 1.0, "theta": 2.0, "alpha1": 3.0, "alpha2": 4.0, "beta1": 5.0
 
 def test_the_live_band_graph_plots_the_grouped_powers():
     screen = LiveSessionScreen()
-    screen.add_raw_sample(dict(SAMPLE))
-    plotted = {key: points[-1] for key, points in screen._band_graph._data.items()}
+    screen.graphs.add_raw_sample(dict(SAMPLE))
+    plotted = {key: points[-1] for key, points in screen.graphs.band._data.items()}
     assert plotted == group_powers(SAMPLE.__getitem__)
-    assert screen._raw_graph._data["eeg"][-1] == sum(SAMPLE.values())
+    assert screen.graphs.raw._data["eeg"][-1] == sum(SAMPLE.values())
 
 
 def test_the_detail_band_graph_plots_the_grouped_powers():
@@ -128,5 +128,5 @@ def test_the_detail_band_graph_plots_the_grouped_powers():
 
 def test_the_band_graphs_name_their_bands_from_the_table():
     names = {g.key: g.name for g in GROUPS}
-    assert LiveSessionScreen()._band_graph._names == names
+    assert LiveSessionScreen().graphs.band._names == names
     assert DiaryScreen().graphs.freq._names == names

@@ -10,10 +10,11 @@ from kivy.graphics import Line, Mesh
 
 import app.ui.graph_runs as runs
 import app.ui.raw_eeg_screen as rg
+from app.ui.graph_kinds import METRICS_COLORS, METRICS_SCALES, GraphKind
 from app.ui.graph_runs import RunExtremes, extremes, run_indices
-from app.ui.live_session import METRICS_COLORS, METRICS_SCALES
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.theme import C
+from tests._graph import bare
 from tests.test_graph_gradient import _graph, _shot
 
 
@@ -31,7 +32,7 @@ SIX = ["shamatha_score", "meditation_score", "distraction", "sinking", "subtle_d
 
 
 def _metrics_graph(n: int, keys=SIX, width=1000, spiky=False) -> ScrollableGraphWidget:
-    g = ScrollableGraphWidget(colors=METRICS_COLORS, scales=METRICS_SCALES, graph_id="live_metrics",
+    g = ScrollableGraphWidget(GraphKind(colors=METRICS_COLORS, scales=METRICS_SCALES), graph_id="live_metrics",
                               size_hint=(None, None), size=(width, 500))
     for k in METRICS_COLORS:
         g._visible[k] = k in keys
@@ -136,7 +137,8 @@ def test_run_indices_folds_each_whole_run_to_its_min_and_max_and_keeps_both_ends
 
 
 def test_a_series_keeps_the_runs_of_one_size():
-    g = ScrollableGraphWidget(colors={"a": (1, 1, 1, 1)}, scales={"a": 100.0}, size_hint=(None, None), size=(1000, 300))
+    g = ScrollableGraphWidget(GraphKind(colors={"a": (1, 1, 1, 1)}, scales={"a": 100.0}), size_hint=(None, None),
+                              size=(1000, 300))
     g._drawing_enabled = False
     values = _noisy(20000, 6)
     g.add_points_batch("a", values)
@@ -158,7 +160,7 @@ def _reference(values: list[float], v0: int, size: int) -> list[int]:
 
 def test_drawn_points_are_each_runs_min_and_max_through_appends_eviction_scrolling_and_reload():
     rnd = random.Random(3)
-    g = ScrollableGraphWidget(colors={"a": (1, 1, 1, 1)}, scales={"a": 100.0}, max_points=3000,
+    g = ScrollableGraphWidget(GraphKind(colors={"a": (1, 1, 1, 1)}, scales={"a": 100.0}), max_points=3000,
                               size_hint=(None, None), size=(400, 300))
     g._drawing_enabled = False
     checked = 0
@@ -189,7 +191,8 @@ def test_drawn_points_are_each_runs_min_and_max_through_appends_eviction_scrolli
 
 def test_a_growing_series_keeps_the_points_it_drew():
     # Fitted, each new tick moves every pixel column; runs at fixed sample positions don't, so the line doesn't shimmer.
-    g = ScrollableGraphWidget(colors={"a": (1, 1, 1, 1)}, scales={"a": 100.0}, size_hint=(None, None), size=(1000, 300))
+    g = ScrollableGraphWidget(GraphKind(colors={"a": (1, 1, 1, 1)}, scales={"a": 100.0}), size_hint=(None, None),
+                              size=(1000, 300))
     g._drawing_enabled = False
     values = _noisy(7201, 4)
     g.add_points_batch("a", values[:7200])
@@ -229,9 +232,9 @@ def test_zoomed_in_draws_every_point():
 
 def test_the_raw_eeg_graph_folds_by_its_zoom_and_draws_every_sample_zoomed_in():
     def raw(seconds):
-        g = ScrollableGraphWidget(colors={"eeg": (0.3, 0.8, 0.8, 1)}, scales={"eeg": 100.0}, viewport_seconds=seconds,
-                                  sample_rate=512, bipolar=True, max_points=512 * 60, size_hint=(None, None),
-                                  size=(1000, 300), show_value_labels=False, show_timestamps=False)
+        g = bare(ScrollableGraphWidget(GraphKind(colors={"eeg": (0.3, 0.8, 0.8, 1)}, scales={"eeg": 100.0},
+                                                 viewport_seconds=seconds, sample_rate=512, bipolar=True),
+                                       max_points=512 * 60, size_hint=(None, None), size=(1000, 300)))
         g.add_points_batch("eeg", [80 * math.sin(i / 3.0) for i in range(512 * 60)])
         g._draw()
         return _drawn_points(g), _points_cap(g)
@@ -275,7 +278,8 @@ def _centre_line_columns(values, drawn, graph_w, graph_h) -> dict[int, tuple[flo
 def test_the_folded_line_reaches_every_height_the_full_line_does_within_the_strokes_width(n):
     # A run's min and max are drawn at their own samples, so the folded line reaches each extreme of the full one less
     # than the stroke's width to the side (a run spans part of it), and passes every height between them on the way.
-    g = ScrollableGraphWidget(colors={"a": (1, 1, 1, 1)}, scales={"a": 100.0}, size_hint=(None, None), size=(1000, 500))
+    g = ScrollableGraphWidget(GraphKind(colors={"a": (1, 1, 1, 1)}, scales={"a": 100.0}), size_hint=(None, None),
+                              size=(1000, 500))
     g._drawing_enabled = False
     values = _noisy(n, 7)
     g.add_points_batch("a", values)

@@ -5,7 +5,7 @@ import math
 from kivy.metrics import dp
 
 import app.ui.raw_eeg_screen as rg
-from app.ui.live_session import METRICS_COLORS, METRICS_SCALES
+from app.ui.graph_kinds import METRICS_COLORS, METRICS_SCALES, GraphKind
 from app.ui.raw_eeg_screen import ScrollableGraphWidget, _x_grid_step
 
 
@@ -23,7 +23,7 @@ def test_wide_zoom_spaces_marks_at_least_the_minimum_gap_apart():
 
 
 def _live_graph(viewport_s: int, n_points: int) -> ScrollableGraphWidget:
-    g = ScrollableGraphWidget(colors=METRICS_COLORS, scales=METRICS_SCALES, graph_id="live_metrics")
+    g = ScrollableGraphWidget(GraphKind(colors=METRICS_COLORS, scales=METRICS_SCALES), graph_id="live_metrics")
     g.size = (dp(900), dp(500))
     for k in METRICS_COLORS:
         g._visible[k] = k == "shamatha_score"
@@ -77,7 +77,7 @@ def test_label_cache_is_bounded(monkeypatch):
 
 def test_a_fixed_grid_step_far_below_the_scale_draws_a_bounded_grid():
     # A 200000 scale at the default 20-unit step drew 10,000 grid lines with a label each: seconds per redraw.
-    g = ScrollableGraphWidget(colors={"a": (1, 1, 1, 1)}, scales={"a": 200000.0}, size=(dp(400), dp(300)))
+    g = ScrollableGraphWidget(GraphKind(colors={"a": (1, 1, 1, 1)}, scales={"a": 200000.0}), size=(dp(400), dp(300)))
     labels = []
     real = ScrollableGraphWidget._make_text_texture
     g._make_text_texture = lambda text, **kw: labels.append(text) or real(g, text, **kw)

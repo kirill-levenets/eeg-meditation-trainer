@@ -306,7 +306,7 @@ def test_the_session_detail_shows_only_the_scored_stats():
     assert [title for title, _ in _detail_rows(diary)] == [
         "Duration", "Metric", "Average", "Threshold", "Time Above Threshold", "Longest Streak", "Mood Rating",
     ]  # the scored metric's average only: no average meditation or shamatha besides it, no time shamatha >= 90
-    grid = diary.stats.grid
+    grid = diary.stats.container
     rows = len(grid.children) // 2
     assert rows == 7
     assert grid.height >= rows * dp(20) + (rows - 1) * grid.spacing[1] + grid.padding[1] + grid.padding[3]
@@ -333,7 +333,7 @@ def test_the_session_detail_follows_the_rows_of_each_session_it_shows():
     ]:
         diary.show_session(session)
         assert [title for title, _ in _detail_rows(diary)] == titles
-        assert len(diary.stats.grid.children) == 2 * len(titles)
+        assert len(diary.stats.container.children) == 2 * len(titles)
     assert _detail_row(diary, "Threshold").text == "60"
 
 
@@ -367,7 +367,7 @@ def test_the_end_card_shows_the_name_duration_and_the_scored_stats(phone_window)
 
 
 def _summary_rows(screen) -> list[tuple[str, str]]:
-    return [(label.text, value.text) for label, value in screen.end_card._rows]
+    return [(label.text, value.text) for label, value in screen.end_card._stats.rows]
 
 
 def test_the_end_card_follows_the_rows_of_each_session_it_shows():
@@ -426,7 +426,7 @@ def test_the_end_card_shows_a_long_scored_on_value_whole_on_a_phone(phone_window
                  "score_metric_name": "Morning ladder", "avg_score": None}
         screen.end_card.show(1, stats, title="2026-10-03 07:15 - MindWave Mobile")
         _frames()
-        value = screen.end_card._rows[1][1]
+        value = screen.end_card._stats.rows[1][1]
         assert value.text == "Morning ladder (program)"
         assert value.width >= _natural_width(value), (value.width, _natural_width(value))
     finally:

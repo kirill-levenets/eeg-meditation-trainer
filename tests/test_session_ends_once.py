@@ -208,7 +208,7 @@ def test_a_failed_final_save_still_ends_the_run_on_screen_and_says_so(fresh_app,
     app._controls.stop_and_save()
     frames()
     assert reported == ["session_save_failed"] and app._session.run is None and releases
-    assert app._live_screen.end_card.session_id is None and not app._live_screen._btn_start.disabled
+    assert app._live_screen.end_card.session_id is None and not app._live_screen.controls.start.disabled
 
 
 def test_an_ending_under_the_stop_dialog_closes_it(fresh_app, monkeypatch):

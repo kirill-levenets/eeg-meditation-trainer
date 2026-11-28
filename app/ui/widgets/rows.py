@@ -1,12 +1,12 @@
-"""Input rows: quick-pick presets for a value, and the inline name editor under a list's row."""
+"""Rows: quick-pick presets for a value, the inline name editor under a list's row, and a session's stats rows."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from kivy.clock import Clock
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 
-from app.ui.theme import C, CenteredTextInput, F, Icons, S
+from app.ui.theme import C, CenteredTextInput, F, Icons, S, ThemedLabel
 from app.ui.widgets.styled_button import StyledButton
 
 
@@ -114,3 +114,33 @@ class PresetRow(BoxLayout):
                 btn.bg_color = self._default_bg
                 btn.text_color = self._default_text
                 btn.bold = False
+
+
+class StatRows:
+    """A session's (title, value) rows in `container`, as tall as its lines: the row widgets come from `make_row` as
+    needed and are kept, since a session that saved no metric has one threshold row where the others have two.
+    `make_row` returns (the widgets the row adds to the container, its title label, its value label)."""
+
+    def __init__(self, container, make_row: Callable[[], tuple[Sequence, ThemedLabel, ThemedLabel]],
+                 line_h: float) -> None:
+        self.container = container
+        self._make_row = make_row
+        self._line_h = line_h
+        self._pool: list[tuple[Sequence, ThemedLabel, ThemedLabel]] = []
+        self.rows: list[tuple[ThemedLabel, ThemedLabel]] = []  # (title, value) of the rows shown, in order
+
+    def show(self, rows: list[tuple[str, str]]) -> None:
+        """These (title, value) rows, the container as tall as they are."""
+        while len(self._pool) < len(rows):
+            self._pool.append(self._make_row())
+        box = self.container
+        box.clear_widgets()
+        used = self._pool[:len(rows)]
+        for (text, shown), (widgets, title, value) in zip(rows, used):
+            title.text, value.text = text, shown
+            for widget in widgets:
+                box.add_widget(widget)
+        self.rows = [(title, value) for _widgets, title, value in used]
+        gap = box.spacing[1] if isinstance(box.spacing, (list, tuple)) else box.spacing  # a grid's is (x, y)
+        n = len(rows)
+        box.height = n * self._line_h + max(n - 1, 0) * gap + box.padding[1] + box.padding[3]

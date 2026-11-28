@@ -8,7 +8,7 @@ from app import android_jni
 from app.ui.detail_sections import export
 from app.ui.detail_sections.bands import BandSection
 from app.ui.detail_sections.graphs import DetailGraphs, detail_graph_data
-from app.ui.detail_sections.stats import StatsRows
+from app.ui.detail_sections.stats import stats_rows
 from app.ui.diary_screen import DiaryScreen
 from app.ui.hooks import wire
 from app.ui.widgets.popups import ThemedFileChooser
@@ -65,14 +65,14 @@ def test_the_legend_marks_the_series_the_session_was_scored_on():
 
 
 def test_the_stats_rows_reuse_their_labels_and_size_the_grid():
-    stats = StatsRows(_page())
+    stats = stats_rows(_page())
     stats.show([("Duration", "10m"), ("Metric", "Shamatha"), ("Threshold", "50")])
     first = list(stats.rows)
     stats.show([("Duration", "5m"), ("Threshold Used", "60")])
     assert stats.rows == first[:2] and [(t.text, v.text) for t, v in stats.rows] == [("Duration", "5m"),
                                                                                        ("Threshold Used", "60")]
-    assert len(stats.grid.children) == 4
-    assert stats.grid.height == 2 * dp(20) + dp(4) + 2 * dp(4)  # two rows, the spacing between, the padding
+    assert len(stats.container.children) == 4
+    assert stats.container.height == 2 * dp(20) + dp(4) + 2 * dp(4)  # two rows, the spacing between, the padding
 
 
 def test_a_failed_load_tells_the_what_if_too():

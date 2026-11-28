@@ -187,7 +187,7 @@ def test_the_session_end_card_fits_a_landscape_phone_above_the_bottom_bar(end_ca
     # a landscape phone has 360 dp less the bar: OK and Save notes show without scrolling.
     from app.ui.theme import S
     screen = end_card(_LANDSCAPE)
-    assert len(screen.end_card._rows) == 6
+    assert len(screen.end_card._stats.rows) == 6
     panel = next(w for w in screen.end_card.walk(restrict=True) if isinstance(w, ModalPanel))
     pad = screen.end_card.padding
     assert panel.height + pad[1] + pad[3] <= dp(360) - S.NAV_H, panel.height
@@ -214,7 +214,7 @@ def _text_width(text: str, label) -> float:
 def test_the_end_cards_title_names_the_session(end_card, size, name, title):
     screen = end_card(size, title=name)
     assert screen.end_card._title.text == title
-    assert screen.end_card._stats_card.children == [box for box, _l, _v in screen.end_card._row_pool[:6]][::-1]
+    assert screen.end_card._stats_card.children == [box for (box,), _l, _v in screen.end_card._stats._pool[:6]][::-1]
 
 
 @pytest.mark.parametrize("size, lines", [(_LANDSCAPE, 1), (_PORTRAIT, 2)])
@@ -354,10 +354,10 @@ def test_a_selected_button_glyph_is_auto_and_readable_on_its_fill(theme):
 def test_the_app_selected_states_are_readable(theme, screens):
     C.set_theme(theme)
     live, hist, sett = screens(LiveSessionScreen), screens(HistoryScreen), screens(SettingsScreen)
-    live._set_view("raw")
-    live._set_view("metrics")
+    live.graphs.show_view("raw")
+    live.graphs.show_view("metrics")
     hist.chart_area.set_view_mode("bars")
-    for btn in (live._view_toggle.buttons["metrics"], hist.chart_area._toggle_col.buttons["bars"], sett.theme._toggle.buttons[theme]):
+    for btn in (live.graphs.toggle.buttons["metrics"], hist.chart_area._toggle_col.buttons["bars"], sett.theme._toggle.buttons[theme]):
         assert _contrast(btn.text_color, btn.bg_color) == pytest.approx(_best_glyph_contrast(btn.bg_color)), btn.text
 
 
@@ -367,7 +367,7 @@ def test_starts_timer_part_draws_its_text_as_start_does(theme, screens):
     """The timer length or "P" beside Start, and its chevron: the glyph Start's own text takes, enabled or not."""
     C.set_theme(theme)
     live = screens(LiveSessionScreen)
-    pill, start = live.duration.button, live.btn_start
+    pill, start = live.controls.duration.button, live.controls.start
     try:
         for disabled in (False, True):
             pill.disabled = start.disabled = disabled
@@ -431,8 +431,8 @@ def test_no_screen_draws_a_fixed_glyph_colour_on_an_accent_fill(theme, screens):
     C.set_theme(theme)
     live, hist, diary, sett = (screens(LiveSessionScreen), screens(HistoryScreen), screens(DiaryScreen),
                                screens(SettingsScreen))
-    live._set_view("raw")
-    live._set_view("metrics")
+    live.graphs.show_view("raw")
+    live.graphs.show_view("metrics")
     hist.chart_area.set_view_mode("bars")
     diary.graphs.show_tab("raw")
     sett.timer.editor.show([{"minutes": 10, "target": 50, "formula": "shamatha_score"}], "")
@@ -541,13 +541,13 @@ def test_the_in_screen_modals_block_taps_on_the_screen_behind():
     screen = LiveSessionScreen()
     Window.add_widget(screen)
     hits = []
-    screen._btn_start.bind(on_release=lambda *_a: hits.append("start"))
+    screen.controls.start.bind(on_release=lambda *_a: hits.append("start"))
     try:
         for show, hide in ((lambda: screen.end_card.show(1, {"duration": 60}), screen.end_card.hide),
                            (lambda: screen.connect_overlay.show("Connecting…"), screen.connect_overlay.hide)):
             show()
             _pump()
-            x, y = screen._btn_start.to_window(*screen._btn_start.center)
+            x, y = screen.controls.start.to_window(*screen.controls.start.center)
             t = UnitTestTouch(x, y)
             t.touch_down()
             t.touch_up()

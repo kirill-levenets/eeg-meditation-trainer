@@ -5,7 +5,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 ## ScrollableGraphWidget
 
-- Every live and session-detail graph is a `ScrollableGraphWidget` (`app/ui/raw_eeg_screen.py`).
+- Every live and session-detail graph is a `ScrollableGraphWidget` (`app/ui/raw_eeg_screen.py`), built from a `GraphKind` (its lines' colour roles, scales and names, the seconds it shows, its sample rate, bipolar, auto-scaled), its id and its data cap.
+  The app's three kinds, `graph_kinds.METRICS`, `RAW_EEG` and `BAND_POWER`, are shared by the Session screen and the session detail, so each kind draws alike on both.
 - **Plot area.**
   `_label_pads` sizes the margins from the labels at each draw:
   left the axis's widest label, right the lines' end values and the scalar threshold's label (drawn in that margin), bottom the time rows, and either side at least half a time label (a mark at the plot's edge centres its label on it).
@@ -13,7 +14,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   `_plot_rect()` is the one plot rectangle: drawing, glyphs and the pan code read it.
   A line's end label takes the nearest free slot between the plot's bottom and the widget's top (`_free_label_y`, upward first), since the top margin leaves no room above and the bottom one holds the time rows;
   a threshold step's label at the top of the scale goes under its line.
-  The Y grid is bounded: a fixed `grid_step` that would draw more than `_MAX_Y_GRID_LINES` lines gives way to `_compute_nice_step`, since each line carries a label (a 200000 scale at the default 20-unit step would draw 10000).
+  The Y grid is bounded: the fixed 20-unit step (`_Y_GRID_STEP`) that would draw more than `_MAX_Y_GRID_LINES` lines gives way to `_compute_nice_step`, since each line carries a label (a 200000 scale at the default 20-unit step would draw 10000).
 - **Glyphs** (the `GraphGlyphs` mixin, `app/ui/graph_glyphs.py`: their callbacks, rects and drawing) sit inside the plot's corners (`_corner_rect`):
   the series picker top-left, expand top-right (in fullscreen the close cross, `set_expand_callback(cb, closes=True)`), fit bottom-right, hidden on a plot too short for it under expand.
   `GraphSet.wire_glyphs` (`app/ui/graph_set.py`, the app's `_graphs`: its six graphs) wires them on every graph (`GraphSet.all()`), the one place for cross-graph affordances.
@@ -79,7 +80,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   steps take precedence over `set_threshold(value)`'s single line, and `set_threshold_steps(None)` reverts to it.
   The live metrics graph and the session detail's step it from the ticks' targets (#83), simple and program sessions alike.
   Live, `add_point(values, threshold=)` extends the steps with `extend_steps` at each point:
-  the tick's target rides its `Ticked` event and the mirror's `score_target`, so a reload from the mirror (`LiveSessionScreen.load_mirror`) rebuilds the same steps with `target_steps`;
+  the tick's target rides its `Ticked` event and the mirror's `score_target`, so a reload from the mirror (`LiveGraphs.load_mirror`) rebuilds the same steps with `target_steps`;
   `SessionControls._start` clears them (`ShownSession.take`), and a segment switch doesn't set the line.
   The detail's `detail_graph_data` returns `threshold_steps` (`target_steps` over the rows: None unless every row has a target) and the metrics fill applies them.
   A session from before #83 keeps what the open draws from its row: its program's steps (`sessions.session_program`, mapped through elapsed time) or one line at `threshold_used`.
@@ -101,7 +102,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   the fold (5) doesn't make the split moot for a thin line on a wide fullscreen graph.
   A stencil mask over a gradient doesn't work instead: Kivy counts overlapping mask fragments (wide-line joints), so `equal` leaves holes and `lequal` leaks outside an enclosing ScrollView's stencil;
   and `StencilUse(func_op=...)` in the constructor is silently ignored (only the property setter applies; the getter raises on Python 3).
-  (4) `set_drawing_enabled(False)` pauses a graph its owner detached (`LiveSessionScreen._set_view`: the hidden Metrics/Raw view), which keeps its size and would redraw every tick unseen;
+  (4) `set_drawing_enabled(False)` pauses a graph its owner detached (`LiveGraphs.show_view`: the hidden Metrics/Raw view), which keeps its size and would redraw every tick unseen;
   data keeps accruing and the graph redraws once re-enabled.
   (5) A zoomed-out series draws each run of samples' min and max (MinMax; #70, #104):
   The fold is `app/ui/graph_runs.py`, Kivy-free arithmetic the widget's `_drawn_indices(key, values, start_idx, per_px)` calls (`run_indices`):
@@ -159,6 +160,7 @@ A graph's touch handling is the `GraphGestures` mixin (`app/ui/graph_gestures.py
   into a full-window `FloatLayout` overlay on `self._float_root` with `size_hint=(1,1)` + `pos_hint={"x":0,"y":0}`, so it reaches every edge, where a `Popup` insets its content with chrome.
   Reparenting keeps the single `Window.on_mouse_down` bind and the live `add_point` feed, so a running session's graph updates live in fullscreen.
   While fullscreen the expand glyph is the close cross (`closes=True`); it, Android back and Esc (`Navigation.on_keyboard` → `GraphFullscreen.close`) restore the graph to its original parent and index and give it the expand glyph back.
-  While fullscreen, `GraphFullscreen` chains its own legend onto the graph's `on_series_change` (`_series_changed`: the owner's handler if one is wired, then `refresh_legend`) and wires the owner's handler back on close.
+  While fullscreen, `GraphFullscreen` chains its own legend onto the graph's `on_series_change` (`_series_changed`: the owner's handler if one is wired, then its own legend) and wires the owner's handler back on close.
+  What is open is one record (`_Shown`: the graph, the overlay and its legend, where the graph was and how big, the owner's handler), set by `present` and taken back by `close`.
   A handler wired to the graph while it is fullscreen would be replaced on close: only the owning screen wires it, once at build.
   **Capture `list(size_hint)`/`list(size)` copies before overriding**: they are live `ReferenceListProperty`s, and a bare reference tracks the `(1,1)` you set and breaks restore.

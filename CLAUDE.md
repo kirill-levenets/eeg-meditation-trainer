@@ -68,7 +68,7 @@ Read it before changing that subsystem.
   `session_run.py` `SessionRun` (one Start: its phase and per-run state), `recorder.py` `SessionRecorder` (the running session's checkpoints).
   `app/session/running_session.py` `RunningSession` (the app's `_session`) — the parts a session runs on (manager, recorder, engine, its own formula lines, program run, timer, watch, BT wait, wake lock), what it is scored on and saved as, and its run's runner thread, the one writer of its state.
   `app/session/program_run.py` `ProgramRun` — the running program: segment stepping on the session's runner, its live-graph lines.
-  `live_mirror.py` `LiveMirror` (the live graphs' data, kept by the runner through a screen lock; `LiveSessionScreen.load_mirror` reloads from its snapshot).
+  `live_mirror.py` `LiveMirror` (the live graphs' data, kept by the runner through a screen lock; `LiveGraphs.load_mirror` reloads from its snapshot).
   Nothing in `app/session/` imports Kivy or `app.ui` at import time, directly or through its imports (`tests/test_session_package.py`): a session's screen work goes out as events.
   `app/ui/program_settings.py` `ProgramSettings` — Settings → Timer: mode, the edited program, saved programs.
   `app/ui/formula_settings.py` `FormulaSettings` — Settings → Custom Formula.
@@ -90,7 +90,7 @@ Read it before changing that subsystem.
   `app/ui/widgets/` — the widgets built on it: `styled_button.py`, `popups.py` (popups, file chooser, in-screen modal card), `folds.py`, `accordion.py`, `bottom_nav.py`, `rows.py`, legends, overlays;
   `app/ui/formatting.py` — durations and counts as text.
   `app/ui/hooks.py` — `Hook`/`wire()`: the handlers the app plugs into a widget. → [ui-theme](docs/architecture/ui-theme.md)
-- `app/ui/raw_eeg_screen.py` — `ScrollableGraphWidget`, the one time-series graph class; `graph_set.py` `GraphSet` (the app's six graphs: zoom groups, line width, corner buttons);
+- `app/ui/raw_eeg_screen.py` — `ScrollableGraphWidget`, the one time-series graph class, built from a `GraphKind` (`graph_kinds.py`: the app's three); `graph_set.py` `GraphSet` (the app's six graphs: zoom groups, line width, corner buttons);
   `graph_series.py` `GraphSeries` (the series picker, each graph's saved selection), `line_colours.py` (the scored line's gradient), `graph_runs.py` (the run fold, Kivy-free);
   `graph_gestures.py` (its touch), `graph_glyphs.py` (its corner buttons), `graph_scroll.py` `GraphAwareScrollView` (a page of graphs), `touch_utils.py`, `render_stats.py`. → [graphs](docs/architecture/graphs.md)
 - `app/session/bt_wait.py` `BtWait` (the BT wait at a session's start: connect, first data, give up),
@@ -98,7 +98,7 @@ Read it before changing that subsystem.
   · `app/ui/headset.py` `Headset` (which headset: a profile's own, found by its one scan path; its name; Settings → Device)
   · `app/ui/power_exemption.py` `PowerExemption` (what may close a locked session: battery optimisation, the maker's power manager;
   the first-start alert and Settings → Device's row → [app-platform](docs/architecture/app-platform.md#background-running-android))
-  · `app/ui/live_session.py` (its graphs and controls; the parts around them in `session_sections/`: header, stats strip, duration picker, end card, connection overlay),
+  · `app/ui/live_session.py` (its parts in `session_sections/`: header, live graphs, stats strip, control bar with the duration picker, end card, connection overlay),
   `shown_session.py` `ShownSession` (the session the screen shows: its graphs' mirror, its end card, the screen's part of every session event and of a resume),
   `settings_screen.py` (its folds, each a section in `settings_sections/`), `device_labels.py` → [live-session-and-settings](docs/architecture/live-session-and-settings.md);
   `history_screen.py` (its parts in `history_sections/`: charts, chart area, session list), `period_totals.py`, `history_flow.py` `HistoryFlow` (what the app does with History's rows) → [history](docs/architecture/history.md);
@@ -255,6 +255,7 @@ a `Hook` on its class, plugged in with `wire()` (never a new `set_*_callback`)
 · count with its noun `formatting.format_count`
 · a colour that must read on a surface `theme.with_contrast`
 · inline rename `rows.RenameRow`
+· a session's stats rows `rows.StatRows`
 · debounced change `UserSettings.after_settle`
 · session titles and stats lines `app/ui/session_labels.py`
 · scoring `scoring.GoalAccrual`

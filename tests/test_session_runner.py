@@ -60,7 +60,7 @@ def test_a_line_shown_or_hidden_mid_session_reaches_the_session_on_the_runner(ru
     set_shown = app._session._set_shown
     monkeypatch.setattr(app._session, "_set_shown",
                         lambda run, keys: (threads.append(threading.current_thread().name), set_shown(run, keys)))
-    graph = app._live_screen.graph
+    graph = app._live_screen.graphs.metrics
     graph.set_visible("custom_formula", not graph.is_visible("custom_formula"))
     frames_until(lambda: bool(threads), 2.0)
     assert threads == ["SessionRunner"] and ("custom_formula" in app._session.shown) == graph.is_visible("custom_formula")
@@ -69,8 +69,8 @@ def test_a_line_shown_or_hidden_mid_session_reaches_the_session_on_the_runner(ru
 def test_a_paused_session_records_nothing_until_it_resumes(running):
     app = running
     app._controls.toggle_pause()
-    frames_until(lambda: app._live_screen._btn_pause.text == "Resume", 2.0)  # its Paused event reached the screen
-    assert app._live_screen._btn_pause.text == "Resume" and app._session.manager.state == SessionState.PAUSED
+    frames_until(lambda: app._live_screen.controls.pause.text == "Resume", 2.0)  # its Paused event reached the screen
+    assert app._live_screen.controls.pause.text == "Resume" and app._session.manager.state == SessionState.PAUSED
     recorded = len(app._shown.mirror.metrics)
     time.sleep(6 * _INTERVAL)
     assert len(app._shown.mirror.metrics) == recorded
@@ -99,7 +99,7 @@ def test_the_runner_ends_with_its_run_and_a_late_command_does_nothing(running):
     assert app._session.run is None and not runner_alive(app) and run.phase.name == "ENDED"
     app._controls.toggle_pause()  # a tap that came after the end
     frames()
-    assert app._session.manager.state == SessionState.IDLE and app._live_screen._btn_pause.text == "Pause"
+    assert app._session.manager.state == SessionState.IDLE and app._live_screen.controls.pause.text == "Pause"
 
 
 def test_one_failing_tick_does_not_end_the_runner(running, monkeypatch):

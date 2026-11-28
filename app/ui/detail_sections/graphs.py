@@ -5,31 +5,22 @@ import math
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 
-from app.eeg.band_spec import BAND_KEYS, GROUP_NAMES, group_powers
+from app.eeg.band_spec import BAND_KEYS, group_powers
 from app.logger import timed
 from app.metrics.formula_slots import COMPUTED_SERIES
-from app.metrics.series_names import SERIES_NAMES
 from app.session.scoring import scored_steps, target_steps
 from app.session.session_program import RunnablePlan, recorded_program
+from app.ui.graph_kinds import BAND_POWER, METRICS, METRICS_COLORS, RAW_EEG
 from app.ui.graph_series import show_program_series
 from app.ui.hooks import wire
-from app.ui.live_session import METRICS_COLORS, METRICS_SCALES
 from app.ui.raw_eeg_screen import ScrollableGraphWidget
 from app.ui.theme import C, F, S, ThemedLabel
-from app.ui.widgets.band_totals import BAND_COLORS, BAND_SCALES
+from app.ui.widgets.band_totals import BAND_COLORS
 from app.ui.widgets.choice_toggle import ChoiceToggle
 from app.ui.widgets.legend import LegendBar
 from app.ui.widgets.what_if import LOAD_FAILED, LOADING
 
-RAW_EEG_PREVIEW_COLORS = {
-    "eeg": (0.3, 0.8, 1.0, 1.0),
-}
-
-RAW_EEG_PREVIEW_SCALES = {
-    "eeg": 500.0,
-}
-
-_SYNTH_RATE: float = 512.0
+_SYNTH_RATE: float = RAW_EEG.sample_rate
 _TICK_DURATION: float = 0.5
 _SAMPLES_PER_TICK: int = int(_SYNTH_RATE * _TICK_DURATION)
 
@@ -126,18 +117,11 @@ class DetailGraphs:
         self._ready: set[str] = {key for key, _label in TABS}  # the graphs with their data in place
         self._failed = False
         self._scored_key: str | None = None  # the series the shown session was scored on, marked in its legend
-        self.metrics = ScrollableGraphWidget(
-            colors=METRICS_COLORS, scales=METRICS_SCALES,
-            names=SERIES_NAMES,  # the live graph's names: a session's Metric is saved under them
-            viewport_seconds=60, show_value_labels=True, show_timestamps=True, size_hint_y=1, graph_id="diary_metrics")
-        self.raw = ScrollableGraphWidget(
-            colors=RAW_EEG_PREVIEW_COLORS, scales=RAW_EEG_PREVIEW_SCALES, viewport_seconds=10, show_value_labels=True,
-            show_timestamps=True, sample_rate=_SYNTH_RATE,
-            max_points=_RAW_MAX_SAMPLES,  # what the synthesizer keeps: the raw marker indices count into it
-            bipolar=True, size_hint_y=1, graph_id="diary_raw")
-        self.freq = ScrollableGraphWidget(
-            colors=BAND_COLORS, scales=BAND_SCALES, viewport_seconds=60, show_value_labels=True, show_timestamps=True,
-            auto_scale=True, size_hint_y=1, graph_id="diary_freq", names=GROUP_NAMES)
+        # The Session screen's kinds: a session's Metric is saved under the live graph's names.
+        self.metrics = ScrollableGraphWidget(METRICS, graph_id="diary_metrics", size_hint_y=1)
+        # Its cap is what the synthesizer keeps: the raw marker indices count into it.
+        self.raw = ScrollableGraphWidget(RAW_EEG, graph_id="diary_raw", max_points=_RAW_MAX_SAMPLES, size_hint_y=1)
+        self.freq = ScrollableGraphWidget(BAND_POWER, graph_id="diary_freq", size_hint_y=1)
         self._by_tab = {"metrics": self.metrics, "raw": self.raw, "freq": self.freq}
         # The legend follows the shown graph's visible set; a picker toggle (or a restore) on it rebuilds the legend.
         for graph in self.all:
