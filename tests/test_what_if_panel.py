@@ -229,9 +229,10 @@ def test_the_detail_opens_its_session_as_recorded_and_the_line_follows_the_slide
     a, workers = app
     targets = [70] * 7 + [90] * 8
     sid = a._db.checkpoint_session(None, {"duration": 7, "threshold_used": 70, "score_metric_key": "shamatha_score",
-                                          "score_metric_name": "Shamatha", "avg_score": 75.0, "score_targets": "[70, 90]",
-                                          "time_above_threshold": 5, "longest_streak": 1},
-                                   _scored_rows(VALUES, targets), user_id=a._current_user_id, session_name="s")
+                                          "score_metric_name": "Shamatha", "avg_score": 75.0,
+                                          "score_targets": "[70, 90]", "time_above_threshold": 5, "longest_streak": 1,
+                                          "user_id": a._current_user_id, "session_name": "s"},
+                                   _scored_rows(VALUES, targets))
     _open(a, workers, sid)
     d = a._diary_screen
     panel, graph = d.what_if, d.graphs.metrics
@@ -263,8 +264,8 @@ def test_a_program_session_opens_with_a_control_per_segment(app):  # noqa: F811
              "meditation_score": values[i] if i >= 120 else 0.0} for i in range(240)]
     sid = a._db.checkpoint_session(None, {"duration": 120, "threshold_used": 90, "score_metric_key": "program",
                                           "score_metric_name": "Program", "time_above_threshold": 61,
-                                          "longest_streak": 61}, rows, user_id=a._current_user_id,
-                                   session_name="p", session_program=json.dumps(program))
+                                          "longest_streak": 61, "user_id": a._current_user_id, "session_name": "p",
+                                          "session_program": json.dumps(program)}, rows)
     _open(a, workers, sid)
     d = a._diary_screen
     panel, graph = d.what_if, d.graphs.metrics
@@ -303,9 +304,9 @@ def test_the_next_session_shows_loading_until_its_data_arrives(app):  # noqa: F8
 def test_a_formula_the_replay_couldnt_rebuild_says_so(app):  # noqa: F811
     a, workers = app
     sid = a._db.checkpoint_session(None, {"duration": 7, "threshold_used": 150, "score_metric_key": "custom_formula_3",
-                                          "score_metric_name": "Gone"},
-                                   [{"timestamp": i * 0.5, "shamatha_score": 60.0} for i in range(10)],
-                                   user_id=a._current_user_id, session_name="f")
+                                          "score_metric_name": "Gone", "user_id": a._current_user_id,
+                                          "session_name": "f"},
+                                   [{"timestamp": i * 0.5, "shamatha_score": 60.0} for i in range(10)])
     _open(a, workers, sid)
     panel = a._diary_screen.what_if
     assert panel._controls.parent is None and "can't be replayed" in panel._message.text

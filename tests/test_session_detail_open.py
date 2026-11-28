@@ -37,8 +37,8 @@ def _session(db, uid: int, ticks: int, name: str, power: float, formula_name: st
     formulas = json.dumps([{"slot": 0, "name": formula_name, "formula": "alpha1 / beta1 * 100", "visible": True}])
     return db.checkpoint_session(None, {"duration": ticks // 2, "threshold_used": 70,
                                         "score_metric_key": "shamatha_score", "score_metric_name": "Shamatha",
-                                        "avg_score": 62.0}, rows, user_id=uid, session_name=name,
-                                 custom_formulas=formulas, started_at=1_759_648_500.0)
+                                        "avg_score": 62.0, "user_id": uid, "session_name": name,
+                                        "custom_formulas": formulas, "started_at": 1_759_648_500.0}, rows)
 
 
 @pytest.fixture
@@ -76,9 +76,9 @@ def _open(a, workers, sid) -> None:
 
 def _program_session(a, program, rows) -> int:
     return a._db.checkpoint_session(None, {"duration": len(rows) // 2, "threshold_used": program[0]["target"],
-                                           "score_metric_key": "program", "score_metric_name": "Program"},
-                                    rows, user_id=a._current_user_id, session_name="p",
-                                    session_program=json.dumps(program))
+                                           "score_metric_key": "program", "score_metric_name": "Program",
+                                           "user_id": a._current_user_id, "session_name": "p",
+                                           "session_program": json.dumps(program)}, rows)
 
 
 def _filled(graph) -> int:

@@ -201,15 +201,19 @@ class MockEEGStream:
         return t * t * (3.0 - 2.0 * t)
 
     def read_sample(self) -> dict[str, float]:
-        """Generate a single mock EEG sample with frequency-based synthesis."""
+        """One tick's sample: the band powers, the raw waveform over the tick, attention and meditation."""
         t = time.time() - self._start_time if self._running else 0.0
         self._sample_count += 1
-
         self._advance_state(0.5)
+        sample: dict = {"timestamp": t, **self._band_powers(t)}
+        sample["raw_eeg_waveform"] = self._waveform(t, sample)
+        sample["attention"], sample["meditation"] = _attention_meditation(sample)
+        return sample
 
+    def _band_powers(self, t: float) -> dict[str, float]:
+        """Each band's power at `t`: its base scaled by the state, oscillating at the band's frequency, with noise."""
         multipliers = self._get_effective_multipliers()
-        sample: dict[str, float] = {"timestamp": t}
-
+        powers: dict[str, float] = {}
         for band in BASE_POWER:
             base = BASE_POWER[band]
             mult = multipliers[band]
@@ -246,10 +250,11 @@ class MockEEGStream:
             if random.random() < 0.05:
                 value += random.uniform(0.5, 1.2) * base * 0.2
 
-            sample[band] = max(0.0, value)
+            powers[band] = max(0.0, value)
+        return powers
 
-        # Synthesize raw oscillating EEG waveform from band frequencies
-        # Generate 64 sub-samples over the 0.5s tick at 128Hz effective rate
+    def _waveform(self, t: float, powers: dict[str, float]) -> list[float]:
+        """The raw EEG over the tick ending at `t`: 64 points at 128 Hz, each band a sinusoid as strong as its power."""
         waveform_len = 64
         dt_sub = 0.5 / waveform_len
         waveform: list[float] = []
@@ -257,40 +262,21 @@ class MockEEGStream:
             t_sub = t - 0.5 + si * dt_sub
             val = 0.0
             for band in BASE_POWER:
-                amp = math.sqrt(max(sample.get(band, 0.0), 0.0))
+                amp = math.sqrt(max(powers.get(band, 0.0), 0.0))
                 freq = self._band_frequencies.get(band, 5.0)
                 phase = self._band_phases.get(band, 0.0)
                 val += amp * math.sin(2 * math.pi * freq * t_sub + phase)
             val += random.gauss(0, 2.0)
             waveform.append(val)
-        sample["raw_eeg_waveform"] = waveform
-
-        # Derived attention/meditation from band ratios
-        alpha_power = sample.get("alpha1", 0) + sample.get("alpha2", 0)
-        beta_power = sample.get("beta1", 0) + sample.get("beta2", 0)
-        theta_power = sample.get("theta", 0)
-        total = alpha_power + beta_power + theta_power + 1.0
-
-        attention = min(100, max(0, int(60 * beta_power / total + random.gauss(0, 5))))
-        meditation = min(100, max(0, int(70 * alpha_power / total + random.gauss(0, 5))))
-
-        sample["attention"] = float(attention)
-        sample["meditation"] = float(meditation)
-        return sample
+        return waveform
 
 
-if __name__ == "__main__":
-    stream = MockEEGStream()
-    stream.start()
-    print("Frequency-synthesized EEG — 20 samples:")
-    print(f"{'t':>5} {'delta':>7} {'theta':>7} {'alpha1':>7} {'alpha2':>7} "
-          f"{'beta1':>7} {'beta2':>7} {'gamma1':>7} {'gamma2':>7} {'att':>4} {'med':>4}")
-    for _i in range(20):
-        s = stream.read_sample()
-        print(f"{s['timestamp']:5.1f} {s['delta']:7.0f} {s['theta']:7.0f} "
-              f"{s['alpha1']:7.0f} {s['alpha2']:7.0f} {s['beta1']:7.0f} "
-              f"{s['beta2']:7.0f} {s['gamma1']:7.0f} {s['gamma2']:7.0f} "
-              f"{s['attention']:4.0f} {s['meditation']:4.0f}")
-        time.sleep(0.1)
-    stream.stop()
-    print(f"\nConnected after stop: {stream.is_connected}")
+def _attention_meditation(powers: dict[str, float]) -> tuple[float, float]:
+    """The headset's attention and meditation, 0-100, from the beta and alpha shares of the power, with noise."""
+    alpha_power = powers.get("alpha1", 0) + powers.get("alpha2", 0)
+    beta_power = powers.get("beta1", 0) + powers.get("beta2", 0)
+    theta_power = powers.get("theta", 0)
+    total = alpha_power + beta_power + theta_power + 1.0
+    attention = min(100, max(0, int(60 * beta_power / total + random.gauss(0, 5))))
+    meditation = min(100, max(0, int(70 * alpha_power / total + random.gauss(0, 5))))
+    return float(attention), float(meditation)

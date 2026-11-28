@@ -138,9 +138,9 @@ def test_a_new_session_averages_only_its_own_ticks(fresh_app, monkeypatch, next_
 def _saved_with_formulas(app) -> tuple[int, dict]:
     """A one-tick session started with the formulas in the slots now, saved with its record: (its id, its row)."""
     start_ticked_by_hand(app)
-    sid = app._db.save_session({"duration": 1}, user_id=app._current_user_id,
-                               custom_formulas=app._session.custom_formulas_json())
-    app._db.save_metrics_batch(sid, [{"timestamp": 0.5, "alpha1": 100, "alpha2": 50, "beta1": 10, "beta2": 5}])
+    sid = app._db.checkpoint_session(None, {"duration": 1, "user_id": app._current_user_id,
+                                            "custom_formulas": app._session.custom_formulas_json()},
+                                     [{"timestamp": 0.5, "alpha1": 100, "alpha2": 50, "beta1": 10, "beta2": 5}])
     return sid, app._db.get_session(sid)
 
 
@@ -194,7 +194,8 @@ def test_replay_with_no_formulas_is_empty_and_resets_the_names(fresh_app):
 
 def test_replay_tolerates_malformed_json(fresh_app):
     app = fresh_app
-    sid = app._db.save_session({"duration": 1}, user_id=app._current_user_id, custom_formulas="{not json")
+    sid = app._db.checkpoint_session(None, {"duration": 1, "user_id": app._current_user_id,
+                                            "custom_formulas": "{not json"}, [])
     series, _names = app._detail.compute_session_formulas(sid, app._db.get_session(sid))  # must not raise
     assert series == {}
 

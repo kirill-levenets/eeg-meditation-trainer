@@ -54,8 +54,94 @@ _OPERATORS = {
     ast.UAdd: operator.pos,
 }
 
+_COMPARISONS = {
+    ast.Lt: operator.lt,
+    ast.LtE: operator.le,
+    ast.Gt: operator.gt,
+    ast.GtE: operator.ge,
+    ast.Eq: operator.eq,
+    ast.NotEq: operator.ne,
+}
+
 _MAX_RESULT = 1e12
 _MAX_FORMULA_LEN = 500
+
+
+def _parse(formula: str) -> tuple[ast.Expression | None, str]:
+    """The formula's tree, or None and why it can't run."""
+    if len(formula) > _MAX_FORMULA_LEN:
+        return None, f"Formula too long (max {_MAX_FORMULA_LEN} chars)"
+    try:
+        tree = ast.parse(formula, mode="eval")
+    except SyntaxError as e:
+        return None, f"Syntax error: {e.msg}"
+    why = _refusal(tree.body)
+    return (None, why) if why else (tree, "")
+
+
+def _refusal(node: ast.AST) -> str | None:
+    """Why a formula can't have this node, or one under it; None when it can."""
+    match node:
+        case ast.Constant(value=value):
+            return None if isinstance(value, (int, float)) else f"Unsupported constant type: {type(value).__name__}"
+        case ast.Name(id=name):
+            return None if name in ALLOWED_VARIABLES or name in ALLOWED_FUNCTIONS else f"Unknown variable: '{name}'"
+        case ast.UnaryOp(op=op, operand=operand):
+            return _operator_refusal(op) or _refusal(operand)
+        case ast.BinOp(op=op, left=left, right=right):
+            return _operator_refusal(op) or _first_refusal((left, right))
+        case ast.Call():
+            return _call_refusal(node)
+        case ast.IfExp(test=test, body=body, orelse=orelse):
+            return _first_refusal((test, body, orelse))
+        case ast.Compare(left=left, ops=ops, comparators=comparators):
+            return _first_refusal((left, *comparators)) or next(
+                (f"Unsupported comparison: {type(op).__name__}" for op in ops if type(op) not in _COMPARISONS), None)
+    return f"Unsupported expression: {type(node).__name__}"
+
+
+def _first_refusal(nodes) -> str | None:
+    return next((why for why in map(_refusal, nodes) if why), None)
+
+
+def _operator_refusal(op: ast.AST) -> str | None:
+    return None if type(op) in _OPERATORS else f"Unsupported operator: {type(op).__name__}"
+
+
+def _call_refusal(node: ast.Call) -> str | None:
+    """A call of an allowed function by its name, with positional arguments it allows."""
+    if not isinstance(node.func, ast.Name):
+        return "Only simple function calls allowed"
+    name = node.func.id
+    if name not in ALLOWED_FUNCTIONS and name not in _WINDOWED_FUNCTIONS:
+        return f"Unknown function: '{name}'"
+    if node.keywords:
+        return "Keyword arguments not allowed"
+    return _windowed_refusal(node) if name in _WINDOWED_FUNCTIONS else _first_refusal(node.args)
+
+
+def _windowed_refusal(node: ast.Call) -> str | None:
+    """avg(expr, N): an allowed expression over a window of 1 to _MAX_WINDOW ticks."""
+    name = node.func.id
+    if len(node.args) != 2:
+        return f"{name}() requires exactly 2 arguments: {name}(expr, N)"
+    expr, window = node.args
+    why = _refusal(expr)
+    if why:
+        return f"In {name}() first argument: {why}"
+    if not isinstance(window, ast.Constant) or not isinstance(window.value, (int, float)):
+        return f"{name}() second argument must be a number"
+    if not 1 <= window.value < _MAX_WINDOW + 1:  # int() of it in range; compared as written, any size of number
+        return f"{name}() window size must be 1-{_MAX_WINDOW}"
+    return None
+
+
+def _avg_exprs(node: ast.AST) -> list[tuple[str, ast.AST]]:
+    """(key, expression) of each distinct avg() argument in the tree: the values its history keeps."""
+    exprs = {ast.dump(child.args[0]): child.args[0] for child in ast.walk(node)
+             if isinstance(child, ast.Call) and isinstance(child.func, ast.Name)
+             and child.func.id in _WINDOWED_FUNCTIONS and child.args}
+    return list(exprs.items())
 
 
 class CustomFormulaEvaluator:
@@ -100,21 +186,8 @@ class CustomFormulaEvaluator:
             self._last_error = ""
             return True, ""
 
-        if len(formula) > _MAX_FORMULA_LEN:
-            err = f"Formula too long (max {_MAX_FORMULA_LEN} chars)"
-            self._last_error = err
-            return False, err
-
-        try:
-            tree = ast.parse(formula, mode="eval")
-        except SyntaxError as e:
-            err = f"Syntax error: {e.msg}"
-            self._last_error = err
-            return False, err
-
-        # Validate AST nodes
-        ok, err = self._validate_ast(tree.body)
-        if not ok:
+        tree, err = _parse(formula)
+        if tree is None:
             self._last_error = err
             return False, err
 
@@ -122,7 +195,7 @@ class CustomFormulaEvaluator:
         self._ast_tree = tree
         self._last_error = ""
         self._history.clear()
-        self._avg_exprs = self._collect_avg_exprs(tree.body)
+        self._avg_exprs = _avg_exprs(tree.body)
         return True, ""
 
     def push_variables(self, variables: dict[str, float]) -> None:
@@ -134,182 +207,66 @@ class CustomFormulaEvaluator:
         for key, expr_node in self._avg_exprs:
             if key not in self._history:
                 self._history[key] = deque(maxlen=_MAX_WINDOW)
-            try:
-                val = self._eval_node(expr_node, variables)
-                if not math.isfinite(val):
-                    val = 0.0
-            except Exception:
-                val = 0.0
-            self._history[key].append(val)
+            self._history[key].append(self._value(expr_node, variables))
 
     def evaluate(self, variables: dict[str, float]) -> float:
-        """Evaluate the formula against the given variables.
-
-        Returns 0.0 on any error (division by zero, overflow, etc.).
-        """
+        """The formula's value on this tick's variables, clamped to +-_MAX_RESULT; 0 without a formula."""
         if not self._ast_tree:
             return 0.0
+        return max(-_MAX_RESULT, min(self._value(self._ast_tree.body, variables), _MAX_RESULT))
+
+    def _value(self, node: ast.AST, variables: dict[str, float]) -> float:
+        """The node's value, or 0 where it has none (a division by zero, a domain error, overflow, a complex result)."""
         try:
-            result = self._eval_node(self._ast_tree.body, variables)
-            if not math.isfinite(result):
-                return 0.0
-            return max(-_MAX_RESULT, min(result, _MAX_RESULT))
+            value = self._eval_node(node, variables)
+            return value if math.isfinite(value) else 0.0
         except (ZeroDivisionError, ValueError, OverflowError, TypeError, KeyError):
             return 0.0
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - a user's formula never stops the tick: it reads 0
             logger.debug(f"Custom formula eval error: {e}")
             return 0.0
 
-    def _validate_ast(self, node: ast.AST) -> tuple[bool, str]:
-        """Recursively validate that all AST nodes are safe."""
-        if isinstance(node, ast.Constant):
-            if not isinstance(node.value, (int, float)):
-                return False, f"Unsupported constant type: {type(node.value).__name__}"
-            return True, ""
-
-        if isinstance(node, ast.Name):
-            if node.id not in ALLOWED_VARIABLES and node.id not in ALLOWED_FUNCTIONS:
-                return False, f"Unknown variable: '{node.id}'"
-            return True, ""
-
-        if isinstance(node, ast.UnaryOp):
-            if type(node.op) not in _OPERATORS:
-                return False, f"Unsupported operator: {type(node.op).__name__}"
-            return self._validate_ast(node.operand)
-
-        if isinstance(node, ast.BinOp):
-            if type(node.op) not in _OPERATORS:
-                return False, f"Unsupported operator: {type(node.op).__name__}"
-            ok, err = self._validate_ast(node.left)
-            if not ok:
-                return False, err
-            return self._validate_ast(node.right)
-
-        if isinstance(node, ast.Call):
-            if not isinstance(node.func, ast.Name):
-                return False, "Only simple function calls allowed"
-            fname = node.func.id
-            if fname not in ALLOWED_FUNCTIONS and fname not in _WINDOWED_FUNCTIONS:
-                return False, f"Unknown function: '{fname}'"
-            if node.keywords:
-                return False, "Keyword arguments not allowed"
-            if fname in _WINDOWED_FUNCTIONS:
-                return self._validate_windowed_call(node)
-            for arg in node.args:
-                ok, err = self._validate_ast(arg)
-                if not ok:
-                    return False, err
-            return True, ""
-
-        if isinstance(node, ast.IfExp):
-            for sub in (node.test, node.body, node.orelse):
-                ok, err = self._validate_ast(sub)
-                if not ok:
-                    return False, err
-            return True, ""
-
-        if isinstance(node, ast.Compare):
-            ok, err = self._validate_ast(node.left)
-            if not ok:
-                return False, err
-            for comp in node.comparators:
-                ok, err = self._validate_ast(comp)
-                if not ok:
-                    return False, err
-            for op in node.ops:
-                if type(op) not in (ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Eq, ast.NotEq):
-                    return False, f"Unsupported comparison: {type(op).__name__}"
-            return True, ""
-
-        return False, f"Unsupported expression: {type(node).__name__}"
-
-    def _validate_windowed_call(self, node: ast.Call) -> tuple[bool, str]:
-        """Validate avg(expression, N) call."""
-        fname = node.func.id
-        if len(node.args) != 2:
-            return False, f"{fname}() requires exactly 2 arguments: {fname}(expr, N)"
-        arg0 = node.args[0]
-        ok, err = self._validate_ast(arg0)
-        if not ok:
-            return False, f"In {fname}() first argument: {err}"
-        arg1 = node.args[1]
-        if not isinstance(arg1, ast.Constant) or not isinstance(arg1.value, (int, float)):
-            return False, f"{fname}() second argument must be a number"
-        n = int(arg1.value)
-        if n < 1 or n > _MAX_WINDOW:
-            return False, f"{fname}() window size must be 1-{_MAX_WINDOW}"
-        return True, ""
-
-    def _collect_avg_exprs(self, node: ast.AST) -> list[tuple[str, ast.AST]]:
-        """Walk the AST and collect (key, expr_node) for each avg() call."""
-        exprs: dict[str, ast.AST] = {}
-        for child in ast.walk(node):
-            if (isinstance(child, ast.Call) and isinstance(child.func, ast.Name)
-                    and child.func.id in _WINDOWED_FUNCTIONS and child.args):
-                    key = ast.dump(child.args[0])
-                    exprs[key] = child.args[0]
-        return list(exprs.items())
-
     def _eval_node(self, node: ast.AST, variables: dict[str, float]) -> float:
-        if isinstance(node, ast.Constant):
-            return float(node.value)
-
-        if isinstance(node, ast.Name):
-            if node.id in ALLOWED_FUNCTIONS:
-                return 0.0
-            return float(variables.get(node.id, 0.0))
-
-        if isinstance(node, ast.UnaryOp):
-            op_func = _OPERATORS[type(node.op)]
-            return op_func(self._eval_node(node.operand, variables))
-
-        if isinstance(node, ast.BinOp):
-            left = self._eval_node(node.left, variables)
-            right = self._eval_node(node.right, variables)
-            op_func = _OPERATORS[type(node.op)]
-            if isinstance(node.op, ast.Pow) and abs(right) > 100:
-                return 0.0
-            return op_func(left, right)
-
-        if isinstance(node, ast.Call):
-            fname = node.func.id
-            if fname in _WINDOWED_FUNCTIONS:
-                return self._eval_windowed(node, variables)
-            func = ALLOWED_FUNCTIONS[fname]
-            args = [self._eval_node(a, variables) for a in node.args]
-            return float(func(*args))
-
-        if isinstance(node, ast.Compare):
-            left = self._eval_node(node.left, variables)
-            for op, comp in zip(node.ops, node.comparators):
-                right = self._eval_node(comp, variables)
-                if isinstance(op, ast.Lt):
-                    if not (left < right):
-                        return 0.0
-                elif isinstance(op, ast.LtE):
-                    if not (left <= right):
-                        return 0.0
-                elif isinstance(op, ast.Gt):
-                    if not (left > right):
-                        return 0.0
-                elif isinstance(op, ast.GtE):
-                    if not (left >= right):
-                        return 0.0
-                elif isinstance(op, ast.Eq):
-                    if not (left == right):
-                        return 0.0
-                elif isinstance(op, ast.NotEq) and not (left != right):
-                    return 0.0
-                left = right
-            return 1.0
-
-        if isinstance(node, ast.IfExp):
-            test = self._eval_node(node.test, variables)
-            if test:
-                return self._eval_node(node.body, variables)
-            return self._eval_node(node.orelse, variables)
-
+        """The value of a node the checks allowed."""
+        match node:
+            case ast.Constant(value=value):
+                return float(value)
+            case ast.Name(id=name):
+                return 0.0 if name in ALLOWED_FUNCTIONS else float(variables.get(name, 0.0))
+            case ast.UnaryOp(op=op, operand=operand):
+                return _OPERATORS[type(op)](self._eval_node(operand, variables))
+            case ast.BinOp():
+                return self._eval_binary(node, variables)
+            case ast.Call():
+                return self._eval_call(node, variables)
+            case ast.Compare():
+                return self._eval_compare(node, variables)
+            case ast.IfExp(test=test, body=body, orelse=orelse):
+                return self._eval_node(body if self._eval_node(test, variables) else orelse, variables)
         return 0.0
+
+    def _eval_binary(self, node: ast.BinOp, variables: dict[str, float]) -> float:
+        """The operator on both sides' values; a power with an exponent over 100 reads 0."""
+        left, right = self._eval_node(node.left, variables), self._eval_node(node.right, variables)
+        if isinstance(node.op, ast.Pow) and abs(right) > 100:
+            return 0.0
+        return _OPERATORS[type(node.op)](left, right)
+
+    def _eval_call(self, node: ast.Call, variables: dict[str, float]) -> float:
+        name = node.func.id
+        if name in _WINDOWED_FUNCTIONS:
+            return self._eval_windowed(node, variables)
+        return float(ALLOWED_FUNCTIONS[name](*(self._eval_node(arg, variables) for arg in node.args)))
+
+    def _eval_compare(self, node: ast.Compare, variables: dict[str, float]) -> float:
+        """1 when every link of the chain holds, else 0; the operands after a failed link are not evaluated."""
+        left = self._eval_node(node.left, variables)
+        for op, comparator in zip(node.ops, node.comparators):
+            right = self._eval_node(comparator, variables)
+            if not _COMPARISONS[type(op)](left, right):
+                return 0.0
+            left = right
+        return 1.0
 
     def _eval_windowed(self, node: ast.Call, variables: dict[str, float]) -> float:
         """Evaluate avg(expression, N) using the history buffer."""
@@ -342,82 +299,4 @@ def evaluate_series(evaluators: Mapping[str, CustomFormulaEvaluator], metrics: d
     for key, ev in valid:
         ev.push_variables(fvars)
         metrics[key] = ev.evaluate(fvars)
-
-
-if __name__ == "__main__":
-    ev = CustomFormulaEvaluator()
-
-    test_vars = {
-        "alpha1": 70000.0, "alpha2": 30000.0,
-        "beta1": 10000.0, "beta2": 12000.0,
-        "gamma1": 3000.0, "gamma2": 2000.0,
-        "theta": 8000.0, "delta": 11000.0,
-        "alpha": 100000.0, "beta": 22000.0, "gamma": 5000.0,
-        "alpha_norm": 0.45, "beta_norm": 0.15, "gamma_norm": 0.05,
-        "theta_norm": 0.10, "delta_norm": 0.25,
-        "total_power": 146000.0,
-        "meditation_score": 65.0, "shamatha_score": 42.0,
-        "distraction": 30.0, "sinking": 20.0,
-        "subtle_distraction": 5.0, "stability": 3.5, "calmness": 2.8,
-        "native_attention": 55.0, "native_meditation": 60.0,
-    }
-
-    formulas = [
-        ("(alpha1 + alpha2) / (beta1 + beta2 + 1)", "Alpha/Beta ratio"),
-        ("sqrt(alpha_norm) * 100", "Sqrt alpha norm scaled"),
-        ("meditation_score * 0.7 + shamatha_score * 0.3", "Weighted blend"),
-        ("log(total_power + 1)", "Log total power"),
-        ("alpha / (beta + gamma + 1)", "Alpha dominance"),
-        ("100 * alpha_norm / (beta_norm + 0.001)", "Alpha/Beta norm ratio"),
-        ("max(meditation_score, shamatha_score)", "Max of med/sham"),
-        ("1 / 0", "Division by zero (should return 0)"),
-        ("pow(999, 999)", "Overflow (should return 0)"),
-        ("import os", "Should fail validation"),
-        ("__import__('os')", "Should fail validation"),
-        ("alpha1 if alpha1 > beta1 else beta1", "Conditional expression"),
-    ]
-
-    for formula, _desc in formulas:
-        ok, err = ev.set_formula(formula)
-        if ok:
-            result = ev.evaluate(test_vars)
-        else:
-            pass
-
-    # --- avg() windowed average tests ---
-
-    ok, err = ev.set_formula("avg(meditation_score, 5)")
-    assert ok, f"avg formula should be valid: {err}"
-    for i in range(10):
-        tick_vars = {**test_vars, "meditation_score": 50.0 + i * 5.0}
-        ev.push_variables(tick_vars)
-    result = ev.evaluate({"meditation_score": 95.0})
-
-    ok, err = ev.set_formula("avg(alpha1, 3) / (avg(beta1, 3) + 1)")
-    assert ok, f"compound avg formula should be valid: {err}"
-    for i in range(5):
-        tick_vars = {"alpha1": 100.0 * (i + 1), "beta1": 50.0 * (i + 1)}
-        ev.push_variables(tick_vars)
-    result = ev.evaluate({"alpha1": 500.0, "beta1": 250.0})
-
-    # avg() with expression as first arg
-    ok, err = ev.set_formula("avg(alpha1 + beta1, 4)")
-    assert ok, f"avg(expr, N) should be valid: {err}"
-    for i in range(6):
-        tick_vars = {"alpha1": 100.0 * (i + 1), "beta1": 50.0 * (i + 1)}
-        ev.push_variables(tick_vars)
-    result = ev.evaluate({"alpha1": 600.0, "beta1": 300.0})
-    # pushed: 150, 300, 450, 600, 750, 900; last 4: 450, 600, 750, 900 → avg=675
-
-    ok, err = ev.set_formula("avg(sqrt(alpha_norm) * 100, 3)")
-    assert ok, f"avg(sqrt(x)*100, N) should be valid: {err}"
-    for val in [0.25, 0.49, 0.64, 0.81, 1.0]:
-        ev.push_variables({"alpha_norm": val})
-    result = ev.evaluate({"alpha_norm": 1.0})
-    # pushed: 50, 70, 80, 90, 100; last 3: 80, 90, 100 → avg=90
-
-    # Validation errors
-    ok, err = ev.set_formula("avg(alpha1)")
-    ok, err = ev.set_formula("avg(unknown_var, 5)")
-    ok, err = ev.set_formula("avg(alpha1, 99999)")
 

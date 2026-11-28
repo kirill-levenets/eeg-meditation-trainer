@@ -59,6 +59,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **A custom formula whose `avg()` window is too large a number to be one (`avg(alpha1, 1e400)`) is refused** with "window size must be 1-600": the app crashed on it.
 - **Exports leave nothing behind in the app's storage**: after a session's CSV (on Android) or a selection's ZIP was copied to Documents, its private copy stayed in the app's storage.
 - **A session's CSV that couldn't be copied to Documents says so and where it is kept**: the message pointed to a Share button the app doesn't have.
 - **A session's CSV exported on Windows has one line break per row**: each row ended in an extra carriage return (Windows' text mode added one to the CSV's own).

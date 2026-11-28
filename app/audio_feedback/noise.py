@@ -532,19 +532,3 @@ class _AudioTest:
         else:
             engine._set_noise_volume(self._saved_volume)
         logger.info("Audio test complete")
-
-
-if __name__ == "__main__":
-    engine = AudioEngine()
-    print(f"Volume at score 0: {engine.compute_volume(0, 100):.2f}")
-    print(f"Volume at score 25: {engine.compute_volume(25, 100):.2f}")
-    print(f"Volume at score 50: {engine.compute_volume(50, 100):.2f}")
-    print(f"Volume at score 100: {engine.compute_volume(100, 100):.2f}")
-    engine.update(25, 100)
-    print(f"Volume after update(25): {engine.volume:.2f}")
-    print(f"Sinking alert enabled: {engine.sinking_alert_enabled}")
-    print(f"Disconnect alert enabled: {engine.disconnect_alert_enabled}")
-    for kept in ("bell", "chime", "disconnect"):
-        print(f"{kept} WAV exists: {os.path.exists(engine._sounds.path(kept))}")
-    engine.cleanup()
-    print("Done")

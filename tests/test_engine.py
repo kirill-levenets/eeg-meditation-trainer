@@ -188,6 +188,18 @@ class TestMetricsEngine(unittest.TestCase):
         self.assertLess(result["meditation_score"], 50.0)
 
 
+def _distraction(raw: tuple, alpha1_pct: int, s_prime: float) -> float:
+    """reference_distraction on (beta1, beta2, alpha1) smoothed powers."""
+    return MetricsEngine.reference_distraction({"alpha1": alpha1_pct}, dict(zip(("beta1", "beta2", "alpha1"), raw)),
+                                               s_prime)
+
+
+def _sinking(pct: tuple, gamma_raw: tuple, s_prime: float) -> float:
+    """reference_sinking on the (alpha1, alpha2, gamma1, gamma2) percentages and the (gamma1, gamma2) powers."""
+    return MetricsEngine.reference_sinking(dict(zip(("alpha1", "alpha2", "gamma1", "gamma2"), pct)),
+                                           dict(zip(("gamma1", "gamma2"), gamma_raw)), s_prime)
+
+
 class TestReferenceDistraction(unittest.TestCase):
     """Distraction from the original Vernihor app.
 
@@ -197,26 +209,26 @@ class TestReferenceDistraction(unittest.TestCase):
 
     def test_main_branch_modulated(self):
         # 100*(3000+3000)/20000 = 30; 30*(140-60)/100 = 24
-        result = MetricsEngine.reference_distraction(3000.0, 3000.0, 20000.0, 47, 60.0)
+        result = _distraction((3000.0, 3000.0, 20000.0), 47, 60.0)
         self.assertAlmostEqual(result, 24.0, places=4)
 
     def test_alpha_gate_strictly_greater_than_65(self):
-        self.assertEqual(MetricsEngine.reference_distraction(3000.0, 3000.0, 20000.0, 66, 60.0), 0.0)
+        self.assertEqual(_distraction((3000.0, 3000.0, 20000.0), 66, 60.0), 0.0)
 
     def test_alpha_pct_exactly_65_is_not_gated(self):
         # gate is a1p > 65, so 65 passes through
-        self.assertAlmostEqual(MetricsEngine.reference_distraction(3000.0, 3000.0, 20000.0, 65, 60.0), 24.0, places=4)
+        self.assertAlmostEqual(_distraction((3000.0, 3000.0, 20000.0), 65, 60.0), 24.0, places=4)
 
     def test_shamatha_gate_at_140(self):
-        self.assertEqual(MetricsEngine.reference_distraction(3000.0, 3000.0, 20000.0, 47, 140.0), 0.0)
+        self.assertEqual(_distraction((3000.0, 3000.0, 20000.0), 47, 140.0), 0.0)
 
     def test_clamped_to_100(self):
         # 100*60000/20000 = 300; 300*(140-0)/100 = 420 -> clamp 100
-        self.assertEqual(MetricsEngine.reference_distraction(50000.0, 10000.0, 20000.0, 47, 0.0), 100.0)
+        self.assertEqual(_distraction((50000.0, 10000.0, 20000.0), 47, 0.0), 100.0)
 
     def test_zero_alpha_guard_clamps_to_100(self):
         # reference divides by raw alpha1 with no guard (inf -> clamp 100); port guards explicitly
-        self.assertEqual(MetricsEngine.reference_distraction(3000.0, 3000.0, 0.0, 47, 60.0), 100.0)
+        self.assertEqual(_distraction((3000.0, 3000.0, 0.0), 47, 60.0), 100.0)
 
 
 class TestReferenceSinking(unittest.TestCase):
@@ -229,51 +241,51 @@ class TestReferenceSinking(unittest.TestCase):
 
     def test_main_branch_no_gamma_damp(self):
         # (45-32)/0.26 = 50; 50*(140-40)/100 = 50; gp=5<10 -> no damp
-        result = MetricsEngine.reference_sinking(40, 32, 5, 5, 5000.0, 5000.0, 40.0)
+        result = _sinking((40, 32, 5, 5), (5000.0, 5000.0), 40.0)
         self.assertAlmostEqual(result, 50.0, places=4)
 
     def test_gamma1_damp(self):
         # 50 / (min(14-9,10)/25 + 1) = 50 / 1.2 = 41.6667
-        result = MetricsEngine.reference_sinking(40, 32, 14, 5, 5000.0, 5000.0, 40.0)
+        result = _sinking((40, 32, 14, 5), (5000.0, 5000.0), 40.0)
         self.assertAlmostEqual(result, 41.66667, places=4)
 
     def test_both_gamma_damp(self):
         # 50 / 1.2 / 1.2 = 34.7222
-        result = MetricsEngine.reference_sinking(40, 32, 14, 14, 5000.0, 5000.0, 40.0)
+        result = _sinking((40, 32, 14, 14), (5000.0, 5000.0), 40.0)
         self.assertAlmostEqual(result, 34.72222, places=4)
 
     def test_gamma_damp_capped_at_10(self):
         # g1p=25 -> min(16,10)=10 -> /25+1 = 1.4; 50/1.4 = 35.7143
-        result = MetricsEngine.reference_sinking(40, 32, 25, 5, 5000.0, 5000.0, 40.0)
+        result = _sinking((40, 32, 25, 5), (5000.0, 5000.0), 40.0)
         self.assertAlmostEqual(result, 35.71429, places=4)
 
     def test_gamma_damp_skipped_when_raw_at_70000(self):
         # gate requires gamma_raw < 70000; at 70000 no damp -> 50
-        result = MetricsEngine.reference_sinking(40, 32, 14, 5, 70000.0, 5000.0, 40.0)
+        result = _sinking((40, 32, 14, 5), (70000.0, 5000.0), 40.0)
         self.assertAlmostEqual(result, 50.0, places=4)
 
     def test_gamma_damp_skipped_when_pct_below_10(self):
         # g1p=9 < 10 -> no damp
-        result = MetricsEngine.reference_sinking(40, 32, 9, 5, 5000.0, 5000.0, 40.0)
+        result = _sinking((40, 32, 9, 5), (5000.0, 5000.0), 40.0)
         self.assertAlmostEqual(result, 50.0, places=4)
 
     def test_alpha1_gate_at_65(self):
-        self.assertEqual(MetricsEngine.reference_sinking(65, 32, 5, 5, 5000.0, 5000.0, 40.0), 0.0)
+        self.assertEqual(_sinking((65, 32, 5, 5), (5000.0, 5000.0), 40.0), 0.0)
 
     def test_alpha2_gate_at_45(self):
-        self.assertEqual(MetricsEngine.reference_sinking(40, 45, 5, 5, 5000.0, 5000.0, 40.0), 0.0)
+        self.assertEqual(_sinking((40, 45, 5, 5), (5000.0, 5000.0), 40.0), 0.0)
 
     def test_alpha2_just_below_gate_not_zeroed(self):
         # a2p=44 < 45: (45-44)/0.26 = 3.8462; *(140-40)/100 = 3.8462
-        result = MetricsEngine.reference_sinking(40, 44, 5, 5, 5000.0, 5000.0, 40.0)
+        result = _sinking((40, 44, 5, 5), (5000.0, 5000.0), 40.0)
         self.assertAlmostEqual(result, 3.84615, places=4)
 
     def test_shamatha_gate_at_140(self):
-        self.assertEqual(MetricsEngine.reference_sinking(40, 32, 5, 5, 5000.0, 5000.0, 140.0), 0.0)
+        self.assertEqual(_sinking((40, 32, 5, 5), (5000.0, 5000.0), 140.0), 0.0)
 
     def test_clamped_to_100(self):
         # a2p=0 -> 45/0.26 = 173.08 -> clamp 100
-        self.assertEqual(MetricsEngine.reference_sinking(40, 0, 5, 5, 5000.0, 5000.0, 40.0), 100.0)
+        self.assertEqual(_sinking((40, 0, 5, 5), (5000.0, 5000.0), 40.0), 100.0)
 
 
 class TestSqrtPct8Band(unittest.TestCase):
@@ -344,13 +356,8 @@ class TestReferenceIntegration(unittest.TestCase):
 
         pct = MetricsEngine.sqrt_pct_8band(sample)
         s_prime = engine.last_s_prime
-        expected_d = MetricsEngine.reference_distraction(
-            sample["beta1"], sample["beta2"], sample["alpha1"], pct["alpha1"], s_prime
-        )
-        expected_s = MetricsEngine.reference_sinking(
-            pct["alpha1"], pct["alpha2"], pct["gamma1"], pct["gamma2"],
-            sample["gamma1"], sample["gamma2"], s_prime,
-        )
+        expected_d = MetricsEngine.reference_distraction(pct, sample, s_prime)
+        expected_s = MetricsEngine.reference_sinking(pct, sample, s_prime)
         self.assertAlmostEqual(result["distraction"], expected_d, places=4)
         self.assertAlmostEqual(result["sinking"], expected_s, places=4)
         self.assertGreater(expected_d, 0.0)  # sample chosen to exercise the active branch
@@ -375,6 +382,17 @@ def _state_after(alpha: float, threshold: float) -> str:
 def test_the_state_is_classified_against_the_threshold_passed_with_the_sample():
     assert _state_after(2000.0, 50) == "Stable Focus"
     assert _state_after(2000.0, 100) == "Neutral"
+
+
+def test_a_sample_with_too_little_power_scores_0_everywhere():
+    startup = {"timestamp": 0.5, "delta": 33.0, "theta": 1.0, "alpha1": 1.0, "alpha2": 3.0, "beta1": 1.0, "beta2": 0.0,
+               "gamma1": 0.0, "gamma2": 1.0, "attention": 12.0, "meditation": 34.0}
+    result = MetricsEngine().process_sample(startup, 50)
+    assert result.pop("state") == "Neutral"
+    assert result == {"timestamp": 0.5, **dict.fromkeys(
+        ("alpha_norm", "beta_norm", "gamma_norm", "theta_norm", "delta_norm", "meditation_score", "distraction",
+         "subtle_distraction", "sinking", "shamatha_score", "stability", "calmness"), 0.0),
+        "native_attention": 12.0, "native_meditation": 34.0}
 
 
 def test_a_threshold_past_the_meditation_scale_classifies_as_its_ceiling():

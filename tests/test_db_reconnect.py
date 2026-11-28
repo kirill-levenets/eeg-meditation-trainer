@@ -62,16 +62,14 @@ def test_direct_table_read_self_heals_after_close_while_alive():
 
 
 def test_write_path_self_heals_after_close_while_alive():
-    # #1: reconnect must cover writes too (tick-thread save_session/save_metrics_batch),
+    # #1: reconnect must cover writes too (the session runner's checkpoint),
     # not just reads/settings — otherwise a post-restore flush crashes and loses the session.
     db = _fresh()
     uid = db.create_user("Kirill")
     db.close()  # closed while alive (e.g. restore that didn't relaunch)
-    sid = db.save_session(
-        {"duration": 60, "threshold_used": 50, "avg_meditation": 0, "avg_shamatha": 0,
-         "max_meditation": 0, "time_above_threshold": 0, "longest_streak": 0},
-        user_id=uid,
-    )
+    sid = db.checkpoint_session(None, {"duration": 60, "threshold_used": 50, "avg_meditation": 0, "avg_shamatha": 0,
+                                       "max_meditation": 0, "time_above_threshold": 0, "longest_streak": 0,
+                                       "user_id": uid}, [])
     assert sid and sid > 0
     assert len(db.get_all_sessions(user_id=uid)) == 1
 
@@ -109,10 +107,10 @@ def test_create_user_during_shutdown_raises_not_fake_id():
         db.create_user("Ghost")
 
 
-def test_save_session_during_shutdown_returns_none_not_fake_id():
+def test_a_new_session_row_during_shutdown_returns_none_not_fake_id():
     db = _fresh()
     uid = db.create_user("Kirill")
     db.mark_shutting_down()
     db.close()
-    sid = db.save_session({"duration": 60}, user_id=uid)
+    sid = db.checkpoint_session(None, {"duration": 60, "user_id": uid}, [])
     assert sid is None  # callers must treat None as "not persisted"

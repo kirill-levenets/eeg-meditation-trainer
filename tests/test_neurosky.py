@@ -1,4 +1,5 @@
 """Tests for NeuroSky ThinkGear parser and stream interface."""
+import struct
 import unittest
 
 from app.eeg import bt_links
@@ -7,6 +8,8 @@ from app.eeg.thinkgear import (
     BAND_NAMES,
     CODE_ASIC_EEG_POWER,
     CODE_ATTENTION,
+    CODE_BATTERY,
+    CODE_EEG_POWER_FLOAT,
     CODE_MEDITATION,
     CODE_POOR_SIGNAL,
     CODE_RAW_WAVE,
@@ -79,6 +82,29 @@ class TestThinkGearParser(unittest.TestCase):
         bands = results[0]["bands"]
         for name in BAND_NAMES:
             self.assertEqual(bands[name], expected[name])
+
+    def test_bands_decode_from_either_width_and_a_row_of_another_length_is_skipped(self):
+        powers = [1.5, 2.25, 1e5, 0.0, 7.0, 123456.0, -3.0, 9.75]
+        floats = bytes([CODE_EEG_POWER_FLOAT, 32]) + b"".join(struct.pack(">f", v) for v in powers)
+        ints = bytes([CODE_ASIC_EEG_POWER, 24]) + b"".join((i * 70000).to_bytes(3, "big") for i in range(8))
+        short = bytes([CODE_ASIC_EEG_POWER, 21]) + bytes(21)
+        float_pkt, int_pkt, both, short_pkt = self.parser.feed(
+            _build_packet(floats) + _build_packet(ints) + _build_packet(floats + ints) + _build_packet(short))
+        self.assertEqual(float_pkt["bands"], dict(zip(BAND_NAMES, powers)))
+        self.assertEqual(int_pkt["bands"], {name: float(i * 70000) for i, name in enumerate(BAND_NAMES)})
+        self.assertEqual(both["bands"], int_pkt["bands"])  # the later row
+        self.assertEqual(short_pkt, {})
+
+    def test_battery_excode_and_a_row_cut_short(self):
+        payload = bytes([0x55, CODE_BATTERY, 90, 0x16, 7, CODE_ATTENTION, 40, CODE_RAW_WAVE, 4, 1])
+        (pkt,) = self.parser.feed(_build_packet(payload))
+        # EXCODE bytes skipped, an unknown code's row skipped, the raw row longer than what is left ends it
+        self.assertEqual(pkt, {"battery": 90, "attention": 40.0})
+        self.assertIs(type(pkt["battery"]), int)
+
+    def test_a_payload_ending_in_a_code_without_its_length(self):
+        (pkt,) = self.parser.feed(_build_packet(bytes([CODE_ATTENTION, 40, CODE_RAW_WAVE])))
+        self.assertEqual(pkt, {"attention": 40.0})
 
     def test_checksum_mismatch_skipped(self):
         payload = bytes([CODE_ATTENTION, 50])

@@ -66,7 +66,7 @@ def test_a_failed_count_shows_the_profile_without_one_and_the_end_card_still_ope
 def test_a_running_sessions_row_is_counted_once_it_ends(fresh_app):
     app = fresh_app
     uid = app._current_user_id
-    app._db.save_session({"duration": 600}, user_id=uid)
+    app._db.checkpoint_session(None, {"duration": 600, "user_id": uid}, [])
     start_ticked_by_hand(app, ticks=2)
     app._session.checkpoint_or_report()  # its first checkpoint: the row exists
     assert len(app._db.get_all_sessions(uid)) == 2
@@ -80,7 +80,7 @@ def test_the_count_is_each_profiles_own_and_zero_once_the_database_is_closing(tm
     try:
         first, second = db.create_user("Mock"), db.create_user("Second mock")
         for uid in (first, first, second):
-            db.save_session({"duration": 60}, user_id=uid)
+            db.checkpoint_session(None, {"duration": 60, "user_id": uid}, [])
         assert (db.count_sessions(first), db.count_sessions(second)) == (2, 1)
         db.mark_shutting_down()
         db.close()

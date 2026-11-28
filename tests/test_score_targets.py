@@ -167,7 +167,7 @@ def _scored_session(db) -> int:
             sm.set_threshold(85)
         tick = {"timestamp": t * 0.5, "shamatha_score": value}
         rows.append({**tick, **sm.add_metric(tick)})
-    return db.checkpoint_session(None, sm.compute_statistics(), rows, session_name="s")
+    return db.checkpoint_session(None, {**sm.compute_statistics(), "session_name": "s"}, rows)
 
 
 def test_a_checkpoint_stores_each_ticks_score_and_the_sessions_targets(db):
@@ -183,7 +183,7 @@ def test_a_checkpoint_stores_each_ticks_score_and_the_sessions_targets(db):
 def test_the_next_checkpoint_updates_the_sessions_targets(db):
     sm = _running(70)
     sm.add_metric({"shamatha_score": 80.0})
-    sid = db.checkpoint_session(None, sm.compute_statistics(), [], session_name="s")
+    sid = db.checkpoint_session(None, {**sm.compute_statistics(), "session_name": "s"}, [])
     assert db.get_session(sid)["score_targets"] == "[70]"
     sm.set_threshold(60)
     sm.add_metric({"shamatha_score": 80.0})

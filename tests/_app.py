@@ -119,8 +119,8 @@ def saved_session(app, ticks: int = 4, name: str = "a sit", **stats) -> int:
     """A finished session of the active profile, as a session's last checkpoint stores it; History is told, as an
     ending tells it."""
     rows = [{"timestamp": t * 0.5, "shamatha_score": 60.0} for t in range(ticks)]
-    sid = app._db.checkpoint_session(None, {"duration": ticks // 2, "threshold_used": 70, **stats}, rows,
-                                     user_id=app._current_user_id, session_name=name)
+    sid = app._db.checkpoint_session(None, {"duration": ticks // 2, "threshold_used": 70, **stats,
+                                            "user_id": app._current_user_id, "session_name": name}, rows)
     app._history.mark_dirty()
     return sid
 

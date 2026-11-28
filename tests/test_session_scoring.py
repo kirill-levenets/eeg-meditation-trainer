@@ -202,11 +202,11 @@ def db():
 def test_the_final_save_and_the_partial_flush_write_the_score_columns(db):
     uid = db.create_user("someone")
     first = {"duration": 60, "score_metric_key": "shamatha_score", "score_metric_name": "Shamatha", "avg_score": 61.5}
-    sid = db.save_session(first, user_id=uid)  # the 60 s partial flush
+    sid = db.checkpoint_session(None, {**first, "user_id": uid}, [])  # the 60 s partial flush
     row = db.get_session(sid)
     assert (row["score_metric_key"], row["score_metric_name"], row["avg_score"]) == ("shamatha_score", "Shamatha", 61.5)
-    db.update_session(sid, {**first, "score_metric_key": "custom_formula", "score_metric_name": "Calm ratio",
-                            "avg_score": 70.0})  # the final save
+    db.checkpoint_session(sid, {**first, "score_metric_key": "custom_formula", "score_metric_name": "Calm ratio",
+                            "avg_score": 70.0}, [])  # the final save
     row = db.get_session(sid)
     assert (row["score_metric_key"], row["score_metric_name"], row["avg_score"]) == ("custom_formula", "Calm ratio", 70.0)
 
@@ -214,7 +214,7 @@ def test_the_final_save_and_the_partial_flush_write_the_score_columns(db):
 def test_an_old_database_gets_the_score_columns(tmp_path):
     path = str(tmp_path / "old.db")
     d = DatabaseManager(db_path=path)
-    sid = d.save_session({"duration": 600}, user_id=d.create_user("someone"))
+    sid = d.checkpoint_session(None, {"duration": 600, "user_id": d.create_user("someone")}, [])
     d.close()
     conn = sqlite3.connect(path)  # turn it into a database from before #51
     present = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}

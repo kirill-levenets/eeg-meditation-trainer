@@ -1,9 +1,16 @@
 import math
 from collections import deque
+from collections.abc import Mapping
 
 from app.config import METRICS, SIGMOID
 from app.eeg.band_spec import BAND_KEYS, GROUP_KEYS, group_powers
 from app.eeg.buffer import RollingBuffer, VarianceBuffer
+
+# A processed sample's normalized bands and its metrics, in the order its dict has them.
+_NORM_KEYS = ("alpha_norm", "beta_norm", "gamma_norm", "theta_norm", "delta_norm")
+_RESULT_SCORE_KEYS = ("meditation_score", "distraction", "subtle_distraction", "sinking", "shamatha_score", "stability",
+                      "state", "calmness")
+_SCORE_KEYS = tuple(key for key in _RESULT_SCORE_KEYS if key != "state")
 
 
 class MetricsEngine:
@@ -149,52 +156,29 @@ class MetricsEngine:
         return sinking
 
     @classmethod
-    def reference_sinking(
-        cls,
-        alpha1_pct: int,
-        alpha2_pct: int,
-        gamma1_pct: int,
-        gamma2_pct: int,
-        gamma1_raw: float,
-        gamma2_raw: float,
-        s_prime: float,
-    ) -> float:
-        """Sinking from the original Vernihor app.
-
-        Alpha2-deficit driven, gated by alpha dominance + shamatha, then
-        gamma-damped. *_pct = round(sqrt(raw/P8)*100); s_prime = pre-(-20) shamatha.
-        """
-        if (
-            s_prime >= cls._SHAMATHA_MOD_CEILING
-            or alpha1_pct >= cls._SINK_ALPHA1_GATE
-            or alpha2_pct >= cls._SINK_ALPHA2_GATE
-        ):
+    def reference_sinking(cls, pct: Mapping[str, int], raw: Mapping[str, float], s_prime: float) -> float:
+        """Sinking from the original Vernihor app: alpha2-deficit driven, gated by alpha dominance and shamatha, then
+        gamma-damped. `pct` is each band's round(sqrt(raw/P8)*100), `raw` its smoothed power, `s_prime` shamatha before
+        its -20."""
+        if (s_prime >= cls._SHAMATHA_MOD_CEILING or pct["alpha1"] >= cls._SINK_ALPHA1_GATE
+                or pct["alpha2"] >= cls._SINK_ALPHA2_GATE):
             return 0.0
-        s = (cls._SINK_ALPHA2_GATE - alpha2_pct) / cls._SINK_SLOPE
+        s = (cls._SINK_ALPHA2_GATE - pct["alpha2"]) / cls._SINK_SLOPE
         s = s * (cls._SHAMATHA_MOD_CEILING - s_prime) / 100.0
-        s = cls._gamma_damp(s, gamma1_pct, gamma1_raw)
-        s = cls._gamma_damp(s, gamma2_pct, gamma2_raw)
+        s = cls._gamma_damp(s, pct["gamma1"], raw.get("gamma1", 0.0))
+        s = cls._gamma_damp(s, pct["gamma2"], raw.get("gamma2", 0.0))
         return max(0.0, min(100.0, s))
 
     @classmethod
-    def reference_distraction(
-        cls,
-        beta1_raw: float,
-        beta2_raw: float,
-        alpha1_raw: float,
-        alpha1_pct: int,
-        s_prime: float,
-    ) -> float:
-        """Distraction from the original Vernihor app.
-
-        Raw beta/alpha ratio, gated by alpha1 dominance, shamatha-modulated.
-        alpha1_pct = round(sqrt(alpha1_raw/P8)*100); s_prime = pre-(-20) shamatha.
-        """
-        if s_prime >= cls._SHAMATHA_MOD_CEILING or alpha1_pct > cls._DIST_ALPHA1_GATE:
+    def reference_distraction(cls, pct: Mapping[str, int], raw: Mapping[str, float], s_prime: float) -> float:
+        """Distraction from the original Vernihor app: the raw beta/alpha ratio, gated by alpha1 dominance,
+        shamatha-modulated; `pct`, `raw` and `s_prime` as for sinking."""
+        alpha1_raw = raw.get("alpha1", 0.0)
+        if s_prime >= cls._SHAMATHA_MOD_CEILING or pct["alpha1"] > cls._DIST_ALPHA1_GATE:
             return 0.0
         if alpha1_raw <= 0.0:  # original divides by raw alpha1 (inf -> clamp 100)
             return 100.0
-        d = 100.0 * (beta1_raw + beta2_raw) / alpha1_raw
+        d = 100.0 * (raw.get("beta1", 0.0) + raw.get("beta2", 0.0)) / alpha1_raw
         d = d * (cls._SHAMATHA_MOD_CEILING - s_prime) / 100.0
         return max(0.0, min(100.0, d))
 
@@ -271,68 +255,35 @@ class MetricsEngine:
 
     def process_sample(self, raw_sample: dict[str, float], threshold: float) -> dict[str, float]:
         """Full pipeline: smooth → derive → normalize → compute all metrics, the state and subtle distraction against
-        the session's threshold in force (clamped to the 0-100 meditation scale)."""
-        threshold = max(0.0, min(100.0, threshold))
+        the session's threshold in force (clamped to the 0-100 meditation scale); with too little power (startup, no
+        signal) every metric is 0."""
         smoothed = self._rolling_buffer.push_sample(raw_sample)
-        bands = self.derive_bands(smoothed)
-        norms = self.normalize_bands(bands)
-
-        # Suppress metrics when total power is too low (startup / no signal)
-        native_attention = raw_sample.get("attention", 0.0)
-        native_meditation = raw_sample.get("meditation", 0.0)
-
+        norms = self.normalize_bands(self.derive_bands(smoothed))
         if norms["total_power"] < self.MIN_TOTAL_POWER:
             self._stability_buffer.push(0.0)
-            return {
-                "timestamp": raw_sample.get("timestamp", 0.0),
-                "alpha_norm": 0.0, "beta_norm": 0.0, "gamma_norm": 0.0,
-                "theta_norm": 0.0, "delta_norm": 0.0,
-                "meditation_score": 0.0, "distraction": 0.0,
-                "subtle_distraction": 0.0, "sinking": 0.0,
-                "shamatha_score": 0.0, "stability": 0.0,
-                "state": "Neutral", "calmness": 0.0,
-                "native_attention": native_attention,
-                "native_meditation": native_meditation,
-            }
+            norms, scores = dict.fromkeys(norms, 0.0), {**dict.fromkeys(_SCORE_KEYS, 0.0), "state": "Neutral"}
+        else:
+            scores = self._scores(smoothed, norms, max(0.0, min(100.0, threshold)))
+        return {"timestamp": raw_sample.get("timestamp", 0.0), **{key: norms[key] for key in _NORM_KEYS},
+                **{key: scores[key] for key in _RESULT_SCORE_KEYS},
+                "native_attention": raw_sample.get("attention", 0.0),
+                "native_meditation": raw_sample.get("meditation", 0.0)}
 
+    def _scores(self, smoothed: dict[str, float], norms: dict[str, float], threshold: float) -> dict:
+        """A sample's metrics and its state, from its smoothed powers and normalized bands."""
         calmness = self.compute_calmness(norms)
-        bands_sqrt = self.compute_sqrt_relative_bands(smoothed)
-        meditation_score = self.compute_meditation_score(bands_sqrt)
+        meditation_score = self.compute_meditation_score(self.compute_sqrt_relative_bands(smoothed))
         self._stability_buffer.push(meditation_score)
         stability = self.compute_stability()
-
         pct8 = self.sqrt_pct_8band(smoothed)
         s_prime = self._last_s_prime  # set by compute_meditation_score above
-        sinking = self.reference_sinking(
-            pct8["alpha1"], pct8["alpha2"], pct8["gamma1"], pct8["gamma2"],
-            smoothed.get("gamma1", 0.0), smoothed.get("gamma2", 0.0), s_prime,
-        )
-        distraction = self.reference_distraction(
-            smoothed.get("beta1", 0.0), smoothed.get("beta2", 0.0),
-            smoothed.get("alpha1", 0.0), pct8["alpha1"], s_prime,
-        )
-        subtle_distraction = self.compute_subtle_distraction(meditation_score, threshold)
-        shamatha = self.compute_shamatha(meditation_score)
-        state = self.classify_state(meditation_score, stability, sinking, distraction, threshold)
-
-        return {
-            "timestamp": raw_sample.get("timestamp", 0.0),
-            "alpha_norm": norms["alpha_norm"],
-            "beta_norm": norms["beta_norm"],
-            "gamma_norm": norms["gamma_norm"],
-            "theta_norm": norms["theta_norm"],
-            "delta_norm": norms["delta_norm"],
-            "meditation_score": meditation_score,
-            "distraction": distraction,
-            "subtle_distraction": subtle_distraction,
-            "sinking": sinking,
-            "shamatha_score": shamatha,
-            "stability": stability,
-            "state": state,
-            "calmness": calmness,
-            "native_attention": native_attention,
-            "native_meditation": native_meditation,
-        }
+        sinking = self.reference_sinking(pct8, smoothed, s_prime)
+        distraction = self.reference_distraction(pct8, smoothed, s_prime)
+        return {"meditation_score": meditation_score, "distraction": distraction,
+                "subtle_distraction": self.compute_subtle_distraction(meditation_score, threshold),
+                "sinking": sinking, "shamatha_score": self.compute_shamatha(meditation_score), "stability": stability,
+                "state": self.classify_state(meditation_score, stability, sinking, distraction, threshold),
+                "calmness": calmness}
 
     def reset(self) -> None:
         self._rolling_buffer.reset()
@@ -341,32 +292,3 @@ class MetricsEngine:
         self._ticks_above_threshold = 0
         self._recent_med_buffer.clear()
         self._last_s_prime = 0.0
-
-
-if __name__ == "__main__":
-    engine = MetricsEngine()
-
-    # NeuroSky-range test data
-    samples = [
-        {"label": "Relaxed (high alpha)", "timestamp": 1.0,
-         "delta": 11158, "theta": 7860, "alpha1": 70533, "alpha2": 31842,
-         "beta1": 9686, "beta2": 12795, "gamma1": 3367, "gamma2": 2396},
-        {"label": "Drowsy (high delta)", "timestamp": 2.0,
-         "delta": 457157, "theta": 26947, "alpha1": 115888, "alpha2": 26465,
-         "beta1": 9854, "beta2": 12525, "gamma1": 2678, "gamma2": 4579},
-        {"label": "Balanced", "timestamp": 3.0,
-         "delta": 32271, "theta": 17149, "alpha1": 29861, "alpha2": 24108,
-         "beta1": 12103, "beta2": 6182, "gamma1": 6435, "gamma2": 3383},
-        {"label": "Distracted (high beta)", "timestamp": 4.0,
-         "delta": 30000, "theta": 20000, "alpha1": 5000, "alpha2": 3000,
-         "beta1": 50000, "beta2": 40000, "gamma1": 20000, "gamma2": 15000},
-        {"label": "Startup (near-zero)", "timestamp": 0.5,
-         "delta": 33, "theta": 1, "alpha1": 1, "alpha2": 3,
-         "beta1": 1, "beta2": 0, "gamma1": 0, "gamma2": 1},
-    ]
-
-    for s in samples:
-        label = s.pop("label")
-        engine.reset()
-        result = engine.process_sample(s, METRICS.MEDITATION_THRESHOLD_DEFAULT)
-

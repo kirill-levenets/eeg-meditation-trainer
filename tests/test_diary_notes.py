@@ -170,7 +170,8 @@ def test_a_notes_only_save_keeps_the_sessions_tags_and_mood_in_history(app):
 def test_a_notes_save_for_a_session_history_has_not_loaded_is_harmless(app):
     listed = _noted_session(app)
     open_history(app, listed)
-    later = app._db.checkpoint_session(None, {"duration": 2}, [], user_id=app._current_user_id, session_name="later")
+    later = app._db.checkpoint_session(None, {"duration": 2, "user_id": app._current_user_id, "session_name": "later"},
+                                       [])
     assert app._history.save_notes(later, notes="x") is True
     assert [s["id"] for s in app._history_screen._sessions] == [listed]
     assert app._db.get_session(later)["notes"] == "x"

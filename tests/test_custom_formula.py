@@ -1,6 +1,8 @@
 import math
 import unittest
 
+import pytest
+
 from app.metrics.custom_formula import CustomFormulaEvaluator, compile_formula
 
 
@@ -9,6 +11,56 @@ def test_one_check_says_whether_a_formula_can_run_and_why_not():
     assert ev is not None and ev.is_valid and error == ""
     assert compile_formula("alpha1 +")[0] is None and compile_formula("alpha1 +")[1].startswith("Syntax error")
     assert compile_formula("   ") == (None, "Empty formula")  # nothing to run either
+
+
+@pytest.mark.parametrize(("formula", "why"), [
+    ("not alpha1", "Unsupported operator: Not"),
+    ("-foo", "Unknown variable: 'foo'"),
+    ("alpha1 & beta1", "Unsupported operator: BitAnd"),
+    ("None", "Unsupported constant type: NoneType"),
+    ("1j", "Unsupported constant type: complex"),
+    ("foo", "Unknown variable: 'foo'"),
+    ("math.sqrt(4)", "Only simple function calls allowed"),
+    ("foo(1)", "Unknown function: 'foo'"),
+    ("sqrt(x=4)", "Keyword arguments not allowed"),
+    ("sqrt(*[4])", "Unsupported expression: Starred"),
+    ("avg(alpha1, 5, 6)", "avg() requires exactly 2 arguments: avg(expr, N)"),
+    ("avg(foo, 5)", "In avg() first argument: Unknown variable: 'foo'"),
+    ("avg(alpha1, beta1)", "avg() second argument must be a number"),
+    ("avg(alpha1, 0.5)", "avg() window size must be 1-600"),
+    ("avg(alpha1, 601)", "avg() window size must be 1-600"),
+    ("avg(alpha1, 1e400)", "avg() window size must be 1-600"),
+    ("avg(alpha1, " + "9" * 400 + ")", "avg() window size must be 1-600"),
+    ("alpha1 if 1 else foo(2)", "Unknown function: 'foo'"),
+    ("alpha1 is beta1", "Unsupported comparison: Is"),
+    ("foo < alpha1 is 3", "Unknown variable: 'foo'"),  # the operands first, then the comparisons
+    ("alpha1 and beta1", "Unsupported expression: BoolOp"),
+    ("alpha1[0]", "Unsupported expression: Subscript"),
+])
+def test_a_refused_formula_says_which_part_it_cant_have(formula, why):
+    assert compile_formula(formula) == (None, why)
+
+
+def test_an_average_over_1_to_600_ticks_runs():
+    assert all(compile_formula(f"avg(alpha1, {window})")[0] is not None for window in (1, 600, 600.9))
+
+
+@pytest.mark.parametrize(("op", "truths"), [
+    ("<", (True, False, False)), ("<=", (True, True, False)), (">", (False, False, True)),
+    (">=", (False, True, True)), ("==", (False, True, False)), ("!=", (True, False, True)),
+])
+def test_each_comparison_reads_1_where_it_holds(op, truths):
+    ev, _ = compile_formula(f"alpha1 {op} 2")
+    assert tuple(ev.evaluate({"alpha1": a}) == 1.0 for a in (1.0, 2.0, 3.0)) == truths
+    chain, _ = compile_formula(f"1 < alpha1 {op} 2")  # a chain holds only where every link does
+    assert tuple(chain.evaluate({"alpha1": a}) == 1.0 for a in (1.0, 2.0, 3.0)) == (False, *truths[1:])
+
+
+def test_a_complex_value_reads_0_in_an_average_and_in_the_formula():
+    ev, _ = compile_formula("avg((0 - beta1) ** 0.5, 2) + 1")
+    ev.push_variables({"beta1": 4.0})  # sqrt of -4: a complex number
+    assert ev.evaluate({"beta1": 4.0}) == 1.0
+    assert compile_formula("(0 - beta1) ** 0.5")[0].evaluate({"beta1": 4.0}) == 0.0
 
 
 class TestFormulaValidation(unittest.TestCase):

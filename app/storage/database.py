@@ -70,6 +70,80 @@ _SESSION_STAT_DEFAULTS: tuple[tuple[str, object], ...] = (
     ("time_above_threshold", 0), ("longest_streak", 0), ("time_shamatha_90", 0),
     ("score_metric_key", ""), ("score_metric_name", ""), ("avg_score", None), ("score_targets", ""),
 )
+# A session row's fields besides its stats, with their defaults: its profile and name, set when it is inserted, and its
+# formula lines, program and engine version, which every checkpoint writes when it has them.
+_SESSION_FIELD_DEFAULTS: tuple[tuple[str, object], ...] = (
+    ("user_id", None), ("session_name", ""), ("custom_formulas", ""), ("session_program", ""), ("engine_version", ""),
+)
+_SESSION_INSERT_ONLY = ("user_id", "session_name")
+
+# Each table's columns after its key, in the order a new database has them (an older one, migrated, has the ones it
+# lacked added at its end): the CREATE, the migration and the inserts are built from these.
+_SESSION_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("user_id", "INTEGER DEFAULT NULL"), ("date_time", "TEXT NOT NULL"), ("duration", "INTEGER NOT NULL"),
+    ("threshold_used", "INTEGER DEFAULT 50"), ("avg_meditation", "REAL DEFAULT 0"), ("avg_shamatha", "REAL DEFAULT 0"),
+    ("max_meditation", "REAL DEFAULT 0"), ("time_above_threshold", "INTEGER DEFAULT 0"),
+    ("longest_streak", "INTEGER DEFAULT 0"), ("notes", "TEXT DEFAULT ''"), ("tags", "TEXT DEFAULT ''"),
+    ("mood_rating", "INTEGER DEFAULT 0"), ("engine_version", "TEXT DEFAULT ''"), ("session_name", "TEXT DEFAULT ''"),
+    ("time_shamatha_90", "INTEGER DEFAULT 0"), ("custom_formulas", "TEXT DEFAULT ''"),
+    ("session_program", "TEXT DEFAULT ''"),
+    # Which metric the session was scored on (#51); '' marks rows from before, scored on meditation.
+    ("score_metric_key", "TEXT DEFAULT ''"), ("score_metric_name", "TEXT DEFAULT ''"), ("avg_score", "REAL DEFAULT NULL"),
+    ("score_targets", "TEXT DEFAULT ''"),  # the targets in force, in order
+)
+
+# (column, SQL type, the tick record's key it is written from, its value when the tick has none)
+_METRIC_COLUMNS: tuple[tuple[str, str, str, object], ...] = (
+    ("timestamp", "REAL NOT NULL", "timestamp", 0),
+    *((f"{band}_raw", "REAL DEFAULT 0", band, 0) for band in BAND_KEYS),
+    *((key, "REAL DEFAULT 0", key, 0) for key in (
+        "alpha_norm", "beta_norm", "theta_norm", "delta_norm", "gamma_norm", "meditation_score", "distraction",
+        "subtle_distraction", "sinking", "shamatha_score", "stability", "calmness", "native_attention",
+        "native_meditation")),
+    ("marker", "INTEGER DEFAULT 0", "marker", 0),
+    # What the tick was scored on; NULL in rows from before it was recorded.
+    ("score_key", "TEXT DEFAULT NULL", "score_key", None),
+    ("score_value", "REAL DEFAULT NULL", "score_value", None),
+    ("score_target", "REAL DEFAULT NULL", "score_target", None),
+)
+
+
+def _column_defs(columns: tuple[tuple, ...]) -> str:
+    return ",\n".join(f"    {name} {sql}" for name, sql, *_ in columns)
+
+
+_SCHEMA = f"""
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+{_column_defs(_SESSION_COLUMNS)},
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS metrics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL,
+{_column_defs(_METRIC_COLUMNS)},
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+"""
+# After the migration: an older database's sessions have no user_id until it adds the column.
+_INDEXES = """
+CREATE INDEX IF NOT EXISTS idx_metrics_session ON metrics(session_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+"""
+_METRICS_INSERT = (f"INSERT INTO metrics (session_id, {', '.join(col for col, *_ in _METRIC_COLUMNS)}) "
+                   f"VALUES ({', '.join('?' * (len(_METRIC_COLUMNS) + 1))})")
 
 
 class UserExistsError(Exception):
@@ -140,233 +214,37 @@ class DatabaseManager:
         logger.info(f"Database initialized at {self._db_path}")
 
     def _create_tables(self) -> None:
-        self._conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                created_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS sessions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER DEFAULT NULL,
-                date_time TEXT NOT NULL,
-                duration INTEGER NOT NULL,
-                threshold_used INTEGER DEFAULT 50,
-                avg_meditation REAL DEFAULT 0,
-                avg_shamatha REAL DEFAULT 0,
-                max_meditation REAL DEFAULT 0,
-                time_above_threshold INTEGER DEFAULT 0,
-                longest_streak INTEGER DEFAULT 0,
-                notes TEXT DEFAULT '',
-                tags TEXT DEFAULT '',
-                mood_rating INTEGER DEFAULT 0,
-                engine_version TEXT DEFAULT '',
-                FOREIGN KEY (user_id) REFERENCES users(id)
-            );
-
-            CREATE TABLE IF NOT EXISTS metrics (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id INTEGER NOT NULL,
-                timestamp REAL NOT NULL,
-                delta_raw REAL DEFAULT 0,
-                theta_raw REAL DEFAULT 0,
-                alpha1_raw REAL DEFAULT 0,
-                alpha2_raw REAL DEFAULT 0,
-                beta1_raw REAL DEFAULT 0,
-                beta2_raw REAL DEFAULT 0,
-                gamma1_raw REAL DEFAULT 0,
-                gamma2_raw REAL DEFAULT 0,
-                alpha_norm REAL DEFAULT 0,
-                beta_norm REAL DEFAULT 0,
-                theta_norm REAL DEFAULT 0,
-                delta_norm REAL DEFAULT 0,
-                gamma_norm REAL DEFAULT 0,
-                meditation_score REAL DEFAULT 0,
-                distraction REAL DEFAULT 0,
-                subtle_distraction REAL DEFAULT 0,
-                sinking REAL DEFAULT 0,
-                shamatha_score REAL DEFAULT 0,
-                stability REAL DEFAULT 0,
-                calmness REAL DEFAULT 0,
-                native_attention REAL DEFAULT 0,
-                native_meditation REAL DEFAULT 0,
-                marker INTEGER DEFAULT 0,
-                FOREIGN KEY (session_id) REFERENCES sessions(id)
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_metrics_session
-            ON metrics(session_id);
-
-            CREATE INDEX IF NOT EXISTS idx_sessions_user
-            ON sessions(user_id);
-
-            CREATE TABLE IF NOT EXISTS app_settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            );
-            """
-        )
+        self._conn.executescript(_SCHEMA)
         self._conn.commit()
 
     def _migrate(self) -> None:
-        """Add columns that may be missing in older databases."""
-        existing = set()
-        cursor = self._conn.execute("PRAGMA table_info(metrics)")
-        for row in cursor.fetchall():
-            existing.add(row[1])
-
-        new_columns = {
-            "delta_raw": "REAL DEFAULT 0",
-            "theta_raw": "REAL DEFAULT 0",
-            "alpha1_raw": "REAL DEFAULT 0",
-            "alpha2_raw": "REAL DEFAULT 0",
-            "beta1_raw": "REAL DEFAULT 0",
-            "beta2_raw": "REAL DEFAULT 0",
-            "gamma1_raw": "REAL DEFAULT 0",
-            "gamma2_raw": "REAL DEFAULT 0",
-            "stability": "REAL DEFAULT 0",
-            "calmness": "REAL DEFAULT 0",
-            "native_attention": "REAL DEFAULT 0",
-            "native_meditation": "REAL DEFAULT 0",
-            "marker": "INTEGER DEFAULT 0",
-            # What the tick was scored on; NULL in rows from before it was recorded.
-            "score_key": "TEXT DEFAULT NULL",
-            "score_value": "REAL DEFAULT NULL",
-            "score_target": "REAL DEFAULT NULL",
-        }
-        for col, col_type in new_columns.items():
-            if col not in existing:
-                self._conn.execute(f"ALTER TABLE metrics ADD COLUMN {col} {col_type}")
-                logger.info(f"Migrated: added column metrics.{col}")
-
-        sess_cursor = self._conn.execute("PRAGMA table_info(sessions)")
-        sess_cols = {row[1] for row in sess_cursor.fetchall()}
-        if "user_id" not in sess_cols:
-            self._conn.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER DEFAULT NULL")
-            logger.info("Migrated: added column sessions.user_id")
-        if "longest_streak" not in sess_cols:
-            self._conn.execute("ALTER TABLE sessions ADD COLUMN longest_streak INTEGER DEFAULT 0")
-            logger.info("Migrated: added column sessions.longest_streak")
-        if "session_name" not in sess_cols:
-            self._conn.execute("ALTER TABLE sessions ADD COLUMN session_name TEXT DEFAULT ''")
-            logger.info("Migrated: added column sessions.session_name")
-        if "time_shamatha_90" not in sess_cols:
-            self._conn.execute("ALTER TABLE sessions ADD COLUMN time_shamatha_90 INTEGER DEFAULT 0")
-            logger.info("Migrated: added column sessions.time_shamatha_90")
-        if "custom_formulas" not in sess_cols:
-            self._conn.execute("ALTER TABLE sessions ADD COLUMN custom_formulas TEXT DEFAULT ''")
-            logger.info("Migrated: added column sessions.custom_formulas")
-        if "session_program" not in sess_cols:
-            self._conn.execute("ALTER TABLE sessions ADD COLUMN session_program TEXT DEFAULT ''")
-            logger.info("Migrated: added column sessions.session_program")
-        if "engine_version" not in sess_cols:
-            self._conn.execute("ALTER TABLE sessions ADD COLUMN engine_version TEXT DEFAULT ''")
-            logger.info("Migrated: added column sessions.engine_version")
-        # Which metric the session was scored on (#51); '' marks rows from before, scored on meditation.
-        for col, col_type in (("score_metric_key", "TEXT DEFAULT ''"), ("score_metric_name", "TEXT DEFAULT ''"),
-                              ("avg_score", "REAL DEFAULT NULL"),
-                              ("score_targets", "TEXT DEFAULT ''")):  # the targets in force, in order
-            if col not in sess_cols:
-                self._conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {col_type}")
-                logger.info(f"Migrated: added column sessions.{col}")
-
+        """Add the columns an older database lacks, at its tables' ends."""
+        for table, columns in (("metrics", _METRIC_COLUMNS), ("sessions", _SESSION_COLUMNS)):
+            existing = {row[1] for row in self._conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            for name, sql, *_ in columns:
+                if name not in existing:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {sql}")
+                    logger.info(f"Migrated: added column {table}.{name}")
+        self._conn.executescript(_INDEXES)
         self._conn.commit()
 
-    def save_session(self, stats: dict, user_id: int | None = None,
-                     session_name: str = "", custom_formulas: str = "",
-                     session_program: str = "", engine_version: str = "") -> int | None:
-        """Insert a session record and return its ID — or None if the write was
-        no-oped by the null connection (shutting down); callers must treat None
-        as "not persisted". `custom_formulas` is a JSON string. `engine_version`
-        stamps which metric-formula version produced the stored values.
-        """
-        with self._write() as c:
-            session_id = self._insert_session(c, stats, user_id, session_name, custom_formulas, session_program,
-                                              engine_version)
-        if session_id is None:
-            logger.error("save_session no-oped — DB is shutting down; session NOT persisted")
-            return None
-        logger.info(f"Session {session_id} saved")
-        return session_id
-
     @staticmethod
-    def _insert_session(c, stats: dict, user_id: int | None, session_name: str, custom_formulas: str,
-                        session_program: str, engine_version: str, started_at: float | None = None) -> int | None:
-        """The session-row INSERT inside the caller's transaction: its id, or None from the null connection.
-        `started_at` (epoch seconds) dates the row; without it, now."""
-        row = {
-            "user_id": user_id,
-            "date_time": (datetime.fromtimestamp(started_at) if started_at else datetime.now()).isoformat(),
-            **{col: stats.get(col, default) for col, default in _SESSION_STAT_DEFAULTS},
-            "session_name": session_name,
-            "custom_formulas": custom_formulas,
-            "session_program": session_program,
-            "engine_version": engine_version,
-        }
-        cursor = c.execute(
-            f"INSERT INTO sessions ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})", tuple(row.values()))
+    def _insert_session(c, row: dict) -> int | None:
+        """The session-row INSERT inside the caller's transaction: its id, or None from the null connection. `row` is
+        its stats and fields; its `started_at` (epoch seconds) dates it, without one now."""
+        started_at = row.get("started_at")
+        values = {"date_time": (datetime.fromtimestamp(started_at) if started_at else datetime.now()).isoformat(),
+                  **{col: row.get(col, default) for col, default in (*_SESSION_STAT_DEFAULTS, *_SESSION_FIELD_DEFAULTS)}}
+        cursor = c.execute(f"INSERT INTO sessions ({', '.join(values)}) VALUES ({', '.join('?' * len(values))})",
+                           tuple(values.values()))
         return cursor.lastrowid
-
-    def save_metrics_batch(self, session_id: int, metrics_list: list[dict]) -> None:
-        """Batch insert metrics rows with raw and computed data."""
-        if not metrics_list:
-            return
-        with self._write() as c:
-            self._insert_metrics(c, session_id, metrics_list)
 
     @staticmethod
     def _insert_metrics(c, session_id: int, metrics_list: list[dict]) -> None:
-        """The metrics INSERT inside the caller's transaction."""
-        if not metrics_list:
-            return
-        rows = [
-            (
-                session_id,
-                m.get("timestamp", 0),
-                m.get("delta", 0),
-                m.get("theta", 0),
-                m.get("alpha1", 0),
-                m.get("alpha2", 0),
-                m.get("beta1", 0),
-                m.get("beta2", 0),
-                m.get("gamma1", 0),
-                m.get("gamma2", 0),
-                m.get("alpha_norm", 0),
-                m.get("beta_norm", 0),
-                m.get("theta_norm", 0),
-                m.get("delta_norm", 0),
-                m.get("gamma_norm", 0),
-                m.get("meditation_score", 0),
-                m.get("distraction", 0),
-                m.get("subtle_distraction", 0),
-                m.get("sinking", 0),
-                m.get("shamatha_score", 0),
-                m.get("stability", 0),
-                m.get("calmness", 0),
-                m.get("native_attention", 0),
-                m.get("native_meditation", 0),
-                m.get("marker", 0),
-                m.get("score_key"),
-                m.get("score_value"),
-                m.get("score_target"),
-            )
-            for m in metrics_list
-        ]
-        c.executemany(
-            """
-            INSERT INTO metrics
-            (session_id, timestamp, delta_raw, theta_raw, alpha1_raw, alpha2_raw,
-             beta1_raw, beta2_raw, gamma1_raw, gamma2_raw,
-             alpha_norm, beta_norm, theta_norm, delta_norm, gamma_norm,
-             meditation_score, distraction, subtle_distraction, sinking,
-             shamatha_score, stability, calmness,
-             native_attention, native_meditation, marker, score_key, score_value, score_target)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            rows,
-        )
+        """The metrics INSERT inside the caller's transaction: each tick's values in their columns."""
+        if metrics_list:
+            c.executemany(_METRICS_INSERT, [(session_id, *(m.get(key, default) for _col, _sql, key, default
+                                                            in _METRIC_COLUMNS)) for m in metrics_list])
 
     def get_all_sessions(self, user_id: int) -> list[dict]:
         """One profile's sessions, newest first: no caller may list every profile's."""
@@ -497,46 +375,26 @@ class DatabaseManager:
 
     # ---- Session management ----
 
-    def update_session(self, session_id: int, stats: dict,
-                       custom_formulas: str | None = None,
-                       session_program: str | None = None,
-                       engine_version: str | None = None) -> None:
-        """Update an existing session's aggregate stats (+ formula snapshot if given)."""
-        with self._write() as c:
-            self._update_session_row(c, session_id, stats, custom_formulas, session_program, engine_version)
-        logger.info(f"Session {session_id} updated with final stats")
-
     @staticmethod
-    def _update_session_row(c, session_id: int, stats: dict, custom_formulas: str | None,
-                            session_program: str | None, engine_version: str | None) -> None:
-        """The session-row UPDATE inside the caller's transaction."""
-        cols = [f"{col} = ?" for col, _ in _SESSION_STAT_DEFAULTS]
-        vals: list = [stats.get(col, default) for col, default in _SESSION_STAT_DEFAULTS]
-        if custom_formulas is not None:
-            cols.append("custom_formulas = ?")
-            vals.append(custom_formulas)
-        if session_program is not None:
-            cols.append("session_program = ?")
-            vals.append(session_program)
-        if engine_version is not None:
-            cols.append("engine_version = ?")
-            vals.append(engine_version)
-        vals.append(session_id)
-        c.execute(f"UPDATE sessions SET {', '.join(cols)} WHERE id = ?", vals)
+    def _update_session_row(c, session_id: int, row: dict) -> None:
+        """The session-row UPDATE inside the caller's transaction: its stats, and the fields `row` has that a checkpoint
+        rewrites (its profile and name stay as inserted)."""
+        values = {col: row.get(col, default) for col, default in _SESSION_STAT_DEFAULTS}
+        values.update({col: row[col] for col, _default in _SESSION_FIELD_DEFAULTS
+                       if col in row and col not in _SESSION_INSERT_ONLY})
+        c.execute(f"UPDATE sessions SET {', '.join(f'{col} = ?' for col in values)} WHERE id = ?",
+                  (*values.values(), session_id))
 
-    def checkpoint_session(self, session_id: int | None, stats: dict, metrics: list[dict], *,
-                           user_id: int | None = None, session_name: str = "", custom_formulas: str = "",
-                           session_program: str = "", engine_version: str = "",
-                           started_at: float | None = None) -> int | None:
-        """Write a session's row (insert or update) and its new metric rows in one transaction, so a process killed at
-        any point leaves both as of one checkpoint. Returns the session id; None when a new row couldn't be inserted
-        (the null connection, shutting down) — an update there is a no-op that still returns the given id."""
+    def checkpoint_session(self, session_id: int | None, row: dict, metrics: list[dict]) -> int | None:
+        """Write a session's row (insert or update: its stats and fields, `_SESSION_FIELD_DEFAULTS` and `started_at`)
+        and its new metric rows in one transaction, so a process killed at any point leaves both as of one checkpoint.
+        Returns the session id; None when a new row couldn't be inserted (the null connection, shutting down) — an
+        update there is a no-op that still returns the given id."""
         with self._write() as c:
             if session_id is None:
-                session_id = self._insert_session(c, stats, user_id, session_name, custom_formulas, session_program,
-                                                  engine_version, started_at)
+                session_id = self._insert_session(c, row)
             else:
-                self._update_session_row(c, session_id, stats, custom_formulas, session_program, engine_version)
+                self._update_session_row(c, session_id, row)
             if session_id is not None:
                 self._insert_metrics(c, session_id, metrics)
         return session_id
@@ -766,58 +624,3 @@ class DatabaseManager:
             self._shutting_down = False
             if self._conn_obj is None:
                 self._init_db()
-
-
-if __name__ == "__main__":
-    import tempfile
-
-    db_path = os.path.join(tempfile.gettempdir(), "test_meditation.db")
-    db = DatabaseManager(db_path=db_path)
-
-    uid = db.create_user("TestUser")
-    print(f"Created user ID: {uid}")
-
-    sid = db.save_session({
-        "duration": 600,
-        "threshold_used": 50,
-        "avg_meditation": 65.5,
-        "avg_shamatha": 42.3,
-        "max_meditation": 180.0,
-        "time_above_threshold": 300,
-        "longest_streak": 45,
-    }, user_id=uid)
-    print(f"Created session ID: {sid}")
-
-    db.save_metrics_batch(sid, [
-        {"timestamp": 0.5, "delta": 300, "theta": 200, "alpha1": 500, "alpha2": 400,
-         "beta1": 100, "beta2": 80, "gamma1": 30, "gamma2": 20,
-         "meditation_score": 60, "shamatha_score": 40, "stability": 5, "calmness": 3.2},
-        {"timestamp": 1.0, "delta": 310, "theta": 210, "alpha1": 510, "alpha2": 410,
-         "beta1": 110, "beta2": 85, "gamma1": 35, "gamma2": 25,
-         "meditation_score": 70, "shamatha_score": 45, "stability": 4, "calmness": 3.5},
-    ])
-
-    print(f"Notes saved: {db.update_session_notes(sid, notes='Good session', tags='morning,calm', mood_rating=4)}")
-
-    sessions = db.get_all_sessions(user_id=uid)
-    print(f"User sessions: {len(sessions)}")
-
-    csv_data = db.export_session_csv(sid)
-    print(f"CSV export ({len(csv_data)} chars):\n{csv_data[:200]}")
-
-    db.set_setting("last_user_id", str(uid))
-    print(f"Saved setting last_user_id: {db.get_setting('last_user_id')}")
-
-    db.rename_session(sid, "Morning meditation")
-    s = db.get_session(sid)
-    print(f"Renamed session notes: {s['notes']}")
-
-    print(f"DB size: {db.get_db_size_bytes()} bytes")
-    print(f"Record counts: {db.get_record_counts()}")
-
-    db.delete_session(sid)
-    print(f"Session after delete: {db.get_session(sid)}")
-
-    db.close()
-    os.remove(db_path)
-    print("Test DB cleaned up")

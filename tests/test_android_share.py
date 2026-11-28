@@ -99,6 +99,17 @@ def test_a_name_mediastore_changed_is_the_one_reported(android, tmp_path, monkey
     monkeypatch.setattr(android_saf, "query_display_name", stored.get)  # the one display-name reader
     assert android_share.copy_to_documents(str(private)) == "Documents/EEGMeditation/formulas_user_4 (1).txt"
     assert resolver.stream.data == b"alpha1\n"
+    assert resolver.values == {"_display_name": "formulas_user_4.txt", "mime_type": "text/plain",
+                               "relative_path": "Documents/EEGMeditation"}
+
+
+def test_an_entry_it_cant_write_is_a_failed_copy(android, tmp_path):
+    private = tmp_path / "session_3.csv"
+    private.write_text("t,v\n")
+    resolver = _Resolver()
+    resolver.openOutputStream = lambda _uri: None
+    android(resolver)
+    assert android_share.copy_to_documents(str(private)) is None
 
 
 def test_the_shared_display_name_reader_reads_mediastores_row(android, tmp_path):
