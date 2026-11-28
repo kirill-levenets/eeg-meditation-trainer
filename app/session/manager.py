@@ -261,24 +261,3 @@ class SessionManager:
         self._total_paused = 0.0
         self._active_metric = "meditation_score"
         self._active_target = None
-
-
-if __name__ == "__main__":
-    sm = SessionManager()
-    sm.start(threshold=50)
-    print(f"State: {sm.state.value}, Elapsed: {sm.elapsed_formatted}")
-
-    sm.add_metric({"meditation_score": 60, "shamatha_score": 40, "state": "Stable Focus"})
-    sm.add_metric({"meditation_score": 70, "shamatha_score": 55, "state": "Stable Focus"})
-    sm.add_metric({"meditation_score": 30, "shamatha_score": 20, "state": "Gross Distraction"})
-    sm.add_metric({"meditation_score": 80, "shamatha_score": 60, "state": "Stable Focus"})
-    sm.add_metric({"meditation_score": 65, "shamatha_score": 50, "state": "Stable Focus"})
-    sm.add_metric({"meditation_score": 55, "shamatha_score": 45, "state": "Stable Focus"})
-
-    stats = sm.stop()
-    print(f"State: {sm.state.value}")
-    for k, v in stats.items():
-        print(f"  {k}: {v}")
-    assert stats["longest_streak"] == 1, f"Expected longest_streak=1, got {stats['longest_streak']}"
-    assert stats["time_above_threshold"] == 2, f"Expected time_above_threshold=2, got {stats['time_above_threshold']}"
-    print("All assertions passed.")

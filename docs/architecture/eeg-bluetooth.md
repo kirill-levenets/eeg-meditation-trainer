@@ -7,6 +7,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 - **EEG sources** (`app/eeg/`): `mock_stream_v2.py` (mock with frequency-based synthesis, NeuroSky-compatible format) and `neurosky_stream.py` (the real headset's reader and its sample);
   `bt_links.py` (the links to the headset) and `thinkgear.py` (the ThinkGear protocol: its packet codes and `ThinkGearParser`).
+  The parser reads a payload as data rows (`_rows`): a single-byte code's key and type come from one table, and a band row of either width (3-byte integers, or 4-byte floats) goes through one decoder (`_bands`); an unknown code, or a band row of another length, is skipped.
   Both produce 8 band powers, a raw waveform (512 Hz from the headset; the mock synthesizes 64 samples per 0.5 s tick) and eSense attention/meditation.
   The real stream tracks `_last_packet_time` for stale-data detection and parses battery level (code 0x01, though TGAM hardware doesn't send it); `reset_sample_state()` clears its cached values for a new session.
 - **The bands** (`app/eeg/band_spec.py`):

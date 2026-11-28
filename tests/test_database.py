@@ -20,38 +20,37 @@ class TestStorageIntegration(unittest.TestCase):
             os.remove(self.db_path)
 
     def test_save_and_retrieve_session(self):
-        sid = self.db.save_session({
+        sid = self.db.checkpoint_session(None, {
             "duration": 300,
             "threshold_used": 50,
             "avg_meditation": 65.0,
             "avg_shamatha": 40.0,
             "max_meditation": 180.0,
             "time_above_threshold": 150,
-        })
+        }, [])
         session = self.db.get_session(sid)
         self.assertIsNotNone(session)
         self.assertEqual(session["duration"], 300)
         self.assertAlmostEqual(session["avg_meditation"], 65.0)
 
-    def test_save_session_stamps_engine_version(self):
-        sid = self.db.save_session({"duration": 60, "threshold_used": 50}, engine_version="2")
+    def test_a_new_session_row_stamps_engine_version(self):
+        sid = self.db.checkpoint_session(None, {"duration": 60, "threshold_used": 50, "engine_version": "2"}, [])
         session = self.db.get_session(sid)
         self.assertEqual(session["engine_version"], "2")
 
     def test_engine_version_defaults_empty(self):
-        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
+        sid = self.db.checkpoint_session(None, {"duration": 60, "threshold_used": 50}, [])
         session = self.db.get_session(sid)
         self.assertEqual(session["engine_version"], "")
 
     def test_update_session_stamps_engine_version(self):
-        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
-        self.db.update_session(sid, {"duration": 120, "threshold_used": 50}, engine_version="2")
+        sid = self.db.checkpoint_session(None, {"duration": 60, "threshold_used": 50}, [])
+        self.db.checkpoint_session(sid, {"duration": 120, "threshold_used": 50, "engine_version": "2"}, [])
         session = self.db.get_session(sid)
         self.assertEqual(session["engine_version"], "2")
 
     def test_save_and_retrieve_metrics(self):
-        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
-        self.db.save_metrics_batch(sid, [
+        sid = self.db.checkpoint_session(None, {"duration": 60, "threshold_used": 50}, [
             {"timestamp": 0.5, "meditation_score": 55, "shamatha_score": 35},
             {"timestamp": 1.0, "meditation_score": 60, "shamatha_score": 38},
         ])
@@ -59,7 +58,7 @@ class TestStorageIntegration(unittest.TestCase):
         self.assertEqual(len(metrics), 2)
 
     def test_update_notes(self):
-        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
+        sid = self.db.checkpoint_session(None, {"duration": 60, "threshold_used": 50}, [])
         self.db.update_session_notes(sid, "Test note", "tag1,tag2", 4)
         session = self.db.get_session(sid)
         self.assertEqual(session["notes"], "Test note")
@@ -67,7 +66,7 @@ class TestStorageIntegration(unittest.TestCase):
         self.assertEqual(session["mood_rating"], 4)
 
     def test_delete_session(self):
-        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
+        sid = self.db.checkpoint_session(None, {"duration": 60, "threshold_used": 50}, [])
         self.db.delete_session(sid)
         session = self.db.get_session(sid)
         self.assertIsNone(session)
@@ -75,7 +74,7 @@ class TestStorageIntegration(unittest.TestCase):
     def test_get_all_sessions_ordered(self):
         uid = self.db.create_user("Alice")
         for duration, day in ((120, "2026-09-02"), (60, "2026-09-01"), (90, "2026-09-03")):
-            sid = self.db.save_session({"duration": duration, "threshold_used": 50}, user_id=uid)
+            sid = self.db.checkpoint_session(None, {"duration": duration, "threshold_used": 50, "user_id": uid}, [])
             self.db._conn.execute("UPDATE sessions SET date_time = ? WHERE id = ?", (f"{day}T10:00:00", sid))
         sessions = self.db.get_all_sessions(uid)
         self.assertEqual([s["duration"] for s in sessions], [90, 120, 60])  # newest first
@@ -104,24 +103,23 @@ class TestStorageIntegration(unittest.TestCase):
 
     def test_session_with_user_id(self):
         uid = self.db.create_user("Alice")
-        sid = self.db.save_session({"duration": 60, "threshold_used": 50}, user_id=uid)
+        sid = self.db.checkpoint_session(None, {"duration": 60, "threshold_used": 50, "user_id": uid}, [])
         session = self.db.get_session(sid)
         self.assertEqual(session["user_id"], uid)
 
     def test_get_sessions_filtered_by_user(self):
         uid1 = self.db.create_user("Alice")
         uid2 = self.db.create_user("Bob")
-        self.db.save_session({"duration": 60, "threshold_used": 50}, user_id=uid1)
-        self.db.save_session({"duration": 120, "threshold_used": 60}, user_id=uid2)
-        self.db.save_session({"duration": 180, "threshold_used": 70}, user_id=uid1)
+        self.db.checkpoint_session(None, {"duration": 60, "threshold_used": 50, "user_id": uid1}, [])
+        self.db.checkpoint_session(None, {"duration": 120, "threshold_used": 60, "user_id": uid2}, [])
+        self.db.checkpoint_session(None, {"duration": 180, "threshold_used": 70, "user_id": uid1}, [])
         alice_sessions = self.db.get_all_sessions(user_id=uid1)
         self.assertEqual(len(alice_sessions), 2)
         bob_sessions = self.db.get_all_sessions(user_id=uid2)
         self.assertEqual(len(bob_sessions), 1)
 
     def test_save_and_retrieve_raw_metrics(self):
-        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
-        self.db.save_metrics_batch(sid, [{
+        sid = self.db.checkpoint_session(None, {"duration": 60, "threshold_used": 50}, [{
             "timestamp": 0.5,
             "delta": 300, "theta": 200, "alpha1": 500, "alpha2": 400,
             "beta1": 100, "beta2": 80, "gamma1": 30, "gamma2": 20,
@@ -137,8 +135,7 @@ class TestStorageIntegration(unittest.TestCase):
         self.assertAlmostEqual(m["calmness"], 3.2)
 
     def test_export_csv(self):
-        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
-        self.db.save_metrics_batch(sid, [
+        sid = self.db.checkpoint_session(None, {"duration": 60, "threshold_used": 50}, [
             {"timestamp": 0.5, "meditation_score": 55},
             {"timestamp": 1.0, "meditation_score": 60},
         ])
@@ -148,8 +145,8 @@ class TestStorageIntegration(unittest.TestCase):
         self.assertEqual(len(lines), 3)  # header + 2 data rows
 
     def test_export_csv_adds_a_formula_column_only_for_a_formula_that_runs(self):
-        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
-        self.db.save_metrics_batch(sid, [{"timestamp": 0.5, "alpha1": 40, "meditation_score": 55}])
+        sid = self.db.checkpoint_session(None, {"duration": 60, "threshold_used": 50},
+                                         [{"timestamp": 0.5, "alpha1": 40, "meditation_score": 55}])
 
         def first_row(formula):
             return next(csv.DictReader(io.StringIO(self.db.export_session_csv(sid, formula=formula))))
@@ -159,7 +156,7 @@ class TestStorageIntegration(unittest.TestCase):
             self.assertNotIn("custom_formula", first_row(formula))
 
     def test_export_csv_empty_session(self):
-        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
+        sid = self.db.checkpoint_session(None, {"duration": 60, "threshold_used": 50}, [])
         csv_str = self.db.export_session_csv(sid)
         self.assertEqual(csv_str, "")
 
@@ -189,14 +186,13 @@ class TestDatabaseExtensions(unittest.TestCase):
         self.assertEqual(self.db.get_setting("key"), "v2")
 
     def test_rename_session(self):
-        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
+        sid = self.db.checkpoint_session(None, {"duration": 60, "threshold_used": 50}, [])
         self.db.rename_session(sid, "Morning sit")
         session = self.db.get_session(sid)
         self.assertEqual(session["session_name"], "Morning sit")
 
     def test_delete_session_removes(self):
-        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
-        self.db.save_metrics_batch(sid, [{"timestamp": 0.5}])
+        sid = self.db.checkpoint_session(None, {"duration": 60, "threshold_used": 50}, [{"timestamp": 0.5}])
         self.db.delete_session(sid)
         self.assertIsNone(self.db.get_session(sid))
         self.assertEqual(len(self.db.get_session_metrics(sid)), 0)
@@ -213,7 +209,7 @@ class TestDatabaseExtensions(unittest.TestCase):
         self.assertEqual(counts["sessions"], 0)
 
     def test_record_counts_after_insert(self):
-        self.db.save_session({"duration": 60, "threshold_used": 50})
+        self.db.checkpoint_session(None, {"duration": 60, "threshold_used": 50}, [])
         counts = self.db.get_record_counts()
         self.assertEqual(counts["sessions"], 1)
 
@@ -263,14 +259,14 @@ class TestDatabaseExtensions(unittest.TestCase):
         self.assertEqual(self.db.get_user_json_setting(uid2, "k"), [2])
 
     def test_update_session_stats(self):
-        sid = self.db.save_session({"duration": 0, "threshold_used": 50})
+        sid = self.db.checkpoint_session(None, {"duration": 0, "threshold_used": 50}, [])
         session = self.db.get_session(sid)
         self.assertEqual(session["duration"], 0)
-        self.db.update_session(sid, {
+        self.db.checkpoint_session(sid, {
             "duration": 300, "threshold_used": 80,
             "avg_meditation": 120.0, "avg_shamatha": 55.0,
             "max_meditation": 190.0, "time_above_threshold": 200,
-        })
+        }, [])
         updated = self.db.get_session(sid)
         self.assertEqual(updated["duration"], 300)
         self.assertEqual(updated["threshold_used"], 80)
@@ -306,17 +302,16 @@ class TestDatabaseExtensions(unittest.TestCase):
         self.assertIn("custom_formulas", cols)
 
     def test_update_session_writes_custom_formulas_when_given(self):
-        sid = self.db.save_session({"duration": 1}, custom_formulas='[{"slot": 0}]')
-        self.db.update_session(sid, {"duration": 2}, custom_formulas='[{"slot": 1}]')
+        sid = self.db.checkpoint_session(None, {"duration": 1, "custom_formulas": '[{"slot": 0}]'}, [])
+        self.db.checkpoint_session(sid, {"duration": 2, "custom_formulas": '[{"slot": 1}]'}, [])
         self.assertEqual(self.db.get_session(sid)["custom_formulas"], '[{"slot": 1}]')
         # Omitting it leaves the stored snapshot untouched.
-        self.db.update_session(sid, {"duration": 3})
+        self.db.checkpoint_session(sid, {"duration": 3}, [])
         self.assertEqual(self.db.get_session(sid)["custom_formulas"], '[{"slot": 1}]')
 
     def test_recompute_formula_series_matches_direct_eval(self):
         from app.metrics.custom_formula import CustomFormulaEvaluator
-        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
-        self.db.save_metrics_batch(sid, [{
+        sid = self.db.checkpoint_session(None, {"duration": 60, "threshold_used": 50}, [{
             "timestamp": 0.5,
             "alpha1": 100, "alpha2": 50,
             "beta1": 10, "beta2": 5,
@@ -336,8 +331,7 @@ class TestDatabaseExtensions(unittest.TestCase):
         # Diary replay must see the same variable namespace as the live tick:
         # stored norms + scores feed formulas, not silent zeros.
         from app.metrics.custom_formula import CustomFormulaEvaluator
-        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
-        self.db.save_metrics_batch(sid, [{
+        sid = self.db.checkpoint_session(None, {"duration": 60, "threshold_used": 50}, [{
             "timestamp": 0.5, "alpha1": 100, "alpha2": 50, "beta1": 10, "beta2": 5,
             "alpha_norm": 0.4, "distraction": 30, "sinking": 20, "calmness": 2.5,
         }])
@@ -349,8 +343,8 @@ class TestDatabaseExtensions(unittest.TestCase):
 
     def test_recompute_formula_series_skips_invalid(self):
         from app.metrics.custom_formula import CustomFormulaEvaluator
-        sid = self.db.save_session({"duration": 60, "threshold_used": 50})
-        self.db.save_metrics_batch(sid, [{"timestamp": 0.5, "alpha1": 10}])
+        sid = self.db.checkpoint_session(None, {"duration": 60, "threshold_used": 50},
+                                         [{"timestamp": 0.5, "alpha1": 10}])
         ev_valid = CustomFormulaEvaluator()
         ev_valid.set_formula("alpha1")
         ev_invalid = CustomFormulaEvaluator()
@@ -359,11 +353,11 @@ class TestDatabaseExtensions(unittest.TestCase):
         self.assertNotIn("bad", series)
         self.assertEqual(series["good"], [10.0])  # alpha1_raw=10 → formula "alpha1"
 
-    def test_save_session_stores_custom_formulas_json(self):
+    def test_a_session_row_stores_custom_formulas_json(self):
         import json
         cf = json.dumps([{"name": "R", "formula": "alpha + beta",
                           "visible": True, "drove_audio": False}])
-        sid = self.db.save_session({"duration": 1}, custom_formulas=cf)
+        sid = self.db.checkpoint_session(None, {"duration": 1, "custom_formulas": cf}, [])
         row = self.db.get_session(sid)
         stored = json.loads(row["custom_formulas"]) if row["custom_formulas"] else []
         self.assertEqual(stored[0]["formula"], "alpha + beta")
@@ -374,9 +368,9 @@ def test_session_program_column_roundtrip(tmp_path):
     db = DatabaseManager(db_path=str(tmp_path / "p.db"))
     uid = db.create_user("u")
     prog = '[{"minutes":10,"target":50,"formula":"shamatha_score"}]'
-    sid = db.save_session({"duration": 1}, user_id=uid, session_program=prog)
+    sid = db.checkpoint_session(None, {"duration": 1, "user_id": uid, "session_program": prog}, [])
     assert db.get_session(sid)["session_program"] == prog
-    db.update_session(sid, {"duration": 2}, session_program='[]')
+    db.checkpoint_session(sid, {"duration": 2, "session_program": '[]'}, [])
     assert db.get_session(sid)["session_program"] == "[]"
     db.close()
 

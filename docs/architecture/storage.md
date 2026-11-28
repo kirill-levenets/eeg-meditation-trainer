@@ -6,6 +6,9 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 ## Database
 
 - **Storage** (`app/storage/database.py`): SQLite with automatic schema migration.
+  Each table's columns are listed once (`_SESSION_COLUMNS`: column and SQL type; `_METRIC_COLUMNS` also the tick key it is written from and its default), and the table's CREATE, the migration that adds a column an older database lacks and the inserts are built from that list;
+  the indexes are made after the migration, since an index on a column the migration adds can't come before it.
+  A session row and its ticks are written by `checkpoint_session` alone: its insert writes every column, its update the stats and the fields the row carries, never the profile, name or start.
   Stores sessions, per-tick metrics timeseries, user profiles and per-user settings.
   A session row carries `session_name`, `time_shamatha_90`, the metric it was scored on (`score_metric_key`/`score_metric_name`/`avg_score`, #51) and the targets in force, in order, as JSON (`score_targets`, #83);
   each metrics row carries what its tick was scored on (`score_key`/`score_value`/`score_target`, #83; NULL in older rows).
@@ -24,7 +27,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   The confirm (`ProfileSection._confirm_delete`) states the profile's session count and that they are deleted with it.
 - The DB opens with `check_same_thread=False` so the session's runner can write metric batches — and that shared connection is why **every runtime write goes through `DatabaseManager._write()`**:
   one transaction at a time under `_write_lock` (RLock), commit on success, rollback on error.
-  Without it the UI thread's commit could end the runner's `save_metrics_batch` transaction mid-batch, raise "cannot commit - no transaction is active" into a UI callback, or drop a batch.
+  Without it the UI thread's commit could end the runner's checkpoint transaction mid-batch, raise "cannot commit - no transaction is active" into a UI callback, or drop a batch.
   The null connection has a no-op `rollback`.
   `tests/test_database_write_lock.py` covers blocking, a two-thread race with exact row counts, and rollback.
 - Android DB path always uses `app_storage_path()` (not `/sdcard`) for a stable path across launches; a DB left in `/sdcard/EEGMeditation/` is copied over when the new path has none yet.
@@ -147,6 +150,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 
 - A file the user exports to open elsewhere (a session's CSV on Android, the bulk sessions ZIP, the saved formulas) goes through `android_share.copy_to_documents(private_path, display_name=…)`:
   on Android through MediaStore into `Documents/EEGMeditation/`, with no storage permission; on desktop a copy into `~/Documents/EEGMeditation/` that replaces a file of the same name.
+  On Android it creates the MediaStore entry (`_create_entry`), then writes the file into it through the same stream writer a backup uses (`android_saf.write_file_to_uri`).
   MediaStore keeps a file already there and stores a clashing name as "name (1)", so the helper reads the stored name back (`_stored_name`) and returns that path for the export's message;
   a failed read-back returns the requested name, since the file is written.
   The session exports (a session's CSV on Android, the bulk ZIP) call it through `move_to_documents`, which then removes the private copy; a copy that failed leaves it, and their message names it.

@@ -261,8 +261,8 @@ def test_the_detail_draws_a_sessions_threshold_steps(app):  # noqa: F811
     a, workers = app
     sid = a._db.checkpoint_session(None, {"duration": 2, "threshold_used": 70, "score_metric_key": "shamatha_score",
                                           "score_metric_name": "Shamatha", "avg_score": 60.0,
-                                          "score_targets": "[70, 85]"},
-                                   _rows([70, 70, 85, 85]), user_id=a._current_user_id, session_name="s")
+                                          "score_targets": "[70, 85]", "user_id": a._current_user_id,
+                                          "session_name": "s"}, _rows([70, 70, 85, 85]))
     _select(a, sid)
     workers.pop()()
     _frames(3)
@@ -304,8 +304,8 @@ def test_a_session_start_puts_its_threshold_in_force_and_clears_the_last_session
 
 def test_an_old_session_opened_after_a_new_one_does_not_keep_its_steps(app):  # noqa: F811
     a, workers = app
-    sid = a._db.checkpoint_session(None, {"duration": 2, "threshold_used": 70, "score_targets": "[70, 85]"},
-                                   _rows([70, 85]), user_id=a._current_user_id, session_name="s")
+    sid = a._db.checkpoint_session(None, {"duration": 2, "threshold_used": 70, "score_targets": "[70, 85]",
+                                          "user_id": a._current_user_id, "session_name": "s"}, _rows([70, 85]))
     _select(a, sid)
     workers.pop()()
     _frames(3)

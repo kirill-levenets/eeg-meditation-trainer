@@ -45,7 +45,7 @@ def test_metrics_batches_and_setting_writes_race_without_errors_or_lost_rows(tmp
     def tick_thread():
         try:
             for _ in range(batches):
-                db.save_metrics_batch(1, _metric_rows(rows_per_batch))
+                db.checkpoint_session(1, {}, _metric_rows(rows_per_batch))  # a running session's flush
         except BaseException as e:
             errors.append(e)
 

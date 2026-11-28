@@ -33,10 +33,8 @@ def test_zip_from_real_db_sessions(tmp_path):
     from app.storage.database import DatabaseManager
     db = DatabaseManager(db_path=str(tmp_path / "t.db"))
     uid = db.create_user("a")
-    s1 = db.save_session({"duration": 10}, user_id=uid)
-    db.save_metrics_batch(s1, [{"shamatha_score": 55}, {"shamatha_score": 58}])
-    s2 = db.save_session({"duration": 20}, user_id=uid)
-    db.save_metrics_batch(s2, [{"shamatha_score": 40}])
+    s1 = db.checkpoint_session(None, {"duration": 10, "user_id": uid}, [{"shamatha_score": 55}, {"shamatha_score": 58}])
+    s2 = db.checkpoint_session(None, {"duration": 20, "user_id": uid}, [{"shamatha_score": 40}])
     mapping = {sid: db.export_session_csv(sid) for sid in (s1, s2)}
     zpath = str(tmp_path / "out.zip")
     assert build_sessions_zip(zpath, mapping) == 2

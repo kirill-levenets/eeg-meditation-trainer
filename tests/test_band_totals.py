@@ -100,8 +100,7 @@ def test_format_power_scales_to_k_and_m():
 def test_get_session_band_totals_sums_raw_bands(tmp_path):
     db = DatabaseManager(db_path=str(tmp_path / "t.db"))
     uid = db.create_user("a")
-    sid = db.save_session({"duration": 10}, user_id=uid)
-    db.save_metrics_batch(sid, [
+    sid = db.checkpoint_session(None, {"duration": 10, "user_id": uid}, [
         {"delta": 10, "theta": 1, "alpha1": 2, "alpha2": 3,
          "beta1": 4, "beta2": 5, "gamma1": 6, "gamma2": 7},
         {"delta": 20, "theta": 1, "alpha1": 2, "alpha2": 3,
@@ -117,7 +116,7 @@ def test_get_session_band_totals_sums_raw_bands(tmp_path):
 def test_get_session_band_totals_empty_session_is_zeros(tmp_path):
     db = DatabaseManager(db_path=str(tmp_path / "t.db"))
     uid = db.create_user("a")
-    sid = db.save_session({"duration": 0}, user_id=uid)
+    sid = db.checkpoint_session(None, {"duration": 0, "user_id": uid}, [])
     totals = db.get_session_band_totals(sid)
     assert set(totals) == set(BANDS)
     assert all(v == 0.0 for v in totals.values())

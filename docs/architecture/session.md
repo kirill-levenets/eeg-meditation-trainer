@@ -69,9 +69,9 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 ## Persistence
 
 - **A session reaches the DB only through checkpoints** (#30):
-  `SessionRecorder.checkpoint(stats=None)` (`app/session/recorder.py`, `RunningSession.recorder`, which owns the buffered ticks and the session's row id) → `DatabaseManager.checkpoint_session(sid, stats, ticks, …)`:
+  `SessionRecorder.checkpoint(stats=None)` (`app/session/recorder.py`, `RunningSession.recorder`, which owns the buffered ticks and the session's row id) → `DatabaseManager.checkpoint_session(session_id, row, ticks)`, `row` being the stats with the session's fields (`RunningSession.row_fields()`: profile, name, formula lines, program, engine version, start):
   it inserts or updates the session row **and** inserts the buffered tick rows in one transaction, so a process killed at any point leaves the row and the data of one checkpoint, which agree.
-  `checkpoint_session` reuses `_insert_session` / `_update_session_row` / `_insert_metrics`, the same SQL `save_session` / `update_session` / `save_metrics_batch` use.
+  It is the only writer of a session row and its ticks; an update leaves the row's profile, name and start as the insert wrote them ([storage](storage.md#database)).
   A checkpoint runs at every snapshot point: the 60 s tick flush (`flush_tick`), the final save (`RunningSession.persist`, with the stop's stats), `_flush_on_leave` (on_pause / on_stop, while a session is running or paused) and both backup workers.
   `on_stop` then also stops and saves a running or paused session.
   Ticks since the last checkpoint (≤ 60 s) are lost on a kill.
@@ -80,7 +80,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   a failed checkpoint puts its ticks back for the next one.
   Leaving the app and both backups go through `RunningSession.checkpoint_or_report()`, which logs and reports a failure (`session_checkpoint_failed`) and carries on: the settings flush, the stop-and-save of `on_stop` and the rest of the backup still run.
   A pending marker is set on the tick's row before it is recorded.
-  The row is dated and named by the session's start (`SessionManager.started_at`, 0.0 before a start and after `reset()` → `checkpoint_session(started_at=…)` and `session_name`), not by its first save a minute later.
+  The row is dated and named by the session's start (`SessionManager.started_at`, 0.0 before a start and after `reset()` → the checkpoint row's `started_at` and `session_name`), not by its first save a minute later.
   **Every ending saves through one path** (#39): `RunningSession._finish(run, reason, alert)` on the writer, then `SessionControls._finish_ui(stats, id)` on the main thread (UI teardown).
   `_finish` claims its run (`run.mark_ended()`: one ending wins), silences the noise (`AudioEngine.mute()`, setVolume only, so nothing plays on while the save waits on the write lock), saves (`persist`: the stop's stats and the last ticks, no Kivy) and queues `Ended(stats, session_id, alert)` for its run;
   the app's handler closes a "Stop session?" still open, shows the alert if a check ended it and calls `SessionControls._finish_ui`; then the session tears its players down (`AudioEngine.stop()`, on the main thread).

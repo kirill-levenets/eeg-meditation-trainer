@@ -37,8 +37,8 @@ def db():
 
 
 def _session(db, uid: int, ticks: int = 3) -> int:
-    return db.checkpoint_session(None, {"duration": 60}, [{"timestamp": i * 0.5, "shamatha_score": 70}
-                                                          for i in range(ticks)], user_id=uid)
+    return db.checkpoint_session(None, {"duration": 60, "user_id": uid}, [{"timestamp": i * 0.5, "shamatha_score": 70}
+                                                          for i in range(ticks)])
 
 
 def _counts(db, sid: int) -> tuple:

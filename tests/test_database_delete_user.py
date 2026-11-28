@@ -18,8 +18,7 @@ def test_delete_user_purges_sessions_metrics_settings_and_spares_others():
     try:
         a = db.create_user("A")
         b = db.create_user("B")
-        sid = db.save_session({"duration": 1}, user_id=a)
-        db.save_metrics_batch(sid, [{"timestamp": 0.0, "meditation_score": 5}])
+        sid = db.checkpoint_session(None, {"duration": 1, "user_id": a}, [{"timestamp": 0.0, "meditation_score": 5}])
         db.set_user_setting(a, "threshold", "120")
         db.set_user_setting(a, "saved_programs", "[]")
         db.set_user_setting(b, "threshold", "60")

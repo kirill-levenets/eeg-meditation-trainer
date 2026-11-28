@@ -72,7 +72,7 @@ class SessionRecorder:
                 stats = self._with_score(self._session_manager.compute_statistics())
             batch, self._buffer = self._buffer, []
             try:
-                sid = self._db.checkpoint_session(self.session_id, stats, batch, **self._row_fields())
+                sid = self._db.checkpoint_session(self.session_id, {**stats, **self._row_fields()}, batch)
             except Exception:
                 self._buffer[:0] = batch  # kept for the next checkpoint
                 raise

@@ -44,7 +44,8 @@ def _row(db, sid) -> tuple:
 
 def test_a_checkpoint_creates_the_session_with_its_data(db):
     uid = db.create_user("t")
-    sid = db.checkpoint_session(None, {"duration": 60, "avg_shamatha": 70}, _rows(120), user_id=uid, session_name="s")
+    sid = db.checkpoint_session(None, {"duration": 60, "avg_shamatha": 70, "user_id": uid, "session_name": "s"},
+                                _rows(120))
     assert sid is not None and _row(db, sid) == (60, 120)
     assert db.get_session(sid)["session_name"] == "s"
 

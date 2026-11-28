@@ -60,69 +60,36 @@ def _copy_desktop(private_path: str, subfolder: str, display_name: str) -> str |
     return dest
 
 
-def _copy_android_mediastore(private_path: str, subfolder: str,
-                              display_name: str) -> str | None:
-    """Copy file to Documents via Android MediaStore API (pyjnius).
-
-    Works on Android 10+ without any storage permissions.
-    File becomes visible in system file browser under Documents/subfolder/.
-    """
+def _copy_android_mediastore(private_path: str, subfolder: str, display_name: str) -> str | None:
+    """Copy the file to Documents/subfolder/ through MediaStore: Android 10+ needs no storage permission for it, and
+    the file shows in the system file browser."""
     try:
-        from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
-
-        activity = android_jni.activity()
-        ContentValues = autoclass("android.content.ContentValues")
-        MediaStoreFiles = autoclass("android.provider.MediaStore$Files")
-        Environment = autoclass("android.os.Environment")
-        Build_VERSION = autoclass("android.os.Build$VERSION")
-
-        resolver = activity.getContentResolver()
-
-        # Build metadata for the new file
-        values = ContentValues()
-        values.put("_display_name", display_name)
-        values.put("mime_type", _guess_mime(display_name))
-
-        if Build_VERSION.SDK_INT >= 29:
-            # Android 10+: use relative_path for scoped storage
-            relative_path = os.path.join(
-                Environment.DIRECTORY_DOCUMENTS, subfolder,
-            )
-            values.put("relative_path", relative_path)
-        # On Android <10 the file goes to the root Documents collection
-
-        # Insert into MediaStore — creates the entry and returns a content:// URI
-        collection_uri = MediaStoreFiles.getContentUri("external")
-        uri = resolver.insert(collection_uri, values)
-
+        uri = _create_entry(subfolder, display_name)
         if uri is None:
             logger.error("MediaStore insert returned None")
             return None
-
-        # Write file contents through the URI's output stream
-        output_stream = resolver.openOutputStream(uri)
-        if output_stream is None:
-            logger.error("openOutputStream returned None")
+        if not android_saf.write_file_to_uri(uri.toString(), private_path):
             return None
-
-        with open(private_path, "rb") as f:
-            chunk_size = 8192
-            while True:
-                chunk = f.read(chunk_size)
-                if not chunk:
-                    break
-                output_stream.write(chunk)
-
-        output_stream.flush()
-        output_stream.close()
-
-        shared_path = f"Documents/{subfolder}/{_stored_name(uri) or display_name}"
-        logger.info(f"Copied to shared storage: {shared_path}")
-        return shared_path
-
     except Exception as e:
         logger.error(f"MediaStore copy failed: {e}", exc_info=True)
         return None
+    shared_path = f"Documents/{subfolder}/{_stored_name(uri) or display_name}"
+    logger.info(f"Copied to shared storage: {shared_path}")
+    return shared_path
+
+
+def _create_entry(subfolder: str, display_name: str):
+    """A new, empty MediaStore file under Documents/subfolder/ (the Documents root before Android 10): its content://
+    URI, or None."""
+    from jnius import autoclass  # noqa: PLC0415 - Android only (pyjnius)
+
+    values = autoclass("android.content.ContentValues")()
+    values.put("_display_name", display_name)
+    values.put("mime_type", _guess_mime(display_name))
+    if autoclass("android.os.Build$VERSION").SDK_INT >= 29:
+        values.put("relative_path", os.path.join(autoclass("android.os.Environment").DIRECTORY_DOCUMENTS, subfolder))
+    collection = autoclass("android.provider.MediaStore$Files").getContentUri("external")
+    return android_jni.content_resolver().insert(collection, values)
 
 
 def _stored_name(uri) -> str | None:

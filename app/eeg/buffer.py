@@ -59,17 +59,3 @@ class VarianceBuffer:
 
     def __len__(self) -> int:
         return len(self._buffer)
-
-
-if __name__ == "__main__":
-    rb = RollingBuffer(window_size=5)
-    values = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0]
-    for v in values:
-        smoothed = rb.push("alpha", v)
-
-    vb = VarianceBuffer(max_size=5)
-    for v in [100.0, 100.0, 100.0, 100.0, 100.0]:
-        vb.push(v)
-
-    for v in [50.0, 150.0, 50.0, 150.0, 50.0]:
-        vb.push(v)

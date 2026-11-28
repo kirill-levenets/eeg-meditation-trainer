@@ -313,7 +313,8 @@ def test_notes_update_keeps_the_fields_it_is_not_given():
     db = DatabaseManager(db_path=path)
     try:
         uid = db.create_user("t")
-        sid = db.save_session({"duration": 60, "avg_meditation": 50, "avg_shamatha": 50}, user_id=uid)
+        sid = db.checkpoint_session(None, {"duration": 60, "avg_meditation": 50, "avg_shamatha": 50, "user_id": uid},
+                                    [])
         assert db.update_session_notes(sid, notes="n1", tags="calm", mood_rating=4) is True
         assert db.update_session_notes(sid, notes="n2") is True
         row = db.get_session(sid)

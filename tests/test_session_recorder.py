@@ -19,7 +19,7 @@ def test_a_discard_during_the_first_checkpoint_deletes_the_row_it_writes():
     writing, release = threading.Event(), threading.Event()
     db = MagicMock()
 
-    def checkpoint_session(sid, stats, batch, **fields):
+    def checkpoint_session(sid, row, batch):
         writing.set()
         release.wait(2)
         return 42

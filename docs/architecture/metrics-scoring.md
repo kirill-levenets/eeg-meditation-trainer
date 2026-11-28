@@ -16,6 +16,8 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
   the diary reads the stored distraction/sinking rather than recomputing them, so old sessions render unchanged.
   Power-line noise detection is in `app/metrics/noise_detector.py`.
 - **Custom formula engine** (`app/metrics/custom_formula.py`): AST-parsed user-defined expressions with whitelisted functions and `avg(expr, N)` windowed averages.
+  `_refusal` says why a formula can't have a node, one case per node type, and the evaluator takes the same cases; the operator and comparison tables (`_OPERATORS`, `_COMPARISONS`) serve both, so what is allowed is what evaluates.
+  A value it can't compute (a division by zero, a domain error, overflow, a complex result) reads 0, the same in `avg`'s history and in the formula (`_value`).
 
 ## Custom formulas
 
@@ -52,7 +54,7 @@ Hard rules are summarized under **Invariants** in [CLAUDE.md](../../CLAUDE.md); 
 - Every checkpoint (`SessionRecorder.checkpoint`: the 60 s flush, leaving the app, a backup, the final save) records the active custom formulas so the diary can replay them:
   the row's `custom_formulas` comes from `RunningSession.row_fields()` → `custom_formulas_json()` (`FormulaSlots.session_record`), a JSON string of the valid slots (`slot`, `name`, `formula`, `visible`, `drove_audio`).
   `formula_slots.recorded_formulas` reads it back.
-  `DatabaseManager.checkpoint_session(..., custom_formulas: str = "")` stores the **already-serialized string** (the contract; callers `json.dumps` at the site).
+  The checkpoint's row stores the **already-serialized string** (the contract; callers `json.dumps` at the site).
   Each slot's `visible` is whether the live graph shows its line, as the session holds it (`RunningSession.shown`: taken at the Start, kept by `set_shown`).
   A formula's per-tick values are not stored: the diary recomputes them from these definitions and the stored bands (see [session-detail.md](session-detail.md)).
 
